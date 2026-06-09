@@ -568,3 +568,78 @@ subtly tinted clay-coral (#D97757). Generous negative space, calm and minimal. A
 optional very-low-contrast scanline/grid texture in the background. No UI chrome,
 no buttons, no status bar. Portrait, iPhone aspect ratio 1290×2796.
 
+## User
+
+ICON: "Attach image" for the chat composer.
+
+CONTEXT: It sits at the LEFT of a multiline text input, opposite the Send button.
+Tapping it opens the system photo picker (multi-select, up to 4 images). It is the
+phone-app equivalent of attaching an image in a terminal chat. It must read as
+"add a photo/image" instantly — universal and mainstream, not abstract.
+
+PRIMARY DIRECTION (preferred): the well-known "add photo" metaphor —
+a rounded-rectangle picture frame containing a small mountain + sun/circle
+(the universal "image" glyph), with a small "+" badge at the top-right corner
+to signal "add". Think Material Symbols "add_photo_alternate", but restyled to
+this app's 1.5pt rounded line system. Keep it calm and clean, not busy.
+
+ALSO PROVIDE these alternates as variants:
+  A) Plain image glyph WITHOUT the "+" (rounded frame + mountain + sun) — for when
+     the "+" reads too noisy at 24dp.
+  B) A paperclip "attach" glyph — generic attachment, in case image-specific is
+     too literal.
+  C) A stack-of-photos glyph (two overlapping rounded frames) — hints multi-select.
+Rank them; recommend the one that stays legible and balanced at 24dp.
+
+STATES (same path, different color — show all three):
+  - default:  stroke = secondary #9BA1A6
+  - pressed/active: stroke = accent #D97757
+  - disabled: stroke = muted #6B7177
+Render each state on the dark surface #16181B so contrast is verified.
+
+DELIVERABLES:
+  - Clean SVG with a single <path> (or minimal paths), 24×24 viewBox, stroke-based,
+    stroke-width 1.5, stroke-linecap round, stroke-linejoin round, no fill —
+    suitable to translate into a Compose ImageVector.
+  - Show it in-place: a small mockup of the dark composer row — [icon] [text input
+    "Message Claude…"] [Send button in terracotta] — so the optical weight next to
+    the Send glyph is verified.
+  - Provide both 24dp and 20dp renderings to confirm it holds up small.
+
+## Assistant
+
+_[tool: write_file]_
+
+_[tool: show_html]_
+
+A launch screen and now a full icon spec — I'll treat this one as a proper design-system spec sheet: primary recommendation, all three states verified on #16181B, the in-place composer mockup, 24/20dp renderings, ranked alternates, and the deliverable SVG. Let me build it, then refine the glyph geometry visually.
+
+_[tool: show_html]_
+
+I want to verify the glyph geometry before delivering — let me look.
+
+_[tool: save_screenshot]_
+
+_[tool: save_screenshot]_
+
+The primary glyph reads cleanly — frame, sun, mountain, and a clear plus badge at top-right. Let me check the states, composer mockup, small sizes, and alternates below the fold.
+
+_[tool: delete_file]_
+
+_[tool: done]_
+
+This is exactly right — all three states verified on the dark surface, the composer mockup confirms the optical weight balances against the terracotta Send, the small sizes hold, and all three alternates (plain image, paperclip, stack) render cleanly with the ranking. Let me clean up the temp captures and hand off.The **Attach-image icon spec** is delivered (`Attach Icon Spec.html`) — a full design-system spec sheet in the app's dark tokens.
+
+**Recommendation: the primary direction** — a rounded picture frame (sun + mountain) with a **＋ badge** at the top-right, where the frame's corner opens to give the plus room. It reads as "add a photo" instantly without crowding.
+
+What's on the sheet:
+- **All three states** rendered on #16181B: default `#9BA1A6`, pressed/active `#D97757`, disabled `#6B7177` — contrast verified.
+- **In-place composer mockup** — `[attach] [Message Claude…] [Send]` — confirming the glyph sits a touch lighter than the filled terracotta Send, correct for a secondary affordance.
+- **24 / 20 / 18dp** renderings: holds to 20dp; the plus begins merging below ~18dp.
+- **Ranked alternates** — A) plain image (no ＋), B) paperclip, C) stack of photos.
+- **Deliverable SVG** — 24×24, stroke-based, 1.5 width, round caps/joins, no fill, with a Compose-ImageVector note.
+
+**Ranking:** 1) frame + ＋ (ship for the 24dp composer), 2) plain image (auto-fallback below 20dp), 3) paperclip (only if attach scope grows beyond photos), 4) stack (busiest, softens first when small).
+
+One judgment call worth your input: I have the primary **swap to Variant A below 20dp** rather than shrinking the badge. If you'd rather keep a single glyph at every size, I'd make **Variant A the primary** and drop the ＋ entirely — slightly less explicit, but bulletproof at any size.
+

@@ -46,7 +46,7 @@ class ClaudeProcess private constructor(
         }
         scope.launch(Dispatchers.IO + CoroutineName("claude-stderr-$pid")) {
             // must drain stderr or the child can block on a full pipe
-            runCatching { process.errorStream.bufferedReader().forEachLine { } }
+            runCatching { process.errorStream.bufferedReader().forEachLine { if (it.isNotBlank()) log.warn("claude stderr: ${it.take(200)}") } }
         }
         scope.launch(Dispatchers.IO + CoroutineName("claude-stdin-$pid")) {
             val w = process.outputStream.bufferedWriter()

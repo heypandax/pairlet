@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.protocol.CancelTurn
+import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.Frame
@@ -17,6 +18,7 @@ import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.SwitchDirectory
+import dev.ccpocket.protocol.SwitchMode
 
 /** Maps an inbound [Frame] to the registry/services. Returns fast; turns run on conversation scopes. */
 class RequestRouter(
@@ -42,6 +44,8 @@ class RequestRouter(
 
             is SendPrompt -> registry.sendPrompt(frame)
             is PermissionVerdict -> registry.verdict(frame)
+            is SwitchMode -> registry.switchMode(frame)
+            is ClearAllowRule -> registry.clearRule(frame)
 
             is SwitchDirectory -> {
                 val wd = dirs.validateWorkdir(frame.workdir)

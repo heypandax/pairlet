@@ -30,16 +30,22 @@ class PermissionBridge(
     private val scope: CoroutineScope,
     private val writeToClaude: suspend (String) -> Unit,
     private val emit: suspend (Frame) -> Unit,
+    private val allowRules: MutableSet<String>, // session "Always allow" scopes, owned by the Conversation
     private val verdictTimeoutMs: Long = 30_000,
 ) {
-    private class Pending(val input: JsonObject?, val timeoutJob: Job)
+    private class Pending(val input: JsonObject?, val rule: String, val timeoutJob: Job)
 
     private val pending = ConcurrentHashMap<String, Pending>()
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val autoAllow = mode == PermissionMode.AUTO || mode == PermissionMode.BYPASS_PERMISSIONS
+    private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
     suspend fun onControlRequest(ev: ClaudeEvent.ControlRequest) {
         if (autoAllow) {
+            writeAllow(ev.requestId, ev.input, null)
+            return
+        }
+        val meta = ToolMetadata.of(ev.toolName, ev.input)
+        if (meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             writeAllow(ev.requestId, ev.input, null)
             return
         }
@@ -48,15 +54,18 @@ class PermissionBridge(
             delay(verdictTimeoutMs)
             if (pending.remove(askId) != null) writeDeny(askId, "timed out")
         }
-        pending[askId] = Pending(ev.input, timeout)
-        emit(PermissionAsk(convoId, askId, ev.toolName, previewOf(ev.toolName, ev.input), mode))
+        pending[askId] = Pending(ev.input, meta.rule, timeout)
+        emit(PermissionAsk(convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote))
     }
 
     suspend fun onVerdict(v: PermissionVerdict) {
         val p = pending.remove(v.askId) ?: return
         p.timeoutJob.cancel()
         when (v.decision) {
-            Decision.ALLOW -> writeAllow(v.askId, p.input, v.updatedInput)
+            Decision.ALLOW -> {
+                if (v.remember) allowRules.add(p.rule) // future matching requests auto-allow this session
+                writeAllow(v.askId, p.input, v.updatedInput)
+            }
             Decision.DENY -> writeDeny(v.askId, v.message ?: "denied")
         }
     }

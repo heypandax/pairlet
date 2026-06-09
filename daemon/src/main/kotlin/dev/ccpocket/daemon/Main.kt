@@ -23,6 +23,9 @@ import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
 
+/** Production relay; users connect here by default so `run`/`service-install` need no URL. */
+const val DEFAULT_RELAY = "wss://pocket.ark-nexus.cc"
+
 private class Root : CliktCommand(name = "cc-pocket-daemon") {
     override fun run() = Unit
 }
@@ -30,21 +33,21 @@ private class Root : CliktCommand(name = "cc-pocket-daemon") {
 private class RunCmd : CliktCommand(name = "run") {
     private val host by option().default("127.0.0.1")
     private val port by option().int().default(8765)
-    private val claudeBin by option("--claude-bin")
-    private val relay by option("--relay", help = "relay ws base, e.g. ws://host:9000 (omit = local LAN server)")
+    private val claudeBin by option("--claude-bin", help = "claude executable (default: auto-detect the installed Claude Code)")
+    private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
+    private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
 
     override fun run() {
         val exe = ClaudeLauncher.resolveExecutable(claudeBin)
         val core = DaemonCore(exe)
-        val r = relay
-        if (r != null) {
+        if (!local) {
             val identity = Identity.loadOrCreate()
-            val relayClient = RelayClient(r, identity, core)
-            echo("cc-pocket daemon — claude=$exe — relay=$r")
+            val relayClient = RelayClient(relay, identity, core)
+            echo("cc-pocket daemon — claude=$exe — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
-            PairLoopback(relayClient, r, identity.e2ePubB64, pairPort).start()
+            PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
         } else {
@@ -103,14 +106,14 @@ private class PairCmd : CliktCommand(name = "pair") {
 
 private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val exec by option("--exec", help = "path to the cc-pocket-daemon launcher").default("/usr/local/bin/cc-pocket-daemon")
-    private val relay by option("--relay")
+    private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
         val runArgs = buildList {
             add("run")
-            relay?.let { add("--relay"); add(it) }
+            add("--relay"); add(relay)
             claudeBin?.let { add("--claude-bin"); add(it) }
         }
         echo(ServiceInstaller.install(exec, runArgs, apply))

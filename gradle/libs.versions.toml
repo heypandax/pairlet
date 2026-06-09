@@ -17,6 +17,9 @@ androidActivityCompose = "1.9.3"
 androidMinSdk = "26"
 androidCompileSdk = "35"
 androidTargetSdk = "35"
+googleServices = "4.4.2"
+firebaseCrashlyticsPlugin = "3.0.2"
+firebaseBom = "33.7.0"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
@@ -44,11 +47,16 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "jun
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
 nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version = "1.8.0" }
 qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
+peekaboo = { module = "io.github.onseok:peekaboo-image-picker", version = "0.5.2" }
 cryptography-core = { module = "dev.whyoleg.cryptography:cryptography-core", version.ref = "cryptographyKotlin" }
 cryptography-provider-jdk = { module = "dev.whyoleg.cryptography:cryptography-provider-jdk", version.ref = "cryptographyKotlin" }
 cryptography-provider-apple = { module = "dev.whyoleg.cryptography:cryptography-provider-apple", version.ref = "cryptographyKotlin" }
 # Apple/CryptoKit provider lacks ECDH at 0.4.0; OpenSSL3 (prebuilt, bundles OpenSSL) covers P-256 on iOS.
 cryptography-provider-openssl3-prebuilt = { module = "dev.whyoleg.cryptography:cryptography-provider-openssl3-prebuilt", version.ref = "cryptographyKotlin" }
+
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
+firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
+firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
@@ -58,3 +66,5 @@ composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMul
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 androidApplication = { id = "com.android.application", version.ref = "agp" }
 androidLibrary = { id = "com.android.library", version.ref = "agp" }
+googleServices = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+firebaseCrashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsPlugin" }

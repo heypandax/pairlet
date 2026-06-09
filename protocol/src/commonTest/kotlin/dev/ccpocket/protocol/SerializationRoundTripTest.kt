@@ -23,12 +23,10 @@ class SerializationRoundTripTest {
     @Test
     fun all_permission_modes_roundtrip() {
         val expected = mapOf(
-            PermissionMode.ACCEPT_EDITS to "acceptEdits",
-            PermissionMode.AUTO to "auto",
-            PermissionMode.BYPASS_PERMISSIONS to "bypassPermissions",
             PermissionMode.DEFAULT to "default",
-            PermissionMode.DONT_ASK to "dontAsk",
+            PermissionMode.ACCEPT_EDITS to "acceptEdits",
             PermissionMode.PLAN to "plan",
+            PermissionMode.BYPASS_PERMISSIONS to "bypassPermissions",
         )
         for ((mode, name) in expected) {
             assertEquals("\"$name\"", PocketJson.encodeToString(mode))

@@ -17,6 +17,8 @@ class DirectoryService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
 
+    private companion object { const val ACTIVE_WINDOW_MS = 30_000L } // wrote within 30s = actively executing
+
     fun noteRecent(workdir: String) {
         recents.remove(workdir)
         recents.add(workdir)
@@ -36,27 +38,41 @@ class DirectoryService {
         val projects = ProjectPaths.projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }
-        return dirs.mapNotNull { dir -> cwdOf(dir) }
-            .map { cwd ->
+        val now = System.currentTimeMillis()
+        // open = a claude process is alive here (idle or active); executing = open AND wrote recently.
+        val liveCwds = LiveProcesses.claudeCwds()
+        return dirs.mapNotNull { dir -> scanProject(dir) }
+            .map { (cwd, mtime, newest) ->
+                val open = cwd in liveCwds
+                // for live dirs, surface the active session (the newest transcript) so the row links straight into it
+                val active = if (open) runCatching { TranscriptScanner.summarize(newest) }.getOrNull() else null
                 DirectoryEntry(
                     path = cwd,
                     name = Path.of(cwd).fileName?.toString() ?: cwd,
                     isDir = true,
                     hasSessions = true,
                     recent = cwd in recents,
+                    lastModified = mtime,
+                    open = open,
+                    executing = open && now - mtime < ACTIVE_WINDOW_MS,
+                    activeSessionId = active?.sessionId,
+                    activeSessionTitle = active?.title,
+                    gitBranch = active?.gitBranch,
                 )
             }
-            .distinctBy { it.path }
-            .sortedWith(compareByDescending<DirectoryEntry> { it.recent }.thenBy { it.path })
+            .sortedByDescending { it.lastModified }
+            .distinctBy { it.path } // keep the newest entry per cwd
     }
 
-    private fun cwdOf(projectDir: Path): String? {
+    /** The dir's `cwd` (from its newest transcript), that transcript's mtime, and the transcript file. */
+    private fun scanProject(projectDir: Path): Triple<String, Long, Path>? {
         val newest = Files.newDirectoryStream(projectDir, "*.jsonl").use { it.toList() }
             .maxByOrNull { it.getLastModifiedTime().toMillis() } ?: return null
+        val mtime = newest.getLastModifiedTime().toMillis()
         newest.bufferedReader().useLines { lines ->
             for (raw in lines) {
                 val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject ?: continue
-                (obj["cwd"] as? JsonPrimitive)?.contentOrNull?.let { return it }
+                (obj["cwd"] as? JsonPrimitive)?.contentOrNull?.let { return Triple(it, mtime, newest) }
             }
         }
         return null

@@ -19,3 +19,15 @@ captures/
 # stray render/tool artifacts from the design phase
 .playwright-mcp/
 /claude-contact-sheet.png
+
+# release secrets — never commit
+.env
+.env.*
+*.p12
+# build artifacts produced by scripts/release-macos.sh
+/cc-pocket-daemon-*.tar.gz
+
+# Firebase client configs — kept local, not in the public repo (users install the binary,
+# they don't build the mobile app from source)
+mobile/composeApp/google-services.json
+iosApp/iosApp/GoogleService-Info.plist

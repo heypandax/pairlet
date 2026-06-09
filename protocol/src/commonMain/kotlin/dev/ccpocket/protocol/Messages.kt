@@ -25,6 +25,7 @@ data class OpenSession(
     val resumeId: String? = null,
     val model: String? = null,
     val mode: PermissionMode = PermissionMode.DEFAULT,
+    val takeOver: Boolean = false, // true = resume/control even a session live in a terminal (vs observe)
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -35,7 +36,11 @@ data class SwitchDirectory(val convoId: String, val workdir: String) : ToDaemon
 /** Send a user turn into a live conversation. */
 @Serializable
 @SerialName("pocket/prompt")
-data class SendPrompt(val convoId: String, val text: String) : ToDaemon
+data class SendPrompt(val convoId: String, val text: String, val images: List<ImageData> = emptyList()) : ToDaemon
+
+/** A base64 image attached to a prompt — downscaled on the phone to fit the relay frame cap. */
+@Serializable
+data class ImageData(val mediaType: String, val base64: String)
 
 /** Resolve a pending permission prompt. askId == the Anthropic request_id (1:1). */
 @Serializable
@@ -46,7 +51,18 @@ data class PermissionVerdict(
     val decision: Decision,
     val updatedInput: String? = null,
     val message: String? = null,
+    val remember: Boolean = false, // ALLOW + remember => add an allow-rule so future matches auto-allow this session
 ) : ToDaemon
+
+/** Switch the live conversation's permission mode (relaunches claude with --resume + the new mode). */
+@Serializable
+@SerialName("pocket/mode.switch")
+data class SwitchMode(val convoId: String, val mode: PermissionMode) : ToDaemon
+
+/** Drop a session allow-rule (rule == null clears them all) so it prompts again next time. */
+@Serializable
+@SerialName("pocket/rule.clear")
+data class ClearAllowRule(val convoId: String, val rule: String? = null) : ToDaemon
 
 /** Interrupt the current turn. */
 @Serializable
@@ -73,7 +89,7 @@ data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPh
 /** The conversation is live. sessionId is backfilled once claude reports system.init. */
 @Serializable
 @SerialName("pocket/session.live")
-data class SessionLive(val convoId: String, val workdir: String, val sessionId: String? = null) : ToPhone
+data class SessionLive(val convoId: String, val workdir: String, val sessionId: String? = null, val observing: Boolean = false) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
 @Serializable
@@ -101,6 +117,10 @@ data class PermissionAsk(
     val tool: String,
     val inputPreview: String,
     val mode: PermissionMode? = null,
+    val title: String = "",            // human verb, e.g. "Run command" / "Write file"
+    val rule: String? = null,          // the scope "Always allow" would remember, e.g. "git status" / "Edit"
+    val danger: Boolean = false,       // destructive tool (rm, force-push…): nudge to "Allow once"
+    val dangerNote: String? = null,    // e.g. "delete files"
 ) : ToPhone
 
 /** Turn finished. finalText is the result text (if any); usage is token accounting (if present). */

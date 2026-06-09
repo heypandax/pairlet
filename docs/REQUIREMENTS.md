@@ -2,7 +2,7 @@
 
 > 本文定义 cc-pocket **要做什么**（WHAT，可验收的需求）。
 > **怎么做**（架构/协议/落地顺序）见实现计划 [`cc-connect-cc-connect-sequential-graham.md`](./cc-connect-cc-connect-sequential-graham.md)；**界面**见 [`design/`](./design/)（已用 claude.ai/design 产出 7 屏 handoff）。
-> 文档状态：草案 v0.1　｜　日期：2026-06-05
+> 文档状态：v1.0（M0–M4 已实现，验收对齐中）　｜　初稿 2026-06-05　｜　更新 2026-06-09
 
 ---
 
@@ -198,6 +198,20 @@
 
 > 设计已就绪：7 屏（Chat / Permission / Sessions / Directory / Pairing / Computers / Settings）见 `design/claude-design-handoff/`，M2 据此实现。
 
+### 6.1 实现现状（2026-06-09）
+
+四个模块均已落地，里程碑 M0–M4 主体功能已编码，正在按 §7 对真实 `claude` 收敛验收。
+
+| 里程碑 | 状态 | 代码落点（节选） |
+|---|---|---|
+| **M0** 局域网 MVP | ✅ 已实现 | `daemon/`：`claude/`（Launcher/Process/StreamParser/PermissionBridge）、`conversation/`、`disk/`（TranscriptScanner 等）、`server/`（本机 WS）；`./gradlew :daemon:run` + `test-client` 可跑通 |
+| **M1** 云端 relay + 配对 | ✅ 已实现 | `relay/`：`Broker`、`auth/`（Ed25519 双向鉴权）、`pairing/`（一次性配对码 + 限流）、`store/`（SQLite/InMemory）；daemon `RelayClient` 主动外拨 + 退避重连 |
+| **M2** 移动端多会话/多目录 | ✅ 已实现 | `mobile/composeApp`：`ui/`（App/Chat/DirList/Markdown/PairingScreen）、`data/PocketRepository`、`net/`、`pairing/`、`secure/`；Android · iOS · desktop 三端共用 commonMain |
+| **M3** 打包 + 后台常驻 | 🟡 部分 | daemon `service/ServiceInstaller` + `Main` 子命令（`run/test-client/pair/service-install`）；`deploy/`（Caddy + systemd）；一键安装包（NFR-10 jpackage）待补 |
+| **M4** 后台授权推送 | ✅ 已实现 | relay `PushProvider` + `Broker` 离线缓存重放；移动端 `telemetry/`、`DeepLink`、Firebase（FCM/APNs）接入 |
+
+> 超出原计划的增强：**端到端加密已默认启用**（`protocol/e2e/`：P-256 ECDH + HKDF + AES-256-GCM，relay 零知识只转密文），即原 NFR-6 / OQ-3 的「P1 可选」已提前转正为 v1 默认。
+
 ---
 
 ## 7. 端到端验收（核心流程，对真实 `claude`）
@@ -236,9 +250,9 @@
 
 | ID | 问题 | 现状/建议默认 |
 |---|---|---|
-| OQ-1 | 产品最终命名（现工作名 `cc-pocket`） | 待用户定；不影响线协议（`pocket/*` 命名解耦） |
+| OQ-1 | 产品最终命名（现工作名 `cc-pocket`） | ✅ 已定：产品名 **CC Pocket**，仓库 / 包名保留 `cc-pocket`（线协议 `pocket/*` 不变） |
 | OQ-2 | 会话中切目录的语义：新目录**开全新会话** vs `--resume` 续接同一会话 | 建议 v1 默认「新会话」（最稳，去掉版本相关不确定性），续接作为开关 |
-| OQ-3 | E2E 加密是否纳入 v1 | 建议 v1 先 `wss` + 双向鉴权 + relay 不持久化；E2E 作 P1 |
+| OQ-3 | E2E 加密是否纳入 v1 | ✅ 已定：E2E **纳入 v1 并默认开启**（P-256 ECDH + HKDF + AES-256-GCM，relay 零知识只转密文），见 §6.1 |
 | OQ-4 | relay 的账号体系（如何标识「同一用户」并撮合） | 待定：邮箱/第三方登录/纯设备绑定；影响 FR-1/8 |
 | OQ-5 | 是否在 v1 暴露「选择 model」与「权限模式」给用户 | 权限模式已纳入（FR-5.10）；model 选择建议 P1 |
 | OQ-6 | 多电脑（多 daemon）是否 v1 必须 | 建议 P1（FR-8.3），v1 先单 daemon 体验 |

@@ -3,12 +3,21 @@ options:
   bundleIdPrefix: com.panda
   deploymentTarget:
     iOS: "15.0"
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    from: "11.0.0"
 targets:
   iosApp:
     type: application
     platform: iOS
     sources:
       - path: iosApp
+    dependencies:
+      - package: Firebase
+        product: FirebaseAnalytics
+      - package: Firebase
+        product: FirebaseCrashlytics
     settings:
       base:
         # dev.ccpocket.app 被旧 Apple 账号占用（bundle ID 跨 team 全局唯一），换账号后改用此 ID

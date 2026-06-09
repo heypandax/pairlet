@@ -4,17 +4,16 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * The six real permission modes from `claude --help`. Serialized names match the CLI flag
- * values exactly so the daemon can pass them straight to `--permission-mode <name>`.
+ * The autonomy ladder — the four permission modes claude's `--permission-mode` actually accepts,
+ * ordered most→least cautious. Serialized names match the CLI flag values exactly.
+ * (The earlier `auto`/`dontAsk` were app-invented and not valid CLI values, so they were dropped.)
  */
 @Serializable
 enum class PermissionMode {
-    @SerialName("acceptEdits") ACCEPT_EDITS,
-    @SerialName("auto") AUTO,
-    @SerialName("bypassPermissions") BYPASS_PERMISSIONS,
     @SerialName("default") DEFAULT,
-    @SerialName("dontAsk") DONT_ASK,
+    @SerialName("acceptEdits") ACCEPT_EDITS,
     @SerialName("plan") PLAN,
+    @SerialName("bypassPermissions") BYPASS_PERMISSIONS,
 }
 
 /** Outcome of a remote permission prompt. Maps to control_response behavior allow|deny. */
@@ -70,6 +69,7 @@ data class SessionSummary(
     val lastModified: Long,
     val gitBranch: String? = null,
     val version: String? = null,
+    val live: Boolean = false, // transcript written very recently — a session running right now
 )
 
 /** One filesystem entry returned by the daemon's DirectoryService. */
@@ -82,4 +82,15 @@ data class DirectoryEntry(
     val hasSessions: Boolean = false,
     /** true if in the recents list. */
     val recent: Boolean = false,
+    /** newest transcript mtime under this dir — used to sort projects newest-first. */
+    val lastModified: Long = 0,
+    /** a claude process is alive in this dir (open session — may be idle, waiting for input). */
+    val open: Boolean = false,
+    /** actively executing right now: a process here that wrote output very recently. */
+    val executing: Boolean = false,
+    /** for open/executing dirs: the live session to jump straight into (tap resumes it directly). */
+    val activeSessionId: String? = null,
+    val activeSessionTitle: String? = null,
+    /** git branch of the active session, shown inline on the live row. */
+    val gitBranch: String? = null,
 )

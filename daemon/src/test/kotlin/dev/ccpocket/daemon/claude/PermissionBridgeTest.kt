@@ -23,7 +23,7 @@ class PermissionBridgeTest {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val written = mutableListOf<String>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { written += it }, { emitted += it })
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { written += it }, { emitted += it }, mutableSetOf())
 
         b.onControlRequest(ClaudeEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "echo hi") }))
         val ask = emitted.single()
@@ -43,7 +43,7 @@ class PermissionBridgeTest {
     fun deny_writes_deny_with_message() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val written = mutableListOf<String>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { written += it }, { })
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { written += it }, { }, mutableSetOf())
 
         b.onControlRequest(ClaudeEvent.ControlRequest("r2", "Bash", null))
         b.onVerdict(PermissionVerdict("c1", "r2", Decision.DENY, message = "nope"))
@@ -54,11 +54,11 @@ class PermissionBridgeTest {
     }
 
     @Test
-    fun auto_mode_allows_without_asking() = runBlocking {
+    fun bypass_mode_allows_without_asking() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val written = mutableListOf<String>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.AUTO, scope, { written += it }, { emitted += it })
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { written += it }, { emitted += it }, mutableSetOf())
 
         b.onControlRequest(ClaudeEvent.ControlRequest("r3", "Bash", null))
         assertTrue(emitted.isEmpty())

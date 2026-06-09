@@ -6,6 +6,8 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.googleServices)
+    alias(libs.plugins.firebaseCrashlytics)
 }
 
 kotlin {
@@ -41,6 +43,10 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.cryptography.provider.jdk) // E2E crypto provider (registers on this target)
+            implementation(project.dependencies.platform(libs.firebase.bom))
+            implementation(libs.firebase.analytics)
+            implementation(libs.firebase.crashlytics)
+            implementation(libs.peekaboo) // image picker + resize (android variant)
         }
         desktopMain.dependencies {
             implementation(compose.desktop.currentOs)
@@ -51,6 +57,7 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
             implementation(libs.cryptography.provider.openssl3.prebuilt) // Apple provider lacks ECDH at 0.4.0
+            implementation(libs.peekaboo) // image picker + resize (ios native variant)
         }
     }
 }
@@ -59,7 +66,7 @@ android {
     namespace = "dev.ccpocket.app"
     compileSdk = libs.versions.androidCompileSdk.get().toInt()
     defaultConfig {
-        applicationId = "dev.ccpocket.app"
+        applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
         versionCode = 1

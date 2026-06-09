@@ -66,15 +66,11 @@ class DeviceSessions(
         }
     }
 
-    /** On disconnect: drop E2E sessions AND reclaim every claude process this device opened. */
-    suspend fun onDisconnect() {
-        val toClose = mutex.withLock {
-            sessions.clear()
-            val all = owned.values.flatten()
-            owned.clear()
-            all
-        }
-        toClose.forEach { runCatching { core.registry.close(it) } }
+    /** On disconnect: drop E2E sessions only. Owned conversations keep running in the background so a
+     *  long task survives the phone going away; the idle reaper reclaims them once truly abandoned. */
+    suspend fun onDisconnect() = mutex.withLock {
+        sessions.clear()
+        owned.clear()
     }
 
     private suspend fun handshake(deviceId: String, deviceEphPub: ByteArray) {

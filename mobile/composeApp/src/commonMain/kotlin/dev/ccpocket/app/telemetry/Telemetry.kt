@@ -1,0 +1,37 @@
+package dev.ccpocket.app.telemetry
+
+/**
+ * Anonymous usage events. Only enum-level metadata is ever sent — never prompts, directory paths,
+ * tool inputs, account ids, or any user content. Mirrors cc-dashboard's Telemetry seam: Firebase is
+ * the only backing and stays hidden behind this single API, so business code never imports Firebase.
+ */
+enum class TelEvent(val id: String) {
+    AppLaunch("app_launch"),
+    Paired("paired"),
+    PairFailed("pair_failed"),
+    Connected("connected"),
+    Disconnected("disconnected"),
+    SessionOpened("session_opened"),
+    PromptSent("prompt_sent"),
+    ApprovalShown("approval_shown"),
+    ApprovalDecided("approval_decided"),
+}
+
+/** Parameter keys — also enum-only; values are short categorical strings or counts, never content. */
+enum class TelKey(val id: String) {
+    Source("source"),       // qr | code | link
+    Transport("transport"), // relay | direct
+    Resume("resume"),       // 0 | 1
+    Tool("tool"),
+    Decision("decision"),   // allow | deny
+    Phase("phase"),
+    Version("version"),
+}
+
+/** The single seam over Firebase Analytics + Crashlytics. Default-on, opt-out via [setEnabled]. */
+expect object Telemetry {
+    fun setEnabled(enabled: Boolean)
+    fun isEnabled(): Boolean
+    fun track(event: TelEvent, params: Map<TelKey, Any> = emptyMap())
+    fun recordError(message: String, phase: String? = null)
+}

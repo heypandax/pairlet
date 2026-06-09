@@ -15,6 +15,7 @@ import kotlin.io.path.isDirectory
 /** Reads the `.jsonl` transcript headers under a project dir into [SessionSummary] — no claude launch. */
 object TranscriptScanner {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    const val LIVE_WINDOW_MS = 20_000L // transcript touched within this window = a session running right now
 
     fun scan(dir: Path): List<SessionSummary> {
         if (!dir.isDirectory()) return emptyList()
@@ -53,6 +54,7 @@ object TranscriptScanner {
         }
 
         if (firstPrompt == null && aiTitle == null) return null
+        val mtime = file.getLastModifiedTime().toMillis()
         val fp = firstPrompt ?: ""
         val title = aiTitle?.takeIf { it.isNotBlank() }
             ?: fp.lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
@@ -63,9 +65,10 @@ object TranscriptScanner {
             firstPrompt = fp,
             messageCount = userCount,
             cwd = cwd ?: "",
-            lastModified = file.getLastModifiedTime().toMillis(),
+            lastModified = mtime,
             gitBranch = gitBranch,
             version = version,
+            live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
         )
     }
 

@@ -25,6 +25,7 @@ import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.readText
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.filterIsInstance
@@ -57,13 +58,15 @@ class RelayClient(
     private val ctrlId = AtomicLong(0)
 
     @Volatile private var dataOut: Channel<ByteArray>? = null
+    @Volatile private var peerOnline = false
     private val sessions = DeviceSessions(core, identity) { deviceId, payload ->
         dataOut?.send(Wire.wrapDevice(deviceId, payload))
     }
 
     val accountId: String get() = identity.accountId
 
-    suspend fun run() {
+    suspend fun run() = coroutineScope {
+        launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
         var backoff = 1_000L
         while (true) {
             try {
@@ -74,6 +77,17 @@ class RelayClient(
             }
             delay(backoff)
             backoff = (backoff * 2).coerceAtMost(30_000L)
+        }
+    }
+
+    /** While no phone is attached, reclaim conversations idle longer than [IDLE_REAP_MS]. */
+    private suspend fun reaperLoop() {
+        while (true) {
+            delay(60_000)
+            if (!peerOnline) {
+                val n = core.registry.reapIdle(IDLE_REAP_MS)
+                if (n > 0) log.info("reaped $n idle background session(s)")
+            }
         }
     }
 
@@ -130,11 +144,13 @@ class RelayClient(
         when (body) {
             is PairTicket -> inboundControl.emit(body)
             is DevicePaired -> sessions.onDevicePaired(body.deviceId, body.devicePubKey)
-            is PeerPresence -> log.info("peer ${if (body.online) "online" else "offline"}")
+            is PeerPresence -> { peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
             else -> {}
         }
     }
 
     private fun controlText(frame: ToRelay): String =
         PocketJson.encodeToString(Envelope(ctrlId.getAndIncrement().toString(), 0L, to = Route.RELAY, body = frame))
+
+    private companion object { const val IDLE_REAP_MS = 15 * 60 * 1000L } // 15 min idle -> reclaim
 }
