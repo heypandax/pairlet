@@ -5,7 +5,7 @@
 用户最终体验：
 
 ```
-brew install heypandax/tap/cc-pocket
+brew install --cask heypandax/tap/cc-pocket
 cc-pocket-daemon service-install --apply    # 开机自启、断线重连
 cc-pocket-daemon pair                        # 出二维码 → 手机扫
 ```
@@ -81,12 +81,12 @@ security find-identity -v -p codesigning
 
 3. **建 GitHub Release** `v1.0.0`，把上面两个 tar.gz 作为附件上传。
 
-4. **更新 formula**：把 `packaging/homebrew/cc-pocket.rb` 的 `version`、两个 `url`、两个 `sha256` 填好，提交到 `heypandax/homebrew-tap` 的 `Formula/cc-pocket.rb`。
+4. **更新 cask**：把 `packaging/homebrew/Casks/cc-pocket.rb` 的 `version` + `url` + `sha256` 填好，提交到 `heypandax/homebrew-tap` 的 `Casks/cc-pocket.rb`。
 
 5. **验收**：
 
    ```bash
-   brew install heypandax/tap/cc-pocket   # 干净机器上
+   brew install --cask heypandax/tap/cc-pocket   # 干净机器上
    cc-pocket-daemon --help                      # 应正常输出（已公证，无 Gatekeeper 警告）
    ```
 
@@ -95,7 +95,7 @@ security find-identity -v -p codesigning
 ## 写进面向用户的 README
 
 - **前置**：先装并登录 [Claude Code](https://claude.com/claude-code)（跑一次 `claude` 完成鉴权）。daemon 会自动找到系统的 `claude`。
-- **装**：`brew install heypandax/tap/cc-pocket`
+- **装**：`brew install --cask heypandax/tap/cc-pocket`
 - **跑 + 配对**：`cc-pocket-daemon service-install --apply` 然后 `cc-pocket-daemon pair`，手机 App 扫码。
 - **卸载服务**：`launchctl unload ~/Library/LaunchAgents/dev.ccpocket.daemon.plist`
 
@@ -105,5 +105,7 @@ security find-identity -v -p codesigning
 
 - **claude 版本**：早先 2.1.169 的 headless 回归**已不复现**（实测 piped stdin/stdout 下输出完整的 stream-json：assistant + result，exit 0）。所以**发布版不再 pin** `--claude-bin`，daemon 自动用用户的 claude。若日后某个 claude 版本又坏，再在 daemon 里加版本检测告警。
 - **默认 relay 已烤进 daemon**（`DEFAULT_RELAY`），`run` / `service-install` 不用传 `--relay`；本地 LAN 调试用 `run --local`。
-- **双架构**：jpackage 打的是构建机的 arch，所以 arm64 / x86_64 要各打一份；formula 用 `on_arm` / `on_intel` 分流。
-- **公证 vs 不公证**：走 Homebrew 已经基本不触发隔离；叠加公证后**任何下载路径都零警告**，最稳。
+- **双架构**：jpackage 打的是构建机的 arch，所以 arm64 / x86_64 要各打一份；cask 用 `depends_on arch: :arm64` 限制，要支持 Intel 再按 arch 给不同 `url`/`sha256`。
+- **必须用 Cask 不用 Formula**：产物是预编译 + 已公证的二进制。Homebrew **Formula** 会强制跑「Command Line Tools 体检」（哪怕不编译，且常误报 CLT 过旧 → 装不上），**Cask** 是预编译通道、不碰 CLT。所以分发用 `Casks/cc-pocket.rb` + `brew install --cask`。
+- **tap-trust 提示**：`heypandax/tap` 是第三方 tap，brew 会打一行 "not trusted" 警告（非阻塞）；Homebrew 6.0 后会要求 `brew trust`，到时文档补一句即可。
+- **公证 vs 不公证**：叠加公证后**任何下载路径都零 Gatekeeper 警告**，最稳。
