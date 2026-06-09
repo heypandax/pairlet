@@ -86,8 +86,8 @@ security find-identity -v -p codesigning
 5. **验收**：
 
    ```bash
-   brew install heypandax/cc-pocket   # 干净机器上
-   cc-pocket-daemon --help                # 应正常输出（已公证，无 Gatekeeper 警告）
+   brew install heypandax/cc-pocket/cc-pocket   # 干净机器上
+   cc-pocket-daemon --help                      # 应正常输出（已公证，无 Gatekeeper 警告）
    ```
 
 ---
@@ -95,7 +95,7 @@ security find-identity -v -p codesigning
 ## 写进面向用户的 README
 
 - **前置**：先装并登录 [Claude Code](https://claude.com/claude-code)（跑一次 `claude` 完成鉴权）。daemon 会自动找到系统的 `claude`。
-- **装**：`brew install heypandax/cc-pocket`
+- **装**：`brew install heypandax/cc-pocket/cc-pocket`
 - **跑 + 配对**：`cc-pocket-daemon service-install --apply` 然后 `cc-pocket-daemon pair`，手机 App 扫码。
 - **卸载服务**：`launchctl unload ~/Library/LaunchAgents/dev.ccpocket.daemon.plist`
 
