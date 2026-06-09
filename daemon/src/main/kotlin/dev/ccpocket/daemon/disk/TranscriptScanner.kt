@@ -1,0 +1,99 @@
+package dev.ccpocket.daemon.disk
+
+import dev.ccpocket.protocol.SessionSummary
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.io.path.bufferedReader
+import kotlin.io.path.getLastModifiedTime
+import kotlin.io.path.isDirectory
+
+/** Reads the `.jsonl` transcript headers under a project dir into [SessionSummary] — no claude launch. */
+object TranscriptScanner {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun scan(dir: Path): List<SessionSummary> {
+        if (!dir.isDirectory()) return emptyList()
+        val files = Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() }
+        return files.mapNotNull { runCatching { summarize(it) }.getOrNull() }
+            .sortedByDescending { it.lastModified }
+    }
+
+    fun summarize(file: Path): SessionSummary? {
+        val sessionId = file.fileName.toString().removeSuffix(".jsonl")
+        var firstPrompt: String? = null
+        var cwd: String? = null
+        var gitBranch: String? = null
+        var version: String? = null
+        var aiTitle: String? = null
+        var userCount = 0
+
+        file.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                when (obj.str("type")) {
+                    "user" -> if (isRealUserTurn(obj)) {
+                        userCount++
+                        if (firstPrompt == null) {
+                            firstPrompt = extractUserText(obj)
+                            cwd = obj.str("cwd")
+                            gitBranch = obj.str("gitBranch")
+                            version = obj.str("version")
+                        }
+                    }
+                    "ai-title" -> aiTitle = obj.str("aiTitle")
+                }
+            }
+        }
+
+        if (firstPrompt == null && aiTitle == null) return null
+        val fp = firstPrompt ?: ""
+        val title = aiTitle?.takeIf { it.isNotBlank() }
+            ?: fp.lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
+            ?: sessionId
+        return SessionSummary(
+            sessionId = sessionId,
+            title = title,
+            firstPrompt = fp,
+            messageCount = userCount,
+            cwd = cwd ?: "",
+            lastModified = file.getLastModifiedTime().toMillis(),
+            gitBranch = gitBranch,
+            version = version,
+        )
+    }
+
+    /** A real user turn has no `toolUseResult` and content is not a `tool_result` array. (C5) */
+    private fun isRealUserTurn(obj: JsonObject): Boolean {
+        if (obj.containsKey("toolUseResult")) return false
+        val content = (obj["message"] as? JsonObject)?.get("content")
+        if (content is JsonArray && content.isNotEmpty()) {
+            val allToolResult = content.all {
+                (it as? JsonObject)?.let { b -> (b["type"] as? JsonPrimitive)?.contentOrNull } == "tool_result"
+            }
+            if (allToolResult) return false
+        }
+        return true
+    }
+
+    private fun extractUserText(obj: JsonObject): String {
+        val content = (obj["message"] as? JsonObject)?.get("content") ?: return ""
+        return when (content) {
+            is JsonPrimitive -> content.contentOrNull ?: ""
+            is JsonArray -> content.firstNotNullOfOrNull { el ->
+                (el as? JsonObject)
+                    ?.takeIf { (it["type"] as? JsonPrimitive)?.contentOrNull == "text" }
+                    ?.let { (it["text"] as? JsonPrimitive)?.contentOrNull }
+            } ?: ""
+            else -> ""
+        }
+    }
+
+    private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+}

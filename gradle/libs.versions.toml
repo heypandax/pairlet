@@ -1,0 +1,60 @@
+[versions]
+kotlin = "2.1.21"
+ktor = "3.1.3"
+kotlinxSerialization = "1.7.3"
+kotlinxCoroutines = "1.9.0"
+clikt = "5.0.1"
+slf4j = "2.0.13"
+logback = "1.5.6"
+junit = "5.11.3"
+sqliteJdbc = "3.46.1.3"
+# 0.4.0 is the last release whose Kotlin/Native klib (Kotlin 2.0.20, ABI 1.8.0) is consumable by
+# this project's Kotlin 2.1.21; 0.5.0+ klibs (ABI 2.2.0+) require a newer Kotlin compiler.
+cryptographyKotlin = "0.4.0"
+composeMultiplatform = "1.7.3"
+agp = "8.7.3"
+androidActivityCompose = "1.9.3"
+androidMinSdk = "26"
+androidCompileSdk = "35"
+androidTargetSdk = "35"
+
+[libraries]
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+
+ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+ktor-server-cio = { module = "io.ktor:ktor-server-cio", version.ref = "ktor" }
+ktor-server-websockets = { module = "io.ktor:ktor-server-websockets", version.ref = "ktor" }
+ktor-server-forwarded-header = { module = "io.ktor:ktor-server-forwarded-header", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
+ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
+
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidActivityCompose" }
+
+clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version = "1.8.0" }
+qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
+cryptography-core = { module = "dev.whyoleg.cryptography:cryptography-core", version.ref = "cryptographyKotlin" }
+cryptography-provider-jdk = { module = "dev.whyoleg.cryptography:cryptography-provider-jdk", version.ref = "cryptographyKotlin" }
+cryptography-provider-apple = { module = "dev.whyoleg.cryptography:cryptography-provider-apple", version.ref = "cryptographyKotlin" }
+# Apple/CryptoKit provider lacks ECDH at 0.4.0; OpenSSL3 (prebuilt, bundles OpenSSL) covers P-256 on iOS.
+cryptography-provider-openssl3-prebuilt = { module = "dev.whyoleg.cryptography:cryptography-provider-openssl3-prebuilt", version.ref = "cryptographyKotlin" }
+
+[plugins]
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+androidApplication = { id = "com.android.application", version.ref = "agp" }
+androidLibrary = { id = "com.android.library", version.ref = "agp" }

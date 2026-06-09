@@ -1,0 +1,39 @@
+name: iosApp
+options:
+  bundleIdPrefix: com.panda
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  iosApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+    settings:
+      base:
+        # dev.ccpocket.app 被旧 Apple 账号占用（bundle ID 跨 team 全局唯一），换账号后改用此 ID
+        PRODUCT_BUNDLE_IDENTIFIER: com.panda.ccpocket
+        PRODUCT_NAME: cc-pocket
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: SC9S2SJ42G  # 当前账号 team；写进来让 xcodegen generate 后不用重选
+        INFOPLIST_FILE: iosApp/Info.plist
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/../mobile/composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -framework
+          - ComposeApp
+    preBuildScripts:
+      - name: Compile Kotlin Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          # Xcode 的构建环境 PATH 里通常没有 java；显式指定，避免 gradlew 启动失败
+          export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
+          cd "$SRCROOT/.."
+          ./gradlew :mobile:composeApp:embedAndSignAppleFrameworkForXcode

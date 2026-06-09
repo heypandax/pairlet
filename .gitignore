@@ -1,0 +1,21 @@
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+
+# local agent / IDE state
+.claude/settings.local.json
+
+# Xcode per-user state
+**/xcuserdata/
+*.xcuserstate
+
+# stray render/tool artifacts from the design phase
+.playwright-mcp/
+/claude-contact-sheet.png

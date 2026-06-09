@@ -1,0 +1,83 @@
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+
+plugins {
+    alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.androidApplication)
+    alias(libs.plugins.composeMultiplatform)
+    alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.kotlinSerialization)
+}
+
+kotlin {
+    jvmToolchain(17)
+    compilerOptions { freeCompilerArgs.add("-Xexpect-actual-classes") } // SecureStore is an expect object (Beta API, stable enough)
+    androidTarget()
+    jvm("desktop")
+    listOf(iosArm64(), iosSimulatorArm64()).forEach { iosTarget ->
+        iosTarget.binaries.framework {
+            baseName = "ComposeApp"
+            isStatic = true
+        }
+    }
+
+    sourceSets {
+        val desktopMain by getting
+
+        commonMain.dependencies {
+            implementation(compose.runtime)
+            implementation(compose.foundation)
+            implementation(compose.material3)
+            implementation(compose.materialIconsExtended)
+            implementation(compose.ui)
+            implementation(project(":protocol"))
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.websockets)
+            implementation(libs.qrkit) // in-app camera QR scanner (ios/android/desktop)
+        }
+        androidMain.dependencies {
+            implementation(libs.androidx.activity.compose)
+            implementation(libs.ktor.client.cio)
+            implementation(libs.kotlinx.coroutines.android)
+            implementation(libs.cryptography.provider.jdk) // E2E crypto provider (registers on this target)
+        }
+        desktopMain.dependencies {
+            implementation(compose.desktop.currentOs)
+            implementation(libs.ktor.client.cio)
+            implementation(libs.kotlinx.coroutines.swing)
+            implementation(libs.cryptography.provider.jdk)
+        }
+        iosMain.dependencies {
+            implementation(libs.ktor.client.darwin)
+            implementation(libs.cryptography.provider.openssl3.prebuilt) // Apple provider lacks ECDH at 0.4.0
+        }
+    }
+}
+
+android {
+    namespace = "dev.ccpocket.app"
+    compileSdk = libs.versions.androidCompileSdk.get().toInt()
+    defaultConfig {
+        applicationId = "dev.ccpocket.app"
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+        targetSdk = libs.versions.androidTargetSdk.get().toInt()
+        versionCode = 1
+        versionName = "0.1.0"
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+compose.desktop {
+    application {
+        mainClass = "dev.ccpocket.app.MainKt"
+        nativeDistributions {
+            targetFormats(TargetFormat.Dmg)
+            packageName = "cc-pocket"
+            packageVersion = "1.0.0"
+        }
+    }
+}
