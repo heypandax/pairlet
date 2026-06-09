@@ -5,7 +5,7 @@
 用户最终体验：
 
 ```
-brew install heypandax/cc-pocket/cc-pocket
+brew install heypandax/tap/cc-pocket
 cc-pocket-daemon service-install --apply    # 开机自启、断线重连
 cc-pocket-daemon pair                        # 出二维码 → 手机扫
 ```
@@ -51,7 +51,7 @@ security find-identity -v -p codesigning
 
 ### 5. GitHub 仓库
 - 主仓库 `heypandax/cc-pocket`（已存在）—— 发布页挂 artifact。
-- tap 仓库 **`heypandax/homebrew-cc-pocket`**（已建）—— 放 `Formula/cc-pocket.rb`（用 `packaging/homebrew/cc-pocket.rb` 当模板）。tap 名即 `heypandax/cc-pocket`。
+- tap 仓库 **`heypandax/homebrew-tap`**（已建）—— 放 `Formula/cc-pocket.rb`（用 `packaging/homebrew/cc-pocket.rb` 当模板）。tap 名即 `heypandax/tap`。
 
 > 证书私钥**只在你创建它的那台 Mac**。换机器：钥匙串访问里选中证书+私钥 → 导出为 `.p12`（带密码）→ 在新机导入。Developer ID 证书一个 Team 数量有限（一般 2 个），别乱删。
 
@@ -86,7 +86,7 @@ security find-identity -v -p codesigning
 5. **验收**：
 
    ```bash
-   brew install heypandax/cc-pocket/cc-pocket   # 干净机器上
+   brew install heypandax/tap/cc-pocket   # 干净机器上
    cc-pocket-daemon --help                      # 应正常输出（已公证，无 Gatekeeper 警告）
    ```
 
@@ -95,7 +95,7 @@ security find-identity -v -p codesigning
 ## 写进面向用户的 README
 
 - **前置**：先装并登录 [Claude Code](https://claude.com/claude-code)（跑一次 `claude` 完成鉴权）。daemon 会自动找到系统的 `claude`。
-- **装**：`brew install heypandax/cc-pocket/cc-pocket`
+- **装**：`brew install heypandax/tap/cc-pocket`
 - **跑 + 配对**：`cc-pocket-daemon service-install --apply` 然后 `cc-pocket-daemon pair`，手机 App 扫码。
 - **卸载服务**：`launchctl unload ~/Library/LaunchAgents/dev.ccpocket.daemon.plist`
 
