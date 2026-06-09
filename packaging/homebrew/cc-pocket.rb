@@ -1,6 +1,6 @@
 # Homebrew formula for the cc-pocket daemon (the Mac side).
 # Lives in the tap repo: github.com/heypandax/homebrew-cc-pocket → Formula/cc-pocket.rb
-# Users then: brew install heypandax/cc-pocket   (formula name == tap name, so no repeat)
+# Users then: brew install heypandax/cc-pocket/cc-pocket (formula name == tap name, so no repeat)
 #
 # The artifacts are self-contained (bundled JRE) + notarized, attached to the GitHub release.
 # After each release: bump `version`, update both URLs + sha256 (printed by scripts/release-macos.sh).
@@ -11,7 +11,8 @@ class CcPocket < Formula
   license "MIT"
 
   on_arm do
-    url "https://github.com/heypandax/cc-pocket/releases/download/v1.0.0/cc-pocket-daemon-1.0.0-macos-arm64.tar.gz"
+    # binaries are hosted on the public tap repo's releases (the main source repo is private)
+    url "https://github.com/heypandax/homebrew-cc-pocket/releases/download/v1.0.0/cc-pocket-daemon-1.0.0-macos-arm64.tar.gz"
     sha256 "ec72f09ee50459565d5623cb5b23184994c5fbea5f352874ab83ed7af890431c"
   end
   on_intel do

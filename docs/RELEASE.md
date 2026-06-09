@@ -5,7 +5,7 @@
 用户最终体验：
 
 ```
-brew install heypandax/cc-pocket
+brew install heypandax/cc-pocket/cc-pocket
 cc-pocket-daemon service-install --apply    # 开机自启、断线重连
 cc-pocket-daemon pair                        # 出二维码 → 手机扫
 ```
