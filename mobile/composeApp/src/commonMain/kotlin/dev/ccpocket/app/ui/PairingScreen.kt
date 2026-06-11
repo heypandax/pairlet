@@ -53,7 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.defaultDaemonUrl
+import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import org.jetbrains.compose.resources.stringResource
 import qrscanner.CameraLens
 import qrscanner.QrScanner
 
@@ -72,10 +74,10 @@ fun PairingScreen(repo: PocketRepository) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
-        Text("Connect your computer", color = Tok.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(Res.string.pairing_title), color = Tok.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(7.dp))
         Text(
-            "Pair this phone with the cc-pocket daemon on your computer.",
+            stringResource(Res.string.pairing_subtitle),
             color = Tok.tx2, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 300.dp),
         )
         Spacer(Modifier.height(22.dp))
@@ -83,41 +85,41 @@ fun PairingScreen(repo: PocketRepository) {
         Viewfinder { repo.handlePairUrl(it) }
 
         Spacer(Modifier.height(22.dp))
-        Divider("or enter the pairing code")
+        Divider(stringResource(Res.string.or_enter_code))
         Spacer(Modifier.height(18.dp))
 
         CodeInput(code) { v -> code = v; if (v.length == 6) repo.pairWithCode(v) }
 
         Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Run ", color = Tok.tx2, fontSize = 13.sp)
+            Text(stringResource(Res.string.run_code_prefix) + " ", color = Tok.tx2, fontSize = 13.sp)
             Text(
                 "cc-pocket pair", color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.surface)
                     .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp),
             )
-            Text(" to get a code.", color = Tok.tx2, fontSize = 13.sp)
+            Text(" " + stringResource(Res.string.run_code_suffix), color = Tok.tx2, fontSize = 13.sp)
         }
 
-        TextButton({ showPaste = !showPaste }) { Text(if (showPaste) "hide" else "can't scan? paste link", color = Tok.muted, fontSize = 12.sp) }
+        TextButton({ showPaste = !showPaste }) { Text(stringResource(if (showPaste) Res.string.hide else Res.string.cant_scan_paste_link), color = Tok.muted, fontSize = 12.sp) }
         if (showPaste) {
             Spacer(Modifier.height(14.dp))
-            OutlinedTextField(link, { link = it }, placeholder = { Text("paste ccpocket://pair link") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(link, { link = it }, placeholder = { Text(stringResource(Res.string.paste_pair_link)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.pair(link) }, Modifier.fillMaxWidth(), enabled = link.isNotBlank()) { Text("Pair from link") }
+            OutlinedButton({ repo.pair(link) }, Modifier.fillMaxWidth(), enabled = link.isNotBlank()) { Text(stringResource(Res.string.pair_from_link)) }
         }
 
         Spacer(Modifier.height(10.dp))
-        Text(repo.status.value, color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+        Text(repo.status.value.resolve(), color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
 
         Spacer(Modifier.height(20.dp))
-        Button({ if (complete) repo.pairWithCode(code) }, Modifier.fillMaxWidth(), enabled = complete) { Text("Connect") }
+        Button({ if (complete) repo.pairWithCode(code) }, Modifier.fillMaxWidth(), enabled = complete) { Text(stringResource(Res.string.connect)) }
         Spacer(Modifier.height(6.dp))
-        TextButton({ advanced = !advanced }) { Text(if (advanced) "Hide advanced" else "Advanced · direct LAN", color = Tok.muted, fontSize = 12.sp) }
+        TextButton({ advanced = !advanced }) { Text(stringResource(if (advanced) Res.string.hide_advanced else Res.string.advanced_direct_lan), color = Tok.muted, fontSize = 12.sp) }
         if (advanced) {
-            OutlinedTextField(url, { url = it }, placeholder = { Text("daemon ws url") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(url, { url = it }, placeholder = { Text(stringResource(Res.string.daemon_ws_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text("Connect direct") }
+            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect_direct)) }
         }
     }
 }
@@ -162,7 +164,7 @@ private fun Viewfinder(onScanned: (String) -> Unit) {
             )
         }
         Text(
-            if (scanning) "scanning…" else "tap to scan the QR",
+            stringResource(if (scanning) Res.string.scanning else Res.string.tap_to_scan),
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
         )

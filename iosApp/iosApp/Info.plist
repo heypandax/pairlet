@@ -4,6 +4,11 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh</string>
+    </array>
     <key>CFBundleDisplayName</key>
     <string>CC Pocket</string>
     <key>CFBundleExecutable</key>
@@ -39,6 +44,10 @@
     <string>cc-pocket connects to the daemon running on your computer over the local network.</string>
     <key>NSCameraUsageDescription</key>
     <string>cc-pocket uses the camera to scan the pairing QR code shown by cc-pocket pair on your computer.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>cc-pocket transcribes your dictation on-device so you can speak prompts instead of typing them.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_ccpocket._tcp</string>

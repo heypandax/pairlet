@@ -64,6 +64,11 @@ class ClaudeProcess private constructor(
 
     suspend fun writeLine(json: String) = stdin.send(json)
 
+    /** Bounded wait for the OS process to fully exit — its transcript is only flushed then. */
+    suspend fun awaitExit(seconds: Long = 5) {
+        withContext(Dispatchers.IO) { runCatching { process.waitFor(seconds, TimeUnit.SECONDS) } }
+    }
+
     suspend fun shutdown() {
         stdin.close()
         runCatching { process.outputStream.close() }

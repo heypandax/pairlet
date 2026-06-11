@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── connect / pairing ─────────────────────────────────────── -->
+    <string name="paired_account">Paired · %1$s…</string>
+    <string name="connect">Connect</string>
+    <string name="unpair">Unpair</string>
+    <string name="pair_with_daemon">Pair with your daemon</string>
+    <string name="paste_pair_link">paste ccpocket://pair link</string>
+    <string name="pair">Pair</string>
+    <string name="hide_advanced">Hide advanced</string>
+    <string name="advanced_direct_lan">Advanced · direct LAN</string>
+    <string name="daemon_ws_url">daemon ws url</string>
+    <string name="connect_direct">Connect direct</string>
+    <string name="pairing_title">Connect your computer</string>
+    <string name="pairing_subtitle">Pair this phone with the cc-pocket daemon on your computer.</string>
+    <string name="scanning">scanning…</string>
+    <string name="tap_to_scan">tap to scan the QR</string>
+    <string name="or_enter_code">or enter the pairing code</string>
+    <string name="run_code_prefix">Run</string>
+    <string name="run_code_suffix">to get a code.</string>
+    <string name="hide">hide</string>
+    <string name="cant_scan_paste_link">can't scan? paste link</string>
+    <string name="pair_from_link">Pair from link</string>
+
+    <!-- ── connection status (monospace line + banner) ───────────── -->
+    <string name="reconnect_banner">Connection lost — reconnecting…</string>
+    <string name="status_disconnected">disconnected</string>
+    <string name="status_invalid_link">invalid pairing link</string>
+    <string name="status_pairing">pairing…</string>
+    <string name="status_pair_failed">pairing failed: %1$s</string>
+    <string name="status_checking_network">checking network access…</string>
+    <string name="status_local_denied">local network denied — allow cc-pocket in Settings → Privacy → Local Network</string>
+    <string name="status_connecting">connecting…</string>
+    <string name="status_reconnecting">reconnecting…</string>
+    <string name="status_connected">connected</string>
+    <string name="status_conn_lost">connection lost — retrying…</string>
+    <string name="status_failed">failed: %1$s</string>
+
+    <!-- ── directory browser ─────────────────────────────────────── -->
+    <string name="choose_directory">Choose a directory</string>
+    <string name="exit">Exit</string>
+    <string name="filter_hint">filter…</string>
+    <string name="history_badge">history</string>
+    <string name="dir_open_sessions">Open Sessions</string>
+    <string name="dir_projects">Projects</string>
+    <string name="running">running</string>
+    <string name="idle">idle</string>
+    <string name="session_fallback">session</string>
+
+    <!-- ── session list ──────────────────────────────────────────── -->
+    <string name="sessions_title">Sessions</string>
+    <string name="new_session_cta">＋ New session</string>
+
+    <!-- ── relative time (session cards) ─────────────────────────── -->
+    <string name="time_just_now">just now</string>
+    <string name="time_minutes_ago">%1$dm ago</string>
+    <string name="time_hours_ago">%1$dh ago</string>
+    <string name="time_yesterday">yesterday</string>
+    <string name="time_days_ago">%1$dd ago</string>
+    <string name="start_claude_in">Start Claude in %1$s</string>
+
+    <!-- ── chat ──────────────────────────────────────────────────── -->
+    <string name="chat_title">Chat</string>
+    <string name="stop">Stop</string>
+    <string name="thinking_streaming">Thinking…</string>
+    <string name="thought_for">Thought for %1$ds</string>
+    <string name="code_copy">copy</string>
+    <string name="code_copied">copied</string>
+    <string name="jump_to_latest">Jump to latest</string>
+    <string name="observing_notice">👁 Observing · running in a terminal</string>
+    <string name="continue_here">Continue here</string>
+    <string name="add_message_hint">Add a message…</string>
+    <string name="message_claude_hint">Message Claude…</string>
+    <string name="send">Send</string>
+    <string name="dictate">Dictate</string>
+    <string name="attach_image">Attach image</string>
+    <string name="error_prefix">error: %1$s</string>
+    <string name="cmd_source_builtin">built-in</string>
+    <string name="cmd_source_user">user</string>
+    <string name="cmd_source_project">project</string>
+    <string name="cmd_source_skill">skill</string>
+
+    <!-- ── execution modes ───────────────────────────────────────── -->
+    <string name="mode_default_short">Ask each step</string>
+    <string name="mode_default_label">I'm watching · ask each step</string>
+    <string name="mode_default_detail">auto-allows nothing automatically · still asks every sensitive tool</string>
+    <string name="mode_accept_short">Auto-edit</string>
+    <string name="mode_accept_label">Auto-edit files, ask before commands</string>
+    <string name="mode_accept_detail">auto-allows file edits · still asks commands</string>
+    <string name="mode_plan_short">Plan</string>
+    <string name="mode_plan_label">Plan first, I'll approve</string>
+    <string name="mode_plan_detail">auto-allows read-only inspection · still asks everything until you approve</string>
+    <string name="mode_bypass_short">Full auto</string>
+    <string name="mode_bypass_label">Full auto · trust it</string>
+    <string name="mode_bypass_detail">auto-allows everything · still asks nothing</string>
+    <string name="exec_mode_title">Execution mode</string>
+    <string name="exec_mode_subtitle">How much should Claude ask before acting?</string>
+    <string name="mode_switching">Restarting session to apply the new mode…</string>
+    <string name="note_new_sessions_default">New sessions always start at “Ask each step”.</string>
+    <string name="bypass_title">Enable full auto?</string>
+    <string name="bypass_body">Claude will run every command without asking — including ones that change or delete files. This session only.</string>
+    <string name="cancel">Cancel</string>
+    <string name="bypass_cta">⚠ Enable full auto</string>
+    <string name="new_session_title">New session</string>
+    <string name="new_session_subtitle">Start in which mode?</string>
+    <string name="note_change_anytime">You can change this anytime from the badge.</string>
+    <string name="rules_remembered_header">REMEMBERED THIS SESSION</string>
+    <string name="clear_all">Clear all</string>
+    <plurals name="mode_rules">
+        <item quantity="one">· %1$d rule</item>
+        <item quantity="other">· %1$d rules</item>
+    </plurals>
+
+    <!-- ── permission sheet ──────────────────────────────────────── -->
+    <string name="auto_deny">auto-deny</string>
+    <string name="auto_denied_title">Auto-denied</string>
+    <string name="auto_denied_body">No response within the time limit.</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="needs_permission">Claude needs permission</string>
+    <string name="permission_fallback">Permission</string>
+    <string name="deny">Deny</string>
+    <string name="allow_once">Allow once</string>
+    <string name="always_allow">Always allow</string>
+    <string name="always_allow_danger">“Always allow” would let Claude %1$s all session — not recommended.</string>
+    <string name="act_freely">act freely</string>
+    <string name="always_allow_scope">“Always allow” remembers only %1$s for this session.</string>
+    <string name="allow_chip_prefix">Always allowing</string>
+    <string name="allow_chip_suffix">this session</string>
+
+    <!-- ── voice input ───────────────────────────────────────────── -->
+    <string name="cancel_recording">Cancel recording</string>
+    <string name="transcribing">Transcribing…</string>
+    <string name="done">Done</string>
+    <string name="mic_title">Microphone access needed</string>
+    <string name="mic_body">cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="not_now">Not now</string>
+    <string name="voice_no_speech">Didn't catch any speech</string>
+    <string name="voice_record_failed">Couldn't start recording</string>
+    <string name="voice_daemon_unreachable">Couldn't reach the daemon — check the connection</string>
+    <string name="voice_transcribe_failed">Couldn't transcribe — try again</string>
+    <string name="voice_no_response">No response — check the connection</string>
+    <string name="voice_dictation_failed">dictation failed</string>
+    <string name="voice_speech_unavailable">speech recognition unavailable</string>
+    <string name="voice_audio_engine">audio engine failed to start</string>
+
+    <!-- ── settings (minimal: about + unpair) ────────────────────── -->
+    <string name="settings_title">Settings</string>
+    <string name="about_section">ABOUT</string>
+    <string name="about_version">Version</string>
+    <string name="about_license">License</string>
+    <string name="about_connection">Connection</string>
+    <string name="settings_open">Settings</string>
+
+    <!-- ── image attachments ─────────────────────────────────────── -->
+    <string name="img_counter">%1$d/4 · compressed on device</string>
+    <string name="img_excluded">· %1$d excluded</string>
+    <string name="img_too_large">too large · %1$dKB</string>
+    <string name="viewer_hint">Swipe down to close · tap to zoom</string>
+</resources>

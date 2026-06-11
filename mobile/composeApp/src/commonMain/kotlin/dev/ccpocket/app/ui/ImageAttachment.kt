@@ -49,7 +49,9 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.PendingImage
 import dev.ccpocket.app.media.decodeImageBitmap
+import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import org.jetbrains.compose.resources.stringResource
 
 /** Decode once per distinct byte array; cached across recompositions. */
 @Composable
@@ -73,8 +75,8 @@ fun AttachTray(pending: List<PendingImage>, onRemove: (Long) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("$valid/4 · compressed on device", color = Tok.muted, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
-            if (rejected > 0) Text("· $rejected excluded", color = Tok.danger, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
+            Text(stringResource(Res.string.img_counter, valid), color = Tok.muted, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
+            if (rejected > 0) Text(stringResource(Res.string.img_excluded, rejected), color = Tok.danger, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
         }
     }
 }
@@ -114,7 +116,7 @@ private fun TrayThumb(img: PendingImage, onRemove: () -> Unit) {
             }
         }
         if (rejected) {
-            Text("too large · ${img.bytes.size / 1024}KB", color = Tok.danger, fontSize = 9.5.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 3.dp))
+            Text(stringResource(Res.string.img_too_large, img.bytes.size / 1024), color = Tok.danger, fontSize = 9.5.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 3.dp))
         }
     }
 }
@@ -214,7 +216,7 @@ fun ImageViewer(images: List<ByteArray>, startIndex: Int, onClose: () -> Unit) {
             }
         }
         Text(
-            "Swipe down to close · tap to zoom",
+            stringResource(Res.string.viewer_hint),
             color = Tok.muted, fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp),
         )

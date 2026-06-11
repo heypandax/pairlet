@@ -5,6 +5,9 @@ import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.daemon.session.SessionRegistry
+import dev.ccpocket.daemon.transcribe.TranscribeService
+import dev.ccpocket.protocol.AudioCancel
+import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
@@ -24,6 +27,7 @@ import dev.ccpocket.protocol.SwitchMode
 class RequestRouter(
     private val registry: SessionRegistry,
     private val dirs: DirectoryService,
+    private val transcribe: TranscribeService,
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
@@ -58,7 +62,11 @@ class RequestRouter(
             }
 
             is CloseSession -> registry.close(frame.convoId)
-            is CancelTurn -> Unit // M0: claude interrupt not wired yet
+            is CancelTurn -> registry.cancelTurn(frame)
+
+            // voice capture: buffer fast here; whisper runs on the service's own scope
+            is AudioChunk -> transcribe.onChunk(frame, sink)
+            is AudioCancel -> transcribe.onCancel(frame)
 
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
         }

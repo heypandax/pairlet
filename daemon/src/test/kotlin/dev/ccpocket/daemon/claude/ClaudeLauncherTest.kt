@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 class ClaudeLauncherTest {
 
     @Test
-    fun args_always_include_p_and_stream_flags_and_omit_default_mode() {
+    fun args_always_include_p_and_stream_flags_and_explicit_default_mode() {
         val args = ClaudeLauncher.buildArgs(ClaudeSpec(Path.of("/x")))
         assertTrue("-p" in args)
         assertTrue(
@@ -23,7 +23,9 @@ class ClaudeLauncherTest {
                 ),
             ),
         )
-        assertFalse("--permission-mode" in args) // default omitted
+        // default must be passed EXPLICITLY — omitted, claude falls back to the user's global
+        // permissions.defaultMode (e.g. "auto") and the phone's "Ask each step" silently lies
+        assertEquals("default", args[args.indexOf("--permission-mode") + 1])
         assertFalse("--resume" in args)
     }
 

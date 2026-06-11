@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
@@ -20,10 +21,22 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -42,28 +55,43 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.media.rememberImageAttacher
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.data.StatusMsg
+import dev.ccpocket.app.data.VoiceState
+import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.voice.openAppSettings
+import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun App(scope: CoroutineScope) {
@@ -74,15 +102,26 @@ fun App(scope: CoroutineScope) {
     }
     val pendingLink by dev.ccpocket.app.DeepLink.pending.collectAsState()
     LaunchedEffect(pendingLink) { pendingLink?.let { repo.handlePairUrl(it); dev.ccpocket.app.DeepLink.pending.value = null } }
+    dev.ccpocket.app.OnAppForeground { repo.onAppForeground() } // iOS kills sockets in background — reconnect on return
     PocketTheme {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
-            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
-                when {
-                    !repo.connected.value -> if (repo.paired.value != null) ConnectScreen(repo) else PairingScreen(repo)
-                    repo.convoId.value != null -> ChatScreen(repo)
-                    repo.sessionsDir.value != null -> SessionsScreen(repo)
-                    else -> DirectoryScreen(repo)
+            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
+                // pushes content down instead of overlaying the header; steady while retrying (no flicker)
+                if (repo.sessionActive.value && repo.reconnecting.value) ReconnectBanner()
+                Box(Modifier.weight(1f)) {
+                    when {
+                        // a dead transport does NOT leave the content screens — the banner + auto-retry handle it
+                        !repo.sessionActive.value -> if (repo.paired.value != null) ConnectScreen(repo) else PairingScreen(repo)
+                        repo.convoId.value != null -> ChatScreen(repo)
+                        repo.sessionsDir.value != null -> SessionsScreen(repo)
+                        else -> DirectoryScreen(repo)
+                    }
                 }
+            }
+            // a permission decision never needs typing — drop the keyboard so the sheet isn't cramped
+            val rootFocus = LocalFocusManager.current
+            LaunchedEffect(repo.pendingAsk.value?.askId) {
+                if (repo.pendingAsk.value != null) rootFocus.clearFocus()
             }
             repo.pendingAsk.value?.let { ask ->
                 PermissionSheet(
@@ -94,6 +133,18 @@ fun App(scope: CoroutineScope) {
                 )
             }
         }
+    }
+}
+
+/** Slim danger strip above the content while the daemon link is being re-established. */
+@Composable
+private fun ReconnectBanner() {
+    Row(
+        Modifier.fillMaxWidth().background(Tok.danger.copy(alpha = 0.14f)).padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(Res.string.reconnect_banner), color = Tok.danger, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -111,28 +162,28 @@ private fun ConnectScreen(repo: PocketRepository) {
         Text("CC Pocket", color = Tok.tx, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
         if (paired != null) {
-            Text("Paired · ${paired.accountId.take(12)}…", color = Tok.tx2, fontSize = 14.sp)
+            Text(stringResource(Res.string.paired_account, paired.accountId.take(12)), color = Tok.tx2, fontSize = 14.sp)
             Spacer(Modifier.height(24.dp))
-            Button({ repo.startRelay() }, Modifier.fillMaxWidth()) { Text("Connect") }
+            Button({ repo.startRelay() }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect)) }
             Spacer(Modifier.height(8.dp))
-            TextButton({ repo.unpair() }) { Text("Unpair", color = Tok.muted, fontSize = 12.sp) }
+            TextButton({ repo.unpair() }) { Text(stringResource(Res.string.unpair), color = Tok.muted, fontSize = 12.sp) }
         } else {
-            Text("Pair with your daemon", color = Tok.tx2, fontSize = 14.sp)
+            Text(stringResource(Res.string.pair_with_daemon), color = Tok.tx2, fontSize = 14.sp)
             Spacer(Modifier.height(24.dp))
-            OutlinedTextField(link, { link = it }, label = { Text("paste ccpocket://pair link") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(link, { link = it }, label = { Text(stringResource(Res.string.paste_pair_link)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(16.dp))
-            Button({ repo.pair(link) }, Modifier.fillMaxWidth(), enabled = link.isNotBlank()) { Text("Pair") }
+            Button({ repo.pair(link) }, Modifier.fillMaxWidth(), enabled = link.isNotBlank()) { Text(stringResource(Res.string.pair)) }
         }
         Spacer(Modifier.height(8.dp))
-        Text(repo.status.value, color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+        Text(repo.status.value.resolve(), color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
         Spacer(Modifier.height(16.dp))
         TextButton({ advanced = !advanced }) {
-            Text(if (advanced) "Hide advanced" else "Advanced · direct LAN", color = Tok.muted, fontSize = 12.sp)
+            Text(stringResource(if (advanced) Res.string.hide_advanced else Res.string.advanced_direct_lan), color = Tok.muted, fontSize = 12.sp)
         }
         if (advanced) {
-            OutlinedTextField(url, { url = it }, label = { Text("daemon ws url") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(url, { url = it }, label = { Text(stringResource(Res.string.daemon_ws_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text("Connect direct") }
+            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect_direct)) }
         }
     }
 }
@@ -143,14 +194,20 @@ private fun DirectoryScreen(repo: PocketRepository) {
     var query by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Choose a directory", color = Tok.tx, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            TextButton({ repo.disconnect() }) { Text("Exit", color = Tok.muted, fontSize = 13.sp) }
+            PulseDot(Tok.ok) // connection bar concept: the live link indicator rides with the title
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            TextButton({ repo.disconnect() }) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 13.sp) }
         }
         OutlinedTextField(
-            query, { query = it }, placeholder = { Text("filter…") }, singleLine = true,
+            query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        val rows = remember(repo.directories.toList(), query) { buildDirRows(repo.directories, query) }
+        val openSessionsLabel = stringResource(Res.string.dir_open_sessions)
+        val projectsLabel = stringResource(Res.string.dir_projects)
+        val rows = remember(repo.directories.toList(), query, openSessionsLabel, projectsLabel) {
+            buildDirRows(repo.directories, query, openSessionsLabel, projectsLabel)
+        }
         PullToRefreshBox(
             isRefreshing = repo.refreshing.value,
             onRefresh = { repo.refreshDirectories() },
@@ -163,8 +220,10 @@ private fun DirectoryScreen(repo: PocketRepository) {
                         is DirRow.Dir -> {
                             val e = row.entry
                             val sid = e.activeSessionId
-                            if (e.open && sid != null) {
-                                LiveProjectCell(e) { repo.openSession(e.path, sid) }
+                            if (row.direct && e.open && sid != null) {
+                                // live sections: one tap straight into the running session; the same project
+                                // repeats below under "Projects" for the session-list / New-session path
+                                LiveProjectCell(e) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
                             } else {
                                 DirCell(
                                     e.name.ifBlank { e.path }, if (row.showPath) tilde(e.path) else null,
@@ -190,11 +249,15 @@ private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: B
             Text(name, color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
         }
-        if (hasSessions) Text("history", color = Tok.accent, fontSize = 11.sp)
+        if (hasSessions) Text(
+            stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp,
+            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
-/** A live project row: the folder + branch, with its active session inline — tap goes straight into that session. */
+/** A live session row: the session title leads, the folder + branch demote to metadata — tap resumes it. */
 @Composable
 private fun LiveProjectCell(e: DirectoryEntry, onClick: () -> Unit) {
     Column(
@@ -202,18 +265,25 @@ private fun LiveProjectCell(e: DirectoryEntry, onClick: () -> Unit) {
             .clickable(onClick = onClick).padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("📁 ${e.name}", color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
-            e.gitBranch?.let { Text(" · $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1) }
-        }
-        Row(Modifier.padding(top = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("▸", color = if (e.executing) Tok.accent else Tok.tx2, fontSize = 13.sp, modifier = Modifier.padding(end = 6.dp))
-            Text(e.activeSessionTitle ?: "session", color = Tok.tx2, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(8.dp))
             Text(
-                if (e.executing) "running" else "idle",
+                e.activeSessionTitle ?: stringResource(Res.string.session_fallback), color = Tok.tx, fontWeight = FontWeight.Medium,
+                fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            if (e.executing) {
+                PulseDot(Tok.accent)
+                Spacer(Modifier.width(4.dp))
+            }
+            Text(
+                stringResource(if (e.executing) Res.string.running else Res.string.idle),
                 color = if (e.executing) Tok.accent else Tok.muted, fontSize = 11.sp,
             )
         }
+        Text(
+            buildString { append(e.name); e.gitBranch?.let { append(" · ⑂ ").append(it) } },
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }
 
@@ -221,40 +291,76 @@ private fun LiveProjectCell(e: DirectoryEntry, onClick: () -> Unit) {
 private fun SessionsScreen(repo: PocketRepository) {
     val dir = repo.sessionsDir.value ?: return
     var pickMode by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({ repo.backToDirectories() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Column(Modifier.weight(1f)) {
-                    Text("Sessions", color = Tok.tx, fontWeight = FontWeight.SemiBold)
-                    Text(dir, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                    Text(stringResource(Res.string.sessions_title), color = Tok.tx, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + workdir
+                        PulseDot(Tok.ok)
+                        Spacer(Modifier.width(5.dp))
+                        TailPathText(dir)
+                    }
+                }
+                IconButton({ showSettings = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
             }
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
-                    Row(
+                    Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.16f))
                             .clickable { pickMode = true }.padding(14.dp),
-                    ) { Text("＋ New session", color = Tok.accent, fontWeight = FontWeight.SemiBold) }
+                    ) {
+                        Text(stringResource(Res.string.new_session_cta), color = Tok.accent, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            stringResource(Res.string.start_claude_in, tilde(dir)),
+                            color = Tok.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
                 }
                 items(repo.sessions) { s ->
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                            .clickable { repo.openSession(dir, s.sessionId) }.padding(14.dp),
+                            .clickable { repo.openSession(dir, s.sessionId, title = s.title) }.padding(14.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
-                            if (s.live) Text("● running", color = Tok.ok, fontSize = 11.sp)
+                            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            if (s.live) {
+                                Spacer(Modifier.width(8.dp))
+                                PulseDot(Tok.ok)
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp)
+                            }
                         }
-                        Text("💬 ${s.messageCount} · ⑂ ${s.gitBranch ?: "-"}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                        if (s.firstPrompt.isNotBlank()) Text(
+                            s.firstPrompt, color = Tok.tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                        Text(
+                            "💬 ${s.messageCount} · ⑂ ${s.gitBranch ?: "-"} · ${relativeTime(s.lastModified)}",
+                            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
                     }
                 }
             }
         }
         if (pickMode) {
             StartSessionModeSheet(
+                workdir = dir,
                 onPick = { m -> pickMode = false; repo.openSession(dir, startMode = m) },
                 onDismiss = { pickMode = false },
+            )
+        }
+        if (showSettings) {
+            SettingsSheet(
+                paired = repo.paired.value,
+                onUnpair = { showSettings = false; repo.unpair() },
+                onDismiss = { showSettings = false },
             )
         }
     }
@@ -268,15 +374,21 @@ private fun ChatScreen(repo: PocketRepository) {
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val listState = rememberLazyListState()
-    // stick to the very bottom: re-scroll on new messages AND while the last one streams/grows;
-    // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport.
+    // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
+    // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
+    var pinned by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
+    }
+    // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull()) {
-        if (repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+        if (pinned && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
     }
     // when the keyboard opens/animates, keep the latest message pinned above the input
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
     LaunchedEffect(imeBottom) {
-        if (imeBottom > 0 && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+        if (pinned && imeBottom > 0 && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
     }
     val focus = LocalFocusManager.current
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() } // scrolling dismisses the keyboard
@@ -285,65 +397,142 @@ private fun ChatScreen(repo: PocketRepository) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({ repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Column(Modifier.weight(1f)) {
-                    Text("Chat", color = Tok.tx, fontWeight = FontWeight.SemiBold)
-                    Text(repo.workdir.value ?: "", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                    // session title leads (design); the generic "Chat" only before the first prompt names it
+                    Text(
+                        repo.chatTitle.value ?: stringResource(Res.string.chat_title),
+                        color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + workdir
+                        PulseDot(Tok.ok)
+                        Spacer(Modifier.width(5.dp))
+                        TailPathText(repo.workdir.value ?: "") // tail-truncated: the project folder stays visible
+                    }
                 }
                 if (!repo.observing.value) {
                     ModeBadge(repo.mode.value, repo.allowRules.size) { showModeSheet = true }
-                    Spacer(Modifier.width(6.dp))
-                }
-                if (repo.streaming.value) {
-                    Text("●", color = Tok.accent, fontSize = 12.sp)
-                    TextButton({ repo.stopSession() }) { Text("Stop", color = Tok.danger, fontSize = 13.sp) }
                 }
             }
-            LazyColumn(
-                Modifier.weight(1f).padding(16.dp).pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
-                state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(repo.messages) { m -> MessageItem(m) { imgs, i -> viewer = imgs to i } }
+            Box(Modifier.weight(1f)) {
+                LazyColumn(
+                    Modifier.fillMaxSize().padding(16.dp).pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
+                    state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(repo.messages) { m -> MessageItem(m) { imgs, i -> viewer = imgs to i } }
+                }
+                if (!pinned) {
+                    val pillScope = rememberCoroutineScope()
+                    JumpToLatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)) {
+                        pinned = true
+                        pillScope.launch {
+                            if (repo.messages.isNotEmpty()) listState.animateScrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+                        }
+                    }
+                }
             }
             if (repo.observing.value) {
                 Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("👁 Observing · running in a terminal", color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Button({ repo.takeOver() }) { Text("Continue here") }
+                    Text(stringResource(Res.string.observing_notice), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Button({ repo.takeOver() }) { Text(stringResource(Res.string.continue_here)) }
                 }
             } else {
                 val hasReady = repo.hasReadyImages()
+                val voiceState = repo.voice.value
+                // the timer stays visible (frozen) through S3, after Recording stopped carrying it
+                var recElapsed by remember { mutableStateOf(0L) }
+                if (voiceState is VoiceState.Recording) recElapsed = voiceState.elapsedMs
+                // "/" autocomplete: live while the user is still typing the command word (no space yet)
+                val slashQuery = input.takeIf { it.startsWith("/") && ' ' !in it && '\n' !in it }?.drop(1)
+                val suggestions = remember(slashQuery, repo.slashCommands.toList()) {
+                    if (slashQuery == null) emptyList()
+                    else repo.slashCommands
+                        .filter { it.name.contains(slashQuery, ignoreCase = true) }
+                        .sortedBy { !it.name.startsWith(slashQuery, ignoreCase = true) } // prefix matches first
+                }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
-                    AttachTray(repo.pendingImages, repo::removePendingImage)
-                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val attachInteraction = remember { MutableInteractionSource() }
-                        val attachPressed by attachInteraction.collectIsPressedAsState()
-                        IconButton(onClick = { launchPicker() }, interactionSource = attachInteraction) {
-                            Icon(
-                                AttachImageIcon,
-                                contentDescription = "Attach image",
-                                tint = if (repo.pendingImages.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
-                                modifier = Modifier.size(24.dp),
-                            )
+                    val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
+                    if (suggestions.isNotEmpty() && !capturing) {
+                        SlashCommandMenu(suggestions) { cmd ->
+                            input = "/${cmd.name}" + if (cmd.argumentHint != null) " " else ""
                         }
-                        OutlinedTextField(
-                            input, { input = it },
-                            placeholder = { Text(if (repo.pendingImages.isNotEmpty()) "Add a message…" else "Message Claude…") },
-                            modifier = Modifier.weight(1f), maxLines = 4,
+                    }
+                    AttachTray(repo.pendingImages, repo::removePendingImage)
+                    repo.voiceNotice.value?.let { n ->
+                        Text(stringResource(n), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
+                    }
+                    if (capturing) {
+                        if (repo.liveDictation.value && voiceState is VoiceState.Recording) {
+                            LiveTranscriptField(repo.liveFinal.value, repo.livePartial.value)
+                        }
+                        RecordingBar(
+                            elapsedMs = recElapsed,
+                            transcribing = voiceState is VoiceState.Transcribing,
+                            levels = repo.voiceLevels,
+                            onCancel = repo::cancelVoice,
+                            onDone = repo::stopVoice,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            enabled = input.isNotBlank() || hasReady,
-                            onClick = {
-                                val t = input.trim()
-                                if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = "" }
-                            },
-                        ) { Text("Send") }
+                    } else {
+                        val failed = voiceState as? VoiceState.Failed
+                        if (failed != null) VoiceErrorChip(failed.detail ?: stringResource(failed.res))
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
+                            val attachInteraction = remember { MutableInteractionSource() }
+                            val attachPressed by attachInteraction.collectIsPressedAsState()
+                            IconButton(onClick = { launchPicker() }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
+                                Icon(
+                                    AttachImageIcon,
+                                    contentDescription = stringResource(Res.string.attach_image),
+                                    tint = if (repo.pendingImages.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            ComposerField(
+                                input, { input = it },
+                                placeholder = stringResource(if (repo.pendingImages.isNotEmpty()) Res.string.add_message_hint else Res.string.message_claude_hint),
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            when {
+                                // generating -> the action slot morphs into Stop (interrupts the turn, session stays)
+                                repo.streaming.value -> {
+                                    val stopLabel = stringResource(Res.string.stop)
+                                    RoundActionButton(
+                                        onClick = { repo.cancelTurn() },
+                                        filled = false, contentDescription = stopLabel,
+                                    ) { Box(Modifier.size(12.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent)) }
+                                }
+                                input.isNotBlank() || hasReady -> {
+                                    val sendLabel = stringResource(Res.string.send)
+                                    RoundActionButton(
+                                        onClick = {
+                                            val t = input.trim()
+                                            if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = "" }
+                                        },
+                                        filled = true, contentDescription = sendLabel,
+                                    ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
+                                }
+                                else -> {
+                                    val dictateLabel = stringResource(Res.string.dictate)
+                                    RoundActionButton(
+                                        onClick = { if (failed != null) repo.retryVoice() else repo.startVoice() },
+                                        filled = false, contentDescription = dictateLabel,
+                                    ) { Icon(MicIcon, dictateLabel, tint = if (failed != null) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp)) }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
         viewer?.let { (imgs, idx) -> ImageViewer(imgs, idx) { viewer = null } }
+        if (repo.micPermissionSheet.value) {
+            MicPermissionSheet(
+                onOpenSettings = { openAppSettings(); repo.dismissMicSheet() },
+                onDismiss = repo::dismissMicSheet,
+            )
+        }
         if (showModeSheet) {
             ModeSheet(
-                current = repo.mode.value, rules = repo.allowRules, switching = repo.switching.value,
+                current = repo.mode.value, rules = repo.allowRules, switching = repo.switching.value, workdir = repo.workdir.value,
                 onSelect = { repo.switchMode(it) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },
@@ -352,15 +541,62 @@ private fun ChatScreen(repo: PocketRepository) {
     }
 }
 
+/** The "/" autocomplete panel above the composer: tap a row to fill the input with the command. */
+@Composable
+private fun SlashCommandMenu(commands: List<SlashCommand>, onPick: (SlashCommand) -> Unit) {
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp).background(Tok.raised).padding(vertical = 4.dp)) {
+        items(commands) { cmd ->
+            Column(Modifier.fillMaxWidth().clickable { onPick(cmd) }.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "/${cmd.name}", color = Tok.accent, fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    cmd.argumentHint?.let {
+                        Text(" $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        stringResource(
+                            when (cmd.source) {
+                                CommandSource.BUILTIN -> Res.string.cmd_source_builtin
+                                CommandSource.USER -> Res.string.cmd_source_user
+                                CommandSource.PROJECT -> Res.string.cmd_source_project
+                                CommandSource.SKILL -> Res.string.cmd_source_skill
+                            },
+                        ),
+                        color = Tok.muted, fontSize = 10.sp,
+                    )
+                }
+                if (cmd.description.isNotBlank()) {
+                    Text(cmd.description, color = Tok.tx2, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> }) {
     when (m) {
-        is ChatItem.User -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("YOU", color = Tok.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
-            if (m.text.isNotBlank()) Text(m.text, color = Tok.tx)
+        // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
+        // rail + warm tint mark "what I said" as a quote; no label, assistant flow untouched
+        is ChatItem.User -> Row(
+            Modifier.fillMaxWidth().height(IntrinsicSize.Min)
+                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 4.dp))
+                .background(Tok.accent.copy(alpha = 0.05f)),
+        ) {
+            Box(Modifier.fillMaxHeight().width(2.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent.copy(alpha = 0.6f)))
+            Column(
+                Modifier.weight(1f).padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                if (m.text.isNotBlank()) Text(m.text, color = Tok.tx)
+            }
         }
         is ChatItem.Assistant -> MarkdownText(m.text, Tok.tx)
+        is ChatItem.Thinking -> ThinkingRow(m)
         is ChatItem.Tool -> {
             var expanded by remember(m) { mutableStateOf(false) }
             Column(
@@ -376,7 +612,7 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
                 )
             }
         }
-        is ChatItem.Sys -> Text(m.text, color = Tok.danger, fontSize = 12.sp)
+        is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)
         is ChatItem.RuleChip -> AllowChip(m.rule)
     }
 }
@@ -384,3 +620,77 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
 @Composable
 private fun Label(text: String) =
     Text(text, color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+
+/** Extended reasoning, collapsed to one italic line; expands to the full text behind a hairline rule. */
+@Composable
+private fun ThinkingRow(m: ChatItem.Thinking) {
+    var expanded by remember(m.seconds == null) { mutableStateOf(false) }
+    Column {
+        Row(
+            Modifier.clip(RoundedCornerShape(6.dp)).clickable { expanded = !expanded }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (expanded) "▾ " else "▸ ", color = Tok.muted, fontSize = 11.sp)
+            Text(
+                m.seconds?.let { stringResource(Res.string.thought_for, it) } ?: stringResource(Res.string.thinking_streaming),
+                color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic,
+            )
+        }
+        if (expanded && m.text.isNotBlank()) {
+            Row(Modifier.height(IntrinsicSize.Min).padding(start = 5.dp, top = 2.dp)) {
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                Text(
+                    m.text, color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic, lineHeight = 18.sp,
+                    modifier = Modifier.padding(start = 13.dp),
+                )
+            }
+        }
+    }
+}
+
+/** The design's connection/live indicator: a softly pulsing dot (scale 1→0.82, alpha 1→0.45, ~1.25s). */
+@Composable
+internal fun PulseDot(color: Color, size: Dp = 6.dp) {
+    val pulse by rememberInfiniteTransition().animateFloat(
+        initialValue = 1f, targetValue = 0.45f,
+        animationSpec = infiniteRepeatable(tween(625), RepeatMode.Reverse),
+    )
+    Box(
+        Modifier.size(size)
+            .graphicsLayer { alpha = pulse; scaleX = 0.82f + 0.18f * pulse; scaleY = 0.82f + 0.18f * pulse }
+            .clip(CircleShape).background(color),
+    )
+}
+
+/** Floating pill over the message list when the user has scrolled away from the bottom. */
+@Composable
+private fun JumpToLatestPill(modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        modifier.shadow(6.dp, shape).clip(shape).background(Tok.raised).border(1.dp, Tok.hair, shape)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
+        Text(stringResource(Res.string.jump_to_latest), color = Tok.tx2, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** "2h ago"-style relative time; tolerates daemon timestamps in seconds or millis. */
+@Composable
+internal fun relativeTime(epoch: Long): String {
+    val ms = if (epoch < 1_000_000_000_000L) epoch * 1000 else epoch
+    val min = ((dev.ccpocket.app.epochMillis() - ms).coerceAtLeast(0)) / 60_000
+    return when {
+        min < 1 -> stringResource(Res.string.time_just_now)
+        min < 60 -> stringResource(Res.string.time_minutes_ago, min)
+        min < 24 * 60 -> stringResource(Res.string.time_hours_ago, min / 60)
+        min < 48 * 60 -> stringResource(Res.string.time_yesterday)
+        else -> stringResource(Res.string.time_days_ago, min / (24 * 60))
+    }
+}
+
+/** Resolve a repo [StatusMsg] into display text — substitutes the optional %1$s detail argument. */
+@Composable
+internal fun StatusMsg.resolve(): String = arg?.let { stringResource(res, it) } ?: stringResource(res)

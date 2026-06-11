@@ -5,6 +5,7 @@ import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.TranscriptScanner
+import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
@@ -74,6 +75,10 @@ class SessionRegistry(
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode) ?: Unit
     suspend fun clearRule(c: ClearAllowRule) = get(c.convoId)?.clearAllowRule(c.rule) ?: Unit
+    suspend fun cancelTurn(c: CancelTurn) = get(c.convoId)?.cancelTurn() ?: Unit
+
+    /** Workdir of a live conversation — used by voice transcription for term injection. */
+    suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir
 
     suspend fun close(convoId: String) {
         mutex.withLock { convos.remove(convoId) }?.close()

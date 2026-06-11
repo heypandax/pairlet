@@ -31,6 +31,7 @@ kotlin {
             implementation(compose.material3)
             implementation(compose.materialIconsExtended)
             implementation(compose.ui)
+            implementation(compose.components.resources) // localized strings (en default, values-zh)
             implementation(project(":protocol"))
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
@@ -70,12 +71,28 @@ android {
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0" // keep in lockstep with the iOS CFBundleShortVersionString
+    }
+    // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
+    // live in the repo; on machines without them the release build falls back to unsigned
+    val releaseKeystore = providers.gradleProperty("CCPOCKET_KEYSTORE").orNull?.let(::File)
+    if (releaseKeystore?.exists() == true) {
+        signingConfigs.create("release") {
+            storeFile = releaseKeystore
+            storePassword = providers.gradleProperty("CCPOCKET_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.gradleProperty("CCPOCKET_KEY_ALIAS").get()
+            keyPassword = providers.gradleProperty("CCPOCKET_KEY_PASSWORD").get()
+        }
+        buildTypes.getByName("release") { signingConfig = signingConfigs.getByName("release") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+compose.resources {
+    packageOfResClass = "dev.ccpocket.app.resources"
 }
 
 compose.desktop {

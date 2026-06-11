@@ -9,13 +9,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,15 +58,20 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
 
 // ── the autonomy ladder (top = most cautious) ───────────────────
+/** [short]/[label]/[detail] are string-resource keys (resolved at render); [tech] is the raw SDK mode name. */
 data class ModeInfo(
-    val key: PermissionMode, val short: String, val label: String, val tech: String,
-    val color: Color, val allows: String, val asks: String, val warn: Boolean = false,
+    val key: PermissionMode, val short: StringResource, val label: StringResource, val tech: String,
+    val color: Color, val detail: StringResource, val warn: Boolean = false,
 )
 
 private val Indigo = Color(0xFF5B9BD5)
@@ -73,10 +81,10 @@ private val TightCenter = TextStyle(
     lineHeightStyle = LineHeightStyle(alignment = LineHeightStyle.Alignment.Center, trim = LineHeightStyle.Trim.Both),
 )
 val MODES = listOf(
-    ModeInfo(PermissionMode.DEFAULT, "Ask each step", "I'm watching · ask each step", "default", Tok.tx2, "nothing automatically", "every sensitive tool"),
-    ModeInfo(PermissionMode.ACCEPT_EDITS, "Auto-edit", "Auto-edit files, ask before commands", "acceptEdits", Tok.ok, "file edits", "commands"),
-    ModeInfo(PermissionMode.PLAN, "Plan", "Plan first, I'll approve", "plan", Indigo, "read-only inspection", "everything until you approve"),
-    ModeInfo(PermissionMode.BYPASS_PERMISSIONS, "Full auto", "Full auto · trust it", "bypassPermissions", Tok.warn, "everything", "nothing", warn = true),
+    ModeInfo(PermissionMode.DEFAULT, Res.string.mode_default_short, Res.string.mode_default_label, "default", Tok.tx2, Res.string.mode_default_detail),
+    ModeInfo(PermissionMode.ACCEPT_EDITS, Res.string.mode_accept_short, Res.string.mode_accept_label, "acceptEdits", Tok.ok, Res.string.mode_accept_detail),
+    ModeInfo(PermissionMode.PLAN, Res.string.mode_plan_short, Res.string.mode_plan_label, "plan", Indigo, Res.string.mode_plan_detail),
+    ModeInfo(PermissionMode.BYPASS_PERMISSIONS, Res.string.mode_bypass_short, Res.string.mode_bypass_label, "bypassPermissions", Tok.warn, Res.string.mode_bypass_detail, warn = true),
 )
 val MODE_BY = MODES.associateBy { it.key }
 
@@ -91,6 +99,7 @@ fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
                 .background(Tok.raised)
                 .pointerInput(Unit) { detectTapGestures { } } // swallow taps so they don't dismiss via the scrim
                 .windowInsetsPadding(WindowInsets.navigationBars)
+                .imePadding() // sheets render outside the app's ime-padded Box — never hide behind the keyboard
                 .padding(bottom = 10.dp),
         ) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp).size(width = 38.dp, height = 5.dp).clip(CircleShape).background(Tok.hair))
@@ -111,8 +120,8 @@ fun ModeBadge(mode: PermissionMode, rules: Int, onClick: () -> Unit) {
     ) {
         if (m.warn) Icon(Icons.Rounded.WarningAmber, null, tint = m.color, modifier = Modifier.size(13.dp))
         else Box(Modifier.size(6.dp).clip(CircleShape).background(m.color))
-        Text(m.short, color = m.color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, lineHeight = 12.5.sp, style = TightCenter)
-        if (rules > 0) Text("· $rules rule${if (rules > 1) "s" else ""}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, lineHeight = 11.sp, style = TightCenter)
+        Text(stringResource(m.short), color = m.color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, lineHeight = 12.5.sp, style = TightCenter)
+        if (rules > 0) Text(pluralStringResource(Res.plurals.mode_rules, rules, rules), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, lineHeight = 11.sp, style = TightCenter)
         ChevronDown(m.color.copy(alpha = 0.85f), 12.dp)
     }
 }
@@ -132,17 +141,17 @@ private fun ChevronDown(color: Color, size: Dp) {
 // ── mode-switch sheet (ladder + bypass confirm + switching + rules) ──
 @Composable
 fun ModeSheet(
-    current: PermissionMode, rules: List<String>, switching: Boolean,
+    current: PermissionMode, rules: List<String>, switching: Boolean, workdir: String? = null,
     onSelect: (PermissionMode) -> Unit, onClearRule: (String) -> Unit, onClearAll: () -> Unit, onDismiss: () -> Unit,
 ) {
     var confirmBypass by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
         if (confirmBypass) {
-            BypassConfirm(onCancel = { confirmBypass = false }, onConfirm = { confirmBypass = false; onSelect(PermissionMode.BYPASS_PERMISSIONS) })
+            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { confirmBypass = false; onSelect(PermissionMode.BYPASS_PERMISSIONS) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
-                Text("Execution mode", color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("How much should Claude ask before acting?", color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
+                Text(stringResource(Res.string.exec_mode_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(Res.string.exec_mode_subtitle), color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
                 if (switching) {
                     Row(
                         Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
@@ -150,7 +159,7 @@ fun ModeSheet(
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         CircularProgressIndicator(Modifier.size(15.dp), color = Tok.accent, strokeWidth = 2.dp)
-                        Text("Restarting session to apply the new mode…", color = Tok.tx2, fontSize = 12.5.sp)
+                        Text(stringResource(Res.string.mode_switching), color = Tok.tx2, fontSize = 12.5.sp)
                     }
                 }
                 Column(
@@ -167,7 +176,7 @@ fun ModeSheet(
                 RulesReview(rules, onClearRule, onClearAll)
                 Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Icon(Icons.Outlined.Shield, null, tint = Tok.muted, modifier = Modifier.padding(top = 1.5.dp).size(13.dp))
-                    Text("New sessions always start at “Ask each step”.", color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
+                    Text(stringResource(Res.string.note_new_sessions_default), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
                 }
             }
         }
@@ -176,7 +185,7 @@ fun ModeSheet(
 
 /** The guarded "Enable full auto?" confirm, shared by the mode-switch sheet and the new-session picker. */
 @Composable
-private fun BypassConfirm(onCancel: () -> Unit, onConfirm: () -> Unit) {
+private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () -> Unit) {
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 18.dp, top = 6.dp)) {
         Box(
             Modifier.size(46.dp).clip(RoundedCornerShape(13.dp)).background(Tok.warn.copy(alpha = 0.14f))
@@ -184,29 +193,31 @@ private fun BypassConfirm(onCancel: () -> Unit, onConfirm: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.WarningAmber, null, tint = Tok.warn, modifier = Modifier.size(22.dp)) }
         Spacer(Modifier.height(14.dp))
-        Text("Enable full auto?", color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(Res.string.bypass_title), color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold)
         Text(
-            "Claude will run every command without asking — including ones that change or delete files. This session only.",
+            stringResource(Res.string.bypass_body),
             color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 8.dp),
         )
+        // the blast radius in plain sight: which working copy full auto is about to own
+        if (workdir != null) TailPathText(workdir, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
         Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SheetButton("Cancel", Modifier.weight(1f), outline = true, onClick = onCancel)
-            SheetButton("⚠ Enable full auto", Modifier.weight(1.4f), bg = Tok.warn, fg = Tok.base, onClick = onConfirm)
+            SheetButton(stringResource(Res.string.cancel), Modifier.weight(1f), outline = true, onClick = onCancel)
+            SheetButton(stringResource(Res.string.bypass_cta), Modifier.weight(1.4f), bg = Tok.warn, fg = Tok.base, onClick = onConfirm)
         }
     }
 }
 
 /** New-session mode picker: choose the execution mode up front. Defaults stay safe; Full auto still confirms. */
 @Composable
-fun StartSessionModeSheet(onPick: (PermissionMode) -> Unit, onDismiss: () -> Unit) {
+fun StartSessionModeSheet(workdir: String? = null, onPick: (PermissionMode) -> Unit, onDismiss: () -> Unit) {
     var confirmBypass by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
         if (confirmBypass) {
-            BypassConfirm(onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS) })
+            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
-                Text("New session", color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Text("Start in which mode?", color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
+                Text(stringResource(Res.string.new_session_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(Res.string.new_session_subtitle), color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
                 Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     MODES.forEach { m ->
                         ModeRow(m, selected = false, enabled = true) {
@@ -216,7 +227,7 @@ fun StartSessionModeSheet(onPick: (PermissionMode) -> Unit, onDismiss: () -> Uni
                 }
                 Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Icon(Icons.Outlined.Shield, null, tint = Tok.muted, modifier = Modifier.padding(top = 1.5.dp).size(13.dp))
-                    Text("You can change this anytime from the badge.", color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
+                    Text(stringResource(Res.string.note_change_anytime), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
                 }
             }
         }
@@ -236,13 +247,13 @@ private fun ModeRow(m: ModeInfo, selected: Boolean, enabled: Boolean, onClick: (
             // dot + label share one CenterVertically row, so the dot tracks the first line exactly
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.size(11.dp).clip(CircleShape).background(m.color))
-                Text(m.label, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text(stringResource(m.label), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 if (m.warn) Icon(Icons.Rounded.WarningAmber, null, tint = m.color, modifier = Modifier.size(13.dp))
                 if (selected) Icon(Icons.Rounded.Check, null, tint = m.color, modifier = Modifier.size(16.dp))
             }
             Column(Modifier.padding(start = 23.dp, top = 4.dp)) { // 11 dot + 12 gap → aligns under the label
                 Text(m.tech, color = m.color, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
-                Text("auto-allows ${m.allows} · still asks ${m.asks}", color = Tok.tx2, fontSize = 12.sp, lineHeight = 16.sp)
+                Text(stringResource(m.detail), color = Tok.tx2, fontSize = 12.sp, lineHeight = 16.sp)
             }
         }
     }
@@ -254,8 +265,8 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
     Column(Modifier.padding(top = 18.dp)) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(Modifier.padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("REMEMBERED THIS SESSION", color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
-            Text("Clear all", color = Tok.danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onClearAll() }.padding(4.dp))
+            Text(stringResource(Res.string.rules_remembered_header), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.clear_all), color = Tok.danger, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onClearAll() }.padding(4.dp))
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             rules.forEach { r ->
@@ -294,7 +305,7 @@ fun PermissionSheet(
                 if (!timedOut) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         CountdownRing(seconds, ask.total())
-                        Text("auto-deny", color = Tok.muted, fontSize = 10.sp)
+                        Text(stringResource(Res.string.auto_deny), color = Tok.muted, fontSize = 10.sp)
                     }
                 }
             }
@@ -305,10 +316,10 @@ fun PermissionSheet(
                 ) {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(Tok.danger))
                     Column(Modifier.weight(1f)) {
-                        Text("Auto-denied", color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                        Text("No response within the time limit.", color = Tok.tx2, fontSize = 12.sp)
+                        Text(stringResource(Res.string.auto_denied_title), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(Res.string.auto_denied_body), color = Tok.tx2, fontSize = 12.sp)
                     }
-                    Text("Dismiss", color = Tok.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onDismiss() }.padding(6.dp))
+                    Text(stringResource(Res.string.dismiss), color = Tok.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onDismiss() }.padding(6.dp))
                 }
             } else {
                 Decision(ask, onDeny, onOnce, onAlways)
@@ -324,10 +335,10 @@ private fun PermBody(ask: PermissionAsk, workdir: String?) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(Icons.Outlined.Shield, null, tint = if (ask.danger) Tok.danger else Tok.warn, modifier = Modifier.size(16.dp))
-            Text("Claude needs permission", color = Tok.tx2, fontSize = 13.sp)
+            Text(stringResource(Res.string.needs_permission), color = Tok.tx2, fontSize = 13.sp)
         }
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.Bottom) {
-            Text(ask.title.ifBlank { "Permission" }, color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(ask.title.ifBlank { stringResource(Res.string.permission_fallback) }, color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(" · ", color = Tok.muted, fontSize = 18.sp)
             Text(ask.tool, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
@@ -335,7 +346,7 @@ private fun PermBody(ask: PermissionAsk, workdir: String?) {
             Text(ask.inputPreview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 6)
         }
         if (workdir != null) {
-            Text(tilde(workdir), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.padding(top = 12.dp))
+            TailPathText(workdir, fontSize = 11.5.sp, modifier = Modifier.padding(top = 12.dp))
         }
     }
 }
@@ -350,16 +361,17 @@ private fun Decision(ask: PermissionAsk, onDeny: () -> Unit, onOnce: () -> Unit,
                 tint = if (danger) Tok.warn else Tok.muted, modifier = Modifier.padding(top = 1.dp).size(14.dp),
             )
             Text(
-                if (danger) "“Always allow” would let Claude ${ask.dangerNote ?: "act freely"} all session — not recommended."
-                else "“Always allow” remembers only ${ask.rule ?: ask.tool} for this session.",
+                if (danger) stringResource(Res.string.always_allow_danger, ask.dangerNote ?: stringResource(Res.string.act_freely))
+                else stringResource(Res.string.always_allow_scope, ask.rule ?: ask.tool),
                 color = if (danger) Tok.warn else Tok.tx2, fontSize = 12.sp, lineHeight = 16.sp,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DecisionButton("Deny", Modifier.weight(1f), outline = Tok.danger, fg = Tok.danger, onClick = onDeny)
-            DecisionButton("Allow once", Modifier.weight(1f), bg = if (danger) Tok.accent else Tok.surface, outline = if (danger) null else Tok.hair, fg = if (danger) Tok.base else Tok.tx, bold = danger, onClick = onOnce)
+        // IntrinsicSize.Min + fillMaxHeight: the rule subtitle makes "Always allow" taller — stretch all three to match
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DecisionButton(stringResource(Res.string.deny), Modifier.weight(1f).fillMaxHeight(), outline = Tok.danger, fg = Tok.danger, onClick = onDeny)
+            DecisionButton(stringResource(Res.string.allow_once), Modifier.weight(1f).fillMaxHeight(), bg = if (danger) Tok.accent else Tok.surface, outline = if (danger) null else Tok.hair, fg = if (danger) Tok.base else Tok.tx, bold = danger, onClick = onOnce)
             DecisionButton(
-                "Always allow", Modifier.weight(1.25f), sub = ask.rule ?: ask.tool,
+                stringResource(Res.string.always_allow), Modifier.weight(1.25f).fillMaxHeight(), sub = ask.rule ?: ask.tool,
                 bg = if (danger) Color.Transparent else Tok.accent, outline = if (danger) Tok.warn.copy(alpha = 0.6f) else null,
                 fg = if (danger) Tok.warn else Tok.base, warn = danger, bold = true, onClick = onAlways,
             )
@@ -414,9 +426,11 @@ fun AllowChip(rule: String) {
             Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(11.dp))
         }
         Row {
-            Text("Always allowing ", color = Tok.tx2, fontSize = 12.5.sp)
+            // suffix is empty in languages where the scope reads naturally up front (e.g. zh)
+            val suffix = stringResource(Res.string.allow_chip_suffix)
+            Text(stringResource(Res.string.allow_chip_prefix) + " ", color = Tok.tx2, fontSize = 12.5.sp)
             Text(rule, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
-            Text(" this session", color = Tok.tx2, fontSize = 12.5.sp)
+            if (suffix.isNotBlank()) Text(" $suffix", color = Tok.tx2, fontSize = 12.5.sp)
         }
     }
 }

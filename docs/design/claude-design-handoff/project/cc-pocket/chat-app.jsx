@@ -26,11 +26,7 @@ const Chevron = ({ d = 'left', c = T.sec, s = 16, w = 2 }) => {
   const p = { left:'M11 3L5 9l6 6', right:'M6 3l6 6-6 6', down:'M3 6l6 6 6-6', up:'M3 12l6-6 6 6' };
   return <svg width={s} height={s} viewBox="0 0 18 18" fill="none"><path d={p[d]} stroke={c} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round"/></svg>;
 };
-const Dots = ({ c = T.sec }) => (
-  <svg width="18" height="18" viewBox="0 0 18 18"><g fill={c}>
-    <circle cx="3.5" cy="9" r="1.6"/><circle cx="9" cy="9" r="1.6"/><circle cx="14.5" cy="9" r="1.6"/>
-  </g></svg>
-);
+// (⋯ "more" icon removed — no defined menu in v1)
 const Plus = ({ c = T.sec }) => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3.5v11M3.5 9h11" stroke={c} strokeWidth="1.9" strokeLinecap="round"/></svg>
 );
@@ -71,7 +67,6 @@ function Header() {
           <span style={{ fontFamily: T.mono, fontSize: 11, color: T.sec }}>default</span>
           <Chevron d="down" c={T.muted} s={10} w={1.7}/>
         </button>
-        <button style={iconBtn} aria-label="More"><Dots c={T.sec}/></button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '0 16px 9px' }}>
         <span className="cc-pulse" style={{ width: 6, height: 6, borderRadius: 999, background: T.success, boxShadow: `0 0 7px ${T.success}99`, flexShrink: 0 }}/>
@@ -176,12 +171,57 @@ function BashRow() {
   );
 }
 
+// ── slash commands ────────────────────────────────────────────
+const SLASH_COMMANDS = [
+  { cmd: '/commit',  hint: ' <message>', source: 'built-in', desc: 'Stage changes and commit with a generated or given message.' },
+  { cmd: '/compact', hint: '',           source: 'built-in', desc: 'Compact the conversation to free up context.' },
+  { cmd: '/diff',    hint: '',           source: 'built-in', desc: 'Show working-tree changes since the last commit.' },
+  { cmd: '/test',    hint: ' [filter]',  source: 'project',  desc: 'Run the gradle test suite, optionally filtered.' },
+  { cmd: '/review',  hint: '',           source: 'user',     desc: 'Review the current diff for bugs and style issues.' },
+  { cmd: '/explain', hint: ' <path>',    source: 'skill',    desc: 'Walk through what a file or function does.' },
+  { cmd: '/pr',      hint: ' <title>',   source: 'project',  desc: 'Open a pull request for the current branch.' },
+];
+
+// visible when input starts with "/" and has no space yet; hidden while voice is active
+function SlashPanel({ query, onPick }) {
+  const q = query.slice(1).toLowerCase();
+  const matches = SLASH_COMMANDS.filter(c => c.cmd.slice(1).toLowerCase().startsWith(q));
+  if (!matches.length) return null;
+  return (
+    <div className="cc-scroll" style={{
+      position: 'absolute', left: 12, right: 12, bottom: '100%', marginBottom: 8,
+      background: T.raised, border: `1px solid ${T.border}`, borderRadius: 12,
+      maxHeight: 240, overflowY: 'auto', zIndex: 20,
+      boxShadow: '0 -8px 28px rgba(0,0,0,0.45)',
+    }}>
+      {matches.map((c, i) => (
+        <div key={c.cmd}
+          onClick={() => onPick(c.cmd)}
+          style={{ padding: '9px 13px', cursor: 'pointer', borderBottom: i < matches.length - 1 ? `1px solid ${T.border}` : 'none' }}
+          onPointerDown={e => e.preventDefault()}
+        >
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontFamily: T.mono, fontSize: 13, fontWeight: 600, color: T.accent }}>{c.cmd}</span>
+            {c.hint && <span style={{ fontFamily: T.mono, fontSize: 12, color: T.muted }}>{c.hint}</span>}
+            <span style={{ flex: 1 }}></span>
+            <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, flexShrink: 0, whiteSpace: 'nowrap' }}>{c.source}</span>
+          </div>
+          <div style={{ fontFamily: T.ui, fontSize: 11, lineHeight: '15px', color: T.muted, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.desc}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── composer ──────────────────────────────────────────────────
-function Composer({ value, onChange, generating, onStop, onSend }) {
+function Composer({ value, onChange, generating, onStop, onSend, voiceActive = false }) {
   const showStop = generating;
   const active = showStop || value.trim();
+  // slash autocomplete: "/" prefix, no space typed yet, voice not recording/transcribing
+  const slashOpen = !voiceActive && value.startsWith('/') && !value.includes(' ');
   return (
-    <div style={{ flexShrink: 0, background: T.base, borderTop: `1px solid ${T.border}`, paddingBottom: 34 }}>
+    <div style={{ flexShrink: 0, background: T.base, borderTop: `1px solid ${T.border}`, paddingBottom: 34, position: 'relative' }}>
+      {slashOpen && <SlashPanel query={value} onPick={(cmd) => onChange(cmd)}/>}
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, padding: '12px 12px 12px' }}>
         <button style={{ ...iconBtn, width: 40, height: 40 }} aria-label="Attach"><Plus c={T.sec}/></button>
         <div style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, display: 'flex', alignItems: 'center', padding: '0 6px 0 14px', minHeight: 44 }}>

@@ -1,0 +1,5 @@
+/* iOS system permission dialogs — English (matches the Info.plist defaults). */
+"NSLocalNetworkUsageDescription" = "cc-pocket connects to the daemon running on your computer over the local network.";
+"NSCameraUsageDescription" = "cc-pocket uses the camera to scan the pairing QR code shown by cc-pocket pair on your computer.";
+"NSMicrophoneUsageDescription" = "cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.";
+"NSSpeechRecognitionUsageDescription" = "cc-pocket transcribes your dictation on-device so you can speak prompts instead of typing them.";

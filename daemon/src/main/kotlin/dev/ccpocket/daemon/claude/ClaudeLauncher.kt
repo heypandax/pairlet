@@ -65,9 +65,9 @@ object ClaudeLauncher {
         add("--permission-prompt-tool"); add("stdio")
         add("--replay-user-messages")
         add("--verbose")
-        if (spec.mode != PermissionMode.DEFAULT) {
-            add("--permission-mode"); add(spec.mode.wireName())
-        }
+        // ALWAYS pass the mode: omitting it lets claude fall back to the user's global
+        // `permissions.defaultMode` (e.g. "auto"), silently breaking the phone's "Ask each step"
+        add("--permission-mode"); add(spec.mode.wireName())
         spec.resumeId?.let { add("--resume"); add(it) }
         spec.model?.let { add("--model"); add(it) }
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }

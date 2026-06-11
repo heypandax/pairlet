@@ -40,17 +40,18 @@ const Group = ({ label, children }) => (
 );
 const sep = (last) => ({ borderBottom: last ? 'none' : `1px solid ${T.border}` });
 
-// ── permission mode rows ──────────────────────────────────────
+// ── permission mode rows — canonical ladder (ep-core.jsx) ─────
 const MODES = [
-  { id: 'default', desc: 'Ask before each tool runs.' },
-  { id: 'acceptEdits', desc: 'Auto-accept file edits, ask for commands.' },
-  { id: 'auto', desc: 'Auto-approve when confidence is high.', glyph: 'bolt' },
-  { id: 'plan', desc: 'Plan only — no changes without approval.' },
-  { id: 'dontAsk', desc: 'Never prompt; skip anything needing permission.' },
-  { id: 'bypass', desc: 'Allow everything, including risky actions.', glyph: 'warn' },
+  { key:'default',     label:"I’m watching · ask each step",        tech:'default',
+    color:'#9BA1A6', allows:'nothing automatically', asks:'every sensitive tool' },
+  { key:'acceptEdits', label:'Auto-edit files, ask before commands', tech:'acceptEdits',
+    color:'#4FB477', allows:'file edits', asks:'commands' },
+  { key:'plan',        label:"Plan first, I’ll approve",             tech:'plan',
+    color:'#5B9BD5', allows:'read-only inspection', asks:'everything until you approve' },
+  { key:'bypass',      label:'Full auto · trust it',                 tech:'bypassPermissions',
+    color:'#E0A93B', warn:true, allows:'everything', asks:'nothing' },
 ];
 function ModeRow({ m, selected, onSelect, last }) {
-  const warn = m.glyph === 'warn';
   const [p, setP] = React.useState(false);
   return (
     <div
@@ -58,18 +59,22 @@ function ModeRow({ m, selected, onSelect, last }) {
       onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
       style={{
         display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', cursor: 'pointer',
-        background: p ? T.raised : (warn ? 'rgba(224,169,59,0.06)' : 'transparent'),
+        background: p ? T.raised : (m.warn ? 'rgba(224,169,59,0.06)' : 'transparent'),
         ...sep(last),
       }}
     >
       <Radio on={selected}/>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 500, color: warn ? T.warning : T.text }}>{m.id}</span>
-          {m.glyph === 'bolt' && <Bolt c={T.accent} s={14}/>}
-          {warn && <Warn c={T.warning} s={14}/>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ width: 7, height: 7, borderRadius: 999, background: m.color, flexShrink: 0 }}></span>
+          <span style={{ fontFamily: T.ui, fontSize: 14.5, fontWeight: 600, color: T.text }}>{m.label}</span>
+          {m.warn && <Warn c={T.warning} s={13}/>}
         </div>
-        <div style={{ fontFamily: T.ui, fontSize: 12.5, lineHeight: '17px', color: T.sec, marginTop: 2 }}>{m.desc}</div>
+        <div style={{ fontFamily: T.ui, fontSize: 12, lineHeight: '17px', color: T.sec, marginTop: 3 }}>
+          <span style={{ fontFamily: T.mono, fontSize: 11.5, color: m.color }}>{m.tech}</span>
+          <span style={{ color: T.muted }}>&nbsp;·&nbsp;</span>
+          auto-allows {m.allows} · still asks {m.asks}
+        </div>
       </div>
     </div>
   );
@@ -119,13 +124,17 @@ function SettingsScreen() {
       <div className="cc-scroll" style={{ flex: 1, overflowY: 'auto', padding: '6px 16px 28px' }}>
         <div style={{ fontFamily: T.ui, fontSize: 28, fontWeight: 700, color: T.text, letterSpacing: -0.4, padding: '2px 4px 20px' }}>Settings</div>
 
-        <Group label="Default permission mode">
-          {MODES.map((m, i) => (
-            <ModeRow key={m.id} m={m} selected={mode === m.id} onSelect={() => setMode(m.id)} last={i === MODES.length - 1}/>
-          ))}
-        </Group>
+        <div style={{ marginBottom: 26 }}>
+          <SectionLabel>Default permission mode</SectionLabel>
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, overflow: 'hidden' }}>
+            {MODES.map((m, i) => (
+              <ModeRow key={m.key} m={m} selected={mode === m.key} onSelect={() => setMode(m.key)} last={i === MODES.length - 1}/>
+            ))}
+          </div>
+          <div style={{ fontFamily: T.ui, fontSize: 11.5, color: T.muted, padding: '8px 6px 0' }}>Applies to new sessions · can be overridden per session</div>
+        </div>
 
-        <Group label="Paired devices">
+        <Group label={<React.Fragment>Paired devices <span style={{ textTransform: 'none', fontWeight: 500, letterSpacing: 0.2 }}>(coming later)</span></React.Fragment>}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 56, padding: '0 14px', ...sep(false) }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontFamily: T.ui, fontSize: 15, fontWeight: 500, color: T.text }}>iPhone 15 Pro</div>

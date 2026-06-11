@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon: solid dark base + the design icon inset into the 66% safe zone
+     (the source icon-1024.png is full-bleed; insetting keeps the ❯▮ glyph inside every mask). -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_fg_inset" />
+</adaptive-icon>

@@ -105,18 +105,32 @@ private class PairCmd : CliktCommand(name = "pair") {
 }
 
 private class ServiceInstallCmd : CliktCommand(name = "service-install") {
-    private val exec by option("--exec", help = "path to the cc-pocket-daemon launcher").default("/usr/local/bin/cc-pocket-daemon")
+    private val exec by option("--exec", help = "path to the cc-pocket-daemon launcher (default: auto-detect)")
     private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
+        val launcher = exec ?: resolveLauncher()
         val runArgs = buildList {
             add("run")
             add("--relay"); add(relay)
             claudeBin?.let { add("--claude-bin"); add(it) }
         }
-        echo(ServiceInstaller.install(exec, runArgs, apply))
+        echo(ServiceInstaller.install(launcher, runArgs, apply))
+    }
+
+    /**
+     * Find the launcher to put in the service's ExecStart. Prefer a stable on-PATH symlink (survives
+     * `brew upgrade`); the Homebrew prefix differs by arch (/opt/homebrew on arm64, /usr/local on Intel).
+     * Fall back to THIS process's own launcher (the jpackage native binary inside the .app).
+     */
+    private fun resolveLauncher(): String {
+        listOf(
+            "/opt/homebrew/bin/cc-pocket-daemon", // Homebrew on Apple Silicon
+            "/usr/local/bin/cc-pocket-daemon",    // Homebrew on Intel / manual installs
+        ).firstOrNull { java.io.File(it).canExecute() }?.let { return it }
+        return ProcessHandle.current().info().command().orElse("/usr/local/bin/cc-pocket-daemon")
     }
 }
 

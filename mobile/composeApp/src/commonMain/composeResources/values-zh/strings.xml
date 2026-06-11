@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ── 连接 / 配对 ───────────────────────────────────────────── -->
+    <string name="paired_account">已配对 · %1$s…</string>
+    <string name="connect">连接</string>
+    <string name="unpair">解除配对</string>
+    <string name="pair_with_daemon">与电脑端守护进程配对</string>
+    <string name="paste_pair_link">粘贴 ccpocket://pair 链接</string>
+    <string name="pair">配对</string>
+    <string name="hide_advanced">收起高级选项</string>
+    <string name="advanced_direct_lan">高级 · 局域网直连</string>
+    <string name="daemon_ws_url">daemon WebSocket 地址</string>
+    <string name="connect_direct">直连</string>
+    <string name="pairing_title">连接你的电脑</string>
+    <string name="pairing_subtitle">将这台手机与电脑上的 cc-pocket 守护进程配对。</string>
+    <string name="scanning">扫描中…</string>
+    <string name="tap_to_scan">点按扫描二维码</string>
+    <string name="or_enter_code">或输入配对码</string>
+    <string name="run_code_prefix">在电脑上运行</string>
+    <string name="run_code_suffix">获取配对码。</string>
+    <string name="hide">收起</string>
+    <string name="cant_scan_paste_link">无法扫码？粘贴链接</string>
+    <string name="pair_from_link">通过链接配对</string>
+
+    <!-- ── 连接状态（等宽状态行 + 顶部横幅）──────────────────────── -->
+    <string name="reconnect_banner">连接已断开，正在重连…</string>
+    <string name="status_disconnected">未连接</string>
+    <string name="status_invalid_link">配对链接无效</string>
+    <string name="status_pairing">配对中…</string>
+    <string name="status_pair_failed">配对失败：%1$s</string>
+    <string name="status_checking_network">正在检查网络权限…</string>
+    <string name="status_local_denied">本地网络访问被拒绝，请在 设置 → 隐私 → 本地网络 中允许 cc-pocket</string>
+    <string name="status_connecting">连接中…</string>
+    <string name="status_reconnecting">重连中…</string>
+    <string name="status_connected">已连接</string>
+    <string name="status_conn_lost">连接断开，重试中…</string>
+    <string name="status_failed">失败：%1$s</string>
+
+    <!-- ── 目录浏览 ──────────────────────────────────────────────── -->
+    <string name="choose_directory">选择目录</string>
+    <string name="exit">退出</string>
+    <string name="filter_hint">筛选…</string>
+    <string name="history_badge">历史</string>
+    <string name="dir_open_sessions">进行中的会话</string>
+    <string name="dir_projects">项目</string>
+    <string name="running">运行中</string>
+    <string name="idle">空闲</string>
+    <string name="session_fallback">会话</string>
+
+    <!-- ── 会话列表 ──────────────────────────────────────────────── -->
+    <string name="sessions_title">会话</string>
+    <string name="new_session_cta">＋ 新建会话</string>
+
+    <!-- ── 相对时间（会话卡片）──────────────────────────────────── -->
+    <string name="time_just_now">刚刚</string>
+    <string name="time_minutes_ago">%1$d 分钟前</string>
+    <string name="time_hours_ago">%1$d 小时前</string>
+    <string name="time_yesterday">昨天</string>
+    <string name="time_days_ago">%1$d 天前</string>
+    <string name="start_claude_in">在 %1$s 启动 Claude</string>
+
+    <!-- ── 对话 ──────────────────────────────────────────────────── -->
+    <string name="chat_title">对话</string>
+    <string name="stop">停止</string>
+    <string name="thinking_streaming">思考中…</string>
+    <string name="thought_for">思考了 %1$d 秒</string>
+    <string name="code_copy">复制</string>
+    <string name="code_copied">已复制</string>
+    <string name="jump_to_latest">回到最新</string>
+    <string name="observing_notice">👁 观察中 · 正在终端里运行</string>
+    <string name="continue_here">在这里继续</string>
+    <string name="add_message_hint">补充说明…</string>
+    <string name="message_claude_hint">给 Claude 发消息…</string>
+    <string name="send">发送</string>
+    <string name="dictate">语音输入</string>
+    <string name="attach_image">添加图片</string>
+    <string name="error_prefix">错误：%1$s</string>
+    <string name="cmd_source_builtin">内置</string>
+    <string name="cmd_source_user">用户</string>
+    <string name="cmd_source_project">项目</string>
+    <string name="cmd_source_skill">技能</string>
+
+    <!-- ── 执行模式 ──────────────────────────────────────────────── -->
+    <string name="mode_default_short">每步询问</string>
+    <string name="mode_default_label">我盯着 · 每步都问</string>
+    <string name="mode_default_detail">不自动允许任何操作 · 每个敏感工具都询问</string>
+    <string name="mode_accept_short">自动编辑</string>
+    <string name="mode_accept_label">自动编辑文件，执行命令前询问</string>
+    <string name="mode_accept_detail">自动允许文件编辑 · 执行命令仍询问</string>
+    <string name="mode_plan_short">规划</string>
+    <string name="mode_plan_label">先规划，经我批准再动手</string>
+    <string name="mode_plan_detail">自动允许只读检查 · 你批准前一切都询问</string>
+    <string name="mode_bypass_short">全自动</string>
+    <string name="mode_bypass_label">全自动 · 放手干</string>
+    <string name="mode_bypass_detail">自动允许所有操作 · 不再询问</string>
+    <string name="exec_mode_title">执行模式</string>
+    <string name="exec_mode_subtitle">Claude 行动前需要问到什么程度？</string>
+    <string name="mode_switching">正在重启会话以应用新模式…</string>
+    <string name="note_new_sessions_default">新会话总是从「每步询问」开始。</string>
+    <string name="bypass_title">启用全自动？</string>
+    <string name="bypass_body">Claude 将不再询问、直接执行所有命令，包括会修改或删除文件的命令。仅对本会话生效。</string>
+    <string name="cancel">取消</string>
+    <string name="bypass_cta">⚠ 启用全自动</string>
+    <string name="new_session_title">新建会话</string>
+    <string name="new_session_subtitle">以哪种模式开始？</string>
+    <string name="note_change_anytime">之后随时可以点击徽章更改。</string>
+    <string name="rules_remembered_header">本会话已记住</string>
+    <string name="clear_all">全部清除</string>
+    <plurals name="mode_rules">
+        <item quantity="other">· %1$d 条规则</item>
+    </plurals>
+
+    <!-- ── 权限弹层 ──────────────────────────────────────────────── -->
+    <string name="auto_deny">自动拒绝</string>
+    <string name="auto_denied_title">已自动拒绝</string>
+    <string name="auto_denied_body">超时未响应。</string>
+    <string name="dismiss">知道了</string>
+    <string name="needs_permission">Claude 请求权限</string>
+    <string name="permission_fallback">权限</string>
+    <string name="deny">拒绝</string>
+    <string name="allow_once">允许一次</string>
+    <string name="always_allow">总是允许</string>
+    <string name="always_allow_danger">「总是允许」会让 Claude 在整个会话中%1$s，不推荐。</string>
+    <string name="act_freely">自由行动</string>
+    <string name="always_allow_scope">「总是允许」仅在本会话中记住 %1$s。</string>
+    <string name="allow_chip_prefix">本会话内总是允许</string>
+    <string name="allow_chip_suffix"></string>
+
+    <!-- ── 语音输入 ──────────────────────────────────────────────── -->
+    <string name="cancel_recording">取消录音</string>
+    <string name="transcribing">转写中…</string>
+    <string name="done">完成</string>
+    <string name="mic_title">需要麦克风权限</string>
+    <string name="mic_body">cc-pocket 使用麦克风进行语音输入。音频仅用于转写本条消息，不会被录制或存储。</string>
+    <string name="open_settings">打开设置</string>
+    <string name="not_now">暂不</string>
+    <string name="voice_no_speech">没有听到语音</string>
+    <string name="voice_record_failed">无法开始录音</string>
+    <string name="voice_daemon_unreachable">无法连接守护进程，请检查连接</string>
+    <string name="voice_transcribe_failed">转写失败，请重试</string>
+    <string name="voice_no_response">无响应，请检查连接</string>
+    <string name="voice_dictation_failed">听写失败</string>
+    <string name="voice_speech_unavailable">语音识别不可用</string>
+    <string name="voice_audio_engine">音频引擎启动失败</string>
+
+    <!-- ── 设置（最小版：关于 + 解除配对）────────────────────────── -->
+    <string name="settings_title">设置</string>
+    <string name="about_section">关于</string>
+    <string name="about_version">版本</string>
+    <string name="about_license">许可证</string>
+    <string name="about_connection">连接</string>
+    <string name="settings_open">设置</string>
+
+    <!-- ── 图片附件 ──────────────────────────────────────────────── -->
+    <string name="img_counter">%1$d/4 · 已在本机压缩</string>
+    <string name="img_excluded">· 已排除 %1$d 张</string>
+    <string name="img_too_large">过大 · %1$dKB</string>
+    <string name="viewer_hint">下滑关闭 · 点按缩放</string>
+</resources>

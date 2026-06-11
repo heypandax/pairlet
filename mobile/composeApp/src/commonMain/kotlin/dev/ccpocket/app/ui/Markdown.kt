@@ -1,6 +1,8 @@
 package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,9 +15,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -24,28 +33,52 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
 
 /**
- * A focused Markdown renderer for assistant output — covers fenced code blocks, inline code,
- * bold, headers, and bullet/numbered lists. Fully themed via [Tok] (no dependency, no ABI risk).
+ * A focused Markdown renderer for assistant output — covers fenced code blocks (language label +
+ * copy), inline code, bold, headers, and bullet/numbered lists. Fully themed via [Tok].
  */
 @Composable
 fun MarkdownText(text: String, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         parseBlocks(text).forEach { block ->
             when (block) {
-                is MdBlock.Code -> Text(
-                    block.code,
-                    color = Tok.tx2,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(Tok.raised)
-                        .horizontalScroll(rememberScrollState()).padding(8.dp),
-                )
+                is MdBlock.Code -> CodeBlock(block.code, block.lang)
                 is MdBlock.Lines -> block.lines.forEach { MdLine(it, color) }
             }
         }
+    }
+}
+
+/** Fenced block per the design: hairline container, surface header (language + copy), mono body. */
+@Composable
+private fun CodeBlock(code: String, lang: String?) {
+    val shape = RoundedCornerShape(10.dp)
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) { if (copied) { delay(1500); copied = false } }
+    Column(Modifier.fillMaxWidth().clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)) {
+        Row(
+            Modifier.fillMaxWidth().background(Tok.surface).padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(lang ?: "code", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, modifier = Modifier.weight(1f))
+            Text(
+                stringResource(if (copied) Res.string.code_copied else Res.string.code_copy),
+                color = if (copied) Tok.ok else Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+                modifier = Modifier.clip(RoundedCornerShape(5.dp))
+                    .clickable { clipboard.setText(AnnotatedString(code)); copied = true }
+                    .padding(horizontal = 7.dp, vertical = 4.dp),
+            )
+        }
+        Text(
+            code, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(10.dp),
+        )
     }
 }
 
@@ -97,7 +130,7 @@ private fun inline(s: String): AnnotatedString = buildAnnotatedString {
 }
 
 private sealed interface MdBlock {
-    data class Code(val code: String) : MdBlock
+    data class Code(val code: String, val lang: String?) : MdBlock
     data class Lines(val lines: List<String>) : MdBlock
 }
 
@@ -110,11 +143,13 @@ private fun parseBlocks(text: String): List<MdBlock> {
     while (i < lines.size) {
         if (lines[i].trimStart().startsWith("```")) {
             flush()
+            // the fence info string ("```kotlin") names the language; blank => null
+            val lang = lines[i].trimStart().drop(3).trim().takeWhile { !it.isWhitespace() }.ifBlank { null }
             val code = ArrayList<String>()
             i++
             while (i < lines.size && !lines[i].trimStart().startsWith("```")) { code += lines[i]; i++ }
             i++ // skip the closing fence
-            blocks += MdBlock.Code(code.joinToString("\n"))
+            blocks += MdBlock.Code(code.joinToString("\n"), lang)
         } else {
             buf += lines[i]; i++
         }

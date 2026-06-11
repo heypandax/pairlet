@@ -74,6 +74,23 @@ data class CancelTurn(val convoId: String) : ToDaemon
 @SerialName("pocket/session.close")
 data class CloseSession(val convoId: String) : ToDaemon
 
+/** One chunk of a voice capture. Chunks of a recording share [captureId]; daemon reassembles by [idx]. */
+@Serializable
+@SerialName("pocket/audio.chunk")
+data class AudioChunk(
+    val convoId: String,
+    val captureId: String,   // phone-generated, one per recording (fresh per retry)
+    val idx: Int,            // 0-based
+    val last: Boolean,       // true on the final chunk -> transcription starts once 0..idx are all present
+    val mediaType: String,   // "audio/mp4" (AAC m4a) | "audio/wav" (desktop PCM)
+    val base64: String,
+) : ToDaemon
+
+/** Abandon a capture (user cancelled mid-upload); the daemon drops buffered chunks + any running job. */
+@Serializable
+@SerialName("pocket/audio.cancel")
+data class AudioCancel(val convoId: String, val captureId: String) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -86,10 +103,20 @@ data class Directories(val entries: List<DirectoryEntry>, val root: String? = nu
 @SerialName("pocket/sessions")
 data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPhone
 
-/** The conversation is live. sessionId is backfilled once claude reports system.init. */
+/**
+ * The conversation is live. sessionId is backfilled once claude reports system.init.
+ * [mode] is the daemon's ACTUAL permission mode — the phone reconciles its badge from it.
+ * Null when observing: the terminal owns that session, the daemon doesn't know its mode.
+ */
 @Serializable
 @SerialName("pocket/session.live")
-data class SessionLive(val convoId: String, val workdir: String, val sessionId: String? = null, val observing: Boolean = false) : ToPhone
+data class SessionLive(
+    val convoId: String,
+    val workdir: String,
+    val sessionId: String? = null,
+    val observing: Boolean = false,
+    val mode: PermissionMode? = null,
+) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
 @Serializable
@@ -156,6 +183,40 @@ data class HistoryMessage(val role: ChatRole, val text: String, val tool: String
 @Serializable
 @SerialName("pocket/history")
 data class ConvoHistory(val convoId: String, val messages: List<HistoryMessage>) : ToPhone
+
+/** One slash command the composer can offer. [name] has no leading "/". */
+@Serializable
+data class SlashCommand(
+    val name: String,
+    val description: String = "",
+    val argumentHint: String? = null,  // e.g. "<name>" / "[instructions]"; null = takes no arguments
+    val source: CommandSource = CommandSource.BUILTIN,
+)
+
+/** Where a slash command was discovered — shown as a small tag in the composer menu. */
+@Serializable
+enum class CommandSource {
+    @SerialName("builtin") BUILTIN,
+    @SerialName("user") USER,       // ~/.claude/commands/*.md
+    @SerialName("project") PROJECT, // <workdir>/.claude/commands/*.md
+    @SerialName("skill") SKILL,     // ~/.claude/skills/<name>/ or <workdir>/.claude/skills/<name>/
+}
+
+/** daemon -> phone: the slash commands available to this conversation, sent after [SessionLive]. */
+@Serializable
+@SerialName("pocket/commands")
+data class CommandList(val convoId: String, val commands: List<SlashCommand>) : ToPhone
+
+/** daemon -> phone: result of transcribing a voice capture. ok=false carries a user-facing [error]. */
+@Serializable
+@SerialName("pocket/transcript")
+data class Transcript(
+    val convoId: String,
+    val captureId: String,
+    val text: String = "",
+    val ok: Boolean = true,
+    val error: String? = null, // e.g. "whisper-cli not found — brew install whisper-cpp"
+) : ToPhone
 
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)

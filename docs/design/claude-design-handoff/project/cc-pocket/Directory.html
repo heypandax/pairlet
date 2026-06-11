@@ -17,6 +17,8 @@
   #root { padding: 28px; }
   @keyframes ccPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.82); } }
   .cc-pulse { animation: ccPulse 1.25s ease-in-out infinite; }
+  @keyframes ccSpin { to { transform: rotate(360deg); } }
+  .cc-spin { animation: ccSpin 0.85s linear infinite; }
   .cc-scroll::-webkit-scrollbar { width: 0; height: 0; }
   .cc-scroll { scrollbar-width: none; }
 </style>
@@ -27,6 +29,6 @@
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <script type="text/babel" src="ios-frame.jsx"></script>
-<script type="text/babel" src="directory-app.jsx?v=1"></script>
+<script type="text/babel" src="directory-app.jsx?v=3"></script>
 </body>
 </html>

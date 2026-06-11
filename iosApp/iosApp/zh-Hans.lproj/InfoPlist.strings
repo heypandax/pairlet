@@ -1,0 +1,5 @@
+/* iOS 系统权限弹窗 — 简体中文。 */
+"NSLocalNetworkUsageDescription" = "cc-pocket 通过本地网络连接到电脑上运行的守护进程。";
+"NSCameraUsageDescription" = "cc-pocket 使用相机扫描电脑上 cc-pocket pair 显示的配对二维码。";
+"NSMicrophoneUsageDescription" = "cc-pocket 使用麦克风进行语音输入。音频仅用于转写本条消息，不会被录制或存储。";
+"NSSpeechRecognitionUsageDescription" = "cc-pocket 在设备端转写你的语音，让你可以用说话代替打字输入提示词。";
