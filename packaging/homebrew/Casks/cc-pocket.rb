@@ -2,8 +2,8 @@
 # so it needs no Command Line Tools). Lives in the tap repo: heypandax/homebrew-tap → Casks/cc-pocket.rb
 # Users: brew install --cask heypandax/tap/cc-pocket
 cask "cc-pocket" do
-  version "1.0.0"
-  sha256 "ec72f09ee50459565d5623cb5b23184994c5fbea5f352874ab83ed7af890431c"
+  version "1.1.0"
+  sha256 "cc168733226dcb423cd8cafa3357f0d2dbaa74ab863b18cece7b266701723174"
 
   url "https://github.com/heypandax/homebrew-tap/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-arm64.tar.gz"
   name "CC Pocket daemon"
@@ -22,5 +22,8 @@ cask "cc-pocket" do
     Start the daemon and pair your phone:
       cc-pocket-daemon service-install --apply   # run on login, auto-reconnect
       cc-pocket-daemon pair                        # shows a QR + 6-digit code
+
+    Optional — voice input from Android/desktop clients transcribes on this Mac:
+      brew install whisper-cpp
   EOS
 end
