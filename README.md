@@ -59,6 +59,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 
 ## Docs
 
+- User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)
 - iOS device build & install — [`docs/ios-device.md`](docs/ios-device.md)
