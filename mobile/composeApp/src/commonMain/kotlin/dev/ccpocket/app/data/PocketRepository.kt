@@ -350,6 +350,12 @@ class PocketRepository(private val scope: CoroutineScope) {
             is SessionLive -> {
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
+                // daemon truth beats the local guess: a turn that ended (or started) while the link was
+                // down would otherwise leave the ■/mic button stuck; null = old daemon, keep local state
+                f.executing?.let { exec ->
+                    if (!exec) finishThinking() // a turn killed mid-thinking has no TurnDone to stamp the block
+                    streaming.value = exec
+                }
                 switching.value = false
             }
             is AssistantChunk -> appendChunk(f)

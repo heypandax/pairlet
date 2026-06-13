@@ -91,6 +91,7 @@ val MODE_BY = MODES.associateBy { it.key }
 // ── bottom-sheet shell (scrim + raised card, radius-20 top) ─────
 @Composable
 fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() } // Android back = scrim tap
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x94000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } })
         Column(

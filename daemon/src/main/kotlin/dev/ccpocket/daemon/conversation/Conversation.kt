@@ -85,6 +85,11 @@ class Conversation(
     private var bridge: PermissionBridge? = null
     private val seq = AtomicLong(0)
 
+    // a user turn is in flight (prompt written, TurnDone not yet seen) — SessionLive carries it so
+    // a (re)attaching phone can reset its ■/streaming state instead of trusting a stale local value
+    @Volatile
+    private var executing = false
+
     @Volatile
     private var intentionalStop = false
 
@@ -102,6 +107,9 @@ class Conversation(
     @Volatile
     private var reemitLive = false
 
+    /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing). */
+    private fun live(sid: String?) = SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing)
+
     fun open(resumeId: String?, model: String?) {
         this.model = model
         this.openedResumeId = resumeId
@@ -112,7 +120,7 @@ class Conversation(
         // would deadlock. So announce the session as live now (we own convoId + workdir), and replay
         // the resumed transcript up front; the pump later re-emits SessionLive with the real sessionId.
         scope.launch {
-            sink.emit(SessionLive(convoId, workdir.toString(), resumeId, mode = mode))
+            sink.emit(live(resumeId))
             if (resumeId != null) {
                 val history = TranscriptReplay.read(ProjectPaths.dirFor(workdir.toString()).resolve("$resumeId.jsonl"))
                 if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
@@ -130,7 +138,7 @@ class Conversation(
     suspend fun switchMode(newMode: PermissionMode) {
         if (newMode == mode) {
             // no-op, but still announce: an out-of-sync phone badge corrects itself from this
-            sink.emit(SessionLive(convoId, workdir.toString(), sessionId, mode = mode))
+            sink.emit(live(sessionId))
             return
         }
         mode = newMode
@@ -141,7 +149,8 @@ class Conversation(
         val sid = sessionId ?: openedResumeId
         stopProcess()
         launchProcess(ClaudeSpec(workdir, resumeId = sid, model = model, mode = newMode)) // no pendingResumeId: don't re-replay history
-        sink.emit(SessionLive(convoId, workdir.toString(), sid, mode = mode)) // confirm now — init won't arrive until the next turn
+        // the relaunch killed any in-flight turn — executing is false again, the phone's ■ resets
+        sink.emit(live(sid)) // confirm now — init won't arrive until the next turn
     }
 
     /**
@@ -179,7 +188,7 @@ class Conversation(
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")
-                            sink.emit(SessionLive(convoId, workdir.toString(), sessionId, mode = mode))
+                            sink.emit(live(sessionId))
                             pendingResumeId?.let { rid ->
                                 pendingResumeId = null
                                 val file = ProjectPaths.dirFor(workdir.toString()).resolve("$rid.jsonl")
@@ -188,7 +197,7 @@ class Conversation(
                             }
                         } else if (reemitLive && sessionId != null) {
                             reemitLive = false // mode switch relaunch landed — refresh the phone's sessionId
-                            sink.emit(SessionLive(convoId, workdir.toString(), sessionId, mode = mode))
+                            sink.emit(live(sessionId))
                         }
                     }
                     is ClaudeEvent.AssistantText ->
@@ -199,7 +208,8 @@ class Conversation(
                         sink.emit(
                             ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, ev.input?.toString()?.take(280)),
                         )
-                    is ClaudeEvent.TurnResult ->
+                    is ClaudeEvent.TurnResult -> {
+                        executing = false
                         sink.emit(
                             TurnDone(
                                 convoId,
@@ -207,6 +217,7 @@ class Conversation(
                                 TokenUsage(ev.inputTokens, ev.outputTokens, ev.cacheCreationInputTokens, ev.cacheReadInputTokens),
                             ),
                         )
+                    }
                     is ClaudeEvent.ControlRequest -> b.onControlRequest(ev)
                     is ClaudeEvent.ControlCancel -> b.onCancel(ev)
                     ClaudeEvent.UserReplay -> {}
@@ -219,6 +230,7 @@ class Conversation(
         if (!intentionalStop) {
             // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
             // real process exit before touching the file (intentional stops patch in stopProcess)
+            executing = false // a dead process never delivers TurnResult
             p.awaitExit()
             unhideTranscript()
             sink.emit(PocketError("process_exited", "claude process ended", convoId))
@@ -238,7 +250,8 @@ class Conversation(
         sink = newSink
         lastActivityMs = System.currentTimeMillis()
         val sid = sessionId ?: return
-        newSink.emit(SessionLive(convoId, workdir.toString(), sid, mode = mode))
+        // executing rights the phone's stale ■: a turn that finished (or started) while it was away
+        newSink.emit(live(sid))
         val file = ProjectPaths.dirFor(workdir.toString()).resolve("$sid.jsonl")
         val history = TranscriptReplay.read(file)
         if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
@@ -248,6 +261,7 @@ class Conversation(
     suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList()) {
         if (text.trimStart().startsWith("/model")) { handleModelCommand(text.trim()); return }
         val p = proc ?: return
+        executing = true // cleared by TurnResult (also covers cancelTurn — claude still emits a result)
         lastActivityMs = System.currentTimeMillis()
         val frame = buildJsonObject {
             put("type", "user")
@@ -323,6 +337,7 @@ class Conversation(
 
     private suspend fun stopProcess() {
         intentionalStop = true
+        executing = false // any in-flight turn dies with the process
         bridge?.cancelAll()
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
         proc = null

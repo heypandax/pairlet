@@ -11,9 +11,13 @@
         android:localeConfig="@xml/locales_config"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <!-- adjustResize (NOT the pan some OEMs pick by default): with edge-to-edge the system
+             stops moving the window for the keyboard and instead reports ime insets, which the
+             Compose root handles via imePadding() -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

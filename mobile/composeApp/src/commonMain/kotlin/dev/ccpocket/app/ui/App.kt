@@ -103,6 +103,14 @@ fun App(scope: CoroutineScope) {
     val pendingLink by dev.ccpocket.app.DeepLink.pending.collectAsState()
     LaunchedEffect(pendingLink) { pendingLink?.let { repo.handlePairUrl(it); dev.ccpocket.app.DeepLink.pending.value = null } }
     dev.ccpocket.app.OnAppForeground { repo.onAppForeground() } // iOS kills sockets in background — reconnect on return
+    // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
+    // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
+    // registers its own handler later in composition, which wins while it is showing (LIFO).
+    dev.ccpocket.app.SystemBackHandler(
+        enabled = repo.sessionActive.value && (repo.convoId.value != null || repo.sessionsDir.value != null),
+    ) {
+        if (repo.convoId.value != null) repo.backToBrowse() else repo.backToDirectories()
+    }
     PocketTheme {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {

@@ -107,6 +107,8 @@ data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPh
  * The conversation is live. sessionId is backfilled once claude reports system.init.
  * [mode] is the daemon's ACTUAL permission mode — the phone reconciles its badge from it.
  * Null when observing: the terminal owns that session, the daemon doesn't know its mode.
+ * [executing] is whether a turn is in flight RIGHT NOW — the phone resets its streaming/■
+ * state from it on (re)attach. Null = sender predates the field (or observing): keep local state.
  */
 @Serializable
 @SerialName("pocket/session.live")
@@ -116,6 +118,7 @@ data class SessionLive(
     val sessionId: String? = null,
     val observing: Boolean = false,
     val mode: PermissionMode? = null,
+    val executing: Boolean? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */

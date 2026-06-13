@@ -102,15 +102,21 @@ class SerializationRoundTripTest {
 
     @Test
     fun sessionLive_carries_mode_and_omits_it_when_unknown() {
-        val controlled = Envelope(id = "7", ts = 0, body = SessionLive("c1", "/x", "sid", mode = PermissionMode.ACCEPT_EDITS))
+        val controlled = Envelope(id = "7", ts = 0, body = SessionLive("c1", "/x", "sid", mode = PermissionMode.ACCEPT_EDITS, executing = true))
         val json = PocketJson.encodeToString(controlled)
         assertTrue("\"mode\":\"acceptEdits\"" in json, json)
+        assertTrue("\"executing\":true" in json, json)
         assertEquals(controlled, PocketJson.decodeFromString<Envelope>(json))
 
         val observed = SessionLive("c2", "/y", "sid2", observing = true) // terminal session: mode unknown
         val obsJson = PocketJson.encodeToString<SessionLive>(observed)
         assertFalse("mode" in obsJson, obsJson) // explicitNulls=false
+        assertFalse("executing" in obsJson, obsJson) // absent = unknown -> the phone keeps local state
         assertEquals(observed, PocketJson.decodeFromString<SessionLive>(obsJson))
+
+        // a frame from a pre-executing peer still decodes (field defaults to null)
+        val legacy = """{"convoId":"c3","workdir":"/z","sessionId":"sid3"}"""
+        assertEquals(SessionLive("c3", "/z", "sid3"), PocketJson.decodeFromString<SessionLive>(legacy))
     }
 
     @Test

@@ -92,16 +92,22 @@ class DeviceSessions(
         val env = runCatching { PocketJson.decodeFromString<Envelope>(plaintext.decodeToString()) }.getOrNull() ?: return
         log.info("← ${env.body::class.simpleName} from ${deviceId.take(8)}…")
 
-        val sink = OutboundSink { frame -> sealAndSend(deviceId, session, frame) }
+        val sink = OutboundSink { frame -> sealAndSend(deviceId, frame) }
         core.router.handle(env.body, sink) { convoId ->
             mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
         }
     }
 
-    private suspend fun sealAndSend(deviceId: String, session: E2ESession, frame: Frame) {
+    private suspend fun sealAndSend(deviceId: String, frame: Frame) {
         val json = PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
-        // serialize seals per session (the GCM counter must advance atomically)
-        val payload = mutex.withLock { Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())) }
+        // serialize seals per session (the GCM counter must advance atomically). Resolve the live session
+        // at seal time rather than capturing one in the sink: conversation sinks outlive a phone reconnect,
+        // and a re-handshake re-keys — a stale session would seal frames the device can't decrypt. No session
+        // means the phone disconnected (sessions cleared on disconnect) and the frame is undeliverable — drop it.
+        val payload = mutex.withLock {
+            val live = sessions[deviceId] ?: return
+            Wire.payload(Wire.TRANSPORT, live.seal(json.encodeToByteArray()))
+        }
         send(deviceId, payload)
     }
 
