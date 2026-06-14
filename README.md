@@ -20,6 +20,20 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 | `:relay` | Cloud broker: device-key pairing, ciphertext routing, multi-tenant, rate-limited | Kotlin/JVM + Ktor + SQLite |
 | `:mobile` | The CC Pocket app | Compose Multiplatform — Android · iOS · desktop |
 
+## Install
+
+End users only need the **daemon** on their Mac — the relay is hosted for you:
+
+```bash
+brew install --cask heypandax/tap/cc-pocket
+cc-pocket-daemon service-install --apply   # run on login, auto-reconnect
+cc-pocket-daemon pair                       # prints a QR + 6-digit code
+```
+
+Then pair your phone and start driving Claude from it — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `brew upgrade --cask cc-pocket`.
+
+> Published for **macOS / Apple Silicon**. The daemon is plain Kotlin/JVM and the code is cross-platform; on Linux/Windows, build it yourself (see [Quick start](#quick-start)).
+
 ## How pairing works
 
 No accounts, no login. The daemon generates a static keypair on first run (its `account id` is the public fingerprint). To add a phone:
@@ -42,7 +56,7 @@ Requires JDK 17 and an installed, logged-in `claude` CLI.
 ./gradlew :protocol:check                         # protocol contract test
 ./gradlew :daemon:run --args="run"                # daemon — local WebSocket on 127.0.0.1:8765
 ./gradlew :daemon:run --args="test-client"        # drive it against the real claude
-#   dirs · ls <wd> · open <wd> [resumeId] · say <text> · cd <wd> · allow · deny · quit
+#   dirs · ls <wd> · open <wd> [resumeId] · say <text> · cd <wd> · mode <m> · allow · deny · quit
 ```
 
 **Through the relay (off-LAN), the real product path:**

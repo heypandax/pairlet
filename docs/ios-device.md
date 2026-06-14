@@ -52,7 +52,7 @@ open /Users/lidapeng/Desktop/Project/app/cc-pocket/iosApp/iosApp.xcodeproj
    # 输出 ccpocket://pair?relay=...&acct=...&dpk=...&ticket=...
    ```
 
-3. **App 里粘贴**：连接页「Pair」框粘贴上面的 `ccpocket://pair?...` 链接 → Pair。配对成功后设备记住该 daemon，以后开 App 直接「Connect」。
+3. **App 里配对**：用 App 内置相机扫终端里的二维码，或手输 6 位码，或把上面的 `ccpocket://pair?...` 链接粘进「Pair」框 → Pair。配对成功后设备记住该 daemon，以后开 App 直接「Connect」。
 
 > 票据 120s 单次有效；过期就再 `pair` 一次。自托管 relay：把 `wss://pocket.ark-nexus.cc` 换成你自己的域名（`deploy/` 有 systemd + Caddyfile）。
 

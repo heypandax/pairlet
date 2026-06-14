@@ -2,7 +2,7 @@
 
 > 本文定义 cc-pocket **要做什么**（WHAT，可验收的需求）。
 > **怎么做**（架构/协议/落地顺序）见实现计划 [`cc-connect-cc-connect-sequential-graham.md`](./cc-connect-cc-connect-sequential-graham.md)；**界面**见 [`design/`](./design/)（已用 claude.ai/design 产出 7 屏 handoff）。
-> 文档状态：v1.0（M0–M4 已实现，验收对齐中）　｜　初稿 2026-06-05　｜　更新 2026-06-09
+> 文档状态：v1.1（M0–M3 已实现并发布，M4 推送部分落地；daemon 1.1.0 / app 1.0.1）　｜　初稿 2026-06-05　｜　更新 2026-06-14
 
 ---
 
@@ -25,7 +25,7 @@
 ## 2. 范围
 
 ### 2.1 v1 In Scope
-- 在 **Linux / Windows / macOS** 电脑上以后台 daemon 驱动本机 `claude` CLI。
+- 在 **Linux / Windows / macOS** 电脑上以后台 daemon 驱动本机 `claude` CLI（daemon 代码跨平台；v1 当前仅打包发布 **macOS / Apple Silicon** 的一键安装包，其余平台可自行 `:daemon:installDist` 构建运行）。
 - 手机（**Android + iOS**）与电脑 daemon 连接：**先局域网直连**（M0 验证），**再经云端 relay 跨网**（M1+）。
 - 会话：列出可恢复会话、恢复、新建。
 - 工作目录：浏览/选择/会话中途切换。
@@ -59,7 +59,7 @@
 | **session（可恢复会话）** | 磁盘上 `~/.claude/projects/**.jsonl` 记录的历史会话，可 `--resume` |
 | **workdir / 工作目录** | `claude` 子进程的 cwd |
 | **pairing / 配对** | 把一台 device 绑定到用户账号/daemon 的一次性流程 |
-| **permission mode** | Claude 的授权模式：`default / acceptEdits / auto / plan / dontAsk / bypass` |
+| **permission mode** | Claude 的授权模式：`default / acceptEdits / plan / bypassPermissions`（4 档，与 `claude` CLI 取值一致） |
 
 ---
 
@@ -125,12 +125,12 @@
 | FR-5.2 | 用户在手机点 **Allow/Deny**，结果**必须**回传并真正放行/拒绝该工具调用 | P0 | M0/M2 |
 | FR-5.3 | 授权请求**必须**展示：工具名、输入预览（命令/路径/diff 摘要）、目标目录与分支 | P0 | M2 |
 | FR-5.4 | 裁决**必须**有超时保护：超时**自动 Deny**（安全优先），不得让工具调用永久挂起 | P0 | M0 |
-| FR-5.5 | `auto`（及等价）模式下 daemon **应当**本地直接放行，不打扰手机 | P1 | M0 |
+| FR-5.5 | `bypassPermissions` 模式下 daemon **应当**本地直接放行，不打扰手机 | P1 | M0 |
 | FR-5.6 | Claude 撤回某授权请求时，手机端对应弹窗**必须**自动消失 | P1 | M2 |
 | FR-5.7 | App 退到后台/不在线时，未决授权**必须**通过推送（APNs/FCM）触达；点击深链到授权页 | P0 | M4 |
 | FR-5.8 | 推送 payload **必须**不含 prompt 内容（仅「需要授权」+ 会话标识，隐私） | P0 | M4 |
 | FR-5.9 | 每个会话的未决授权 relay **应当**仅缓存最新一条，设备重连时重放 | P1 | M4 |
-| FR-5.10 | 权限模式**必须**支持 6 个真实取值（`default/acceptEdits/auto/plan/dontAsk/bypass`）；`bypass` 等高风险模式**必须**有 App 内显式确认 | P0 | M2 |
+| FR-5.10 | 权限模式**必须**支持 4 个真实取值（`default/acceptEdits/plan/bypassPermissions`）；`bypassPermissions` 高风险模式**必须**有 App 内显式确认 | P0 | M2 |
 
 **验收**：default 模式下手机收到弹窗→Allow 后工具执行、Deny 后被拒；不答复约 30s 自动 Deny；auto 模式不弹窗；App 后台时推送可达并能批准。
 
@@ -198,19 +198,29 @@
 
 > 设计已就绪：7 屏（Chat / Permission / Sessions / Directory / Pairing / Computers / Settings）见 `design/claude-design-handoff/`，M2 据此实现。
 
-### 6.1 实现现状（2026-06-09）
+### 6.1 实现现状（2026-06-14）
 
-四个模块均已落地，里程碑 M0–M4 主体功能已编码，正在按 §7 对真实 `claude` 收敛验收。
+四个模块均已落地并发布：daemon 经 Homebrew cask 分发（当前 **daemon 1.1.0**），移动端 Android/iOS 同步发版（当前 **app 1.0.1**——daemon 与 app 是两条独立的版本线）。M0–M3 主体已实现，M4 后台推送仅部分落地（见下）。
 
 | 里程碑 | 状态 | 代码落点（节选） |
 |---|---|---|
-| **M0** 局域网 MVP | ✅ 已实现 | `daemon/`：`claude/`（Launcher/Process/StreamParser/PermissionBridge）、`conversation/`、`disk/`（TranscriptScanner 等）、`server/`（本机 WS）；`./gradlew :daemon:run` + `test-client` 可跑通 |
-| **M1** 云端 relay + 配对 | ✅ 已实现 | `relay/`：`Broker`、`auth/`（Ed25519 双向鉴权）、`pairing/`（一次性配对码 + 限流）、`store/`（SQLite/InMemory）；daemon `RelayClient` 主动外拨 + 退避重连 |
-| **M2** 移动端多会话/多目录 | ✅ 已实现 | `mobile/composeApp`：`ui/`（App/Chat/DirList/Markdown/PairingScreen）、`data/PocketRepository`、`net/`、`pairing/`、`secure/`；Android · iOS · desktop 三端共用 commonMain |
-| **M3** 打包 + 后台常驻 | 🟡 部分 | daemon `service/ServiceInstaller` + `Main` 子命令（`run/test-client/pair/service-install`）；`deploy/`（Caddy + systemd）；一键安装包（NFR-10 jpackage）待补 |
-| **M4** 后台授权推送 | ✅ 已实现 | relay `PushProvider` + `Broker` 离线缓存重放；移动端 `telemetry/`、`DeepLink`、Firebase（FCM/APNs）接入 |
+| **M0** 局域网 MVP | ✅ 已实现 | `daemon/`：`claude/`（ClaudeLauncher/ClaudeProcess/StreamParser/StreamWire/PermissionBridge）、`conversation/`、`disk/`（TranscriptScanner/DirectoryService/SlashCommandScanner）、本机 WS（`--local`）；`./gradlew :daemon:run` + `test-client` 可跑通 |
+| **M1** 云端 relay + 配对 | ✅ 已实现 | `relay/`：`Broker`、`auth/`（daemon Ed25519 签名挑战 + device bearer 凭据）、`pairing/`（一次性票 + 6 位码 + 限流）、`store/`（SQLite/InMemory）；daemon `RelayClient` 主动外拨 + 退避重连 |
+| **M2** 移动端多会话/多目录 | ✅ 已实现 | `mobile/composeApp`：5 屏（Pairing/Connect/Directory/Sessions/Chat）+ 弹窗（Permission/Mode/Settings）；`data/PocketRepository`、`net/`（relay E2E + LAN 直连）、`pairing/`、`secure/`；Android · iOS · desktop 共用 commonMain |
+| **M3** 打包 + 后台常驻 | ✅ 已实现 | daemon `service/ServiceInstaller`（macOS launchd）+ `Main` 子命令（`run/pair/test-client/service-install`）；jpackage 自带 JRE（`:daemon:packageDaemon`）、签名+公证（`scripts/release-macos.sh`）、Homebrew cask 一键安装；relay `deploy/`（Caddy + systemd + Cloudflare） |
+| **M4** 后台授权推送 | 🟡 部分 | relay 侧 `PushProvider` 接口已就位（当前为 `LoggingPushProvider` 桩，**尚未接真实 APNs/FCM 投递**）；客户端目前**不依赖推送**，而是 App 回到前台时自动重连（指数退避）+ **turn-state 同步**（`SessionLive.executing`）补齐状态，避免漏审/按钮卡死 |
 
-> 超出原计划的增强：**端到端加密已默认启用**（`protocol/e2e/`：P-256 ECDH + HKDF + AES-256-GCM，relay 零知识只转密文），即原 NFR-6 / OQ-3 的「P1 可选」已提前转正为 v1 默认。
+> **超出原计划的增强**（已实现，需求初稿未列）：
+> - **端到端加密默认启用**（`protocol/e2e/`：P-256 ECDH + HKDF + AES-256-GCM，relay 零知识只转密文）——原 NFR-6 / OQ-3 的「P1 可选」提前转正为 v1 默认。
+> - **语音输入**：iOS 系统级实时听写（`SFSpeechRecognizer`，首选语言自适应、CJK 友好）；Android／桌面录音回传 Mac、由 whisper-cpp 本地转写（daemon `transcribe/`）。
+> - **图片附件**：单条消息最多 4 张，端上压缩到 256 KiB 帧上限内。
+> - **斜杠命令补全**：daemon 扫描 4 个来源（内置／用户 `~/.claude/commands`／项目 `.claude/commands`／skill），App 输入 `/` 自动补全。
+> - **会话内动态切换**：切权限模式、`/model` 切模型（重启子进程但保留「本会话总是允许」规则）。
+> - **观察模式**：只读旁观电脑终端里正在跑的 `claude` 会话，点「Continue here」接管为手机控制。
+> - **思考块 + token 用量**：extended thinking 实时流式（可折叠），结束态含缓存命中 token。
+> - **打断与排队**：会话进行中可中断（`CancelTurn`）；忙碌时追加消息自动排队，按回合依次送入。
+> - **桌面接力**：会话回收后在电脑 `claude --resume` 原地续接。
+> - **中文本地化**：App 内置 en/zh 两套文案。**匿名遥测**：客户端 Firebase 仅上报枚举级元数据（AppLaunch/Paired/Connected…），不含 prompt／会话内容。
 
 ---
 

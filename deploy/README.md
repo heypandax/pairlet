@@ -21,7 +21,7 @@ client ──HTTPS──> Cloudflare (proxy, edge cert for ark-nexus.cc)
 ```
 
 Public URL: `https://pocket.ark-nexus.cc/healthz` → `ok`
-WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `/v1/pair/redeem`.
+WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `/v1/pair/redeem`, `/v1/pair/code`.
 
 ## Server facts
 

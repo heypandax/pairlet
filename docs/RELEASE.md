@@ -41,7 +41,9 @@ security find-identity -v -p codesigning
 
 ### 4. notarytool 公证凭据（存一次进钥匙串）
 - **App 专用密码**：`appleid.apple.com` → 登录 → Sign-In and Security → App-Specific Passwords → 生成一个（如 `cc-pocket-notary`），记下（形如 `abcd-efgh-ijkl-mnop`）。
-- 存凭据：
+- 存凭据（二选一）：
+  - **脚本**（推荐）：把 `APPLE_ID` / `APPLE_APP_PASSWORD` / `APPLE_TEAM_ID` 填进仓库根 `.env`，跑 `bash scripts/notary-setup.sh`，它用这三个值执行下面的 `store-credentials`（profile 名 `cc-pocket`）。
+  - **手动**：
   ```bash
   xcrun notarytool store-credentials cc-pocket \
     --apple-id you@example.com \
@@ -51,7 +53,7 @@ security find-identity -v -p codesigning
 
 ### 5. GitHub 仓库
 - 主仓库 `heypandax/cc-pocket`（已存在）—— 发布页挂 artifact。
-- tap 仓库 **`heypandax/homebrew-tap`**（已建）—— 放 `Formula/cc-pocket.rb`（用 `packaging/homebrew/cc-pocket.rb` 当模板）。tap 名即 `heypandax/tap`。
+- tap 仓库 **`heypandax/homebrew-tap`**（已建）—— 放 `Casks/cc-pocket.rb`（用 `packaging/homebrew/Casks/cc-pocket.rb` 当模板）。tap 名即 `heypandax/tap`。artifact（`.tar.gz`）也上传到**这个 tap 仓库**的 GitHub Release（cask 的 `url` 指向它），不是主仓库。
 
 > 证书私钥**只在你创建它的那台 Mac**。换机器：钥匙串访问里选中证书+私钥 → 导出为 `.p12`（带密码）→ 在新机导入。Developer ID 证书一个 Team 数量有限（一般 2 个），别乱删。
 
@@ -59,27 +61,27 @@ security find-identity -v -p codesigning
 
 ## 每次发布
 
-1. **定版本**：更新 `daemon/build.gradle.kts` 的 `packageDaemon` 任务里 `--app-version`，以及 formula 的 `version`。
+1. **定版本**：更新 `daemon/build.gradle.kts` 的 `packageDaemon` 任务里 `--app-version`，以及 cask（`packaging/homebrew/Casks/cc-pocket.rb`）的 `version`。（移动端 app 是**独立版本线**——改 `mobile/composeApp/build.gradle.kts` 的 `versionName/versionCode` + `iosApp/iosApp/Info.plist`，随 App 发版单独走，不必和 daemon 对齐。）
 
 2. **打包 + 签名 + 公证**（在 Apple Silicon Mac 上）：
 
    ```bash
    export DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
    export NOTARY_PROFILE=cc-pocket
-   scripts/release-macos.sh 1.0.0
+   scripts/release-macos.sh 1.1.0
    ```
 
-   产出 `cc-pocket-daemon-1.0.0-macos-arm64.tar.gz` + 打印 sha256。
+   产出 `cc-pocket-daemon-1.1.0-macos-arm64.tar.gz` + 打印 sha256。
 
    **Intel 版**（可选，覆盖 x86 Mac 用户）：装一个 x86_64 的 JDK 17，然后在 Rosetta 下跑同一脚本：
 
    ```bash
-   arch -x86_64 env JAVA_HOME=/path/to/x86_64-jdk-17 scripts/release-macos.sh 1.0.0
+   arch -x86_64 env JAVA_HOME=/path/to/x86_64-jdk-17 scripts/release-macos.sh 1.1.0
    ```
 
    产出 `…-macos-x86_64.tar.gz`。（先只发 arm64 也行，多数 Mac 已是 Apple Silicon。）
 
-3. **建 GitHub Release** `v1.0.0`，把上面两个 tar.gz 作为附件上传。
+3. **建 GitHub Release** `v1.1.0`，把上面两个 tar.gz 作为附件上传。
 
 4. **更新 cask**：把 `packaging/homebrew/Casks/cc-pocket.rb` 的 `version` + `url` + `sha256` 填好，提交到 `heypandax/homebrew-tap` 的 `Casks/cc-pocket.rb`。
 

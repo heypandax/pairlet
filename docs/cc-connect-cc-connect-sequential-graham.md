@@ -1,6 +1,8 @@
 # 手机操控电脑 Claude Code —— 实现计划（参考 cc-connect，全 Kotlin 重写）
 
 > 配套文档：需求 [`REQUIREMENTS.md`](./REQUIREMENTS.md)（要做什么）；界面设计 [`design/`](./design/)（**已产出**，claude.ai/design handoff）。本文聚焦实现（怎么做）。
+>
+> **现状（2026-06-14）**：本计划的 M0–M4 已基本落地并发布（daemon 1.1.0 / app 1.0.1）。下文保留当初的实现规划原貌，与最终代码有几处出入，**以代码与 [`REQUIREMENTS.md`](./REQUIREMENTS.md) §6.1 为准**：E2E 实际用 **P-256**（非草案里的 X25519）且**默认启用**；权限模式实际为 **4 档**（`default / acceptEdits / plan / bypassPermissions`）；协议消息集已扩展（语音、图片、斜杠命令、思考块、观察模式等）。
 
 ## Context（为什么做这件事）
 

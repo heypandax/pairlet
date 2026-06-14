@@ -49,6 +49,7 @@ quit
 ```
 
 恢复已有会话：把 `ls` 列出的某个 `sessionId` 接在 open 后面 —— `open <目录> <sessionId>`。
+切权限模式：`mode <default|acceptEdits|plan|bypassPermissions>` —— daemon 会用新模式重启子进程（保留本会话「总是允许」规则）。
 授权弹窗：默认权限模式下，若你的 claude 配置会对某个工具询问，test-client 会显示 `[ASK] …`，输入 `allow` 或 `deny` 即可（你这台机器对常见工具是放行的，所以多数命令不弹窗——授权回环由单元测试 `PermissionBridgeTest` 确定性覆盖）。
 退出后 `pgrep -fl claude` 应看不到本 daemon 的子进程（干净杀树）。
 
