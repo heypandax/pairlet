@@ -34,6 +34,9 @@ class RelayE2EConnection {
     private val client = HttpClient { install(WebSockets) }
     private val outbox = Channel<Frame>(Channel.BUFFERED)
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
+    /** Relay control-plane frames (Attached, AuthError, PeerPresence) — NOT E2E daemon traffic. The
+     *  repository reads this to drive an honest connection state (e.g. "computer offline"). */
+    val control = MutableSharedFlow<Frame>(extraBufferCapacity = 16)
     private var nextId = 0L
 
     /** @param firstTicket the pairing ticket — supplied as PSK only on the very first connect after pairing. */
@@ -54,11 +57,15 @@ class RelayE2EConnection {
                 }
             }
             try {
-                for (frame in incoming) {
-                    if (frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT) {
+                for (frame in incoming) when {
+                    frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
                         val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
                         runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
                     }
+                    // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
+                    frame is WsFrame.Text ->
+                        runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
+                    else -> {}
                 }
             } finally {
                 writer.cancel()
@@ -72,8 +79,8 @@ class RelayE2EConnection {
         while (true) {
             val f = incoming.receive() as? WsFrame.Text ?: continue
             when (val b = runCatching { PocketJson.decodeFromString<Envelope>(f.readText()).body }.getOrNull()) {
-                is Attached -> return
-                is AuthError -> error("relay auth failed: ${b.code}")
+                is Attached -> { control.emit(b); return }
+                is AuthError -> { control.emit(b); throw RelayAuthException(b.code) }
                 else -> {}
             }
         }
@@ -89,3 +96,6 @@ class RelayE2EConnection {
     private fun control(frame: dev.ccpocket.protocol.ToRelay): String =
         PocketJson.encodeToString(Envelope("h", 0L, to = Route.RELAY, body = frame))
 }
+
+/** The relay rejected our device credential — re-pairing is required (not a transient network error). */
+class RelayAuthException(val code: String) : Exception("relay auth failed: $code")

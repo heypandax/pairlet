@@ -36,6 +36,22 @@
     <string name="status_conn_lost">connection lost — retrying…</string>
     <string name="status_failed">failed: %1$s</string>
 
+    <!-- ── connection-state UX (full-screen states + empty) ──────── -->
+    <string name="conn_retry">Try again</string>
+    <string name="conn_repair">Pair again</string>
+    <string name="conn_relay_unreachable_title">Can\'t reach the server</string>
+    <string name="conn_relay_unreachable_body">We can\'t reach CC Pocket\'s relay right now. Check your phone\'s internet and try again.</string>
+    <string name="conn_computer_offline_title">Your computer is offline</string>
+    <string name="conn_computer_offline_body">CC Pocket can\'t see your computer. Make sure it\'s awake and the cc-pocket app is running.</string>
+    <string name="conn_computer_offline_hint">We\'ll reconnect automatically as soon as it\'s back.</string>
+    <string name="conn_computer_offline_banner">Computer offline — waiting for it to come back…</string>
+    <string name="conn_pairing_invalid_title">Pairing expired</string>
+    <string name="conn_pairing_invalid_body">This phone is no longer paired with your computer. Pair again to reconnect.</string>
+    <string name="dir_empty_title">No projects yet</string>
+    <string name="dir_empty_body">Open a folder with the cc-pocket CLI on your computer, then pull to refresh.</string>
+    <string name="dir_refresh">Refresh</string>
+    <string name="dir_no_matches">No matches</string>
+
     <!-- ── directory browser ─────────────────────────────────────── -->
     <string name="choose_directory">Choose a directory</string>
     <string name="exit">Exit</string>

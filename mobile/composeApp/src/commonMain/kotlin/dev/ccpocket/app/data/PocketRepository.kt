@@ -3,6 +3,7 @@ package dev.ccpocket.app.data
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.app.ensureLocalNetworkAccess
+import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.RelayE2EConnection
 import dev.ccpocket.app.pairing.PairedDaemon
@@ -11,6 +12,8 @@ import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.Telemetry
 import dev.ccpocket.protocol.AssistantChunk
+import dev.ccpocket.protocol.Attached
+import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
@@ -28,6 +31,7 @@ import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.OpenSession
+import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -48,7 +52,6 @@ import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.status_checking_network
 import dev.ccpocket.app.resources.status_conn_lost
-import dev.ccpocket.app.resources.status_connected
 import dev.ccpocket.app.resources.status_connecting
 import dev.ccpocket.app.resources.status_disconnected
 import dev.ccpocket.app.resources.status_failed
@@ -105,6 +108,18 @@ enum class ImgState { Compressing, Ready, Rejected }
  */
 data class StatusMsg(val res: StringResource, val arg: String? = null)
 
+/**
+ * The single source of truth for what the connection UI shows. Driven by REAL transport/relay events
+ * (Attached, PeerPresence, the first Directories reply, AuthError) — never set optimistically.
+ *  - [Connecting] first attempt (skeleton during a short grace window)
+ *  - [Reconnecting] was Ready, link dropped — keep the old list under a slim banner
+ *  - [RelayUnreachable] never reached the relay within the grace window — "can't reach server"
+ *  - [ComputerOffline] relay reached (Attached) but the daemon is offline (PeerPresence=false)
+ *  - [PairingInvalid] relay rejected our credential (AuthError) — re-pair
+ *  - [Ready] Attached + daemon online + Directories received
+ */
+enum class ConnPhase { Connecting, Reconnecting, RelayUnreachable, ComputerOffline, PairingInvalid, Ready }
+
 /** A photo staged in the composer: [bytes] are the current JPEG for the thumbnail; [state] drives the tray UI. */
 class PendingImage(val id: Long, val bytes: ByteArray, val state: ImgState)
 
@@ -119,6 +134,15 @@ class PocketRepository(private val scope: CoroutineScope) {
     private var connectJob: Job? = null     // the socket loop; returns/throws when the link dies
     private var retryJob: Job? = null       // scheduled auto-reconnect
     private var retryAttempts = 0
+    private var controlJob: Job? = null     // collects relay control frames (Attached/PeerPresence/AuthError)
+    private var graceJob: Job? = null       // silent window before showing RelayUnreachable
+    private var listWaitJob: Job? = null    // post-attach wait for the first list before assuming the computer is offline
+    // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
+    private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
+    private var daemonOffline = false       // explicit: got PeerPresence(false), or the post-attach list-wait elapsed
+    private var pairingInvalid = false      // relay AuthError -> needs re-pair, never auto-retry
+    private var hadReadyThisSession = false // reached Ready at least once -> a later drop shows Reconnecting
+    private var relayDeadlinePassed = false // grace elapsed without attaching -> RelayUnreachable
 
     /**
      * True from a successful explicit connect until the user disconnects/unpairs. While true, a dead
@@ -127,12 +151,13 @@ class PocketRepository(private val scope: CoroutineScope) {
      */
     val sessionActive = mutableStateOf(false)
     val connected = mutableStateOf(false)
-    /** Steady "link is being re-established" signal for the banner — set on drop, cleared only once
-     *  the transport is truly attached (unlike [connected], which flips optimistically per attempt). */
-    val reconnecting = mutableStateOf(false)
+    /** Single source of truth for the connection-state UI (see [ConnPhase]); driven by real events. */
+    val phase = mutableStateOf(ConnPhase.Connecting)
     val status = mutableStateOf(StatusMsg(Res.string.status_disconnected))
     val paired = mutableStateOf<PairedDaemon?>(Pairing.load())
     val directories = mutableStateListOf<DirectoryEntry>()
+    /** True once the first Directories of a session arrives — distinguishes "empty" from "still loading". */
+    val directoriesLoaded = mutableStateOf(false)
     val refreshing = mutableStateOf(false)
     val sessions = mutableStateListOf<SessionSummary>()
     val sessionsDir = mutableStateOf<String?>(null)
@@ -234,13 +259,81 @@ class PocketRepository(private val scope: CoroutineScope) {
         }
     }
 
+    /** Recompute the observable [phase] from the per-session flags. Call after every relevant event. */
+    private fun recomputePhase() {
+        val ready = attachedThisSession && directoriesLoaded.value && !daemonOffline
+        phase.value = when {
+            pairingInvalid                                   -> ConnPhase.PairingInvalid
+            ready                                            -> ConnPhase.Ready
+            attachedThisSession && daemonOffline && useRelay -> ConnPhase.ComputerOffline
+            hadReadyThisSession                              -> ConnPhase.Reconnecting
+            relayDeadlinePassed                              -> ConnPhase.RelayUnreachable
+            else                                             -> ConnPhase.Connecting
+        }
+    }
+
+    /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
+    private fun handleControl(f: Frame) {
+        when (f) {
+            is Attached -> { attachedThisSession = true; connected.value = true; relayDeadlinePassed = false; startListWait(); recomputePhase() }
+            // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
+            // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
+            // transport (that surfaced as a spurious Reconnecting banner when opening a session).
+            is PeerPresence -> { val wasOffline = daemonOffline; daemonOffline = !f.online; if (f.online && wasOffline) onComputerBackOnline(); recomputePhase() }
+            is AuthError -> { pairingInvalid = true; retryJob?.cancel(); recomputePhase() }
+            else -> {}
+        }
+    }
+
+    /** The computer (re)attached. A restarted/reconnected daemon has a fresh E2E session and no memory of
+     *  the old Noise session, so re-handshake the whole transport — re-sending over the stale session would
+     *  just hit "transport before handshake" at the daemon. launchTransport(reconnect) re-syncs the page. */
+    private fun onComputerBackOnline() {
+        launchTransport(reconnect = true)
+    }
+
+    /** Silent window before declaring [ConnPhase.RelayUnreachable]. A first connect shows the skeleton for a
+     *  beat; a reconnect already keeps the old list under a banner, so it tolerates a longer quiet window. */
+    private fun startGrace(reconnect: Boolean) {
+        graceJob?.cancel()
+        graceJob = scope.launch {
+            delay(if (reconnect) RECONNECT_GRACE_MS else FIRST_GRACE_MS)
+            if (sessionActive.value && !attachedThisSession && !hadReadyThisSession && !pairingInvalid) {
+                relayDeadlinePassed = true
+                recomputePhase()
+            }
+        }
+    }
+
+    /** After [Attached], wait briefly for the first Directories. The relay sends no daemon-presence snapshot
+     *  on attach, so a silent computer (offline / zombie daemon) would otherwise hang on the skeleton — escalate
+     *  to ComputerOffline. A real Directories reply (handle()) cancels this and proves the computer is online. */
+    private fun startListWait() {
+        listWaitJob?.cancel()
+        listWaitJob = scope.launch {
+            delay(LIST_WAIT_MS)
+            if (sessionActive.value && attachedThisSession && !directoriesLoaded.value && !daemonOffline && !pairingInvalid) {
+                daemonOffline = true
+                recomputePhase()
+            }
+        }
+    }
+
     /** (Re)open the active transport's socket. Both transports re-handshake on every connect() call. */
     private fun launchTransport(reconnect: Boolean) {
-        connected.value = true // optimistic; onTransportDown reverts it if the link fails
+        connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
+        attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
+        if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false }
+        recomputePhase() // Connecting, or Reconnecting if we were Ready before — recomputePhase is the sole writer of phase
         status.value = StatusMsg(if (reconnect) Res.string.status_reconnecting else Res.string.status_connecting)
         if (inboundJob == null) {
             inboundJob = scope.launch {
                 if (useRelay) relay.inbound.collect { handle(it) } else direct.inbound.collect { handle(it) }
+            }
+        }
+        if (controlJob == null) {
+            controlJob = scope.launch {
+                (if (useRelay) relay.control else direct.control).collect { handleControl(it) }
             }
         }
         connectJob?.cancel()
@@ -257,15 +350,11 @@ class PocketRepository(private val scope: CoroutineScope) {
             if (err is CancellationException) return@launch // intentional disconnect/relaunch — not a failure
             onTransportDown(err)
         }
-        scope.launch {
-            // sends buffer in the transport's outbox and flush once the handshake lands
-            send(ListDirectories())
-            status.value = StatusMsg(Res.string.status_connected)
-            retryAttempts = 0
-            reconnecting.value = false
-            if (reconnect) restoreAfterReconnect()
-            Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to if (useRelay) "relay" else "direct"))
-        }
+        // ask for the list now; it buffers in the outbox and flushes once the handshake lands. Ready is
+        // asserted only when the real Directories reply arrives (see handle()), never optimistically here.
+        // On a reconnect, also re-sync whatever page the user is parked on (re-open a live chat, re-list sessions).
+        scope.launch { send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
+        startGrace(reconnect)
     }
 
     /** The socket died. Stay on the current screen; banner + backoff retries take it from here. */
@@ -276,12 +365,16 @@ class PocketRepository(private val scope: CoroutineScope) {
                 ?: StatusMsg(Res.string.status_disconnected)
             return
         }
-        reconnecting.value = true
+        if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
+            pairingInvalid = true; recomputePhase(); return
+        }
         status.value = StatusMsg(Res.string.status_conn_lost)
+        recomputePhase() // hadReady -> Reconnecting (keep list); else stays Connecting until grace -> RelayUnreachable
         scheduleRetry()
     }
 
     private fun scheduleRetry() {
+        if (pairingInvalid) return // an expired pairing won't fix itself by retrying
         retryJob?.cancel()
         val delayMs = (1000L shl retryAttempts.coerceAtMost(5)).coerceAtMost(30_000) // 1s 2s 4s 8s 16s 30s…
         retryAttempts++
@@ -293,11 +386,21 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     /** App came to the foreground (iOS suspends sockets in background) — reconnect now, fresh backoff. */
     fun onAppForeground() {
+        if (pairingInvalid) return
         if (sessionActive.value && !connected.value) {
             retryJob?.cancel()
             retryAttempts = 0
             launchTransport(reconnect = true)
         }
+    }
+
+    /** Manual "Try again" from the RelayUnreachable / ComputerOffline screens. */
+    fun retryConnection() {
+        if (!sessionActive.value || pairingInvalid) return
+        retryJob?.cancel()
+        retryAttempts = 0
+        relayDeadlinePassed = false
+        launchTransport(reconnect = true)
     }
 
     /** After the link is back: re-sync whatever page the user is parked on; reattach a live chat. */
@@ -317,10 +420,12 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
-        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel()
-        retryJob = null; connectJob = null; inboundJob = null
+        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel()
+        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null
         connected.value = false
-        reconnecting.value = false
+        phase.value = ConnPhase.Connecting
+        attachedThisSession = false; daemonOffline = false; pairingInvalid = false
+        hadReadyThisSession = false; relayDeadlinePassed = false; directoriesLoaded.value = false
         convoId.value = null
         sessionsDir.value = null
         pendingAsk.value = null
@@ -345,7 +450,17 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     private fun handle(f: Frame) {
         when (f) {
-            is Directories -> { replace(directories, f.entries); refreshing.value = false }
+            is Directories -> {
+                replace(directories, f.entries); refreshing.value = false
+                directoriesLoaded.value = true; daemonOffline = false; listWaitJob?.cancel() // a reply proves the computer is online
+                if (!useRelay) attachedThisSession = true // direct mode: socket + data == attached
+                connected.value = true; relayDeadlinePassed = false
+                if (!hadReadyThisSession) {
+                    hadReadyThisSession = true
+                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to if (useRelay) "relay" else "direct"))
+                }
+                recomputePhase()
+            }
             is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items) }
             is SessionLive -> {
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
@@ -816,6 +931,9 @@ class PocketRepository(private val scope: CoroutineScope) {
     }
 
     private companion object {
+        const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
+        const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
+        const val LIST_WAIT_MS = 6_000L       // after Attached, wait this long for the list before "computer offline"
         const val MAX_IMAGES = 4
         const val IMG_MAX_DIM = 1024 // longest side, true 1× pixels
         const val IMG_MAX_BYTES = 90_000 // per-image compression target (~120 KB base64); lets ~2 share a frame

@@ -20,6 +20,9 @@ class RelayConnection {
     private val client = HttpClient { install(WebSockets) }
     private val outbox = Channel<Frame>(Channel.BUFFERED)
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
+    /** Mirrors [RelayE2EConnection.control] so the repository can collect symmetrically. Direct LAN has
+     *  no relay control plane (no Attached/PeerPresence), so this stays empty. */
+    val control = MutableSharedFlow<Frame>(extraBufferCapacity = 16)
     private var nextId = 0L
 
     suspend fun connect(url: String) = coroutineScope {

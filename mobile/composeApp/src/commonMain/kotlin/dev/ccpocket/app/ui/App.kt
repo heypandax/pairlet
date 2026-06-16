@@ -72,6 +72,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -79,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
@@ -115,14 +117,18 @@ fun App(scope: CoroutineScope) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
-                if (repo.sessionActive.value && repo.reconnecting.value) ReconnectBanner()
+                if (repo.sessionActive.value && repo.phase.value == ConnPhase.Reconnecting) StatusBanner(Tok.danger, stringResource(Res.string.reconnect_banner))
                 Box(Modifier.weight(1f)) {
                     when {
-                        // a dead transport does NOT leave the content screens — the banner + auto-retry handle it
+                        // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
                         !repo.sessionActive.value -> if (repo.paired.value != null) ConnectScreen(repo) else PairingScreen(repo)
-                        repo.convoId.value != null -> ChatScreen(repo)
-                        repo.sessionsDir.value != null -> SessionsScreen(repo)
-                        else -> DirectoryScreen(repo)
+                        else -> ConnectionGate(repo) {
+                            when {
+                                repo.convoId.value != null -> ChatScreen(repo)
+                                repo.sessionsDir.value != null -> SessionsScreen(repo)
+                                else -> DirectoryScreen(repo)
+                            }
+                        }
                     }
                 }
             }
@@ -144,15 +150,114 @@ fun App(scope: CoroutineScope) {
     }
 }
 
-/** Slim danger strip above the content while the daemon link is being re-established. */
+/** Slim status strip above the content — reconnecting (danger-red) or computer-offline (amber). */
 @Composable
-private fun ReconnectBanner() {
+private fun StatusBanner(color: Color, text: String) {
     Row(
-        Modifier.fillMaxWidth().background(Tok.danger.copy(alpha = 0.14f)).padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().background(color.copy(alpha = 0.14f)).padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(stringResource(Res.string.reconnect_banner), color = Tok.danger, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/**
+ * Gates the content screens on the honest connection [ConnPhase]. Replaces "blank screen on any failure"
+ * with explicit, actionable states; self-heals (auto-retry) and only escalates to a full screen once a
+ * failure persists. Reconnecting/Ready just show the content (the slim banner rides above it).
+ */
+@Composable
+private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Unit) {
+    when (repo.phase.value) {
+        ConnPhase.PairingInvalid -> CenteredState(
+            Tok.danger,
+            stringResource(Res.string.conn_pairing_invalid_title),
+            stringResource(Res.string.conn_pairing_invalid_body),
+            stringResource(Res.string.conn_repair), { repo.unpair() },
+        )
+        ConnPhase.RelayUnreachable -> CenteredState(
+            Tok.warn,
+            stringResource(Res.string.conn_relay_unreachable_title),
+            stringResource(Res.string.conn_relay_unreachable_body),
+            stringResource(Res.string.conn_retry), { repo.retryConnection() }, onExit = { repo.disconnect() },
+        )
+        ConnPhase.ComputerOffline ->
+            if (repo.convoId.value != null) { StatusBanner(Tok.warn, stringResource(Res.string.conn_computer_offline_banner)); content() } // mid-chat: keep history
+            else CenteredState(
+                Tok.warn,
+                stringResource(Res.string.conn_computer_offline_title),
+                stringResource(Res.string.conn_computer_offline_body),
+                stringResource(Res.string.conn_retry), { repo.retryConnection() }, onExit = { repo.disconnect() },
+                hint = stringResource(Res.string.conn_computer_offline_hint),
+            )
+        ConnPhase.Connecting ->
+            if (repo.directoriesLoaded.value || repo.convoId.value != null) content() else DirectorySkeleton()
+        ConnPhase.Reconnecting, ConnPhase.Ready -> content()
+    }
+}
+
+/** A centered dot + title + body + primary action (+ optional hint / exit). Shared by the gate states. */
+@Composable
+private fun CenteredState(
+    dot: Color, title: String, body: String, primary: String, onPrimary: () -> Unit,
+    onExit: (() -> Unit)? = null, hint: String? = null,
+) {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        PulseDot(dot, size = 10.dp)
+        Spacer(Modifier.height(16.dp))
+        Text(title, color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(body, color = Tok.tx2, fontSize = 14.sp, textAlign = TextAlign.Center, lineHeight = 20.sp)
+        if (hint != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(hint, color = Tok.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.height(24.dp))
+        Button(onPrimary, Modifier.fillMaxWidth()) { Text(primary) }
+        if (onExit != null) {
+            Spacer(Modifier.height(8.dp))
+            TextButton(onExit) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 12.sp) }
+        }
+    }
+}
+
+/** First-connect placeholder: the directory header over a few shimmering rows (never a blank screen). */
+@Composable
+private fun DirectorySkeleton() {
+    val shimmer by rememberInfiniteTransition().animateFloat(
+        initialValue = 0.25f, targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+    )
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            PulseDot(Tok.warn)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold)
+        }
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(5) {
+                Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).graphicsLayer { alpha = shimmer }.background(Tok.surface))
+            }
+        }
+    }
+}
+
+/** Real empty-list state — connected, but the computer has no projects open yet (not a blank screen). */
+@Composable
+private fun EmptyDirectories(onRefresh: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(Res.string.dir_empty_title), color = Tok.tx, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(Res.string.dir_empty_body), color = Tok.tx2, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 19.sp)
+        Spacer(Modifier.height(20.dp))
+        OutlinedButton(onRefresh) { Text(stringResource(Res.string.dir_refresh)) }
     }
 }
 
@@ -202,7 +307,7 @@ private fun DirectoryScreen(repo: PocketRepository) {
     var query by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            PulseDot(Tok.ok) // connection bar concept: the live link indicator rides with the title
+            PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn) // live link indicator rides with the title
             Spacer(Modifier.width(8.dp))
             Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton({ repo.disconnect() }) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 13.sp) }
@@ -221,7 +326,12 @@ private fun DirectoryScreen(repo: PocketRepository) {
             onRefresh = { repo.refreshDirectories() },
             modifier = Modifier.fillMaxSize(),
         ) {
-            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (rows.isEmpty() && repo.directoriesLoaded.value) {
+                if (query.isBlank()) EmptyDirectories { repo.refreshDirectories() }
+                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
+                }
+            } else LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(rows) { row ->
                     when (row) {
                         is DirRow.Header -> Label(row.label)

@@ -36,6 +36,22 @@
     <string name="status_conn_lost">连接断开，重试中…</string>
     <string name="status_failed">失败：%1$s</string>
 
+    <!-- ── 连接状态 UX（整页状态 + 空态）─────────────────────────── -->
+    <string name="conn_retry">重试</string>
+    <string name="conn_repair">重新配对</string>
+    <string name="conn_relay_unreachable_title">无法连接到服务器</string>
+    <string name="conn_relay_unreachable_body">暂时连不上 CC Pocket 的中继服务器。请检查手机网络后重试。</string>
+    <string name="conn_computer_offline_title">你的电脑已离线</string>
+    <string name="conn_computer_offline_body">CC Pocket 找不到你的电脑。请确认电脑已唤醒，且 cc-pocket 正在运行。</string>
+    <string name="conn_computer_offline_hint">电脑恢复后会自动重新连接。</string>
+    <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
+    <string name="conn_pairing_invalid_title">配对已失效</string>
+    <string name="conn_pairing_invalid_body">这台手机已不再与你的电脑配对。请重新配对以恢复连接。</string>
+    <string name="dir_empty_title">还没有项目</string>
+    <string name="dir_empty_body">在电脑上用 cc-pocket 命令行打开一个文件夹，然后下拉刷新。</string>
+    <string name="dir_refresh">刷新</string>
+    <string name="dir_no_matches">没有匹配项</string>
+
     <!-- ── 目录浏览 ──────────────────────────────────────────────── -->
     <string name="choose_directory">选择目录</string>
     <string name="exit">退出</string>
