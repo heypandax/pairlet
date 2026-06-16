@@ -117,6 +117,7 @@ fun App(scope: CoroutineScope) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
+                if (repo.demoMode.value) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
                 if (repo.sessionActive.value && repo.phase.value == ConnPhase.Reconnecting) StatusBanner(Tok.danger, stringResource(Res.string.reconnect_banner))
                 Box(Modifier.weight(1f)) {
                     when {

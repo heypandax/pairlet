@@ -44,6 +44,7 @@ import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.ToolEvent
+import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.Transcript
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
@@ -155,6 +156,8 @@ class PocketRepository(private val scope: CoroutineScope) {
     val phase = mutableStateOf(ConnPhase.Connecting)
     val status = mutableStateOf(StatusMsg(Res.string.status_disconnected))
     val paired = mutableStateOf<PairedDaemon?>(Pairing.load())
+    /** No-pairing demo: when true, all I/O is short-circuited to local sample data (see [enterDemo]). */
+    val demoMode = mutableStateOf(false)
     val directories = mutableStateListOf<DirectoryEntry>()
     /** True once the first Directories of a session arrives — distinguishes "empty" from "still loading". */
     val directoriesLoaded = mutableStateOf(false)
@@ -321,6 +324,7 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     /** (Re)open the active transport's socket. Both transports re-handshake on every connect() call. */
     private fun launchTransport(reconnect: Boolean) {
+        if (demoMode.value) return // demo mode never touches the network
         connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
         attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
         if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false }
@@ -386,7 +390,7 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     /** App came to the foreground (iOS suspends sockets in background) — reconnect now, fresh backoff. */
     fun onAppForeground() {
-        if (pairingInvalid) return
+        if (demoMode.value || pairingInvalid) return
         if (sessionActive.value && !connected.value) {
             retryJob?.cancel()
             retryAttempts = 0
@@ -430,6 +434,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         sessionsDir.value = null
         pendingAsk.value = null
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear()
+        demoMode.value = false // leaving the demo returns to real pairing
         abandonVoice()
         status.value = StatusMsg(Res.string.status_disconnected)
         Telemetry.track(TelEvent.Disconnected)
@@ -439,6 +444,7 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
+        if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
             if (useRelay) relay.send(frame) else direct.send(frame)
         } catch (e: CancellationException) {
@@ -446,6 +452,69 @@ class PocketRepository(private val scope: CoroutineScope) {
         } catch (t: Throwable) {
             onTransportDown(t)
         }
+    }
+
+    // ── demo mode ─────────────────────────────────────────────────────────
+    // A no-pairing, no-account, fully on-device walkthrough (App Store review + first-run preview).
+    // It reuses the real path: outbound frames are answered by [demoRespond] with sample ToPhone frames
+    // fed back through handle(), so the UI state machine behaves exactly as it does over a live link.
+    private var demoSeq = 0L
+    private var demoAsked = false        // the one-time tool + permission demo has fired this session
+    private var demoPendingReply = false // a turn is paused on the demo permission prompt
+
+    /** Enter the demo: seed the project list + slash commands, then render like a connected session. */
+    fun enterDemo() {
+        demoMode.value = true
+        demoAsked = false
+        sessionActive.value = true
+        handle(Directories(DemoData.dirs())) // drives phase -> Ready via the normal handle() path
+        replace(slashCommands, DemoData.commands())
+    }
+
+    /** Synthesize the daemon's reply to an outbound [frame] from local sample data. */
+    private suspend fun demoRespond(frame: Frame) {
+        when (frame) {
+            is ListDirectories -> handle(Directories(DemoData.dirs()))
+            is ListSessions -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
+            is OpenSession -> {
+                val cid = "demo-convo-${frame.resumeId ?: "new"}"
+                handle(SessionLive(cid, frame.workdir, frame.resumeId ?: DemoData.LIVE_SESSION_ID, mode = frame.mode, executing = false))
+                handle(CommandList(cid, DemoData.commands()))
+                if (frame.resumeId != null) handle(ConvoHistory(cid, DemoData.history())) // resumed = preloaded transcript
+            }
+            is SendPrompt -> demoHandlePrompt(frame.convoId)
+            is PermissionVerdict -> if (demoPendingReply) { demoPendingReply = false; demoStream(frame.convoId, DemoData.REPLY_CHUNKS, thinking = false) }
+            is SwitchMode -> handle(SessionLive(frame.convoId, workdir.value ?: DemoData.LIVE_DIR, currentSessionId, mode = frame.mode, executing = false))
+            is CancelTurn -> handle(TurnDone(frame.convoId))
+            is AudioChunk -> if (frame.last) handle(Transcript(frame.convoId, frame.captureId, text = "show me the open files", ok = true))
+            else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel — nothing to echo
+        }
+    }
+
+    private suspend fun demoHandlePrompt(convoId: String) {
+        if (!demoAsked) {
+            // first turn demonstrates a tool call + permission prompt; the verdict resumes the reply
+            demoAsked = true
+            delay(500)
+            handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Thinking(DemoData.THINKING)))
+            delay(700)
+            handle(ToolEvent(convoId, demoSeq++, ToolPhase.START, DemoData.ASK_TOOL, DemoData.ASK_PREVIEW))
+            delay(300)
+            demoPendingReply = true
+            handle(PermissionAsk(convoId, "demo-ask-${demoSeq++}", DemoData.ASK_TOOL, DemoData.ASK_PREVIEW, title = DemoData.ASK_TITLE, rule = DemoData.ASK_RULE))
+            scope.launch { // safety: never leave the ■ button stuck if the prompt is ignored/dismissed
+                delay(40_000)
+                if (demoPendingReply) { demoPendingReply = false; demoStream(convoId, DemoData.REPLY_CHUNKS, thinking = false) }
+            }
+        } else {
+            demoStream(convoId, DemoData.PLAIN_REPLY_CHUNKS, thinking = true)
+        }
+    }
+
+    private suspend fun demoStream(convoId: String, chunks: List<String>, thinking: Boolean) {
+        if (thinking) { delay(400); handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Thinking(DemoData.THINKING))); delay(600) }
+        chunks.forEach { part -> handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Text(part))); delay(350) }
+        handle(TurnDone(convoId))
     }
 
     private fun handle(f: Frame) {

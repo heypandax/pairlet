@@ -21,6 +21,8 @@
     <string name="hide">收起</string>
     <string name="cant_scan_paste_link">无法扫码？粘贴链接</string>
     <string name="pair_from_link">通过链接配对</string>
+    <string name="demo_cta">体验 Demo · 无需电脑</string>
+    <string name="demo_banner">演示模式 · 示例数据</string>
 
     <!-- ── 连接状态（等宽状态行 + 顶部横幅）──────────────────────── -->
     <string name="reconnect_banner">连接已断开，正在重连…</string>

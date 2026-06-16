@@ -10,6 +10,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,7 +72,7 @@ fun PairingScreen(repo: PocketRepository) {
     val complete = code.length == 6
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
@@ -121,6 +123,11 @@ fun PairingScreen(repo: PocketRepository) {
             Spacer(Modifier.height(8.dp))
             OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect_direct)) }
         }
+
+        Spacer(Modifier.height(20.dp))
+        // No computer? Explore the whole app with sample data — no pairing or account needed.
+        OutlinedButton({ repo.enterDemo() }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.demo_cta)) }
+        Spacer(Modifier.height(24.dp))
     }
 }
 

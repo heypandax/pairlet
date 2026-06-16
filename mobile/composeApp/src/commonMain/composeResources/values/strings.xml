@@ -21,6 +21,8 @@
     <string name="hide">hide</string>
     <string name="cant_scan_paste_link">can't scan? paste link</string>
     <string name="pair_from_link">Pair from link</string>
+    <string name="demo_cta">Try Demo · no computer needed</string>
+    <string name="demo_banner">Demo mode · sample data</string>
 
     <!-- ── connection status (monospace line + banner) ───────────── -->
     <string name="reconnect_banner">Connection lost — reconnecting…</string>
