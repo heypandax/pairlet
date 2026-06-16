@@ -1,3 +1,12 @@
+{
+	# Disable HTTP/3 (QUIC) globally. Some restrictive / mobile networks break QUIC, and iOS would
+	# otherwise try h3 via the Alt-Svc header and hang ~60s before falling back — the root of the
+	# "phone can't reach the relay" failure. Forcing h1/h2 (TCP) makes URLSession use TCP directly.
+	servers {
+		protocols h1 h2
+	}
+}
+
 pocket.ark-nexus.cc {
 	# Caddy auto-provisions a Let's Encrypt cert (needs inbound 80/443 from the
 	# internet for the ACME challenge) and auto-handles the WebSocket upgrade,
