@@ -14,7 +14,9 @@ import dev.ccpocket.protocol.PairCredential
 import dev.ccpocket.protocol.PairRedeem
 import dev.ccpocket.protocol.PairTicket
 import dev.ccpocket.protocol.PeerPresence
+import dev.ccpocket.protocol.Ping
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.Pong
 import dev.ccpocket.protocol.RevokeDevice
 import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
@@ -195,6 +197,7 @@ class RelayServer(
                 }
             }
             is RevokeDevice -> if (store.revokeDevice(account, body.deviceId)) broker.closeDevice(account, body.deviceId)
+            is Ping -> broker.controlToDaemon(account, controlText(Pong(body.ts))) // app-level liveness echo
             else -> {} // daemons send no other control
         }
     }

@@ -300,6 +300,18 @@ data class RevokeDevice(val deviceId: String) : ToRelay
 @SerialName("pocket/peer.presence")
 data class PeerPresence(val online: Boolean) : ToRelay
 
+/** peer -> relay: application-level liveness probe. The relay echoes [Pong] with the same [ts].
+ *  Getting the echo proves the relay *application* (not merely the TCP socket) is alive — this
+ *  catches half-open/zombie links that the transport's TCP ping cannot. */
+@Serializable
+@SerialName("pocket/ping")
+data class Ping(val ts: Long) : ToRelay
+
+/** relay -> peer: echo of a [Ping]. */
+@Serializable
+@SerialName("pocket/pong")
+data class Pong(val ts: Long) : ToRelay
+
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----
 
 /** device -> relay (HTTP body): redeem a scanned ticket, registering its X25519 static pubkey. */

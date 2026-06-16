@@ -13,7 +13,9 @@ import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairTicket
 import dev.ccpocket.protocol.PeerPresence
+import dev.ccpocket.protocol.Ping
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.Pong
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.ToRelay
 import dev.ccpocket.protocol.e2e.Wire
@@ -22,6 +24,8 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
@@ -59,6 +63,8 @@ class RelayClient(
 
     @Volatile private var dataOut: Channel<ByteArray>? = null
     @Volatile private var peerOnline = false
+    @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness)
+    @Volatile private var sawPong = false  // this relay speaks Pong -> only then enforce the dead-link timeout
     private val sessions = DeviceSessions(core, identity) { deviceId, payload ->
         dataOut?.send(Wire.wrapDevice(deviceId, payload))
     }
@@ -107,6 +113,19 @@ class RelayClient(
             dataOut = outbox
             val dataWriter = launch { for (bytes in outbox) outgoing.send(WsFrame.Binary(true, bytes)) }
             val ctrlWriter = launch { for (c in controlOutbox) outgoing.send(WsFrame.Text(controlText(c))) }
+            // App-level heartbeat: a half-open/zombie link keeps the TCP socket ESTABLISHED and Ktor's
+            // transport ping satisfied, yet no Pong returns through the dead relay app. Force a reconnect.
+            sawPong = false; lastPongAt = System.currentTimeMillis()
+            val heartbeat = launch {
+                while (true) {
+                    delay(HEARTBEAT_INTERVAL_MS)
+                    controlOutbox.send(Ping(System.currentTimeMillis()))
+                    if (sawPong && System.currentTimeMillis() - lastPongAt > HEARTBEAT_DEAD_MS) {
+                        log.warn("relay heartbeat timeout (no pong in ${HEARTBEAT_DEAD_MS}ms); forcing reconnect")
+                        close(CloseReason(CloseReason.Codes.GOING_AWAY, "heartbeat timeout")); break
+                    }
+                }
+            }
             try {
                 for (frame in incoming) when (frame) {
                     is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
@@ -117,7 +136,7 @@ class RelayClient(
                 }
             } finally {
                 dataOut = null
-                outbox.close(); dataWriter.cancel(); ctrlWriter.cancel()
+                outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()
                 withContext(NonCancellable) { sessions.onDisconnect() }
             }
         }
@@ -145,6 +164,7 @@ class RelayClient(
             is PairTicket -> inboundControl.emit(body)
             is DevicePaired -> sessions.onDevicePaired(body.deviceId, body.devicePubKey)
             is PeerPresence -> { peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
+            is Pong -> { if (!sawPong) log.info("relay heartbeat armed (pong received)"); sawPong = true; lastPongAt = System.currentTimeMillis() }
             else -> {}
         }
     }
@@ -152,5 +172,9 @@ class RelayClient(
     private fun controlText(frame: ToRelay): String =
         PocketJson.encodeToString(Envelope(ctrlId.getAndIncrement().toString(), 0L, to = Route.RELAY, body = frame))
 
-    private companion object { const val IDLE_REAP_MS = 15 * 60 * 1000L } // 15 min idle -> reclaim
+    private companion object {
+        const val IDLE_REAP_MS = 15 * 60 * 1000L  // 15 min idle -> reclaim
+        const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
+        const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this (after one was seen) -> reconnect
+    }
 }
