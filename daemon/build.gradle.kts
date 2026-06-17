@@ -57,7 +57,7 @@ tasks.register<Exec>("packageDaemon") {
         "${System.getProperty("java.home")}/bin/jpackage",
         "--type", "app-image",
         "--name", "cc-pocket-daemon",
-        "--app-version", "1.1.1",
+        "--app-version", "1.1.2",
         "--input", layout.buildDirectory.dir("install/cc-pocket-daemon/lib").get().asFile.absolutePath,
         "--main-jar", "daemon-${project.version}.jar",
         "--main-class", "dev.ccpocket.daemon.MainKt",

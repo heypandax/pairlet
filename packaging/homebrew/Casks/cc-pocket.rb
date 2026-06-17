@@ -2,8 +2,8 @@
 # so it needs no Command Line Tools). Lives in the tap repo: heypandax/homebrew-tap → Casks/cc-pocket.rb
 # Users: brew install --cask heypandax/tap/cc-pocket
 cask "cc-pocket" do
-  version "1.1.1"
-  sha256 "a714fa7f3f88c1cf5de3b0e0f1e8d3d6064f42b629d79de559df013fa9d52d90"
+  version "1.1.2"
+  sha256 "b9a99fdabe8dbba3d9863d75c64574a8d8d7f5e62c978497e5ed81996a48277c"
 
   url "https://github.com/heypandax/homebrew-tap/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-arm64.tar.gz"
   name "CC Pocket daemon"
