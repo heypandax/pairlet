@@ -1,11 +1,13 @@
 # Homebrew CASK for the cc-pocket daemon (a prebuilt, notarized binary — NOT a buildable formula,
-# so it needs no Command Line Tools). Lives in the tap repo: heypandax/homebrew-tap → Casks/cc-pocket.rb
+# so it needs no Command Line Tools). The cask file lives in the tap repo
+# (heypandax/homebrew-tap → Casks/cc-pocket.rb); the artifact (.tar.gz) is hosted on the MAIN repo's
+# Releases (heypandax/cc-pocket) — the url below points there. The tap holds only this description.
 # Users: brew install --cask heypandax/tap/cc-pocket
 cask "cc-pocket" do
-  version "1.1.2"
-  sha256 "b9a99fdabe8dbba3d9863d75c64574a8d8d7f5e62c978497e5ed81996a48277c"
+  version "1.1.3"
+  sha256 "839dbefeda04ff045dc2bcacade70a547968374bb35d82e9f8a2282cd6f4508a"
 
-  url "https://github.com/heypandax/homebrew-tap/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-arm64.tar.gz"
+  url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-arm64.tar.gz"
   name "CC Pocket daemon"
   desc "Drive Claude Code on your Mac from your phone over a zero-knowledge E2E relay"
   homepage "https://github.com/heypandax/cc-pocket"

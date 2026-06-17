@@ -60,7 +60,13 @@ class BackgroundJobRegistry {
     fun onToolResult(toolUseId: String?, content: String?, isError: Boolean, now: Long): Boolean {
         val job = jobs[toolUseId] ?: return false
         job.lastUpdate = now
-        if (job.kind == JobKind.BASH_BACKGROUND) return false // the shell finishes later via a system task_* event
+        if (job.kind == JobKind.BASH_BACKGROUND) {
+            // a normal bg-Bash reports "started" here and finishes later via a system task_* event — so a
+            // success result is NOT terminal. But an ERROR result means the launch never backgrounded: that
+            // later task_* event will never come, so settle it now instead of leaking a forever-RUNNING job.
+            if (isError && job.status == JobStatus.RUNNING) { job.status = JobStatus.FAILED; return true }
+            return false
+        }
         if (job.status != JobStatus.RUNNING) return false
         job.status = if (isError) JobStatus.FAILED else JobStatus.DONE
         return true
@@ -89,6 +95,25 @@ class BackgroundJobRegistry {
         if (job.status == next || next == JobStatus.RUNNING) return false // never resurrect a finished job
         job.status = next
         return true
+    }
+
+    /**
+     * Backstop for the case onToolResult can't see: a backgrounded shell whose completion `task_*` event
+     * never arrives (turn ended, the phone was away, the event was dropped). A bg-Bash that has been RUNNING
+     * with NO update for [staleMs] is almost certainly long dead — settle it as KILLED so the count clears
+     * and the session becomes idle-reapable. Sub-agents / monitors complete synchronously from the turn and
+     * are never reaped here. Returns true if anything changed (caller re-emits the snapshot).
+     */
+    fun reapStale(now: Long, staleMs: Long): Boolean {
+        var changed = false
+        for (job in jobs.values) {
+            if (job.kind == JobKind.BASH_BACKGROUND && job.status == JobStatus.RUNNING && now - job.lastUpdate > staleMs) {
+                job.status = JobStatus.KILLED
+                job.lastUpdate = now
+                changed = true
+            }
+        }
+        return changed
     }
 
     fun hasRunning(): Boolean = jobs.values.any { it.status == JobStatus.RUNNING }

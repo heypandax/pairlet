@@ -187,6 +187,12 @@ class PocketRepository(private val scope: CoroutineScope) {
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
 
+    // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
+    // session closes its process; reopening resumes a FRESH process that would otherwise default these.
+    // Remember the last-known set per sessionId so a reopen restores the badge + relaunches under them.
+    private data class SessionParams(val mode: PermissionMode, val model: String?, val effort: String?)
+    private val sessionParams = mutableMapOf<String, SessionParams>()
+
     // ── voice input (dictation) ───────────────────────────────────────────
     val voice = mutableStateOf<VoiceState>(VoiceState.Idle)
     val voiceLevels = mutableStateListOf<Float>()            // rolling envelope window driving the waveform
@@ -551,6 +557,8 @@ class PocketRepository(private val scope: CoroutineScope) {
                     streaming.value = exec
                 }
                 switching.value = false
+                // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
+                f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value) }
             }
             is AssistantChunk -> appendChunk(f)
             is ToolEvent -> { finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
@@ -640,11 +648,16 @@ class PocketRepository(private val scope: CoroutineScope) {
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
-        mode.value = startMode; allowRules.clear()
-        model.value = null; effort.value = null; contextUsed.value = null // repopulated by the session's SessionLive
+        // restore the session's last-known launch flags: shows the right badge immediately (no default flash)
+        // AND relaunches under them if the daemon closed the process while we were away. A live session's
+        // reattach SessionLive still wins as the source of truth right after.
+        val saved = resumeId?.let { sessionParams[it] }
+        val openMode = saved?.mode ?: startMode
+        mode.value = openMode; allowRules.clear()
+        model.value = saved?.model; effort.value = saved?.effort; contextUsed.value = null // reconciled by SessionLive
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
-        send(OpenSession(wd, resumeId, mode = startMode))
+        send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = saved?.effort))
     }
 
     fun hasReadyImages() = pendingImages.any { it.state == ImgState.Ready }

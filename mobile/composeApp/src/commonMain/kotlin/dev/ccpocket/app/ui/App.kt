@@ -510,7 +510,7 @@ private fun ChatScreen(repo: PocketRepository) {
             .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
     }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
-    LaunchedEffect(repo.messages.size, repo.messages.lastOrNull()) {
+    LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
         if (pinned && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
     }
     // when the keyboard opens/animates, keep the latest message pinned above the input
@@ -554,6 +554,12 @@ private fun ChatScreen(repo: PocketRepository) {
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(repo.messages) { m -> MessageItem(m) { imgs, i -> viewer = imgs to i } }
+                    // a turn is running but nothing live is on screen yet — e.g. just after sending, or
+                    // after re-entering a mid-turn session (the streamed Thinking row isn't in the replayed
+                    // transcript). A live Thinking/Assistant row already shows progress, so don't double up.
+                    val last = repo.messages.lastOrNull()
+                    val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
+                    if (repo.streaming.value && !liveContent) item { WorkingRow() }
                 }
                 if (!pinned) {
                     val pillScope = rememberCoroutineScope()
@@ -765,6 +771,22 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
 @Composable
 private fun Label(text: String) =
     Text(text, color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+
+/**
+ * "Thinking…" activity row: a pulsing dot + label shown while a turn is running but nothing live is on
+ * screen yet (just-sent, or re-entered mid-turn where the streamed reasoning wasn't in the transcript).
+ */
+@Composable
+private fun WorkingRow() {
+    Row(
+        Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PulseDot(Tok.muted)
+        Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
 
 /** Extended reasoning, collapsed to one italic line; expands to the full text behind a hairline rule. */
 @Composable

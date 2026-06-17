@@ -86,6 +86,37 @@ class BackgroundJobRegistryTest {
     }
 
     @Test
+    fun background_bash_error_result_settles_as_failed() {
+        // a bg-bash whose LAUNCH errors gets no later system task_* event, so the error result must settle it
+        val r = BackgroundJobRegistry()
+        r.onToolUse("toolu_1", "Bash", bgBash("nope"), now = 1)
+        assertTrue(r.onToolResult("toolu_1", "command timed out", isError = true, now = 2))
+        assertFalse(r.hasRunning())
+        assertEquals(JobStatus.FAILED, r.snapshot().single().status)
+    }
+
+    @Test
+    fun reap_stale_settles_a_silent_background_bash() {
+        val r = BackgroundJobRegistry()
+        r.onToolUse("toolu_1", "Bash", bgBash("server"), now = 1)
+        r.onToolResult("toolu_1", "started", isError = false, now = 2) // still RUNNING, lastUpdate = 2
+        assertFalse(r.reapStale(now = 100, staleMs = 1000)) // not stale yet
+        assertTrue(r.hasRunning())
+        assertTrue(r.reapStale(now = 2_000, staleMs = 1000)) // silent past the window -> reaped
+        assertFalse(r.hasRunning())
+        assertEquals(JobStatus.KILLED, r.snapshot().single().status)
+        assertFalse(r.reapStale(now = 9_999, staleMs = 1000)) // idempotent — never resurrects/re-reaps
+    }
+
+    @Test
+    fun reap_stale_leaves_subagents_alone() {
+        val r = BackgroundJobRegistry()
+        r.onToolUse("a1", "Task", buildJsonObject { put("description", "x") }, now = 1)
+        assertFalse(r.reapStale(now = 10_000_000, staleMs = 1000)) // sub-agents complete from the turn, never reaped
+        assertTrue(r.hasRunning())
+    }
+
+    @Test
     fun clear_empties_and_reports_change() {
         val r = BackgroundJobRegistry()
         r.onToolUse("t1", "Bash", bgBash("x"), now = 1)

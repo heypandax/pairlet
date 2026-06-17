@@ -25,6 +25,7 @@ data class OpenSession(
     val resumeId: String? = null,
     val model: String? = null,
     val mode: PermissionMode = PermissionMode.DEFAULT,
+    val effort: String? = null, // reasoning effort to relaunch under; restores the session's last setting on reopen
     val takeOver: Boolean = false, // true = resume/control even a session live in a terminal (vs observe)
 ) : ToDaemon
 

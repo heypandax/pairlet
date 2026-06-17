@@ -120,8 +120,9 @@ class Conversation(
     private fun live(sid: String?) =
         SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort)
 
-    fun open(resumeId: String?, model: String?) {
+    fun open(resumeId: String?, model: String?, effort: String? = null) {
         this.model = model
+        this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
         launchProcess(ClaudeSpec(workdir, resumeId, model, mode, effort = effort))
         // claude in `--input-format stream-json` emits NOTHING (not even the system/init that would
@@ -152,6 +153,17 @@ class Conversation(
 
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
     fun hasBackgroundWork(): Boolean = jobs.hasRunning()
+
+    /**
+     * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
+     * pushing the refreshed snapshot to the phone. Driven by the daemon's periodic reaper so a forever-RUNNING
+     * count clears even with no stream activity. Returns true if anything was reaped.
+     */
+    suspend fun reapStaleJobs(staleMs: Long): Boolean {
+        val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
+        if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+        return changed
+    }
 
     /** Relaunch claude resuming the same session under a new permission mode. Keeps allow-rules + history. */
     suspend fun switchMode(newMode: PermissionMode) {
