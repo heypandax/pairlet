@@ -111,3 +111,63 @@ security find-identity -v -p codesigning
 - **必须用 Cask 不用 Formula**：产物是预编译 + 已公证的二进制。Homebrew **Formula** 会强制跑「Command Line Tools 体检」（哪怕不编译，且常误报 CLT 过旧 → 装不上），**Cask** 是预编译通道、不碰 CLT。所以分发用 `Casks/cc-pocket.rb` + `brew install --cask`。
 - **tap-trust 提示**：`heypandax/tap` 是第三方 tap，brew 会打一行 "not trusted" 警告（非阻塞）；Homebrew 6.0 后会要求 `brew trust`，到时文档补一句即可。
 - **公证 vs 不公证**：叠加公证后**任何下载路径都零 Gatekeeper 警告**，最稳。
+
+---
+
+# 发布 iOS App（App Store）
+
+移动端 iOS app（`com.panda.ccpocket`）走 **App Store**，与 daemon 完全独立。**关键结论：不需要 App Store Connect API key / Issuer ID**——签名和上传都靠 Xcode 已登录账号的自动签名（cloud-managed distribution）。
+
+## 前提（一次性）
+
+- Apple Developer 账号，Team `SC9S2SJ42G`（个人账号 `pandaleecn@gmail.com`；`dev.ccpocket.app` 被旧账号占用，故 bundle id 改用 `com.panda.ccpocket`）。
+- **Xcode 登录该账号**：Settings（⌘,）→ Accounts → 加 Apple ID。自动签名 + 上传都依赖这个会话。
+- 自动签名已写进 `iosApp/project.yml`（`CODE_SIGN_STYLE: Automatic`、`DEVELOPMENT_TEAM: SC9S2SJ42G`）。
+- 发布证书是 **Apple 云端托管**，**不会**出现在本机 `security find-identity -v -p codesigning` 里——看不到属正常，不代表缺证书。
+- `build/ios/ExportOptions.plist` 已在仓库里：`method=app-store-connect`、`destination=upload`、`teamID=SC9S2SJ42G`、`uploadSymbols`。
+
+> `.env` 里的 `APPLE_ID` / `APPLE_APP_PASSWORD` 是给 **daemon 公证**（notarytool）用的，与 App Store iOS 上传**无关**，别混。
+
+## 每次发布
+
+1. **定版本（两处保持 lockstep）**：
+   - `iosApp/iosApp/Info.plist`：`CFBundleShortVersionString`（营销版本，如 `1.0`）+ `CFBundleVersion`（构建号）。
+   - `mobile/composeApp/build.gradle.kts`：`versionName` / `versionCode` 与上面一致。
+   - **构建号每次上传必须自增**（同一营销版本下唯一且递增）；如 `1.0(1)` 被拒后重传用 `1.0(2)`。
+
+2. **归档（Release，自动签名）**：
+   ```bash
+   cd <repo 根>
+   xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
+     -destination 'generic/platform=iOS' \
+     -archivePath build/ios/CCPocket.xcarchive \
+     -allowProvisioningUpdates archive
+   ```
+   - archive 的 `Compile Kotlin Framework` build phase 会自动跑 `./gradlew :mobile:composeApp:embedAndSignAppleFrameworkForXcode`；Release 的 Kotlin/Native 编译较慢，**几分钟正常**。
+
+3. **导出 + 直传 App Store Connect**：
+   ```bash
+   xcodebuild -exportArchive \
+     -archivePath build/ios/CCPocket.xcarchive \
+     -exportOptionsPlist build/ios/ExportOptions.plist \
+     -exportPath build/ios/export \
+     -allowProvisioningUpdates
+   ```
+   - 因为 ExportOptions 里 `destination=upload`，这条会**签名后直接上传**（不落 IPA 到磁盘，`build/ios/export/` 为空属正常）。
+   - **成功标志**：日志出现 `Progress 100%: Upload succeeded.` + `** EXPORT SUCCEEDED **` + `Uploaded iosApp`。
+   - `Upload Symbols Failed`（Firebase / Google 第三方框架缺 dSYM）是**非致命告警**，可忽略（只影响这些框架的崩溃符号化）。
+
+4. **等 Apple 处理**：约 10–30 分钟，构建在 App Store Connect 从 “Processing” 变为可选。
+
+5. **网页操作（无 API，只能手动）**：
+   - 进对应 version → Build 区选中刚上传的构建。
+   - 回答出口合规（Export Compliance）等问询。
+   - **首次提交**：填完信息 → Submit for Review。
+   - **被拒后重新提交**（如 Guideline 2.1a）：同一 version 选新构建 → **Resolution Center** 回复审核员 → 重新提交。Resolution Center 回复**没有 API，只能网页手动**。
+
+## 注意事项 / 坑
+
+- **不需要 issuer / API key**：`1.0(1)` 和 `1.0(2)` 都是 Xcode 账号自动签名 + `-allowProvisioningUpdates`。若哪天要做无人值守 CI，才需要 App Store Connect API key（`.p8` + Key ID + **Issuer ID** + key 角色 ≥ App Manager）。
+- **本机看不到发布证书是正常的**（云端托管），别误判为缺证书去乱建。
+- **CLI `tail` 吞退出码**：`xcodebuild ... | tail` 的退出码是 `tail` 的，会把失败误判成成功；要判结果就 `> log 2>&1` 后单独看 `$?` 或 grep `** EXPORT SUCCEEDED/FAILED **`。
+- **伴侣 App 审核**：本 app 主功能需配对桌面 daemon，审核员进不去 → 触发 2.1a。已内置免配对 **Demo 模式**（配对页底部 “Try Demo”）供审核；详见提交时的 App Review Notes。

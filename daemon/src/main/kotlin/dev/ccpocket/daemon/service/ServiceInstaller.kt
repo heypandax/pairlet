@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.service
 
+import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.writeText
@@ -17,8 +18,21 @@ object ServiceInstaller {
     }
 
     private fun mac(exec: String, args: List<String>, apply: Boolean): String {
-        val plistPath = Path.of(System.getProperty("user.home"), "Library", "LaunchAgents", "dev.ccpocket.daemon.plist")
-        val argsXml = (listOf(exec) + args).joinToString("\n") { "        <string>$it</string>" }
+        val home = System.getProperty("user.home")
+        val plistPath = Path.of(home, "Library", "LaunchAgents", "dev.ccpocket.daemon.plist")
+        val logDir = Path.of(home, "Library", "Logs", "cc-pocket")
+        val outLog = logDir.resolve("daemon.out.log")
+        val errLog = logDir.resolve("daemon.err.log")
+
+        // launchd starts login agents with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin) — no Homebrew,
+        // no node — so the daemon can't reliably find `claude`. We're invoked from the user's shell (or a
+        // Homebrew postflight), so seed the agent's PATH from ours and UNION in the well-known bin dirs;
+        // that keeps it correct even when the caller's environment was sanitized.
+        val wellKnown = listOf("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
+        val path = (System.getenv("PATH")?.split(":").orEmpty() + wellKnown)
+            .map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(":")
+
+        val argsXml = (listOf(exec) + args).joinToString("\n") { "        <string>${xml(it)}</string>" }
         val plist = """
             |<?xml version="1.0" encoding="UTF-8"?>
             |<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,20 +41,37 @@ object ServiceInstaller {
             |    <key>ProgramArguments</key><array>
             |$argsXml
             |    </array>
+            |    <key>EnvironmentVariables</key><dict>
+            |        <key>PATH</key><string>${xml(path)}</string>
+            |        <key>HOME</key><string>${xml(home)}</string>
+            |    </dict>
             |    <key>RunAtLoad</key><true/>
             |    <key>KeepAlive</key><true/>
+            |    <key>ThrottleInterval</key><integer>10</integer>
+            |    <key>StandardOutPath</key><string>${xml(outLog.toString())}</string>
+            |    <key>StandardErrorPath</key><string>${xml(errLog.toString())}</string>
             |</dict></plist>
         """.trimMargin()
-        return if (apply) {
-            Files.createDirectories(plistPath.parent)
-            plistPath.writeText(plist)
-            runCatching { ProcessBuilder("launchctl", "unload", plistPath.toString()).start().waitFor() }
-            ProcessBuilder("launchctl", "load", plistPath.toString()).start().waitFor()
-            "installed + loaded launchd agent: $plistPath"
-        } else {
-            "macOS launchd agent — write to $plistPath then `launchctl load <plist>` (or re-run with --apply):\n\n$plist"
+
+        if (!apply) {
+            return "macOS launchd agent — write to $plistPath then `launchctl load <plist>` (or re-run with --apply):\n\n$plist"
         }
+        // Refuse to install a plist whose launcher is missing — that's the classic
+        // "/usr/local/bin on Apple Silicon" footgun that fails at every boot with EX_CONFIG (78).
+        require(File(exec).canExecute()) {
+            "launcher not executable: $exec — pass --exec with the real cc-pocket-daemon path"
+        }
+        Files.createDirectories(logDir)
+        Files.createDirectories(plistPath.parent)
+        plistPath.writeText(plist)
+        runCatching { ProcessBuilder("launchctl", "unload", plistPath.toString()).start().waitFor() }
+        ProcessBuilder("launchctl", "load", plistPath.toString()).start().waitFor()
+        return "installed + loaded launchd agent: $plistPath\n  logs: $errLog"
     }
+
+    /** Minimal XML text escaping for plist <string> values. */
+    private fun xml(s: String): String =
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     private fun linux(exec: String, args: List<String>): String {
         val unit = """
