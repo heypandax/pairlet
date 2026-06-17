@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -25,7 +26,7 @@ object StreamParser {
         return when (val type = root.str("type")) {
             "system" -> listOf(parseSystem(root))
             "assistant" -> parseAssistant(root)
-            "user" -> listOf(ClaudeEvent.UserReplay)
+            "user" -> parseUser(root)
             "result" -> listOf(parseResult(root))
             "control_request" -> listOf(parseControlRequest(root))
             "control_cancel_request" -> listOf(ClaudeEvent.ControlCancel(root.str("request_id") ?: ""))
@@ -34,6 +35,19 @@ object StreamParser {
     }
 
     private fun parseSystem(root: JsonObject): ClaudeEvent {
+        // background-task lifecycle (backgrounded shells): claude emits these as system events, NOT in the
+        // tool_result. They carry session_id too, so they must be matched on subtype BEFORE the init fallback.
+        when (root.str("subtype")) {
+            "task_started" -> root.str("task_id")?.let {
+                return ClaudeEvent.BackgroundTaskStarted(it, root.str("tool_use_id"), root.str("description"), root.str("task_type"))
+            }
+            "task_updated" -> root.str("task_id")?.let {
+                return ClaudeEvent.BackgroundTaskUpdated(it, (root["patch"] as? JsonObject)?.let { p -> p.str("status") })
+            }
+            "task_notification" -> root.str("task_id")?.let {
+                return ClaudeEvent.BackgroundTaskUpdated(it, root.str("status"))
+            }
+        }
         // session_id appears on hook_started/hook_response as well as init — take the first one we see
         // so the conversation goes "live" immediately, not only once `init` lands.
         val sid = root.str("session_id")
@@ -60,6 +74,32 @@ object StreamParser {
                 else -> null
             }
         }
+    }
+
+    /**
+     * A `user` line is either a replayed user turn (--replay-user-messages) or claude feeding tool_results
+     * back in. We surface tool_results (for background-job tracking) and treat everything else as a replay.
+     */
+    private fun parseUser(root: JsonObject): List<ClaudeEvent> {
+        val content = (root["message"] as? JsonObject)?.get("content") as? JsonArray
+            ?: return listOf(ClaudeEvent.UserReplay)
+        val results = content.mapNotNull { el ->
+            val block = el as? JsonObject ?: return@mapNotNull null
+            if (block.str("type") != "tool_result") return@mapNotNull null
+            ClaudeEvent.ToolResult(
+                toolUseId = block.str("tool_use_id"),
+                content = toolResultText(block["content"]),
+                isError = (block["is_error"] as? JsonPrimitive)?.booleanOrNull == true,
+            )
+        }
+        return results.ifEmpty { listOf(ClaudeEvent.UserReplay) }
+    }
+
+    /** tool_result `content` is either a raw string or an array of {type:text,text:…} blocks. */
+    private fun toolResultText(el: JsonElement?): String? = when (el) {
+        is JsonPrimitive -> el.contentOrNull
+        is JsonArray -> el.mapNotNull { (it as? JsonObject)?.str("text") }.joinToString("\n").ifBlank { null }
+        else -> null
     }
 
     private fun parseResult(root: JsonObject): ClaudeEvent {

@@ -54,6 +54,21 @@ fun MarkdownText(text: String, color: Color) {
     }
 }
 
+/** A small "copy/copied" affordance that copies [text] to the clipboard and flashes confirmation. */
+@Composable
+fun CopyChip(text: String, modifier: Modifier = Modifier) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) { if (copied) { delay(1500); copied = false } }
+    Text(
+        stringResource(if (copied) Res.string.code_copied else Res.string.code_copy),
+        color = if (copied) Tok.ok else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+        modifier = modifier.clip(RoundedCornerShape(5.dp))
+            .clickable { clipboard.setText(AnnotatedString(text)); copied = true }
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+    )
+}
+
 /** Fenced block per the design: hairline container, surface header (language + copy), mono body. */
 @Composable
 private fun CodeBlock(code: String, lang: String?) {

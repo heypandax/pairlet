@@ -14,6 +14,15 @@ sealed interface ClaudeEvent {
     data class AssistantThinking(val text: String) : ClaudeEvent
     data class AssistantToolUse(val id: String?, val name: String, val input: JsonObject?) : ClaudeEvent
 
+    /** a tool_result block from a `user` line — carries the originating tool_use id + (text) content. */
+    data class ToolResult(val toolUseId: String?, val content: String?, val isError: Boolean) : ClaudeEvent
+
+    /** `system/task_started` — a background task (e.g. a backgrounded shell) began; links task_id to its tool_use. */
+    data class BackgroundTaskStarted(val taskId: String, val toolUseId: String?, val description: String?, val taskType: String?) : ClaudeEvent
+
+    /** `system/task_updated` or `task_notification` — a background task changed state (status: completed/failed/…). */
+    data class BackgroundTaskUpdated(val taskId: String, val status: String?) : ClaudeEvent
+
     /** replayed user turn (from --replay-user-messages). */
     data object UserReplay : ClaudeEvent
 

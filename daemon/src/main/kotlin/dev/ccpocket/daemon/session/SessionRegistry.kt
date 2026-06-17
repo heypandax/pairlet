@@ -58,17 +58,29 @@ class SessionRegistry(
         return convoId
     }
 
-    /** Close conversations with no claude activity for longer than [idleMs]. Returns the reap count. */
+    /**
+     * Close conversations with no claude activity for longer than [idleMs]. Returns the reap count.
+     * A conversation with running background work is NEVER reaped — killing it would take its still-running
+     * background shells / sub-agents with it (the "I left it running" case this is meant to preserve).
+     */
     suspend fun reapIdle(idleMs: Long): Int {
         val now = System.currentTimeMillis()
         val stale = mutex.withLock {
-            val s = convos.filterValues { now - it.lastActivityMs > idleMs }
+            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.hasBackgroundWork() }
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
         stale.forEach { it.close() }
         return stale.size
     }
+
+    /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
+    suspend fun busyCwds(): Set<String> =
+        mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }
+
+    /** sessionIds of live conversations with running background work — keep their session row's "running" badge on. */
+    suspend fun busySessionIds(): Set<String> =
+        mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.mapNotNull { it.sessionId }.toSet() }
 
     suspend fun sendPrompt(p: SendPrompt) = get(p.convoId)?.sendPrompt(p.text, p.images) ?: Unit
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit

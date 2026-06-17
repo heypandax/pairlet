@@ -174,4 +174,31 @@
     <string name="img_excluded">· 已排除 %1$d 张</string>
     <string name="img_too_large">过大 · %1$dKB</string>
     <string name="viewer_hint">下滑关闭 · 点按缩放</string>
+
+    <!-- ── 会话信息 + 快捷操作 ───────────────────────────────────── -->
+    <string name="session_info_title">会话</string>
+    <string name="label_model">模型</string>
+    <string name="label_effort">思考深度</string>
+    <string name="label_mode">模式</string>
+    <string name="label_workdir">目录</string>
+    <string name="label_context">上下文</string>
+    <string name="value_default">默认</string>
+    <string name="session_actions_open">会话操作</string>
+    <string name="quick_actions_title">快捷操作</string>
+    <string name="qa_model">切换模型</string>
+    <string name="qa_clear">清空会话</string>
+    <string name="qa_clear_hint">再次点击确认</string>
+    <string name="qa_compact">压缩上下文</string>
+    <string name="qa_simplify">简化</string>
+
+    <!-- ── 后台任务 ──────────────────────────────────────────────── -->
+    <string name="bg_running">后台运行 %1$d 个</string>
+    <string name="bg_title">后台任务</string>
+    <string name="job_running">运行中</string>
+    <string name="job_done">完成</string>
+    <string name="job_failed">失败</string>
+    <string name="job_killed">已终止</string>
+    <string name="job_kind_bash">脚本</string>
+    <string name="job_kind_subagent">子代理</string>
+    <string name="job_kind_monitor">监视</string>
 </resources>

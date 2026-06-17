@@ -61,7 +61,8 @@ fun TailPathText(path: String, modifier: Modifier = Modifier, color: Color = Tok
 fun buildDirRows(dirs: List<DirectoryEntry>, query: String, openSessionsLabel: String, projectsLabel: String): List<DirRow> {
     val q = query.trim()
     val filtered = if (q.isEmpty()) dirs else dirs.filter { it.path.contains(q, ignoreCase = true) }
-    val live = filtered.filter { it.open }
+    // a session with running background work stays "open" in the list even if its claude process check lags
+    val live = filtered.filter { it.open || it.busy }
     val rows = ArrayList<DirRow>()
     fun section(label: String, items: List<DirectoryEntry>, direct: Boolean) {
         if (items.isEmpty()) return

@@ -14,6 +14,8 @@ import dev.ccpocket.app.telemetry.Telemetry
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
+import dev.ccpocket.protocol.BackgroundJob
+import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
@@ -174,6 +176,11 @@ class PocketRepository(private val scope: CoroutineScope) {
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
+    val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
+    val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
+    val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
+    val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
+    val backgroundJobs = mutableStateListOf<BackgroundJob>() // bg shells / sub-agents / monitors the daemon is tracking
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val streaming = mutableStateOf(false)
@@ -433,7 +440,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         convoId.value = null
         sessionsDir.value = null
         pendingAsk.value = null
-        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear()
+        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearBackgroundJobs()
         demoMode.value = false // leaving the demo returns to real pairing
         abandonVoice()
         status.value = StatusMsg(Res.string.status_disconnected)
@@ -534,6 +541,9 @@ class PocketRepository(private val scope: CoroutineScope) {
             is SessionLive -> {
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
+                f.model?.let { model.value = it }
+                f.effort?.let { effort.value = it }
+                contextWindow.value = f.contextWindow ?: contextWindowFor(f.model ?: model.value)
                 // daemon truth beats the local guess: a turn that ended (or started) while the link was
                 // down would otherwise leave the ■/mic button stuck; null = old daemon, keep local state
                 f.executing?.let { exec ->
@@ -545,7 +555,12 @@ class PocketRepository(private val scope: CoroutineScope) {
             is AssistantChunk -> appendChunk(f)
             is ToolEvent -> { finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
             is PermissionAsk -> { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
-            is TurnDone -> { finishThinking(); streaming.value = false }
+            is TurnDone -> {
+                finishThinking(); streaming.value = false
+                // ~context occupancy: the prompt claude just saw (fresh input + the cached prefix still in the window)
+                f.usage?.let { contextUsed.value = it.inputTokens + (it.cacheReadInputTokens ?: 0) + (it.cacheCreationInputTokens ?: 0) }
+            }
+            is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
             is PocketError -> {
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
@@ -569,6 +584,8 @@ class PocketRepository(private val scope: CoroutineScope) {
     private fun <T> replace(list: MutableList<T>, items: List<T>) {
         list.clear(); list.addAll(items)
     }
+
+    private fun clearBackgroundJobs() = replace(backgroundJobs, emptyList())
 
     private fun appendChunk(c: AssistantChunk) {
         streaming.value = true
@@ -613,6 +630,9 @@ class PocketRepository(private val scope: CoroutineScope) {
         }
     }
 
+    /** Keep the open-project list fresh without the pull-to-refresh spinner (the daemon list is pull-only). */
+    fun refreshDirectoriesSilently() = scope.launch { runCatching { send(ListDirectories()) } }
+
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = PermissionMode.DEFAULT, title: String? = null) = scope.launch {
         convoId.value?.let { send(CloseSession(it)) } // reclaim any lingering claude process first
@@ -621,6 +641,8 @@ class PocketRepository(private val scope: CoroutineScope) {
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         mode.value = startMode; allowRules.clear()
+        model.value = null; effort.value = null; contextUsed.value = null // repopulated by the session's SessionLive
+        clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         send(OpenSession(wd, resumeId, mode = startMode))
     }
@@ -931,6 +953,49 @@ class PocketRepository(private val scope: CoroutineScope) {
         }
     }
 
+    /** Switch the model — routed through the daemon's `/model` interception (relaunch under --model). */
+    fun switchModel(name: String) {
+        val target = name.trim()
+        if (convoId.value == null || target.isEmpty() || target == model.value) return
+        model.value = target // optimistic; the daemon's next SessionLive corrects it to the resolved id
+        switchViaCommand("/model $target")
+    }
+
+    /** Switch reasoning effort — routed through the daemon's `/effort` interception (relaunch under --effort). */
+    fun switchEffort(level: String) {
+        val target = level.trim().lowercase()
+        if (convoId.value == null || target.isEmpty() || target == effort.value) return
+        effort.value = target // optimistic; the daemon's next SessionLive corrects it
+        switchViaCommand("/effort $target")
+    }
+
+    /** Send a daemon-intercepted relaunch command and hold the "switching" affordance until the next SessionLive. */
+    private fun switchViaCommand(command: String) {
+        val c = convoId.value ?: return
+        switching.value = true
+        scope.launch {
+            send(SendPrompt(c, command))
+            delay(8000); switching.value = false // safety: clear if the daemon never re-announces
+        }
+    }
+
+    /** Clear the conversation — the daemon starts a fresh session (keeps model/effort/mode) and wipes history. */
+    fun clearConversation() {
+        val c = convoId.value ?: return
+        messages.clear(); chatTitle.value = null; contextUsed.value = null
+        clearBackgroundJobs()
+        scope.launch { send(SendPrompt(c, "/clear")) }
+    }
+
+    /** True when `/simplify` is an available command in this workdir (gates the quick-action row). */
+    fun hasSimplify(): Boolean = slashCommands.any { it.name == "simplify" }
+
+    /** Context-window capacity for a model id: 1M for the `[1m]` variants, else the standard 200k. */
+    private fun contextWindowFor(model: String?): Long {
+        val m = model?.lowercase() ?: return 200_000
+        return if ("[1m]" in m || "-1m" in m) 1_000_000 else 200_000
+    }
+
     fun clearRule(rule: String) {
         allowRules.remove(rule)
         convoId.value?.let { c -> scope.launch { send(ClearAllowRule(c, rule)) } }
@@ -960,6 +1025,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         chatTitle.value = null
         messages.clear()
         pendingImages.clear()
+        clearBackgroundJobs()
         observing.value = false
         abandonVoice()
     }
@@ -991,6 +1057,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         chatTitle.value = null
         messages.clear()
         pendingImages.clear()
+        clearBackgroundJobs()
         abandonVoice()
     }
 

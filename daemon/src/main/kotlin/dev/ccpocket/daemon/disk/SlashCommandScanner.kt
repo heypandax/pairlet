@@ -22,11 +22,19 @@ import kotlin.io.path.nameWithoutExtension
  */
 object SlashCommandScanner {
 
-    // claude `-p` ignores most interactive commands (/cost, /status, …); only list what works there.
+    // claude `-p` ignores most interactive commands (/cost, /status, /config, /vim, /agents, …) — sending
+    // them as stdin text silently no-ops, so they are deliberately absent. Only list what actually works:
+    //  - intercepted by [Conversation] (relaunch under a new flag): /model, /effort, /clear
+    //  - claude expands the prompt itself in headless stream-json: /compact, /review, /security-review,
+    //    /init, /pr-comments  (these are prompt-backed, not interactive-TUI-only)
     private val builtins = listOf(
         SlashCommand("model", "Switch the model for this session", "<name>"),
+        SlashCommand("effort", "Set reasoning effort (low/medium/high/xhigh/max)", "<level>"),
         SlashCommand("compact", "Compact the conversation to free up context", "[instructions]"),
-        SlashCommand("clear", "Clear the conversation history"),
+        SlashCommand("clear", "Start a fresh conversation (clears context)"),
+        SlashCommand("review", "Review the current changes"),
+        SlashCommand("security-review", "Security review of the pending changes"),
+        SlashCommand("init", "Generate or update CLAUDE.md"),
     )
 
     fun scan(workdir: Path, home: Path = Path.of(System.getProperty("user.home"))): List<SlashCommand> {

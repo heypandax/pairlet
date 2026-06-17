@@ -31,10 +31,14 @@ class RequestRouter(
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
-            is ListDirectories -> sink.emit(Directories(dirs.listDirectories(frame.root)))
+            is ListDirectories -> sink.emit(Directories(dirs.listDirectories(frame.root, registry.busyCwds())))
 
-            is ListSessions ->
-                sink.emit(Sessions(frame.workdir, TranscriptScanner.scan(ProjectPaths.dirFor(frame.workdir))))
+            is ListSessions -> {
+                val busy = registry.busySessionIds()
+                val items = TranscriptScanner.scan(ProjectPaths.dirFor(frame.workdir))
+                    .map { if (it.sessionId in busy) it.copy(busy = true) else it }
+                sink.emit(Sessions(frame.workdir, items))
+            }
 
             is OpenSession -> {
                 val wd = dirs.validateWorkdir(frame.workdir)

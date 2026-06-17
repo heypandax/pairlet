@@ -109,6 +109,9 @@ data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPh
  * Null when observing: the terminal owns that session, the daemon doesn't know its mode.
  * [executing] is whether a turn is in flight RIGHT NOW — the phone resets its streaming/■
  * state from it on (re)attach. Null = sender predates the field (or observing): keep local state.
+ * [model]/[effort] are the daemon's actual model + reasoning-effort for this session (for the
+ * header + session-info sheet). [contextWindow] is the token capacity; null => the phone derives
+ * it from [model]. All three are re-announced on every relaunch (mode/model/effort switch).
  */
 @Serializable
 @SerialName("pocket/session.live")
@@ -119,6 +122,9 @@ data class SessionLive(
     val observing: Boolean = false,
     val mode: PermissionMode? = null,
     val executing: Boolean? = null,
+    val model: String? = null,
+    val effort: String? = null,
+    val contextWindow: Long? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -209,6 +215,14 @@ enum class CommandSource {
 @Serializable
 @SerialName("pocket/commands")
 data class CommandList(val convoId: String, val commands: List<SlashCommand>) : ToPhone
+
+/**
+ * daemon -> phone: the conversation's background jobs (backgrounded shells, sub-agents, monitors),
+ * pushed whenever the set or any status changes. An empty list clears the in-chat indicator.
+ */
+@Serializable
+@SerialName("pocket/jobs")
+data class BackgroundJobs(val convoId: String, val jobs: List<BackgroundJob>) : ToPhone
 
 /** daemon -> phone: result of transcribing a voice capture. ok=false carries a user-facing [error]. */
 @Serializable

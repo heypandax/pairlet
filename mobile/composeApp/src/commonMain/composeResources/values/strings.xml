@@ -175,4 +175,31 @@
     <string name="img_excluded">· %1$d excluded</string>
     <string name="img_too_large">too large · %1$dKB</string>
     <string name="viewer_hint">Swipe down to close · tap to zoom</string>
+
+    <!-- ── session info + quick actions ──────────────────────────── -->
+    <string name="session_info_title">Session</string>
+    <string name="label_model">Model</string>
+    <string name="label_effort">Thinking depth</string>
+    <string name="label_mode">Mode</string>
+    <string name="label_workdir">Directory</string>
+    <string name="label_context">Context</string>
+    <string name="value_default">default</string>
+    <string name="session_actions_open">Session actions</string>
+    <string name="quick_actions_title">Quick actions</string>
+    <string name="qa_model">Switch model</string>
+    <string name="qa_clear">Clear conversation</string>
+    <string name="qa_clear_hint">Tap again to confirm</string>
+    <string name="qa_compact">Compact context</string>
+    <string name="qa_simplify">Simplify</string>
+
+    <!-- ── background tasks ──────────────────────────────────────── -->
+    <string name="bg_running">%1$d running in background</string>
+    <string name="bg_title">Background tasks</string>
+    <string name="job_running">running</string>
+    <string name="job_done">done</string>
+    <string name="job_failed">failed</string>
+    <string name="job_killed">killed</string>
+    <string name="job_kind_bash">shell</string>
+    <string name="job_kind_subagent">agent</string>
+    <string name="job_kind_monitor">monitor</string>
 </resources>

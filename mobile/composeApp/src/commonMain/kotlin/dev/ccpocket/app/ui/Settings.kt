@@ -63,8 +63,9 @@ fun SettingsSheet(paired: PairedDaemon?, onUnpair: () -> Unit, onDismiss: () -> 
     }
 }
 
+/** A label/value row used by the settings + session-info sheets (label left, mono value right). */
 @Composable
-private fun AboutRow(label: String, value: String) {
+fun AboutRow(label: String, value: String) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

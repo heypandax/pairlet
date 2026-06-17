@@ -21,8 +21,11 @@ class SlashCommandScannerTest {
     fun builtins_present_even_with_no_command_dirs() {
         val cmds = SlashCommandScanner.scan(workdir = tmp(), home = tmp())
         assertTrue(cmds.any { it.name == "model" && it.source == CommandSource.BUILTIN })
+        assertTrue(cmds.any { it.name == "effort" && it.source == CommandSource.BUILTIN })
         assertTrue(cmds.any { it.name == "compact" })
         assertTrue(cmds.any { it.name == "clear" })
+        assertTrue(cmds.any { it.name == "review" })
+        assertTrue(cmds.any { it.name == "security-review" })
     }
 
     @Test
@@ -67,12 +70,13 @@ class SlashCommandScannerTest {
     @Test
     fun skill_dirs_are_listed_but_never_shadow_commands_or_builtins() {
         val home = tmp()
-        write(home.resolve(".claude/skills/review/SKILL.md"), "---\ndescription: Review code\n---\n")
+        // use a skill name that is NOT a built-in (review/model are now built-ins) to test the listing + no-shadow rule
+        write(home.resolve(".claude/skills/research/SKILL.md"), "---\ndescription: Research stuff\n---\n")
         write(home.resolve(".claude/skills/model/SKILL.md"), "---\ndescription: should not win\n---\n")
         val cmds = SlashCommandScanner.scan(tmp(), home)
-        val review = cmds.single { it.name == "review" }
-        assertEquals(CommandSource.SKILL, review.source)
-        assertEquals("Review code", review.description)
+        val research = cmds.single { it.name == "research" }
+        assertEquals(CommandSource.SKILL, research.source)
+        assertEquals("Research stuff", research.description)
         assertEquals(CommandSource.BUILTIN, cmds.single { it.name == "model" }.source)
     }
 
