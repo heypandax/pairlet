@@ -211,10 +211,12 @@ fun BackgroundJobsSheet(jobs: List<BackgroundJob>, onDismiss: () -> Unit) {
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp, top = 4.dp)) {
             Text(stringResource(Res.string.bg_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Column(Modifier.padding(top = 12.dp).heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // running first, then most-recently-updated
+            // running first, then most-recently-updated; remembered so unrelated recompositions don't re-sort
+            val sorted = remember(jobs) {
                 jobs.sortedWith(compareByDescending<BackgroundJob> { it.status == JobStatus.RUNNING }.thenByDescending { it.lastUpdate })
-                    .forEach { JobRow(it) }
+            }
+            Column(Modifier.padding(top = 12.dp).heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                sorted.forEach { JobRow(it) }
             }
         }
     }

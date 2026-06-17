@@ -114,9 +114,8 @@
   } else {
     revealEls.forEach(el => el.classList.add('in'));
   }
-  function forceVisible(){
-    revealEls.forEach(el => { el.style.transition = 'none'; el.style.opacity = '1'; el.style.transform = 'none'; });
-  }
+  const show = el => { el.style.transition = 'none'; el.style.opacity = '1'; el.style.transform = 'none'; };
+  function forceVisible(){ revealEls.forEach(show); }
   // probe: does a CSS transition actually progress here?
   const probe = document.createElement('div');
   probe.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;transition:opacity .05s linear;pointer-events:none;';
@@ -130,5 +129,5 @@
     }, 140);
   });
   // ultimate safety net regardless of probe outcome
-  setTimeout(() => { revealEls.forEach(el => { if (parseFloat(getComputedStyle(el).opacity) < 0.5) { el.style.transition='none'; el.style.opacity='1'; el.style.transform='none'; } }); }, 2400);
+  setTimeout(() => { revealEls.forEach(el => { if (parseFloat(getComputedStyle(el).opacity) < 0.5) show(el); }); }, 2400);
 })();

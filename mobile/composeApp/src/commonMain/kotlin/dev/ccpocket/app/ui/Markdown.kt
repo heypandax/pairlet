@@ -73,22 +73,13 @@ fun CopyChip(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun CodeBlock(code: String, lang: String?) {
     val shape = RoundedCornerShape(10.dp)
-    val clipboard = LocalClipboardManager.current
-    var copied by remember { mutableStateOf(false) }
-    LaunchedEffect(copied) { if (copied) { delay(1500); copied = false } }
     Column(Modifier.fillMaxWidth().clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)) {
         Row(
             Modifier.fillMaxWidth().background(Tok.surface).padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(lang ?: "code", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, modifier = Modifier.weight(1f))
-            Text(
-                stringResource(if (copied) Res.string.code_copied else Res.string.code_copy),
-                color = if (copied) Tok.ok else Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
-                modifier = Modifier.clip(RoundedCornerShape(5.dp))
-                    .clickable { clipboard.setText(AnnotatedString(code)); copied = true }
-                    .padding(horizontal = 7.dp, vertical = 4.dp),
-            )
+            CopyChip(code)
         }
         Text(
             code, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,

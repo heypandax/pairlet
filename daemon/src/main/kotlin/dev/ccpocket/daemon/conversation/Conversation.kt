@@ -160,9 +160,21 @@ class Conversation(
      * count clears even with no stream activity. Returns true if anything was reaped.
      */
     suspend fun reapStaleJobs(staleMs: Long): Boolean {
+        if (!jobs.hasRunning()) return false // idle conversation: nothing RUNNING to settle, skip the clock+scan
         val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
         if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
         return changed
+    }
+
+    /**
+     * The relaunch primitive: stop claude and re-spawn it resuming [resumeId], rebuilding the spec from the
+     * live `model`/`mode`/`effort` fields. The switch-* methods just mutate their field and call this — the
+     * sole `ClaudeSpec` resume call site, so a new launch flag is a one-line field add, not another method.
+     * No pendingResumeId: a resume relaunch must not re-replay history.
+     */
+    private suspend fun relaunch(resumeId: String? = sessionId) {
+        stopProcess()
+        launchProcess(ClaudeSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort))
     }
 
     /** Relaunch claude resuming the same session under a new permission mode. Keeps allow-rules + history. */
@@ -178,8 +190,7 @@ class Conversation(
         // was opened with, so a resumed/taken-over terminal session keeps its history (null = brand
         // new session — nothing happened yet, a fresh start loses nothing)
         val sid = sessionId ?: openedResumeId
-        stopProcess()
-        launchProcess(ClaudeSpec(workdir, resumeId = sid, model = model, mode = newMode, effort = effort)) // no pendingResumeId: don't re-replay history
+        relaunch(sid)
         // the relaunch killed any in-flight turn — executing is false again, the phone's ■ resets
         sink.emit(live(sid)) // confirm now — init won't arrive until the next turn
     }
@@ -190,9 +201,7 @@ class Conversation(
      */
     suspend fun switchModel(newModel: String?) {
         model = newModel
-        val sid = sessionId
-        stopProcess()
-        launchProcess(ClaudeSpec(workdir, resumeId = sid, model = newModel, mode = mode, effort = effort))
+        relaunch()
     }
 
     /**
@@ -201,9 +210,7 @@ class Conversation(
      */
     suspend fun switchEffort(newEffort: String?) {
         effort = newEffort
-        val sid = sessionId
-        stopProcess()
-        launchProcess(ClaudeSpec(workdir, resumeId = sid, model = model, mode = mode, effort = newEffort))
+        relaunch()
     }
 
     fun clearAllowRule(rule: String?) {
