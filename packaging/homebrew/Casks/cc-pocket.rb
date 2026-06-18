@@ -4,8 +4,8 @@
 # Releases (heypandax/cc-pocket) — the url below points there. The tap holds only this description.
 # Users: brew install --cask heypandax/tap/cc-pocket
 cask "cc-pocket" do
-  version "1.1.3"
-  sha256 "839dbefeda04ff045dc2bcacade70a547968374bb35d82e9f8a2282cd6f4508a"
+  version "1.1.4"
+  sha256 "2d93df6b4af36d354db17a908db6419635ee43f9744d9884e6916f3ed5395301"
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-arm64.tar.gz"
   name "CC Pocket daemon"
