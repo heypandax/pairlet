@@ -25,7 +25,11 @@ data class PairedDaemon(
     val daemonPub: String,   // base64url P-256, learned out-of-band from the QR (authenticates the daemon)
     val deviceId: String,
     val credential: String,  // relay bearer credential
+    val label: String? = null, // user-assigned local nickname; null -> displayName() falls back to accountId
 )
+
+/** What this binding shows in the device list: the user's nickname, else the truncated account id. */
+fun PairedDaemon.displayName(): String = label?.takeIf { it.isNotBlank() } ?: "${accountId.take(12)}…"
 
 object Pairing {
     private val json = Json { ignoreUnknownKeys = true }
@@ -57,7 +61,8 @@ object Pairing {
             setBody("""{"ticket":"${info.ticket}","devicePubKey":"${B64Url.encode(keys.publicRaw)}"}""")
         }.bodyAsText()
         val cred = runCatching { json.decodeFromString<PairCredential>(resp) }.getOrElse { error("pairing failed: $resp") }
-        return PairedDaemon(info.relay, info.accountId, info.daemonPub, cred.deviceId, cred.credential).also(::save)
+        return PairedDaemon(info.relay, info.accountId, info.daemonPub, cred.deviceId, cred.credential)
+            .also { upsert(it); setActive(it.accountId) }
     }
 
     /** The relay this app pairs against (the daemon dials the same one). Override in Advanced if self-hosting. */
@@ -71,11 +76,45 @@ object Pairing {
         return PairingInfo(DEFAULT_RELAY, payload.accountId, payload.daemonPub, payload.ticket)
     }
 
-    fun save(p: PairedDaemon) = SecureStore.putString(K_PAIRED, json.encodeToString(p))
-    fun load(): PairedDaemon? = SecureStore.getString(K_PAIRED)?.let { runCatching { json.decodeFromString<PairedDaemon>(it) }.getOrNull() }
-    fun forget() = SecureStore.remove(K_PAIRED)
+    // ── paired-daemon store: a list of bindings + which one is active ───────────────────────────────
+    // The phone can bind several computers; it talks to exactly one at a time (the "active" account).
+
+    /** Every bound computer. Migrates the legacy single-record key into the list the first time it runs. */
+    fun loadAll(): List<PairedDaemon> {
+        SecureStore.getString(K_PAIRED_LIST)?.let {
+            return runCatching { json.decodeFromString<List<PairedDaemon>>(it) }.getOrDefault(emptyList())
+        }
+        val legacy = SecureStore.getString(K_PAIRED)?.let { runCatching { json.decodeFromString<PairedDaemon>(it) }.getOrNull() }
+        return if (legacy != null) {
+            saveAll(listOf(legacy)); setActive(legacy.accountId); SecureStore.remove(K_PAIRED); listOf(legacy)
+        } else emptyList()
+    }
+
+    private fun saveAll(list: List<PairedDaemon>) = SecureStore.putString(K_PAIRED_LIST, json.encodeToString(list))
+
+    /** Add or replace by accountId — re-pairing the same computer refreshes its credential in place. */
+    fun upsert(p: PairedDaemon): List<PairedDaemon> =
+        (loadAll().filterNot { it.accountId == p.accountId } + p).also(::saveAll)
+
+    /** Drop one binding; if it was the active one, hand "active" to whatever remains (or clear it). */
+    fun remove(accountId: String): List<PairedDaemon> =
+        loadAll().filterNot { it.accountId == accountId }.also {
+            saveAll(it); if (activeAccount() == accountId) setActive(it.lastOrNull()?.accountId)
+        }
+
+    /** Set/clear a binding's local nickname (blank clears it back to the accountId fallback). */
+    fun rename(accountId: String, label: String?): List<PairedDaemon> =
+        loadAll().map { if (it.accountId == accountId) it.copy(label = label?.ifBlank { null }) else it }.also(::saveAll)
+
+    fun activeAccount(): String? = SecureStore.getString(K_ACTIVE)
+    fun setActive(accountId: String?) { if (accountId == null) SecureStore.remove(K_ACTIVE) else SecureStore.putString(K_ACTIVE, accountId) }
+
+    /** The active binding: the one pinned by [activeAccount], else the most-recently paired, else null. */
+    fun active(): PairedDaemon? = loadAll().let { all -> all.firstOrNull { it.accountId == activeAccount() } ?: all.lastOrNull() }
 
     private const val K_PRIV = "device_priv"
     private const val K_PUB = "device_pub"
-    private const val K_PAIRED = "paired_daemon"
+    private const val K_PAIRED = "paired_daemon"       // legacy single record (migrated into K_PAIRED_LIST, then removed)
+    private const val K_PAIRED_LIST = "paired_daemons" // JSON array of every bound computer
+    private const val K_ACTIVE = "active_account"      // accountId of the binding we currently talk to
 }

@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- ── connect / pairing ─────────────────────────────────────── -->
-    <string name="paired_account">Paired · %1$s…</string>
     <string name="connect">Connect</string>
-    <string name="unpair">Unpair</string>
-    <string name="pair_with_daemon">Pair with your daemon</string>
     <string name="paste_pair_link">paste ccpocket://pair link</string>
-    <string name="pair">Pair</string>
     <string name="hide_advanced">Hide advanced</string>
     <string name="advanced_direct_lan">Advanced · direct LAN</string>
     <string name="daemon_ws_url">daemon ws url</string>
@@ -162,13 +158,31 @@
     <string name="voice_speech_unavailable">speech recognition unavailable</string>
     <string name="voice_audio_engine">audio engine failed to start</string>
 
-    <!-- ── settings (minimal: about + unpair) ────────────────────── -->
+    <!-- ── settings (about + paired devices) ─────────────────────── -->
     <string name="settings_title">Settings</string>
     <string name="about_section">ABOUT</string>
     <string name="about_version">Version</string>
     <string name="about_license">License</string>
     <string name="about_connection">Connection</string>
     <string name="settings_open">Settings</string>
+
+    <!-- ── notifications ─────────────────────────────────────────── -->
+    <string name="notifications_section">NOTIFICATIONS</string>
+    <string name="notify_on_complete">Notify when a task finishes</string>
+    <string name="notify_on_complete_sub">Wake your phone when Claude finishes a turn while the app is closed.</string>
+
+    <!-- ── paired devices (multi-device) ─────────────────────────── -->
+    <string name="devices_section">PAIRED DEVICES</string>
+    <string name="choose_computer">Choose a computer</string>
+    <string name="add_device">Add a computer</string>
+    <string name="device_active">Active</string>
+    <string name="device_rename">Rename</string>
+    <string name="device_remove">Remove</string>
+    <string name="rename_device_title">Rename computer</string>
+    <string name="rename_device_hint">Nickname</string>
+    <string name="device_save">Save</string>
+    <string name="remove_device_title">Remove computer?</string>
+    <string name="remove_device_confirm">You\'ll need to pair again to reconnect to this computer.</string>
 
     <!-- ── image attachments ─────────────────────────────────────── -->
     <string name="img_counter">%1$d/4 · compressed on device</string>

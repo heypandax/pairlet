@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.session
 import dev.ccpocket.daemon.conversation.Conversation
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.CancelTurn
@@ -29,6 +30,11 @@ class SessionRegistry(
     private val convos = mutableMapOf<String, Conversation>()
     private val observes = mutableMapOf<String, ObserveSession>()
 
+    /** Installed by the relay client; null in local-server mode. Read per turn so a conversation opened
+     *  before the relay attached still sees it. */
+    @Volatile
+    var pushHook: PushHook? = null
+
     suspend fun open(open: OpenSession, sink: OutboundSink): String {
         val resume = open.resumeId
         if (resume != null) {
@@ -52,7 +58,7 @@ class SessionRegistry(
         }
         // resume + control: an idle session, or an explicit "Continue here" take-over
         val convoId = UUID.randomUUID().toString()
-        val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, claudeExe)
+        val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, claudeExe, pushHookProvider = { pushHook })
         mutex.withLock { convos[convoId] = c }
         c.open(open.resumeId, open.model, open.effort)
         return convoId

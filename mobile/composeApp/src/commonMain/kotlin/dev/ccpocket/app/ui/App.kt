@@ -27,6 +27,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,6 +88,7 @@ import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
+import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
@@ -124,7 +127,8 @@ fun App(scope: CoroutineScope) {
                 Box(Modifier.weight(1f)) {
                     when {
                         // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
-                        !repo.sessionActive.value -> if (repo.paired.value != null) ConnectScreen(repo) else PairingScreen(repo)
+                        !repo.sessionActive.value ->
+                            if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingScreen(repo) else ConnectScreen(repo)
                         else -> ConnectionGate(repo) {
                             when {
                                 repo.convoId.value != null -> ChatScreen(repo)
@@ -177,7 +181,7 @@ private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Un
             Tok.danger,
             stringResource(Res.string.conn_pairing_invalid_title),
             stringResource(Res.string.conn_pairing_invalid_body),
-            stringResource(Res.string.conn_repair), { repo.unpair() },
+            stringResource(Res.string.conn_repair), { repo.unpairActive() },
         )
         ConnPhase.RelayUnreachable -> CenteredState(
             Tok.warn,
@@ -264,33 +268,22 @@ private fun EmptyDirectories(onRefresh: () -> Unit) {
     }
 }
 
+/** Disconnected, with at least one bound computer: the device picker. Tap one to connect, or add another. */
 @Composable
 private fun ConnectScreen(repo: PocketRepository) {
-    val paired = repo.paired.value
-    var link by remember { mutableStateOf("") }
     var url by remember { mutableStateOf(defaultDaemonUrl()) }
     var advanced by remember { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxSize().padding(24.dp),
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("CC Pocket", color = Tok.tx, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
-        if (paired != null) {
-            Text(stringResource(Res.string.paired_account, paired.accountId.take(12)), color = Tok.tx2, fontSize = 14.sp)
-            Spacer(Modifier.height(24.dp))
-            Button({ repo.startRelay() }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect)) }
-            Spacer(Modifier.height(8.dp))
-            TextButton({ repo.unpair() }) { Text(stringResource(Res.string.unpair), color = Tok.muted, fontSize = 12.sp) }
-        } else {
-            Text(stringResource(Res.string.pair_with_daemon), color = Tok.tx2, fontSize = 14.sp)
-            Spacer(Modifier.height(24.dp))
-            OutlinedTextField(link, { link = it }, label = { Text(stringResource(Res.string.paste_pair_link)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(16.dp))
-            Button({ repo.pair(link) }, Modifier.fillMaxWidth(), enabled = link.isNotBlank()) { Text(stringResource(Res.string.pair)) }
-        }
-        Spacer(Modifier.height(8.dp))
+        Text(stringResource(Res.string.choose_computer), color = Tok.tx2, fontSize = 14.sp)
+        Spacer(Modifier.height(20.dp))
+        DeviceList(repo, onSwitch = { repo.switchDaemon(it) }, onAdd = { repo.beginAddDevice() })
+        Spacer(Modifier.height(10.dp))
         Text(repo.status.value.resolve(), color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
         Spacer(Modifier.height(16.dp))
         TextButton({ advanced = !advanced }) {
@@ -315,7 +308,13 @@ private fun DirectoryScreen(repo: PocketRepository) {
         Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn) // live link indicator rides with the title
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold)
+                // which computer these projects live on — the active binding's name (mono, muted)
+                repo.paired.value?.let {
+                    Text(it.displayName(), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             TextButton({ repo.disconnect() }) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 13.sp) }
         }
         OutlinedTextField(
@@ -483,8 +482,8 @@ private fun SessionsScreen(repo: PocketRepository) {
         }
         if (showSettings) {
             SettingsSheet(
-                paired = repo.paired.value,
-                onUnpair = { showSettings = false; repo.unpair() },
+                repo = repo,
+                onAddDevice = { showSettings = false; repo.beginAddDevice() },
                 onDismiss = { showSettings = false },
             )
         }

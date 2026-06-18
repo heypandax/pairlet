@@ -7,6 +7,7 @@ import dev.ccpocket.protocol.DaemonHello
 import dev.ccpocket.protocol.DevicePaired
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
+import dev.ccpocket.protocol.NotifyPush
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairCodePayload
 import dev.ccpocket.protocol.PairCodeResolve
@@ -17,10 +18,13 @@ import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.Ping
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.Pong
+import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RevokeDevice
 import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.e2e.Wire
+import dev.ccpocket.relay.push.LoggingPushService
+import dev.ccpocket.relay.push.PushService
 import dev.ccpocket.relay.auth.Codec
 import dev.ccpocket.relay.auth.DaemonAuthenticator
 import dev.ccpocket.relay.auth.DeviceAuthenticator
@@ -48,6 +52,9 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -65,10 +72,13 @@ class RelayServer(
     private val host: String,
     private val port: Int,
     private val store: RelayStore,
+    private val pushService: PushService = LoggingPushService(),
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val broker = Broker()
     private val limiter = RateLimiter(clock)
+    // off-loop fan-out: a slow APNs/FCM round-trip must not block the daemon socket's control loop
+    private val pushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val daemonAuth = DaemonAuthenticator(store, clock)
     private val deviceAuth = DeviceAuthenticator(store, clock)
     private val pairing = PairingService(store, clock)
@@ -198,7 +208,17 @@ class RelayServer(
             }
             is RevokeDevice -> if (store.revokeDevice(account, body.deviceId)) broker.closeDevice(account, body.deviceId)
             is Ping -> broker.controlToDaemon(account, controlText(Pong(body.ts))) // app-level liveness echo
+            // wake an offline phone: push only when no device socket is live (an online phone got TurnDone already)
+            is NotifyPush -> if (broker.deviceCount(account) == 0) pushScope.launch { pushService.notify(account, body.title, body.body) }
             else -> {} // daemons send no other control
+        }
+    }
+
+    /** device control TEXT plane: only push-token (de)registration; everything else rides the data plane. */
+    private suspend fun handleDeviceControl(deviceId: String, text: String) {
+        when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
+            is RegisterPush -> runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
+            else -> {}
         }
     }
 
@@ -228,7 +248,8 @@ class RelayServer(
         try {
             for (frame in incoming) when (frame) {
                 is Frame.Binary -> broker.toDaemonFrom(account, hello.deviceId, frame.data)
-                else -> {} // devices drive the daemon only through the opaque data plane
+                is Frame.Text -> handleDeviceControl(hello.deviceId, frame.readText())
+                else -> {}
             }
         } finally {
             broker.detachDevice(conn)

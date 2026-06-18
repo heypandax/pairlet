@@ -1,5 +1,6 @@
 package dev.ccpocket.relay
 
+import dev.ccpocket.relay.push.PushConfig
 import dev.ccpocket.relay.store.Db
 import dev.ccpocket.relay.store.InMemoryRelayStore
 import dev.ccpocket.relay.store.SqliteRelayStore
@@ -22,5 +23,6 @@ fun main(args: Array<String>) {
     val where = if (inMemory) "in-memory" else dbPath
     println("cc-pocket relay — http://$host:$port  (ws: /v1/daemon /v1/device · rest: /v1/pair/redeem · /healthz · store: $where)")
     println("zero-knowledge: forwards opaque end-to-end-encrypted frames; stores only fingerprints, pubkeys, and hashes.")
-    RelayServer(host, port, store).run()
+    val pushService = PushConfig.load(store)
+    RelayServer(host, port, store, pushService).run()
 }

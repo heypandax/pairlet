@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.DaemonCore
+import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Attached
@@ -10,6 +11,7 @@ import dev.ccpocket.protocol.DaemonAuth
 import dev.ccpocket.protocol.DaemonHello
 import dev.ccpocket.protocol.DevicePaired
 import dev.ccpocket.protocol.Envelope
+import dev.ccpocket.protocol.NotifyPush
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairTicket
 import dev.ccpocket.protocol.PeerPresence
@@ -72,6 +74,16 @@ class RelayClient(
     val accountId: String get() = identity.accountId
 
     suspend fun run() = coroutineScope {
+        // wake an offline phone when a turn completes. peerOnline gates it here (an attached phone got the
+        // TurnDone over the data plane already); the relay re-checks deviceCount before actually pushing.
+        core.registry.pushHook = PushHook { workdir, finalText ->
+            if (!peerOnline) controlOutbox.send(
+                NotifyPush(
+                    title = workdir.fileName?.toString() ?: "CC Pocket",
+                    body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",
+                ),
+            )
+        }
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
         var backoff = 1_000L
         while (true) {

@@ -70,12 +70,20 @@ fun PairingScreen(repo: PocketRepository) {
     var advanced by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(defaultDaemonUrl()) }
     val complete = code.length == 6
+    // "Add a computer" entered from an existing binding — let the user back out to the device picker.
+    val adding = repo.addingDevice.value
+    if (adding) dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.cancelAddDevice() }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(48.dp))
+        if (adding) {
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                TextButton({ repo.cancelAddDevice() }) { Text("‹ " + stringResource(Res.string.cancel), color = Tok.muted, fontSize = 13.sp) }
+            }
+        }
+        Spacer(Modifier.height(if (adding) 8.dp else 48.dp))
         Text(stringResource(Res.string.pairing_title), color = Tok.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(7.dp))
         Text(

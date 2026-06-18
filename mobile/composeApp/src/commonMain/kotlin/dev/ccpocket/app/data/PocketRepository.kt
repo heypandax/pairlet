@@ -8,6 +8,9 @@ import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.RelayE2EConnection
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
+import dev.ccpocket.app.push.PushController
+import dev.ccpocket.app.push.PushToken
+import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.Telemetry
@@ -38,6 +41,7 @@ import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
@@ -147,6 +151,13 @@ class PocketRepository(private val scope: CoroutineScope) {
     private var hadReadyThisSession = false // reached Ready at least once -> a later drop shows Reconnecting
     private var relayDeadlinePassed = false // grace elapsed without attaching -> RelayUnreachable
 
+    // ── push notifications: register the device's APNs/FCM token so the relay can wake it while offline ──
+    private var pushToken: PushToken? = null
+    private var pushStarted = false
+    private var pushRegistered: Pair<String, String>? = null // last (platform, token) sent; skip redundant re-sends
+    /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
+    val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
+
     /**
      * True from a successful explicit connect until the user disconnects/unpairs. While true, a dead
      * transport does NOT route back to the Connect screen — the UI stays put, shows a slim banner,
@@ -157,7 +168,12 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Single source of truth for the connection-state UI (see [ConnPhase]); driven by real events. */
     val phase = mutableStateOf(ConnPhase.Connecting)
     val status = mutableStateOf(StatusMsg(Res.string.status_disconnected))
-    val paired = mutableStateOf<PairedDaemon?>(Pairing.load())
+    /** The active binding the transport talks to. Stays a single value so all transport code is unchanged. */
+    val paired = mutableStateOf<PairedDaemon?>(Pairing.active())
+    /** Every bound computer (observable mirror of [Pairing.loadAll]); drives the device picker + settings list. */
+    val pairedList = mutableStateListOf<PairedDaemon>().also { it.addAll(Pairing.loadAll()) }
+    /** Pair-another-computer mode: routes to PairingScreen even though bindings already exist. */
+    val addingDevice = mutableStateOf(false)
     /** No-pairing demo: when true, all I/O is short-circuited to local sample data (see [enterDemo]). */
     val demoMode = mutableStateOf(false)
     val directories = mutableStateListOf<DirectoryEntry>()
@@ -237,7 +253,9 @@ class PocketRepository(private val scope: CoroutineScope) {
         try {
             val info = getInfo(client)
             val keys = Pairing.deviceKeys()
-            paired.value = Pairing.redeem(info, keys, client)
+            paired.value = Pairing.redeem(info, keys, client) // upserts the list + pins this as the active account
+            replace(pairedList, Pairing.loadAll())
+            addingDevice.value = false
             firstTicket = info.ticket
             Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to source))
             startRelay()
@@ -291,7 +309,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { attachedThisSession = true; connected.value = true; relayDeadlinePassed = false; startListWait(); recomputePhase() }
+            is Attached -> { attachedThisSession = true; connected.value = true; relayDeadlinePassed = false; ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
@@ -306,6 +324,37 @@ class PocketRepository(private val scope: CoroutineScope) {
      *  just hit "transport before handshake" at the daemon. launchTransport(reconnect) re-syncs the page. */
     private fun onComputerBackOnline() {
         launchTransport(reconnect = true)
+    }
+
+    // ── push registration ───────────────────────────────────────────────────────────────────────────
+
+    /** Start platform push registration once, after the first relay attach (so the iOS permission prompt
+     *  follows pairing). The token callback may land later — [registerPush] also runs on every Attached. */
+    private fun ensurePushStarted() {
+        if (pushStarted || !notificationsOn.value) return
+        pushStarted = true
+        PushController.start { token -> pushToken = token; registerPush() }
+    }
+
+    /** (Re)send the push token to the relay over the control plane — or an empty token to de-register when
+     *  notifications are off. Skips when unchanged since the last send (the relay persists it), so the
+     *  foreground-triggered reconnect storm doesn't rewrite the same row. Relay transport only. */
+    private fun registerPush() {
+        if (!useRelay) return
+        val tok = pushToken ?: return
+        val sent = tok.platform to (if (notificationsOn.value) tok.token else "")
+        if (sent == pushRegistered) return
+        pushRegistered = sent
+        scope.launch { runCatching { relay.sendControl(RegisterPush(sent.first, sent.second)) } }
+    }
+
+    /** Settings toggle: persist the choice, then register (on) or clear (off) the token on the relay. */
+    fun setNotificationsEnabled(on: Boolean) {
+        if (on == notificationsOn.value) return
+        notificationsOn.value = on
+        SecureStore.putString(K_NOTIFY, if (on) "1" else "0")
+        ensurePushStarted() // self-guards when off
+        registerPush()
     }
 
     /** Silent window before declaring [ConnPhase.RelayUnreachable]. A first connect shows the skeleton for a
@@ -443,6 +492,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         phase.value = ConnPhase.Connecting
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; directoriesLoaded.value = false
+        pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         convoId.value = null
         sessionsDir.value = null
         pendingAsk.value = null
@@ -453,7 +503,41 @@ class PocketRepository(private val scope: CoroutineScope) {
         Telemetry.track(TelEvent.Disconnected)
     }
 
-    fun unpair() { disconnect(); Pairing.forget(); paired.value = null }
+    // ── multi-device: bind several computers, talk to one at a time ─────────────────────────────────
+
+    /** Pair another computer without dropping the existing ones: tear down the live link, show PairingScreen. */
+    fun beginAddDevice() { disconnect(); addingDevice.value = true }
+
+    /** Back out of "add a computer" — returns to the device picker (bindings are untouched). */
+    fun cancelAddDevice() { addingDevice.value = false }
+
+    /** Switch the active computer: tear down the current link, pin [target], reconnect to it. */
+    fun switchDaemon(target: PairedDaemon) {
+        if (paired.value?.accountId == target.accountId && sessionActive.value) return
+        disconnect()
+        paired.value = target
+        Pairing.setActive(target.accountId)
+        firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
+        startRelay()
+    }
+
+    /** Give a binding a local nickname (blank clears it). */
+    fun renameDaemon(target: PairedDaemon, label: String?) {
+        val list = Pairing.rename(target.accountId, label)
+        replace(pairedList, list)
+        if (paired.value?.accountId == target.accountId) paired.value = list.firstOrNull { it.accountId == target.accountId }
+    }
+
+    /** Remove one binding. If it was active, fall back to another (or to PairingScreen when none remain). */
+    fun unpair(target: PairedDaemon) {
+        val wasActive = paired.value?.accountId == target.accountId
+        val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
+        replace(pairedList, remaining)
+        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull() }
+    }
+
+    /** Remove the currently active binding (the "re-pair" escape hatch when a pairing goes invalid). */
+    fun unpairActive() { paired.value?.let { unpair(it) } }
 
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
@@ -1094,5 +1178,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val LEVEL_WINDOW = 48                  // rolling waveform samples (~4 s at 12 Hz)
         const val TRANSCRIBE_TIMEOUT_MS = 15_000L    // upload → Transcript round-trip guard
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
+
+        const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
     }
 }

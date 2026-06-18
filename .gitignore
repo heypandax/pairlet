@@ -24,6 +24,11 @@ captures/
 .env
 .env.*
 *.p12
+# APNs auth keys (e.g. iosApp/AuthKey_*.p8)
+*.p8
+# Firebase service-account / admin SDK keys for the relay's FCM sender
+/firebase/
+*-adminsdk-*.json
 # build artifacts produced by scripts/release-macos.sh
 /cc-pocket-daemon-*.tar.gz
 

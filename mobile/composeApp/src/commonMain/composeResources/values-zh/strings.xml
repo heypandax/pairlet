@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- ── 连接 / 配对 ───────────────────────────────────────────── -->
-    <string name="paired_account">已配对 · %1$s…</string>
     <string name="connect">连接</string>
-    <string name="unpair">解除配对</string>
-    <string name="pair_with_daemon">与电脑端守护进程配对</string>
     <string name="paste_pair_link">粘贴 ccpocket://pair 链接</string>
-    <string name="pair">配对</string>
     <string name="hide_advanced">收起高级选项</string>
     <string name="advanced_direct_lan">高级 · 局域网直连</string>
     <string name="daemon_ws_url">daemon WebSocket 地址</string>
@@ -161,13 +157,31 @@
     <string name="voice_speech_unavailable">语音识别不可用</string>
     <string name="voice_audio_engine">音频引擎启动失败</string>
 
-    <!-- ── 设置（最小版：关于 + 解除配对）────────────────────────── -->
+    <!-- ── 设置（关于 + 已配对设备）──────────────────────────────── -->
     <string name="settings_title">设置</string>
     <string name="about_section">关于</string>
     <string name="about_version">版本</string>
     <string name="about_license">许可证</string>
     <string name="about_connection">连接</string>
     <string name="settings_open">设置</string>
+
+    <!-- ── 通知 ──────────────────────────────────────────────────── -->
+    <string name="notifications_section">通知</string>
+    <string name="notify_on_complete">任务完成时通知</string>
+    <string name="notify_on_complete_sub">应用关闭时，Claude 完成一轮回复就唤醒手机。</string>
+
+    <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
+    <string name="devices_section">已配对设备</string>
+    <string name="choose_computer">选择电脑</string>
+    <string name="add_device">添加电脑</string>
+    <string name="device_active">当前</string>
+    <string name="device_rename">重命名</string>
+    <string name="device_remove">移除</string>
+    <string name="rename_device_title">重命名电脑</string>
+    <string name="rename_device_hint">昵称</string>
+    <string name="device_save">保存</string>
+    <string name="remove_device_title">移除这台电脑？</string>
+    <string name="remove_device_confirm">移除后需重新配对才能再次连接这台电脑。</string>
 
     <!-- ── 图片附件 ──────────────────────────────────────────────── -->
     <string name="img_counter">%1$d/4 · 已在本机压缩</string>

@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="CC Pocket"
@@ -29,5 +30,18 @@
                 <data android:scheme="ccpocket" />
             </intent-filter>
         </activity>
+
+        <!-- FCM: receives token refreshes + foreground notification messages -->
+        <service
+            android:name=".push.CcPocketMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- channel the system uses to display backgrounded notification messages -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="task_complete" />
     </application>
 </manifest>

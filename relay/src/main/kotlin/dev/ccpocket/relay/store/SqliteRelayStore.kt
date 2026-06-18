@@ -147,6 +147,36 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
         Unit
     }
 
+    override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long) = tx { c ->
+        // a blank token de-registers — null out both columns so pushTargets() drops the device
+        val clear = token.isBlank()
+        c.prepareStatement("UPDATE devices SET push_platform=?, push_token=?, push_updated_at=? WHERE device_id=?").use { ps ->
+            if (clear) { ps.setNull(1, java.sql.Types.VARCHAR); ps.setNull(2, java.sql.Types.VARCHAR) }
+            else { ps.setString(1, platform); ps.setString(2, token) }
+            ps.setLong(3, now); ps.setString(4, deviceId)
+            ps.executeUpdate()
+        }
+        Unit
+    }
+
+    override suspend fun pushTargets(accountId: String): List<PushTarget> = tx { c ->
+        c.prepareStatement(
+            "SELECT device_id, push_platform, push_token FROM devices " +
+                "WHERE account_id=? AND revoked=0 AND push_token IS NOT NULL AND push_token<>''"
+        ).use { ps ->
+            ps.setString(1, accountId)
+            ps.executeQuery().use { rs ->
+                buildList {
+                    while (rs.next()) {
+                        val platform = rs.getString(2) ?: continue
+                        val token = rs.getString(3) ?: continue
+                        add(PushTarget(rs.getString(1), platform, token))
+                    }
+                }
+            }
+        }
+    }
+
     override suspend fun sweepExpired(now: Long) = tx { c ->
         c.prepareStatement("DELETE FROM pairing_tickets WHERE expires_at<? OR used=1").use { ps ->
             ps.setLong(1, now); ps.executeUpdate()

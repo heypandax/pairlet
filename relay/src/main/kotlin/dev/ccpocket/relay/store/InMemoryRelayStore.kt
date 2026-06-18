@@ -58,8 +58,26 @@ class InMemoryRelayStore : RelayStore {
     }
 
     override suspend fun touchDevice(deviceId: String, now: Long): Unit = lock.withLock {
-        devices[deviceId]?.let { devices[deviceId] = Device(it.deviceId, it.accountId, it.devicePubkey, it.credentialHash, it.createdAt, now, it.revoked) }
+        devices[deviceId]?.let { devices[deviceId] = Device(it.deviceId, it.accountId, it.devicePubkey, it.credentialHash, it.createdAt, now, it.revoked, it.pushPlatform, it.pushToken) }
         Unit
+    }
+
+    override suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long): Unit = lock.withLock {
+        val clear = token.isBlank()
+        devices[deviceId]?.let {
+            devices[deviceId] = Device(
+                it.deviceId, it.accountId, it.devicePubkey, it.credentialHash, it.createdAt, it.lastSeen, it.revoked,
+                pushPlatform = if (clear) null else platform,
+                pushToken = if (clear) null else token,
+            )
+        }
+        Unit
+    }
+
+    override suspend fun pushTargets(accountId: String): List<PushTarget> = lock.withLock {
+        devices.values
+            .filter { it.accountId == accountId && !it.revoked && !it.pushToken.isNullOrBlank() && it.pushPlatform != null }
+            .map { PushTarget(it.deviceId, it.pushPlatform!!, it.pushToken!!) }
     }
 
     override suspend fun sweepExpired(now: Long): Unit = lock.withLock {
