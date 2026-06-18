@@ -70,6 +70,7 @@ data class SessionSummary(
     val gitBranch: String? = null,
     val version: String? = null,
     val live: Boolean = false, // transcript written very recently — a session running right now
+    val busy: Boolean = false, // has running background work (bg bash / subagent / monitor) — keep it "active" even when idle
 )
 
 /** One filesystem entry returned by the daemon's DirectoryService. */
@@ -88,9 +89,42 @@ data class DirectoryEntry(
     val open: Boolean = false,
     /** actively executing right now: a process here that wrote output very recently. */
     val executing: Boolean = false,
+    /** the live session here has running background work — keep it "active" even when the turn is idle. */
+    val busy: Boolean = false,
     /** for open/executing dirs: the live session to jump straight into (tap resumes it directly). */
     val activeSessionId: String? = null,
     val activeSessionTitle: String? = null,
     /** git branch of the active session, shown inline on the live row. */
     val gitBranch: String? = null,
+)
+
+/** What kind of background work a [BackgroundJob] is. */
+@Serializable
+enum class JobKind {
+    @SerialName("bash") BASH_BACKGROUND, // a Bash tool call with run_in_background=true
+    @SerialName("subagent") SUBAGENT,    // a Task tool call (sub-agent)
+    @SerialName("monitor") MONITOR,      // a Monitor tool call (polls until a condition)
+}
+
+/** Lifecycle of a [BackgroundJob]. RUNNING jobs keep their session "active" (see [DirectoryEntry.busy]). */
+@Serializable
+enum class JobStatus {
+    @SerialName("running") RUNNING,
+    @SerialName("done") DONE,
+    @SerialName("failed") FAILED,
+    @SerialName("killed") KILLED,
+}
+
+/**
+ * One background job tracked by the daemon for a conversation: a backgrounded shell, a sub-agent,
+ * or a monitor. [id] is the originating tool_use id; [label] is a human summary (command / desc).
+ */
+@Serializable
+data class BackgroundJob(
+    val id: String,
+    val kind: JobKind,
+    val label: String,
+    val status: JobStatus,
+    val startedAt: Long,
+    val lastUpdate: Long,
 )

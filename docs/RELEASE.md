@@ -52,8 +52,8 @@ security find-identity -v -p codesigning
   ```
 
 ### 5. GitHub 仓库
-- 主仓库 `heypandax/cc-pocket`（已存在）—— 发布页挂 artifact。
-- tap 仓库 **`heypandax/homebrew-tap`**（已建）—— 放 `Casks/cc-pocket.rb`（用 `packaging/homebrew/Casks/cc-pocket.rb` 当模板）。tap 名即 `heypandax/tap`。artifact（`.tar.gz`）也上传到**这个 tap 仓库**的 GitHub Release（cask 的 `url` 指向它），不是主仓库。
+- 主仓库 `heypandax/cc-pocket`（已存在）—— **artifact（`.tar.gz`）挂在它的 GitHub Release**，cask 的 `url` 指向这里；Android APK 也放主仓 Release。
+- tap 仓库 **`heypandax/homebrew-tap`**（已建）—— **只放 `Casks/cc-pocket.rb`**（用 `packaging/homebrew/Casks/cc-pocket.rb` 当模板），不挂任何 artifact。tap 名即 `heypandax/tap`。
 
 > 证书私钥**只在你创建它的那台 Mac**。换机器：钥匙串访问里选中证书+私钥 → 导出为 `.p12`（带密码）→ 在新机导入。Developer ID 证书一个 Team 数量有限（一般 2 个），别乱删。
 
@@ -81,9 +81,9 @@ security find-identity -v -p codesigning
 
    产出 `…-macos-x86_64.tar.gz`。（先只发 arm64 也行，多数 Mac 已是 Apple Silicon。）
 
-3. **建 GitHub Release** `v1.1.0`，把上面两个 tar.gz 作为附件上传。
+3. **在主仓 `heypandax/cc-pocket` 建 GitHub Release** `v1.1.0`（tag 用 daemon 版本号），把上面的 tar.gz 作为附件上传。⚠️ 别传到 tap 仓库——tap 只放 cask。
 
-4. **更新 cask**：把 `packaging/homebrew/Casks/cc-pocket.rb` 的 `version` + `url` + `sha256` 填好，提交到 `heypandax/homebrew-tap` 的 `Casks/cc-pocket.rb`。
+4. **更新 cask**：把 `packaging/homebrew/Casks/cc-pocket.rb` 的 `version` + `sha256` 填好（`url` 已模板化为 `#{version}` 且指向主仓 Release，不用动），提交到 `heypandax/homebrew-tap` 的 `Casks/cc-pocket.rb`。
 
 5. **验收**：
 

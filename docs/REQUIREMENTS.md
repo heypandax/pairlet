@@ -207,7 +207,7 @@
 | **M0** 局域网 MVP | ✅ 已实现 | `daemon/`：`claude/`（ClaudeLauncher/ClaudeProcess/StreamParser/StreamWire/PermissionBridge）、`conversation/`、`disk/`（TranscriptScanner/DirectoryService/SlashCommandScanner）、本机 WS（`--local`）；`./gradlew :daemon:run` + `test-client` 可跑通 |
 | **M1** 云端 relay + 配对 | ✅ 已实现 | `relay/`：`Broker`、`auth/`（daemon Ed25519 签名挑战 + device bearer 凭据）、`pairing/`（一次性票 + 6 位码 + 限流）、`store/`（SQLite/InMemory）；daemon `RelayClient` 主动外拨 + 退避重连 |
 | **M2** 移动端多会话/多目录 | ✅ 已实现 | `mobile/composeApp`：5 屏（Pairing/Connect/Directory/Sessions/Chat）+ 弹窗（Permission/Mode/Settings）；`data/PocketRepository`、`net/`（relay E2E + LAN 直连）、`pairing/`、`secure/`；Android · iOS · desktop 共用 commonMain |
-| **M3** 打包 + 后台常驻 | ✅ 已实现 | daemon `service/ServiceInstaller`（macOS launchd）+ `Main` 子命令（`run/pair/test-client/service-install`）；jpackage 自带 JRE（`:daemon:packageDaemon`）、签名+公证（`scripts/release-macos.sh`）、Homebrew cask 一键安装；relay `deploy/`（Caddy + systemd + Cloudflare） |
+| **M3** 打包 + 后台常驻 | ✅ 已实现 | daemon `service/ServiceInstaller`（macOS launchd / Linux systemd `--user`，均支持 `--apply` 实装）+ `Main` 子命令（`run/pair/test-client/service-install`）；jpackage 自带 JRE（`:daemon:packageDaemon`）、macOS 签名+公证（`scripts/release-macos.sh`）+ Homebrew cask 一键安装、Linux 自包含 tarball（`scripts/release-linux.sh`）；relay `deploy/`（Caddy + systemd + Cloudflare） |
 | **M4** 后台授权推送 | 🟡 部分 | relay 侧 `PushProvider` 接口已就位（当前为 `LoggingPushProvider` 桩，**尚未接真实 APNs/FCM 投递**）；客户端目前**不依赖推送**，而是 App 回到前台时自动重连（指数退避）+ **turn-state 同步**（`SessionLive.executing`）补齐状态，避免漏审/按钮卡死 |
 
 > **超出原计划的增强**（已实现，需求初稿未列）：

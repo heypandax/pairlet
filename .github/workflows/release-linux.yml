@@ -3,9 +3,6 @@ name: release-linux
 # Builds the self-contained Linux daemon (bundled JRE via jpackage) and attaches the
 # tarball to a GitHub release. jpackage can't cross-compile, so this runs on a Linux
 # runner — the Mac dev box can't produce this artifact.
-#
-# Dispatch with `--ref <branch>` to build that branch's code; the workflow definition
-# must live on the default branch for workflow_dispatch to be allowed.
 
 on:
   workflow_dispatch:

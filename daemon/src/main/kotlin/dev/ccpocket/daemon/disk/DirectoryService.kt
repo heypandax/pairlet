@@ -34,12 +34,13 @@ class DirectoryService {
      * We read the authoritative `cwd` from each project's newest .jsonl rather than decoding the
      * (lossy) dir-key.
      */
-    fun listDirectories(root: String?): List<DirectoryEntry> {
+    fun listDirectories(root: String?, busyCwds: Set<String> = emptySet()): List<DirectoryEntry> {
         val projects = ProjectPaths.projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }
         val now = System.currentTimeMillis()
-        // open = a claude process is alive here (idle or active); executing = open AND wrote recently.
+        // open = a claude process is alive here (idle or active); executing = open AND wrote recently;
+        // busy = a daemon conversation here has running background work (keep it "active" even when idle).
         val liveCwds = LiveProcesses.claudeCwds()
         return dirs.mapNotNull { dir -> scanProject(dir) }
             .map { (cwd, mtime, newest) ->
@@ -55,6 +56,7 @@ class DirectoryService {
                     lastModified = mtime,
                     open = open,
                     executing = open && now - mtime < ACTIVE_WINDOW_MS,
+                    busy = cwd in busyCwds,
                     activeSessionId = active?.sessionId,
                     activeSessionTitle = active?.title,
                     gitBranch = active?.gitBranch,

@@ -9,13 +9,14 @@ import kotlin.io.path.inputStream
 import kotlin.io.path.isExecutable
 import kotlin.io.path.isRegularFile
 
-/** What to launch: working directory + optional resume/model/mode. */
+/** What to launch: working directory + optional resume/model/effort/mode. */
 data class ClaudeSpec(
     val workdir: Path,
     val resumeId: String? = null,
     val model: String? = null,
     val mode: PermissionMode = PermissionMode.DEFAULT,
     val appendSystemPrompt: String? = null,
+    val effort: String? = null, // reasoning effort: low|medium|high|xhigh|max (claude --effort)
 )
 
 /** Resolves the real `claude` binary and builds the launch command — pure, no side effects. */
@@ -70,6 +71,7 @@ object ClaudeLauncher {
         add("--permission-mode"); add(spec.mode.wireName())
         spec.resumeId?.let { add("--resume"); add(it) }
         spec.model?.let { add("--model"); add(it) }
+        spec.effort?.let { add("--effort"); add(it) }
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }
     }
 

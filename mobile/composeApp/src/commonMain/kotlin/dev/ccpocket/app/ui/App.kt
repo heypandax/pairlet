@@ -34,6 +34,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -77,6 +78,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.data.ChatItem
@@ -306,6 +308,9 @@ private fun ConnectScreen(repo: PocketRepository) {
 @Composable
 private fun DirectoryScreen(repo: PocketRepository) {
     var query by remember { mutableStateOf("") }
+    // the daemon's project list is pull-only; while parked here, re-pull quietly so a session that goes
+    // idle-with-background-work (or finishes) updates its running/idle badge without a manual refresh
+    LaunchedEffect(Unit) { while (true) { delay(10_000); repo.refreshDirectoriesSilently() } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn) // live link indicator rides with the title
@@ -389,13 +394,14 @@ private fun LiveProjectCell(e: DirectoryEntry, onClick: () -> Unit) {
                 fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
-            if (e.executing) {
+            val active = e.executing || e.busy // background work counts as "running" even when the turn is idle
+            if (active) {
                 PulseDot(Tok.accent)
                 Spacer(Modifier.width(4.dp))
             }
             Text(
-                stringResource(if (e.executing) Res.string.running else Res.string.idle),
-                color = if (e.executing) Tok.accent else Tok.muted, fontSize = 11.sp,
+                stringResource(if (active) Res.string.running else Res.string.idle),
+                color = if (active) Tok.accent else Tok.muted, fontSize = 11.sp,
             )
         }
         Text(
@@ -448,7 +454,7 @@ private fun SessionsScreen(repo: PocketRepository) {
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            if (s.live) {
+                            if (s.live || s.busy) { // running, or idle with background work still going
                                 Spacer(Modifier.width(8.dp))
                                 PulseDot(Tok.ok)
                                 Spacer(Modifier.width(4.dp))
@@ -490,6 +496,9 @@ private fun ChatScreen(repo: PocketRepository) {
     var input by remember { mutableStateOf("") }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var showModeSheet by remember { mutableStateOf(false) }
+    var showSessionInfo by remember { mutableStateOf(false) }
+    var showQuickActions by remember { mutableStateOf(false) }
+    var showBgJobs by remember { mutableStateOf(false) }
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val listState = rememberLazyListState()
@@ -501,7 +510,7 @@ private fun ChatScreen(repo: PocketRepository) {
             .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
     }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
-    LaunchedEffect(repo.messages.size, repo.messages.lastOrNull()) {
+    LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
         if (pinned && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
     }
     // when the keyboard opens/animates, keep the latest message pinned above the input
@@ -515,19 +524,27 @@ private fun ChatScreen(repo: PocketRepository) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({ repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showSessionInfo = true }.padding(vertical = 2.dp)) {
                     // session title leads (design); the generic "Chat" only before the first prompt names it
                     Text(
                         repo.chatTitle.value ?: stringResource(Res.string.chat_title),
                         color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + workdir
+                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + workdir + model
                         PulseDot(Tok.ok)
                         Spacer(Modifier.width(5.dp))
-                        TailPathText(repo.workdir.value ?: "") // tail-truncated: the project folder stays visible
+                        TailPathText(repo.workdir.value ?: "", modifier = Modifier.weight(1f)) // tail-truncated: the folder stays visible
+                        modelAlias(repo.model.value).takeIf { it.isNotBlank() }?.let {
+                            Text(" · $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                        }
                     }
                 }
                 if (!repo.observing.value) {
+                    Box(
+                        Modifier.size(32.dp).clip(CircleShape).clickable { showQuickActions = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("⋯", color = Tok.tx2, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                    Spacer(Modifier.width(4.dp))
                     ModeBadge(repo.mode.value, repo.allowRules.size) { showModeSheet = true }
                 }
             }
@@ -537,6 +554,12 @@ private fun ChatScreen(repo: PocketRepository) {
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(repo.messages) { m -> MessageItem(m) { imgs, i -> viewer = imgs to i } }
+                    // a turn is running but nothing live is on screen yet — e.g. just after sending, or
+                    // after re-entering a mid-turn session (the streamed Thinking row isn't in the replayed
+                    // transcript). A live Thinking/Assistant row already shows progress, so don't double up.
+                    val last = repo.messages.lastOrNull()
+                    val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
+                    if (repo.streaming.value && !liveContent) item { WorkingRow() }
                 }
                 if (!pinned) {
                     val pillScope = rememberCoroutineScope()
@@ -568,6 +591,7 @@ private fun ChatScreen(repo: PocketRepository) {
                         .sortedBy { !it.name.startsWith(slashQuery, ignoreCase = true) } // prefix matches first
                 }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
+                    BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd ->
@@ -657,6 +681,9 @@ private fun ChatScreen(repo: PocketRepository) {
                 onDismiss = { showModeSheet = false },
             )
         }
+        if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }
+        if (showQuickActions) QuickActionsSheet(repo) { showQuickActions = false }
+        if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs) { showBgJobs = false }
     }
 }
 
@@ -711,10 +738,15 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
-                if (m.text.isNotBlank()) Text(m.text, color = Tok.tx)
+                if (m.text.isNotBlank()) SelectionContainer { Text(m.text, color = Tok.tx) } // select-to-copy
             }
         }
-        is ChatItem.Assistant -> MarkdownText(m.text, Tok.tx)
+        is ChatItem.Assistant -> Column {
+            SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
+            if (m.text.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                CopyChip(m.text) // one-tap copy of the whole turn
+            }
+        }
         is ChatItem.Thinking -> ThinkingRow(m)
         is ChatItem.Tool -> {
             var expanded by remember(m) { mutableStateOf(false) }
@@ -739,6 +771,22 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
 @Composable
 private fun Label(text: String) =
     Text(text, color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+
+/**
+ * "Thinking…" activity row: a pulsing dot + label shown while a turn is running but nothing live is on
+ * screen yet (just-sent, or re-entered mid-turn where the streamed reasoning wasn't in the transcript).
+ */
+@Composable
+private fun WorkingRow() {
+    Row(
+        Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PulseDot(Tok.muted)
+        Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
 
 /** Extended reasoning, collapsed to one italic line; expands to the full text behind a hairline rule. */
 @Composable

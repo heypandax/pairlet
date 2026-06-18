@@ -37,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,6 +92,11 @@ val MODE_BY = MODES.associateBy { it.key }
 // ── bottom-sheet shell (scrim + raised card, radius-20 top) ─────
 @Composable
 fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    // a sheet has no text input — drop the keyboard if the composer still held focus. Otherwise the open
+    // keyboard + the sheet's imePadding fight over the bottom inset and (on iOS) wedge the layout, so a
+    // nested confirm popup can't lay out and the keyboard won't dismiss — the "stuck sheet" symptom.
+    val focus = LocalFocusManager.current
+    LaunchedEffect(Unit) { focus.clearFocus() }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() } // Android back = scrim tap
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x94000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } })

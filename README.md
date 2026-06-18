@@ -22,7 +22,7 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 
 ## Install
 
-End users only need the **daemon** on their Mac — the relay is hosted for you:
+End users only need the **daemon** on their computer (macOS or Linux) — the relay is hosted for you:
 
 ```bash
 brew install --cask heypandax/tap/cc-pocket
@@ -32,7 +32,14 @@ cc-pocket-daemon pair                       # prints a QR + 6-digit code
 
 Then pair your phone and start driving Claude from it — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `brew upgrade --cask cc-pocket`.
 
-> Published for **macOS / Apple Silicon**. The daemon is plain Kotlin/JVM and the code is cross-platform; on Linux/Windows, build it yourself (see [Quick start](#quick-start)).
+**Linux (x86_64)** is one-click too:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
+cc-pocket-daemon pair                       # prints a QR + 6-digit code
+```
+
+The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; re-run it to upgrade. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`. Other architectures (Linux arm64) or Windows: build from source — see [`scripts/release-linux.sh`](scripts/release-linux.sh) and [Quick start](#quick-start).
 
 ## How pairing works
 

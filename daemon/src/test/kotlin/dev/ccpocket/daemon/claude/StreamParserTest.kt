@@ -63,4 +63,53 @@ class StreamParserTest {
         assertIs<ClaudeEvent.Unparseable>(StreamParser.parse("not json").single())
         assertTrue(StreamParser.parse("   ").isEmpty())
     }
+
+    @Test
+    fun user_tool_result_becomes_toolResult() {
+        val ev = StreamParser.parse(
+            """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"done","is_error":false}]}}""",
+        ).single()
+        assertIs<ClaudeEvent.ToolResult>(ev)
+        assertEquals("t1", ev.toolUseId)
+        assertEquals("done", ev.content)
+        assertEquals(false, ev.isError)
+    }
+
+    @Test
+    fun user_tool_result_array_content_is_joined() {
+        val ev = StreamParser.parse(
+            """{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":[{"type":"text","text":"line"}],"is_error":true}]}}""",
+        ).single()
+        assertIs<ClaudeEvent.ToolResult>(ev)
+        assertEquals("line", ev.content)
+        assertTrue(ev.isError)
+    }
+
+    @Test
+    fun plain_user_line_stays_replay() {
+        assertIs<ClaudeEvent.UserReplay>(StreamParser.parse("""{"type":"user","message":{"content":[{"type":"text","text":"hi"}]}}""").single())
+        assertIs<ClaudeEvent.UserReplay>(StreamParser.parse("""{"type":"user"}""").single())
+    }
+
+    @Test
+    fun system_task_events_become_background_task_events_not_sessionInit() {
+        val started = StreamParser.parse(
+            """{"type":"system","subtype":"task_started","task_id":"T1","tool_use_id":"u1","description":"Sleep","task_type":"local_bash","session_id":"s"}""",
+        ).single()
+        assertIs<ClaudeEvent.BackgroundTaskStarted>(started)
+        assertEquals("T1", started.taskId)
+        assertEquals("u1", started.toolUseId)
+
+        val notif = StreamParser.parse(
+            """{"type":"system","subtype":"task_notification","task_id":"T1","status":"completed","session_id":"s"}""",
+        ).single()
+        assertIs<ClaudeEvent.BackgroundTaskUpdated>(notif)
+        assertEquals("completed", notif.status)
+
+        val updated = StreamParser.parse(
+            """{"type":"system","subtype":"task_updated","task_id":"T1","patch":{"status":"completed"},"session_id":"s"}""",
+        ).single()
+        assertIs<ClaudeEvent.BackgroundTaskUpdated>(updated)
+        assertEquals("completed", updated.status)
+    }
 }

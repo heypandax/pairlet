@@ -12,6 +12,7 @@ import dev.ccpocket.daemon.disk.TranscriptPatcher
 import dev.ccpocket.daemon.disk.TranscriptReplay
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AssistantChunk
+import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.PermissionMode
@@ -57,6 +58,10 @@ class Conversation(
     @Volatile
     private var model: String? = null
 
+    // mutable: a phone can switch reasoning effort mid-session via `/effort <level>` (relaunches under --resume)
+    @Volatile
+    private var effort: String? = null
+
     // session "Always allow" scopes; survives a mode-switch relaunch (the bridge is recreated, this isn't)
     private val allowRules: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val scope = CoroutineScope(
@@ -85,6 +90,10 @@ class Conversation(
     private var bridge: PermissionBridge? = null
     private val seq = AtomicLong(0)
 
+    // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
+    // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running
+    private val jobs = BackgroundJobRegistry()
+
     // a user turn is in flight (prompt written, TurnDone not yet seen) — SessionLive carries it so
     // a (re)attaching phone can reset its ■/streaming state instead of trusting a stale local value
     @Volatile
@@ -107,13 +116,15 @@ class Conversation(
     @Volatile
     private var reemitLive = false
 
-    /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing). */
-    private fun live(sid: String?) = SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing)
+    /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort). */
+    private fun live(sid: String?) =
+        SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort)
 
-    fun open(resumeId: String?, model: String?) {
+    fun open(resumeId: String?, model: String?, effort: String? = null) {
         this.model = model
+        this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
-        launchProcess(ClaudeSpec(workdir, resumeId, model, mode))
+        launchProcess(ClaudeSpec(workdir, resumeId, model, mode, effort = effort))
         // claude in `--input-format stream-json` emits NOTHING (not even the system/init that would
         // drive SessionLive) until the first user turn lands on stdin. But the phone needs convoId —
         // carried by SessionLive — before it can send that first turn. Waiting for claude's init here
@@ -134,6 +145,38 @@ class Conversation(
         sink.emit(CommandList(convoId, SlashCommandScanner.scan(workdir)))
     }
 
+    /** Push the current background-job snapshot to the phone. A job-state change also counts as activity. */
+    private suspend fun emitJobs() {
+        lastActivityMs = System.currentTimeMillis()
+        sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+    }
+
+    /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
+    fun hasBackgroundWork(): Boolean = jobs.hasRunning()
+
+    /**
+     * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
+     * pushing the refreshed snapshot to the phone. Driven by the daemon's periodic reaper so a forever-RUNNING
+     * count clears even with no stream activity. Returns true if anything was reaped.
+     */
+    suspend fun reapStaleJobs(staleMs: Long): Boolean {
+        if (!jobs.hasRunning()) return false // idle conversation: nothing RUNNING to settle, skip the clock+scan
+        val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
+        if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+        return changed
+    }
+
+    /**
+     * The relaunch primitive: stop claude and re-spawn it resuming [resumeId], rebuilding the spec from the
+     * live `model`/`mode`/`effort` fields. The switch-* methods just mutate their field and call this — the
+     * sole `ClaudeSpec` resume call site, so a new launch flag is a one-line field add, not another method.
+     * No pendingResumeId: a resume relaunch must not re-replay history.
+     */
+    private suspend fun relaunch(resumeId: String? = sessionId) {
+        stopProcess()
+        launchProcess(ClaudeSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort))
+    }
+
     /** Relaunch claude resuming the same session under a new permission mode. Keeps allow-rules + history. */
     suspend fun switchMode(newMode: PermissionMode) {
         if (newMode == mode) {
@@ -147,8 +190,7 @@ class Conversation(
         // was opened with, so a resumed/taken-over terminal session keeps its history (null = brand
         // new session — nothing happened yet, a fresh start loses nothing)
         val sid = sessionId ?: openedResumeId
-        stopProcess()
-        launchProcess(ClaudeSpec(workdir, resumeId = sid, model = model, mode = newMode)) // no pendingResumeId: don't re-replay history
+        relaunch(sid)
         // the relaunch killed any in-flight turn — executing is false again, the phone's ■ resets
         sink.emit(live(sid)) // confirm now — init won't arrive until the next turn
     }
@@ -159,9 +201,16 @@ class Conversation(
      */
     suspend fun switchModel(newModel: String?) {
         model = newModel
-        val sid = sessionId
-        stopProcess()
-        launchProcess(ClaudeSpec(workdir, resumeId = sid, model = newModel, mode = mode))
+        relaunch()
+    }
+
+    /**
+     * Relaunch claude at a different reasoning effort, resuming the same session (claude `-p` ignores the
+     * interactive `/effort`, so the daemon honors it by re-spawning with `--effort`). Keeps model + mode.
+     */
+    suspend fun switchEffort(newEffort: String?) {
+        effort = newEffort
+        relaunch()
     }
 
     fun clearAllowRule(rule: String?) {
@@ -185,6 +234,7 @@ class Conversation(
                     is ClaudeEvent.SessionInit -> {
                         val firstTime = sessionId == null
                         ev.sessionId?.let { sessionId = it }
+                        ev.model?.let { model = it } // claude's resolved model (real name even when opened with model=null)
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")
@@ -204,10 +254,18 @@ class Conversation(
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
                     is ClaudeEvent.AssistantThinking ->
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
-                    is ClaudeEvent.AssistantToolUse ->
+                    is ClaudeEvent.AssistantToolUse -> {
                         sink.emit(
                             ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, ev.input?.toString()?.take(280)),
                         )
+                        if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
+                    }
+                    is ClaudeEvent.ToolResult ->
+                        if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
+                    is ClaudeEvent.BackgroundTaskStarted ->
+                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, System.currentTimeMillis())) emitJobs()
+                    is ClaudeEvent.BackgroundTaskUpdated ->
+                        if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
                     is ClaudeEvent.TurnResult -> {
                         executing = false
                         sink.emit(
@@ -256,10 +314,11 @@ class Conversation(
         val history = TranscriptReplay.read(file)
         if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
         emitCommands()
+        newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
     }
 
     suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList()) {
-        if (text.trimStart().startsWith("/model")) { handleModelCommand(text.trim()); return }
+        if (tryIntercept(text)) return
         val p = proc ?: return
         executing = true // cleared by TurnResult (also covers cancelTurn — claude still emits a result)
         lastActivityMs = System.currentTimeMillis()
@@ -289,6 +348,23 @@ class Conversation(
         p.writeLine(frame.toString())
     }
 
+    /**
+     * Daemon-intercepted slash commands. claude `-p` ignores the interactive forms, so we honor them here
+     * (relaunch under the matching flag, or reset the session). Returns true if [text] was a recognized
+     * command (and was handled) — the caller then skips the normal prompt path. Custom commands, skills,
+     * and prompt-backed built-ins (/review, /compact, …) are NOT intercepted: they pass through to claude.
+     */
+    private suspend fun tryIntercept(text: String): Boolean {
+        val trimmed = text.trim()
+        when (trimmed.substringBefore(' ').substringBefore('\n')) {
+            "/model" -> handleModelCommand(trimmed)
+            "/effort" -> handleEffortCommand(trimmed)
+            "/clear" -> handleClearCommand()
+            else -> return false
+        }
+        return true
+    }
+
     /** Handle the phone's `/model [name]` — claude `-p` ignores it, so the daemon relaunches with `--model`. */
     private suspend fun handleModelCommand(text: String) {
         val arg = text.removePrefix("/model").trim()
@@ -298,6 +374,35 @@ class Conversation(
         }
         switchModel(arg)
         reply("✓ Model switched to \"$arg\" for this session. Your next message will use it.")
+    }
+
+    /** Handle the phone's `/effort [level]` — claude `-p` ignores it, so the daemon relaunches with `--effort`. */
+    private suspend fun handleEffortCommand(text: String) {
+        val arg = text.removePrefix("/effort").trim().lowercase()
+        if (arg.isEmpty()) {
+            reply("Current reasoning effort: ${effort ?: "default"}.\nUsage: /effort <level> — one of ${EFFORT_LEVELS.joinToString(", ")}.")
+            return
+        }
+        if (arg !in EFFORT_LEVELS) {
+            reply("Unknown effort \"$arg\". Choose one of: ${EFFORT_LEVELS.joinToString(", ")}.")
+            return
+        }
+        switchEffort(arg)
+        reply("✓ Reasoning effort set to \"$arg\" for this session. Your next message will use it.")
+    }
+
+    /**
+     * Handle the phone's `/clear` — claude `-p` has no stream-json "clear", so the daemon starts a fresh
+     * session in the same cwd (no resume), keeping the chosen model/effort/mode. The phone's transcript is
+     * wiped via an empty history; the next turn lands on a brand-new sessionId.
+     */
+    private suspend fun handleClearCommand() {
+        stopProcess() // also clears + re-emits background jobs (the killed tree took its bg shells with it)
+        sessionId = null
+        openedResumeId = null // brand-new session — no resume lineage left to preserve
+        launchProcess(ClaudeSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
+        sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
+        sink.emit(live(null))                          // sessionId backfills on the next init
     }
 
     /** Emit a daemon-side message to the phone as a complete assistant turn (used by slash commands). */
@@ -331,7 +436,7 @@ class Conversation(
         workdir = newWorkdir
         sessionId = null
         openedResumeId = null // fresh session in the new cwd — no resume lineage left to preserve
-        launchProcess(ClaudeSpec(workdir, resumeId = null, model = null, mode = mode))
+        launchProcess(ClaudeSpec(workdir, resumeId = null, model = null, mode = mode, effort = effort))
         emitCommands() // project commands differ per workdir
     }
 
@@ -342,11 +447,16 @@ class Conversation(
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
         proc = null
         bridge = null
+        if (jobs.clear()) sink.emit(BackgroundJobs(convoId, emptyList())) // the killed process tree took its bg shells with it
         unhideTranscript()
     }
 
     suspend fun close() {
         stopProcess()
         scope.cancel()
+    }
+
+    private companion object {
+        val EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh", "max")
     }
 }

@@ -54,21 +54,37 @@ class SessionRegistry(
         val convoId = UUID.randomUUID().toString()
         val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, claudeExe)
         mutex.withLock { convos[convoId] = c }
-        c.open(open.resumeId, open.model)
+        c.open(open.resumeId, open.model, open.effort)
         return convoId
     }
 
-    /** Close conversations with no claude activity for longer than [idleMs]. Returns the reap count. */
+    /**
+     * Close conversations with no claude activity for longer than [idleMs]. Returns the reap count.
+     * A conversation with running background work is NEVER reaped — killing it would take its still-running
+     * background shells / sub-agents with it (the "I left it running" case this is meant to preserve).
+     */
     suspend fun reapIdle(idleMs: Long): Int {
+        // first settle background jobs whose completion event never arrived — otherwise their forever-RUNNING
+        // status keeps hasBackgroundWork() true and the session can never be reaped (and the phone's "N running"
+        // count never clears). Snapshot outside the lock so the per-conversation emit doesn't hold the mutex.
+        mutex.withLock { convos.values.toList() }.forEach { runCatching { it.reapStaleJobs(STALE_JOB_MS) } }
         val now = System.currentTimeMillis()
         val stale = mutex.withLock {
-            val s = convos.filterValues { now - it.lastActivityMs > idleMs }
+            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.hasBackgroundWork() }
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
         stale.forEach { it.close() }
         return stale.size
     }
+
+    /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
+    suspend fun busyCwds(): Set<String> =
+        mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }
+
+    /** sessionIds of live conversations with running background work — keep their session row's "running" badge on. */
+    suspend fun busySessionIds(): Set<String> =
+        mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.mapNotNull { it.sessionId }.toSet() }
 
     suspend fun sendPrompt(p: SendPrompt) = get(p.convoId)?.sendPrompt(p.text, p.images) ?: Unit
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
@@ -93,4 +109,10 @@ class SessionRegistry(
     }
 
     private suspend fun get(id: String): Conversation? = mutex.withLock { convos[id] }
+
+    private companion object {
+        // a backgrounded shell silent this long (no started/updated/result event) is treated as dead. Well above
+        // any real launch-to-first-update gap, so a genuinely long-running background job is never reaped early.
+        const val STALE_JOB_MS = 15 * 60 * 1000L
+    }
 }

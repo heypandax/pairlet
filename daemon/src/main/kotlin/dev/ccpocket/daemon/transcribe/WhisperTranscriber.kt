@@ -15,7 +15,7 @@ import kotlin.io.path.name
 import kotlin.io.path.readText
 
 /**
- * Runs whisper.cpp over a finished voice capture: m4a → (afconvert) → 16 kHz wav → whisper-cli → text.
+ * Runs whisper.cpp over a finished voice capture: m4a → (afconvert/ffmpeg) → 16 kHz wav → whisper-cli → text.
  * Discovery mirrors [dev.ccpocket.daemon.claude.ClaudeLauncher]; process lifetime mirrors ClaudeProcess
  * (hard timeout, descendants reaped). Privacy: transcripts and audio are never logged — only durations
  * and exit codes; all temp files are deleted in `finally`.
@@ -28,6 +28,8 @@ object WhisperTranscriber {
     }
 
     const val MSG_INSTALL = "whisper-cli not found — install it on the computer: brew install whisper-cpp"
+    const val MSG_CONVERTER = "no audio converter found — install ffmpeg on the computer (Linux: " +
+        "sudo apt install ffmpeg / sudo dnf install ffmpeg; macOS ships afconvert built-in)"
     val MSG_MODEL = "whisper model missing — run on the computer:\n" +
         "mkdir -p ~/.cache/cc-pocket/models && curl -L " +
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin " +
@@ -37,7 +39,7 @@ object WhisperTranscriber {
 
     // brew's whisper-cpp formula installs `whisper-cli` (older releases shipped `whisper-cpp`)
     private val binNames = listOf("whisper-cli", "whisper-cpp")
-    private val fallbackDirs = listOf("/opt/homebrew/bin", "/usr/local/bin")
+    private val fallbackDirs = listOf("/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/local/bin", "/usr/bin")
 
     /** Locate the whisper binary; null = not installed (a user-facing soft error, not a crash). */
     fun resolveWhisper(explicit: String? = System.getenv("CC_POCKET_WHISPER_BIN")): Path? {
@@ -95,6 +97,32 @@ object WhisperTranscriber {
         return if (list.isEmpty()) "$intro。" else "$intro，可能提到 $list 等术语。"
     }
 
+    /**
+     * argv to transcode [src] (m4a/any) → 16 kHz mono 16-bit WAV at [wav]. Prefers macOS's built-in
+     * `afconvert`; falls back to `ffmpeg` (the Linux default). Returns null when neither is available.
+     */
+    fun convertArgs(src: Path, wav: Path): List<String>? {
+        if (Path.of("/usr/bin/afconvert").isExecutable()) {
+            return listOf("/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", src.toString(), wav.toString())
+        }
+        resolveOnPath("ffmpeg")?.let {
+            return listOf(it.toString(), "-nostdin", "-y", "-i", src.toString(), "-ar", "16000", "-ac", "1", "-f", "wav", wav.toString())
+        }
+        return null
+    }
+
+    /** Find an executable named [name] on PATH or in the well-known fallback dirs. */
+    private fun resolveOnPath(name: String): Path? {
+        val candidates = LinkedHashSet<Path>()
+        System.getenv("PATH")?.split(File.pathSeparator)?.forEach { dir ->
+            if (dir.isNotBlank()) candidates.add(Path.of(dir, name))
+        }
+        fallbackDirs.forEach { candidates.add(Path.of(it, name)) }
+        return candidates.firstOrNull {
+            runCatching { it.isRegularFile() && it.isExecutable() }.getOrDefault(false)
+        }
+    }
+
     /** whisper-cli argv. `-otxt -of` writes a deterministic .txt next to [outBase]; stdout is noise. */
     fun buildArgs(model: Path, wav: Path, outBase: Path, prompt: String): List<String> = buildList {
         add("-m"); add(model.toString())
@@ -119,7 +147,7 @@ object WhisperTranscriber {
         return kept.joinToString(" ").trim()
     }
 
-    /** Full pipeline. [mediaType] "audio/wav" skips conversion; anything else goes through afconvert. */
+    /** Full pipeline. [mediaType] "audio/wav" skips conversion; anything else goes through afconvert/ffmpeg. */
     suspend fun transcribe(bytes: ByteArray, mediaType: String, workdir: Path?, whisper: Path, model: Path): TranscribeResult =
         withContext(Dispatchers.IO) {
             val tmp = Files.createTempDirectory("ccp-voice")
@@ -132,11 +160,10 @@ object WhisperTranscriber {
                     val src = tmp.resolve("in.m4a")
                     Files.write(src, bytes)
                     wav = tmp.resolve("in.wav")
-                    val conv = runProcess(
-                        listOf("/usr/bin/afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", src.toString(), wav.toString()),
-                        CONVERT_TIMEOUT_S,
-                    )
-                    if (conv != 0) return@withContext TranscribeResult.Err("convert_failed", "audio conversion failed (afconvert exit $conv)")
+                    val argv = convertArgs(src, wav)
+                        ?: return@withContext TranscribeResult.Err("convert_failed", MSG_CONVERTER)
+                    val conv = runProcess(argv, CONVERT_TIMEOUT_S)
+                    if (conv != 0) return@withContext TranscribeResult.Err("convert_failed", "audio conversion failed (converter exit $conv)")
                 }
 
                 val outBase = tmp.resolve("out")
