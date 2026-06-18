@@ -49,6 +49,8 @@ class Conversation(
     initialSink: OutboundSink,
     parentScope: CoroutineScope,
     private val claudeExe: Path,
+    // read dynamically: the relay client installs the hook after this conversation may already exist
+    private val pushHookProvider: () -> PushHook? = { null },
 ) {
     // mutable: a phone can switch the permission mode mid-session (relaunches claude under --resume)
     @Volatile
@@ -275,6 +277,9 @@ class Conversation(
                                 TokenUsage(ev.inputTokens, ev.outputTokens, ev.cacheCreationInputTokens, ev.cacheReadInputTokens),
                             ),
                         )
+                        // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
+                        // so a control-plane send never stalls stdout parsing.
+                        pushHookProvider()?.let { hook -> scope.launch { hook.onTurnComplete(workdir, ev.finalText) } }
                     }
                     is ClaudeEvent.ControlRequest -> b.onControlRequest(ev)
                     is ClaudeEvent.ControlCancel -> b.onCancel(ev)

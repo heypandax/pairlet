@@ -17,7 +17,12 @@ class Device(
     val createdAt: Long,
     val lastSeen: Long?,
     val revoked: Boolean,
+    val pushPlatform: String? = null, // "apns"/"apns_sandbox"/"fcm"/… ; null until the device registers
+    val pushToken: String? = null,    // opaque APNs/FCM token; cleared (null) when the user opts out
 )
+
+/** A device the relay can push to: a non-revoked device that has registered a token. */
+data class PushTarget(val deviceId: String, val platform: String, val token: String)
 
 /**
  * Durable, multi-tenant state for the relay. Stores ONLY fingerprints, public keys, and hashes —
@@ -45,6 +50,12 @@ interface RelayStore {
     /** Mark a device revoked. Returns true if it existed under [accountId] and was not already revoked. */
     suspend fun revokeDevice(accountId: String, deviceId: String): Boolean
     suspend fun touchDevice(deviceId: String, now: Long)
+
+    // ---- push notifications ----
+    /** Store (or clear, when [token] is blank) a device's push token + platform for offline wake-ups. */
+    suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long)
+    /** Registered, non-revoked push targets for an account (devices that currently hold a token). */
+    suspend fun pushTargets(accountId: String): List<PushTarget>
 
     // ---- maintenance ----
     suspend fun sweepExpired(now: Long)

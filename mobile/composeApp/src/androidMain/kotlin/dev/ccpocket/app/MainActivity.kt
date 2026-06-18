@@ -1,18 +1,26 @@
 package dev.ccpocket.app
 
+import android.Manifest
+import android.app.NotificationManager
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
+import dev.ccpocket.app.push.CcPocketMessagingService
 import dev.ccpocket.app.secure.initSecureStore
 import dev.ccpocket.app.telemetry.initTelemetry
 import dev.ccpocket.app.ui.App
 import dev.ccpocket.app.voice.initVoice
 
 class MainActivity : ComponentActivity() {
+    private val requestNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Edge-to-edge so Compose owns ALL insets (the root Column pads systemBars + ime itself).
@@ -26,9 +34,21 @@ class MainActivity : ComponentActivity() {
         initSecureStore(this)
         initTelemetry(this)
         initVoice(this)
+        setupNotifications()
         setContent {
             val scope = rememberCoroutineScope()
             App(scope)
+        }
+    }
+
+    /** Create the push channel up front and request POST_NOTIFICATIONS (Android 13+). The token is only
+     *  sent to the relay once notifications are on AND a relay link attaches (see PocketRepository). */
+    private fun setupNotifications() {
+        getSystemService(NotificationManager::class.java)?.let(CcPocketMessagingService::ensureChannel)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestNotif.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }

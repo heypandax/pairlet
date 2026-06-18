@@ -22,7 +22,18 @@ object Db {
             st.execute("PRAGMA busy_timeout=5000")
         }
         conn.createStatement().use { st -> SCHEMA.split(";").forEach { sql -> sql.trim().takeIf { it.isNotEmpty() }?.let(st::execute) } }
+        migrate(conn)
         return conn
+    }
+
+    /** Additive, idempotent migrations for databases created before a column existed. SQLite has no
+     *  `ADD COLUMN IF NOT EXISTS`, so we ALTER and swallow the "duplicate column" error on re-run. */
+    private fun migrate(conn: Connection) {
+        listOf(
+            "ALTER TABLE devices ADD COLUMN push_platform TEXT",
+            "ALTER TABLE devices ADD COLUMN push_token TEXT",
+            "ALTER TABLE devices ADD COLUMN push_updated_at INTEGER",
+        ).forEach { sql -> runCatching { conn.createStatement().use { it.execute(sql) } } }
     }
 
     /** Only fingerprints, public keys, and hashes — never content, never private keys. */
@@ -40,7 +51,10 @@ object Db {
           credential_hash BLOB NOT NULL,
           created_at      INTEGER NOT NULL,
           last_seen       INTEGER,
-          revoked         INTEGER NOT NULL DEFAULT 0
+          revoked         INTEGER NOT NULL DEFAULT 0,
+          push_platform   TEXT,
+          push_token      TEXT,
+          push_updated_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_devices_account ON devices(account_id);
         CREATE TABLE IF NOT EXISTS pairing_tickets (

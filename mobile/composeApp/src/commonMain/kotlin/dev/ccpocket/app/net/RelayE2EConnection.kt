@@ -33,6 +33,9 @@ import io.ktor.websocket.Frame as WsFrame
 class RelayE2EConnection {
     private val client = HttpClient { install(WebSockets) }
     private val outbox = Channel<Frame>(Channel.BUFFERED)
+    // relay control-plane (TEXT) frames the device originates — e.g. RegisterPush. Buffered across
+    // reconnects like [outbox]; the per-connection writer drains it once a socket is live.
+    private val controlOutbox = Channel<dev.ccpocket.protocol.ToRelay>(Channel.BUFFERED)
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
     /** Relay control-plane frames (Attached, AuthError, PeerPresence) — NOT E2E daemon traffic. The
      *  repository reads this to drive an honest connection state (e.g. "computer offline"). */
@@ -56,6 +59,8 @@ class RelayE2EConnection {
                     outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray()))))
                 }
             }
+            // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
+            val ctrlWriter = launch { for (c in controlOutbox) outgoing.send(WsFrame.Text(control(c))) }
             try {
                 for (frame in incoming) when {
                     frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
@@ -68,12 +73,15 @@ class RelayE2EConnection {
                     else -> {}
                 }
             } finally {
-                writer.cancel()
+                writer.cancel(); ctrlWriter.cancel()
             }
         }
     }
 
     suspend fun send(frame: Frame) = outbox.send(frame)
+
+    /** Send a relay control-plane frame (e.g. RegisterPush) on the TEXT plane. Buffers until connected. */
+    suspend fun sendControl(frame: dev.ccpocket.protocol.ToRelay) = controlOutbox.send(frame)
 
     private suspend fun DefaultClientWebSocketSession.awaitAttached() {
         while (true) {

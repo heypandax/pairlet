@@ -47,6 +47,7 @@ kotlin {
             implementation(project.dependencies.platform(libs.firebase.bom))
             implementation(libs.firebase.analytics)
             implementation(libs.firebase.crashlytics)
+            implementation(libs.firebase.messaging) // FCM push (task-complete notifications)
             implementation(libs.peekaboo) // image picker + resize (android variant)
         }
         desktopMain.dependencies {

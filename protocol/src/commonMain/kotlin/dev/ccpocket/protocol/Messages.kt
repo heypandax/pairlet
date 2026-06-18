@@ -327,6 +327,27 @@ data class Ping(val ts: Long) : ToRelay
 @SerialName("pocket/pong")
 data class Pong(val ts: Long) : ToRelay
 
+// ---- push notifications (wake an offline phone via APNs/FCM) ----
+
+/**
+ * device -> relay: register (or refresh) this device's push token so the relay can wake it while its
+ * socket is offline. [platform] selects the relay-side sender — "apns"/"apns_sandbox" (iOS, by build
+ * env) or "fcm" (Android via Firebase); future domestic-vendor channels ("xiaomi"/"huawei"/…) slot in
+ * here. An empty [token] de-registers (the user turned notifications off). Re-sent on every reconnect.
+ */
+@Serializable
+@SerialName("pocket/push.register")
+data class RegisterPush(val platform: String, val token: String) : ToRelay
+
+/**
+ * daemon -> relay: a notify-worthy event happened (a turn finished). The relay pushes [title]/[body]
+ * to the account's registered tokens ONLY if no device socket is live. Unlike the opaque data plane,
+ * this label is cleartext to the relay by design — it becomes the lock-screen alert text.
+ */
+@Serializable
+@SerialName("pocket/push.notify")
+data class NotifyPush(val title: String, val body: String) : ToRelay
+
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----
 
 /** device -> relay (HTTP body): redeem a scanned ticket, registering its X25519 static pubkey. */

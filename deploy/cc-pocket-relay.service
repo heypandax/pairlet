@@ -13,6 +13,11 @@ Group=ccpocket
 # so it applies regardless of the launcher script.
 Environment=JAVA_TOOL_OPTIONS=-Xmx256m
 
+# Push credentials (APNs .p8 + FCM service account). Optional ("-"): without it the relay still
+# starts and logs "push disabled (logging only)". Provisioned out-of-band to /etc/cc-pocket-relay/,
+# never committed. See scripts/provision-relay-push.sh.
+EnvironmentFile=-/etc/cc-pocket-relay/push.env
+
 # Binds LOOPBACK only — Caddy reverse-proxies to it. SQLite db lives under /var/lib.
 ExecStart=/opt/cc-pocket-relay/bin/cc-pocket-relay --host 127.0.0.1 --port 9000 --db /var/lib/cc-pocket-relay/relay.db
 

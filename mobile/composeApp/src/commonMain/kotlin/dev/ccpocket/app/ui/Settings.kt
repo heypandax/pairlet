@@ -2,7 +2,6 @@ package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,7 +19,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.ccpocket.app.pairing.PairedDaemon
+import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
@@ -28,20 +29,30 @@ import org.jetbrains.compose.resources.stringResource
 private const val APP_VERSION = "0.1.0"
 
 /**
- * Minimal v1 settings sheet (design: Settings.html, reduced per the v1 audit): the About rows plus
- * the Unpair escape hatch. Default-mode / device management / appearance are P2.
+ * Settings sheet: the paired-computers list (switch / add / rename / remove — see [DeviceList]) plus the
+ * About rows. The single-device "Unpair" button is gone — removal is now per-device inside the list.
  */
 @Composable
-fun SettingsSheet(paired: PairedDaemon?, onUnpair: () -> Unit, onDismiss: () -> Unit) {
+fun SettingsSheet(repo: PocketRepository, onAddDevice: () -> Unit, onDismiss: () -> Unit) {
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
             Text(stringResource(Res.string.settings_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
 
-            Text(
-                stringResource(Res.string.about_section), color = Tok.muted, fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
-                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-            )
+            SectionLabel(stringResource(Res.string.devices_section))
+            // tapping a row in Settings switches to that computer; close the sheet so the new link is in view
+            DeviceList(repo, onSwitch = { onDismiss(); repo.switchDaemon(it) }, onAdd = onAddDevice)
+
+            SectionLabel(stringResource(Res.string.notifications_section))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+                ToggleRow(
+                    label = stringResource(Res.string.notify_on_complete),
+                    sub = stringResource(Res.string.notify_on_complete_sub),
+                    checked = repo.notificationsOn.value,
+                    onChange = { repo.setNotificationsEnabled(it) },
+                )
+            }
+
+            SectionLabel(stringResource(Res.string.about_section))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
                 AboutRow(stringResource(Res.string.about_version), APP_VERSION)
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -49,17 +60,35 @@ fun SettingsSheet(paired: PairedDaemon?, onUnpair: () -> Unit, onDismiss: () -> 
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 AboutRow(
                     stringResource(Res.string.about_connection),
-                    paired?.let { "relay · ${it.accountId.take(12)}…" } ?: "direct LAN",
+                    repo.paired.value?.displayName() ?: "direct LAN",
                 )
             }
-
-            Box(
-                Modifier.padding(top = 18.dp).fillMaxWidth().height(48.dp).clip(RoundedCornerShape(12.dp))
-                    .border(1.dp, Tok.danger.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                    .clickable(onClick = onUnpair),
-                contentAlignment = Alignment.Center,
-            ) { Text(stringResource(Res.string.unpair), color = Tok.danger, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold) }
         }
+    }
+}
+
+/** A small uppercase group heading, shared by the settings groups. */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text, color = Tok.muted, fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+    )
+}
+
+/** A settings row with a title + subtitle on the left and a Switch on the right. */
+@Composable
+private fun ToggleRow(label: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(label, color = Tok.tx, fontSize = 14.sp)
+            Text(sub, color = Tok.muted, fontSize = 11.5.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
