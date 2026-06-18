@@ -60,6 +60,11 @@ ln -sf "$launcher" "$BINDIR/$BIN"
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   say "registering systemd --user service"
   "$launcher" service-install --apply --exec "$launcher"
+  # service-install does `enable --now`, which is a NO-OP on an already-running service — so an
+  # in-place upgrade would keep running the old (rm'd-but-still-alive) binary. Force a restart so the
+  # new binary actually takes over. (macOS avoids this via the cask uninstall-then-postflight order.)
+  say "restarting onto the new binary"
+  systemctl --user restart "$BIN"
 else
   warn "no systemd --user session detected — skipping service registration"
   warn "start the daemon manually instead: $BINDIR/$BIN run"
