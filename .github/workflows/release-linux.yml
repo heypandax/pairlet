@@ -1,0 +1,48 @@
+name: release-linux
+
+# Builds the self-contained Linux daemon (bundled JRE via jpackage) and attaches the
+# tarball to a GitHub release. jpackage can't cross-compile, so this runs on a Linux
+# runner — the Mac dev box can't produce this artifact.
+#
+# Dispatch with `--ref <branch>` to build that branch's code; the workflow definition
+# must live on the default branch for workflow_dispatch to be allowed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag/version to attach the Linux tarball to (e.g. 1.1.3)"
+        required: true
+        default: "1.1.3"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Linux x86_64 covers the vast majority of self-hosted boxes; add arm64 later if needed.
+        arch: [x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build self-contained Linux tarball
+        run: |
+          chmod +x scripts/release-linux.sh gradlew
+          scripts/release-linux.sh "${{ inputs.version }}"
+
+      - name: Upload tarball to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACT="cc-pocket-daemon-${{ inputs.version }}-linux-${{ matrix.arch }}.tar.gz"
+          echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
+          gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
