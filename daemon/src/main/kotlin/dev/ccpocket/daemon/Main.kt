@@ -127,8 +127,10 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
      */
     private fun resolveLauncher(): String {
         listOf(
-            "/opt/homebrew/bin/cc-pocket-daemon", // Homebrew on Apple Silicon
-            "/usr/local/bin/cc-pocket-daemon",    // Homebrew on Intel / manual installs
+            "/opt/homebrew/bin/cc-pocket-daemon",            // Homebrew on Apple Silicon
+            "/home/linuxbrew/.linuxbrew/bin/cc-pocket-daemon", // Homebrew on Linux
+            "/usr/local/bin/cc-pocket-daemon",               // Homebrew on Intel / manual installs
+            "/usr/bin/cc-pocket-daemon",                     // distro package / manual install on Linux
         ).firstOrNull { java.io.File(it).canExecute() }?.let { return it }
         return ProcessHandle.current().info().command().orElse("/usr/local/bin/cc-pocket-daemon")
     }

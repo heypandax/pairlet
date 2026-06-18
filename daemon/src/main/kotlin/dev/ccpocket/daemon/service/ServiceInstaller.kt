@@ -13,7 +13,7 @@ object ServiceInstaller {
         return when {
             os.contains("mac") -> mac(exec, runArgs, apply)
             os.contains("win") -> windows(exec, runArgs)
-            else -> linux(exec, runArgs)
+            else -> linux(exec, runArgs, apply)
         }
     }
 
@@ -73,7 +73,17 @@ object ServiceInstaller {
     private fun xml(s: String): String =
         s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    private fun linux(exec: String, args: List<String>): String {
+    private fun linux(exec: String, args: List<String>, apply: Boolean): String {
+        val home = System.getProperty("user.home")
+        val unitPath = Path.of(home, ".config", "systemd", "user", "cc-pocket-daemon.service")
+
+        // A systemd --user service inherits the user manager's environment, which often lacks the
+        // Homebrew/node bin dirs the daemon needs to find `claude`. Seed PATH from ours, union in the
+        // well-known dirs — same footgun (and fix) as the launchd agent on macOS.
+        val wellKnown = listOf("/home/linuxbrew/.linuxbrew/bin", "/usr/local/bin", "/usr/bin", "/bin")
+        val path = (System.getenv("PATH")?.split(":").orEmpty() + wellKnown)
+            .map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(":")
+
         val unit = """
             |[Unit]
             |Description=cc-pocket daemon
@@ -81,14 +91,32 @@ object ServiceInstaller {
             |
             |[Service]
             |ExecStart=$exec ${args.joinToString(" ")}
+            |Environment=PATH=$path
             |Restart=always
             |RestartSec=3
             |
             |[Install]
             |WantedBy=default.target
         """.trimMargin()
-        return "Linux systemd --user unit — write to ~/.config/systemd/user/cc-pocket-daemon.service then " +
-            "`systemctl --user daemon-reload && systemctl --user enable --now cc-pocket-daemon`:\n\n$unit"
+
+        if (!apply) {
+            return "Linux systemd --user unit — write to $unitPath then " +
+                "`systemctl --user daemon-reload && systemctl --user enable --now cc-pocket-daemon` " +
+                "(or re-run with --apply):\n\n$unit"
+        }
+        // Same guard as macOS: refuse to install a unit whose launcher is missing — it would just
+        // fail at every (re)start with status=203/EXEC.
+        require(File(exec).canExecute()) {
+            "launcher not executable: $exec — pass --exec with the real cc-pocket-daemon path"
+        }
+        Files.createDirectories(unitPath.parent)
+        unitPath.writeText(unit)
+        ProcessBuilder("systemctl", "--user", "daemon-reload").start().waitFor()
+        ProcessBuilder("systemctl", "--user", "enable", "--now", "cc-pocket-daemon").start().waitFor()
+        // Best-effort: let the --user service keep running after logout (no-op if already enabled).
+        runCatching { ProcessBuilder("loginctl", "enable-linger", System.getenv("USER") ?: "").start().waitFor() }
+        return "installed + started systemd --user unit: $unitPath\n" +
+            "  logs: journalctl --user -u cc-pocket-daemon -f"
     }
 
     private fun windows(exec: String, args: List<String>): String =

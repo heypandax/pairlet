@@ -32,7 +32,7 @@ cc-pocket-daemon pair                       # prints a QR + 6-digit code
 
 Then pair your phone and start driving Claude from it — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `brew upgrade --cask cc-pocket`.
 
-> Published for **macOS / Apple Silicon**. The daemon is plain Kotlin/JVM and the code is cross-platform; on Linux/Windows, build it yourself (see [Quick start](#quick-start)).
+> Prebuilt one-click install is **macOS / Apple Silicon** only. The daemon is plain Kotlin/JVM and runs on **Linux** too: build a self-contained tarball with [`scripts/release-linux.sh`](scripts/release-linux.sh) (or `./gradlew :daemon:packageDaemon`), then `cc-pocket-daemon service-install --apply` writes and starts a `systemd --user` unit. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`. Windows: build it yourself (see [Quick start](#quick-start)).
 
 ## How pairing works
 

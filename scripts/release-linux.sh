@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Build → jpackage (bundled JRE) → tarball for Linux.
+# Produces a self-contained cc-pocket-daemon app-image (runs with no system Java).
+#
+# Unlike macOS there is no codesigning / notarization on Linux, so this is the whole pipeline.
+#
+# Prereqs:
+#   - JDK 17 with jpackage on PATH (JAVA_HOME set)
+#   - Run on the target arch (x86_64 or aarch64): jpackage bundles the host JRE, no cross-build.
+#
+# Usage: scripts/release-linux.sh [version]
+set -euo pipefail
+
+VERSION="${1:-1.0.0}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+ARCH="$(uname -m)" # x86_64 | aarch64
+
+echo "==> gradle build + jpackage (bundled JRE)"
+./gradlew :daemon:packageDaemon -q
+APP="$ROOT/daemon/build/jpackage/cc-pocket-daemon"
+[ -d "$APP" ] || { echo "ERROR: jpackage output not found at $APP"; exit 1; }
+
+echo "==> tarball + checksum"
+OUT="cc-pocket-daemon-${VERSION}-linux-${ARCH}.tar.gz"
+tar -C "$(dirname "$APP")" -czf "$OUT" "$(basename "$APP")"
+echo ""
+echo "    artifact : $OUT"
+echo "    sha256   : $(sha256sum "$OUT" | awk '{print $1}')"
+echo ""
+echo "Install on the target machine:"
+echo "  tar -xzf $OUT -C ~/.local/opt/"
+echo "  ln -sf ~/.local/opt/cc-pocket-daemon/bin/cc-pocket-daemon ~/.local/bin/cc-pocket-daemon"
+echo "  cc-pocket-daemon service-install --apply   # writes a systemd --user unit"
