@@ -32,6 +32,9 @@ captures/
 # build artifacts produced by scripts/release-macos.sh
 /cc-pocket-daemon-*.tar.gz
 
+# generated App Preview videos (rebuild with marketing/preview/make-preview.sh)
+/marketing/preview/out/
+
 # Firebase client configs — kept local, not in the public repo (users install the binary,
 # they don't build the mobile app from source)
 mobile/composeApp/google-services.json
