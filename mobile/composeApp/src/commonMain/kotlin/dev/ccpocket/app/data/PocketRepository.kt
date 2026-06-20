@@ -56,7 +56,10 @@ import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.TurnDone
+import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.preview_cmd_title
+import dev.ccpocket.app.resources.preview_cmd_note
 import dev.ccpocket.app.resources.status_checking_network
 import dev.ccpocket.app.resources.status_conn_lost
 import dev.ccpocket.app.resources.status_connecting
@@ -84,6 +87,7 @@ import dev.ccpocket.app.voice.VOICE_MAX_MS
 import dev.ccpocket.app.voice.VoicePermissionDenied
 import dev.ccpocket.app.voice.VoiceRecorder
 import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getString
 import io.ktor.client.HttpClient
 import dev.ccpocket.app.media.compressImage
 import kotlin.random.Random
@@ -176,6 +180,8 @@ class PocketRepository(private val scope: CoroutineScope) {
     val addingDevice = mutableStateOf(false)
     /** No-pairing demo: when true, all I/O is short-circuited to local sample data (see [enterDemo]). */
     val demoMode = mutableStateOf(false)
+    /** PREVIEW: brief connecting → end-to-end-encrypted opener shown before the demo project list. */
+    val demoConnecting = mutableStateOf(false)
     val directories = mutableStateListOf<DirectoryEntry>()
     /** True once the first Directories of a session arrives — distinguishes "empty" from "still loading". */
     val directoriesLoaded = mutableStateOf(false)
@@ -498,6 +504,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         pendingAsk.value = null
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearBackgroundJobs()
         demoMode.value = false // leaving the demo returns to real pairing
+        demoConnecting.value = false
         abandonVoice()
         status.value = StatusMsg(Res.string.status_disconnected)
         Telemetry.track(TelEvent.Disconnected)
@@ -564,8 +571,16 @@ class PocketRepository(private val scope: CoroutineScope) {
         demoMode.value = true
         demoAsked = false
         sessionActive.value = true
-        handle(Directories(DemoData.dirs())) // drives phase -> Ready via the normal handle() path
         replace(slashCommands, DemoData.commands())
+        // preview mode opens with a connecting → encrypted animation; normal demo goes straight to the list
+        if (isPreviewMode()) demoConnecting.value = true
+        else handle(Directories(DemoData.dirs())) // drives phase -> Ready via the normal handle() path
+    }
+
+    /** Preview opener finished — reveal the project list via the normal handle() path. */
+    fun finishDemoConnect() {
+        demoConnecting.value = false
+        handle(Directories(DemoData.dirs()))
     }
 
     /** Synthesize the daemon's reply to an outbound [frame] from local sample data. */
@@ -592,13 +607,19 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (!demoAsked) {
             // first turn demonstrates a tool call + permission prompt; the verdict resumes the reply
             demoAsked = true
+            // preview mode demos a destructive command (danger styling); normal demo shows a benign one
+            val preview = isPreviewMode()
+            val cmd = if (preview) DemoData.PREVIEW_ASK_PREVIEW else DemoData.ASK_PREVIEW
+            val rule = if (preview) DemoData.PREVIEW_ASK_RULE else DemoData.ASK_RULE
+            val title = if (preview) getString(Res.string.preview_cmd_title) else DemoData.ASK_TITLE
+            val note = if (preview) getString(Res.string.preview_cmd_note) else null
             delay(500)
             handle(AssistantChunk(convoId, demoSeq++, StreamPiece.Thinking(DemoData.THINKING)))
             delay(700)
-            handle(ToolEvent(convoId, demoSeq++, ToolPhase.START, DemoData.ASK_TOOL, DemoData.ASK_PREVIEW))
+            handle(ToolEvent(convoId, demoSeq++, ToolPhase.START, DemoData.ASK_TOOL, cmd))
             delay(300)
             demoPendingReply = true
-            handle(PermissionAsk(convoId, "demo-ask-${demoSeq++}", DemoData.ASK_TOOL, DemoData.ASK_PREVIEW, title = DemoData.ASK_TITLE, rule = DemoData.ASK_RULE))
+            handle(PermissionAsk(convoId, "demo-ask-${demoSeq++}", DemoData.ASK_TOOL, cmd, title = title, rule = rule, danger = preview, dangerNote = note))
             scope.launch { // safety: never leave the ■ button stuck if the prompt is ignored/dismissed
                 delay(40_000)
                 if (demoPendingReply) { demoPendingReply = false; demoStream(convoId, DemoData.REPLY_CHUNKS, thinking = false) }

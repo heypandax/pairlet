@@ -110,6 +110,9 @@ object DemoData {
     const val ASK_PREVIEW = "git status"
     const val ASK_TITLE = "Run command"
     const val ASK_RULE = "git status"
+    // preview/recording mode uses a destructive command so the permission card shows danger styling
+    const val PREVIEW_ASK_PREVIEW = "rm -rf ./build/cache"
+    const val PREVIEW_ASK_RULE = "rm:*"
 
     /** Reply body, split into chunks so it visibly streams in. */
     val REPLY_CHUNKS = listOf(

@@ -4,3 +4,5 @@ package dev.ccpocket.app
 actual fun defaultDaemonUrl(): String = "ws://10.0.2.2:8765/v1/ws"
 
 actual fun epochMillis(): Long = System.currentTimeMillis()
+
+actual fun isPreviewMode(): Boolean = false

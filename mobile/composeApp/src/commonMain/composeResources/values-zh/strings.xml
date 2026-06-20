@@ -19,6 +19,11 @@
     <string name="pair_from_link">通过链接配对</string>
     <string name="demo_cta">体验 Demo · 无需电脑</string>
     <string name="demo_banner">演示模式 · 示例数据</string>
+    <!-- preview/recording mode (marketing/preview) -->
+    <string name="preview_connecting">正在连接你的电脑…</string>
+    <string name="preview_encrypted">端到端加密</string>
+    <string name="preview_cmd_title">运行命令</string>
+    <string name="preview_cmd_note">删除文件</string>
 
     <!-- ── 连接状态（等宽状态行 + 顶部横幅）──────────────────────── -->
     <string name="reconnect_banner">连接已断开，正在重连…</string>

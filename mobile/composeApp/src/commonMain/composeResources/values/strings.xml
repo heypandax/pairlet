@@ -19,6 +19,11 @@
     <string name="pair_from_link">Pair from link</string>
     <string name="demo_cta">Try Demo · no computer needed</string>
     <string name="demo_banner">Demo mode · sample data</string>
+    <!-- preview/recording mode (marketing/preview) -->
+    <string name="preview_connecting">Connecting to your Mac…</string>
+    <string name="preview_encrypted">End-to-end encrypted</string>
+    <string name="preview_cmd_title">Run command</string>
+    <string name="preview_cmd_note">delete files</string>
 
     <!-- ── connection status (monospace line + banner) ───────────── -->
     <string name="reconnect_banner">Connection lost — reconnecting…</string>

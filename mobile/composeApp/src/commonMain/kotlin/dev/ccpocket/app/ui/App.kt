@@ -40,6 +40,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -122,13 +126,15 @@ fun App(scope: CoroutineScope) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
-                if (repo.demoMode.value) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
+                // preview/recording mode hides the demo banner for a clean marketing capture
+                if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
                 if (repo.sessionActive.value && repo.phase.value == ConnPhase.Reconnecting) StatusBanner(Tok.danger, stringResource(Res.string.reconnect_banner))
                 Box(Modifier.weight(1f)) {
                     when {
                         // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
                         !repo.sessionActive.value ->
                             if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingScreen(repo) else ConnectScreen(repo)
+                        repo.demoConnecting.value -> DemoConnectScreen { repo.finishDemoConnect() } // PREVIEW opener
                         else -> ConnectionGate(repo) {
                             when {
                                 repo.convoId.value != null -> ChatScreen(repo)
@@ -166,6 +172,40 @@ private fun StatusBanner(color: Color, text: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** PREVIEW: a brief "connecting → end-to-end encrypted" opener shown when entering the demo (scene 1). */
+@Composable
+private fun DemoConnectScreen(onDone: () -> Unit) {
+    var secured by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(1500); secured = true
+        delay(2200); onDone()
+    }
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("CC Pocket", color = Tok.tx, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(44.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Icon(Icons.Rounded.Smartphone, null, tint = Tok.tx2, modifier = Modifier.size(40.dp))
+            Icon(
+                if (secured) Icons.Rounded.Lock else Icons.Rounded.MoreHoriz, null,
+                tint = if (secured) Tok.ok else Tok.muted, modifier = Modifier.size(if (secured) 24.dp else 28.dp),
+            )
+            Icon(Icons.Rounded.Computer, null, tint = Tok.tx2, modifier = Modifier.size(40.dp))
+        }
+        Spacer(Modifier.height(44.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PulseDot(if (secured) Tok.ok else Tok.warn, size = 8.dp)
+            Text(
+                stringResource(if (secured) Res.string.preview_encrypted else Res.string.preview_connecting),
+                color = if (secured) Tok.ok else Tok.tx2,
+                fontSize = 15.sp, fontWeight = if (secured) FontWeight.SemiBold else FontWeight.Normal,
+            )
+        }
     }
 }
 
