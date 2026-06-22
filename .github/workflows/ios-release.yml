@@ -59,7 +59,16 @@ jobs:
           if [ -z "$GOOGLE_SERVICE_INFO_PLIST" ]; then
             echo "::error::GOOGLE_SERVICE_INFO_PLIST secret is not set."; exit 1
           fi
-          echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode > iosApp/iosApp/GoogleService-Info.plist
+          OUT=iosApp/iosApp/GoogleService-Info.plist
+          # Accept the secret as EITHER base64 OR the raw plist XML (it's plain text, not binary), so a
+          # pasted-raw secret doesn't fail base64 decode. plutil -lint is the hard gate on the result.
+          if printf '%s' "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode > "$OUT" 2>/dev/null && plutil -lint "$OUT" >/dev/null 2>&1; then
+            echo "GoogleService-Info.plist: decoded from base64"
+          else
+            printf '%s' "$GOOGLE_SERVICE_INFO_PLIST" > "$OUT"
+            echo "GoogleService-Info.plist: written from raw secret value"
+          fi
+          plutil -lint "$OUT"
 
       - name: Generate Xcode project (+ shared scheme) from project.yml
         # The committed .xcodeproj has NO shared scheme, so `-scheme iosApp` fails on a fresh checkout.
