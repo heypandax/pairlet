@@ -182,7 +182,10 @@ jobs:
           ORG_GRADLE_PROJECT_CCPOCKET_KEY_PASSWORD: ${{ secrets.CCPOCKET_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :mobile:composeApp:assembleRelease
+          # The repo's gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew
+          # JDK, which doesn't exist on Linux — override it with the runner's JDK (same trick the
+          # daemon release scripts use).
+          ./gradlew :mobile:composeApp:assembleRelease -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Verify signature & upload APK to release v${{ inputs.version }}
         env:
