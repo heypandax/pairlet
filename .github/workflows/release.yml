@@ -3,12 +3,14 @@ name: release
 # Builds the self-contained cc-pocket daemon (bundled JRE via jpackage) for every desktop
 # platform and attaches the artifacts to a GitHub release. jpackage CAN'T cross-compile — it
 # bundles the host JRE — so each OS/arch is built on a matching runner:
-#   macOS arm64   -> macos-14 (Apple Silicon)   [signed + notarized]
-#   macOS x86_64  -> macos-13 (Intel)           [signed + notarized]
+#   macOS arm64   -> macos-14, native arm64 JDK              [signed + notarized]
+#   macOS x86_64  -> macos-14, x86_64 JDK under Rosetta      [signed + notarized]
 #   Windows x86_64-> windows-latest
 #   Linux  x86_64 -> ubuntu-latest
-# The Mac dev box (Apple Silicon) can't produce the Intel / Windows / Linux artifacts locally,
-# which is why this all runs in CI.
+# Both macOS arches build on Apple Silicon (macos-14): jpackage bundles whichever JDK arch it's
+# given, so an x86_64 JDK (run via Rosetta) emits an x86_64 image. We deliberately AVOID the
+# macos-13 Intel runner — GitHub is retiring it and jobs there queue indefinitely. The Mac dev box
+# can't produce the Intel / Windows / Linux artifacts locally, which is why this all runs in CI.
 
 on:
   workflow_dispatch:
@@ -27,19 +29,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14   # Apple Silicon
-            arch: arm64
-          - runner: macos-13   # Intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+          - arch: arm64
+            jdk_arch: aarch64   # native on the Apple Silicon runner
+          - arch: x86_64
+            jdk_arch: x64       # cross-build via Rosetta
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17 (with jpackage)
+      - name: Install Rosetta (for the x86_64 JDK)
+        if: matrix.arch == 'x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+          architecture: ${{ matrix.jdk_arch }}
 
       - name: Import Developer ID signing certificate
         env:
@@ -63,6 +70,7 @@ jobs:
 
       - name: Build, sign, notarize, tarball
         env:
+          CCP_ARCH: ${{ matrix.arch }}
           DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}

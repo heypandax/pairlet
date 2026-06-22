@@ -27,14 +27,17 @@ cd "$ROOT"
 NOTARY_PROFILE="${NOTARY_PROFILE:-cc-pocket}"
 : "${DEVELOPER_ID:?set DEVELOPER_ID (in .env or the environment) to your 'Developer ID Application: …' identity}"
 
-ARCH="$(uname -m)" # arm64 | x86_64
+# The artifact arch follows the JDK that jpackage bundles, NOT the host CPU. We cross-build the
+# Intel package on an Apple Silicon runner (x86_64 JDK under Rosetta), where `uname -m` still says
+# arm64 — so CCP_ARCH lets CI name the tarball for the JDK's arch. Local builds default to the host.
+ARCH="${CCP_ARCH:-$(uname -m)}" # arm64 | x86_64
 
 echo "==> gradle build + jpackage (bundled JRE)"
 # gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew JDK, which doesn't
 # exist on a CI runner. Override it from JAVA_HOME when set (CI / setup-java); fall back to the
 # committed pin when JAVA_HOME is unset (the local dev convenience). jpackage bundles whichever
-# JDK runs gradle, so on the macos-13 (Intel) runner this yields an x86_64 image, and on
-# macos-14 (Apple Silicon) an arm64 image — that's how we cross-cover both arches.
+# JDK runs gradle: feed it an x86_64 JDK (via Rosetta) to emit an x86_64 image, or the native
+# arm64 JDK for an arm64 image — that's how we cover both arches from one runner.
 ./gradlew :daemon:packageDaemon -q -PappVersion="$VERSION" ${JAVA_HOME:+-Dorg.gradle.java.home="$JAVA_HOME"}
 APP="$ROOT/daemon/build/jpackage/cc-pocket-daemon.app"
 [ -d "$APP" ] || { echo "ERROR: jpackage output not found at $APP"; exit 1; }
