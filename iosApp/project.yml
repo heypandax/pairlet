@@ -28,6 +28,10 @@ targets:
         INFOPLIST_FILE: iosApp/Info.plist
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: NO
+        # iPhone only. Without this, xcodegen defaults to "1,2" (universal) and App Store validation
+        # rejects the Portrait-only Info.plist for iPad multitasking. The committed .xcodeproj already
+        # has TARGETED_DEVICE_FAMILY=1; declaring it here keeps the CI-regenerated project in sync.
+        TARGETED_DEVICE_FAMILY: "1"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         FRAMEWORK_SEARCH_PATHS:
