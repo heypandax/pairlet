@@ -5,14 +5,24 @@
 # Users: brew install --cask heypandax/tap/cc-pocket
 cask "cc-pocket" do
   version "1.1.4"
-  sha256 "2d93df6b4af36d354db17a908db6419635ee43f9744d9884e6916f3ed5395301"
 
-  url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-arm64.tar.gz"
+  # Apple Silicon and Intel each get their own notarized build (jpackage bundles an arch-specific
+  # JRE — see .github/workflows/release.yml). `arch` maps the running CPU to the asset suffix; the
+  # sha256 differs per arch. Refresh BOTH after each release run (notarized tarballs aren't
+  # bit-reproducible, so even the arm64 sha changes on a rebuild).
+  arch arm: "arm64", intel: "x86_64"
+
+  on_arm do
+    sha256 "2d93df6b4af36d354db17a908db6419635ee43f9744d9884e6916f3ed5395301"
+  end
+  on_intel do
+    sha256 :no_check # TODO: paste the macos-x86_64 tarball sha256 from the release CI run
+  end
+
+  url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
   name "CC Pocket daemon"
   desc "Drive Claude Code on your Mac from your phone over a zero-knowledge E2E relay"
   homepage "https://github.com/heypandax/cc-pocket"
-
-  depends_on arch: :arm64
 
   # the launcher lives in a self-contained .app (bundled JRE); symlink it onto PATH
   binary "cc-pocket-daemon.app/Contents/MacOS/cc-pocket-daemon"

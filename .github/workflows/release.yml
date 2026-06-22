@@ -1,0 +1,131 @@
+name: release
+
+# Builds the self-contained cc-pocket daemon (bundled JRE via jpackage) for every desktop
+# platform and attaches the artifacts to a GitHub release. jpackage CAN'T cross-compile — it
+# bundles the host JRE — so each OS/arch is built on a matching runner:
+#   macOS arm64   -> macos-14 (Apple Silicon)   [signed + notarized]
+#   macOS x86_64  -> macos-13 (Intel)           [signed + notarized]
+#   Windows x86_64-> windows-latest
+#   Linux  x86_64 -> ubuntu-latest
+# The Mac dev box (Apple Silicon) can't produce the Intel / Windows / Linux artifacts locally,
+# which is why this all runs in CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, no leading v (e.g. 1.1.4). The release tag must be v<version>."
+        required: true
+        default: "1.1.4"
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14   # Apple Silicon
+            arch: arm64
+          - runner: macos-13   # Intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Import Developer ID signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          # Import the Developer ID Application cert into a throwaway keychain so codesign can find
+          # it. The keychain is unlocked and added to the search list for this runner only.
+          KEYCHAIN="$RUNNER_TEMP/ccp-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          # allow codesign to use the key without an interactive prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build, sign, notarize, tarball
+        env:
+          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/release-macos.sh gradlew
+          scripts/release-macos.sh "${{ inputs.version }}"
+
+      - name: Upload tarball to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACT="cc-pocket-daemon-${{ inputs.version }}-macos-${{ matrix.arch }}.tar.gz"
+          echo "sha256: $(shasum -a 256 "$ARTIFACT" | awk '{print $1}')"
+          gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build self-contained Windows zip
+        run: pwsh scripts/release-windows.ps1 "${{ inputs.version }}"
+
+      - name: Upload zip to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $artifact = "cc-pocket-daemon-${{ inputs.version }}-windows-x86_64.zip"
+          $sha = (Get-FileHash -Algorithm SHA256 $artifact).Hash.ToLower()
+          Write-Host "sha256: $sha"
+          gh release upload "v${{ inputs.version }}" $artifact --clobber
+
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Linux x86_64 covers the vast majority of self-hosted boxes; add arm64 later if needed.
+        arch: [x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build self-contained Linux tarball
+        run: |
+          chmod +x scripts/release-linux.sh gradlew
+          scripts/release-linux.sh "${{ inputs.version }}"
+
+      - name: Upload tarball to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACT="cc-pocket-daemon-${{ inputs.version }}-linux-${{ matrix.arch }}.tar.gz"
+          echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
+          gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber

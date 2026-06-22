@@ -53,11 +53,17 @@ tasks.register<Exec>("packageDaemon") {
     dependsOn("installDist")
     val out = layout.buildDirectory.dir("jpackage")
     doFirst { out.get().asFile.deleteRecursively() }
+    // jpackage can't cross-build: it bundles the host JRE, so each OS/arch artifact must be built
+    // on a matching runner (see .github/workflows/release.yml). The launcher binary is jpackage.exe
+    // on Windows. The release version comes from -PappVersion (falls back for plain local builds).
+    val isWindows = System.getProperty("os.name").lowercase().contains("win")
+    val jpackageBin = "${System.getProperty("java.home")}/bin/jpackage" + if (isWindows) ".exe" else ""
+    val appVersion = (findProperty("appVersion") as String?) ?: "1.1.4"
     commandLine(
-        "${System.getProperty("java.home")}/bin/jpackage",
+        jpackageBin,
         "--type", "app-image",
         "--name", "cc-pocket-daemon",
-        "--app-version", "1.1.4",
+        "--app-version", appVersion,
         "--input", layout.buildDirectory.dir("install/cc-pocket-daemon/lib").get().asFile.absolutePath,
         "--main-jar", "daemon-${project.version}.jar",
         "--main-class", "dev.ccpocket.daemon.MainKt",

@@ -30,7 +30,12 @@ NOTARY_PROFILE="${NOTARY_PROFILE:-cc-pocket}"
 ARCH="$(uname -m)" # arm64 | x86_64
 
 echo "==> gradle build + jpackage (bundled JRE)"
-./gradlew :daemon:packageDaemon -q
+# gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew JDK, which doesn't
+# exist on a CI runner. Override it from JAVA_HOME when set (CI / setup-java); fall back to the
+# committed pin when JAVA_HOME is unset (the local dev convenience). jpackage bundles whichever
+# JDK runs gradle, so on the macos-13 (Intel) runner this yields an x86_64 image, and on
+# macos-14 (Apple Silicon) an arm64 image — that's how we cross-cover both arches.
+./gradlew :daemon:packageDaemon -q -PappVersion="$VERSION" ${JAVA_HOME:+-Dorg.gradle.java.home="$JAVA_HOME"}
 APP="$ROOT/daemon/build/jpackage/cc-pocket-daemon.app"
 [ -d "$APP" ] || { echo "ERROR: jpackage output not found at $APP"; exit 1; }
 
@@ -86,7 +91,15 @@ else
   echo "==> notarize (this can take a few minutes)"
   ZIP="$(mktemp -t ccp-notarize).zip"
   ditto -c -k --keepParent "$APP" "$ZIP"
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  # Two auth paths: a keychain profile created with `notarytool store-credentials` (local dev),
+  # or raw Apple-ID creds from env (CI, where importing a keychain profile is awkward). Prefer
+  # the explicit creds when all three are present, else fall back to the keychain profile.
+  if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+    xcrun notarytool submit "$ZIP" \
+      --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+  else
+    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+  fi
   xcrun stapler staple "$APP"
   xcrun stapler validate "$APP"
 fi

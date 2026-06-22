@@ -21,7 +21,7 @@ echo "==> gradle build + jpackage (bundled JRE)"
 # The repo's gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew JDK,
 # which doesn't exist on Linux. Override it from JAVA_HOME when set (CI / a Linux user's JDK);
 # fall back to the committed pin when JAVA_HOME is unset (the Mac dev's local convenience).
-./gradlew :daemon:packageDaemon -q ${JAVA_HOME:+-Dorg.gradle.java.home="$JAVA_HOME"}
+./gradlew :daemon:packageDaemon -q -PappVersion="$VERSION" ${JAVA_HOME:+-Dorg.gradle.java.home="$JAVA_HOME"}
 APP="$ROOT/daemon/build/jpackage/cc-pocket-daemon"
 [ -d "$APP" ] || { echo "ERROR: jpackage output not found at $APP"; exit 1; }
 

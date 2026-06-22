@@ -37,7 +37,9 @@ flowchart LR
 
 **1. 在手机上装 App** —— iPhone 与 iPad 走 [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)，Android 从 GitHub Releases 下 [Android APK](https://github.com/heypandax/cc-pocket/releases/latest)。（在手机上打开[官网](https://heypandax.github.io/cc-pocket/)会直接跳转商店；在电脑上则显示二维码供扫码。）
 
-**2. 在电脑上装 daemon**（macOS 或 Linux）—— 中继已为你托管：
+**2. 在电脑上装 daemon** —— 中继已为你托管。
+
+**macOS**（Apple Silicon 与 Intel 各有一份签名 + 公证的构建）：
 
 ```bash
 brew install --cask heypandax/tap/cc-pocket
@@ -54,7 +56,17 @@ curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/in
 cc-pocket-daemon pair                       # 打印一个二维码 + 6 位配对码
 ```
 
-安装脚本会从 GitHub Releases 拉一个自包含 tarball（内置 JRE —— 无需系统 Java），解到 `~/.local` 下，并注册一个 `systemd --user` 服务；重新跑一遍即可升级。Linux 上的语音转写用 `ffmpeg`，而非 macOS 自带的 `afconvert`。其他架构（Linux arm64）或 Windows：请从源码构建 —— 见 [`scripts/release-linux.sh`](scripts/release-linux.sh) 与 [快速开始](#快速开始)。
+安装脚本会从 GitHub Releases 拉一个自包含 tarball（内置 JRE —— 无需系统 Java），解到 `~/.local` 下，并注册一个 `systemd --user` 服务；重新跑一遍即可升级。Linux 上的语音转写用 `ffmpeg`，而非 macOS 自带的 `afconvert`。
+
+**Windows（x86_64）** —— 从 [Releases](https://github.com/heypandax/cc-pocket/releases/latest) 下载 `cc-pocket-daemon-<version>-windows-x86_64.zip`，在 PowerShell 里：
+
+```powershell
+Expand-Archive cc-pocket-daemon-*-windows-x86_64.zip -DestinationPath $env:LOCALAPPDATA\Programs\
+$ccp = "$env:LOCALAPPDATA\Programs\cc-pocket-daemon\cc-pocket-daemon.exe"
+& $ccp pair                                  # 打印一个二维码 + 6 位配对码
+```
+
+这个 zip 是自包含的（内置 JRE —— 无需系统 Java）；覆盖解压到原文件夹即可升级。想让它作为后台服务开机自启，运行 `& $ccp service-install`，再按打印出来的 `sc.exe` 命令执行（需以管理员身份）。其他架构（Linux arm64）：请从源码构建 —— 见 [快速开始](#快速开始)。
 
 ## 配对原理
 

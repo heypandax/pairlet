@@ -37,7 +37,9 @@ Two pieces: the **app** on your phone, and a hosted-relay **daemon** on your com
 
 **1. Get the app on your phone** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) for iPhone & iPad, or the [Android APK](https://github.com/heypandax/cc-pocket/releases/latest) from GitHub Releases. (On a phone, the [website](https://heypandax.github.io/cc-pocket/) links straight to the store; on a computer it shows a QR to scan.)
 
-**2. Install the daemon on your computer** (macOS or Linux) — the relay is hosted for you:
+**2. Install the daemon on your computer** — the relay is hosted for you.
+
+**macOS** (Apple Silicon and Intel — each gets its own signed, notarized build):
 
 ```bash
 brew install --cask heypandax/tap/cc-pocket
@@ -54,7 +56,17 @@ curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/in
 cc-pocket-daemon pair                       # prints a QR + 6-digit code
 ```
 
-The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; re-run it to upgrade. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`. Other architectures (Linux arm64) or Windows: build from source — see [`scripts/release-linux.sh`](scripts/release-linux.sh) and [Quick start](#quick-start).
+The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; re-run it to upgrade. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`.
+
+**Windows (x86_64)** — download `cc-pocket-daemon-<version>-windows-x86_64.zip` from [Releases](https://github.com/heypandax/cc-pocket/releases/latest), then in PowerShell:
+
+```powershell
+Expand-Archive cc-pocket-daemon-*-windows-x86_64.zip -DestinationPath $env:LOCALAPPDATA\Programs\
+$ccp = "$env:LOCALAPPDATA\Programs\cc-pocket-daemon\cc-pocket-daemon.exe"
+& $ccp pair                                  # prints a QR + 6-digit code
+```
+
+The zip is self-contained (bundled JRE — no system Java); re-extract over the old folder to upgrade. To auto-start it as a background service, run `& $ccp service-install` and follow the printed `sc.exe` commands (run them as Administrator). Other architectures (Linux arm64): build from source — see [Quick start](#quick-start).
 
 ## How pairing works
 
