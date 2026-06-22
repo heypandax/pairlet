@@ -6,12 +6,12 @@
   the gitignored build/, so CI can't see it. `destination: upload` makes `xcodebuild -exportArchive`
   sign and push straight to App Store Connect (no IPA on disk). Auth is the App Store Connect API key
   passed on the xcodebuild command line, not an Xcode account session.
-  Note: newer Xcode renames method `app-store` -> `app-store-connect`; `app-store` still works on both.
+  Note: Xcode 15.3+ renamed method `app-store` -> `app-store-connect`; we build on macos-26 (Xcode 26) so use the new name.
 -->
 <plist version="1.0">
 <dict>
   <key>method</key>
-  <string>app-store</string>
+  <string>app-store-connect</string>
   <key>destination</key>
   <string>upload</string>
   <key>teamID</key>

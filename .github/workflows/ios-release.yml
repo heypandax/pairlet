@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   ios:
-    runs-on: macos-14
+    runs-on: macos-26  # Xcode 26 / macOS 26 SDK — matches the local toolchain that produced prior uploads
     steps:
       - uses: actions/checkout@v4
 
