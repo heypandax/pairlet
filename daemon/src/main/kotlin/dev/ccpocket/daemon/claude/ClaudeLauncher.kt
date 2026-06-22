@@ -17,6 +17,13 @@ data class ClaudeSpec(
     val mode: PermissionMode = PermissionMode.DEFAULT,
     val appendSystemPrompt: String? = null,
     val effort: String? = null, // reasoning effort: low|medium|high|xhigh|max (claude --effort)
+    // Fork the resumed session into a fresh id (claude `--fork-session`) instead of appending to the
+    // original transcript. Set when the phone takes over / cold-resumes a session that another writer
+    // (a desktop `claude --resume`, or a still-live terminal) may also hold: forking writes to a NEW
+    // .jsonl so the two never share one file — eliminating the interleaved-write + branched-parentUuid
+    // race by construction (claude does not lock transcripts). Mirrors claude's own `/branch`. No-op
+    // unless resumeId != null.
+    val forkSession: Boolean = false,
 )
 
 /** Resolves the real `claude` binary and builds the launch command — pure, no side effects. */
@@ -69,7 +76,12 @@ object ClaudeLauncher {
         // ALWAYS pass the mode: omitting it lets claude fall back to the user's global
         // `permissions.defaultMode` (e.g. "auto"), silently breaking the phone's "Ask each step"
         add("--permission-mode"); add(spec.mode.wireName())
-        spec.resumeId?.let { add("--resume"); add(it) }
+        spec.resumeId?.let {
+            add("--resume"); add(it)
+            // fork into a fresh id rather than appending to the resumed transcript — guarded by resumeId
+            // so we never emit --fork-session with nothing to fork (see ClaudeSpec.forkSession)
+            if (spec.forkSession) add("--fork-session")
+        }
         spec.model?.let { add("--model"); add(it) }
         spec.effort?.let { add("--effort"); add(it) }
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }

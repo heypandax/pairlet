@@ -39,6 +39,25 @@ class ClaudeLauncherTest {
     }
 
     @Test
+    fun fork_session_added_only_when_forking_a_resume() {
+        val forked = ClaudeLauncher.buildArgs(
+            ClaudeSpec(Path.of("/x"), resumeId = "sid-9", forkSession = true),
+        )
+        assertTrue("--fork-session" in forked)
+        assertEquals("sid-9", forked[forked.indexOf("--resume") + 1])
+
+        // plain resume (the relaunch-in-place case) must NOT fork — that would mint a new id every switch
+        val plain = ClaudeLauncher.buildArgs(
+            ClaudeSpec(Path.of("/x"), resumeId = "sid-9", forkSession = false),
+        )
+        assertFalse("--fork-session" in plain)
+
+        // fork is a no-op without a resume id — never emit --fork-session with nothing to fork
+        val noResume = ClaudeLauncher.buildArgs(ClaudeSpec(Path.of("/x"), forkSession = true))
+        assertFalse("--fork-session" in noResume)
+    }
+
+    @Test
     fun bypass_mode_serializes_to_cli_name() {
         assertEquals("bypassPermissions", PermissionMode.BYPASS_PERMISSIONS.wireName())
     }

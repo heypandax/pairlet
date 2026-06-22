@@ -98,13 +98,19 @@ class RelayClient(
         }
     }
 
-    /** While no phone is attached, reclaim conversations idle longer than [IDLE_REAP_MS]. */
+    /**
+     * While no phone is attached, reclaim conversations idle longer than [IDLE_REAP_MS]. Reaping stops the
+     * claude process and unhides its (possibly forked) transcript, so a session the phone is done with
+     * surfaces in the desktop `claude --resume` picker promptly instead of staying hidden behind a warm
+     * process. Gated on `!peerOnline`: an actively-attached phone is never reaped, so its live session
+     * stays warm and its id stable (only sessions whose phone has already left are handed back).
+     */
     private suspend fun reaperLoop() {
         while (true) {
-            delay(60_000)
+            delay(REAP_SCAN_MS)
             if (!peerOnline) {
                 val n = core.registry.reapIdle(IDLE_REAP_MS)
-                if (n > 0) log.info("reaped $n idle background session(s)")
+                if (n > 0) log.info("reaped $n idle session(s) — transcripts unhidden for desktop resume")
             }
         }
     }
@@ -185,7 +191,12 @@ class RelayClient(
         PocketJson.encodeToString(Envelope(ctrlId.getAndIncrement().toString(), 0L, to = Route.RELAY, body = frame))
 
     private companion object {
-        const val IDLE_REAP_MS = 15 * 60 * 1000L  // 15 min idle -> reclaim
+        // Once the phone detaches, hand an idle (no background work) session back to the desktop quickly:
+        // stop + unhide so it surfaces in `claude --resume`. Short enough to feel prompt, long enough to
+        // ride out brief app-backgrounding / network blips — a reaped session re-opened later cold-forks
+        // into a fresh id (see Conversation.open), so too-short here trades desktop freshness for id churn.
+        const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
+        const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
         const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this (after one was seen) -> reconnect
     }

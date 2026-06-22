@@ -126,7 +126,11 @@ class Conversation(
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
-        launchProcess(ClaudeSpec(workdir, resumeId, model, mode, effort = effort))
+        // fork on take-over / cold-resume: the resumed id may belong to a desktop `claude --resume` or a
+        // still-live terminal, and claude doesn't lock transcripts — so we branch into a fresh id (carrying
+        // the full history) and write there, leaving the original .jsonl untouched. The pump re-announces
+        // the forked sessionId below. No-op when resumeId is null (a brand-new session).
+        launchProcess(ClaudeSpec(workdir, resumeId, model, mode, effort = effort, forkSession = true))
         // claude in `--input-format stream-json` emits NOTHING (not even the system/init that would
         // drive SessionLive) until the first user turn lands on stdin. But the phone needs convoId —
         // carried by SessionLive — before it can send that first turn. Waiting for claude's init here
@@ -173,10 +177,17 @@ class Conversation(
      * live `model`/`mode`/`effort` fields. The switch-* methods just mutate their field and call this — the
      * sole `ClaudeSpec` resume call site, so a new launch flag is a one-line field add, not another method.
      * No pendingResumeId: a resume relaunch must not re-replay history.
+     *
+     * Fork only when [resumeId] is NOT our own materialized [sessionId]: before the first turn lands
+     * `sessionId` is still null and a mode switch relaunches the foreign `openedResumeId` (a desktop /
+     * terminal id we must not write) — that must keep forking. Once we own a forked `sessionId`, relaunch
+     * continues it in place (no re-fork, no id sprawl, no orphaned history).
      */
     private suspend fun relaunch(resumeId: String? = sessionId) {
         stopProcess()
-        launchProcess(ClaudeSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort))
+        launchProcess(
+            ClaudeSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = resumeId != sessionId),
+        )
     }
 
     /** Relaunch claude resuming the same session under a new permission mode. Keeps allow-rules + history. */
