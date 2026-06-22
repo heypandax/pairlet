@@ -1,0 +1,125 @@
+name: ios-release
+
+# Archives the iOS app (com.panda.ccpocket), embeds the Kotlin/Native ComposeApp framework, and uploads
+# the build to App Store Connect — fully unattended. The local flow in docs/RELEASE.md relies on an
+# interactive Xcode-account session; CI instead authenticates with an App Store Connect API key (.p8 +
+# Key ID + Issuer ID) for BOTH cloud-managed signing (-allowProvisioningUpdates creates the distribution
+# cert/profile on the fly) and the upload. iOS ships on its own version line (CFBundleShortVersionString),
+# independent of the daemon's release.yml — hence a separate workflow.
+#
+# Required repo secrets (one-time setup):
+#   APPSTORE_API_KEY_P8        base64 of the App Store Connect API key .p8
+#                              (App Store Connect -> Users and Access -> Integrations -> App Store Connect
+#                               API -> generate a key with role >= App Manager; download the .p8 ONCE)
+#   APPSTORE_API_KEY_ID        the key's Key ID
+#   APPSTORE_API_ISSUER_ID     the team's Issuer ID (same Integrations page)
+#   GOOGLE_SERVICE_INFO_PLIST  base64 of iosApp/iosApp/GoogleService-Info.plist (gitignored Firebase config)
+# (The repo's APNs AuthKey_*.p8 is for push, NOT App Store Connect — do not reuse it here.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      marketing_version:
+        description: "Marketing version (CFBundleShortVersionString), e.g. 1.0.1. Bump for a new App Store version; reuse to attach another build to the same version."
+        required: true
+        default: "1.0.1"
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        # Exports JAVA_HOME for later steps; the Xcode "Compile Kotlin Framework" build phase reads
+        # ${JAVA_HOME:-...} to find java, and (with the pin removed below) gradle uses it too.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Unpin the dev-box JDK from gradle.properties
+        # gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew JDK, which doesn't
+        # exist on the runner AND overrides JAVA_HOME. Drop the line so the gradle invoked by Xcode's
+        # build phase falls back to the runner's JAVA_HOME (same intent as the android job's -D override).
+        run: sed -i '' '/^org\.gradle\.java\.home=/d' gradle.properties
+
+      - name: Restore GoogleService-Info.plist
+        # Gitignored (Firebase config, like Android's google-services.json). Must exist BEFORE xcodegen
+        # so it's globbed into the project as a bundled resource — else Firebase has no config at runtime.
+        env:
+          GOOGLE_SERVICE_INFO_PLIST: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "::error::GOOGLE_SERVICE_INFO_PLIST secret is not set."; exit 1
+          fi
+          echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode > iosApp/iosApp/GoogleService-Info.plist
+
+      - name: Generate Xcode project (+ shared scheme) from project.yml
+        # The committed .xcodeproj has NO shared scheme, so `-scheme iosApp` fails on a fresh checkout.
+        # project.yml is the source of truth; xcodegen regenerates the project with a shared scheme.
+        run: cd iosApp && xcodegen generate
+
+      - name: Stamp version & build number
+        # Build number = the workflow run number: strictly increasing across runs, so every upload is
+        # unique automatically (App Store Connect rejects a re-used build number under one marketing version).
+        env:
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          PLIST=iosApp/iosApp/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+          echo "building $MARKETING_VERSION ($BUILD_NUMBER)"
+
+      - name: Stage App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ] || [ -z "$ASC_KEY_ID" ]; then
+            echo "::error::APPSTORE_API_KEY_P8 / APPSTORE_API_KEY_ID secrets are not set."; exit 1
+          fi
+          # both locations: -authenticationKeyPath reads the explicit path; some tooling also looks in ~/.appstoreconnect
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          echo "$ASC_KEY_P8" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Archive (Release, cloud-managed signing)
+        env:
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          set -o pipefail   # tee must not mask xcodebuild's exit code (the classic "tail ate the failure")
+          xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/CCPocket.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            archive | tee "$RUNNER_TEMP/archive.log"
+          grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
+
+      - name: Export & upload to App Store Connect
+        env:
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/CCPocket.xcarchive" \
+            -exportOptionsPlist iosApp/ExportOptions.plist \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" | tee "$RUNNER_TEMP/export.log"
+          # destination=upload means success is the upload, not an IPA on disk; gate on the marker
+          grep -q "EXPORT SUCCEEDED" "$RUNNER_TEMP/export.log"

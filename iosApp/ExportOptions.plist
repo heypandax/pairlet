@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Store Connect export options for CI (.github/workflows/ios-release.yml).
+  Committed at a non-ignored path on purpose: the local flow's build/ios/ExportOptions.plist lives under
+  the gitignored build/, so CI can't see it. `destination: upload` makes `xcodebuild -exportArchive`
+  sign and push straight to App Store Connect (no IPA on disk). Auth is the App Store Connect API key
+  passed on the xcodebuild command line, not an Xcode account session.
+  Note: newer Xcode renames method `app-store` -> `app-store-connect`; `app-store` still works on both.
+-->
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store</string>
+  <key>destination</key>
+  <string>upload</string>
+  <key>teamID</key>
+  <string>SC9S2SJ42G</string>
+  <key>signingStyle</key>
+  <string>automatic</string>
+  <key>uploadSymbols</key>
+  <true/>
+  <!-- we stamp the version/build ourselves (PlistBuddy in CI); don't let Xcode auto-manage it -->
+  <key>manageAppVersionAndBuildNumber</key>
+  <false/>
+</dict>
+</plist>

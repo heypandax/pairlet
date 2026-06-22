@@ -24,7 +24,8 @@ captures/
 .env
 .env.*
 *.p12
-# APNs auth keys (e.g. iosApp/AuthKey_*.p8)
+# Apple .p8 secrets — both APNs push (iosApp/AuthKey_*.p8) AND the App Store Connect API key
+# used by ios-release.yml (iosApp/Github_AuthKey_*.p8). Never commit either; they go in CI as secrets.
 *.p8
 # Firebase service-account / admin SDK keys for the relay's FCM sender
 /firebase/
