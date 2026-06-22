@@ -1,5 +1,7 @@
 # CC Pocket
 
+**English** | [简体中文](README.zh-CN.md)
+
 Drive the `claude` CLI on your computer from your phone — from anywhere, not just your LAN. Start/resume sessions, browse working directories, send prompts, and approve or deny Claude's tool-permission requests remotely. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext. Clean-room Kotlin, MIT.
 
 **🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📱 Get the app:** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone & iPad) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest) (GitHub Releases)
