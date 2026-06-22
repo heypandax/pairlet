@@ -1,7 +1,8 @@
 name: release
 
 # Builds the self-contained cc-pocket daemon (bundled JRE via jpackage) for every desktop
-# platform and attaches the artifacts to a GitHub release. jpackage CAN'T cross-compile — it
+# platform — plus the signed Android phone APK — and attaches the artifacts to a GitHub release.
+# jpackage CAN'T cross-compile — it
 # bundles the host JRE — so each OS/arch is built on a matching runner:
 #   macOS arm64   -> macos-14, native arm64 JDK              [signed + notarized]
 #   macOS x86_64  -> macos-14, x86_64 JDK under Rosetta      [signed + notarized]
@@ -135,5 +136,59 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ARTIFACT="cc-pocket-daemon-${{ inputs.version }}-linux-${{ matrix.arch }}.tar.gz"
+          echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
+          gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
+
+  android:
+    # Builds the signed phone app (:mobile:composeApp) and attaches the APK to the release, so the
+    # website's "newest .apk" link always resolves to a current, release-signed build. The signing
+    # key is injected from repo secrets; if any are missing the build.gradle signing config is
+    # skipped and we FAIL the job rather than ship an unsigned APK (apksigner verify is the gate).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.CCPOCKET_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::CCPOCKET_KEYSTORE_BASE64 secret is not set — cannot produce a signed APK."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cc-pocket-release.jks"
+
+      - name: Build signed release APK
+        env:
+          # build.gradle.kts reads these via providers.gradleProperty(...). Gradle maps each
+          # ORG_GRADLE_PROJECT_<name> env var to a project property, so the keystore path and
+          # passwords stay out of the command line, the repo, and the build logs.
+          ORG_GRADLE_PROJECT_CCPOCKET_KEYSTORE: ${{ runner.temp }}/cc-pocket-release.jks
+          ORG_GRADLE_PROJECT_CCPOCKET_KEYSTORE_PASSWORD: ${{ secrets.CCPOCKET_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_CCPOCKET_KEY_ALIAS: ${{ secrets.CCPOCKET_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_CCPOCKET_KEY_PASSWORD: ${{ secrets.CCPOCKET_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :mobile:composeApp:assembleRelease
+
+      - name: Verify signature & upload APK to release v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SRC=$(ls mobile/composeApp/build/outputs/apk/release/*-release.apk 2>/dev/null | grep -v unsigned | head -1)
+          if [ -z "$SRC" ]; then echo "::error::no release APK produced"; exit 1; fi
+          # Gate: a missing/incorrect signing config yields an unsigned APK — apksigner verify
+          # exits non-zero on that, failing the job before we publish a non-installable build.
+          APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "$SRC"
+          VN=$(grep -E '^[[:space:]]*versionName' mobile/composeApp/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          ARTIFACT="cc-pocket-android-${VN}.apk"
+          cp "$SRC" "$ARTIFACT"
           echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
