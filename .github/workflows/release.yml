@@ -171,6 +171,19 @@ jobs:
           fi
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cc-pocket-release.jks"
 
+      - name: Restore google-services.json
+        # Gitignored (not committed), but the Firebase google-services plugin needs it at build
+        # time. It ships inside the APK anyway, so it's kept as a secret only to honor the repo's
+        # gitignore convention — not because it's sensitive.
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON secret is not set — the Firebase plugin can't build without it."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_JSON" | base64 --decode > mobile/composeApp/google-services.json
+
       - name: Build signed release APK
         env:
           # build.gradle.kts reads these via providers.gradleProperty(...). Gradle maps each
