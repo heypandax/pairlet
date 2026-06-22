@@ -211,7 +211,11 @@ jobs:
           APKSIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs "$SRC"
           VN=$(grep -E '^[[:space:]]*versionName' mobile/composeApp/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          ARTIFACT="cc-pocket-android-${VN}.apk"
+          echo "app versionName: $VN"
+          # Stable, version-less name so https://github.com/.../releases/latest/download/cc-pocket-android.apk
+          # is a permanent "always newest" link the README and site can hard-code (the per-release
+          # tag still carries the version; the APK's own versionName shows in Android settings).
+          ARTIFACT="cc-pocket-android.apk"
           cp "$SRC" "$ARTIFACT"
           echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
