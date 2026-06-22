@@ -98,6 +98,28 @@
     });
   });
 
+  // ── install: OS-aware tabs (detect the visitor's OS, let them switch if wrong) ──
+  const osTabs = [...document.querySelectorAll('.os-tab')];
+  const osPanels = [...document.querySelectorAll('.os-panel')];
+  if (osTabs.length){
+    const detectOS = () => {
+      const s = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '').toLowerCase();
+      if (/win/.test(s)) return 'windows';
+      if (/linux|x11|cros/.test(s) && !/android/.test(s)) return 'linux';
+      return 'mac'; // default — also covers macOS and anything unrecognized
+    };
+    const setOS = (os) => {
+      if (!osPanels.some(p => p.dataset.os === os)) os = 'mac';
+      osTabs.forEach(t => t.classList.toggle('on', t.dataset.os === os));
+      osPanels.forEach(p => p.classList.toggle('on', p.dataset.os === os));
+      try { localStorage.setItem('ccp-os', os); } catch(e){}
+    };
+    let savedOS = null;
+    try { savedOS = localStorage.getItem('ccp-os'); } catch(e){}
+    setOS(savedOS || detectOS());
+    osTabs.forEach(t => t.addEventListener('click', () => setOS(t.dataset.os)));
+  }
+
   // ── download: device-aware (phone → direct install, computer → QR) ──
   // Phones get tappable store buttons; computers get a QR to scan with a phone
   // camera. Detection drives a root attribute the CSS keys off of.

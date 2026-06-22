@@ -198,8 +198,28 @@
         <div class="step">
           <div class="n mono">1</div>
           <div class="s-body">
-            <h4><span class="i18n-en">Install the daemon on your Mac</span><span class="i18n-zh">在 Mac 上安装守护进程</span> <span class="mono">(Homebrew)</span></h4>
-            <div class="cmd"><span class="prompt mono">$</span><code class="mono">brew install --cask heypandax/tap/cc-pocket</code><button class="copy" data-copy="brew install --cask heypandax/tap/cc-pocket" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+            <h4><span class="i18n-en">Install the daemon on your computer</span><span class="i18n-zh">在电脑上安装守护进程</span></h4>
+            <!-- OS tabs: JS preselects the visitor's OS; click to switch in case detection is wrong -->
+            <div class="os-tabs" role="tablist" aria-label="Operating system">
+              <button class="os-tab" role="tab" data-os="mac">macOS</button>
+              <button class="os-tab" role="tab" data-os="linux">Linux</button>
+              <button class="os-tab" role="tab" data-os="windows">Windows</button>
+            </div>
+
+            <div class="os-panel" data-os="mac">
+              <div class="cmd"><span class="prompt mono">$</span><code class="mono">brew install --cask heypandax/tap/cc-pocket</code><button class="copy" data-copy="brew install --cask heypandax/tap/cc-pocket" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+              <p class="os-note"><span class="i18n-en">Apple Silicon &amp; Intel — Homebrew picks the right signed build.</span><span class="i18n-zh">Apple 芯片与 Intel 通用——Homebrew 自动选对应的签名构建。</span></p>
+            </div>
+
+            <div class="os-panel" data-os="linux">
+              <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+              <p class="os-note"><span class="i18n-en">x86_64. Installs under <span class="mono">~/.local</span> + a <span class="mono">systemd&nbsp;--user</span> service.</span><span class="i18n-zh">x86_64。装到 <span class="mono">~/.local</span> 下，并注册 <span class="mono">systemd&nbsp;--user</span> 服务。</span></p>
+            </div>
+
+            <div class="os-panel" data-os="windows">
+              <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">Expand-Archive cc-pocket-daemon-*-windows-x86_64.zip $env:LOCALAPPDATA\Programs\</code><button class="copy" data-copy="Expand-Archive cc-pocket-daemon-*-windows-x86_64.zip -DestinationPath $env:LOCALAPPDATA\Programs\" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+              <p class="os-note"><span class="i18n-en">x86_64. <a href="https://github.com/heypandax/cc-pocket/releases/latest" target="_blank" rel="noopener">Download the .zip</a> from Releases first, then extract in PowerShell.</span><span class="i18n-zh">x86_64。先从 <a href="https://github.com/heypandax/cc-pocket/releases/latest" target="_blank" rel="noopener">Releases 下载 .zip</a>，再在 PowerShell 里解压。</span></p>
+            </div>
           </div>
         </div>
         <div class="step">

@@ -361,6 +361,21 @@ a{color:inherit;text-decoration:none;}
 }
 .cmd .copy:hover{color:#ECEDEE;border-color:#6B7177;}
 .cmd .copy.done{color:var(--success);border-color:var(--success);}
+/* OS install tabs */
+.os-tabs{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap;}
+.os-tab{
+  font-family:'JetBrains Mono',monospace;font-size:13px;padding:6px 14px;border-radius:8px;
+  border:1px solid var(--hair);background:transparent;color:var(--sec);cursor:pointer;
+  transition:color .18s,border-color .18s,background .18s;
+}
+.os-tab:hover{color:var(--text);border-color:var(--muted);}
+.os-tab.on{background:var(--accent-bg);color:var(--accent);border-color:transparent;}
+.os-panel{display:none;}
+.os-panel.on{display:block;}
+.os-note{font-size:13.5px;color:var(--muted);margin:9px 0 0;}
+.os-note .mono{color:var(--sec);}
+.os-note a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent;}
+.os-note a:hover{border-bottom-color:var(--accent);}
 .step-foot{margin-top:30px;font-size:14px;color:var(--muted);}
 .step-foot .mono{color:var(--sec);font-size:13px;}
 .get-cta{margin-top:30px;}
