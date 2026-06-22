@@ -2,6 +2,8 @@
 
 Drive the `claude` CLI on your computer from your phone — from anywhere, not just your LAN. Start/resume sessions, browse working directories, send prompts, and approve or deny Claude's tool-permission requests remotely. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext. Clean-room Kotlin, MIT.
 
+**🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📱 Get the app:** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone & iPad) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest) (GitHub Releases)
+
 ```mermaid
 flowchart LR
     phone["📱 CC Pocket<br/>(Compose Multiplatform)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
@@ -10,6 +12,13 @@ flowchart LR
 ```
 
 The relay pairs phone ↔ computer and routes opaque encrypted frames between them; it holds no message content and no private keys. The phone and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake) so plaintext never leaves the two trusted endpoints.
+
+## What you can do from your pocket
+
+- **Approve from anywhere** — tool-permission requests reach your phone the moment Claude raises one. Allow or deny in seconds; if you don't, it times out to a safe deny.
+- **Pick up any session** — resume the exact Claude session you left running on your computer, or start a fresh one in any repo.
+- **Watch it think, live** — real-time streaming output, code blocks and tool events, exactly as they render in the terminal.
+- **Switch the working directory** — point Claude at any repo on your computer mid-conversation, with recents, a live breadcrumb, and per-project session counts.
 
 ## Modules
 
@@ -22,7 +31,11 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 
 ## Install
 
-End users only need the **daemon** on their computer (macOS or Linux) — the relay is hosted for you:
+Two pieces: the **app** on your phone, and a hosted-relay **daemon** on your computer.
+
+**1. Get the app on your phone** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) for iPhone & iPad, or the [Android APK](https://github.com/heypandax/cc-pocket/releases/latest) from GitHub Releases. (On a phone, the [website](https://heypandax.github.io/cc-pocket/) links straight to the store; on a computer it shows a QR to scan.)
+
+**2. Install the daemon on your computer** (macOS or Linux) — the relay is hosted for you:
 
 ```bash
 brew install --cask heypandax/tap/cc-pocket
@@ -30,7 +43,7 @@ cc-pocket-daemon service-install --apply   # run on login, auto-reconnect
 cc-pocket-daemon pair                       # prints a QR + 6-digit code
 ```
 
-Then pair your phone and start driving Claude from it — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `brew upgrade --cask cc-pocket`.
+Then pair your phone (open the app, scan the QR or type the 6-digit code) and start driving Claude from it — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `brew upgrade --cask cc-pocket`.
 
 **Linux (x86_64)** is one-click too:
 
@@ -80,6 +93,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 
 ## Docs
 
+- Website / landing page — <https://heypandax.github.io/cc-pocket/>
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)
