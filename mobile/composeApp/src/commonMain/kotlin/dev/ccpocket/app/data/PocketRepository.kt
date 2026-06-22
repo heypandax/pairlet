@@ -665,10 +665,14 @@ class PocketRepository(private val scope: CoroutineScope) {
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value) }
             }
-            is AssistantChunk -> appendChunk(f)
-            is ToolEvent -> { finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
-            is PermissionAsk -> { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
-            is TurnDone -> {
+            // Stream/turn frames carry their source convoId; this single-active-view model has one `messages`
+            // list, so a frame from a just-left conversation (its tail still in flight when we switched) must
+            // be dropped — else it renders into whatever convo is now open. Reopening the source replays its
+            // full transcript via ConvoHistory, so nothing is actually lost. (Matches the BackgroundJobs guard.)
+            is AssistantChunk -> if (f.convoId == convoId.value) appendChunk(f)
+            is ToolEvent -> if (f.convoId == convoId.value) { finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
+            is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
+            is TurnDone -> if (f.convoId == convoId.value) {
                 finishThinking(); streaming.value = false
                 // ~context occupancy: the prompt claude just saw (fresh input + the cached prefix still in the window)
                 f.usage?.let { contextUsed.value = it.inputTokens + (it.cacheReadInputTokens ?: 0) + (it.cacheCreationInputTokens ?: 0) }
@@ -681,8 +685,9 @@ class PocketRepository(private val scope: CoroutineScope) {
                     finishThinking(); streaming.value = false
                 }
             }
-            is ConvoHistory -> { messages.clear(); messages.addAll(f.messages.map(::historyItem)) }
-            is CommandList -> replace(slashCommands, f.commands)
+            // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript
+            is ConvoHistory -> if (f.convoId == convoId.value) { messages.clear(); messages.addAll(f.messages.map(::historyItem)) }
+            is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
             else -> {}
         }
