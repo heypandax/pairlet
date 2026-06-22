@@ -120,6 +120,35 @@
     osTabs.forEach(t => t.addEventListener('click', () => setOS(t.dataset.os)));
   }
 
+  // ── Android APK: resolve the newest .apk asset from GitHub Releases ──
+  // The APK is not on every release (daemon-only releases exist), so /releases/latest
+  // can point at a tag with no APK. We scan releases newest-first for the first .apk
+  // asset and upgrade the Android card to that direct download URL. The HTML ships a
+  // hard-coded direct-APK fallback, so this only ever improves a link that already works.
+  const apkCard = document.querySelector('.dl-card[data-store="android"]');
+  function setApkHref(url){
+    if (!apkCard || !url) return;
+    apkCard.dataset.href = url;
+    const btn = apkCard.querySelector('.dl-btn');
+    if (btn) btn.href = url;
+    // If a QR was already drawn from the fallback href, redraw it with the resolved URL.
+    const box = apkCard.querySelector('.dl-qr-box');
+    if (box && box.firstChild && typeof QRCode !== 'undefined'){
+      box.innerHTML = '';
+      new QRCode(box, { text: url, width: 148, height: 148, colorDark: '#0E0F11', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+    }
+  }
+  fetch('https://api.github.com/repos/heypandax/cc-pocket/releases?per_page=100')
+    .then(r => r.ok ? r.json() : null)
+    .then(rels => {
+      if (!Array.isArray(rels)) return;            // API error/rate-limit → keep the fallback
+      for (const rel of rels){                     // releases are newest-first
+        const apk = (rel.assets || []).find(a => /\.apk$/i.test(a.name));
+        if (apk){ setApkHref(apk.browser_download_url); return; }
+      }
+    })
+    .catch(() => {});                              // offline → keep the fallback
+
   // ── download: device-aware (phone → direct install, computer → QR) ──
   // Phones get tappable store buttons; computers get a QR to scan with a phone
   // camera. Detection drives a root attribute the CSS keys off of.
