@@ -20,12 +20,17 @@ on:
         description: "Release version, no leading v (e.g. 1.1.4). The release tag must be v<version>."
         required: true
         default: "1.1.4"
+      only_android:
+        description: "Only build & attach the Android APK (skip daemon jobs). For testing the APK pipeline against an existing release WITHOUT re-uploading daemon tarballs (which would change their sha256 and break the published Homebrew cask)."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   macos:
+    if: ${{ !inputs.only_android }}
     strategy:
       fail-fast: false
       matrix:
@@ -89,6 +94,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   windows:
+    if: ${{ !inputs.only_android }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +118,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" $artifact --clobber
 
   linux:
+    if: ${{ !inputs.only_android }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
