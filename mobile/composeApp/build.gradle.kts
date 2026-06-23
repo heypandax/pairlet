@@ -71,8 +71,8 @@ android {
         applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 4
-        versionName = "1.1.5" // keep in lockstep with the iOS CFBundleShortVersionString
+        versionCode = 5
+        versionName = "1.1.6" // keep in lockstep with the iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
     // live in the repo; on machines without them the release build falls back to unsigned
