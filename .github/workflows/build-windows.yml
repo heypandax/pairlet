@@ -1,0 +1,40 @@
+name: build-windows
+
+# Standalone Windows daemon build for quick testing. jpackage CAN'T cross-compile (it bundles the host
+# JRE), so the Windows zip must be built on a Windows runner — same constraint as release.yml. Unlike
+# release.yml, this workflow does NOT touch any GitHub release or the Homebrew cask: it uploads the
+# self-contained zip as a downloadable workflow artifact. Reuses scripts/release-windows.ps1 — the exact
+# same script release.yml's windows job runs — so there's a single source of truth for the build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version stamped into the build (no leading v, e.g. 1.1.8)"
+        required: true
+        default: "1.1.8"
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build self-contained Windows zip
+        run: pwsh scripts/release-windows.ps1 "${{ inputs.version }}"
+
+      - name: Upload zip as a downloadable workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64
+          path: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64.zip
+          if-no-files-found: error

@@ -10,7 +10,7 @@ local.properties
 captures/
 
 # local agent / IDE state
-.claude/settings.local.json
+.claude/
 
 # Xcode per-user state
 **/xcuserdata/

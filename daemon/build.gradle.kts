@@ -59,14 +59,19 @@ tasks.register<Exec>("packageDaemon") {
     val isWindows = System.getProperty("os.name").lowercase().contains("win")
     val jpackageBin = "${System.getProperty("java.home")}/bin/jpackage" + if (isWindows) ".exe" else ""
     val appVersion = (findProperty("appVersion") as String?) ?: "1.1.7"
-    commandLine(
-        jpackageBin,
-        "--type", "app-image",
-        "--name", "cc-pocket-daemon",
-        "--app-version", appVersion,
-        "--input", layout.buildDirectory.dir("install/cc-pocket-daemon/lib").get().asFile.absolutePath,
-        "--main-jar", "daemon-${project.version}.jar",
-        "--main-class", "dev.ccpocket.daemon.MainKt",
-        "--dest", out.get().asFile.absolutePath,
-    )
+    val jpackageArgs = buildList {
+        add(jpackageBin)
+        add("--type"); add("app-image")
+        add("--name"); add("cc-pocket-daemon")
+        add("--app-version"); add(appVersion)
+        add("--input"); add(layout.buildDirectory.dir("install/cc-pocket-daemon/lib").get().asFile.absolutePath)
+        add("--main-jar"); add("daemon-${project.version}.jar")
+        add("--main-class"); add("dev.ccpocket.daemon.MainKt")
+        add("--dest"); add(out.get().asFile.absolutePath)
+        // Windows: jpackage's app-image launcher defaults to the GUI subsystem, so stdout/stderr are
+        // not attached to the console — `pair`/`run` print nothing when launched from a terminal.
+        // Force a console launcher. --win-console is Windows-only; it errors on macOS/Linux jpackage.
+        if (isWindows) add("--win-console")
+    }
+    commandLine(jpackageArgs)
 }

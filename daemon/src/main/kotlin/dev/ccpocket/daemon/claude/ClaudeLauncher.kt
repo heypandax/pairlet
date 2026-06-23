@@ -29,13 +29,24 @@ data class ClaudeSpec(
 /** Resolves the real `claude` binary and builds the launch command — pure, no side effects. */
 object ClaudeLauncher {
 
+    private val isWindows: Boolean = System.getProperty("os.name").lowercase().contains("win")
+
     private val envBin: String? = System.getenv("CC_POCKET_CLAUDE_BIN")
-    private val fallbacks: List<String> = listOf(
-        System.getProperty("user.home") + "/.local/bin/claude",
-        "/opt/homebrew/bin/claude",
-        "/usr/local/bin/claude",
-        "/usr/bin/claude",
-    )
+
+    // Executable basenames to probe in each PATH / fallback dir. On Windows a bare `claude` is not
+    // directly runnable: the native installer drops `claude.exe` under ~\.local\bin (not on PATH by
+    // default) and npm installs `claude.cmd`, so we must try the suffixed names — preferring .exe.
+    private val exeNames: List<String> =
+        if (isWindows) listOf("claude.exe", "claude.cmd", "claude.bat", "claude") else listOf("claude")
+
+    // Well-known install dirs to search when PATH lacks claude (login services / GUI launchers often
+    // start with a sanitized PATH). ~/.local/bin is the native installer's target on every OS.
+    private val fallbackDirs: List<String> = buildList {
+        add(System.getProperty("user.home") + File.separator + ".local" + File.separator + "bin")
+        if (!isWindows) {
+            add("/opt/homebrew/bin"); add("/usr/local/bin"); add("/usr/bin")
+        }
+    }
 
     /**
      * Resolve the real `claude` executable. NEVER goes through a shell: the PATH `claude` may be a
@@ -46,10 +57,11 @@ object ClaudeLauncher {
         explicit?.let { return Path.of(it).toRealPath() }
         val candidates = LinkedHashSet<Path>()
         envBin?.let { candidates.add(Path.of(it)) }
-        System.getenv("PATH")?.split(File.pathSeparator)?.forEach {
-            if (it.isNotBlank()) candidates.add(Path.of(it, "claude"))
+        val dirs = buildList {
+            System.getenv("PATH")?.split(File.pathSeparator)?.forEach { if (it.isNotBlank()) add(it) }
+            addAll(fallbackDirs)
         }
-        fallbacks.forEach { candidates.add(Path.of(it)) }
+        dirs.forEach { dir -> exeNames.forEach { name -> candidates.add(Path.of(dir, name)) } }
 
         val valid = candidates.filter {
             runCatching { it.isRegularFile() && it.isExecutable() }.getOrDefault(false)
@@ -87,12 +99,22 @@ object ClaudeLauncher {
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }
     }
 
-    fun processBuilder(exe: Path, spec: ClaudeSpec): ProcessBuilder =
-        ProcessBuilder(buildList { add(exe.toString()); addAll(buildArgs(spec)) }).apply {
+    fun processBuilder(exe: Path, spec: ClaudeSpec): ProcessBuilder {
+        val exeStr = exe.toString()
+        // Windows can't CreateProcess a .cmd/.bat directly — those must run through cmd.exe. A native
+        // .exe (the installer's claude.exe) runs directly, same as the Unix binary.
+        val needsShell = isWindows && exeStr.lowercase().let { it.endsWith(".cmd") || it.endsWith(".bat") }
+        val argv = buildList {
+            if (needsShell) { add(System.getenv("ComSpec") ?: "cmd.exe"); add("/c") }
+            add(exeStr)
+            addAll(buildArgs(spec))
+        }
+        return ProcessBuilder(argv).apply {
             directory(spec.workdir.toFile())
             redirectErrorStream(false) // keep stderr off the stdout JSON stream
             environment().remove("CLAUDECODE") // avoid nested-session detection
         }
+    }
 }
 
 /** The CLI flag value for a permission mode (single source of truth = the @SerialName). */
