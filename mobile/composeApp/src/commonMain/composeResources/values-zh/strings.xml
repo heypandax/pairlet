@@ -63,6 +63,10 @@
     <string name="dir_open_sessions">进行中的会话</string>
     <string name="dir_projects">项目</string>
     <string name="dir_active">进行中</string>
+    <string name="dir_pinned">置顶</string>
+    <string name="dir_current_project">当前项目</string>
+    <string name="pin_project">置顶</string>
+    <string name="unpin_project">取消置顶</string>
     <string name="running">运行中</string>
     <string name="idle">空闲</string>
     <string name="session_fallback">会话</string>

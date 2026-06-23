@@ -52,6 +52,18 @@ class PushTest {
         assertEquals(listOf("tokB" to ("title" to "body")), fcm.sent)
     }
 
+    @Test fun forwardsSessionRouteToSenders() = runBlocking {
+        val store = InMemoryRelayStore()
+        store.insertAccount("acct", ByteArray(32), 1)
+        store.insertDevice(device("a", "acct")); store.setPushToken("a", "apns", "tokA", 2)
+        val apns = RecordingSender()
+        val route = dev.ccpocket.relay.push.NotifyRoute("/Users/x/proj", "sess-1")
+
+        StorePushService(store, mapOf("apns" to apns)) {}.notify("acct", "title", "body", route)
+
+        assertEquals(route, apns.routes.single()) // deep-link routing reaches the sender intact
+    }
+
     @Test fun skipsTokensWithNoSenderForPlatform() = runBlocking {
         val store = InMemoryRelayStore()
         store.insertAccount("acct", ByteArray(32), 1)
@@ -69,8 +81,9 @@ class PushTest {
 
     private class RecordingSender : PushSender {
         val sent = mutableListOf<Pair<String, Pair<String, String>>>()
-        override suspend fun send(token: String, title: String, body: String): Boolean {
-            sent += token to (title to body); return true
+        val routes = mutableListOf<dev.ccpocket.relay.push.NotifyRoute?>()
+        override suspend fun send(token: String, title: String, body: String, route: dev.ccpocket.relay.push.NotifyRoute?): Boolean {
+            sent += token to (title to body); routes += route; return true
         }
     }
 }

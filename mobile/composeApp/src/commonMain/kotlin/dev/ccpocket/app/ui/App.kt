@@ -1,6 +1,9 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.size
@@ -38,7 +41,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
@@ -118,6 +123,9 @@ fun App(scope: CoroutineScope) {
     }
     val pendingLink by dev.ccpocket.app.DeepLink.pending.collectAsState()
     LaunchedEffect(pendingLink) { pendingLink?.let { repo.handlePairUrl(it); dev.ccpocket.app.DeepLink.pending.value = null } }
+    // a tapped task-complete push deep-links straight into its session (connecting first if needed)
+    val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
+    LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
     dev.ccpocket.app.OnAppForeground { repo.onAppForeground() } // iOS kills sockets in background — reconnect on return
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
     // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
@@ -363,20 +371,40 @@ private fun DirectoryScreen(repo: PocketRepository) {
     val openSessionsLabel = stringResource(Res.string.dir_open_sessions)
     val projectsLabel = stringResource(Res.string.dir_projects)
     val activeLabel = stringResource(Res.string.dir_active)
-    val flatRows = remember(dirsSnapshot, query, openSessionsLabel, projectsLabel) { buildDirRows(repo.directories, query, openSessionsLabel, projectsLabel) }
+    val pinnedLabel = stringResource(Res.string.dir_pinned)
+    val currentProjectLabel = stringResource(Res.string.dir_current_project)
+    // drilled into a folder → the header names where you are (folder name); root keeps the section title.
+    // This stops the big title and the in-list "Projects" label from both reading "Projects" while drilled in.
+    // Reuse crumbs() (the breadcrumb's helper) so the title and breadcrumb tail stay identical by construction.
+    val headerTitle = if (treeMode && base != root) crumbs(base).lastOrNull() ?: projectsLabel else projectsLabel
+    val pinnedSnapshot = repo.pinnedPaths.toList()
+    val flatRows = remember(dirsSnapshot, query, pinnedSnapshot, openSessionsLabel, projectsLabel) {
+        buildDirRows(repo.directories, query, pinnedSnapshot, pinnedLabel, openSessionsLabel, projectsLabel)
+    }
     val treeRows = remember(dirsSnapshot, base) { buildTree(repo.directories, base) }
+    // when drilled into a folder that is itself a project, buildTree leads with its own leaf — split it out
+    // as the "current project" row (the rest are its subfolders). Computed once here, not per recomposition.
+    val currentLeaf = remember(treeRows, base, root) {
+        (treeRows.firstOrNull() as? TreeRow.Leaf)?.takeIf { base != root && it.entry.path == base }
+    }
+    val childRows = remember(treeRows, currentLeaf) { if (currentLeaf != null) treeRows.drop(1) else treeRows }
     val live = remember(dirsSnapshot) { dirsSnapshot.filter { it.open || it.busy } } // ACTIVE: live sessions
+    // pinned projects shown at the tree root (in pin order, present-only) — mirrors the flat Pinned section
+    val pinned = remember(dirsSnapshot, pinnedSnapshot) { pinnedEntries(dirsSnapshot, pinnedSnapshot) }
+    // long-press a project → a small sheet to pin/unpin it
+    var actionTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
     val listState = rememberLazyListState()
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
 
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         // ── top bar: "Projects" + connection sub-line · view toggle · settings ──
         Row(Modifier.fillMaxWidth().background(Tok.surface).padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(projectsLabel, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+                Text(headerTitle, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                     PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn, size = 6.dp)
                     Spacer(Modifier.width(6.dp))
@@ -413,17 +441,40 @@ private fun DirectoryScreen(repo: PocketRepository) {
                         Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
                     }
                 treeMode -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (base == root && live.isNotEmpty()) { // ACTIVE pinned on top at root
-                        item { Label(activeLabel) }
-                        items(live, key = { "a:" + it.path }) { ProjectCell(repo, it, showPath = true, direct = true) }
+                    if (base == root) { // PINNED + ACTIVE pinned on top at root
+                        if (pinned.isNotEmpty()) {
+                            item { Label(pinnedLabel) }
+                            items(pinned, key = { "p:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }) }
+                        }
+                        if (live.isNotEmpty()) {
+                            item { Label(activeLabel) }
+                            items(live, key = { "a:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }) }
+                        }
+                        if (pinned.isNotEmpty() || live.isNotEmpty()) item { Label(projectsLabel) }
+                    }
+                    // drilled into a folder that is itself a project → its own sessions lead as "current project"
+                    if (currentLeaf != null) {
+                        item { Label(currentProjectLabel) }
+                        item(key = "cur:" + currentLeaf.entry.path) {
+                            val e = currentLeaf.entry
+                            LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }) { repo.openProject(e) }
+                        }
                         item { Label(projectsLabel) }
                     }
-                    items(treeRows, key = { r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { r ->
+                    items(childRows, key = { r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { r ->
                         when (r) {
-                            is TreeRow.Folder -> FolderRow(r.name, r.hasSessions) { repo.browsePath.value = r.path }
+                            is TreeRow.Folder -> {
+                                val proj = r.project
+                                FolderRow(
+                                    name = r.name,
+                                    project = proj,
+                                    pinned = proj != null && repo.isPinned(proj.path),
+                                    onLongPress = proj?.let { e -> { actionTarget = e } },
+                                ) { repo.browsePath.value = r.path }
+                            }
                             is TreeRow.Leaf -> {
-                                val e = r.entry; val sid = e.activeSessionId
-                                LeafRow(e) { if (e.open && sid != null) repo.openSession(e.path, sid, title = e.activeSessionTitle) else repo.listSessions(e.path) }
+                                val e = r.entry
+                                LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }) { repo.openProject(e) }
                             }
                         }
                     }
@@ -432,22 +483,58 @@ private fun DirectoryScreen(repo: PocketRepository) {
                     items(flatRows) { row ->
                         when (row) {
                             is DirRow.Header -> Label(row.label)
-                            is DirRow.Dir -> ProjectCell(repo, row.entry, showPath = row.showPath, direct = row.direct)
+                            is DirRow.Dir -> ProjectCell(repo, row.entry, showPath = row.showPath, direct = row.direct, onLongPress = { actionTarget = row.entry })
                         }
                     }
                 }
             }
         }
     }
+        actionTarget?.let { ProjectActionsSheet(repo, it) { actionTarget = null } }
+    }
+}
+
+/** Tap a project: jump straight into its live session when one is running, else open its session list. */
+private fun PocketRepository.openProject(e: DirectoryEntry) {
+    val sid = e.activeSessionId
+    if (e.open && sid != null) openSession(e.path, sid, title = e.activeSessionTitle) else listSessions(e.path)
 }
 
 /** A project row: jumps into the live session (when [direct] and running) or opens its session list. */
 @Composable
-private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean) {
+private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean, onLongPress: (() -> Unit)? = null) {
     val sid = e.activeSessionId
-    if (direct && e.open && sid != null) LiveProjectCell(e) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
-    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, e.hasSessions, indent = false) { repo.listSessions(e.path) }
+    val pinned = repo.isPinned(e.path)
+    if (direct && e.open && sid != null) LiveProjectCell(e, pinned, onLongPress) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
+    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, e.hasSessions, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
 }
+
+/** Long-press a project → pin it to the top, or unpin it. Small sheet, mirrors the app's other actions. */
+@Composable
+private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onDismiss: () -> Unit) {
+    val pinned = repo.isPinned(e.path)
+    PocketSheet(onDismiss) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
+            Text(e.name.ifBlank { e.path }, color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            TailPathText(e.path, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+            Row(
+                Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .clickable { repo.togglePin(e.path); onDismiss() }.padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
+                Text(
+                    stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
+                    color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+}
+
+/** A small filled pin marking a project that's pinned to the top. */
+@Composable
+private fun PinGlyph() = Icon(Icons.Filled.PushPin, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
 
 /** The terracotta "history" pill shown on a dir/folder/leaf that has Claude history. */
 @Composable
@@ -499,19 +586,39 @@ private fun Breadcrumb(segs: List<String>, onUp: () -> Unit, onSegment: (Int) ->
     }
 }
 
-/** A folder row in the tree — drill in. [hasSessions] = the folder is itself a project too (badge hint). */
+/**
+ * A folder row in the tree — tap drills in. [project] != null means the folder is ALSO a project
+ * (history/running hint shown); drilling in surfaces its own sessions as the "current project" row at
+ * the top of that level, so it's reachable without the row itself hijacking the drill gesture.
+ */
 @Composable
-private fun FolderRow(name: String, hasSessions: Boolean, onClick: () -> Unit) {
+private fun FolderRow(
+    name: String,
+    project: DirectoryEntry?,
+    pinned: Boolean,
+    onLongPress: (() -> Unit)?,
+    onClick: () -> Unit,
+) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 13.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(horizontal = 4.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
         Text(name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (hasSessions) {
-            HistoryBadge()
-            Spacer(Modifier.width(8.dp))
+        if (pinned) { PinGlyph(); Spacer(Modifier.width(8.dp)) }
+        if (project != null) {
+            if (project.open || project.busy) {
+                PulseDot(Tok.accent, size = 6.dp)
+                Spacer(Modifier.width(4.dp))
+                Text(stringResource(Res.string.running), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp)
+                Spacer(Modifier.width(8.dp))
+            } else {
+                HistoryBadge()
+                Spacer(Modifier.width(8.dp))
+            }
         }
         Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
     }
@@ -519,13 +626,14 @@ private fun FolderRow(name: String, hasSessions: Boolean, onClick: () -> Unit) {
 
 /** A project-leaf row in the tree — opens its session list (or jumps into the live session). */
 @Composable
-private fun LeafRow(e: DirectoryEntry, onClick: () -> Unit) {
+private fun LeafRow(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 13.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(horizontal = 4.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("⑂", color = Tok.accent, fontSize = 14.sp, modifier = Modifier.padding(end = 9.dp)) // project marker
         Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (pinned) { PinGlyph(); Spacer(Modifier.width(8.dp)) }
         if (e.open || e.busy) {
             PulseDot(Tok.accent, size = 6.dp)
             Spacer(Modifier.width(4.dp))
@@ -541,32 +649,34 @@ private fun LeafRow(e: DirectoryEntry, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: Boolean, onClick: () -> Unit) {
+private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: Boolean, pinned: Boolean = false, onLongPress: (() -> Unit)? = null, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(start = if (indent) 16.dp else 0.dp)
-            .clip(RoundedCornerShape(10.dp)).background(Tok.surface).clickable(onClick = onClick).padding(12.dp),
+            .clip(RoundedCornerShape(10.dp)).background(Tok.surface).combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(name, color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
         }
+        if (pinned) { PinGlyph(); Spacer(Modifier.width(8.dp)) }
         if (hasSessions) HistoryBadge()
     }
 }
 
 /** A live session row: the session title leads, the folder + branch demote to metadata — tap resumes it. */
 @Composable
-private fun LiveProjectCell(e: DirectoryEntry, onClick: () -> Unit) {
+private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .clickable(onClick = onClick).padding(12.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 e.activeSessionTitle ?: stringResource(Res.string.session_fallback), color = Tok.tx, fontWeight = FontWeight.Medium,
                 fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
+            if (pinned) { Spacer(Modifier.width(6.dp)); PinGlyph() }
             Spacer(Modifier.width(8.dp))
             val active = e.executing || e.busy // background work counts as "running" even when the turn is idle
             if (active) {
@@ -674,13 +784,18 @@ private fun ChatScreen(repo: PocketRepository) {
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
     var pinned by remember { mutableStateOf(true) }
+    // keep the message list hidden until it's first parked at the bottom, so opening a session with
+    // history doesn't flash the top then visibly scroll down. Resets per session (convoId); a short
+    // grace reveals an empty/new session that has no history to position on.
+    var landed by remember(repo.convoId.value) { mutableStateOf(false) }
+    LaunchedEffect(repo.convoId.value) { delay(180); landed = true }
     LaunchedEffect(Unit) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
     }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
-        if (pinned && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+        if (pinned && repo.messages.isNotEmpty()) { listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE); landed = true }
     }
     // when the keyboard opens/animates, keep the latest message pinned above the input
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
@@ -719,7 +834,8 @@ private fun ChatScreen(repo: PocketRepository) {
             }
             Box(Modifier.weight(1f)) {
                 LazyColumn(
-                    Modifier.fillMaxSize().padding(16.dp).pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
+                    Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
+                        .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(repo.messages) { m -> MessageItem(m) { imgs, i -> viewer = imgs to i } }

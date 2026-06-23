@@ -17,6 +17,11 @@ fun MainViewController() = ComposeUIViewController {
 @Suppress("unused")
 fun handleDeepLink(url: String) = DeepLink.handle(url)
 
+/** Called from iOSApp.swift when a task-complete notification is tapped — the `wd`/`sid` custom keys
+ *  from the APNs payload route straight into that session. */
+@Suppress("unused")
+fun handlePushOpen(workdir: String, sessionId: String) = PushRoute.open(workdir, sessionId)
+
 /** Called from iOSApp.swift's didRegisterForRemoteNotificationsWithDeviceToken with the hex APNs token
  *  ("apns" on release builds, "apns_sandbox" on debug — picks the relay's APNs host). */
 @Suppress("unused")

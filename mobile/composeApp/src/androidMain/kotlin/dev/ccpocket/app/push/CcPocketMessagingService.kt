@@ -22,9 +22,17 @@ class CcPocketMessagingService : FirebaseMessagingService() {
         val n = message.notification ?: return // data-only messages aren't used by the relay
         val nm = getSystemService(NotificationManager::class.java) ?: return
         ensureChannel(nm)
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
+        // carry the session-routing data so a tap opens the right session (mirrors how the system tray
+        // delivers `data` as intent extras for backgrounded notifications)
+        val wd = message.data["wd"]
+        val sid = message.data["sid"]
+        val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            if (wd != null && sid != null) { putExtra("wd", wd); putExtra("sid", sid) }
+        }
+        // a distinct request code per session keeps each notification's extras from clobbering another's
+        val reqCode = (wd to sid).hashCode()
         val tap = launch?.let {
-            PendingIntent.getActivity(this, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            PendingIntent.getActivity(this, reqCode, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }
         val notif = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(applicationInfo.icon)

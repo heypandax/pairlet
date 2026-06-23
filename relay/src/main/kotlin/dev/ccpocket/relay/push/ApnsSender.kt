@@ -48,12 +48,14 @@ class ApnsSender(
         return cachedJwt
     }
 
-    override suspend fun send(token: String, title: String, body: String): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): Boolean = withContext(Dispatchers.IO) {
         val payload = buildJsonObject {
             putJsonObject("aps") {
                 putJsonObject("alert") { put("title", title); put("body", body) }
                 put("sound", "default")
             }
+            // custom keys (siblings of `aps`) carry deep-link routing; the OS hands them to the app on tap
+            route?.let { put("wd", it.workdir); put("sid", it.sessionId) }
         }.toString()
         val req = HttpRequest.newBuilder()
             .uri(URI.create("https://$host/3/device/$token"))

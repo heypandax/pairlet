@@ -58,7 +58,19 @@ fun TailPathText(path: String, modifier: Modifier = Modifier, color: Color = Tok
  * keeps the session list and "New session" reachable. The daemon sorts by transcript mtime.
  * Section labels come in pre-localized (this runs inside remember{}, outside composition).
  */
-fun buildDirRows(dirs: List<DirectoryEntry>, query: String, openSessionsLabel: String, projectsLabel: String): List<DirRow> {
+/** The entries for the pinned [paths] (in pin order) that are still present in [dirs]. Shared by the flat
+ *  and tree views so both resolve pins the same way. */
+fun pinnedEntries(dirs: List<DirectoryEntry>, paths: List<String>): List<DirectoryEntry> =
+    paths.mapNotNull { p -> dirs.firstOrNull { it.path == p } }
+
+fun buildDirRows(
+    dirs: List<DirectoryEntry>,
+    query: String,
+    pinned: List<String>,
+    pinnedLabel: String,
+    openSessionsLabel: String,
+    projectsLabel: String,
+): List<DirRow> {
     val q = query.trim()
     // match path + project name + the LIVE session's title (what the card shows). Idle-session titles and
     // transcript content aren't in this flat list — searching those needs a daemon-side session search.
@@ -69,14 +81,18 @@ fun buildDirRows(dirs: List<DirectoryEntry>, query: String, openSessionsLabel: S
     }
     // a session with running background work stays "open" in the list even if its claude process check lags
     val live = filtered.filter { it.open || it.busy }
+    // pinned-to-top, in pin order; only those still present (and matching the filter). Like the live section,
+    // a pinned project also keeps its copy in the full Projects list below.
+    val pins = pinnedEntries(filtered, pinned)
     val rows = ArrayList<DirRow>()
     fun section(label: String, items: List<DirectoryEntry>, direct: Boolean) {
         if (items.isEmpty()) return
         if (label.isNotEmpty()) rows += DirRow.Header(label)
         items.forEach { rows += DirRow.Dir(it, showPath = true, direct = direct) }
     }
+    section(pinnedLabel, pins, direct = true)
     section(openSessionsLabel, live, direct = true)
-    section(if (live.isNotEmpty()) projectsLabel else "", filtered, direct = false)
+    section(if (live.isNotEmpty() || pins.isNotEmpty()) projectsLabel else "", filtered, direct = false)
     return rows
 }
 
@@ -87,8 +103,9 @@ fun buildDirRows(dirs: List<DirectoryEntry>, query: String, openSessionsLabel: S
 
 /** A node at the current tree level: a folder to drill into, or a project leaf to open. */
 sealed interface TreeRow {
-    /** [hasSessions] = this folder is ALSO a project itself (its own sessions show when you drill in). */
-    data class Folder(val name: String, val path: String, val hasSessions: Boolean = false) : TreeRow
+    /** [project] is non-null when this folder is ALSO a project itself — tapping then opens its sessions
+     *  directly (a separate chevron drills into subfolders), instead of dead-ending behind the drill. */
+    data class Folder(val name: String, val path: String, val project: DirectoryEntry? = null) : TreeRow
     data class Leaf(val entry: DirectoryEntry) : TreeRow
 }
 
@@ -128,7 +145,7 @@ fun buildTree(dirs: List<DirectoryEntry>, base: String): List<TreeRow> {
         .forEach { (seg, es) ->
             val childPath = "$base/$seg"
             if (es.any { it.path.startsWith("$childPath/") }) { // has deeper projects → drillable folder
-                rows += TreeRow.Folder(seg, childPath, hasSessions = es.any { it.path == childPath })
+                rows += TreeRow.Folder(seg, childPath, project = es.firstOrNull { it.path == childPath })
             } else {
                 rows += TreeRow.Leaf(es.first { it.path == childPath })
             }

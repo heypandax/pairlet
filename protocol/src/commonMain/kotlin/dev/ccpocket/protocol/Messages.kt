@@ -343,10 +343,19 @@ data class RegisterPush(val platform: String, val token: String) : ToRelay
  * daemon -> relay: a notify-worthy event happened (a turn finished). The relay pushes [title]/[body]
  * to the account's registered tokens ONLY if no device socket is live. Unlike the opaque data plane,
  * this label is cleartext to the relay by design — it becomes the lock-screen alert text.
+ *
+ * [workdir]/[sessionId] (nullable for wire-compat with older daemons) ride along as routing data so a
+ * tapped notification can deep-link straight into that session — they travel as APNs custom keys / FCM
+ * data, not in the visible alert text.
  */
 @Serializable
 @SerialName("pocket/push.notify")
-data class NotifyPush(val title: String, val body: String) : ToRelay
+data class NotifyPush(
+    val title: String,
+    val body: String,
+    val workdir: String? = null,
+    val sessionId: String? = null,
+) : ToRelay
 
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----
 

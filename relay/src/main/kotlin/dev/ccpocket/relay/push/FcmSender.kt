@@ -68,12 +68,14 @@ class FcmSender private constructor(
         return cachedAccess
     }
 
-    override suspend fun send(token: String, title: String, body: String): Boolean {
+    override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): Boolean {
         val auth = bearer()
         val payload = buildJsonObject {
             putJsonObject("message") {
                 put("token", token)
                 putJsonObject("notification") { put("title", title); put("body", body) }
+                // data travels in the tapped launch intent's extras — routes to the right session
+                route?.let { putJsonObject("data") { put("wd", it.workdir); put("sid", it.sessionId) } }
                 putJsonObject("android") { put("priority", "high") }
             }
         }.toString()

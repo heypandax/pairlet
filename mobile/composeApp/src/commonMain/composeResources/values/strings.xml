@@ -63,6 +63,10 @@
     <string name="dir_open_sessions">Open Sessions</string>
     <string name="dir_projects">Projects</string>
     <string name="dir_active">Active</string>
+    <string name="dir_pinned">Pinned</string>
+    <string name="dir_current_project">Current project</string>
+    <string name="pin_project">Pin to top</string>
+    <string name="unpin_project">Unpin</string>
     <string name="running">running</string>
     <string name="idle">idle</string>
     <string name="session_fallback">session</string>

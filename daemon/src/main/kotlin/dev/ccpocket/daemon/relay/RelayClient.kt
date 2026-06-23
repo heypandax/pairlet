@@ -76,11 +76,13 @@ class RelayClient(
     suspend fun run() = coroutineScope {
         // wake an offline phone when a turn completes. peerOnline gates it here (an attached phone got the
         // TurnDone over the data plane already); the relay re-checks deviceCount before actually pushing.
-        core.registry.pushHook = PushHook { workdir, finalText ->
+        core.registry.pushHook = PushHook { workdir, sessionId, finalText ->
             if (!peerOnline) controlOutbox.send(
                 NotifyPush(
                     title = workdir.fileName?.toString() ?: "CC Pocket",
                     body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",
+                    workdir = workdir.toString(),
+                    sessionId = sessionId,
                 ),
             )
         }
@@ -124,7 +126,11 @@ class RelayClient(
 
     private suspend fun connectOnce() {
         client.webSocket(urlString = "$relayWsBase/v1/daemon") {
-            authenticate()
+            // Bound the pre-attach handshake: the socket can connect yet the relay/network stay silent (the
+            // half-open path a heartbeat-forced reconnect lands back on), and authenticate() would otherwise
+            // block on incoming.receive() forever — before the heartbeat below is even armed — wedging the
+            // daemon until a manual restart. A timeout throws instead, so run()'s loop backs off and retries.
+            if (withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { authenticate() } == null) error("relay handshake timed out")
             log.info("attached to relay as daemon (account=${identity.accountId})")
 
             val outbox = Channel<ByteArray>(Channel.BUFFERED)
@@ -199,5 +205,6 @@ class RelayClient(
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
         const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this (after one was seen) -> reconnect
+        const val HANDSHAKE_TIMEOUT_MS = 15_000L  // pre-attach (connect→auth→attached) cap, else assume a wedged link
     }
 }

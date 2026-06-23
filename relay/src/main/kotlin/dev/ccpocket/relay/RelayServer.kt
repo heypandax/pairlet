@@ -24,6 +24,7 @@ import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.e2e.Wire
 import dev.ccpocket.relay.push.LoggingPushService
+import dev.ccpocket.relay.push.NotifyRoute
 import dev.ccpocket.relay.push.PushService
 import dev.ccpocket.relay.auth.Codec
 import dev.ccpocket.relay.auth.DaemonAuthenticator
@@ -209,7 +210,10 @@ class RelayServer(
             is RevokeDevice -> if (store.revokeDevice(account, body.deviceId)) broker.closeDevice(account, body.deviceId)
             is Ping -> broker.controlToDaemon(account, controlText(Pong(body.ts))) // app-level liveness echo
             // wake an offline phone: push only when no device socket is live (an online phone got TurnDone already)
-            is NotifyPush -> if (broker.deviceCount(account) == 0) pushScope.launch { pushService.notify(account, body.title, body.body) }
+            is NotifyPush -> if (broker.deviceCount(account) == 0) pushScope.launch {
+                val route = body.workdir?.let { wd -> body.sessionId?.let { sid -> NotifyRoute(wd, sid) } }
+                pushService.notify(account, body.title, body.body, route)
+            }
             else -> {} // daemons send no other control
         }
     }

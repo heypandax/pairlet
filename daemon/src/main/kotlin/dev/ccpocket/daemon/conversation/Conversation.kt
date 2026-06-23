@@ -290,7 +290,7 @@ class Conversation(
                         )
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
                         // so a control-plane send never stalls stdout parsing.
-                        pushHookProvider()?.let { hook -> scope.launch { hook.onTurnComplete(workdir, ev.finalText) } }
+                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText) } }
                     }
                     is ClaudeEvent.ControlRequest -> b.onControlRequest(ev)
                     is ClaudeEvent.ControlCancel -> b.onCancel(ev)

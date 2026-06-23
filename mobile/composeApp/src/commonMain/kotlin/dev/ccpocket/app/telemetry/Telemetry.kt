@@ -11,6 +11,11 @@ enum class TelEvent(val id: String) {
     PairFailed("pair_failed"),
     Connected("connected"),
     Disconnected("disconnected"),
+    // connection diagnostics: ConnPhase fires on every connection-state transition (the honest state the
+    // user sees); ConnFailed fires when a transport attempt dies, carrying WHY. Together they let us see in
+    // Firebase whether "can't connect" is a wedged handshake, relay-unreachable, computer-offline, or auth.
+    ConnPhase("conn_phase"),
+    ConnFailed("conn_failed"),
     SessionOpened("session_opened"),
     PromptSent("prompt_sent"),
     ApprovalShown("approval_shown"),
@@ -24,7 +29,9 @@ enum class TelKey(val id: String) {
     Resume("resume"),       // 0 | 1
     Tool("tool"),
     Decision("decision"),   // allow | deny
-    Phase("phase"),
+    Phase("phase"),         // ConnPhase name, e.g. Ready | RelayUnreachable | ComputerOffline
+    Reason("reason"),       // conn_failed cause: wedged | auth | closed | <exception name>
+    Attempt("attempt"),     // reconnect attempt counter at the time of failure
     Version("version"),
 }
 

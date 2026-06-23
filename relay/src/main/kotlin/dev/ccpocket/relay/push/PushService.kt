@@ -7,13 +7,13 @@ import dev.ccpocket.relay.store.RelayStore
  * socket is live). Implementations resolve the account's registered tokens and deliver the alert.
  */
 interface PushService {
-    suspend fun notify(account: String, title: String, body: String)
+    suspend fun notify(account: String, title: String, body: String, route: NotifyRoute? = null)
 }
 
 /** Default no-op provider — logs intent. Used when no APNs/FCM credentials are configured. */
 class LoggingPushService : PushService {
-    override suspend fun notify(account: String, title: String, body: String) {
-        println("[push] account=$account offline — would notify: \"$title — $body\"")
+    override suspend fun notify(account: String, title: String, body: String, route: NotifyRoute?) {
+        println("[push] account=$account offline — would notify: \"$title — $body\" route=$route")
     }
 }
 
@@ -27,13 +27,13 @@ class StorePushService(
     private val senders: Map<String, PushSender>,
     private val log: (String) -> Unit = ::println,
 ) : PushService {
-    override suspend fun notify(account: String, title: String, body: String) {
+    override suspend fun notify(account: String, title: String, body: String, route: NotifyRoute?) {
         val targets = store.pushTargets(account)
         if (targets.isEmpty()) return
         for (t in targets) {
             val sender = senders[t.platform]
             if (sender == null) { log("[push] no sender for platform=${t.platform} (device=${t.deviceId.take(8)}…)"); continue }
-            runCatching { sender.send(t.token, title, body) }
+            runCatching { sender.send(t.token, title, body, route) }
                 .onFailure { log("[push] send failed platform=${t.platform}: ${it.message}") }
         }
     }

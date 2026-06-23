@@ -134,6 +134,11 @@ enum class ConnPhase { Connecting, Reconnecting, RelayUnreachable, ComputerOffli
 /** A photo staged in the composer: [bytes] are the current JPEG for the thumbnail; [state] drives the tray UI. */
 class PendingImage(val id: Long, val bytes: ByteArray, val state: ImgState)
 
+/** A connect that never reached Attached within the deadline (silent pre-attach hang). Surfaced as a
+ *  normal failure so the backoff reconnect kicks in — NOT a CancellationException (which would read as
+ *  an intentional teardown and skip the retry). */
+class ConnectWedgedException : Exception("connect wedged: no attach within timeout")
+
 /** State hub: consumes inbound [Frame]s into observable Compose state, exposes user actions. */
 class PocketRepository(private val scope: CoroutineScope) {
     private val direct = RelayConnection()
@@ -148,6 +153,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     private var controlJob: Job? = null     // collects relay control frames (Attached/PeerPresence/AuthError)
     private var graceJob: Job? = null       // silent window before showing RelayUnreachable
     private var listWaitJob: Job? = null    // post-attach wait for the first list before assuming the computer is offline
+    private var connectWatchdog: Job? = null // forces a retry if a connect wedges pre-attach (no socket error)
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
     private var daemonOffline = false       // explicit: got PeerPresence(false), or the post-attach list-wait elapsed
@@ -175,9 +181,26 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
 
+    /** Projects the user pinned to the top, newest pin first. Persisted client-side (paths never contain
+     *  '\n', so a newline-joined string is a safe, dependency-free encoding). */
+    val pinnedPaths = mutableStateListOf<String>().also { list ->
+        SecureStore.getString(K_PINNED)?.split('\n')?.filter { it.isNotBlank() }?.let(list::addAll)
+    }
+
+    fun isPinned(path: String) = path in pinnedPaths
+
+    /** Toggle a project's pinned state (most-recent pin first) and persist. */
+    fun togglePin(path: String) {
+        if (!pinnedPaths.remove(path)) pinnedPaths.add(0, path)
+        SecureStore.putString(K_PINNED, pinnedPaths.joinToString("\n"))
+    }
+
     /** Current tree drill-down path (null = root). Hoisted here (not screen-local) so it survives opening a
      *  session and returning — DirectoryScreen leaves the composition on that navigation. Not persisted. */
     val browsePath = mutableStateOf<String?>(null)
+
+    /** A session a tapped push asked to open, held until the link is Ready (see [requestOpenSession]). */
+    private var pendingOpen: dev.ccpocket.app.SessionRoute? = null
 
     /**
      * True from a successful explicit connect until the user disconnects/unpairs. While true, a dead
@@ -294,6 +317,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Connect to the already-paired daemon over the encrypted relay channel. */
     fun startRelay() {
         if (paired.value == null) return
+        if (sessionActive.value) return // already connected/connecting — the transport layer self-heals from here
         useRelay = true
         sessionActive.value = true
         retryAttempts = 0
@@ -319,7 +343,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Recompute the observable [phase] from the per-session flags. Call after every relevant event. */
     private fun recomputePhase() {
         val ready = attachedThisSession && directoriesLoaded.value && !daemonOffline
-        phase.value = when {
+        val next = when {
             pairingInvalid                                   -> ConnPhase.PairingInvalid
             ready                                            -> ConnPhase.Ready
             attachedThisSession && daemonOffline && useRelay -> ConnPhase.ComputerOffline
@@ -327,6 +351,34 @@ class PocketRepository(private val scope: CoroutineScope) {
             relayDeadlinePassed                              -> ConnPhase.RelayUnreachable
             else                                             -> ConnPhase.Connecting
         }
+        if (next != phase.value) { // emit only real transitions — the honest connection-state trail in Firebase
+            phase.value = next
+            Telemetry.track(TelEvent.ConnPhase, mapOf(TelKey.Phase to next.name, TelKey.Transport to transportName()))
+        }
+        consumePendingOpenIfReady() // a push-tap target waits here until the link is actually Ready
+    }
+
+    private fun transportName() = if (useRelay) "relay" else "direct"
+
+    /**
+     * A tapped task-complete push wants to resume a specific session. Stash it, bring the link up if the
+     * app was disconnected, and open it now if we're already Ready — otherwise [recomputePhase] opens it
+     * the moment the directory list lands (proving the computer is online). Idempotent for repeat taps.
+     */
+    fun requestOpenSession(workdir: String, sessionId: String) {
+        pendingOpen = dev.ccpocket.app.SessionRoute(workdir, sessionId)
+        if (demoMode.value) { pendingOpen = null; return }
+        if (paired.value != null && !sessionActive.value) startRelay()
+        consumePendingOpenIfReady()
+    }
+
+    private fun consumePendingOpenIfReady() {
+        val t = pendingOpen ?: return
+        if (phase.value != ConnPhase.Ready) return
+        pendingOpen = null
+        if (convoId.value != null && currentSessionId == t.sessionId) return // already in this session — don't churn it
+        sessionsDir.value = null // drop any half-open session list so the chat is what shows
+        openSession(t.workdir, t.sessionId)
     }
 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
@@ -466,16 +518,42 @@ class PocketRepository(private val scope: CoroutineScope) {
         // On a reconnect, also re-sync whatever page the user is parked on (re-open a live chat, re-list sessions).
         scope.launch { send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
         startGrace(reconnect)
+        startConnectWatchdog()
+    }
+
+    /**
+     * A connect that never reaches [Attached] within [CONNECT_TIMEOUT_MS] is wedged — a known mobile failure
+     * where the socket hangs pre-attach (QUIC/TCP black-hole or a stalled handshake) WITHOUT ever erroring,
+     * so [onTransportDown] never fires and nothing retries until the user manually re-opens. Force a teardown +
+     * backoff retry so it self-heals. Self-guards: a clean failure already flipped connected=false (no-op),
+     * and an Attached flips attachedThisSession (no-op) — so this only bites the silent-hang case.
+     */
+    private fun startConnectWatchdog() {
+        connectWatchdog?.cancel()
+        connectWatchdog = scope.launch {
+            delay(CONNECT_TIMEOUT_MS)
+            if (sessionActive.value && connected.value && !attachedThisSession && !pairingInvalid) {
+                connectJob?.cancel()
+                onTransportDown(ConnectWedgedException())
+            }
+        }
     }
 
     /** The socket died. Stay on the current screen; banner + backoff retries take it from here. */
     private fun onTransportDown(err: Throwable?) {
         connected.value = false
-        if (!sessionActive.value) {
+        if (!sessionActive.value) { // an intentional teardown is not a connection failure — don't report it
             status.value = err?.let { StatusMsg(Res.string.status_failed, it.message ?: it::class.simpleName ?: "error") }
                 ?: StatusMsg(Res.string.status_disconnected)
             return
         }
+        val reason = when (err) {
+            null -> "closed"
+            is RelayAuthException -> "auth"
+            is ConnectWedgedException -> "wedged"
+            else -> err::class.simpleName ?: "error"
+        }
+        Telemetry.track(TelEvent.ConnFailed, mapOf(TelKey.Transport to transportName(), TelKey.Reason to reason, TelKey.Attempt to retryAttempts))
         if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
             pairingInvalid = true; recomputePhase(); return
         }
@@ -531,10 +609,11 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
-        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel()
-        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null
+        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel()
+        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null
         connected.value = false
         phase.value = ConnPhase.Connecting
+        pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; directoriesLoaded.value = false
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
@@ -684,7 +763,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 retryAttempts = 0 // a healthy round-trip restarts the backoff ladder — otherwise a flapping link climbs to 30s and every reconnect crawls
                 if (!hadReadyThisSession) {
                     hadReadyThisSession = true
-                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to if (useRelay) "relay" else "direct"))
+                    Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
                 }
                 recomputePhase()
             }
@@ -1236,6 +1315,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
         const val LIST_WAIT_MS = 6_000L       // after Attached, wait this long for the list before "computer offline"
+        const val CONNECT_TIMEOUT_MS = 12_000L // no Attached within this → treat the connect as wedged, force a retry
         const val MAX_IMAGES = 4
         const val IMG_MAX_DIM = 1024 // longest side, true 1× pixels
         const val IMG_MAX_BYTES = 90_000 // per-image compression target (~120 KB base64); lets ~2 share a frame
@@ -1252,5 +1332,6 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
+        const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
     }
 }

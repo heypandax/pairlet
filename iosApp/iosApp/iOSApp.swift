@@ -38,6 +38,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }
+
+    // a tapped task-complete notification carries `wd`/`sid` custom keys → deep-link into that session
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let wd = info["wd"] as? String, let sid = info["sid"] as? String {
+            MainViewControllerKt.handlePushOpen(workdir: wd, sessionId: sid)
+        }
+        completionHandler()
+    }
 }
 
 @main

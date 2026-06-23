@@ -2,6 +2,7 @@ package dev.ccpocket.app
 
 import android.Manifest
 import android.app.NotificationManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
@@ -39,6 +40,21 @@ class MainActivity : ComponentActivity() {
             val scope = rememberCoroutineScope()
             App(scope)
         }
+        routeFromIntent(intent) // cold start: launched by tapping a task-complete notification
+    }
+
+    /** Warm start: the activity is already running when a notification is tapped. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        routeFromIntent(intent)
+    }
+
+    /** A tapped task-complete notification carries `wd`/`sid` extras (FCM `data`) → open that session. */
+    private fun routeFromIntent(intent: Intent?) {
+        val wd = intent?.getStringExtra("wd") ?: return
+        val sid = intent.getStringExtra("sid") ?: return
+        PushRoute.open(wd, sid)
     }
 
     /** Create the push channel up front and request POST_NOTIFICATIONS (Android 13+). The token is only
