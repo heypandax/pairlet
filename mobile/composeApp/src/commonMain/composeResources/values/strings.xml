@@ -176,6 +176,10 @@
     <string name="notify_on_complete">Notify when a task finishes</string>
     <string name="notify_on_complete_sub">Wake your phone when Claude finishes a turn while the app is closed.</string>
 
+    <!-- ── new-session default mode ──────────────────────────────── -->
+    <string name="default_mode_section">NEW SESSION DEFAULT</string>
+    <string name="default_effort_section">DEFAULT REASONING EFFORT</string>
+
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>
     <string name="choose_computer">Choose a computer</string>

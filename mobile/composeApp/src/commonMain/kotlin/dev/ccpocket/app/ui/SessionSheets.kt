@@ -41,7 +41,7 @@ import org.jetbrains.compose.resources.stringResource
 
 // ── model + effort option sets (what `--model` / `--effort` accept) ──
 private val MODEL_OPTIONS = listOf("opus", "sonnet", "haiku")
-private val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max")
+internal val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max") // shared: live /effort picker + Settings default
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
 fun modelAlias(model: String?): String {

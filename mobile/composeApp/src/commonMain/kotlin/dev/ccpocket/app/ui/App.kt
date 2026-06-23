@@ -341,6 +341,8 @@ private fun ConnectScreen(repo: PocketRepository) {
 @Composable
 private fun DirectoryScreen(repo: PocketRepository) {
     var query by remember { mutableStateOf("") }
+    var showSettings by remember { mutableStateOf(false) }
+    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
     // the daemon's project list is pull-only; while parked here, re-pull quietly so a session that goes
     // idle-with-background-work (or finishes) updates its running/idle badge without a manual refresh
     LaunchedEffect(Unit) { while (true) { delay(10_000); repo.refreshDirectoriesSilently() } }
@@ -355,7 +357,9 @@ private fun DirectoryScreen(repo: PocketRepository) {
                     Text(it.displayName(), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            TextButton({ repo.disconnect() }) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 13.sp) }
+            IconButton({ showSettings = true }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
+            }
         }
         OutlinedTextField(
             query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
@@ -456,6 +460,7 @@ private fun SessionsScreen(repo: PocketRepository) {
     val dir = repo.sessionsDir.value ?: return
     var pickMode by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -516,15 +521,9 @@ private fun SessionsScreen(repo: PocketRepository) {
         if (pickMode) {
             StartSessionModeSheet(
                 workdir = dir,
+                selected = repo.defaultMode.value,
                 onPick = { m -> pickMode = false; repo.openSession(dir, startMode = m) },
                 onDismiss = { pickMode = false },
-            )
-        }
-        if (showSettings) {
-            SettingsSheet(
-                repo = repo,
-                onAddDevice = { showSettings = false; repo.beginAddDevice() },
-                onDismiss = { showSettings = false },
             )
         }
     }

@@ -175,6 +175,10 @@
     <string name="notify_on_complete">任务完成时通知</string>
     <string name="notify_on_complete_sub">应用关闭时，Claude 完成一轮回复就唤醒手机。</string>
 
+    <!-- ── 新会话默认模式 ────────────────────────────────────────── -->
+    <string name="default_mode_section">新会话默认模式</string>
+    <string name="default_effort_section">默认推理强度</string>
+
     <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
     <string name="devices_section">已配对设备</string>
     <string name="choose_computer">选择电脑</string>

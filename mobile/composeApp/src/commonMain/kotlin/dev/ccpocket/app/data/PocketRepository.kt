@@ -162,6 +162,16 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
     val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
 
+    /** Persisted default execution mode for NEW sessions (Settings binds to it; the new-session picker pre-selects it).
+     *  Resumed sessions keep their own remembered mode — this only seeds brand-new ones. Default: Ask each step. */
+    val defaultMode = mutableStateOf(
+        SecureStore.getString(K_DEFAULT_MODE)?.let { s -> PermissionMode.entries.firstOrNull { it.name == s } } ?: PermissionMode.DEFAULT,
+    )
+
+    /** Persisted default reasoning effort for NEW sessions (null = the model's own default). Resumed sessions
+     *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
+    val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
+
     /**
      * True from a successful explicit connect until the user disconnects/unpairs. While true, a dead
      * transport does NOT route back to the Connect screen — the UI stays put, shows a slim banner,
@@ -361,6 +371,21 @@ class PocketRepository(private val scope: CoroutineScope) {
         SecureStore.putString(K_NOTIFY, if (on) "1" else "0")
         ensurePushStarted() // self-guards when off
         registerPush()
+    }
+
+    /** Settings: persist the default execution mode for new sessions. Takes effect on the next new session. */
+    fun setDefaultMode(m: PermissionMode) {
+        if (m == defaultMode.value) return
+        defaultMode.value = m
+        SecureStore.putString(K_DEFAULT_MODE, m.name)
+    }
+
+    /** Settings: persist the default reasoning effort for new sessions (null = model default). */
+    fun setDefaultEffort(level: String?) {
+        val v = level?.takeIf { it.isNotEmpty() }
+        if (v == defaultEffort.value) return
+        defaultEffort.value = v
+        SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
     }
 
     /** Silent window before declaring [ConnPhase.RelayUnreachable]. A first connect shows the skeleton for a
@@ -763,11 +788,12 @@ class PocketRepository(private val scope: CoroutineScope) {
         // reattach SessionLive still wins as the source of truth right after.
         val saved = resumeId?.let { sessionParams[it] }
         val openMode = saved?.mode ?: startMode
+        val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         mode.value = openMode; allowRules.clear()
-        model.value = saved?.model; effort.value = saved?.effort; contextUsed.value = null // reconciled by SessionLive
+        model.value = saved?.model; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
-        send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = saved?.effort))
+        send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = openEffort))
     }
 
     fun hasReadyImages() = pendingImages.any { it.state == ImgState.Ready }
@@ -1206,5 +1232,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
+        const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
+        const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
     }
 }

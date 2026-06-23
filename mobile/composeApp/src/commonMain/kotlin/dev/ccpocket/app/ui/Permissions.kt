@@ -216,7 +216,7 @@ private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () 
 
 /** New-session mode picker: choose the execution mode up front. Defaults stay safe; Full auto still confirms. */
 @Composable
-fun StartSessionModeSheet(workdir: String? = null, onPick: (PermissionMode) -> Unit, onDismiss: () -> Unit) {
+fun StartSessionModeSheet(workdir: String? = null, selected: PermissionMode = PermissionMode.DEFAULT, onPick: (PermissionMode) -> Unit, onDismiss: () -> Unit) {
     var confirmBypass by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
         if (confirmBypass) {
@@ -227,7 +227,7 @@ fun StartSessionModeSheet(workdir: String? = null, onPick: (PermissionMode) -> U
                 Text(stringResource(Res.string.new_session_subtitle), color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
                 Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     MODES.forEach { m ->
-                        ModeRow(m, selected = false, enabled = true) {
+                        ModeRow(m, selected = m.key == selected, enabled = true) {
                             if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true else onPick(m.key)
                         }
                     }
