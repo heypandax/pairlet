@@ -12,7 +12,7 @@ object ServiceInstaller {
         val os = System.getProperty("os.name").lowercase()
         return when {
             os.contains("mac") -> mac(exec, runArgs, apply)
-            os.contains("win") -> windows(exec, runArgs)
+            os.contains("win") -> windows(exec, runArgs, apply)
             else -> linux(exec, runArgs, apply)
         }
     }
@@ -119,8 +119,48 @@ object ServiceInstaller {
             "  logs: journalctl --user -u cc-pocket-daemon -f"
     }
 
-    private fun windows(exec: String, args: List<String>): String =
-        "Windows — wrap with WinSW, or (as Administrator):\n" +
-            "  sc.exe create cc-pocket-daemon binPath= \"$exec ${args.joinToString(" ")}\" start= auto\n" +
-            "  sc.exe start cc-pocket-daemon"
+    // Windows has no launchd/systemd; the closest no-admin, no-extra-deps equivalent is a per-user
+    // Scheduled Task triggered at logon. The launcher is a --win-console exe, so a logon task running it
+    // directly would flash a console window every login — instead we point the task at a tiny VBScript
+    // that launches the daemon with window style 0 (hidden) and returns immediately. Registered via
+    // PowerShell cmdlets (Execute/Argument passed separately → avoids schtasks /tr quote hell).
+    private fun windows(exec: String, args: List<String>, apply: Boolean): String {
+        val home = System.getProperty("user.home")
+        val taskName = "cc-pocket-daemon"
+        val ccDir = Path.of(home, ".cc-pocket")
+        val vbs = ccDir.resolve("cc-pocket-daemon-service.vbs")
+
+        // VBScript escapes a double-quote by doubling it. Quote every token so spaces in the exe path
+        // are safe: WScript.Shell.Run "<cmd>", 0, False  (0 = hidden window, False = don't wait).
+        val cmd = (listOf(exec) + args).joinToString(" ") { "\"\"$it\"\"" }
+        val vbsBody = "CreateObject(\"WScript.Shell\").Run \"$cmd\", 0, False\n"
+
+        val ps = """
+            |${'$'}a = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument '"$vbs"'
+            |${'$'}t = New-ScheduledTaskTrigger -AtLogOn
+            |${'$'}s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+            |Register-ScheduledTask -TaskName '$taskName' -Action ${'$'}a -Trigger ${'$'}t -Settings ${'$'}s -Force | Out-Null
+            |Start-ScheduledTask -TaskName '$taskName'
+        """.trimMargin()
+
+        if (!apply) {
+            return "Windows logon Scheduled Task — write $vbs with:\n\n$vbsBody\n" +
+                "then register it in PowerShell (or re-run with --apply):\n\n$ps"
+        }
+        // Same guard as macOS/Linux: refuse to register a task whose launcher is missing.
+        require(File(exec).canExecute()) {
+            "launcher not executable: $exec — pass --exec with the real cc-pocket-daemon.exe path"
+        }
+        Files.createDirectories(ccDir)
+        vbs.writeText(vbsBody)
+        val proc = ProcessBuilder("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
+            .redirectErrorStream(true).start()
+        val out = proc.inputStream.bufferedReader().readText()
+        val code = proc.waitFor()
+        if (code != 0) {
+            return "could not register the Scheduled Task (exit $code):\n$out\n" +
+                "the daemon still runs by hand: \"$exec\" run"
+        }
+        return "installed + started logon Scheduled Task '$taskName'\n  hidden launcher: $vbs"
+    }
 }
