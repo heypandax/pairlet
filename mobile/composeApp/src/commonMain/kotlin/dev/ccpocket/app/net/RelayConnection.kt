@@ -17,7 +17,8 @@ import io.ktor.websocket.Frame as WsFrame
 
 /** Thin WebSocket client to a daemon (local `/v1/ws`) or relay (`/v1/device`). Engine auto-resolves per platform. */
 class RelayConnection {
-    private val client = HttpClient { install(WebSockets) }
+    // ws keepalive + dead-connection detection — see RelayE2EConnection for the rationale (zombie sockets).
+    private val client = HttpClient { install(WebSockets) { pingIntervalMillis = 20_000 } }
     private val outbox = Channel<Frame>(Channel.BUFFERED)
     val inbound = MutableSharedFlow<Frame>(extraBufferCapacity = 128)
     /** Mirrors [RelayE2EConnection.control] so the repository can collect symmetrically. Direct LAN has

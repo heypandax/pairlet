@@ -172,6 +172,13 @@ class PocketRepository(private val scope: CoroutineScope) {
      *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
 
+    /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
+    val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
+
+    /** Current tree drill-down path (null = root). Hoisted here (not screen-local) so it survives opening a
+     *  session and returning — DirectoryScreen leaves the composition on that navigation. Not persisted. */
+    val browsePath = mutableStateOf<String?>(null)
+
     /**
      * True from a successful explicit connect until the user disconnects/unpairs. While true, a dead
      * transport does NOT route back to the Connect screen — the UI stays put, shows a slim banner,
@@ -378,6 +385,13 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (m == defaultMode.value) return
         defaultMode.value = m
         SecureStore.putString(K_DEFAULT_MODE, m.name)
+    }
+
+    /** Projects screen: persist the browse mode (true = tree, false = flat). */
+    fun setTreeView(on: Boolean) {
+        if (on == treeView.value) return
+        treeView.value = on
+        SecureStore.putString(K_VIEW_MODE, if (on) "tree" else "flat")
     }
 
     /** Settings: persist the default reasoning effort for new sessions (null = model default). */
@@ -667,6 +681,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 directoriesLoaded.value = true; daemonOffline = false; listWaitJob?.cancel() // a reply proves the computer is online
                 if (!useRelay) attachedThisSession = true // direct mode: socket + data == attached
                 connected.value = true; relayDeadlinePassed = false
+                retryAttempts = 0 // a healthy round-trip restarts the backoff ladder — otherwise a flapping link climbs to 30s and every reconnect crawls
                 if (!hadReadyThisSession) {
                     hadReadyThisSession = true
                     Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to if (useRelay) "relay" else "direct"))
@@ -777,7 +792,9 @@ class PocketRepository(private val scope: CoroutineScope) {
     fun refreshDirectoriesSilently() = scope.launch { runCatching { send(ListDirectories()) } }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
-    fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = PermissionMode.DEFAULT, title: String? = null) = scope.launch {
+    // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
+    // the list applies it too — not just the new-session picker. A session opened before keeps its own (saved).
+    fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null) = scope.launch {
         convoId.value?.let { send(CloseSession(it)) } // reclaim any lingering claude process first
         messages.clear(); convoId.value = null
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
@@ -1234,5 +1251,6 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
+        const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
     }
 }

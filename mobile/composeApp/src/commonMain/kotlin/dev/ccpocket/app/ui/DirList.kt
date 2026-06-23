@@ -60,7 +60,13 @@ fun TailPathText(path: String, modifier: Modifier = Modifier, color: Color = Tok
  */
 fun buildDirRows(dirs: List<DirectoryEntry>, query: String, openSessionsLabel: String, projectsLabel: String): List<DirRow> {
     val q = query.trim()
-    val filtered = if (q.isEmpty()) dirs else dirs.filter { it.path.contains(q, ignoreCase = true) }
+    // match path + project name + the LIVE session's title (what the card shows). Idle-session titles and
+    // transcript content aren't in this flat list — searching those needs a daemon-side session search.
+    val filtered = if (q.isEmpty()) dirs else dirs.filter {
+        it.path.contains(q, ignoreCase = true) ||
+            it.name.contains(q, ignoreCase = true) ||
+            it.activeSessionTitle?.contains(q, ignoreCase = true) == true
+    }
     // a session with running background work stays "open" in the list even if its claude process check lags
     val live = filtered.filter { it.open || it.busy }
     val rows = ArrayList<DirRow>()
@@ -73,3 +79,62 @@ fun buildDirRows(dirs: List<DirectoryEntry>, query: String, openSessionsLabel: S
     section(if (live.isNotEmpty()) projectsLabel else "", filtered, direct = false)
     return rows
 }
+
+// ── tree browse: a client-side hierarchy over the flat project list ───────────────────────────────
+// The daemon only knows project dirs (cwds with Claude history); it has no real filesystem tree. We
+// derive one by grouping those flat paths on their directory segments, so the phone can drill in level
+// by level (one level per screen, mobile-first) with a breadcrumb back up.
+
+/** A node at the current tree level: a folder to drill into, or a project leaf to open. */
+sealed interface TreeRow {
+    /** [hasSessions] = this folder is ALSO a project itself (its own sessions show when you drill in). */
+    data class Folder(val name: String, val path: String, val hasSessions: Boolean = false) : TreeRow
+    data class Leaf(val entry: DirectoryEntry) : TreeRow
+}
+
+/** The tree root: the user's home (~/…) inferred from the project paths, else their common parent dir. */
+fun treeRoot(dirs: List<DirectoryEntry>): String {
+    dirs.firstNotNullOfOrNull { e ->
+        val s = e.path.split('/')
+        if (s.size > 3 && (s[1] == "Users" || s[1] == "home")) "/${s[1]}/${s[2]}" else null
+    }?.let { return it }
+    val paths = dirs.map { it.path }
+    if (paths.isEmpty()) return "/"
+    var prefix = paths.first().substringBeforeLast('/')
+    for (p in paths.drop(1)) {
+        while (prefix.isNotEmpty() && p != prefix && !p.startsWith("$prefix/")) prefix = prefix.substringBeforeLast('/', "")
+    }
+    return prefix.ifEmpty { "/" }
+}
+
+/**
+ * Rows directly under [base]: immediate child folders (drill in) + project leaves (open). Newest-first.
+ * A child that has ANY deeper project is a Folder (drillable) EVEN if it is itself a project — otherwise
+ * dirs like ~/Desktop (a project that also holds many projects) would dead-end as a leaf. When [base]
+ * itself is a project, its own sessions appear as a leaf at the top of this level.
+ */
+fun buildTree(dirs: List<DirectoryEntry>, base: String): List<TreeRow> {
+    val relevant = dirs.filter { it.path == base || it.path.startsWith("$base/") }
+    val rows = ArrayList<TreeRow>()
+    relevant.firstOrNull { it.path == base }?.let { rows += TreeRow.Leaf(it) } // base's own sessions, if any
+    val byChild = LinkedHashMap<String, MutableList<DirectoryEntry>>()
+    for (e in relevant) {
+        if (e.path == base) continue
+        val seg = e.path.removePrefix("$base/").substringBefore('/')
+        byChild.getOrPut(seg) { mutableListOf() }.add(e)
+    }
+    byChild.entries
+        .sortedByDescending { (_, es) -> es.maxOf { it.lastModified } }
+        .forEach { (seg, es) ->
+            val childPath = "$base/$seg"
+            if (es.any { it.path.startsWith("$childPath/") }) { // has deeper projects → drillable folder
+                rows += TreeRow.Folder(seg, childPath, hasSessions = es.any { it.path == childPath })
+            } else {
+                rows += TreeRow.Leaf(es.first { it.path == childPath })
+            }
+        }
+    return rows
+}
+
+/** Breadcrumb segments for [base], home collapsed to ~. e.g. /Users/x/proj/app -> [~, proj, app]. */
+fun crumbs(base: String): List<String> = tilde(base).split('/').filter { it.isNotEmpty() }

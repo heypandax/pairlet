@@ -38,7 +38,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Reorder
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreHoriz
@@ -343,21 +348,46 @@ private fun DirectoryScreen(repo: PocketRepository) {
     var query by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
-    // the daemon's project list is pull-only; while parked here, re-pull quietly so a session that goes
-    // idle-with-background-work (or finishes) updates its running/idle badge without a manual refresh
-    LaunchedEffect(Unit) { while (true) { delay(10_000); repo.refreshDirectoriesSilently() } }
+    LaunchedEffect(Unit) { while (true) { delay(10_000); repo.refreshDirectoriesSilently() } } // pull-only list: re-pull quietly
+
+    val tree = repo.treeView.value
+    val dirsSnapshot = repo.directories.toList()
+    val root = remember(dirsSnapshot) { treeRoot(dirsSnapshot) }
+    val browse = repo.browsePath.value
+    // a browse path the daemon no longer has (dirs changed) falls back to root
+    val base = remember(dirsSnapshot, browse, root) {
+        browse?.takeIf { b -> dirsSnapshot.any { it.path == b || it.path.startsWith("$b/") } } ?: root
+    }
+    val treeMode = tree && query.isBlank() // filtering or flat mode both render the flat grouped list
+
+    val openSessionsLabel = stringResource(Res.string.dir_open_sessions)
+    val projectsLabel = stringResource(Res.string.dir_projects)
+    val activeLabel = stringResource(Res.string.dir_active)
+    val flatRows = remember(dirsSnapshot, query, openSessionsLabel, projectsLabel) { buildDirRows(repo.directories, query, openSessionsLabel, projectsLabel) }
+    val treeRows = remember(dirsSnapshot, base) { buildTree(repo.directories, base) }
+    val live = remember(dirsSnapshot) { dirsSnapshot.filter { it.open || it.busy } } // ACTIVE: live sessions
+
+    // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
+    val focus = LocalFocusManager.current
+    val listState = rememberLazyListState()
+    LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
+
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn) // live link indicator rides with the title
-            Spacer(Modifier.width(8.dp))
+        // ── top bar: "Projects" + connection sub-line · view toggle · settings ──
+        Row(Modifier.fillMaxWidth().background(Tok.surface).padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold)
-                // which computer these projects live on — the active binding's name (mono, muted)
-                repo.paired.value?.let {
-                    Text(it.displayName(), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(projectsLabel, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                    PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn, size = 6.dp)
+                    Spacer(Modifier.width(6.dp))
+                    repo.paired.value?.let {
+                        Text(it.displayName(), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
-            IconButton({ showSettings = true }, modifier = Modifier.size(40.dp)) {
+            ViewToggle(tree) { repo.setTreeView(!tree) }
+            Spacer(Modifier.width(4.dp))
+            IconButton({ showSettings = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
             }
         }
@@ -365,43 +395,148 @@ private fun DirectoryScreen(repo: PocketRepository) {
             query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        val openSessionsLabel = stringResource(Res.string.dir_open_sessions)
-        val projectsLabel = stringResource(Res.string.dir_projects)
-        val rows = remember(repo.directories.toList(), query, openSessionsLabel, projectsLabel) {
-            buildDirRows(repo.directories, query, openSessionsLabel, projectsLabel)
+        // ── breadcrumb (tree, drilled below root) ──
+        if (treeMode && base != root) {
+            val segs = remember(base) { crumbs(base) }
+            Breadcrumb(
+                segs,
+                onUp = { repo.browsePath.value = base.substringBeforeLast('/').takeIf { it.length > root.length } },
+                onSegment = { i -> repo.browsePath.value = if (i <= 0) null else (root + "/" + segs.drop(1).take(i).joinToString("/")).takeIf { it.length > root.length } },
+            )
         }
-        PullToRefreshBox(
-            isRefreshing = repo.refreshing.value,
-            onRefresh = { repo.refreshDirectories() },
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            if (rows.isEmpty() && repo.directoriesLoaded.value) {
-                if (query.isBlank()) EmptyDirectories { repo.refreshDirectories() }
-                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
-                }
-            } else LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(rows) { row ->
-                    when (row) {
-                        is DirRow.Header -> Label(row.label)
-                        is DirRow.Dir -> {
-                            val e = row.entry
-                            val sid = e.activeSessionId
-                            if (row.direct && e.open && sid != null) {
-                                // live sections: one tap straight into the running session; the same project
-                                // repeats below under "Projects" for the session-list / New-session path
-                                LiveProjectCell(e) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
-                            } else {
-                                DirCell(
-                                    e.name.ifBlank { e.path }, if (row.showPath) tilde(e.path) else null,
-                                    e.hasSessions, indent = false,
-                                ) { repo.listSessions(e.path) }
+        PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxSize()) {
+            when {
+                repo.directories.isEmpty() && repo.directoriesLoaded.value && query.isBlank() ->
+                    EmptyDirectories { repo.refreshDirectories() }
+                !treeMode && flatRows.isEmpty() && repo.directoriesLoaded.value ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
+                    }
+                treeMode -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (base == root && live.isNotEmpty()) { // ACTIVE pinned on top at root
+                        item { Label(activeLabel) }
+                        items(live, key = { "a:" + it.path }) { ProjectCell(repo, it, showPath = true, direct = true) }
+                        item { Label(projectsLabel) }
+                    }
+                    items(treeRows, key = { r -> when (r) { is TreeRow.Folder -> "f:" + r.path; is TreeRow.Leaf -> "l:" + r.entry.path } }) { r ->
+                        when (r) {
+                            is TreeRow.Folder -> FolderRow(r.name, r.hasSessions) { repo.browsePath.value = r.path }
+                            is TreeRow.Leaf -> {
+                                val e = r.entry; val sid = e.activeSessionId
+                                LeafRow(e) { if (e.open && sid != null) repo.openSession(e.path, sid, title = e.activeSessionTitle) else repo.listSessions(e.path) }
                             }
+                        }
+                    }
+                }
+                else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(flatRows) { row ->
+                        when (row) {
+                            is DirRow.Header -> Label(row.label)
+                            is DirRow.Dir -> ProjectCell(repo, row.entry, showPath = row.showPath, direct = row.direct)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** A project row: jumps into the live session (when [direct] and running) or opens its session list. */
+@Composable
+private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean) {
+    val sid = e.activeSessionId
+    if (direct && e.open && sid != null) LiveProjectCell(e) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
+    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, e.hasSessions, indent = false) { repo.listSessions(e.path) }
+}
+
+/** The terracotta "history" pill shown on a dir/folder/leaf that has Claude history. */
+@Composable
+private fun HistoryBadge() {
+    Text(
+        stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp,
+        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+/** Flat ⇄ tree view-mode toggle (top-bar right). Tapping flips the persisted mode. */
+@Composable
+private fun ViewToggle(tree: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(9.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
+            .clickable(onClick = onToggle).padding(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ViewSeg(on = !tree, icon = Icons.Rounded.Reorder)
+        ViewSeg(on = tree, icon = Icons.Rounded.AccountTree)
+    }
+}
+
+@Composable
+private fun ViewSeg(on: Boolean, icon: ImageVector) {
+    Box(
+        Modifier.size(width = 30.dp, height = 26.dp).clip(RoundedCornerShape(7.dp)).then(if (on) Modifier.background(Tok.accent) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, null, tint = if (on) Tok.base else Tok.tx2, modifier = Modifier.size(16.dp)) }
+}
+
+/** Path breadcrumb shown when drilled into a subfolder: back ‹ + tappable mono segments (current bolded). */
+@Composable
+private fun Breadcrumb(segs: List<String>, onUp: () -> Unit, onSegment: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text("‹", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onUp).padding(end = 2.dp))
+        segs.forEachIndexed { i, s ->
+            val last = i == segs.lastIndex
+            Text(
+                s, color = if (last) Tok.tx else Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                fontWeight = if (last) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                modifier = Modifier.clickable(enabled = !last) { onSegment(i) },
+            )
+            if (!last) Text("›", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+        }
+    }
+}
+
+/** A folder row in the tree — drill in. [hasSessions] = the folder is itself a project too (badge hint). */
+@Composable
+private fun FolderRow(name: String, hasSessions: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(name, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (hasSessions) {
+            HistoryBadge()
+            Spacer(Modifier.width(8.dp))
+        }
+        Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
+    }
+}
+
+/** A project-leaf row in the tree — opens its session list (or jumps into the live session). */
+@Composable
+private fun LeafRow(e: DirectoryEntry, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("⑂", color = Tok.accent, fontSize = 14.sp, modifier = Modifier.padding(end = 9.dp)) // project marker
+        Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (e.open || e.busy) {
+            PulseDot(Tok.accent, size = 6.dp)
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(Res.string.running), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp)
+            Spacer(Modifier.width(8.dp))
+        }
+        e.gitBranch?.let {
+            Text(it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1)
+            Spacer(Modifier.width(8.dp))
+        }
+        if (e.hasSessions) HistoryBadge()
     }
 }
 
@@ -416,11 +551,7 @@ private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: B
             Text(name, color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
         }
-        if (hasSessions) Text(
-            stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp,
-            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f))
-                .padding(horizontal = 8.dp, vertical = 3.dp),
-        )
+        if (hasSessions) HistoryBadge()
     }
 }
 

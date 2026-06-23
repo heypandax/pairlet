@@ -62,6 +62,7 @@
     <string name="history_badge">history</string>
     <string name="dir_open_sessions">Open Sessions</string>
     <string name="dir_projects">Projects</string>
+    <string name="dir_active">Active</string>
     <string name="running">running</string>
     <string name="idle">idle</string>
     <string name="session_fallback">session</string>

@@ -31,7 +31,11 @@ import io.ktor.websocket.Frame as WsFrame
  * handshake (initiator) -> AES-GCM transport. The relay only ever sees ciphertext.
  */
 class RelayE2EConnection {
-    private val client = HttpClient { install(WebSockets) }
+    // pingInterval matches the daemon's relay leg (RelayClient): without it Ktor never pings, so a silently
+    // dead ws (iOS foreground-idle, NAT/relay idle timeout, network switch) is a zombie until the OS TCP
+    // stack eventually errors — minutes of "connected but can't reach the computer". The ping doubles as
+    // keepalive AND triggers a fast close (no pong → connect() returns → the repo's backoff reconnects).
+    private val client = HttpClient { install(WebSockets) { pingIntervalMillis = 20_000 } }
     private val outbox = Channel<Frame>(Channel.BUFFERED)
     // relay control-plane (TEXT) frames the device originates — e.g. RegisterPush. Buffered across
     // reconnects like [outbox]; the per-connection writer drains it once a socket is live.
