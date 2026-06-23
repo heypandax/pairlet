@@ -18,9 +18,12 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 ## What you can do from your pocket
 
 - **Approve from anywhere** — tool-permission requests reach your phone the moment Claude raises one. Allow or deny in seconds; if you don't, it times out to a safe deny.
-- **Pick up any session** — resume the exact Claude session you left running on your computer, or start a fresh one in any repo.
-- **Watch it think, live** — real-time streaming output, code blocks and tool events, exactly as they render in the terminal.
-- **Switch the working directory** — point Claude at any repo on your computer mid-conversation, with recents, a live breadcrumb, and per-project session counts.
+- **Set how much it asks** — four execution modes (ask each step, auto-edit, plan, full auto), a persisted **default mode** and reasoning **effort**, plus per-session allow rules — switchable mid-conversation.
+- **Pick up any session** — resume the exact Claude session you left running on your computer, or start a fresh one in any repo; hand it back to the desktop later with `claude --resume`.
+- **Watch it think, live** — real-time streaming output, code blocks, tool events and background-task status, exactly as they render in the terminal.
+- **Browse projects as a tree** — drill through your computer's folders level by level (or a flat recents list), filter as you type, with a live breadcrumb and per-project session counts.
+
+Voice dictation, image attachments, slash-command autocomplete, model switching, and finish-time push notifications round it out. **[See the full feature list →](https://heypandax.github.io/cc-pocket/features.html)**
 
 ## Modules
 
@@ -108,6 +111,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 ## Docs
 
 - Website / landing page — <https://heypandax.github.io/cc-pocket/>
+- Full feature list — <https://heypandax.github.io/cc-pocket/features.html>
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)

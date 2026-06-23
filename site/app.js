@@ -120,6 +120,19 @@
     osTabs.forEach(t => t.addEventListener('click', () => setOS(t.dataset.os)));
   }
 
+  // ── install vs update mode: one toggle drives the visible command in every OS panel ──
+  const modeTabs = [...document.querySelectorAll('.mode-tab')];
+  const modeBlocks = [...document.querySelectorAll('.mode-block')];
+  if (modeTabs.length){
+    const setMode = (mode) => {
+      if (!modeBlocks.some(b => b.dataset.mode === mode)) mode = 'install';
+      modeTabs.forEach(t => t.classList.toggle('on', t.dataset.mode === mode));
+      modeBlocks.forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+    };
+    setMode('install'); // always start on Install; Update is opt-in per visit
+    modeTabs.forEach(t => t.addEventListener('click', () => setMode(t.dataset.mode)));
+  }
+
   // ── Android APK: resolve the newest .apk asset from GitHub Releases ──
   // The APK is not on every release (daemon-only releases exist), so /releases/latest
   // can point at a tag with no APK. We scan releases newest-first for the first .apk

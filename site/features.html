@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cc-pocket — Features · everything it does</title>
+<meta name="description" content="The complete CC Pocket feature list: execution modes, default mode & reasoning effort, live streaming, tree project browser, voice & images, background tasks, finish notifications, end-to-end encryption — all from your phone." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  /* page-local tweaks only — design tokens & components live in styles.css */
+  .feat-hero{position:relative;overflow:hidden;padding:140px 0 60px;text-align:center;}
+  .feat-hero::before{
+    content:"";position:absolute;left:50%;top:-10%;width:1000px;height:1000px;
+    transform:translateX(-50%);pointer-events:none;
+    background:radial-gradient(circle, var(--glow) 0%, transparent 60%);
+  }
+  .feat-hero .wrap{position:relative;max-width:780px;}
+  .feat-hero h1{font-size:clamp(34px,5.4vw,54px);font-weight:600;letter-spacing:-0.03em;line-height:1.06;margin:0 0 18px;text-wrap:balance;}
+  .feat-hero .sub{font-size:clamp(16px,2vw,19px);color:var(--sec);max-width:600px;margin:0 auto 28px;}
+  .feat-hero .hero-btns{justify-content:center;}
+  /* alternating section rhythm */
+  .fband{background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);}
+  /* group sections sit closer together than full landing sections */
+  .fgroup{padding:84px 0;}
+  .fgroup .section-head{margin-bottom:40px;}
+  /* a tag on a NEW card */
+  .sec-card .new-tag{
+    display:inline-block;margin-left:8px;vertical-align:middle;
+    font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.04em;
+    color:var(--accent);background:var(--accent-bg);border-radius:999px;padding:2px 7px;line-height:1.4;
+  }
+  .feat-foot-cta{padding:84px 0;text-align:center;}
+  .feat-foot-cta h2{font-size:clamp(26px,3.6vw,36px);font-weight:600;letter-spacing:-0.02em;margin:0 0 12px;}
+  .feat-foot-cta p{font-size:17px;color:var(--sec);margin:0 0 26px;}
+  .feat-foot-cta .hero-btns{justify-content:center;}
+</style>
+</head>
+<body>
+
+<!-- ══════════════ NAV ══════════════ -->
+<nav class="nav scrolled" id="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html#top" aria-label="cc-pocket home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="wordmark mono">cc-pocket</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html#start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
+      <a href="features.html" class="active"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
+      <a href="index.html#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+      <a href="index.html#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+    </div>
+    <div class="nav-right">
+      <div class="seg" role="group" aria-label="Language">
+        <button data-setlang="zh">中</button>
+        <button data-setlang="en" class="on">EN</button>
+      </div>
+      <button class="icon-btn" id="theme-btn" aria-label="Toggle theme"></button>
+      <a class="btn btn-primary desktop-github" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <span class="gh-glyph" aria-hidden="true"></span>
+        <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
+        <span class="star-pill mono" style="display:none"><span class="star-ico" aria-hidden="true"></span><span class="star-n"></span></span>
+      </a>
+      <button class="icon-btn hamburger" id="hamburger" aria-label="Menu"></button>
+    </div>
+  </div>
+</nav>
+<div class="mobile-menu" id="mobile-menu">
+  <a href="index.html#start"><span class="i18n-en">Download</span><span class="i18n-zh">下载</span></a>
+  <a href="features.html"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
+  <a href="index.html#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+  <a href="index.html#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+  <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener" style="color:var(--accent)">View on GitHub →</a>
+</div>
+
+<span id="top"></span>
+
+<!-- ══════════════ INTRO ══════════════ -->
+<header class="feat-hero">
+  <div class="wrap">
+    <p class="eyebrow reveal"><span class="i18n-en">Features</span><span class="i18n-zh">完整特性</span></p>
+    <h1 class="reveal">
+      <span class="i18n-en">Everything CC Pocket does.</span>
+      <span class="i18n-zh">CC Pocket 的全部能力。</span>
+    </h1>
+    <p class="sub reveal">
+      <span class="i18n-en">The four headline jobs are just the start. Here's the full toolkit you carry in your pocket — control, visibility, input, and trust, end to end.</span>
+      <span class="i18n-zh">「四件事」只是开始。这是你口袋里的完整工具箱——掌控、可见、输入、信任，端到端齐全。</span>
+    </p>
+    <div class="hero-btns reveal">
+      <a class="btn btn-primary" href="index.html#start">
+        <span class="i18n-en">Get the app</span><span class="i18n-zh">获取 App</span>
+      </a>
+      <a class="btn btn-ghost" href="index.html#features">
+        <span class="i18n-en">← Back to overview</span><span class="i18n-zh">← 回到概览</span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════ 1 · CONTROL & PERMISSIONS ══════════════ -->
+<section class="fgroup" id="control">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Control &amp; permissions</span><span class="i18n-zh">掌控与授权</span></p>
+      <h2><span class="i18n-en">Decide how much it asks.</span><span class="i18n-zh">你来定它问多少。</span></h2>
+      <p><span class="i18n-en">From approve-every-step to full auto — and a default that sticks.</span><span class="i18n-zh">从每步批准到全自动——还有一个会被记住的默认值。</span></p>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/><path d="M9 12l2 2 4-4.5"/></svg></div>
+        <h4><span class="i18n-en">Approve from anywhere</span><span class="i18n-zh">随处批准</span></h4>
+        <p><span class="i18n-en">Tool-permission requests reach your phone the instant Claude raises one. Allow or deny in seconds — or it times out to a safe deny.</span><span class="i18n-zh">Claude 一发起工具授权，立刻推到手机。几秒内允许或拒绝——不处理则超时安全拒绝。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="18" r="2"/></svg></div>
+        <h4><span class="i18n-en">Four execution modes</span><span class="i18n-zh">四档执行模式</span></h4>
+        <p><span class="i18n-en">Ask each step, Auto-edit, Plan-first, or Full auto. Pick exactly how much Claude does before checking in.</span><span class="i18n-zh">每步询问、自动改文件、先计划、全自动。精确选定 Claude 动手前先问多少。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z"/></svg></div>
+        <h4><span class="i18n-en">Set a default mode</span><span class="i18n-zh">默认模式</span><span class="new-tag">NEW</span></h4>
+        <p><span class="i18n-en">Choose a default in Settings; new sessions — and ones you resume — open straight into it instead of always asking.</span><span class="i18n-zh">在设置里定默认；新会话和恢复的会话都直接从它起步，不必每次从头询问。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 13a9 9 0 100-9 9 9 0 000 9z" opacity="0"/><path d="M3 14a9 9 0 1118 0"/><path d="M12 14l4-4"/><circle cx="12" cy="14" r="1.3"/></svg></div>
+        <h4><span class="i18n-en">Default reasoning effort</span><span class="i18n-zh">默认推理强度</span><span class="new-tag">NEW</span></h4>
+        <p><span class="i18n-en">Set the thinking depth once. Every session opens at your preferred effort, tweakable per session.</span><span class="i18n-zh">思考深度设定一次。每个会话都按你偏好的强度打开，可按会话再调。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l1.5 1.5L8 5.5M4 12.5l1.5 1.5L8 11.5M4 18.5l1.5 1.5L8 17.5M11 7h9M11 13h9M11 19h6"/></svg></div>
+        <h4><span class="i18n-en">Per-session allow rules</span><span class="i18n-zh">本会话记忆</span></h4>
+        <p><span class="i18n-en">“Always allow” remembers a tool for this session only — see what's remembered and revoke any of it anytime.</span><span class="i18n-zh">「本会话总是允许」只在当前会话记住某类操作——可查看已记住项并随时撤销。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="10" rx="5"/><circle cx="16" cy="12" r="3"/></svg></div>
+        <h4><span class="i18n-en">Switch mode mid-session</span><span class="i18n-zh">随时切换</span></h4>
+        <p><span class="i18n-en">Flip the execution mode straight from the badge — the conversation keeps its place.</span><span class="i18n-zh">直接点徽标切换执行模式——对话原地不丢。</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 2 · SEE WHAT IT'S DOING ══════════════ -->
+<section class="fgroup fband" id="visibility">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">See what it's doing</span><span class="i18n-zh">实时可见</span></p>
+      <h2><span class="i18n-en">The terminal, mirrored to your hand.</span><span class="i18n-zh">终端，镜像到你手里。</span></h2>
+      <p><span class="i18n-en">Every token, tool call and background job — exactly as it renders on your computer.</span><span class="i18n-zh">每个 token、工具调用、后台任务——和电脑上渲染的一模一样。</span></p>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2.5-7 5 16 2.5-9H22"/></svg></div>
+        <h4><span class="i18n-en">Live streaming output</span><span class="i18n-zh">实时流式输出</span></h4>
+        <p><span class="i18n-en">Text streams in token by token as Claude works — follow along on the go.</span><span class="i18n-zh">Claude 干活时文字逐字流出——在路上也能跟上。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16"/></svg></div>
+        <h4><span class="i18n-en">Copyable code blocks</span><span class="i18n-zh">可复制代码块</span></h4>
+        <p><span class="i18n-en">Syntax-styled code blocks render inline, with one-tap copy.</span><span class="i18n-zh">带语法样式的代码块内联呈现，一键复制。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M6.5 9l3 3-3 3M13 15h4.5"/></svg></div>
+        <h4><span class="i18n-en">Tool events, with timing</span><span class="i18n-zh">工具调用与耗时</span></h4>
+        <p><span class="i18n-en">Watch each Bash, edit, and search as Claude runs it — running, done, how long it took.</span><span class="i18n-zh">每条 Bash、编辑、搜索随执行实时显示——运行中、完成、耗时多久。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 00-3.8 5.2A4 4 0 008 16a3.5 3.5 0 004 3 3.5 3.5 0 004-3 4 4 0 00-.2-7.8A4 4 0 0012 3z"/><path d="M12 8v8"/></svg></div>
+        <h4><span class="i18n-en">Thinking, made visible</span><span class="i18n-zh">思考可见</span></h4>
+        <p><span class="i18n-en">Extended thinking unfolds live, then collapses to “Thought for N s”.</span><span class="i18n-zh">扩展思考实时展开，结束后折叠为「思考了 N 秒」。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5M3 16.5l9 5 9-5"/></svg></div>
+        <h4><span class="i18n-en">Background tasks</span><span class="i18n-zh">后台任务</span></h4>
+        <p><span class="i18n-en">Long shells and sub-agents keep running in the background — see how many and how each one is doing.</span><span class="i18n-zh">长命令与子代理在后台继续跑——显示数量和各自状态。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 109 9h-9V3z"/><path d="M14 3.5A9 9 0 0120.5 10H14V3.5z"/></svg></div>
+        <h4><span class="i18n-en">Context &amp; token usage</span><span class="i18n-zh">上下文与 token 用量</span></h4>
+        <p><span class="i18n-en">Live context-window fill and per-turn token counts, so you know how much room is left.</span><span class="i18n-zh">实时上下文占用与每回合 token 数，剩多少一目了然。</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 3 · SESSIONS & PROJECTS ══════════════ -->
+<section class="fgroup" id="projects">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Sessions &amp; projects</span><span class="i18n-zh">会话与项目</span></p>
+      <h2><span class="i18n-en">Find any repo, pick up any session.</span><span class="i18n-zh">找到任意仓库，接起任意会话。</span></h2>
+      <p><span class="i18n-en">Browse your machine's folders as a tree, resume what's running, hand it back to the desktop.</span><span class="i18n-zh">把电脑的目录当树来逛，恢复正跑着的会话，再交回桌面。</span></p>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 11-2.6-6.4M21 4v5h-5"/></svg></div>
+        <h4><span class="i18n-en">Resume any session</span><span class="i18n-zh">接起任何会话</span></h4>
+        <p><span class="i18n-en">Pick up the exact Claude session you left running on your computer, right where it stopped.</span><span class="i18n-zh">接起你电脑上正跑着的那个 Claude 会话，从停下的地方继续。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M12 8.5v7M8.5 12h7"/></svg></div>
+        <h4><span class="i18n-en">Start fresh anywhere</span><span class="i18n-zh">任意新开</span></h4>
+        <p><span class="i18n-en">Open a brand-new session in any repo on your machine, in your chosen mode.</span><span class="i18n-zh">在本机任意仓库新开会话，用你选定的模式起步。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="9" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><path d="M6.5 8v8.5h7M6.5 11.5h7"/></svg></div>
+        <h4><span class="i18n-en">Tree project browser</span><span class="i18n-zh">树状项目浏览</span><span class="new-tag">NEW</span></h4>
+        <p><span class="i18n-en">Drill into your folders level by level instead of one flat list, with a breadcrumb to step back up.</span><span class="i18n-zh">不再是一张平铺列表——按目录层层下钻，面包屑随时回上层。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M9 9v11"/></svg></div>
+        <h4><span class="i18n-en">Flat or tree, your call</span><span class="i18n-zh">平铺或树状</span><span class="new-tag">NEW</span></h4>
+        <p><span class="i18n-en">Toggle between a flat recents list and the hierarchical tree — your preference is remembered.</span><span class="i18n-zh">在平铺最近列表与树状结构间一键切换——偏好会被记住。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg></div>
+        <h4><span class="i18n-en">Filter projects</span><span class="i18n-zh">项目筛选</span></h4>
+        <p><span class="i18n-en">Type to filter by path, project name, or a running session's title; scrolling drops the keyboard.</span><span class="i18n-zh">输入即筛选：按路径、项目名或进行中会话的标题；滚动列表自动收起键盘。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.5A1.5 1.5 0 013.5 4h5L10 6h10.5A1.5 1.5 0 0122 7.5v11A1.5 1.5 0 0120.5 20h-17A1.5 1.5 0 012 18.5z"/><path d="M14 14h3"/></svg></div>
+        <h4><span class="i18n-en">Per-project session counts</span><span class="i18n-zh">每项目会话数</span></h4>
+        <p><span class="i18n-en">Each project shows how many sessions live under it, sorted newest-first.</span><span class="i18n-zh">每个项目显示其下会话数，按最新在前排序。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8l-4 4 4 4M17 8l4 4-4 4M3 12h18"/></svg></div>
+        <h4><span class="i18n-en">Desktop handoff</span><span class="i18n-zh">桌面接力</span></h4>
+        <p><span class="i18n-en">Did some on the phone? Run <span class="mono">claude --resume</span> on your computer and the session is there — race-free.</span><span class="i18n-zh">手机上聊了一半？电脑里跑 <span class="mono">claude --resume</span>，会话就在列表里——无竞态。</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 4 · WAYS TO TALK TO IT ══════════════ -->
+<section class="fgroup fband" id="input">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Ways to talk to it</span><span class="i18n-zh">多种输入</span></p>
+      <h2><span class="i18n-en">Type, speak, or show it a picture.</span><span class="i18n-zh">打字、说话，或给它看张图。</span></h2>
+      <p><span class="i18n-en">More than a text box — voice, images, slash commands and quick actions.</span><span class="i18n-zh">不只是输入框——语音、图片、斜杠命令、快捷操作。</span></p>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2.5" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg></div>
+        <h4><span class="i18n-en">Voice dictation</span><span class="i18n-zh">语音听写</span></h4>
+        <p><span class="i18n-en">Dictate a prompt instead of typing. On iPhone it's on-device and never touches the network.</span><span class="i18n-zh">口述指令，不用打字。iPhone 上为设备本地识别，不经过网络。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="M3.5 17l5-5 4 4 3-3 5 5"/></svg></div>
+        <h4><span class="i18n-en">Image attachments</span><span class="i18n-zh">图片附件</span></h4>
+        <p><span class="i18n-en">Send up to 4 images per message, compressed on device — error screenshots, mockups, whatever it needs to see.</span><span class="i18n-zh">每条消息最多 4 张图，设备端压缩——报错截图、设计稿，让它看个清楚。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.5L8 20.5"/><rect x="2.5" y="4" width="19" height="16" rx="2.5"/></svg></div>
+        <h4><span class="i18n-en">Slash commands</span><span class="i18n-zh">斜杠命令</span></h4>
+        <p><span class="i18n-en">Type <span class="mono">/</span> to autocomplete your project's slash commands — built-in, user, and skills.</span><span class="i18n-zh">输入 <span class="mono">/</span> 自动补全项目的斜杠命令——内置、用户、技能都在。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12l1-9z"/></svg></div>
+        <h4><span class="i18n-en">Quick actions</span><span class="i18n-zh">快捷操作</span></h4>
+        <p><span class="i18n-en">Clear the conversation, compact the context, or run <span class="mono">/simplify</span> in a tap.</span><span class="i18n-zh">一键清空对话、压缩上下文，或跑 <span class="mono">/simplify</span>。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7M21 16v5h-5M14 14l7 7M3 8V3h5M10 10L3 3"/></svg></div>
+        <h4><span class="i18n-en">Switch models</span><span class="i18n-zh">切换模型</span></h4>
+        <p><span class="i18n-en"><span class="mono">/model opus</span> mid-conversation — swap the model without starting over.</span><span class="i18n-zh">对话中 <span class="mono">/model opus</span>——不必重来即可换模型。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h11M4 7l3-3M4 7l3 3M20 17H9M20 17l-3-3M20 17l-3 3"/></svg></div>
+        <h4><span class="i18n-en">Interrupt anytime</span><span class="i18n-zh">随时打断</span></h4>
+        <p><span class="i18n-en">Tap ■ to stop the current turn without killing the session — then redirect it.</span><span class="i18n-zh">点 ■ 停掉当前回合而不杀会话——再改方向。</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 5 · STAY IN THE LOOP ══════════════ -->
+<section class="fgroup" id="loop">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Stay in the loop</span><span class="i18n-zh">随时掌握</span></p>
+      <h2><span class="i18n-en">It finds you — and stays connected.</span><span class="i18n-zh">它来找你——而且一直连着。</span></h2>
+      <p><span class="i18n-en">Off-LAN, across networks, on more than one phone — with a link that heals itself.</span><span class="i18n-zh">异地、跨网、多部手机——连接还能自愈。</span></p>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8.5a6 6 0 00-12 0c0 7-3 8.5-3 8.5h18s-3-1.5-3-8.5z"/><path d="M10.5 21a1.8 1.8 0 003 0"/></svg></div>
+        <h4><span class="i18n-en">Finish notifications</span><span class="i18n-zh">完成推送</span></h4>
+        <p><span class="i18n-en">Get a push the moment Claude finishes a turn while the app is closed — no babysitting.</span><span class="i18n-zh">App 关着时，Claude 一跑完回合就给你推送——不用守着。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 01-9 9 9 9 0 01-7.5-4M3 12a9 9 0 019-9 9 9 0 017.5 4"/><path d="M21 3v5h-5M3 21v-5h5"/></svg></div>
+        <h4><span class="i18n-en">Resilient connection</span><span class="i18n-zh">稳定连接</span><span class="new-tag">NEW</span></h4>
+        <p><span class="i18n-en">A heartbeat keeps the link alive and detects a dead socket fast, so a network blip reconnects in a second or two — not minutes.</span><span class="i18n-zh">心跳保活并快速发现死连接，网络一抖一两秒就重连——不是几分钟。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 000 18M12 3a14 14 0 010 18"/></svg></div>
+        <h4><span class="i18n-en">Works from anywhere</span><span class="i18n-zh">异地可用</span></h4>
+        <p><span class="i18n-en">Cellular, hotel Wi-Fi, a different city — the relay bridges you. No shared LAN required.</span><span class="i18n-zh">蜂窝、酒店 Wi-Fi、异地——中继帮你架桥。无需同一局域网。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="13" height="10" rx="1.5"/><rect x="16.5" y="8.5" width="5" height="11.5" rx="1.5"/><path d="M7 18h4M9 14v4"/></svg></div>
+        <h4><span class="i18n-en">Multi-device pairing</span><span class="i18n-zh">多设备配对</span></h4>
+        <p><span class="i18n-en">Pair more than one phone to the same computer — each with its own device key.</span><span class="i18n-zh">一台电脑可配对多部手机——各自独立设备密钥。</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 6 · PRIVATE BY DESIGN ══════════════ -->
+<section class="fgroup fband" id="trust">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Private by design</span><span class="i18n-zh">隐私即设计</span></p>
+      <h2><span class="i18n-en">The relay can't read a thing.</span><span class="i18n-zh">中继什么也读不到。</span></h2>
+      <p><span class="i18n-en">End-to-end encrypted, no account, open source — trust without trusting us.</span><span class="i18n-zh">端到端加密、免账号、开源——信任，但不必信任我们。</span></p>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+        <h4><span class="i18n-en">End-to-end encrypted</span><span class="i18n-zh">端到端加密</span></h4>
+        <p><span class="i18n-en">P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake; plaintext stays on your two endpoints.</span><span class="i18n-zh">P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手；明文只留在你的两个端点。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8.5 4.2v6.1c0 4.9-3.6 8.1-8.5 9.2-4.9-1.1-8.5-4.3-8.5-9.2V6.7L12 2.5z"/><path d="M9.5 12.5l-2 2M14.5 9.5l-5 5"/></svg></div>
+        <h4><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></h4>
+        <p><span class="i18n-en">It forwards ciphertext only — holds no message content and no private keys.</span><span class="i18n-zh">只转发密文——不保存任何消息内容，也不持有私钥。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9.5h18M7 14.5h4"/></svg></div>
+        <h4><span class="i18n-en">No accounts, no login</span><span class="i18n-zh">无账号、免登录</span></h4>
+        <p><span class="i18n-en">Pair by scanning a QR or typing a 6-digit code; the daemon's key travels out-of-band, so even a malicious relay can't MITM.</span><span class="i18n-zh">扫码或输入 6 位码即可；守护进程密钥经带外传递，即便恶意中继也无法中间人攻击。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6L4 11l5 5M15 6l5 5-5 5"/></svg></div>
+        <h4><span class="i18n-en">Open &amp; self-hostable</span><span class="i18n-zh">开源可自托管</span></h4>
+        <p><span class="i18n-en">Clean-room Kotlin, MIT, zero content logging — run your own relay if you like.</span><span class="i18n-zh">纯净室 Kotlin、MIT 许可、零内容日志——也可自建中继。</span></p>
+      </div>
+    </div>
+    <div class="pullquote reveal">
+      <a class="tm-link" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Read the full threat model →</span><span class="i18n-zh">阅读完整威胁模型 →</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ CLOSING CTA ══════════════ -->
+<section class="feat-foot-cta">
+  <div class="wrap reveal">
+    <h2><span class="i18n-en">All of it, in your pocket.</span><span class="i18n-zh">这一切，装进口袋。</span></h2>
+    <p><span class="i18n-en">Free, open source, end-to-end encrypted. Get the app and connect your computer in three commands.</span><span class="i18n-zh">免费、开源、端到端加密。装上 App，三条命令连上电脑。</span></p>
+    <div class="hero-btns">
+      <a class="btn btn-primary" href="index.html#start">
+        <span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <span class="gh-glyph" aria-hidden="true"></span>
+        <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div class="brand-col">
+        <a class="brand" href="index.html#top"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">cc-pocket</span></a>
+        <p class="tagline"><span class="i18n-en">Claude Code, in your pocket. End-to-end encrypted, no account.</span><span class="i18n-zh">Claude Code，装进口袋。端到端加密，无需账号。</span></p>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Product</span><span class="i18n-zh">产品</span></h5>
+        <a href="features.html"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
+        <a href="index.html#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+        <a href="index.html#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+        <a href="index.html#start"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></a>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Resources</span><span class="i18n-zh">资源</span></h5>
+        <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></a>
+        <a href="https://github.com/heypandax/cc-pocket#readme" target="_blank" rel="noopener"><span class="i18n-en">User guide</span><span class="i18n-zh">使用指南</span></a>
+        <a href="https://heypandax.github.io/cc-pocket/privacy.html" target="_blank" rel="noopener"><span class="i18n-en">Privacy policy</span><span class="i18n-zh">隐私政策</span></a>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Legal</span><span class="i18n-zh">法律</span></h5>
+        <a href="https://github.com/heypandax/cc-pocket/blob/main/LICENSE" target="_blank" rel="noopener"><span class="i18n-en">MIT License</span><span class="i18n-zh">MIT 许可证</span></a>
+      </div>
+    </div>
+    <div class="bottom">
+      <span class="copy-line mono">© 2026 cc-pocket · MIT</span>
+      <div class="seg" role="group" aria-label="Language">
+        <button data-setlang="zh">中</button>
+        <button data-setlang="en" class="on">EN</button>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
