@@ -61,24 +61,15 @@ cc-pocket-daemon pair                       # prints a QR + 6-digit code
 
 The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; re-run it to upgrade. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`.
 
-**Windows (x86_64)** — download `cc-pocket-daemon-<version>-windows-x86_64.zip` from [Releases](https://github.com/heypandax/cc-pocket/releases/latest). The daemon drives the [Claude Code CLI](https://github.com/anthropics/claude-code), so install that first. Then, in PowerShell **from the folder you downloaded the zip into**:
+**Windows (x86_64)** — install with [Scoop](https://scoop.sh) (needs the [Claude Code CLI](https://github.com/anthropics/claude-code) installed — the daemon drives it):
 
 ```powershell
-# unzip — the * matches the version you downloaded
-Expand-Archive cc-pocket-daemon-*-windows-x86_64.zip -DestinationPath $env:LOCALAPPDATA\Programs\ -Force
-$ccp = "$env:LOCALAPPDATA\Programs\cc-pocket-daemon\cc-pocket-daemon.exe"
-
-# start the daemon — it connects to the hosted relay; KEEP THIS WINDOW OPEN
-& $ccp run
+scoop bucket add heypandax https://github.com/heypandax/scoop-bucket
+scoop install cc-pocket-daemon
+cc-pocket-daemon pair        # prints a QR + 6-digit code
 ```
 
-Then open a **second** PowerShell window and pair your phone (the daemon from the first window must stay running):
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\cc-pocket-daemon\cc-pocket-daemon.exe" pair   # prints a QR + 6-digit code
-```
-
-The zip is self-contained (bundled JRE — no system Java); re-extract over the old folder with `-Force` to upgrade. To keep it running in the background instead of holding a window open, `& $ccp service-install` prints `sc.exe` commands — but the launcher isn't a native Windows service, so wrap it with a tool like [WinSW](https://github.com/winsw/winsw) (run as Administrator). Other architectures (Linux arm64): build from source — see [Quick start](#quick-start).
+`scoop install` puts `cc-pocket-daemon` on your PATH and registers a logon Scheduled Task so the daemon runs in the background (connecting to the hosted relay) — you just pair. Upgrade with `scoop update cc-pocket-daemon`. Other architectures (Linux arm64): build from source — see [Quick start](#quick-start).
 
 ## How pairing works
 
