@@ -4,7 +4,7 @@
 
 Drive Claude Code — or OpenAI Codex — on your computer from your phone, from anywhere, not just your LAN. Start/resume sessions, browse working directories, send prompts, and approve or deny the agent's tool-permission requests remotely. Pick your agent (Claude or Codex) per session; either way, streaming output, command and file-change approvals, and interrupts all work the same. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext. Clean-room Kotlin, MIT.
 
-**🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📱 Get the app:** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone & iPad) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) (GitHub Releases)
+**🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📱 Get the app:** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone & iPad) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) (GitHub Releases) · **🖥️ Desktop app:** [macOS (.dmg, signed)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Windows (.msi)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,7 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 
 Voice dictation, image attachments, slash-command autocomplete, model switching, and finish-time push notifications round it out. **[See the full feature list →](https://heypandax.github.io/cc-pocket/features.html)**
 
-cc-pocket now also runs as a native **desktop app** (macOS / Linux / Windows), built from the same Compose Multiplatform codebase — a two-pane "mission control" for driving Claude Code or Codex on *another* computer with the same remote step-by-step approval, so it's no longer phone-only.
+cc-pocket now also runs as a native **desktop app** (macOS / Linux / Windows), built from the same Compose Multiplatform codebase — a two-pane "mission control" for driving Claude Code or Codex on *another* computer with the same remote step-by-step approval, so it's no longer phone-only. Download: [macOS (.dmg, signed)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Windows (.msi)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi).
 
 ## Modules
 
@@ -43,7 +43,7 @@ Two pieces: the **app** on your phone, and a hosted-relay **daemon** on your com
 
 **1. Get the app on your phone** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) for iPhone & iPad, or the [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) from GitHub Releases. (On a phone, the [website](https://heypandax.github.io/cc-pocket/) links straight to the store; on a computer it shows a QR to scan.)
 
-**Or get the desktop app** — cc-pocket also runs on your computer (drive *another* machine from it): [macOS .dmg](https://github.com/heypandax/cc-pocket/releases/download/v1.1.8/cc-pocket-desktop-1.1.8-macos-arm64.dmg) (Apple Silicon · signed & notarized) · [Windows .msi](https://github.com/heypandax/cc-pocket/releases/download/v1.1.8/cc-pocket-desktop-1.1.8-windows.msi) (unsigned — SmartScreen → "More info → Run anyway"). Linux desktop: build from source.
+**Or get the desktop app** — cc-pocket also runs on your computer (drive *another* machine from it): [macOS .dmg](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) (Apple Silicon · signed & notarized) · [Windows .msi](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi) (unsigned — SmartScreen → "More info → Run anyway"). Linux desktop: build from source.
 
 **2. Install the daemon on your computer** — the relay is hosted for you.
 

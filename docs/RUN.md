@@ -53,6 +53,8 @@ quit
 授权弹窗：默认权限模式下，若你的 claude 配置会对某个工具询问，test-client 会显示 `[ASK] …`，输入 `allow` 或 `deny` 即可（你这台机器对常见工具是放行的，所以多数命令不弹窗——授权回环由单元测试 `PermissionBridgeTest` 确定性覆盖）。
 退出后 `pgrep -fl claude` 应看不到本 daemon 的子进程（干净杀树）。
 
+**Codex 后端**：daemon 除了 Claude Code，现在也能驱动 OpenAI Codex。它会自动探测 PATH 上的 `codex` CLI；要指定路径就在 `run` 上加 `--codex-bin <path>`（`service-install` 会把它透传进常驻配置）。后端由**客户端**（手机或桌面）在新建会话时选——Claude 或 Codex——两者的远程逐步命令 / 文件批准用法完全一样。一个会话始终绑定一个后端。
+
 ---
 
 ## 3. M1 —— 经云端 relay（端到端加密 + 配对）
@@ -113,6 +115,13 @@ $D test-client --relay ws://127.0.0.1:9000 --daemon-pub "<dpk>" --ticket "<ticke
 
 窗口里把地址填 `ws://127.0.0.1:8765/v1/ws` → Connect → 点目录 → 点会话/新建 → 在 Chat 里发消息。
 （这是 Desktop 目标；Android/iOS 目标需要先装 Android SDK / Xcode。）
+
+**桌面客户端（给用户的另一种选择）**：除了手机 App，cc-pocket 也能作为桌面 App 运行——从 GitHub Release 下载 DMG（macOS）/ MSI（Windows）：
+
+- macOS：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg>
+- Windows：<https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi>
+
+或像上面那样从源码 `./gradlew :mobile:composeApp:run`。它通过和手机端**同一套配对**连到**另一台**机器上的 daemon——桌面端没有摄像头，所以请输入 `cc-pocket-daemon pair` 打印的那 6 位配对码。
 
 ---
 

@@ -114,6 +114,55 @@ security find-identity -v -p codesigning
 
 ---
 
+# 发布桌面 App（Compose Desktop）
+
+桌面 App 是和手机端同一套 Compose Multiplatform 代码的**客户端**（用它去操控**另一台**电脑上的 Claude / Codex），**不是 daemon**。它以两种安装包分发，挂在**和 daemon 同一个 GitHub Release** 上（即 `v<X>` 那个 release）：
+
+- macOS：签名 + 公证的 `.dmg`（Apple Silicon）。
+- Windows：`.msi`。
+
+两者都用**无版本号的固定 asset 名**——`cc-pocket-desktop-macos-arm64.dmg` 和 `cc-pocket-desktop-windows-x86_64.msi`——这样 `https://github.com/heypandax/cc-pocket/releases/latest/download/<asset>` 就是永久有效的「最新版」直链，官网与 README 都引用它。
+
+> 桌面 App **没有 Homebrew / Scoop 入口**，纯直链下载；只有 daemon 走 cask / scoop。别把它和 daemon 的安装（brew / scoop / curl）搞混。
+
+## CI（常规路径）
+
+`release.yml` 现在带 `macos-desktop` 和 `windows-desktop` 两个 job。一条命令：
+
+```bash
+gh workflow run release.yml -f version=<X>
+```
+
+就会：构建 + 签名 + 公证出 DMG、构建出 MSI，并把两者都上传到 `v<X>` 这个 release —— 和 daemon、Android APK 挂在一起。（**前提**：`v<X>` 这个 GitHub Release 必须已存在，和 daemon 的 job 一样。）
+
+## macOS DMG 手动出包（本地兜底）
+
+需要仓库根 `.env` 里的 Apple 凭据（`DEVELOPER_ID` / `APPLE_ID` / `APPLE_TEAM_ID` / `APPLE_APP_PASSWORD`）：
+
+```bash
+set -a; . .env; set +a
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :mobile:composeApp:packageDmg \
+  -Pcompose.desktop.packaging.checkJdkVendor=false -PccpocketSignId="$DEVELOPER_ID"
+DMG=$(ls mobile/composeApp/build/compose/binaries/main/dmg/*.dmg | head -1)
+xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+xcrun stapler staple "$DMG"
+gh release upload v<X> "$DMG" --clobber   # 先把文件名改成 cc-pocket-desktop-macos-arm64.dmg 再传
+```
+
+- Homebrew 的 JDK 需要加 `-Pcompose.desktop.packaging.checkJdkVendor=false`，否则 jpackage 会因 vendor 校验失败。
+- 公证完成后用 `xcrun stapler validate <dmg>` 验收。
+
+## Windows MSI
+
+MSI 在 `windows-latest` runner 上构建（jpackage 不能跨平台出包，且 WiX 只在该 runner 上自带），由 `release.yml` 的 `windows-desktop` job 产出并上传到 release。`build-windows.yml` 也会构建一份 MSI 供临时测试，但**只上传 workflow artifact，不传到 release**。
+
+## 注意事项
+
+- Windows MSI 目前**未签名**（没有 Authenticode 证书）→ 首次运行会弹 SmartScreen（点「更多信息 → 仍要运行」）。macOS DMG 是完整签名 + 公证的，双击零警告。
+- 桌面 App **没有 Homebrew / Scoop** 入口，是直链下载；只有 daemon 用 cask / scoop。
+
+---
+
 # 发布 iOS App（App Store）
 
 移动端 iOS app（`com.panda.ccpocket`）走 **App Store**，与 daemon 完全独立。**关键结论：不需要 App Store Connect API key / Issuer ID**——签名和上传都靠 Xcode 已登录账号的自动签名（cloud-managed distribution）。

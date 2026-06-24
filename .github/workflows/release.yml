@@ -219,3 +219,149 @@ jobs:
           cp "$SRC" "$ARTIFACT"
           echo "sha256: $(sha256sum "$ARTIFACT" | awk '{print $1}')"
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
+
+  macos-desktop:
+    # The Compose Desktop APP (.dmg) for macOS — signed + notarized, attached to the release under a stable
+    # version-less name (so releases/latest/download/cc-pocket-desktop-macos-arm64.dmg is a permanent link).
+    # arm64 only for now (most Macs are Apple Silicon); add an x86_64/Rosetta build later if Intel demand shows.
+    # composeApp applies the Android + googleServices plugins, so the build needs the Android SDK at configure
+    # time and a google-services.json to exist — the desktop target never touches Firebase, so a placeholder is fine.
+    if: ${{ !inputs.only_android }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (aarch64, with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: aarch64
+
+      - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
+        uses: android-actions/setup-android@v3
+
+      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        run: |
+          cat > mobile/composeApp/google-services.json <<'JSON'
+          {
+            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": { "package_name": "com.panda.ccpocket" }
+                },
+                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
+                "oauth_client": [],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+
+      - name: Import Developer ID signing certificate
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/ccp-signing.keychain-db"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Build + sign the DMG
+        env:
+          DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
+        run: |
+          ./gradlew :mobile:composeApp:packageDmg --no-daemon \
+            -Dorg.gradle.java.home="$JAVA_HOME" \
+            -Pcompose.desktop.packaging.checkJdkVendor=false \
+            -PccpocketSignId="$DEVELOPER_ID"
+
+      - name: Notarize, staple & upload DMG to release v${{ inputs.version }}
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DMG=$(ls mobile/composeApp/build/compose/binaries/main/dmg/*.dmg | head -1)
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$DMG"
+          OUT="cc-pocket-desktop-macos-arm64.dmg"
+          cp "$DMG" "$OUT"
+          echo "sha256: $(shasum -a 256 "$OUT" | awk '{print $1}')"
+          gh release upload "v${{ inputs.version }}" "$OUT" --clobber
+
+  windows-desktop:
+    # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
+    # name. jpackage can't cross-compile, so this runs on windows-latest (which ships WiX, so the MSI builds).
+    # Mirrors build-windows.yml's windows-app job but uploads to the release instead of a workflow artifact.
+    if: ${{ !inputs.only_android }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
+        uses: android-actions/setup-android@v3
+
+      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        shell: bash
+        run: |
+          cat > mobile/composeApp/google-services.json <<'JSON'
+          {
+            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": { "package_name": "com.panda.ccpocket" }
+                },
+                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
+                "oauth_client": [],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+
+      - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK)
+        shell: bash
+        run: grep -v 'org.gradle.java.home' gradle.properties > gradle.properties.tmp && mv gradle.properties.tmp gradle.properties
+
+      - name: Build desktop app — MSI installer
+        shell: bash
+        run: |
+          # retry createDistributable — Maven Central / the plugins portal occasionally 403s or times out from CI
+          ok=0
+          for attempt in 1 2 3; do
+            if ./gradlew :mobile:composeApp:createDistributable --no-daemon --stacktrace; then ok=1; break; fi
+            echo "::warning::createDistributable attempt $attempt failed (network?), retrying in 20s"; sleep 20
+          done
+          [ "$ok" = 1 ] || { echo "::error::createDistributable failed after 3 attempts"; exit 1; }
+          ./gradlew :mobile:composeApp:packageMsi --no-daemon
+
+      - name: Upload MSI to release v${{ inputs.version }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MSI=$(find mobile/composeApp/build/compose/binaries -name "*.msi" | head -1)
+          [ -n "$MSI" ] || { echo "::error::no MSI produced (WiX missing?)"; exit 1; }
+          cp "$MSI" cc-pocket-desktop-windows-x86_64.msi
+          gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
