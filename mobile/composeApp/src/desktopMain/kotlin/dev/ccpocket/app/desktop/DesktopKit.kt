@@ -1,0 +1,118 @@
+package dev.ccpocket.app.desktop
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.theme.Tok
+
+/**
+ * Desktop design kit — the atoms shared by the two-pane shell, ported from `desktop-core.jsx`.
+ *
+ * Color tokens come straight from [Tok] (the design's `T` palette is byte-for-byte the app's), so there is
+ * no second source of truth. Fonts use the system sans + [FontFamily.Monospace]; bundling Inter / JetBrains
+ * Mono to exactly match the web mock is a later refinement and is intentionally not blocking this pass.
+ */
+object Dk {
+    val ui = FontFamily.Default           // Inter on the mock; system sans here
+    val mono = FontFamily.Monospace       // JetBrains Mono on the mock
+    val backdrop = Color(0xFF08090A)      // the page/window backdrop, a touch under base
+    val sidebarWidth = 300.dp
+    val maxStreamWidth = 760.dp           // chat message column cap for readability
+}
+
+/** A small keycap chip — a mono pill with a hairline border, e.g. ⌘K / ⏎ / ⌘⏎. */
+@Composable
+fun Key(text: String) {
+    Text(
+        text,
+        color = Tok.muted,
+        fontFamily = Dk.mono,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(5.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
+}
+
+/** A status dot; [pulse] is wired by the caller via [PulseDot] so this stays allocation-free where static. */
+@Composable
+fun Dot(color: Color, size: Dp = 7.dp, modifier: Modifier = Modifier) {
+    Box(modifier.size(size).clip(RoundedCornerShape(999.dp)).background(color))
+}
+
+/** SECTION LABEL — the 11sp uppercase muted group header (Projects / Sessions / Pending approvals …). */
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier, trailing: (@Composable () -> Unit)? = null) {
+    Row(
+        modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text.uppercase(),
+            color = Tok.muted,
+            fontFamily = Dk.ui,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.8.sp,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.width(1.dp)) // keep row baseline stable when trailing is absent
+        trailing?.invoke()
+    }
+}
+
+/**
+ * Background that lifts to [hover] (raised surface) while the pointer is over the element — the desktop hover
+ * affordance absent on mobile. Apply AFTER `.clip(shape)` so the fill is clipped to the row's corners.
+ */
+@Composable
+fun Modifier.hoverFill(
+    shape: Shape = RoundedCornerShape(0.dp),
+    base: Color = Color.Transparent,
+    hover: Color = Tok.raised,
+): Modifier {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    return this.hoverable(src).background(if (hovered) hover else base, shape)
+}
+
+/** A pill-shaped tinted badge (used for the "history" project marker and inline counts). */
+@Composable
+fun OutlinePill(text: String, color: Color, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        color = color,
+        fontFamily = Dk.mono,
+        fontSize = 9.5.sp,
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .border(1.dp, color.copy(alpha = 0.33f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 7.dp, vertical = 1.dp),
+    )
+}

@@ -79,6 +79,13 @@ kotlin {
             implementation(libs.cryptography.provider.openssl3.prebuilt) // Apple provider lacks ECDH at 0.4.0
             implementation(libs.peekaboo) // image picker + resize (ios native variant)
         }
+        val desktopTest by getting
+        desktopTest.dependencies {
+            implementation(compose.desktop.currentOs) // skiko runtime for headless ui-test rendering
+            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+            implementation(compose.uiTest)
+            implementation(kotlin("test"))
+        }
     }
 }
 
@@ -121,9 +128,27 @@ compose.desktop {
     application {
         mainClass = "dev.ccpocket.app.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Dmg)
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
             packageName = "cc-pocket"
             packageVersion = "1.0.0"
+            macOS {
+                bundleID = "dev.ccpocket.app"
+                // Developer ID signing — pass -PccpocketSignId="Developer ID Application: … (TEAMID)".
+                // Off by default so unsigned dev builds still work. Notarization is done after packaging
+                // (xcrun notarytool) so the DMG installs with no Gatekeeper warning.
+                (findProperty("ccpocketSignId") as String?)?.takeIf { it.isNotBlank() }?.let { id ->
+                    signing {
+                        sign.set(true)
+                        identity.set(id)
+                    }
+                }
+            }
         }
     }
+}
+
+// Forward -PccpocketLive=1 to the test JVM. Gates DesktopLiveTest, which connects to a real daemon and so
+// must stay opt-in (skipped by default in local + CI runs).
+tasks.withType(org.gradle.api.tasks.testing.Test::class.java).configureEach {
+    systemProperty("ccpocket.live", providers.gradleProperty("ccpocketLive").getOrElse("0"))
 }

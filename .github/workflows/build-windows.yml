@@ -1,10 +1,13 @@
 name: build-windows
 
-# Standalone Windows daemon build for quick testing. jpackage CAN'T cross-compile (it bundles the host
-# JRE), so the Windows zip must be built on a Windows runner — same constraint as release.yml. Unlike
-# release.yml, this workflow does NOT touch any GitHub release or the Homebrew cask: it uploads the
-# self-contained zip as a downloadable workflow artifact. Reuses scripts/release-windows.ps1 — the exact
-# same script release.yml's windows job runs — so there's a single source of truth for the build.
+# Standalone Windows builds for quick testing. jpackage CAN'T cross-compile (it bundles the host JRE), so
+# Windows artifacts must be built on a Windows runner — same constraint as release.yml. This workflow does
+# NOT touch any GitHub release or the Homebrew cask: it uploads downloadable workflow artifacts.
+#   - windows (daemon): self-contained zip via scripts/release-windows.ps1 (same script release.yml runs).
+#   - windows-app (desktop GUI): Compose Desktop app — portable zip (always) + MSI installer (if WiX present).
+# The composeApp module applies the Android + googleServices plugins, so the desktop build needs the Android
+# SDK to configure and a google-services.json to exist; the desktop target never uses Firebase, so a
+# placeholder file is written on the runner (the real one is gitignored and stays out of the public repo).
 
 on:
   workflow_dispatch:
@@ -13,12 +16,17 @@ on:
         description: "Version stamped into the build (no leading v, e.g. 1.1.8)"
         required: true
         default: "1.1.8"
+      skip_daemon:
+        description: "Skip the daemon build (only build the desktop app)"
+        required: false
+        default: "false"
 
 permissions:
   contents: read
 
 jobs:
   windows:
+    if: ${{ inputs.skip_daemon != 'true' }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,4 +45,64 @@ jobs:
         with:
           name: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64
           path: cc-pocket-daemon-${{ inputs.version }}-windows-x86_64.zip
+          if-no-files-found: error
+
+  windows-app:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (with jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
+        uses: android-actions/setup-android@v3
+
+      - name: Write placeholder google-services.json (gitignored; desktop target never uses Firebase)
+        shell: bash
+        run: |
+          cat > mobile/composeApp/google-services.json <<'JSON'
+          {
+            "project_info": { "project_number": "000000000000", "project_id": "ccpocket-ci-placeholder" },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": { "package_name": "com.panda.ccpocket" }
+                },
+                "api_key": [ { "current_key": "AIzaPlaceholderKeyForCiDesktopBuildOnly0000" } ],
+                "oauth_client": [],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+
+      - name: Build desktop app — portable zip (+ MSI if WiX is available)
+        shell: bash
+        run: |
+          ./gradlew :mobile:composeApp:createDistributable --no-daemon --stacktrace
+          # MSI needs the WiX Toolset; don't fail the run if it's absent — the portable zip is the guaranteed deliverable.
+          ./gradlew :mobile:composeApp:packageMsi --no-daemon || echo "::warning::packageMsi failed (WiX missing?) — portable zip still produced"
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p out
+          APP=mobile/composeApp/build/compose/binaries/main/app/cc-pocket
+          if [ -d "$APP" ]; then
+            powershell -Command "Compress-Archive -Path '$APP' -DestinationPath 'out/cc-pocket-desktop-${{ inputs.version }}-windows-x64-portable.zip' -Force"
+          fi
+          find mobile/composeApp/build/compose/binaries -name "*.msi" -exec cp {} "out/cc-pocket-desktop-${{ inputs.version }}-windows.msi" \; || true
+          ls -la out
+
+      - name: Upload desktop app artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-pocket-desktop-${{ inputs.version }}-windows
+          path: out/*
           if-no-files-found: error
