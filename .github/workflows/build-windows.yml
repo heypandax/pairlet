@@ -90,7 +90,13 @@ jobs:
       - name: Build desktop app — portable zip (+ MSI if WiX is available)
         shell: bash
         run: |
-          ./gradlew :mobile:composeApp:createDistributable --no-daemon --stacktrace
+          # retry createDistributable — Maven Central / plugins portal occasionally 403s or times out from CI
+          ok=0
+          for attempt in 1 2 3; do
+            if ./gradlew :mobile:composeApp:createDistributable --no-daemon --stacktrace; then ok=1; break; fi
+            echo "::warning::createDistributable attempt $attempt failed (network?), retrying in 20s"; sleep 20
+          done
+          [ "$ok" = 1 ] || { echo "::error::createDistributable failed after 3 attempts"; exit 1; }
           # MSI needs the WiX Toolset; don't fail the run if it's absent — the portable zip is the guaranteed deliverable.
           ./gradlew :mobile:composeApp:packageMsi --no-daemon || echo "::warning::packageMsi failed (WiX missing?) — portable zip still produced"
 
