@@ -19,7 +19,7 @@ class DaemonCore(backends: Map<AgentKind, AgentBackendFactory>) {
     val dirs = DirectoryService()
     val transcribe = TranscribeService(scope, registry::workdirOf)
     val shell = ShellService(scope)
-    val router = RequestRouter(registry, dirs, transcribe, shell)
+    val router = RequestRouter(registry, dirs, transcribe, shell, scope)
 
     suspend fun shutdown() = registry.closeAll()
 }

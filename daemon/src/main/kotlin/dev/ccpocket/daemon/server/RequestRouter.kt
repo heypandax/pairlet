@@ -23,6 +23,8 @@ import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /** Maps an inbound [Frame] to the registry/services. Returns fast; turns run on conversation scopes. */
 class RequestRouter(
@@ -30,6 +32,7 @@ class RequestRouter(
     private val dirs: DirectoryService,
     private val transcribe: TranscribeService,
     private val shell: ShellService,
+    private val scope: CoroutineScope,
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
@@ -60,7 +63,11 @@ class RequestRouter(
             is SwitchMode -> registry.switchMode(frame)
             is ClearAllowRule -> registry.clearRule(frame)
 
-            is RunShellCommand -> {
+            // MUST launch, not await: shell.run suspends on the human approval gate, but the relay transport
+            // pumps inbound frames sequentially & inline — awaiting here would wedge the whole socket (for every
+            // device/convo) until the verdict, which itself can't be read while we block. Fire it on the daemon
+            // scope so the loop stays free to deliver that verdict.
+            is RunShellCommand -> scope.launch {
                 val wd = dirs.validateWorkdir(frame.workdir)
                 if (wd == null) {
                     sink.emit(ShellResult(frame.convoId, frame.command, exitCode = -1, error = "not a readable directory: ${frame.workdir}"))
