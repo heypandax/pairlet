@@ -4,6 +4,7 @@ import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Envelope
+import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.readText
@@ -51,7 +52,15 @@ class WsConnection(
                     val env = runCatching { PocketJson.decodeFromString<Envelope>(text) }.getOrNull()
                     if (env != null) {
                         log.info("recv ${env.body::class.simpleName}")
-                        launch { router.handle(env.body, sink) { owned.add(it) } }
+                        launch {
+                            try {
+                                router.handle(env.body, sink) { owned.add(it) }
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                                log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")
+                                runCatching { sink.emit(PocketError("internal", e.message ?: "request failed")) }
+                            }
+                        }
                     } else {
                         log.warn("undecodable frame: ${text.take(120)}")
                     }

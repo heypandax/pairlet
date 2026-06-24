@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
@@ -93,8 +94,14 @@ class DeviceSessions(
         log.info("← ${env.body::class.simpleName} from ${deviceId.take(8)}…")
 
         val sink = OutboundSink { frame -> sealAndSend(deviceId, frame) }
-        core.router.handle(env.body, sink) { convoId ->
-            mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
+        try {
+            core.router.handle(env.body, sink) { convoId ->
+                mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")
+            runCatching { sink.emit(PocketError("internal", e.message ?: "request failed")) }
         }
     }
 

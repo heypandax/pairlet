@@ -22,9 +22,32 @@ import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 /** Production relay; users connect here by default so `run`/`service-install` need no URL. */
 const val DEFAULT_RELAY = "wss://pocket.ark-nexus.cc"
+
+/** Pick the most likely LAN IPv4 address: a physical, non-virtual site-local address. */
+fun lanIp(): String? {
+    // Common virtual / overlay / tunnel interface name prefixes that are never the user's
+    // physical "LAN" interface even though they look like ordinary NICs to the JVM.
+    val virtualPrefixes = setOf("zt", "tun", "tap", "docker", "veth", "br-", "lo", "gif", "stf",
+        "anpi", "ap", "awdl", "bridge", "llw", "utun")
+    val candidate = NetworkInterface.getNetworkInterfaces().asSequence()
+        .filter { it.isUp && !it.isLoopback && !it.isVirtual }
+        .sortedBy { ni: NetworkInterface ->
+            // prefer physical / non-virtual interfaces over overlay/tunnel ones
+            val name = ni.name.lowercase()
+            if (virtualPrefixes.any { name.startsWith(it) }) 2 else 0
+        }
+        .flatMap { it.interfaceAddresses.asSequence() }
+        .map { it.address }
+        .filterIsInstance<Inet4Address>()
+        .map { it.hostAddress }
+        .firstOrNull { !it.startsWith("127.") && !it.startsWith("169.254.") }
+    return candidate
+}
 
 private class Root : CliktCommand(name = "cc-pocket-daemon") {
     override fun run() = Unit
@@ -51,7 +74,33 @@ private class RunCmd : CliktCommand(name = "run") {
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
         } else {
-            echo("cc-pocket daemon — claude=$exe — ws://$host:$port/v1/ws")
+            // Display a URL with the LAN IP for QR convenience, but NEVER silently widen the
+            // bind unless the user explicitly asked for 0.0.0.0. The direct-LAN path has no
+            // handshake / auth / E2E — anyone on the network can reach /v1/ws.
+            val advertiseIp = if (host == "127.0.0.1" || host == "0.0.0.0") lanIp() else host
+            val url = "ws://${advertiseIp ?: host}:$port/v1/ws"
+            echo("cc-pocket daemon — claude=$exe")
+            echo("")
+            if (host == "0.0.0.0") {
+                echo("  !! UNGUARDED — bound to 0.0.0.0 (all interfaces) !!")
+                echo("  Anyone on your network can open sessions, browse files and approve tools.")
+                echo("")
+            }
+            echo("  LAN server on $url")
+            echo("")
+            if (advertiseIp != null && host == "127.0.0.1") {
+                echo("  Note: daemon is bound to 127.0.0.1 only.")
+                echo("  To accept LAN connections pass --host 0.0.0.0")
+                echo("")
+            }
+            echo("  On your phone, open CC Pocket and tap:")
+            echo("    Advanced: Direct LAN")
+            echo("  Then enter: $url")
+            echo("")
+            if (advertiseIp != null) {
+                echo(QrTerminal.render(url))
+                echo("")
+            }
             DaemonServer(core, host, port).run()
         }
     }
