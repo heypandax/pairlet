@@ -28,25 +28,27 @@ import java.net.NetworkInterface
 /** Production relay; users connect here by default so `run`/`service-install` need no URL. */
 const val DEFAULT_RELAY = "wss://pocket.ark-nexus.cc"
 
-/** Pick the most likely LAN IPv4 address: a physical, non-virtual site-local address. */
+/** Pick the most likely LAN IPv4 address: a physical, non-virtual site-local (RFC1918) address. */
 fun lanIp(): String? {
-    // Common virtual / overlay / tunnel interface name prefixes that are never the user's
-    // physical "LAN" interface even though they look like ordinary NICs to the JVM.
-    val virtualPrefixes = setOf("zt", "tun", "tap", "docker", "veth", "br-", "lo", "gif", "stf",
-        "anpi", "ap", "awdl", "bridge", "llw", "utun")
-    val candidate = NetworkInterface.getNetworkInterfaces().asSequence()
+    // Virtual / overlay / tunnel NICs look like ordinary interfaces to the JVM. On Linux/macOS the
+    // hint is in the device name (zt*, utun*, docker0, veth*); on Windows the JVM hands out synthetic
+    // names (eth7, net3) and the only hint is the friendly displayName — so we check both.
+    val virtualHints = listOf("zt", "tun", "tap", "docker", "veth", "br-", "gif", "stf", "anpi",
+        "awdl", "bridge", "llw", "utun", "vmnet", "vmware", "vbox", "virtualbox",
+        "zerotier", "tailscale", "wireguard", "hyper-v", "loopback")
+    fun looksVirtual(ni: NetworkInterface): Boolean {
+        val name = ni.name.lowercase()
+        val display = (ni.displayName ?: "").lowercase()
+        return virtualHints.any { name.startsWith(it) || display.contains(it) }
+    }
+    return NetworkInterface.getNetworkInterfaces().asSequence()
         .filter { it.isUp && !it.isLoopback && !it.isVirtual }
-        .sortedBy { ni: NetworkInterface ->
-            // prefer physical / non-virtual interfaces over overlay/tunnel ones
-            val name = ni.name.lowercase()
-            if (virtualPrefixes.any { name.startsWith(it) }) 2 else 0
-        }
+        .sortedBy { if (looksVirtual(it)) 1 else 0 } // de-prioritize overlay/tunnel NICs
         .flatMap { it.interfaceAddresses.asSequence() }
-        .map { it.address }
-        .filterIsInstance<Inet4Address>()
+        .mapNotNull { it.address as? Inet4Address }
+        .filter { it.isSiteLocalAddress } // RFC1918 only: 10/8, 172.16/12, 192.168/16
         .map { it.hostAddress }
-        .firstOrNull { !it.startsWith("127.") && !it.startsWith("169.254.") }
-    return candidate
+        .firstOrNull()
 }
 
 private class Root : CliktCommand(name = "cc-pocket-daemon") {
@@ -74,32 +76,38 @@ private class RunCmd : CliktCommand(name = "run") {
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
         } else {
-            // Display a URL with the LAN IP for QR convenience, but NEVER silently widen the
-            // bind unless the user explicitly asked for 0.0.0.0. The direct-LAN path has no
-            // handshake / auth / E2E — anyone on the network can reach /v1/ws.
-            val advertiseIp = if (host == "127.0.0.1" || host == "0.0.0.0") lanIp() else host
-            val url = "ws://${advertiseIp ?: host}:$port/v1/ws"
+            // Advertise a LAN URL + QR for phone pairing, but NEVER silently widen the bind:
+            // we listen on `host` as-is. The direct-LAN path has no handshake / auth / E2E, so a
+            // phone can only reach us once the user explicitly binds beyond loopback — show the
+            // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
+            val lan = lanIp()
             echo("cc-pocket daemon — claude=$exe")
             echo("")
-            if (host == "0.0.0.0") {
-                echo("  !! UNGUARDED — bound to 0.0.0.0 (all interfaces) !!")
-                echo("  Anyone on your network can open sessions, browse files and approve tools.")
+            if (host == "127.0.0.1") {
+                echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")
+                if (lan != null) {
+                    echo("  To pair over your LAN, re-run with:  --host 0.0.0.0")
+                    echo("  It would then be reachable at ws://$lan:$port/v1/ws")
+                }
                 echo("")
-            }
-            echo("  LAN server on $url")
-            echo("")
-            if (advertiseIp != null && host == "127.0.0.1") {
-                echo("  Note: daemon is bound to 127.0.0.1 only.")
-                echo("  To accept LAN connections pass --host 0.0.0.0")
+            } else {
+                val advertiseIp = if (host == "0.0.0.0") (lan ?: host) else host
+                val url = "ws://$advertiseIp:$port/v1/ws"
+                if (host == "0.0.0.0") {
+                    echo("  !! UNGUARDED — bound to 0.0.0.0 (all interfaces) !!")
+                    echo("  Anyone on your network can open sessions, browse files and approve tools.")
+                    echo("")
+                }
+                echo("  LAN server on $url")
                 echo("")
-            }
-            echo("  On your phone, open CC Pocket and tap:")
-            echo("    Advanced: Direct LAN")
-            echo("  Then enter: $url")
-            echo("")
-            if (advertiseIp != null) {
-                echo(QrTerminal.render(url))
+                echo("  On your phone, open CC Pocket and tap:")
+                echo("    Advanced: Direct LAN")
+                echo("  Then enter: $url")
                 echo("")
+                if (advertiseIp != "0.0.0.0") {
+                    echo(QrTerminal.render(url))
+                    echo("")
+                }
             }
             DaemonServer(core, host, port).run()
         }
