@@ -82,6 +82,11 @@ jobs:
           }
           JSON
 
+      - name: Unpin the macOS-only JDK path (gradle.properties pins it for local dev; CI uses the runner JDK via JAVA_HOME)
+        shell: bash
+        run: |
+          grep -v 'org.gradle.java.home' gradle.properties > gradle.properties.tmp && mv gradle.properties.tmp gradle.properties
+
       - name: Build desktop app — portable zip (+ MSI if WiX is available)
         shell: bash
         run: |
