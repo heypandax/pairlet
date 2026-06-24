@@ -42,6 +42,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.random.Random
 import io.ktor.websocket.Frame as WsFrame
 
 /**
@@ -57,7 +58,12 @@ class RelayClient(
 ) {
     private val log = logger("RelayClient")
     // keepalive ping well under Cloudflare's ~100s idle WS timeout, so the relay link stays up
-    private val client = HttpClient(CIO) { install(WebSockets) { pingIntervalMillis = 20_000 } }
+    private val client = HttpClient(CIO) {
+        install(WebSockets) {
+            pingIntervalMillis = 20_000
+            maxFrameSize = 4L * 1024 * 1024 // accept big frames forwarded from the phone (matches relay cap)
+        }
+    }
 
     private val controlOutbox = Channel<ToRelay>(Channel.BUFFERED)
     private val inboundControl = MutableSharedFlow<ToRelay>(extraBufferCapacity = 32)
@@ -95,7 +101,8 @@ class RelayClient(
             } catch (t: Throwable) {
                 log.warn("relay connection lost (${t.message}); retry in ${backoff}ms")
             }
-            delay(backoff)
+            val jittered = backoff / 2 + Random.nextLong(backoff / 2 + 1) // equal jitter: 50–100% of backoff, decorrelates herd reconnects
+            delay(jittered)
             backoff = (backoff * 2).coerceAtMost(30_000L)
         }
     }

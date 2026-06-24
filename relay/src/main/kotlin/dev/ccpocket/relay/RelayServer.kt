@@ -288,7 +288,9 @@ class RelayServer(
         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, reason))
 
     private companion object {
-        const val MAX_FRAME = 256L * 1024
+        // raised 256KB->4MB so phone image / large E2E frames aren't killed (FrameTooBigException);
+        // receiving peers raise their client maxFrameSize to match.
+        const val MAX_FRAME = 4L * 1024 * 1024
         const val MAX_LIVE_DEVICES = 10
     }
 }

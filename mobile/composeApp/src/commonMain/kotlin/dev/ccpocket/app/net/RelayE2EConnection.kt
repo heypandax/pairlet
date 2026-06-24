@@ -35,7 +35,12 @@ class RelayE2EConnection {
     // dead ws (iOS foreground-idle, NAT/relay idle timeout, network switch) is a zombie until the OS TCP
     // stack eventually errors — minutes of "connected but can't reach the computer". The ping doubles as
     // keepalive AND triggers a fast close (no pong → connect() returns → the repo's backoff reconnects).
-    private val client = HttpClient { install(WebSockets) { pingIntervalMillis = 20_000 } }
+    private val client = HttpClient {
+        install(WebSockets) {
+            pingIntervalMillis = 20_000
+            maxFrameSize = 4L * 1024 * 1024 // accept big frames forwarded from the daemon, e.g. long transcript history replays (matches relay cap)
+        }
+    }
     private val outbox = Channel<Frame>(Channel.BUFFERED)
     // relay control-plane (TEXT) frames the device originates — e.g. RegisterPush. Buffered across
     // reconnects like [outbox]; the per-connection writer drains it once a socket is live.

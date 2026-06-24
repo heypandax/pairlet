@@ -22,9 +22,15 @@ sealed interface DirRow {
     data class Dir(val entry: DirectoryEntry, val showPath: Boolean, val direct: Boolean = false) : DirRow
 }
 
+// Project paths arrive in the daemon HOST's native format: Unix "/a/b" OR Windows "C:\a\b". Split on
+// either separator, but rebuild paths with the ORIGINAL separator so equality against DirectoryEntry.path
+// (e.g. base == entry.path, here and in App.kt) still holds on a Windows daemon.
+private val PATH_SEP = Regex("""[/\\]""")
+private fun sepOf(path: String): Char = if (path.contains('\\')) '\\' else '/'
+
 /** Collapse $HOME to ~ (so paths stop repeating /Users/<name>/ everywhere). */
 fun tilde(path: String): String {
-    val seg = path.split('/')
+    val seg = path.split(PATH_SEP)
     return if (seg.size > 3 && (seg[1] == "Users" || seg[1] == "home")) "~/" + seg.drop(3).joinToString("/") else path
 }
 
@@ -112,16 +118,18 @@ sealed interface TreeRow {
 /** The tree root: the user's home (~/…) inferred from the project paths, else their common parent dir. */
 fun treeRoot(dirs: List<DirectoryEntry>): String {
     dirs.firstNotNullOfOrNull { e ->
-        val s = e.path.split('/')
-        if (s.size > 3 && (s[1] == "Users" || s[1] == "home")) "/${s[1]}/${s[2]}" else null
+        val s = e.path.split(PATH_SEP)
+        // keep s[0] (the drive on Windows, "" on Unix) so the root stays a real prefix of the entries
+        if (s.size > 3 && (s[1] == "Users" || s[1] == "home")) s.take(3).joinToString(sepOf(e.path).toString()) else null
     }?.let { return it }
     val paths = dirs.map { it.path }
     if (paths.isEmpty()) return "/"
-    var prefix = paths.first().substringBeforeLast('/')
+    val sep = sepOf(paths.first())
+    var prefix = paths.first().substringBeforeLast(sep)
     for (p in paths.drop(1)) {
-        while (prefix.isNotEmpty() && p != prefix && !p.startsWith("$prefix/")) prefix = prefix.substringBeforeLast('/', "")
+        while (prefix.isNotEmpty() && p != prefix && !p.startsWith("$prefix$sep")) prefix = prefix.substringBeforeLast(sep, "")
     }
-    return prefix.ifEmpty { "/" }
+    return prefix.ifEmpty { sep.toString() }
 }
 
 /**
@@ -131,20 +139,21 @@ fun treeRoot(dirs: List<DirectoryEntry>): String {
  * itself is a project, its own sessions appear as a leaf at the top of this level.
  */
 fun buildTree(dirs: List<DirectoryEntry>, base: String): List<TreeRow> {
-    val relevant = dirs.filter { it.path == base || it.path.startsWith("$base/") }
+    val sep = sepOf(base)
+    val relevant = dirs.filter { it.path == base || it.path.startsWith("$base$sep") }
     val rows = ArrayList<TreeRow>()
     relevant.firstOrNull { it.path == base }?.let { rows += TreeRow.Leaf(it) } // base's own sessions, if any
     val byChild = LinkedHashMap<String, MutableList<DirectoryEntry>>()
     for (e in relevant) {
         if (e.path == base) continue
-        val seg = e.path.removePrefix("$base/").substringBefore('/')
+        val seg = e.path.removePrefix("$base$sep").split(PATH_SEP).first()
         byChild.getOrPut(seg) { mutableListOf() }.add(e)
     }
     byChild.entries
         .sortedByDescending { (_, es) -> es.maxOf { it.lastModified } }
         .forEach { (seg, es) ->
-            val childPath = "$base/$seg"
-            if (es.any { it.path.startsWith("$childPath/") }) { // has deeper projects → drillable folder
+            val childPath = "$base$sep$seg"
+            if (es.any { it.path.startsWith("$childPath$sep") }) { // has deeper projects → drillable folder
                 rows += TreeRow.Folder(seg, childPath, project = es.firstOrNull { it.path == childPath })
             } else {
                 rows += TreeRow.Leaf(es.first { it.path == childPath })
@@ -154,4 +163,4 @@ fun buildTree(dirs: List<DirectoryEntry>, base: String): List<TreeRow> {
 }
 
 /** Breadcrumb segments for [base], home collapsed to ~. e.g. /Users/x/proj/app -> [~, proj, app]. */
-fun crumbs(base: String): List<String> = tilde(base).split('/').filter { it.isNotEmpty() }
+fun crumbs(base: String): List<String> = tilde(base).split(PATH_SEP).filter { it.isNotEmpty() }

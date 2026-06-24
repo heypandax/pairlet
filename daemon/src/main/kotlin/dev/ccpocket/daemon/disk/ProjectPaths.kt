@@ -1,9 +1,20 @@
 package dev.ccpocket.daemon.disk
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.bufferedReader
+import kotlin.io.path.exists
+import kotlin.io.path.getLastModifiedTime
+import kotlin.io.path.isDirectory
 
 /** Maps a working directory to its `~/.claude/projects/<dir-key>` transcript folder. */
 object ProjectPaths {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
     fun projectsRoot(): Path = Path.of(System.getProperty("user.home"), ".claude", "projects")
 
     /**
@@ -13,8 +24,50 @@ object ProjectPaths {
      * → `--`). Verified against on-disk dirs, e.g. `…/j_c3x2gb/work` → `…-j-c3x2gb-work` and
      * `…/skdbg.IYBb` → `…-skdbg-IYBb`. An earlier version replaced only '/', which broke session
      * fetch/open for any cwd containing '_' or '.' (the computed dir didn't exist on disk).
+     *
+     * This forward mapping is LOSSY and was only verified against Unix paths. On Windows a cwd like
+     * `C:\Users\x\proj` may NOT encode to claude's actual on-disk dir name, so [dirFor] must not rely
+     * on it alone — it falls back to the authoritative recorded `cwd` (see below).
      */
     fun dirKey(absPath: String): String = absPath.replace(Regex("[^A-Za-z0-9-]"), "-")
 
-    fun dirFor(workdir: String): Path = projectsRoot().resolve(dirKey(workdir))
+    /**
+     * The project dir for [workdir]. Tries the fast [dirKey] path first; when that dir does not exist
+     * — the Windows / lossy-encoding case — falls back to locating the dir by the authoritative `cwd`
+     * recorded inside each project's newest transcript (the same source [DirectoryService] lists from),
+     * which is correct on any OS regardless of how claude encoded the folder name. Returns the dirKey
+     * path when nothing matches (e.g. a brand-new session whose dir doesn't exist yet), so new-session
+     * behavior is unchanged. Unix keeps the fast path (no scan); only a dirKey miss pays for the scan.
+     */
+    fun dirFor(workdir: String): Path = dirForUnder(projectsRoot(), workdir)
+
+    /** [dirFor] against an explicit projects [root] — same logic, testable without touching `$HOME`. */
+    fun dirForUnder(root: Path, workdir: String): Path {
+        val byKey = root.resolve(dirKey(workdir))
+        if (byKey.exists()) return byKey
+        return findByRecordedCwd(root, workdir) ?: byKey
+    }
+
+    /** The project dir whose newest transcript records exactly [workdir] as its `cwd`, or null. */
+    private fun findByRecordedCwd(root: Path, workdir: String): Path? {
+        if (!root.isDirectory()) return null
+        return Files.newDirectoryStream(root).use { stream ->
+            stream.firstOrNull { dir -> dir.isDirectory() && recordedCwd(dir) == workdir }
+        }
+    }
+
+    /** The `cwd` recorded in [projectDir]'s newest `.jsonl`, or null if none/unreadable. */
+    private fun recordedCwd(projectDir: Path): String? {
+        val newest = runCatching {
+            Files.newDirectoryStream(projectDir, "*.jsonl").use { it.toList() }
+        }.getOrNull()?.maxByOrNull { it.getLastModifiedTime().toMillis() } ?: return null
+        return runCatching {
+            newest.bufferedReader().useLines { lines ->
+                lines.firstNotNullOfOrNull { raw ->
+                    val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject
+                    (obj?.get("cwd") as? JsonPrimitive)?.contentOrNull
+                }
+            }
+        }.getOrNull()
+    }
 }
