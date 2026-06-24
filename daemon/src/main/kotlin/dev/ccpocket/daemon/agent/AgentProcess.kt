@@ -1,4 +1,4 @@
-package dev.ccpocket.daemon.claude
+package dev.ccpocket.daemon.agent
 
 import dev.ccpocket.daemon.util.logger
 import kotlinx.coroutines.CoroutineName
@@ -11,26 +11,27 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 /**
- * Owns one OS `claude` process: a [stdout] channel of raw lines, a single serialized [writeLine],
- * and a [shutdown] that reaps the whole process tree (no orphaned MCP grandchildren).
+ * Owns one OS agent process (claude / codex): a [stdout] channel of raw lines, a single serialized
+ * [writeLine], and a [shutdown] that reaps the whole process tree (no orphaned MCP grandchildren).
+ * Provider-agnostic — it speaks only newline-delimited text; the [AgentBackend] owns the schema.
  */
-class ClaudeProcess private constructor(
+class AgentProcess private constructor(
     private val process: Process,
     private val scope: CoroutineScope,
 ) {
-    private val log = logger("ClaudeProcess")
+    private val log = logger("AgentProcess")
     private val descendantsAtStart: List<ProcessHandle> = process.toHandle().descendants().toList()
 
     val pid: Long get() = process.pid()
 
-    /** Raw stdout lines; closed when the process exits. Bounded -> backpressure to claude. */
+    /** Raw stdout lines; closed when the process exits. Bounded -> backpressure to the agent. */
     val stdout: Channel<String> = Channel(capacity = 256)
 
-    /** Every write (prompt / allow / deny) funnels through this one writer -> no interleaving. */
+    /** Every write (prompt / allow / deny / rpc) funnels through this one writer -> no interleaving. */
     private val stdin: Channel<String> = Channel(capacity = 64)
 
     private fun launchPumps() {
-        scope.launch(Dispatchers.IO + CoroutineName("claude-stdout-$pid")) {
+        scope.launch(Dispatchers.IO + CoroutineName("agent-stdout-$pid")) {
             try {
                 process.inputStream.bufferedReader().use { r ->
                     while (isActive) {
@@ -44,11 +45,11 @@ class ClaudeProcess private constructor(
                 stdout.close()
             }
         }
-        scope.launch(Dispatchers.IO + CoroutineName("claude-stderr-$pid")) {
+        scope.launch(Dispatchers.IO + CoroutineName("agent-stderr-$pid")) {
             // must drain stderr or the child can block on a full pipe
-            runCatching { process.errorStream.bufferedReader().forEachLine { if (it.isNotBlank()) log.warn("claude stderr: ${it.take(200)}") } }
+            runCatching { process.errorStream.bufferedReader().forEachLine { if (it.isNotBlank()) log.warn("agent stderr: ${it.take(200)}") } }
         }
-        scope.launch(Dispatchers.IO + CoroutineName("claude-stdin-$pid")) {
+        scope.launch(Dispatchers.IO + CoroutineName("agent-stdin-$pid")) {
             val w = process.outputStream.bufferedWriter()
             try {
                 for (msg in stdin) {
@@ -91,7 +92,7 @@ class ClaudeProcess private constructor(
     }
 
     companion object {
-        fun start(pb: ProcessBuilder, scope: CoroutineScope): ClaudeProcess =
-            ClaudeProcess(pb.start(), scope).also { it.launchPumps() }
+        fun start(pb: ProcessBuilder, scope: CoroutineScope): AgentProcess =
+            AgentProcess(pb.start(), scope).also { it.launchPumps() }
     }
 }

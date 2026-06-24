@@ -10,6 +10,24 @@ plugins {
     alias(libs.plugins.firebaseCrashlytics)
 }
 
+// Single source of truth for the app version: the Android versionName AND the in-app "About" version both
+// derive from this (the latter via the generated constant below, so it can never drift — which is how it
+// got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
+val appVersionName = "1.1.7"
+
+// Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
+val generateAppVersion by tasks.registering {
+    val outDir = layout.buildDirectory.dir("generated/appversion")
+    inputs.property("v", appVersionName)
+    outputs.dir(outDir)
+    doLast {
+        outDir.get().file("dev/ccpocket/app/AppVersion.kt").asFile.apply {
+            parentFile.mkdirs()
+            writeText("package dev.ccpocket.app\n\n/** Generated from build.gradle.kts appVersionName — do not edit. */\ninternal const val APP_VERSION = \"$appVersionName\"\n")
+        }
+    }
+}
+
 kotlin {
     jvmToolchain(17)
     compilerOptions { freeCompilerArgs.add("-Xexpect-actual-classes") } // SecureStore is an expect object (Beta API, stable enough)
@@ -64,6 +82,9 @@ kotlin {
     }
 }
 
+// wire the generated version constant into commonMain (drives the in-app About row)
+kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(generateAppVersion)
+
 android {
     namespace = "dev.ccpocket.app"
     compileSdk = libs.versions.androidCompileSdk.get().toInt()
@@ -72,7 +93,7 @@ android {
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
         versionCode = 6
-        versionName = "1.1.7" // keep in lockstep with the iOS CFBundleShortVersionString
+        versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
     // live in the repo; on machines without them the release build falls back to unsigned

@@ -7,8 +7,13 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
+import dev.ccpocket.daemon.agent.AgentBackendFactory
+import dev.ccpocket.daemon.claude.ClaudeBackend
 import dev.ccpocket.daemon.claude.ClaudeLauncher
+import dev.ccpocket.daemon.codex.CodexBackend
+import dev.ccpocket.daemon.codex.CodexLauncher
 import dev.ccpocket.daemon.identity.Identity
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.daemon.relay.LoopbackPair
 import dev.ccpocket.daemon.relay.PairLoopback
 import dev.ccpocket.daemon.relay.RelayClient
@@ -59,17 +64,26 @@ private class RunCmd : CliktCommand(name = "run") {
     private val host by option().default("127.0.0.1")
     private val port by option().int().default(8765)
     private val claudeBin by option("--claude-bin", help = "claude executable (default: auto-detect the installed Claude Code)")
+    private val codexBin by option("--codex-bin", help = "codex executable (default: auto-detect the installed Codex CLI)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
 
     override fun run() {
         val exe = ClaudeLauncher.resolveExecutable(claudeBin)
-        val core = DaemonCore(exe)
+        // codex is optional: probe for the echo, but resolve lazily per session so a missing codex never
+        // blocks startup — a Codex open then fails with a clear PocketError instead.
+        val codexExe = runCatching { CodexLauncher.resolveExecutable(codexBin) }.getOrNull()
+        val core = DaemonCore(
+            mapOf(
+                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(exe) },
+                AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
+            ),
+        )
         if (!local) {
             val identity = Identity.loadOrCreate()
             val relayClient = RelayClient(relay, identity, core)
-            echo("cc-pocket daemon — claude=$exe — relay=$relay")
+            echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
             PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
@@ -81,7 +95,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // phone can only reach us once the user explicitly binds beyond loopback — show the
             // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
             val lan = lanIp()
-            echo("cc-pocket daemon — claude=$exe")
+            echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"}")
             echo("")
             if (host == "127.0.0.1") {
                 echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")
@@ -165,6 +179,7 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val exec by option("--exec", help = "path to the cc-pocket-daemon launcher (default: auto-detect)")
     private val relay by option("--relay").default(DEFAULT_RELAY)
     private val claudeBin by option("--claude-bin")
+    private val codexBin by option("--codex-bin")
     private val apply by option("--apply", help = "actually write + load the service (default: print only)").flag()
 
     override fun run() {
@@ -173,6 +188,7 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
             add("run")
             add("--relay"); add(relay)
             claudeBin?.let { add("--claude-bin"); add(it) }
+            codexBin?.let { add("--codex-bin"); add(it) }
         }
         echo(ServiceInstaller.install(launcher, runArgs, apply))
     }

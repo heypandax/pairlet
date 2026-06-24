@@ -23,6 +23,17 @@ enum class Decision {
     @SerialName("deny") DENY,
 }
 
+/**
+ * Which agent CLI backs a session. Serialized in [OpenSession]/[SessionLive]/[SessionSummary];
+ * the default CLAUDE is what an older peer (App or daemon) implies when it omits the field, so adding
+ * this stays wire-backward-compatible.
+ */
+@Serializable
+enum class AgentKind {
+    @SerialName("claude") CLAUDE,
+    @SerialName("codex") CODEX,
+}
+
 /** One assistant content piece (closed set for M0: text | thinking). tool_use is a [ToolEvent]. */
 @Serializable
 sealed interface StreamPiece {
@@ -71,6 +82,7 @@ data class SessionSummary(
     val version: String? = null,
     val live: Boolean = false, // transcript written very recently — a session running right now
     val busy: Boolean = false, // has running background work (bg bash / subagent / monitor) — keep it "active" even when idle
+    val agent: AgentKind? = null, // which backend owns this transcript (null = older daemon → phone assumes Claude)
 )
 
 /** One filesystem entry returned by the daemon's DirectoryService. */

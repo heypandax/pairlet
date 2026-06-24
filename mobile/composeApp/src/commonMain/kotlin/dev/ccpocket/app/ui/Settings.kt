@@ -25,14 +25,12 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
-
-// keep in sync with versionName in mobile/composeApp/build.gradle.kts (no BuildConfig in commonMain)
-private const val APP_VERSION = "0.1.0"
 
 // new-session default effort: the canonical levels (shared with the live /effort picker) + a leading
 // null = "model default". Hoisted so it isn't rebuilt on every Settings recomposition.

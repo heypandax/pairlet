@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.delay
@@ -78,7 +81,7 @@ data class ModeInfo(
 private val Indigo = Color(0xFF5B9BD5)
 
 /** Trims a single line's leading and centers the glyph in it — fixes text riding high when vertically centered. */
-private val TightCenter = TextStyle(
+internal val TightCenter = TextStyle(
     lineHeightStyle = LineHeightStyle(alignment = LineHeightStyle.Alignment.Center, trim = LineHeightStyle.Trim.Both),
 )
 val MODES = listOf(
@@ -214,21 +217,44 @@ private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () 
     }
 }
 
-/** New-session mode picker: choose the execution mode up front. Defaults stay safe; Full auto still confirms. */
+/** New-session picker: choose the agent backend + execution mode up front. Defaults stay safe; Full auto still confirms. */
 @Composable
-fun StartSessionModeSheet(workdir: String? = null, selected: PermissionMode = PermissionMode.DEFAULT, onPick: (PermissionMode) -> Unit, onDismiss: () -> Unit) {
+fun StartSessionModeSheet(
+    workdir: String? = null,
+    selected: PermissionMode = PermissionMode.DEFAULT,
+    agent: AgentKind = AgentKind.CLAUDE,
+    onPick: (PermissionMode, AgentKind) -> Unit,
+    onDismiss: () -> Unit,
+) {
     var confirmBypass by remember { mutableStateOf(false) }
+    var chosenAgent by remember { mutableStateOf(agent) }
     PocketSheet(onDismiss) {
         if (confirmBypass) {
-            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS) })
+            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS, chosenAgent) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
                 Text(stringResource(Res.string.new_session_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(stringResource(Res.string.new_session_subtitle), color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.padding(top = 4.dp))
-                Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    MODES.forEach { m ->
-                        ModeRow(m, selected = m.key == selected, enabled = true) {
-                            if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true else onPick(m.key)
+                SectionLabel(stringResource(Res.string.label_agent))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AgentOption(AgentKind.CLAUDE, chosenAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { chosenAgent = AgentKind.CLAUDE }
+                    AgentOption(AgentKind.CODEX, chosenAgent == AgentKind.CODEX, Modifier.weight(1f)) { chosenAgent = AgentKind.CODEX }
+                }
+                SectionLabel(stringResource(Res.string.label_mode))
+                if (chosenAgent == AgentKind.CLAUDE) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        MODES.forEach { m ->
+                            ModeRow(m, selected = m.key == selected, enabled = true) {
+                                if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true else onPick(m.key, AgentKind.CLAUDE)
+                            }
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CODEX_PRESETS.forEach { p ->
+                            PresetRow(p, selected = p.mode == selected) {
+                                if (p.danger) confirmBypass = true else onPick(p.mode, AgentKind.CODEX)
+                            }
                         }
                     }
                 }
@@ -237,6 +263,101 @@ fun StartSessionModeSheet(workdir: String? = null, selected: PermissionMode = Pe
                     Text(stringResource(Res.string.note_change_anytime), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
                 }
             }
+        }
+    }
+}
+
+/** Uppercase section label inside the new-session sheet ("Agent" / "Mode"). */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text.uppercase(), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.7.sp,
+        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+    )
+}
+
+/** An agent choice card: glyph + name + tagline; selected → tinted in the agent's identity color with a check. */
+@Composable
+private fun AgentOption(agent: AgentKind, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = agentColor(agent)
+    val shape = RoundedCornerShape(13.dp)
+    Column(
+        modifier.clip(shape)
+            .background(if (selected) c.agentTintFill() else Tok.surface)
+            .border(1.5.dp, if (selected) c else Tok.hair, shape)
+            .clickable(onClick = onClick).padding(13.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                Modifier.size(30.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) c.agentTintFill() else Tok.raised)
+                    .border(1.dp, if (selected) c.agentTintBorder() else Tok.hair, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) { AgentGlyph(agent, c, 17) }
+            Text(agentName(agent), color = Tok.tx, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, style = TightCenter, modifier = Modifier.weight(1f))
+            if (selected) Box(Modifier.size(18.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Check, null, tint = Tok.base, modifier = Modifier.size(13.dp))
+            }
+        }
+        Text(agentTagline(agent), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, modifier = Modifier.padding(top = 8.dp))
+    }
+}
+
+/** A Codex execution preset — the two-axis (approval × sandbox) combination behind a named choice.
+ *  [mode] is the PermissionMode the daemon's CodexBackend translates into the actual approvalPolicy + sandbox. */
+data class CodexPreset(
+    val mode: PermissionMode, val name: StringResource, val desc: StringResource,
+    val askChip: StringResource, val fsChip: StringResource,
+    val recommended: Boolean = false, val danger: Boolean = false,
+)
+
+val CODEX_PRESETS = listOf(
+    CodexPreset(PermissionMode.PLAN, Res.string.codex_preset_cautious, Res.string.codex_preset_cautious_desc, Res.string.codex_chip_ask_every, Res.string.codex_chip_fs_read),
+    CodexPreset(PermissionMode.DEFAULT, Res.string.codex_preset_balanced, Res.string.codex_preset_balanced_desc, Res.string.codex_chip_ask_needed, Res.string.codex_chip_fs_workspace, recommended = true),
+    CodexPreset(PermissionMode.ACCEPT_EDITS, Res.string.codex_preset_autonomous, Res.string.codex_preset_autonomous_desc, Res.string.codex_chip_ask_never, Res.string.codex_chip_fs_workspace),
+    CodexPreset(PermissionMode.BYPASS_PERMISSIONS, Res.string.codex_preset_full, Res.string.codex_preset_full_desc, Res.string.codex_chip_ask_never, Res.string.codex_chip_fs_full, danger = true),
+)
+
+/** A small monospace chip ("ask: never" / "fs: full") echoing the underlying axes of a Codex preset. */
+@Composable
+fun MonoChip(text: String, c: Color = Tok.tx2) {
+    Text(
+        text, color = c, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+        modifier = Modifier.background(Tok.surface, RoundedCornerShape(6.dp))
+            .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+/** One Codex preset row: name + RECOMMENDED/warning + plain-language desc + the two raw-axis mono chips. */
+@Composable
+private fun PresetRow(p: CodexPreset, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    val outline = if (p.danger) Tok.danger else if (selected) Tok.codex else Tok.hair
+    val fill = when {
+        !selected -> Tok.surface
+        p.danger -> Tok.danger.copy(alpha = 0.07f)
+        else -> Tok.codex.copy(alpha = 0.12f)
+    }
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(fill).border(1.5.dp, outline, shape)
+            .clickable(onClick = onClick).padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(p.name), color = if (p.danger) Tok.danger else Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            if (p.danger) Icon(Icons.Rounded.WarningAmber, null, tint = Tok.danger, modifier = Modifier.size(14.dp))
+            if (p.recommended) Text(
+                stringResource(Res.string.recommended_badge), color = Tok.codex, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.border(1.dp, Tok.codex.copy(alpha = 0.42f), RoundedCornerShape(999.dp)).padding(horizontal = 7.dp, vertical = 1.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            if (selected) Icon(Icons.Rounded.Check, null, tint = if (p.danger) Tok.danger else Tok.codex, modifier = Modifier.size(15.dp))
+        }
+        Text(stringResource(p.desc), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 5.dp, bottom = 8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // both axes are only ever "dangerous" on the Full-auto preset, so a single danger flag drives the color
+            val chipColor = if (p.danger) Tok.danger else Tok.tx2
+            MonoChip(stringResource(p.askChip), chipColor)
+            MonoChip(stringResource(p.fsChip), chipColor)
         }
     }
 }
@@ -349,11 +470,45 @@ private fun PermBody(ask: PermissionAsk, workdir: String?) {
             Text(" · ", color = Tok.muted, fontSize = 18.sp)
             Text(ask.tool, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
-        Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Text(ask.inputPreview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 6)
+        val diff = ask.diff
+        if (diff != null) { // Codex file-change approval → render the patch as +/- lines
+            DiffView(diff, Modifier.padding(top = 12.dp))
+        } else {
+            Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Text(ask.inputPreview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 6)
+            }
         }
         if (workdir != null) {
             TailPathText(workdir, fontSize = 11.5.sp, modifier = Modifier.padding(top = 12.dp))
+        }
+    }
+}
+
+/** A line-based unified-diff viewer for Codex patch approvals: added lines green, removed red, scrollable + truncated. */
+@Composable
+private fun DiffView(diff: String, modifier: Modifier = Modifier) {
+    val all = remember(diff) { diff.lines() }
+    val shown = remember(diff) { all.take(140) }
+    Column(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
+            .heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(vertical = 8.dp),
+    ) {
+        shown.forEach { ln ->
+            val sign = ln.firstOrNull()
+            val bg = when (sign) { '+' -> Tok.ok.copy(alpha = 0.12f); '-' -> Tok.danger.copy(alpha = 0.12f); else -> Color.Transparent }
+            val col = when (sign) { '+' -> Tok.ok; '-' -> Tok.danger; else -> Tok.tx2 }
+            Text(
+                ln.ifEmpty { " " }, color = col, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 16.sp,
+                maxLines = 1, softWrap = false,
+                modifier = Modifier.fillMaxWidth().background(bg).padding(horizontal = 12.dp),
+            )
+        }
+        if (all.size > shown.size) {
+            Text(
+                stringResource(Res.string.diff_more_lines, all.size - shown.size), color = Tok.codex, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
     }
 }

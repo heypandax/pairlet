@@ -229,4 +229,23 @@
     <string name="job_kind_bash">脚本</string>
     <string name="job_kind_subagent">子代理</string>
     <string name="job_kind_monitor">监视</string>
+
+    <!-- ── 多智能体（Claude / Codex） ────────────────────────────── -->
+    <string name="label_agent">智能体</string>
+    <string name="recommended_badge">推荐</string>
+    <string name="codex_preset_cautious">谨慎</string>
+    <string name="codex_preset_cautious_desc">每步都问，只能读取</string>
+    <string name="codex_preset_balanced">均衡</string>
+    <string name="codex_preset_balanced_desc">按需询问，可写工作区</string>
+    <string name="codex_preset_autonomous">自主</string>
+    <string name="codex_preset_autonomous_desc">从不询问，可写工作区</string>
+    <string name="codex_preset_full">全自动</string>
+    <string name="codex_preset_full_desc">从不询问，完全访问系统</string>
+    <string name="diff_more_lines">… 还有 %1$d 行</string>
+    <string name="codex_chip_ask_every">询问：每步</string>
+    <string name="codex_chip_ask_needed">询问：按需</string>
+    <string name="codex_chip_ask_never">询问：从不</string>
+    <string name="codex_chip_fs_read">沙箱：只读</string>
+    <string name="codex_chip_fs_workspace">沙箱：工作区</string>
+    <string name="codex_chip_fs_full">沙箱：完全</string>
 </resources>

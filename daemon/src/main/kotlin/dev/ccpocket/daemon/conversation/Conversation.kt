@@ -1,15 +1,12 @@
 package dev.ccpocket.daemon.conversation
 
-import dev.ccpocket.daemon.claude.ClaudeEvent
-import dev.ccpocket.daemon.claude.ClaudeLauncher
-import dev.ccpocket.daemon.claude.ClaudeProcess
-import dev.ccpocket.daemon.claude.ClaudeSpec
-import dev.ccpocket.daemon.claude.PermissionBridge
-import dev.ccpocket.daemon.claude.StreamParser
-import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.agent.AgentBackend
+import dev.ccpocket.daemon.agent.AgentEvent
+import dev.ccpocket.daemon.agent.AgentIo
+import dev.ccpocket.daemon.agent.AgentProcess
+import dev.ccpocket.daemon.agent.AgentSpec
+import dev.ccpocket.daemon.agent.PermissionBridge
 import dev.ccpocket.daemon.disk.SlashCommandScanner
-import dev.ccpocket.daemon.disk.TranscriptPatcher
-import dev.ccpocket.daemon.disk.TranscriptReplay
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.BackgroundJobs
@@ -30,17 +27,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import dev.ccpocket.protocol.ImageData
-import kotlinx.serialization.json.addJsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * One live conversation: glues a [ClaudeProcess] + [StreamParser] + [PermissionBridge] to an
- * [OutboundSink]. Owns its own scope; a single stdout pump assigns the monotonic `seq` (no locks).
+ * One live conversation: glues an [AgentBackend] (Claude / Codex) to an [OutboundSink]. Owns its own
+ * scope; a single stdout pump assigns the monotonic `seq` (no locks). Agent-agnostic — every provider
+ * specific (wire schema, prompt/interrupt/approval encoding, transcript layout) lives behind [backend].
  */
 class Conversation(
     val convoId: String,
@@ -48,19 +41,19 @@ class Conversation(
     initialMode: PermissionMode,
     initialSink: OutboundSink,
     parentScope: CoroutineScope,
-    private val claudeExe: Path,
+    private val backend: AgentBackend,
     // read dynamically: the relay client installs the hook after this conversation may already exist
     private val pushHookProvider: () -> PushHook? = { null },
 ) {
-    // mutable: a phone can switch the permission mode mid-session (relaunches claude under --resume)
+    // mutable: a phone can switch the permission mode mid-session (Claude relaunches; Codex applies next turn)
     @Volatile
     private var mode: PermissionMode = initialMode
 
-    // mutable: a phone can switch the model mid-session via `/model <name>` (also relaunches under --resume)
+    // mutable: a phone can switch the model mid-session via `/model <name>`
     @Volatile
     private var model: String? = null
 
-    // mutable: a phone can switch reasoning effort mid-session via `/effort <level>` (relaunches under --resume)
+    // mutable: a phone can switch reasoning effort mid-session via `/effort <level>`
     @Volatile
     private var effort: String? = null
 
@@ -75,7 +68,7 @@ class Conversation(
     @Volatile
     private var sink: OutboundSink = initialSink
 
-    /** Wall-clock of the last claude activity — drives the daemon's idle reaper. */
+    /** Wall-clock of the last agent activity — drives the daemon's idle reaper. */
     @Volatile
     var lastActivityMs: Long = System.currentTimeMillis()
         private set
@@ -88,7 +81,7 @@ class Conversation(
     var sessionId: String? = null
         private set
 
-    private var proc: ClaudeProcess? = null
+    private var proc: AgentProcess? = null
     private var bridge: PermissionBridge? = null
     private val seq = AtomicLong(0)
 
@@ -108,7 +101,7 @@ class Conversation(
     private var pendingResumeId: String? = null
 
     // the resumeId this conversation was opened with — the relaunch anchor while sessionId is still
-    // null (claude emits nothing, init included, until the first turn lands). Without it, a
+    // null (the agent emits nothing, init included, until the first turn lands). Without it, a
     // pre-first-turn mode switch on a resumed/taken-over terminal session would relaunch blank
     // and orphan that session's history.
     @Volatile
@@ -118,28 +111,27 @@ class Conversation(
     @Volatile
     private var reemitLive = false
 
-    /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort). */
+    /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
-        SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort)
+        SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort, agent = backend.kind)
 
     fun open(resumeId: String?, model: String?, effort: String? = null) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
-        // fork on take-over / cold-resume: the resumed id may belong to a desktop `claude --resume` or a
-        // still-live terminal, and claude doesn't lock transcripts — so we branch into a fresh id (carrying
-        // the full history) and write there, leaving the original .jsonl untouched. The pump re-announces
-        // the forked sessionId below. No-op when resumeId is null (a brand-new session).
-        launchProcess(ClaudeSpec(workdir, resumeId, model, mode, effort = effort, forkSession = true))
-        // claude in `--input-format stream-json` emits NOTHING (not even the system/init that would
-        // drive SessionLive) until the first user turn lands on stdin. But the phone needs convoId —
-        // carried by SessionLive — before it can send that first turn. Waiting for claude's init here
-        // would deadlock. So announce the session as live now (we own convoId + workdir), and replay
-        // the resumed transcript up front; the pump later re-emits SessionLive with the real sessionId.
+        // fork on take-over / cold-resume (Claude only): the resumed id may belong to a desktop `claude --resume`
+        // or a still-live terminal, and claude doesn't lock transcripts — branch into a fresh id (carrying the
+        // full history). Codex ignores forkSession. No-op when resumeId is null (a brand-new session).
+        launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = true))
+        // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
+        // init that would drive SessionLive — until the first user turn / handshake lands. But the phone needs
+        // convoId (carried by SessionLive) before it can send that first turn. So announce the session as live
+        // now (we own convoId + workdir), and replay the resumed transcript up front; the pump later re-emits
+        // SessionLive with the real sessionId.
         scope.launch {
             sink.emit(live(resumeId))
             if (resumeId != null) {
-                val history = TranscriptReplay.read(ProjectPaths.dirFor(workdir.toString()).resolve("$resumeId.jsonl"))
+                val history = backend.replayHistory(workdir.toString(), resumeId)
                 if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
             }
             emitCommands()
@@ -173,24 +165,20 @@ class Conversation(
     }
 
     /**
-     * The relaunch primitive: stop claude and re-spawn it resuming [resumeId], rebuilding the spec from the
-     * live `model`/`mode`/`effort` fields. The switch-* methods just mutate their field and call this — the
-     * sole `ClaudeSpec` resume call site, so a new launch flag is a one-line field add, not another method.
-     * No pendingResumeId: a resume relaunch must not re-replay history.
+     * The relaunch primitive: stop the agent and re-spawn it resuming [resumeId], rebuilding the spec from the
+     * live `model`/`mode`/`effort` fields. Used by the Claude path (which bakes flags at launch); Codex applies
+     * settings to the next turn and skips relaunch. No pendingResumeId: a resume relaunch must not re-replay history.
      *
-     * Fork only when [resumeId] is NOT our own materialized [sessionId]: before the first turn lands
-     * `sessionId` is still null and a mode switch relaunches the foreign `openedResumeId` (a desktop /
-     * terminal id we must not write) — that must keep forking. Once we own a forked `sessionId`, relaunch
-     * continues it in place (no re-fork, no id sprawl, no orphaned history).
+     * Fork only when [resumeId] is NOT our own materialized [sessionId] (Claude take-over case; see [open]).
      */
     private suspend fun relaunch(resumeId: String? = sessionId) {
         stopProcess()
         launchProcess(
-            ClaudeSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = resumeId != sessionId),
+            AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = resumeId != sessionId),
         )
     }
 
-    /** Relaunch claude resuming the same session under a new permission mode. Keeps allow-rules + history. */
+    /** Switch the permission mode. Claude relaunches under --resume + the new mode; Codex applies it next turn. */
     suspend fun switchMode(newMode: PermissionMode) {
         if (newMode == mode) {
             // no-op, but still announce: an out-of-sync phone badge corrects itself from this
@@ -198,8 +186,13 @@ class Conversation(
             return
         }
         mode = newMode
+        if (!backend.applySettings(mode = newMode, model = null, effort = null)) {
+            // Codex: no relaunch; the next turn/start carries the new approval policy
+            sink.emit(live(sessionId))
+            return
+        }
         reemitLive = true // the next init re-announces too — it carries the post-resume sessionId
-        // pre-first-turn claude has reported no sessionId yet: fall back to the id this conversation
+        // pre-first-turn the agent has reported no sessionId yet: fall back to the id this conversation
         // was opened with, so a resumed/taken-over terminal session keeps its history (null = brand
         // new session — nothing happened yet, a fresh start loses nothing)
         val sid = sessionId ?: openedResumeId
@@ -208,54 +201,51 @@ class Conversation(
         sink.emit(live(sid)) // confirm now — init won't arrive until the next turn
     }
 
-    /**
-     * Relaunch claude on a different model, resuming the same session (claude `-p` ignores the interactive
-     * `/model` command, so the daemon honors it by re-spawning with `--model`). Keeps mode + allow-rules.
-     */
+    /** Switch the model. Claude relaunches under --model; Codex applies it to the next turn. */
     suspend fun switchModel(newModel: String?) {
         model = newModel
-        relaunch()
+        if (backend.applySettings(mode = null, model = newModel, effort = null)) relaunch() else sink.emit(live(sessionId))
     }
 
-    /**
-     * Relaunch claude at a different reasoning effort, resuming the same session (claude `-p` ignores the
-     * interactive `/effort`, so the daemon honors it by re-spawning with `--effort`). Keeps model + mode.
-     */
+    /** Switch reasoning effort. Claude relaunches under --effort; Codex applies it to the next turn. */
     suspend fun switchEffort(newEffort: String?) {
         effort = newEffort
-        relaunch()
+        if (backend.applySettings(mode = null, model = null, effort = newEffort)) relaunch() else sink.emit(live(sessionId))
     }
 
     fun clearAllowRule(rule: String?) {
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
     }
 
-    private fun launchProcess(spec: ClaudeSpec) {
+    private fun launchProcess(spec: AgentSpec) {
         intentionalStop = false
-        val p = ClaudeProcess.start(ClaudeLauncher.processBuilder(claudeExe, spec), scope)
-        val b = PermissionBridge(convoId, mode, scope, p::writeLine, { sink.emit(it) }, allowRules) // read sink dynamically (reattach)
+        val p = AgentProcess.start(backend.processBuilder(spec), scope)
+        val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
+        val b = PermissionBridge(convoId, mode, scope, { sink.emit(it) }, allowRules, respond = backend::respondPermission)
         proc = p
         bridge = b
-        scope.launch(CoroutineName("pump-$convoId")) { pump(p, b) }
+        scope.launch(CoroutineName("pump-$convoId")) {
+            backend.attach(io, spec) // bind IO + run any handshake (Codex initialize/thread-start) before reading
+            pump(p, b)
+        }
     }
 
-    private suspend fun pump(p: ClaudeProcess, b: PermissionBridge) {
+    private suspend fun pump(p: AgentProcess, b: PermissionBridge) {
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
-            for (ev in StreamParser.parse(line)) {
+            for (ev in backend.parse(line)) {
                 when (ev) {
-                    is ClaudeEvent.SessionInit -> {
+                    is AgentEvent.SessionInit -> {
                         val firstTime = sessionId == null
                         ev.sessionId?.let { sessionId = it }
-                        ev.model?.let { model = it } // claude's resolved model (real name even when opened with model=null)
+                        ev.model?.let { model = it } // the agent's resolved model (real name even when opened with model=null)
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")
                             sink.emit(live(sessionId))
                             pendingResumeId?.let { rid ->
                                 pendingResumeId = null
-                                val file = ProjectPaths.dirFor(workdir.toString()).resolve("$rid.jsonl")
-                                val history = TranscriptReplay.read(file)
+                                val history = backend.replayHistory(workdir.toString(), rid)
                                 if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
                             }
                         } else if (reemitLive && sessionId != null) {
@@ -263,23 +253,23 @@ class Conversation(
                             sink.emit(live(sessionId))
                         }
                     }
-                    is ClaudeEvent.AssistantText ->
+                    is AgentEvent.AssistantText ->
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
-                    is ClaudeEvent.AssistantThinking ->
+                    is AgentEvent.AssistantThinking ->
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
-                    is ClaudeEvent.AssistantToolUse -> {
+                    is AgentEvent.AssistantToolUse -> {
                         sink.emit(
                             ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, ev.input?.toString()?.take(280)),
                         )
                         if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
                     }
-                    is ClaudeEvent.ToolResult ->
+                    is AgentEvent.ToolResult ->
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
-                    is ClaudeEvent.BackgroundTaskStarted ->
+                    is AgentEvent.BackgroundTaskStarted ->
                         if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, System.currentTimeMillis())) emitJobs()
-                    is ClaudeEvent.BackgroundTaskUpdated ->
+                    is AgentEvent.BackgroundTaskUpdated ->
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
-                    is ClaudeEvent.TurnResult -> {
+                    is AgentEvent.TurnResult -> {
                         executing = false
                         sink.emit(
                             TurnDone(
@@ -292,31 +282,23 @@ class Conversation(
                         // so a control-plane send never stalls stdout parsing.
                         pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText) } }
                     }
-                    is ClaudeEvent.ControlRequest -> b.onControlRequest(ev)
-                    is ClaudeEvent.ControlCancel -> b.onCancel(ev)
-                    ClaudeEvent.UserReplay -> {}
-                    is ClaudeEvent.Ignored -> {}
-                    is ClaudeEvent.Unparseable -> {}
+                    is AgentEvent.ControlRequest -> b.onControlRequest(ev)
+                    is AgentEvent.ControlCancel -> b.onCancel(ev)
+                    AgentEvent.UserReplay -> {}
+                    is AgentEvent.Ignored -> {}
+                    is AgentEvent.Unparseable -> {}
                 }
             }
         }
         log.info("$convoId pump ended (intentionalStop=$intentionalStop)")
         if (!intentionalStop) {
             // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
-            // real process exit before touching the file (intentional stops patch in stopProcess)
+            // real process exit before touching the file (intentional stops settle in stopProcess)
             executing = false // a dead process never delivers TurnResult
             p.awaitExit()
-            unhideTranscript()
-            sink.emit(PocketError("process_exited", "claude process ended", convoId))
+            backend.onProcessEnded(sessionId)
+            sink.emit(PocketError("process_exited", "agent process ended", convoId))
         }
-    }
-
-    // claude marks `-p` transcripts `entrypoint:"sdk-cli"` and the desktop `--resume` picker hides
-    // those; once our process is dead the file is safe to rewrite so this session shows up there
-    private fun unhideTranscript() {
-        val sid = sessionId ?: return
-        val file = ProjectPaths.dirFor(workdir.toString()).resolve("$sid.jsonl")
-        if (TranscriptPatcher.unhide(file)) log.info("$convoId transcript unhidden for desktop resume: $sid")
     }
 
     /** Re-point this live conversation to a re-opened device, replaying its transcript so far. */
@@ -326,8 +308,7 @@ class Conversation(
         val sid = sessionId ?: return
         // executing rights the phone's stale ■: a turn that finished (or started) while it was away
         newSink.emit(live(sid))
-        val file = ProjectPaths.dirFor(workdir.toString()).resolve("$sid.jsonl")
-        val history = TranscriptReplay.read(file)
+        val history = backend.replayHistory(workdir.toString(), sid)
         if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
@@ -335,40 +316,17 @@ class Conversation(
 
     suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList()) {
         if (tryIntercept(text)) return
-        val p = proc ?: return
-        executing = true // cleared by TurnResult (also covers cancelTurn — claude still emits a result)
+        if (proc == null) return
+        executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         lastActivityMs = System.currentTimeMillis()
-        val frame = buildJsonObject {
-            put("type", "user")
-            putJsonObject("message") {
-                put("role", "user")
-                if (images.isEmpty()) {
-                    put("content", text)
-                } else {
-                    putJsonArray("content") {
-                        images.forEach { img ->
-                            addJsonObject {
-                                put("type", "image")
-                                putJsonObject("source") {
-                                    put("type", "base64")
-                                    put("media_type", img.mediaType)
-                                    put("data", img.base64)
-                                }
-                            }
-                        }
-                        if (text.isNotBlank()) addJsonObject { put("type", "text"); put("text", text) }
-                    }
-                }
-            }
-        }
-        p.writeLine(frame.toString())
+        backend.sendPrompt(text, images)
     }
 
     /**
-     * Daemon-intercepted slash commands. claude `-p` ignores the interactive forms, so we honor them here
+     * Daemon-intercepted slash commands. The agent `-p` ignores the interactive forms, so we honor them here
      * (relaunch under the matching flag, or reset the session). Returns true if [text] was a recognized
      * command (and was handled) — the caller then skips the normal prompt path. Custom commands, skills,
-     * and prompt-backed built-ins (/review, /compact, …) are NOT intercepted: they pass through to claude.
+     * and prompt-backed built-ins (/review, /compact, …) are NOT intercepted: they pass through to the agent.
      */
     private suspend fun tryIntercept(text: String): Boolean {
         val trimmed = text.trim()
@@ -381,7 +339,7 @@ class Conversation(
         return true
     }
 
-    /** Handle the phone's `/model [name]` — claude `-p` ignores it, so the daemon relaunches with `--model`. */
+    /** Handle the phone's `/model [name]` — the agent `-p` ignores it, so the daemon honors it. */
     private suspend fun handleModelCommand(text: String) {
         val arg = text.removePrefix("/model").trim()
         if (arg.isEmpty()) {
@@ -392,7 +350,7 @@ class Conversation(
         reply("✓ Model switched to \"$arg\" for this session. Your next message will use it.")
     }
 
-    /** Handle the phone's `/effort [level]` — claude `-p` ignores it, so the daemon relaunches with `--effort`. */
+    /** Handle the phone's `/effort [level]` — the agent `-p` ignores it, so the daemon honors it. */
     private suspend fun handleEffortCommand(text: String) {
         val arg = text.removePrefix("/effort").trim().lowercase()
         if (arg.isEmpty()) {
@@ -408,15 +366,15 @@ class Conversation(
     }
 
     /**
-     * Handle the phone's `/clear` — claude `-p` has no stream-json "clear", so the daemon starts a fresh
-     * session in the same cwd (no resume), keeping the chosen model/effort/mode. The phone's transcript is
-     * wiped via an empty history; the next turn lands on a brand-new sessionId.
+     * Handle the phone's `/clear` — there is no stream-json "clear", so the daemon starts a fresh session in
+     * the same cwd (no resume), keeping the chosen model/effort/mode. The phone's transcript is wiped via an
+     * empty history; the next turn lands on a brand-new sessionId.
      */
     private suspend fun handleClearCommand() {
         stopProcess() // also clears + re-emits background jobs (the killed tree took its bg shells with it)
         sessionId = null
         openedResumeId = null // brand-new session — no resume lineage left to preserve
-        launchProcess(ClaudeSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
+        launchProcess(AgentSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
     }
@@ -432,18 +390,13 @@ class Conversation(
     }
 
     /**
-     * Interrupt the in-flight turn (phone composer ■). Uses the stream-json control protocol —
-     * claude aborts the turn and emits its result; the session and process stay alive.
+     * Interrupt the in-flight turn (phone composer ■). Claude uses the stream-json control protocol; Codex
+     * sends turn/interrupt. Either way the agent aborts the turn and the session/process stay alive.
      */
     suspend fun cancelTurn() {
-        val p = proc ?: return
+        if (proc == null) return
         lastActivityMs = System.currentTimeMillis()
-        val frame = buildJsonObject {
-            put("type", "control_request")
-            put("request_id", "pocket-interrupt-${seq.getAndIncrement()}")
-            putJsonObject("request") { put("subtype", "interrupt") }
-        }
-        p.writeLine(frame.toString())
+        backend.interrupt()
     }
 
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */
@@ -452,7 +405,7 @@ class Conversation(
         workdir = newWorkdir
         sessionId = null
         openedResumeId = null // fresh session in the new cwd — no resume lineage left to preserve
-        launchProcess(ClaudeSpec(workdir, resumeId = null, model = null, mode = mode, effort = effort))
+        launchProcess(AgentSpec(workdir, resumeId = null, model = null, mode = mode, effort = effort))
         emitCommands() // project commands differ per workdir
     }
 
@@ -464,7 +417,7 @@ class Conversation(
         proc = null
         bridge = null
         if (jobs.clear()) sink.emit(BackgroundJobs(convoId, emptyList())) // the killed process tree took its bg shells with it
-        unhideTranscript()
+        backend.onProcessEnded(sessionId)
     }
 
     suspend fun close() {

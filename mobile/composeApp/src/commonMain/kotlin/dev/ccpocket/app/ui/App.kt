@@ -107,6 +107,7 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.openAppSettings
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
@@ -735,10 +736,11 @@ private fun SessionsScreen(repo: PocketRepository) {
                 items(repo.sessions) { s ->
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                            .clickable { repo.openSession(dir, s.sessionId, title = s.title) }.padding(14.dp),
+                            .clickable { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) }.padding(14.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            AgentBadge(s.agent, gap = 8.dp) // shows only for Codex (so resume opens the right backend)
                             if (s.live || s.busy) { // running, or idle with background work still going
                                 Spacer(Modifier.width(8.dp))
                                 PulseDot(Tok.ok)
@@ -763,7 +765,8 @@ private fun SessionsScreen(repo: PocketRepository) {
             StartSessionModeSheet(
                 workdir = dir,
                 selected = repo.defaultMode.value,
-                onPick = { m -> pickMode = false; repo.openSession(dir, startMode = m) },
+                agent = repo.defaultAgent.value,
+                onPick = { m, a -> pickMode = false; repo.setDefaultAgent(a); repo.openSession(dir, startMode = m, agent = a) },
                 onDismiss = { pickMode = false },
             )
         }
@@ -772,7 +775,8 @@ private fun SessionsScreen(repo: PocketRepository) {
 
 @Composable
 private fun ChatScreen(repo: PocketRepository) {
-    var input by remember { mutableStateOf("") }
+    // restore the per-project composer draft (keyed by workdir); re-inits when the session/workdir changes
+    var input by remember(repo.workdir.value) { mutableStateOf(repo.draftFor(repo.workdir.value)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
@@ -789,6 +793,8 @@ private fun ChatScreen(repo: PocketRepository) {
     // grace reveals an empty/new session that has no history to position on.
     var landed by remember(repo.convoId.value) { mutableStateOf(false) }
     LaunchedEffect(repo.convoId.value) { delay(180); landed = true }
+    // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
+    LaunchedEffect(input, repo.workdir.value) { delay(400); repo.saveDraft(repo.workdir.value, input) }
     LaunchedEffect(Unit) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
@@ -807,7 +813,7 @@ private fun ChatScreen(repo: PocketRepository) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                TextButton({ repo.saveDraft(repo.workdir.value, input); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showSessionInfo = true }.padding(vertical = 2.dp)) {
                     // session title leads (design); the generic "Chat" only before the first prompt names it
                     Text(
@@ -821,6 +827,7 @@ private fun ChatScreen(repo: PocketRepository) {
                         modelAlias(repo.model.value).takeIf { it.isNotBlank() }?.let {
                             Text(" · $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
                         }
+                        AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
                     }
                 }
                 if (!repo.observing.value) {
@@ -933,7 +940,7 @@ private fun ChatScreen(repo: PocketRepository) {
                                     RoundActionButton(
                                         onClick = {
                                             val t = input.trim()
-                                            if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = "" }
+                                            if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = ""; repo.clearDraft(repo.workdir.value) }
                                         },
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }

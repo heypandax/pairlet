@@ -15,6 +15,7 @@ object Tok {
     val tx2 = Color(0xFF9BA1A6)
     val muted = Color(0xFF6B7177)
     val accent = Color(0xFFD97757)
+    val codex = Color(0xFF3FB5AC) // Codex agent identity (Claude uses accent); calm teal that sits on the dark palette
     val ok = Color(0xFF4FB477)
     val warn = Color(0xFFE0A93B)
     val danger = Color(0xFFE5604D)

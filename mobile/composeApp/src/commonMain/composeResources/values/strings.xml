@@ -230,4 +230,23 @@
     <string name="job_kind_bash">shell</string>
     <string name="job_kind_subagent">agent</string>
     <string name="job_kind_monitor">monitor</string>
+
+    <!-- ── multi-agent (Claude / Codex) ──────────────────────────── -->
+    <string name="label_agent">Agent</string>
+    <string name="recommended_badge">RECOMMENDED</string>
+    <string name="codex_preset_cautious">Cautious</string>
+    <string name="codex_preset_cautious_desc">Asks every step, can only read</string>
+    <string name="codex_preset_balanced">Balanced</string>
+    <string name="codex_preset_balanced_desc">Asks when needed, writes in the workspace</string>
+    <string name="codex_preset_autonomous">Autonomous</string>
+    <string name="codex_preset_autonomous_desc">Never asks, writes in the workspace</string>
+    <string name="codex_preset_full">Full auto</string>
+    <string name="codex_preset_full_desc">Never asks, full system access</string>
+    <string name="diff_more_lines">… %1$d more lines</string>
+    <string name="codex_chip_ask_every">ask: every</string>
+    <string name="codex_chip_ask_needed">ask: needed</string>
+    <string name="codex_chip_ask_never">ask: never</string>
+    <string name="codex_chip_fs_read">fs: read</string>
+    <string name="codex_chip_fs_workspace">fs: workspace</string>
+    <string name="codex_chip_fs_full">fs: full</string>
 </resources>

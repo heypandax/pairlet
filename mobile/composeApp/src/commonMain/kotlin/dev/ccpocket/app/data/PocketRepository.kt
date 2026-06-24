@@ -35,6 +35,7 @@ import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PermissionAsk
@@ -178,6 +179,12 @@ class PocketRepository(private val scope: CoroutineScope) {
      *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
 
+    /** Persisted default agent backend for NEW sessions (Claude unless the user switched to Codex). Resumed
+     *  sessions keep their own backend (the picker only seeds new ones). */
+    val defaultAgent = mutableStateOf(
+        SecureStore.getString(K_DEFAULT_AGENT)?.let { s -> AgentKind.entries.firstOrNull { it.name == s } } ?: AgentKind.CLAUDE,
+    )
+
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
 
@@ -194,6 +201,17 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (!pinnedPaths.remove(path)) pinnedPaths.add(0, path)
         SecureStore.putString(K_PINNED, pinnedPaths.joinToString("\n"))
     }
+
+    /** Composer draft persisted per working directory: a half-typed message survives leaving the chat
+     *  (or backgrounding the app) and returns on reopening that project. Blank clears it; sending clears it. */
+    fun draftFor(wd: String?): String = wd?.let { SecureStore.getString(K_DRAFT_PREFIX + it) } ?: ""
+
+    fun saveDraft(wd: String?, text: String) {
+        wd ?: return
+        if (text.isBlank()) SecureStore.remove(K_DRAFT_PREFIX + wd) else SecureStore.putString(K_DRAFT_PREFIX + wd, text)
+    }
+
+    fun clearDraft(wd: String?) { wd?.let { SecureStore.remove(K_DRAFT_PREFIX + it) } }
 
     /** Current tree drill-down path (null = root). Hoisted here (not screen-local) so it survives opening a
      *  session and returning — DirectoryScreen leaves the composition on that navigation. Not persisted. */
@@ -239,6 +257,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
+    val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
     val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
     val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
@@ -252,7 +271,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
     // session closes its process; reopening resumes a FRESH process that would otherwise default these.
     // Remember the last-known set per sessionId so a reopen restores the badge + relaunches under them.
-    private data class SessionParams(val mode: PermissionMode, val model: String?, val effort: String?)
+    private data class SessionParams(val mode: PermissionMode, val model: String?, val effort: String?, val agent: AgentKind = AgentKind.CLAUDE)
     private val sessionParams = mutableMapOf<String, SessionParams>()
 
     // ── voice input (dictation) ───────────────────────────────────────────
@@ -454,6 +473,13 @@ class PocketRepository(private val scope: CoroutineScope) {
         SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
     }
 
+    /** Settings: persist the default agent backend that new sessions start under. */
+    fun setDefaultAgent(a: AgentKind) {
+        if (a == defaultAgent.value) return
+        defaultAgent.value = a
+        SecureStore.putString(K_DEFAULT_AGENT, a.name)
+    }
+
     /** Silent window before declaring [ConnPhase.RelayUnreachable]. A first connect shows the skeleton for a
      *  beat; a reconnect already keeps the old list under a banner, so it tolerates a longer quiet window. */
     private fun startGrace(reconnect: Boolean) {
@@ -600,7 +626,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         when {
             // daemon finds the still-live conversation by sessionId → reattach + history replay
             convoId.value != null && !observing.value && sid != null && wd != null ->
-                send(OpenSession(wd, sid, mode = mode.value))
+                send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE))
             dir != null -> send(ListSessions(dir))
             else -> {} // directory list already refreshed by launchTransport
         }
@@ -773,6 +799,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
                 f.model?.let { model.value = it }
                 f.effort?.let { effort.value = it }
+                f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
                 contextWindow.value = f.contextWindow ?: contextWindowFor(f.model ?: model.value)
                 // daemon truth beats the local guess: a turn that ended (or started) while the link was
                 // down would otherwise leave the ■/mic button stuck; null = old daemon, keep local state
@@ -782,7 +809,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 }
                 switching.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
-                f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value) }
+                f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
             }
             // Stream/turn frames carry their source convoId; this single-active-view model has one `messages`
             // list, so a frame from a just-left conversation (its tail still in flight when we switched) must
@@ -873,7 +900,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker. A session opened before keeps its own (saved).
-    fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null) = scope.launch {
+    fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
         convoId.value?.let { send(CloseSession(it)) } // reclaim any lingering claude process first
         messages.clear(); convoId.value = null
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
@@ -885,11 +912,13 @@ class PocketRepository(private val scope: CoroutineScope) {
         val saved = resumeId?.let { sessionParams[it] }
         val openMode = saved?.mode ?: startMode
         val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
+        val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
         mode.value = openMode; allowRules.clear()
         model.value = saved?.model; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
+        sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
-        send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = openEffort))
+        send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = openEffort, agent = openAgent))
     }
 
     fun hasReadyImages() = pendingImages.any { it.state == ImgState.Ready }
@@ -1331,7 +1360,9 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
+        const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
+        const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<workdir>" → unsent composer text for that project
     }
 }

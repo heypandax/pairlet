@@ -1,0 +1,52 @@
+package dev.ccpocket.daemon.codex
+
+import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.HistoryMessage
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import java.nio.file.Path
+import kotlin.io.path.bufferedReader
+import kotlin.io.path.exists
+
+/**
+ * Flattens a Codex rollout `.jsonl` into [HistoryMessage]s for replaying a resumed chat. Mirrors the Claude
+ * [dev.ccpocket.daemon.disk.TranscriptReplay]: user + assistant text + tool calls, skipping the synthetic
+ * `<environment_context>` / `<permissions …>` user blocks codex injects. Schema: `response_item` payloads —
+ * `message` (role user `input_text` / assistant `output_text`), `function_call`, `web_search_call`, `custom_tool_call`.
+ */
+object CodexTranscriptReplay {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun read(file: Path, maxMessages: Int = 100, maxTextLen: Int = 2000): List<HistoryMessage> {
+        if (!file.exists()) return emptyList()
+        val out = ArrayList<HistoryMessage>()
+        runCatching {
+            file.bufferedReader().useLines { lines ->
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty()) continue
+                    val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                    if (obj.str("type") != "response_item") continue
+                    val p = obj.obj("payload") ?: continue
+                    when (p.str("type")) {
+                        "message" -> {
+                            val text = codexMessageText(p)?.takeIf { it.isNotBlank() } ?: continue
+                            when (p.str("role")) {
+                                "user" -> if (!text.startsWith("<")) out += HistoryMessage(ChatRole.USER, text.take(maxTextLen))
+                                "assistant" -> out += HistoryMessage(ChatRole.ASSISTANT, text.take(maxTextLen))
+                                else -> {}
+                            }
+                        }
+                        "function_call" ->
+                            out += HistoryMessage(ChatRole.TOOL, (p.str("arguments") ?: "").take(1000), tool = p.str("name") ?: "tool")
+                        "web_search_call" -> out += HistoryMessage(ChatRole.TOOL, "", tool = "WebSearch")
+                        "custom_tool_call" ->
+                            out += HistoryMessage(ChatRole.TOOL, (p.str("input") ?: "").take(1000), tool = p.str("name") ?: "tool")
+                    }
+                }
+            }
+        }
+        return if (out.size > maxMessages) out.takeLast(maxMessages) else out
+    }
+
+}

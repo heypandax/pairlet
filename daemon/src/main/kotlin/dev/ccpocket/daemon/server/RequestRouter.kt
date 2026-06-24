@@ -2,8 +2,6 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
-import dev.ccpocket.daemon.disk.ProjectPaths
-import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AudioCancel
@@ -35,7 +33,8 @@ class RequestRouter(
 
             is ListSessions -> {
                 val busy = registry.busySessionIds()
-                val items = TranscriptScanner.scan(ProjectPaths.dirFor(frame.workdir))
+                // merge every backend's resumable sessions for this dir (Claude ~/.claude/projects + Codex ~/.codex/sessions)
+                val items = registry.listSessions(frame.workdir)
                     .map { if (it.sessionId in busy) it.copy(busy = true) else it }
                 sink.emit(Sessions(frame.workdir, items))
             }
@@ -46,7 +45,8 @@ class RequestRouter(
                     sink.emit(PocketError("bad_workdir", "not a readable directory: ${frame.workdir}"))
                 } else {
                     dirs.noteRecent(wd.toString())
-                    onOpened(registry.open(frame.copy(workdir = wd.toString()), sink))
+                    val convoId = registry.open(frame.copy(workdir = wd.toString()), sink)
+                    if (convoId.isNotEmpty()) onOpened(convoId) // "" = backend unavailable (PocketError already sent)
                 }
             }
 

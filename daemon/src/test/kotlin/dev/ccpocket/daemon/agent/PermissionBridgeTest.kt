@@ -1,0 +1,94 @@
+package dev.ccpocket.daemon.agent
+
+import dev.ccpocket.protocol.Decision
+import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.PermissionAsk
+import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.PermissionVerdict
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
+
+/** The provider-neutral bridge: it translates a ControlRequest to a PermissionAsk and routes the verdict to
+ *  the backend's [respond] callback. The wire format of that response is the backend's job (see ClaudeBackendTest). */
+class PermissionBridgeTest {
+    private data class Resp(val askId: String, val allow: Boolean, val remember: Boolean, val updated: String?, val deny: String?)
+
+    @Test
+    fun default_asks_then_allow_routes_to_respond() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "echo hi") }))
+        val ask = emitted.single()
+        assertIs<PermissionAsk>(ask)
+        assertEquals("r1", ask.askId)
+        assertEquals("Bash", ask.tool)
+
+        b.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
+        val r = responses.single()
+        assertEquals("r1", r.askId)
+        assertTrue(r.allow)
+        assertTrue(r.remember)
+        scope.cancel()
+    }
+
+    @Test
+    fun deny_routes_with_message() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", null))
+        b.onVerdict(PermissionVerdict("c1", "r2", Decision.DENY, message = "nope"))
+        val r = responses.single()
+        assertFalse(r.allow)
+        assertEquals("nope", r.deny)
+        scope.cancel()
+    }
+
+    @Test
+    fun bypass_mode_allows_without_asking() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r3", "Bash", null))
+        assertTrue(emitted.isEmpty())
+        assertTrue(responses.single().allow)
+        scope.cancel()
+    }
+
+    @Test
+    fun remembered_rule_auto_allows_next_matching_request() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val rules = mutableSetOf<String>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        // first "git status" → ask, allow+remember adds the "git status" rule
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
+        b.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
+        // second identical command → no new ask, auto-allowed
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -s") }))
+        assertEquals(1, emitted.size) // only the first asked
+        assertTrue(responses.last().allow)
+        scope.cancel()
+    }
+}

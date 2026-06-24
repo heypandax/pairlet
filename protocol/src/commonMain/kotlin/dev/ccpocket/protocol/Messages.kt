@@ -27,6 +27,7 @@ data class OpenSession(
     val mode: PermissionMode = PermissionMode.DEFAULT,
     val effort: String? = null, // reasoning effort to relaunch under; restores the session's last setting on reopen
     val takeOver: Boolean = false, // true = resume/control even a session live in a terminal (vs observe)
+    val agent: AgentKind = AgentKind.CLAUDE, // which backend to drive; default keeps older Apps (no field) on Claude
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -126,6 +127,7 @@ data class SessionLive(
     val model: String? = null,
     val effort: String? = null,
     val contextWindow: Long? = null,
+    val agent: AgentKind? = null, // which backend drives this session (null = older daemon → phone assumes Claude)
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -158,6 +160,7 @@ data class PermissionAsk(
     val rule: String? = null,          // the scope "Always allow" would remember, e.g. "git status" / "Edit"
     val danger: Boolean = false,       // destructive tool (rm, force-push…): nudge to "Allow once"
     val dangerNote: String? = null,    // e.g. "delete files"
+    val diff: String? = null,          // unified-diff text for a file-change approval (Codex patch) — phone renders it as +/- lines
 ) : ToPhone
 
 /** Turn finished. finalText is the result text (if any); usage is token accounting (if present). */

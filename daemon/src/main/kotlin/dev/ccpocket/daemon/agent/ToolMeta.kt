@@ -1,4 +1,4 @@
-package dev.ccpocket.daemon.claude
+package dev.ccpocket.daemon.agent
 
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -14,7 +14,8 @@ data class ToolMeta(
 )
 
 /** Derives [ToolMeta] from a tool name + its input. The allow-rule is granular: Bash → first two tokens
- *  ("git status"), edits → the tool family ("Edit"). A future request that produces the same rule auto-allows. */
+ *  ("git status"), edits → the tool family ("Edit"). A future request that produces the same rule auto-allows.
+ *  Codex backends reuse this by synthesizing Claude-shaped tool names ("Bash"/"Edit") + inputs. */
 object ToolMetadata {
     private val DANGER = Regex(
         """rm\s+-[rf]|--force|force-with-lease|\bsudo\b|\bdd\b|mkfs|>\s*/dev/|chmod\s+-R|chown\s+-R|:\(\)\s*\{|git\s+reset\s+--hard|git\s+clean\s+-[a-z]*f""",

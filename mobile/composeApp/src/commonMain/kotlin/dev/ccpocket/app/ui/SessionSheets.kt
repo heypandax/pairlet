@@ -37,10 +37,12 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.BackgroundJob
 import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
+import dev.ccpocket.protocol.AgentKind
 import org.jetbrains.compose.resources.stringResource
 
 // ── model + effort option sets (what `--model` / `--effort` accept) ──
 private val MODEL_OPTIONS = listOf("opus", "sonnet", "haiku")
+private val CODEX_MODEL_OPTIONS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex") // Codex sessions get Codex models
 internal val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max") // shared: live /effort picker + Settings default
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
@@ -69,6 +71,14 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                 Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
             ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.label_agent), color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                    AgentTag(repo.sessionAgent.value ?: AgentKind.CLAUDE, small = false)
+                }
+                Hairline()
                 AboutRow(stringResource(Res.string.label_model), repo.model.value ?: stringResource(Res.string.value_default))
                 Hairline()
                 AboutRow(stringResource(Res.string.label_effort), repo.effort.value ?: stringResource(Res.string.value_default))
@@ -136,12 +146,15 @@ fun QuickActionsSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                         }
                     }
                 }
-                QaSub.MODEL -> OptionPicker(
-                    title = stringResource(Res.string.qa_model),
-                    options = MODEL_OPTIONS,
-                    selected = modelAlias(repo.model.value),
-                    onBack = { sub = QaSub.MAIN },
-                ) { repo.switchModel(it); onDismiss() }
+                QaSub.MODEL -> {
+                    val codex = repo.sessionAgent.value == AgentKind.CODEX // Codex sessions pick Codex models, not Claude aliases
+                    OptionPicker(
+                        title = stringResource(Res.string.qa_model),
+                        options = if (codex) CODEX_MODEL_OPTIONS else MODEL_OPTIONS,
+                        selected = if (codex) repo.model.value else modelAlias(repo.model.value),
+                        onBack = { sub = QaSub.MAIN },
+                    ) { repo.switchModel(it); onDismiss() }
+                }
                 QaSub.EFFORT -> OptionPicker(
                     title = stringResource(Res.string.label_effort),
                     options = EFFORT_OPTIONS,
