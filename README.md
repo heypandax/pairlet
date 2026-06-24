@@ -8,9 +8,9 @@ Drive Claude Code — or OpenAI Codex — on your computer from your phone, from
 
 ```mermaid
 flowchart LR
-    phone["📱 CC Pocket<br/>(Compose Multiplatform)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
+    phone["📱🖥️ CC Pocket<br/>(phone · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
     relay -- "wss · ciphertext" --> daemon["daemon<br/>(your computer)"]
-    daemon -- "stdio" --> claude["claude CLI"]
+    daemon -- "stdio" --> agent["claude / codex CLI"]
 ```
 
 The relay pairs phone ↔ computer and routes opaque encrypted frames between them; it holds no message content and no private keys. The phone and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake) so plaintext never leaves the two trusted endpoints.
@@ -42,6 +42,8 @@ cc-pocket now also runs as a native **desktop app** (macOS / Linux / Windows), b
 Two pieces: the **app** on your phone, and a hosted-relay **daemon** on your computer.
 
 **1. Get the app on your phone** — [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) for iPhone & iPad, or the [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) from GitHub Releases. (On a phone, the [website](https://heypandax.github.io/cc-pocket/) links straight to the store; on a computer it shows a QR to scan.)
+
+**Or get the desktop app** — cc-pocket also runs on your computer (drive *another* machine from it): [macOS .dmg](https://github.com/heypandax/cc-pocket/releases/download/v1.1.8/cc-pocket-desktop-1.1.8-macos-arm64.dmg) (Apple Silicon · signed & notarized) · [Windows .msi](https://github.com/heypandax/cc-pocket/releases/download/v1.1.8/cc-pocket-desktop-1.1.8-windows.msi) (unsigned — SmartScreen → "More info → Run anyway"). Linux desktop: build from source.
 
 **2. Install the daemon on your computer** — the relay is hosted for you.
 

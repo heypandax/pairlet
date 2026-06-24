@@ -8,9 +8,9 @@
 
 ```mermaid
 flowchart LR
-    phone["📱 CC Pocket<br/>(Compose Multiplatform)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
+    phone["📱🖥️ CC Pocket<br/>(phone · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
     relay -- "wss · ciphertext" --> daemon["daemon<br/>(your computer)"]
-    daemon -- "stdio" --> claude["claude CLI"]
+    daemon -- "stdio" --> agent["claude / codex CLI"]
 ```
 
 中继负责把手机与电脑配对，并在两者之间转发不透明的加密帧；它不保存任何消息内容，也不持有私钥。手机与守护进程（daemon）之间运行一条端到端会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文永远不离开这两个可信端点。
@@ -42,6 +42,8 @@ cc-pocket 现在也以原生**桌面 App**（macOS / Linux / Windows）的形式
 两部分：手机上的 **App**，以及电脑上连接托管中继的 **daemon**。
 
 **1. 在手机上装 App** —— iPhone 与 iPad 走 [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)，Android 从 GitHub Releases 下 [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)。（在手机上打开[官网](https://heypandax.github.io/cc-pocket/)会直接跳转商店；在电脑上则显示二维码供扫码。）
+
+**或者用桌面端 App** —— cc-pocket 也能在你电脑上跑（用它去操控**另一台**机器）：[macOS .dmg](https://github.com/heypandax/cc-pocket/releases/download/v1.1.8/cc-pocket-desktop-1.1.8-macos-arm64.dmg)（Apple Silicon · 已签名 + 公证）· [Windows .msi](https://github.com/heypandax/cc-pocket/releases/download/v1.1.8/cc-pocket-desktop-1.1.8-windows.msi)（未签名 —— SmartScreen 提示点「更多信息 → 仍要运行」）。Linux 桌面端：从源码构建。
 
 **2. 在电脑上装 daemon** —— 中继已为你托管。
 
