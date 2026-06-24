@@ -22,9 +22,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.7</string>
+    <string>1.1.8</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>7</string>
     <!-- Export compliance: the app uses only standard, published crypto (TLS + Noise/X25519/AES-GCM),
          which qualifies for the export exemption — so App Store Connect skips the per-build encryption
          prompt and no compliance docs are required. -->

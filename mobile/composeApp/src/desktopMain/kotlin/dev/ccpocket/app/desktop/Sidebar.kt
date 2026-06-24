@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.protocol.AgentKind
@@ -228,7 +229,7 @@ private fun SettingsFooter() {
         ) {
             Icon(Icons.Outlined.Settings, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
             Text("Settings", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
-            Text("v1.1.7", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+            Text("v$APP_VERSION", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
         }
     }
 }
