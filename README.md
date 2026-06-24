@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-Drive the `claude` CLI on your computer from your phone — from anywhere, not just your LAN. Start/resume sessions, browse working directories, send prompts, and approve or deny Claude's tool-permission requests remotely. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext. Clean-room Kotlin, MIT.
+Drive Claude Code — or OpenAI Codex — on your computer from your phone, from anywhere, not just your LAN. Start/resume sessions, browse working directories, send prompts, and approve or deny the agent's tool-permission requests remotely. Pick your agent (Claude or Codex) per session; either way, streaming output, command and file-change approvals, and interrupts all work the same. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext. Clean-room Kotlin, MIT.
 
 **🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📱 Get the app:** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone & iPad) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) (GitHub Releases)
 
@@ -22,8 +22,11 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 - **Pick up any session** — resume the exact Claude session you left running on your computer, or start a fresh one in any repo; hand it back to the desktop later with `claude --resume`.
 - **Watch it think, live** — real-time streaming output, code blocks, tool events and background-task status, exactly as they render in the terminal.
 - **Browse projects as a tree** — drill through your computer's folders level by level (or a flat recents list), filter as you type, with a live breadcrumb and per-project session counts.
+- **Pick Claude or Codex** — choose the agent when you start a session and drive **OpenAI Codex** with the same remote, step-by-step approval as Claude: stream its output, approve its commands and diffs one step at a time, interrupt anytime. Codex sessions get a permission preset (Cautious / Balanced / Autonomous / Full auto) mapped to Codex's approval-policy × sandbox, and are tagged teal in lists and headers. A session stays bound to one backend.
 
 Voice dictation, image attachments, slash-command autocomplete, model switching, and finish-time push notifications round it out. **[See the full feature list →](https://heypandax.github.io/cc-pocket/features.html)**
+
+cc-pocket now also runs as a native **desktop app** (macOS / Linux / Windows), built from the same Compose Multiplatform codebase — a two-pane "mission control" for driving Claude Code or Codex on *another* computer with the same remote step-by-step approval, so it's no longer phone-only.
 
 ## Modules
 
