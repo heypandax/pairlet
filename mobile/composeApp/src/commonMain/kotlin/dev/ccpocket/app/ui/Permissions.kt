@@ -471,12 +471,21 @@ private fun PermBody(ask: PermissionAsk, workdir: String?) {
             Text(ask.tool, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
         val diff = ask.diff
-        if (diff != null) { // Codex file-change approval → render the patch as +/- lines
-            DiffView(diff, Modifier.padding(top = 12.dp))
-        } else {
-            Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                Text(ask.inputPreview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 6)
-            }
+        when {
+            diff != null -> // Codex file-change approval → render the patch as +/- lines
+                DiffView(diff, Modifier.padding(top = 12.dp))
+            ask.tool == "ExitPlanMode" || ask.tool == "exit_plan_mode" -> // plan approval → render the full plan as scrollable markdown (issue #10)
+                Column(
+                    Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.base)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
+                        .heightIn(max = 340.dp).verticalScroll(rememberScrollState()).padding(14.dp),
+                ) {
+                    MarkdownText(ask.inputPreview, Tok.tx)
+                }
+            else ->
+                Box(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+                    Text(ask.inputPreview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 6)
+                }
         }
         if (workdir != null) {
             TailPathText(workdir, fontSize = 11.5.sp, modifier = Modifier.padding(top = 12.dp))
@@ -515,6 +524,14 @@ private fun DiffView(diff: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun Decision(ask: PermissionAsk, onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit) {
+    if (ask.tool == "ExitPlanMode" || ask.tool == "exit_plan_mode") {
+        // A plan is a one-off human decision — never "Always allow" (the daemon treats it as neverRemember). Issue #10.
+        Row(Modifier.padding(top = 16.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DecisionButton(stringResource(Res.string.deny), Modifier.weight(1f).fillMaxHeight(), outline = Tok.danger, fg = Tok.danger, onClick = onDeny)
+            DecisionButton(stringResource(Res.string.allow_once), Modifier.weight(1f).fillMaxHeight(), bg = Tok.accent, fg = Tok.base, bold = true, onClick = onOnce)
+        }
+        return
+    }
     val danger = ask.danger
     Column(Modifier.padding(top = 16.dp)) {
         Row(Modifier.padding(bottom = 11.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -598,7 +615,7 @@ fun AllowChip(rule: String) {
 }
 
 @Composable
-private fun SheetButton(label: String, modifier: Modifier, bg: Color = Color.Transparent, fg: Color = Tok.tx, outline: Boolean = false, onClick: () -> Unit) {
+internal fun SheetButton(label: String, modifier: Modifier, bg: Color = Color.Transparent, fg: Color = Tok.tx, outline: Boolean = false, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier.height(52.dp).clip(shape).background(bg)

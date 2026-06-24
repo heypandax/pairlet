@@ -120,6 +120,29 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun runShellCommand_roundtrips_with_default_timeout() {
+        val env = Envelope(id = "8", ts = 0, body = RunShellCommand("c1", "git status", "/repo"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/shell.run\"" in json, json)
+        assertTrue("\"timeoutMs\":30000" in json, json) // encodeDefaults
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun shellResult_roundtrips_and_omits_null_error() {
+        val ok = Envelope(id = "9", ts = 0, body = ShellResult("c1", "node -v", exitCode = 0, stdout = "v22.0.0\n"))
+        val json = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/shell.result\"" in json, json)
+        assertFalse("error" in json, json) // explicitNulls=false
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(json))
+
+        val denied = ShellResult("c1", "rm -rf /", exitCode = -1, denied = true)
+        val deniedJson = PocketJson.encodeToString<ShellResult>(denied)
+        assertTrue("\"denied\":true" in deniedJson, deniedJson)
+        assertEquals(denied, PocketJson.decodeFromString<ShellResult>(deniedJson))
+    }
+
+    @Test
     fun pairBegin_roundtrips() {
         val env = Envelope(id = "3", ts = 0, to = Route.RELAY, body = PairBegin("daemon-e2e-pub"))
         val json = PocketJson.encodeToString(env)

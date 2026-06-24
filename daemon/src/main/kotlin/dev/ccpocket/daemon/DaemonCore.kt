@@ -4,6 +4,7 @@ import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.session.SessionRegistry
+import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AgentKind
 import kotlinx.coroutines.CoroutineScope
@@ -17,7 +18,8 @@ class DaemonCore(backends: Map<AgentKind, AgentBackendFactory>) {
     val registry = SessionRegistry(scope, backends)
     val dirs = DirectoryService()
     val transcribe = TranscribeService(scope, registry::workdirOf)
-    val router = RequestRouter(registry, dirs, transcribe)
+    val shell = ShellService(scope)
+    val router = RequestRouter(registry, dirs, transcribe, shell)
 
     suspend fun shutdown() = registry.closeAll()
 }

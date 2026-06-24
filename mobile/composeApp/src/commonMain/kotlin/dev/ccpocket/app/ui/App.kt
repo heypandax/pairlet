@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -79,6 +80,7 @@ import dev.ccpocket.app.media.rememberImageAttacher
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -104,6 +106,7 @@ import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.openAppSettings
@@ -136,7 +139,7 @@ fun App(scope: CoroutineScope) {
     ) {
         if (repo.convoId.value != null) repo.backToBrowse() else repo.backToDirectories()
     }
-    PocketTheme {
+    PocketTheme(repo.fontScale.value) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
@@ -394,6 +397,9 @@ private fun DirectoryScreen(repo: PocketRepository) {
     val pinned = remember(dirsSnapshot, pinnedSnapshot) { pinnedEntries(dirsSnapshot, pinnedSnapshot) }
     // long-press a project → a small sheet to pin/unpin it
     var actionTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
+    // "+" → type an arbitrary path to start a session in a folder with no prior history (issue #7)
+    var showNewPath by remember { mutableStateOf(false) }
+    var newPathTarget by remember { mutableStateOf<String?>(null) }
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
@@ -413,6 +419,9 @@ private fun DirectoryScreen(repo: PocketRepository) {
                         Text(it.displayName(), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
+            }
+            IconButton({ showNewPath = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Rounded.Add, stringResource(Res.string.new_path_open), tint = Tok.tx2, modifier = Modifier.size(22.dp))
             }
             ViewToggle(tree) { repo.setTreeView(!tree) }
             Spacer(Modifier.width(4.dp))
@@ -492,6 +501,45 @@ private fun DirectoryScreen(repo: PocketRepository) {
         }
     }
         actionTarget?.let { ProjectActionsSheet(repo, it) { actionTarget = null } }
+        if (showNewPath) NewPathSheet(onDismiss = { showNewPath = false }) { p -> showNewPath = false; newPathTarget = p }
+        // chosen a new path → reuse the standard mode/agent picker, then open the session there
+        newPathTarget?.let { path ->
+            StartSessionModeSheet(
+                workdir = path,
+                selected = repo.defaultMode.value,
+                agent = repo.defaultAgent.value,
+                onPick = { m, a -> newPathTarget = null; repo.setDefaultAgent(a); repo.openSession(path, startMode = m, agent = a) },
+                onDismiss = { newPathTarget = null },
+            )
+        }
+    }
+}
+
+/** Start a session in a folder that has no prior cc-pocket/claude history by typing its absolute path (issue #7).
+ *  The daemon validates the path is a readable directory; a not-yet-created folder can be made first via the
+ *  in-chat terminal. On confirm, [onStart] hands the trimmed path to the standard new-session mode picker. */
+@Composable
+private fun NewPathSheet(onDismiss: () -> Unit, onStart: (String) -> Unit) {
+    var path by remember { mutableStateOf("") }
+    val trimmed = path.trim()
+    // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
+    val looksAbsolute = trimmed.startsWith("/") || trimmed.startsWith("~") || Regex("^[A-Za-z]:[\\\\/].*").matches(trimmed)
+    PocketSheet(onDismiss = onDismiss) {
+        Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp, top = 4.dp)) {
+            Text(stringResource(Res.string.new_path_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.new_path_sub), color = Tok.muted, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
+            OutlinedTextField(
+                path, { path = it },
+                placeholder = { Text("/Users/me/new-project", fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            )
+            SheetButton(
+                stringResource(Res.string.new_path_start),
+                Modifier.fillMaxWidth().padding(top = 14.dp).alpha(if (looksAbsolute) 1f else 0.4f),
+                bg = Tok.accent, fg = Tok.base,
+            ) { if (looksAbsolute) onStart(trimmed) }
+        }
     }
 }
 
@@ -782,6 +830,8 @@ private fun ChatScreen(repo: PocketRepository) {
     var showSessionInfo by remember { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
     var showBgJobs by remember { mutableStateOf(false) }
+    var showTerminal by remember { mutableStateOf(false) }
+    if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val listState = rememberLazyListState()
@@ -974,7 +1024,7 @@ private fun ChatScreen(repo: PocketRepository) {
             )
         }
         if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }
-        if (showQuickActions) QuickActionsSheet(repo) { showQuickActions = false }
+        if (showQuickActions) QuickActionsSheet(repo, onTerminal = { showTerminal = true }) { showQuickActions = false }
         if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs) { showBgJobs = false }
     }
 }
@@ -1030,7 +1080,12 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
-                if (m.text.isNotBlank()) SelectionContainer { Text(m.text, color = Tok.tx) } // select-to-copy
+                if (m.text.isNotBlank()) {
+                    SelectionContainer { Text(m.text, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
+                    }
+                }
             }
         }
         is ChatItem.Assistant -> Column {
@@ -1041,18 +1096,22 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
         }
         is ChatItem.Thinking -> ThinkingRow(m)
         is ChatItem.Tool -> {
-            var expanded by remember(m) { mutableStateOf(false) }
+            val isPlan = m.tool == "ExitPlanMode" || m.tool == "exit_plan_mode"
+            var expanded by remember(m) { mutableStateOf(isPlan) } // plans read open by default (issue #10)
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
                     .clickable { expanded = !expanded }.padding(8.dp),
             ) {
-                Text("⚙ ${m.tool}", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                if (m.preview.isNotBlank()) Text(
-                    m.preview, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                    maxLines = if (expanded) Int.MAX_VALUE else 1,
-                    overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+                Text(if (isPlan) "⚙ Plan" else "⚙ ${m.tool}", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                if (m.preview.isNotBlank()) {
+                    if (isPlan && expanded) Box(Modifier.padding(top = 4.dp)) { MarkdownText(m.preview, Tok.tx2) } // plan rendered as markdown
+                    else Text(
+                        m.preview, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+                        maxLines = if (expanded) Int.MAX_VALUE else 1,
+                        overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
         }
         is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)

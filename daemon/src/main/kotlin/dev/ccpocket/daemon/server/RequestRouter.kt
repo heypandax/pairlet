@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.server
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.session.SessionRegistry
+import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
@@ -16,8 +17,10 @@ import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.Sessions
+import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 
@@ -26,6 +29,7 @@ class RequestRouter(
     private val registry: SessionRegistry,
     private val dirs: DirectoryService,
     private val transcribe: TranscribeService,
+    private val shell: ShellService,
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
@@ -51,9 +55,20 @@ class RequestRouter(
             }
 
             is SendPrompt -> registry.sendPrompt(frame)
-            is PermissionVerdict -> registry.verdict(frame)
+            // a verdict may resolve a SHELL ask (issue #3) or an agent tool ask — shell claims its own by askId
+            is PermissionVerdict -> if (!shell.onVerdict(frame)) registry.verdict(frame)
             is SwitchMode -> registry.switchMode(frame)
             is ClearAllowRule -> registry.clearRule(frame)
+
+            is RunShellCommand -> {
+                val wd = dirs.validateWorkdir(frame.workdir)
+                if (wd == null) {
+                    sink.emit(ShellResult(frame.convoId, frame.command, exitCode = -1, error = "not a readable directory: ${frame.workdir}"))
+                } else {
+                    // the daemon (not the phone) decides the mode → the approval gate can't be spoofed client-side
+                    shell.run(frame.copy(workdir = wd.toString()), registry.modeOf(frame.convoId), sink::emit)
+                }
+            }
 
             is SwitchDirectory -> {
                 val wd = dirs.validateWorkdir(frame.workdir)
@@ -65,7 +80,7 @@ class RequestRouter(
                 }
             }
 
-            is CloseSession -> registry.close(frame.convoId)
+            is CloseSession -> { registry.close(frame.convoId); shell.forget(frame.convoId) }
             is CancelTurn -> registry.cancelTurn(frame)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope

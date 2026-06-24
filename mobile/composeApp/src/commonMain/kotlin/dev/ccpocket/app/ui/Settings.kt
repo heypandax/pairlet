@@ -36,6 +36,10 @@ import org.jetbrains.compose.resources.stringResource
 // null = "model default". Hoisted so it isn't rebuilt on every Settings recomposition.
 private val EFFORT_DEFAULT_OPTS: List<String?> = listOf(null) + EFFORT_OPTIONS
 
+// chat text-size presets (issue #8): five stops within PocketRepository.FONT_SCALE_MIN..MAX, rendered as an
+// "A"-gradient segmented control so it reads the same in any language.
+private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4f)
+
 /**
  * Settings as a full screen (not a sheet): per-session preferences — notifications, the new-session default
  * mode + reasoning effort, About, and Exit. Paired computers are managed on the disconnected picker
@@ -111,6 +115,42 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                             fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
                         )
                     }
+                }
+            }
+
+            SectionLabel(stringResource(Res.string.text_size_section))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+            ) {
+                // "A"-gradient segmented control: each segment shows "A" at a representative size; selected fills accent
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FONT_SCALE_STEPS.forEachIndexed { i, s ->
+                        val sel = repo.fontScale.value in (s - 0.04f)..(s + 0.04f)
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                                .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                                .clickable { repo.setFontScale(s) }.padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "A", color = if (sel) Tok.base else Tok.tx2,
+                                fontSize = (11f + i * 2.5f).sp,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                        }
+                    }
+                }
+                // live preview at the chosen scale
+                Box(
+                    Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(8.dp)).background(Tok.base)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(12.dp),
+                ) {
+                    Text(stringResource(Res.string.text_size_sample), color = Tok.tx, fontSize = 14.sp * repo.fontScale.value)
                 }
             }
 

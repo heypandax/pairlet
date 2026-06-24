@@ -184,6 +184,20 @@
     <!-- ── new-session default mode ──────────────────────────────── -->
     <string name="default_mode_section">NEW SESSION DEFAULT</string>
     <string name="default_effort_section">DEFAULT REASONING EFFORT</string>
+    <string name="text_size_section">TEXT SIZE</string>
+    <string name="text_size_sample">Sample message text — 示例 123</string>
+    <string name="new_path_open">New session in a folder</string>
+    <string name="new_path_title">New session in a folder</string>
+    <string name="new_path_sub">Type the absolute path to a folder on your computer — it doesn\'t need any prior history. (To create a brand-new folder, make it first from the in-chat terminal.)</string>
+    <string name="new_path_start">Start session</string>
+    <string name="terminal_open">Terminal</string>
+    <string name="terminal_title">Terminal</string>
+    <string name="terminal_hint">git status</string>
+    <string name="terminal_run">Run</string>
+    <string name="terminal_clear">Clear</string>
+    <string name="terminal_empty">Run a shell command in this session\'s folder to check the environment (e.g. git status, node -v). Each command asks for your approval first.</string>
+    <string name="terminal_denied">denied</string>
+    <string name="terminal_timed_out">timed out</string>
 
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>

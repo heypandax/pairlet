@@ -3,6 +3,8 @@ package dev.ccpocket.app.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /** Calm Terminal Companion tokens. */
@@ -23,8 +25,11 @@ object Tok {
     val info = Color(0xFF5B9BD5) // neutral info / links / "plan" mode
 }
 
+/** Chat text scale (issue #8), provided once at the app root from PocketRepository.fontScale; 1.0 = design default. */
+val LocalFontScale = staticCompositionLocalOf { 1f }
+
 @Composable
-fun PocketTheme(content: @Composable () -> Unit) {
+fun PocketTheme(fontScale: Float = 1f, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = Tok.accent,
@@ -38,6 +43,6 @@ fun PocketTheme(content: @Composable () -> Unit) {
             outline = Tok.hair,
             error = Tok.danger,
         ),
-        content = content,
+        content = { CompositionLocalProvider(LocalFontScale provides fontScale, content = content) },
     )
 }

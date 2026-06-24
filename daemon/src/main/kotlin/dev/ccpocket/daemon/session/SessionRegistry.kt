@@ -11,6 +11,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.OpenSession
+import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.SendPrompt
@@ -74,7 +75,9 @@ class SessionRegistry(
         val convoId = UUID.randomUUID().toString()
         val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(), pushHookProvider = { pushHook })
         mutex.withLock { convos[convoId] = c }
-        val started = runCatching { c.open(open.resumeId, open.model, open.effort) }
+        // fork only for an explicit take-over (this path bypassed the ObserveSession guard above, so the
+        // resumed transcript may still be written by a desktop claude); an ordinary cold-resume appends in place.
+        val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = open.takeOver) }
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
             runCatching { c.close() }
@@ -126,6 +129,9 @@ class SessionRegistry(
 
     /** Workdir of a live conversation — used by voice transcription for term injection. */
     suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir
+
+    /** The conversation's current permission mode — the authoritative input to the shell approval gate (issue #3). */
+    suspend fun modeOf(convoId: String): PermissionMode? = get(convoId)?.currentMode()
 
     suspend fun close(convoId: String) {
         mutex.withLock { convos.remove(convoId) }?.close()

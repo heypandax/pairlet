@@ -43,7 +43,9 @@ import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.RegisterPush
+import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.SendPrompt
+import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.Sessions
@@ -112,6 +114,9 @@ sealed interface ChatItem {
 }
 
 enum class ImgState { Compressing, Ready, Rejected }
+
+/** One quick-terminal command and its [ShellResult] (null while awaiting approval/result). Issue #3. */
+data class TerminalEntry(val command: String, val result: ShellResult? = null)
 
 /**
  * A localizable status line: the UI resolves [res] (and substitutes [arg] for %1$s when present).
@@ -188,6 +193,12 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
 
+    /** Chat text scale (FONT_SCALE_MIN..MAX), persisted. 1.0 = the design's default sizes; bumped for eye comfort
+     *  on small screens (issue #8). Threaded into every message via LocalFontScale. */
+    val fontScale = mutableStateOf(
+        SecureStore.getString(K_FONT_SCALE)?.toFloatOrNull()?.coerceIn(FONT_SCALE_MIN, FONT_SCALE_MAX) ?: 1f,
+    )
+
     /** Projects the user pinned to the top, newest pin first. Persisted client-side (paths never contain
      *  '\n', so a newline-joined string is a safe, dependency-free encoding). */
     val pinnedPaths = mutableStateListOf<String>().also { list ->
@@ -255,6 +266,8 @@ class PocketRepository(private val scope: CoroutineScope) {
     private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
+    val terminalEntries = mutableStateListOf<TerminalEntry>() // quick-terminal history for the active session (issue #3)
+    val terminalBusy = mutableStateOf(false)                  // a shell command is awaiting approval/result
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -478,6 +491,14 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (a == defaultAgent.value) return
         defaultAgent.value = a
         SecureStore.putString(K_DEFAULT_AGENT, a.name)
+    }
+
+    /** Settings: persist the chat text scale (clamped to the slider range). Applies live to every message. */
+    fun setFontScale(scale: Float) {
+        val v = scale.coerceIn(FONT_SCALE_MIN, FONT_SCALE_MAX)
+        if (v == fontScale.value) return
+        fontScale.value = v
+        SecureStore.putString(K_FONT_SCALE, v.toString())
     }
 
     /** Silent window before declaring [ConnPhase.RelayUnreachable]. A first connect shows the skeleton for a
@@ -863,6 +884,11 @@ class PocketRepository(private val scope: CoroutineScope) {
             is ConvoHistory -> if (f.convoId == convoId.value) { messages.clear(); messages.addAll(f.messages.map(::historyItem)) }
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
+            is ShellResult -> if (f.convoId == convoId.value) {
+                terminalBusy.value = false
+                val i = terminalEntries.indexOfLast { it.result == null } // fill the in-flight command's slot
+                if (i >= 0) terminalEntries[i] = terminalEntries[i].copy(result = f)
+            }
             else -> {}
         }
     }
@@ -931,6 +957,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
         convoId.value?.let { send(CloseSession(it)) } // reclaim any lingering claude process first
         messages.clear(); convoId.value = null
+        terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
@@ -1002,6 +1029,22 @@ class PocketRepository(private val scope: CoroutineScope) {
         Telemetry.track(TelEvent.PromptSent)
         scope.launch { send(SendPrompt(c, text, images)) }
     }
+
+    /** Quick-terminal (issue #3): run one shell command in the session's cwd. The daemon gates approval and
+     *  replies with a single [ShellResult]; one command is in flight at a time. */
+    fun runShell(command: String) {
+        val cmd = command.trim()
+        val c = convoId.value ?: return
+        val wd = workdir.value ?: return
+        if (cmd.isEmpty() || terminalBusy.value) return
+        terminalEntries.add(TerminalEntry(cmd))
+        terminalBusy.value = true
+        Telemetry.track(TelEvent.PromptSent)
+        scope.launch { send(RunShellCommand(c, cmd, wd)) }
+    }
+
+    /** Clear the quick-terminal scrollback for the active session. */
+    fun clearTerminal() = terminalEntries.clear()
 
     // ── voice input actions ───────────────────────────────────────────────
 
@@ -1392,5 +1435,8 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<workdir>" → unsent composer text for that project
+        const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
+        const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
+        const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
     }
 }

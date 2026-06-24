@@ -11,6 +11,9 @@ data class ToolMeta(
     val rule: String, // doubles as the display string AND the match key for "Always allow"
     val danger: Boolean,
     val dangerNote: String?,
+    // A human-decision gate that must NEVER be remembered or auto-allowed (e.g. ExitPlanMode): every occurrence
+    // re-prompts even if "Always allow" was tapped before or the mode would otherwise skip the ask.
+    val neverRemember: Boolean = false,
 )
 
 /** Derives [ToolMeta] from a tool name + its input. The allow-rule is granular: Bash → first two tokens
@@ -45,6 +48,18 @@ object ToolMetadata {
                 dangerNote = null,
             )
             "Read", "Glob", "Grep" -> ToolMeta("Read", (str("file_path") ?: str("path") ?: str("pattern"))?.let(::tilde) ?: tool, tool, false, null)
+            // The plan-approval gate. The proposed plan lives in input["plan"] (NOT command/path/…), so the
+            // generic else branch showed only the literal "ExitPlanMode" — the plan was invisible on the phone.
+            // Surface the full plan as the preview, and mark it neverRemember so approving a plan is always an
+            // explicit, per-plan human decision (never auto-confirmed by a remembered rule). See PermissionBridge.
+            "ExitPlanMode", "exit_plan_mode" -> ToolMeta(
+                title = "Review plan",
+                preview = str("plan")?.takeIf(String::isNotBlank) ?: "(empty plan)",
+                rule = "ExitPlanMode",
+                danger = false,
+                dangerNote = null,
+                neverRemember = true,
+            )
             else -> {
                 val p = listOf("command", "file_path", "path", "pattern", "url", "description", "content")
                     .firstNotNullOfOrNull { str(it)?.takeIf(String::isNotBlank) } ?: tool

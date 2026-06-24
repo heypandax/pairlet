@@ -6,6 +6,7 @@ import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentProcess
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.agent.PermissionBridge
+import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.SlashCommandScanner
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AssistantChunk
@@ -115,14 +116,22 @@ class Conversation(
     private fun live(sid: String?) =
         SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort, agent = backend.kind)
 
-    fun open(resumeId: String?, model: String?, effort: String? = null) {
+    /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
+    fun currentMode(): PermissionMode = mode
+
+    fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
-        // fork on take-over / cold-resume (Claude only): the resumed id may belong to a desktop `claude --resume`
-        // or a still-live terminal, and claude doesn't lock transcripts — branch into a fresh id (carrying the
-        // full history). Codex ignores forkSession. No-op when resumeId is null (a brand-new session).
-        launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = true))
+        // Resume in-place by default — appending to the resumed transcript. The registry already ruled out the
+        // dangerous concurrent-writer cases before we get here: a live daemon session reattaches, and an
+        // externally-active Claude transcript routes to a read-only ObserveSession. Forking unconditionally (the
+        // old behavior) minted a new .jsonl on every phone re-entry of an idle session, cluttering the list with
+        // duplicates (issue #12). We DO still fork for an explicit take-over ([fork] == OpenSession.takeOver):
+        // that path deliberately bypasses the ObserveSession guard, so a desktop `claude --resume` may still be
+        // writing — branching into a fresh id (carrying full history) leaves the original .jsonl untouched.
+        // Codex ignores forkSession. No-op when resumeId is null (a brand-new session).
+        launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = fork))
         // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
         // init that would drive SessionLive — until the first user turn / handshake lands. But the phone needs
         // convoId (carried by SessionLive) before it can send that first turn. So announce the session as live
@@ -258,8 +267,14 @@ class Conversation(
                     is AgentEvent.AssistantThinking ->
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
                     is AgentEvent.AssistantToolUse -> {
+                        // ExitPlanMode's input IS the proposed plan (input["plan"]) — surface it in full via the
+                        // shared ToolMetadata extractor so the plan is readable in the phone's chat, not truncated
+                        // to 280 chars of raw JSON (issue #10). Other tools keep the compact JSON preview.
+                        val preview =
+                            if (ev.name == "ExitPlanMode" || ev.name == "exit_plan_mode") ToolMetadata.of(ev.name, ev.input).preview
+                            else ev.input?.toString()?.take(280)
                         sink.emit(
-                            ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, ev.input?.toString()?.take(280)),
+                            ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, preview),
                         )
                         if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
                     }

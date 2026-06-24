@@ -93,6 +93,21 @@ data class AudioChunk(
 @SerialName("pocket/audio.cancel")
 data class AudioCancel(val convoId: String, val captureId: String) : ToDaemon
 
+/**
+ * phone -> daemon: run a one-off shell command in [workdir] (the active session's cwd) to check the
+ * environment from afar (e.g. `git status`, `node -v`). The daemon gates it through the same approval
+ * UI as the Bash tool — auto-run only in bypass mode or for a remembered rule; dangerous commands always
+ * prompt. The reply is a single [ShellResult] (not streamed). A daemon that predates this drops it.
+ */
+@Serializable
+@SerialName("pocket/shell.run")
+data class RunShellCommand(
+    val convoId: String,
+    val command: String,
+    val workdir: String,
+    val timeoutMs: Long = 30_000,
+) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -237,6 +252,20 @@ data class Transcript(
     val text: String = "",
     val ok: Boolean = true,
     val error: String? = null, // e.g. "whisper-cli not found — brew install whisper-cpp"
+) : ToPhone
+
+/** daemon -> phone: the result of a [RunShellCommand]. stdout/stderr are capped server-side. */
+@Serializable
+@SerialName("pocket/shell.result")
+data class ShellResult(
+    val convoId: String,
+    val command: String,
+    val exitCode: Int,
+    val stdout: String = "",
+    val stderr: String = "",
+    val timedOut: Boolean = false,
+    val denied: Boolean = false,   // approval denied (or timed out) → the command was not run
+    val error: String? = null,     // a spawn/system error (e.g. bad workdir), distinct from a non-zero exit
 ) : ToPhone
 
 // ===========================================================================

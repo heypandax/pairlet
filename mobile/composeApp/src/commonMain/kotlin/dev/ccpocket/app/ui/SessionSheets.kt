@@ -124,7 +124,7 @@ private fun Hairline() = Box(Modifier.fillMaxWidth().height(1.dp).background(Tok
 private enum class QaSub { MAIN, MODEL, EFFORT }
 
 @Composable
-fun QuickActionsSheet(repo: PocketRepository, onDismiss: () -> Unit) {
+fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onDismiss: () -> Unit) {
     var sub by remember { mutableStateOf(QaSub.MAIN) }
     var clearArmed by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
@@ -135,6 +135,7 @@ fun QuickActionsSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         ActionRow(stringResource(Res.string.qa_model), value = modelAlias(repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
                         ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
+                        ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
                         ActionRow(stringResource(Res.string.qa_compact)) { repo.sendPrompt("/compact"); onDismiss() }
                         if (repo.hasSimplify()) ActionRow(stringResource(Res.string.qa_simplify)) { repo.sendPrompt("/simplify"); onDismiss() }
                         ActionRow(

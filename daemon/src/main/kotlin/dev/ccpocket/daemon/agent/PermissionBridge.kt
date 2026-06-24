@@ -28,7 +28,7 @@ class PermissionBridge(
     private val respond: suspend (askId: String, allow: Boolean, remember: Boolean, originalInput: JsonObject?, updatedInput: String?, denyMessage: String?) -> Unit,
     private val verdictTimeoutMs: Long = 30_000,
 ) {
-    private class Pending(val input: JsonObject?, val rule: String, val timeoutJob: Job)
+    private class Pending(val input: JsonObject?, val rule: String, val neverRemember: Boolean, val timeoutJob: Job)
 
     private val pending = ConcurrentHashMap<String, Pending>()
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
@@ -39,7 +39,9 @@ class PermissionBridge(
             return
         }
         val meta = ToolMetadata.of(ev.toolName, ev.input)
-        if (meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
+        // neverRemember tools (ExitPlanMode) are a human-decision gate: never satisfy them from a remembered
+        // rule — every plan must be approved explicitly, never auto-confirmed (issue #10).
+        if (!meta.neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -48,7 +50,7 @@ class PermissionBridge(
             delay(verdictTimeoutMs)
             if (pending.remove(askId) != null) respond(askId, false, false, null, null, "timed out")
         }
-        pending[askId] = Pending(ev.input, meta.rule, timeout)
+        pending[askId] = Pending(ev.input, meta.rule, meta.neverRemember, timeout)
         emit(PermissionAsk(convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff))
     }
 
@@ -57,8 +59,9 @@ class PermissionBridge(
         p.timeoutJob.cancel()
         when (v.decision) {
             Decision.ALLOW -> {
-                if (v.remember) allowRules.add(p.rule) // future matching requests auto-allow this session
-                respond(v.askId, true, v.remember, p.input, v.updatedInput, null)
+                val remember = v.remember && !p.neverRemember // a plan-approval gate is never remembered (issue #10)
+                if (remember) allowRules.add(p.rule) // future matching requests auto-allow this session
+                respond(v.askId, true, remember, p.input, v.updatedInput, null)
             }
             Decision.DENY -> respond(v.askId, false, false, p.input, null, v.message ?: "denied")
         }
