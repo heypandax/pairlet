@@ -60,11 +60,12 @@ fun formatTokens(n: Long): String = when {
 }
 
 /** Context-occupancy color ramp, shared by the session sheet's [ContextBar] and the chat statusline:
- *  calm under 80%, warn to 95%, danger past it. One definition keeps the two in lockstep. */
-fun contextColor(frac: Float): Color = when {
+ *  [base] under 80%, warn to 95%, danger past it. One definition keeps the thresholds in lockstep;
+ *  callers pick the calm base (the bar fills with accent, the corner text rests at muted). */
+fun contextColor(frac: Float, base: Color = Tok.accent): Color = when {
     frac >= 0.95f -> Tok.danger
     frac >= 0.80f -> Tok.warn
-    else -> Tok.accent
+    else -> base
 }
 
 // ════════════════════════════════════════════════════════════════════
