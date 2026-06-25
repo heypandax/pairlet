@@ -26,7 +26,7 @@ sealed interface DirRow {
 // either separator, but rebuild paths with the ORIGINAL separator so equality against DirectoryEntry.path
 // (e.g. base == entry.path, here and in App.kt) still holds on a Windows daemon.
 private val PATH_SEP = Regex("""[/\\]""")
-private fun sepOf(path: String): Char = if (path.contains('\\')) '\\' else '/'
+internal fun sepOf(path: String): Char = if (path.contains('\\')) '\\' else '/' // shared with App.kt's NewPathSheet seed
 
 /** Collapse $HOME to ~ (so paths stop repeating /Users/<name>/ everywhere). */
 fun tilde(path: String): String {

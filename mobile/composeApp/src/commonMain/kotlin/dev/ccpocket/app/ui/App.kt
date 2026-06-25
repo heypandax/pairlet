@@ -88,9 +88,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -501,7 +503,11 @@ private fun DirectoryScreen(repo: PocketRepository) {
         }
     }
         actionTarget?.let { ProjectActionsSheet(repo, it) { actionTarget = null } }
-        if (showNewPath) NewPathSheet(onDismiss = { showNewPath = false }) { p -> showNewPath = false; newPathTarget = p }
+        if (showNewPath) NewPathSheet(
+            // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
+            parent = base.takeIf { treeMode && base != root },
+            onDismiss = { showNewPath = false },
+        ) { p -> showNewPath = false; newPathTarget = p }
         // chosen a new path → reuse the standard mode/agent picker, then open the session there
         newPathTarget?.let { path ->
             StartSessionModeSheet(
@@ -519,9 +525,16 @@ private fun DirectoryScreen(repo: PocketRepository) {
  *  The daemon validates the path is a readable directory; a not-yet-created folder can be made first via the
  *  in-chat terminal. On confirm, [onStart] hands the trimmed path to the standard new-session mode picker. */
 @Composable
-private fun NewPathSheet(onDismiss: () -> Unit, onStart: (String) -> Unit) {
-    var path by remember { mutableStateOf("") }
-    val trimmed = path.trim()
+private fun NewPathSheet(parent: String?, onDismiss: () -> Unit, onStart: (String) -> Unit) {
+    // drilled into a folder → seed the field with "<folder>/" and park the cursor at the end, so the user types
+    // only the new project's leaf name. sepOf() keeps a Windows daemon's "\" paths native (issue #7).
+    var field by remember(parent) {
+        val seed = parent?.let { it.trimEnd('/', '\\') + sepOf(it) } ?: ""
+        mutableStateOf(TextFieldValue(seed, selection = TextRange(seed.length)))
+    }
+    val trimmed = field.text.trim()
+    // drop a trailing separator so we never open a session at "/foo/bar/", but keep a bare root ("/") intact
+    val target = trimmed.trimEnd('/', '\\').ifEmpty { trimmed }
     // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
     val looksAbsolute = trimmed.startsWith("/") || trimmed.startsWith("~") || Regex("^[A-Za-z]:[\\\\/].*").matches(trimmed)
     PocketSheet(onDismiss = onDismiss) {
@@ -529,7 +542,7 @@ private fun NewPathSheet(onDismiss: () -> Unit, onStart: (String) -> Unit) {
             Text(stringResource(Res.string.new_path_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Text(stringResource(Res.string.new_path_sub), color = Tok.muted, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 4.dp))
             OutlinedTextField(
-                path, { path = it },
+                field, { field = it },
                 placeholder = { Text("/Users/me/new-project", fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -538,7 +551,7 @@ private fun NewPathSheet(onDismiss: () -> Unit, onStart: (String) -> Unit) {
                 stringResource(Res.string.new_path_start),
                 Modifier.fillMaxWidth().padding(top = 14.dp).alpha(if (looksAbsolute) 1f else 0.4f),
                 bg = Tok.accent, fg = Tok.base,
-            ) { if (looksAbsolute) onStart(trimmed) }
+            ) { if (looksAbsolute) onStart(target) }
         }
     }
 }

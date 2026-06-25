@@ -47,7 +47,8 @@ class RequestRouter(
             }
 
             is OpenSession -> {
-                val wd = dirs.validateWorkdir(frame.workdir)
+                // a new project: create the named folder if it doesn't exist yet (under an existing writable parent)
+                val wd = dirs.validateOrCreateWorkdir(frame.workdir)
                 if (wd == null) {
                     sink.emit(PocketError("bad_workdir", "not a readable directory: ${frame.workdir}"))
                 } else {

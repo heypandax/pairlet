@@ -8,9 +8,11 @@ import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.bufferedReader
+import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.isDirectory
 import kotlin.io.path.isReadable
+import kotlin.io.path.isWritable
 
 /** Enumerate candidate working directories + validate a chosen cwd. M0 = in-memory recents. */
 class DirectoryService {
@@ -83,5 +85,26 @@ class DirectoryService {
     fun validateWorkdir(path: String): Path? {
         val p = runCatching { Path.of(path).toRealPath() }.getOrNull() ?: return null
         return if (p.isDirectory() && p.isReadable()) p else null
+    }
+
+    /**
+     * Like [validateWorkdir], but for STARTING A NEW PROJECT (issue #7 follow-up): if [path] doesn't exist yet,
+     * create it as a single new leaf directory under an already-existing, writable parent, then return its real
+     * path. Only one level is created (no `mkdir -p` of a deep tree) and the parent must already be a writable
+     * directory — so a typo'd path fails fast instead of materialising a stray tree. An existing readable
+     * directory behaves exactly like [validateWorkdir]; returns null when the path is unusable (it exists but
+     * isn't a readable dir, the parent is missing or not writable, or creation failed).
+     *
+     * A paired phone can already create folders through the approval-gated terminal (issue #3), so creating the
+     * one named project directory here adds no new trust boundary.
+     */
+    fun validateOrCreateWorkdir(path: String): Path? {
+        validateWorkdir(path)?.let { return it }                       // already a readable directory → done
+        val raw = runCatching { Path.of(path).normalize() }.getOrNull() ?: return null
+        if (raw.exists()) return null                                  // exists but not a readable dir (e.g. a file)
+        val leaf = raw.fileName ?: return null                         // need a leaf name to create
+        val parent = raw.parent?.let { p -> runCatching { p.toRealPath() }.getOrNull() } ?: return null
+        if (!parent.isDirectory() || !parent.isWritable()) return null // parent must already exist & be writable
+        return runCatching { Files.createDirectory(parent.resolve(leaf)).toRealPath() }.getOrNull()
     }
 }
