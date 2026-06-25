@@ -68,7 +68,18 @@ interface DesktopModel {
     var switcherOpen: Boolean
     var showNewSession: Boolean
     var showTray: Boolean
+    var showPalette: Boolean // ⌘K command palette (jump to computer / project / session)
+    var showSettings: Boolean
+    var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
+
+    /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
+    val anyOverlayOpen: Boolean
+        get() = showPalette || showSettings || showAddComputer || showNewSession || showTray
+    /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
+    fun dismissOverlays() {
+        showPalette = false; showSettings = false; showAddComputer = false; showNewSession = false; showTray = false
+    }
 
     // sidebar: projects + the current project's sessions
     val projects: List<DkProject>
@@ -95,6 +106,14 @@ interface DesktopModel {
     val ask: PermissionAsk?
     fun resolve(allow: Boolean, remember: Boolean)
     fun dismissAsk()
+
+    // settings (general prefs + paired-computer management)
+    val appVersion: String
+    val relayUrl: String
+    var defaultAgent: AgentKind
+    var defaultMode: PermissionMode
+    fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
+    fun revokeComputer(c: DkComputer)
 }
 
 /** A status dot that gently pulses (scale + alpha + soft glow) — "this is live / working". */

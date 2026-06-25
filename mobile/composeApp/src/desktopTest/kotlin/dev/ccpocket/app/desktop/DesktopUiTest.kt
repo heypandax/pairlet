@@ -2,9 +2,11 @@ package dev.ccpocket.app.desktop
 
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AgentKind
@@ -61,6 +63,46 @@ class DesktopUiTest {
     }
 
     @Test
+    fun commandPaletteListsAndFilters() = runComposeUiTest {
+        // render the palette alone so the only nodes are its own rows (the shell's sidebar would otherwise
+        // also carry session titles and make a global text query meaningless)
+        setContent { PocketTheme { CommandPalette(SeedDesktopModel()) {} } }
+        waitForIdle()
+        assertPresent("Jump to a project", substring = true) // placeholder
+        assertPresent("Fix relay reconnect")                 // a session row
+        assertPresent("cc-pocket")                           // a project row
+        assertPresent("computer")                            // per-row type tag
+        onAllNodes(hasSetTextAction()).onFirst().performTextInput("relay")
+        waitForIdle()
+        assertPresent("Fix relay reconnect")                            // label matches "relay"
+        assertTrue(!present("Tidy CI workflow"), "non-matching session filtered out")
+        assertTrue(!present("dotfiles"), "non-matching project filtered out")
+    }
+
+    @Test
+    fun shellOpensCommandPaletteFromFlag() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showPalette = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("Jump to a project", substring = true) // palette-unique placeholder
+        assertPresent("navigate")                            // palette-unique footer hint
+    }
+
+    @Test
+    fun settingsModalShowsPanesAndComputerActions() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showSettings = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("Default agent")            // General pane (default tab)
+        assertPresent("Default permission mode")
+        onAllNodes(hasText("Computers")).onFirst().performClick() // left-rail navigation
+        waitForIdle()
+        assertPresent("Paired computers")
+        assertPresent("Rename")                   // per-computer actions (also fixes the accountId-label gap)
+        assertPresent("Revoke")
+    }
+
+    @Test
     fun trayPopoverShowsApprovalsAndSessions() = runComposeUiTest {
         setContent { PocketTheme { TrayPopover() } }
         assertPresent("PENDING APPROVALS")
@@ -97,6 +139,15 @@ class DesktopUiTest {
         assertTrue(m.ask?.diff != null, "Codex pending session surfaces a diff approval")
         m.resolve(allow = true, remember = false)
         assertEquals(null, m.ask, "resolving clears the ask")
+    }
+
+    @Test
+    fun seedSettingsDefaultsAreMutable() {
+        val m = SeedDesktopModel()
+        assertEquals(AgentKind.CLAUDE, m.defaultAgent)
+        m.defaultAgent = AgentKind.CODEX
+        assertEquals(AgentKind.CODEX, m.defaultAgent)
+        assertEquals("1.1.8", m.appVersion)
     }
 
     @Test

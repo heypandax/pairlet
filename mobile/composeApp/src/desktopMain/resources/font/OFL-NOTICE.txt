@@ -1,0 +1,18 @@
+Bundled fonts — SIL Open Font License 1.1
+==========================================
+
+These fonts are redistributed under the SIL Open Font License, Version 1.1.
+Full license text: https://openfontlicense.org  (a.k.a. https://scripts.sil.org/OFL)
+
+Inter  (Inter-{Regular,Medium,SemiBold,Bold}.ttf)
+  Copyright (c) 2016 The Inter Project Authors.
+  https://github.com/rsms/inter
+
+JetBrains Mono  (JetBrainsMono-{Regular,Medium,SemiBold}.ttf)
+  Copyright (c) 2020 The JetBrains Mono Project Authors.
+  https://github.com/JetBrains/JetBrainsMono
+
+Files here are the Latin subset (via the Fontsource CDN) to keep the bundle small;
+the cc-pocket desktop UI is English-only, so this covers the full character set.
+The fonts are loaded at runtime from the classpath in
+mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/DesktopKit.kt (object Dk).

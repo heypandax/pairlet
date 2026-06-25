@@ -44,9 +44,9 @@ import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionMode
 
-private data class DkMode(val label: String, val token: String, val mode: PermissionMode, val dot: Color, val danger: Boolean = false)
+internal data class DkMode(val label: String, val token: String, val mode: PermissionMode, val dot: Color, val danger: Boolean = false)
 
-private val CLAUDE_MODES = listOf(
+internal val CLAUDE_MODES = listOf(
     DkMode("Ask each step", "default", PermissionMode.DEFAULT, Tok.tx2),
     DkMode("Accept edits", "acceptEdits", PermissionMode.ACCEPT_EDITS, Tok.ok),
     DkMode("Plan", "plan", PermissionMode.PLAN, Tok.info),
@@ -98,7 +98,7 @@ private fun PopoverLabel(text: String) {
 }
 
 @Composable
-private fun AgentCard(agent: AgentKind, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+internal fun AgentCard(agent: AgentKind, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = agentColor(agent)
     Column(
         modifier.clip(RoundedCornerShape(10.dp))

@@ -49,6 +49,7 @@ fun FrameWindowScope.DkTitleBar(
     onMinimize: () -> Unit,
     onToggleMax: () -> Unit,
     onTray: () -> Unit,
+    onSearch: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -72,7 +73,7 @@ fun FrameWindowScope.DkTitleBar(
                 Spacer(Modifier.weight(1f))
             }
             Row(
-                Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).clickable { }.padding(horizontal = 9.dp, vertical = 3.dp),
+                Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).clickable(onClick = onSearch).padding(horizontal = 9.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Rounded.Search, null, tint = Tok.muted, modifier = Modifier.size(13.dp))

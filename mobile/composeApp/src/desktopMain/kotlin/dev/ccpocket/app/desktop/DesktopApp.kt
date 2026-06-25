@@ -36,6 +36,16 @@ fun DesktopApp(model: DesktopModel) {
                 TrayPopover()
             }
         }
+        if (model.showPalette) {
+            Overlay(onDismiss = { model.showPalette = false }, alignment = Alignment.TopCenter, padding = PaddingValues(top = 80.dp), scrim = true) {
+                CommandPalette(model) { model.showPalette = false }
+            }
+        }
+        if (model.showSettings) {
+            Overlay(onDismiss = { model.showSettings = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                SettingsModal(model) { model.showSettings = false }
+            }
+        }
         if (model.showPermissionModal) {
             model.ask?.let { ask ->
                 FocusedModal(
@@ -52,8 +62,15 @@ fun DesktopApp(model: DesktopModel) {
 
 /** A dismiss-on-scrim overlay that anchors [content] at [alignment]; clicks on the content are swallowed. */
 @Composable
-private fun Overlay(onDismiss: () -> Unit, alignment: Alignment, padding: PaddingValues, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().noRippleClick(onDismiss)) {
+private fun Overlay(
+    onDismiss: () -> Unit,
+    alignment: Alignment,
+    padding: PaddingValues,
+    scrim: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val base = Modifier.fillMaxSize()
+    Box((if (scrim) base.background(Dk.backdrop.copy(alpha = 0.5f)) else base).noRippleClick(onDismiss)) {
         Box(Modifier.align(alignment).padding(padding).noRippleClick {}) { content() }
     }
 }

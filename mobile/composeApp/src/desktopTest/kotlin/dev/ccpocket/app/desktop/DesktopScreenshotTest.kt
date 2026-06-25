@@ -100,10 +100,12 @@ class DesktopScreenshotTest {
         shot("04-new-session.png", W, H) { WindowFrame(seed { showNewSession = true }) }
         shot("05-tray-quick-approve.png", W, H) { WindowFrame(seed { showTray = true }) }
         shot("06-focused-permission.png", W, H) { WindowFrame(seed { selectSession(sessions[1]); showPermissionModal = true }) }
+        shot("07-command-palette.png", W, H) { WindowFrame(seed { showPalette = true }) }
+        shot("08-settings.png", W, H) { WindowFrame(seed { showSettings = true }) }
 
         val shots = outDir.listFiles { f -> f.name.endsWith(".png") }?.sortedBy { it.name }.orEmpty()
         println("[screenshots] wrote ${shots.size} files to ${outDir.absolutePath}")
         shots.forEach { println("[screenshots]   ${it.name}  ${it.length() / 1024}KB") }
-        assertTrue(shots.size >= 6, "expected at least 6 screenshots")
+        assertTrue(shots.size >= 8, "expected at least 8 screenshots")
     }
 }

@@ -43,7 +43,17 @@ class SeedDesktopModel : DesktopModel {
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
     override var showTray by mutableStateOf(false)
+    override var showPalette by mutableStateOf(false)
+    override var showSettings by mutableStateOf(false)
+    override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)
+
+    override val appVersion = "1.1.8"
+    override val relayUrl = "wss://pocket.ark-nexus.cc"
+    override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
+    override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
+    override fun renameComputer(c: DkComputer, label: String?) {}
+    override fun revokeComputer(c: DkComputer) {}
     override var composer by mutableStateOf("")
 
     override val hasChat = true

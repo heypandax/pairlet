@@ -20,10 +20,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.platform.Font
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -33,12 +38,22 @@ import dev.ccpocket.app.theme.Tok
  * Desktop design kit — the atoms shared by the two-pane shell, ported from `desktop-core.jsx`.
  *
  * Color tokens come straight from [Tok] (the design's `T` palette is byte-for-byte the app's), so there is
- * no second source of truth. Fonts use the system sans + [FontFamily.Monospace]; bundling Inter / JetBrains
- * Mono to exactly match the web mock is a later refinement and is intentionally not blocking this pass.
+ * no second source of truth. Typography is the design's own — Inter for UI, JetBrains Mono for paths / ids /
+ * code — bundled as classpath resources under `desktopMain/resources/font/` (latin subset, OFL) so the type
+ * is pixel-identical across macOS / Windows / Linux instead of falling back to each OS's default sans/mono.
  */
 object Dk {
-    val ui = FontFamily.Default           // Inter on the mock; system sans here
-    val mono = FontFamily.Monospace       // JetBrains Mono on the mock
+    val ui = FontFamily(
+        Font("font/Inter-Regular.ttf", FontWeight.Normal),
+        Font("font/Inter-Medium.ttf", FontWeight.Medium),
+        Font("font/Inter-SemiBold.ttf", FontWeight.SemiBold),
+        Font("font/Inter-Bold.ttf", FontWeight.Bold),
+    )
+    val mono = FontFamily(
+        Font("font/JetBrainsMono-Regular.ttf", FontWeight.Normal),
+        Font("font/JetBrainsMono-Medium.ttf", FontWeight.Medium),
+        Font("font/JetBrainsMono-SemiBold.ttf", FontWeight.SemiBold),
+    )
     val backdrop = Color(0xFF08090A)      // the page/window backdrop, a touch under base
     val sidebarWidth = 300.dp
     val maxStreamWidth = 760.dp           // chat message column cap for readability
@@ -100,6 +115,26 @@ fun Modifier.hoverFill(
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     return this.hoverable(src).background(if (hovered) hover else base, shape)
+}
+
+/**
+ * A "pick one" list row background: a solid [Tok.surface] fill when [selected], else the hover lift. The shared
+ * idiom behind the command-palette rows and the settings rail (clips to [radius] so the fill follows the corners).
+ */
+@Composable
+fun Modifier.selectableRow(selected: Boolean, radius: Dp = 8.dp): Modifier {
+    val shape = RoundedCornerShape(radius)
+    return clip(shape).then(if (selected) Modifier.background(Tok.surface) else Modifier.hoverFill(shape))
+}
+
+/** A dashed rounded border — marks "add" affordances (add-computer rows) apart from solid cards. */
+fun Modifier.dashedBorder(color: Color, radius: Dp = 11.dp, stroke: Dp = 1.dp): Modifier = drawBehind {
+    val r = radius.toPx()
+    drawRoundRect(
+        color = color,
+        cornerRadius = CornerRadius(r, r),
+        style = Stroke(width = stroke.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f)),
+    )
 }
 
 /** A pill-shaped tinted badge (used for the "history" project marker and inline counts). */

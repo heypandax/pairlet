@@ -662,6 +662,34 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Back out of "add a computer" — returns to the device picker (bindings are untouched). */
     fun cancelAddDevice() { addingDevice.value = false }
 
+    /**
+     * Desktop "add a computer" while a session is live: pair the new binding and add it to the list, but
+     * DON'T tear down or switch the current connection (unlike [beginAddDevice] + [pairWithCode], which
+     * disconnect then connect to the new one). The new computer just shows up in the switcher; the user
+     * switches to it when ready. [onDone] reports success so the modal can close itself.
+     */
+    fun addDeviceByCode(code: String, onDone: (Boolean) -> Unit = {}) {
+        val keepActive = paired.value?.accountId // the computer we stay connected to
+        status.value = StatusMsg(Res.string.status_pairing)
+        scope.launch {
+            val client = HttpClient()
+            try {
+                val info = Pairing.resolveCode(code.trim(), client)
+                Pairing.redeem(info, Pairing.deviceKeys(), client) // upserts the list + pins the NEW account active…
+                keepActive?.let { Pairing.setActive(it) }          // …undo that pin so the live session stays put
+                replace(pairedList, Pairing.loadAll())
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "code-add"))
+                onDone(true)
+            } catch (t: Throwable) {
+                status.value = StatusMsg(Res.string.status_pair_failed, t.message ?: t::class.simpleName ?: "error")
+                Telemetry.track(TelEvent.PairFailed)
+                onDone(false)
+            } finally {
+                client.close()
+            }
+        }
+    }
+
     /** Switch the active computer: tear down the current link, pin [target], reconnect to it. */
     fun switchDaemon(target: PairedDaemon) {
         if (paired.value?.accountId == target.accountId && sessionActive.value) return

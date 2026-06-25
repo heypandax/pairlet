@@ -52,7 +52,7 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.protocol.AgentKind
 
-private fun osIcon(os: DkOs): ImageVector = when (os) {
+internal fun osIcon(os: DkOs): ImageVector = when (os) {
     DkOs.MAC -> Icons.Rounded.LaptopMac
     DkOs.LINUX -> Icons.Rounded.Terminal
     DkOs.WIN -> Icons.Rounded.LaptopWindows
@@ -88,7 +88,7 @@ fun Sidebar(model: DesktopModel, modifier: Modifier = Modifier) {
                 )
             }
         }
-        SettingsFooter()
+        SettingsFooter { model.showSettings = true }
     }
 }
 
@@ -219,11 +219,11 @@ private fun SessionRow(s: DkSession, selected: Boolean, onClick: () -> Unit, onP
 }
 
 @Composable
-private fun SettingsFooter() {
+private fun SettingsFooter(onClick: () -> Unit) {
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(
-            Modifier.fillMaxWidth().hoverFill().clickable { }.padding(horizontal = 14.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().hoverFill().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
