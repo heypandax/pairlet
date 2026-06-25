@@ -31,6 +31,7 @@ object TranscriptScanner {
         var gitBranch: String? = null
         var version: String? = null
         var aiTitle: String? = null
+        var customTitle: String? = null // the user's rename, persisted by Claude as a `custom-title` record (issue #14)
         var userCount = 0
 
         file.bufferedReader().useLines { lines ->
@@ -49,14 +50,18 @@ object TranscriptScanner {
                         }
                     }
                     "ai-title" -> aiTitle = obj.str("aiTitle")
+                    // the user's explicit rename — rewritten through the session, last wins (issue #14)
+                    "custom-title" -> customTitle = obj.str("customTitle")
                 }
             }
         }
 
-        if (firstPrompt == null && aiTitle == null) return null
+        if (firstPrompt == null && aiTitle == null && customTitle == null) return null
         val mtime = file.getLastModifiedTime().toMillis()
         val fp = firstPrompt ?: ""
-        val title = aiTitle?.takeIf { it.isNotBlank() }
+        // the user's rename beats the AI's guess beats the first prompt (issue #14)
+        val title = customTitle?.takeIf { it.isNotBlank() }
+            ?: aiTitle?.takeIf { it.isNotBlank() }
             ?: fp.lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
             ?: sessionId
         return SessionSummary(

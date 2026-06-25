@@ -34,4 +34,32 @@ class TranscriptScannerTest {
         assertEquals("main", s.gitBranch)
         assertEquals("2.1.165", s.version)
     }
+
+    @Test
+    fun custom_title_overrides_ai_title_last_write_wins() {
+        // Claude Code persists the user's session rename as a `custom-title` record (issue #14); it must win
+        // over the AI-generated `ai-title`, and a later rename overrides an earlier one.
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-2.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"hi"},"cwd":"/repo"}""",
+                """{"type":"ai-title","aiTitle":"claude-session-browser-dashboard"}""",
+                """{"type":"custom-title","customTitle":"cc"}""",
+                """{"type":"custom-title","customTitle":"cc-renamed"}""",
+            ).joinToString("\n"),
+        )
+        val s = assertNotNull(TranscriptScanner.summarize(f))
+        assertEquals("cc-renamed", s.title)
+    }
+
+    @Test
+    fun custom_title_alone_surfaces_a_renamed_session() {
+        // a renamed session with no captured first prompt must still surface (the guard includes customTitle)
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-3.jsonl")
+        f.writeText("""{"type":"custom-title","customTitle":"My Renamed Session"}""")
+        val s = assertNotNull(TranscriptScanner.summarize(f))
+        assertEquals("My Renamed Session", s.title)
+    }
 }

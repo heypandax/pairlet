@@ -67,8 +67,8 @@ data class TokenUsage(
 
 /**
  * Built by the daemon's TranscriptScanner from `~/.claude/projects/<key>/<sid>.jsonl`.
- * `title` prefers the `ai-title` record, else a truncated [firstPrompt]; `messageCount`
- * counts real user turns only (excludes tool-result turns).
+ * `title` prefers the user's `custom-title` rename, else the `ai-title` record, else a truncated
+ * [firstPrompt]; `messageCount` counts real user turns only (excludes tool-result turns).
  */
 @Serializable
 data class SessionSummary(
