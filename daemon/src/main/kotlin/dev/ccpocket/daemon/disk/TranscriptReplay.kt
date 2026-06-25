@@ -26,7 +26,10 @@ object TranscriptReplay {
                     if (line.isEmpty()) continue
                     val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
                     when (obj.str("type")) {
-                        "user" -> if (isRealUserTurn(obj)) userText(obj).takeIf { it.isNotBlank() }
+                        // drop harness plumbing (standalone task-notifications, the resume nudge) so the
+                        // phone replays the real conversation, not background-shell chatter
+                        "user" -> if (isRealUserTurn(obj)) userText(obj)
+                            .takeIf { it.isNotBlank() && !TranscriptNoise.isNoiseUserText(it) }
                             ?.let { out += HistoryMessage(ChatRole.USER, it.take(maxTextLen)) }
                         "assistant" -> assistantBlocks(obj, maxTextLen).forEach { out += it }
                     }

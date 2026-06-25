@@ -29,8 +29,6 @@ import java.nio.file.attribute.PosixFilePermissions
 object TranscriptPatcher {
     private const val SDK_TAG = "\"entrypoint\":\"sdk-cli\""
     private const val CLI_TAG = "\"entrypoint\":\"cli\""
-    private const val TN_OPEN = "<task-notification>"
-    private const val TN_CLOSE = "</task-notification>"
     private const val QUEUE_OP_TAG = "\"queue-operation\"" // cheap substring marker for the noise prefilter
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -44,7 +42,7 @@ object TranscriptPatcher {
         // cheap substring prefilter: the file can only change if it carries an sdk-cli tag or a noise
         // marker. skips JSON-parsing every line on the common no-op (already-cli, noise-free) + re-runs.
         val hasSdk = lines.any { it.contains(SDK_TAG) }
-        val maybeNoise = lines.any { it.contains(QUEUE_OP_TAG) || it.contains(TN_OPEN) }
+        val maybeNoise = lines.any { it.contains(QUEUE_OP_TAG) || it.contains(TranscriptNoise.TN_OPEN) }
         if (!hasSdk && !maybeNoise) return false
 
         val rows = lines.map(::classify) // parse only once we know something might actually change
@@ -99,22 +97,10 @@ object TranscriptPatcher {
         val type = str(obj["type"])
         val noise = when (type) {
             "queue-operation" -> true
-            "user" -> isPureTaskNotification(userText(obj))
+            "user" -> TranscriptNoise.isPureTaskNotification(userText(obj))
             else -> false
         }
         return Row(line, str(obj["uuid"]), str(obj["parentUuid"]), noise)
-    }
-
-    /** True when the user turn is nothing but one or more `<task-notification>` blocks (no real text). */
-    private fun isPureTaskNotification(text: String?): Boolean {
-        var s = (text ?: return false).trim()
-        if (!s.startsWith(TN_OPEN)) return false
-        while (s.startsWith(TN_OPEN)) {
-            val end = s.indexOf(TN_CLOSE)
-            if (end < 0) return false // unterminated — keep the turn to be safe
-            s = s.substring(end + TN_CLOSE.length).trim()
-        }
-        return s.isEmpty()
     }
 
     private fun userText(obj: JsonObject): String? {
