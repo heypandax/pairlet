@@ -348,6 +348,10 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.read(it) } ?: emptyList()
 
+    // Codex usage is live-only (thread/tokenUsage/updated) — the rollout carries no per-turn usage
+    // record to read back, so there's nothing to seed the statusline with on resume.
+    override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+
     // ---- mode mapping (Claude's single mode → Codex's approvalPolicy × sandbox axes) ----
 
     // The 4 PermissionMode values are the phone's Codex presets (Cautious/Balanced/Autonomous/Full auto).

@@ -59,6 +59,14 @@ fun formatTokens(n: Long): String = when {
     else -> n.toString()
 }
 
+/** Context-occupancy color ramp, shared by the session sheet's [ContextBar] and the chat statusline:
+ *  calm under 80%, warn to 95%, danger past it. One definition keeps the two in lockstep. */
+fun contextColor(frac: Float): Color = when {
+    frac >= 0.95f -> Tok.danger
+    frac >= 0.80f -> Tok.warn
+    else -> Tok.accent
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  Session info (read-only): model · effort · mode · dir · context bar
 // ════════════════════════════════════════════════════════════════════
@@ -104,11 +112,7 @@ private fun ContextBar(used: Long?, total: Long?) {
             Text(label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
         }
         val frac = if (used == null || total == null || total <= 0) 0f else (used.toFloat() / total).coerceIn(0f, 1f)
-        val fill = when {
-            frac >= 0.95f -> Tok.danger
-            frac >= 0.80f -> Tok.warn
-            else -> Tok.accent
-        }
+        val fill = contextColor(frac)
         Box(Modifier.padding(top = 7.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Tok.hair)) {
             if (frac > 0f) Box(Modifier.fillMaxWidth(frac).height(4.dp).clip(RoundedCornerShape(2.dp)).background(fill))
         }

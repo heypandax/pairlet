@@ -147,4 +147,7 @@ class ClaudeBackend(private val exe: Path) : AgentBackend {
 
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         TranscriptReplay.read(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
+
+    override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
+        TranscriptScanner.lastContextTokens(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 }

@@ -128,7 +128,9 @@ data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPh
  * state from it on (re)attach. Null = sender predates the field (or observing): keep local state.
  * [model]/[effort] are the daemon's actual model + reasoning-effort for this session (for the
  * header + session-info sheet). [contextWindow] is the token capacity; null => the phone derives
- * it from [model]. All three are re-announced on every relaunch (mode/model/effort switch).
+ * it from [model]. [contextUsed] seeds the usage statusline on resume (tokens the last completed
+ * turn left in the window) so it shows before the first new turn; null => unknown, the phone waits
+ * for the next [TurnDone]. All are re-announced on every relaunch (mode/model/effort switch).
  */
 @Serializable
 @SerialName("pocket/session.live")
@@ -142,6 +144,7 @@ data class SessionLive(
     val model: String? = null,
     val effort: String? = null,
     val contextWindow: Long? = null,
+    val contextUsed: Long? = null, // resume-time seed for the usage statusline (null = older daemon / no prior turn)
     val agent: AgentKind? = null, // which backend drives this session (null = older daemon → phone assumes Claude)
 ) : ToPhone
 

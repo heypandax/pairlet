@@ -890,13 +890,6 @@ private fun ChatScreen(repo: PocketRepository) {
                         modelAlias(repo.model.value).takeIf { it.isNotBlank() }?.let {
                             Text(" · $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
                         }
-                        // live context-window usage (issue #15): % of the model's window filled by the last turn
-                        repo.contextUsed.value?.let { used ->
-                            val cap = repo.contextWindow.value ?: 200_000L
-                            val frac = if (cap > 0) (used.toFloat() / cap).coerceIn(0f, 1f) else 0f
-                            val c = when { frac >= 0.95f -> Tok.danger; frac >= 0.80f -> Tok.warn; else -> Tok.muted }
-                            Text(" · ${(frac * 100).toInt()}%", color = c, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
-                        }
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
                     }
                 }
@@ -953,6 +946,7 @@ private fun ChatScreen(repo: PocketRepository) {
                         .sortedBy { !it.name.startsWith(slashQuery, ignoreCase = true) } // prefix matches first
                 }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
+                    ContextStatusline(repo.contextUsed.value, repo.contextWindow.value) // issue #15: a thin "Context ▱▱ NN%" line above the composer
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     if (suggestions.isNotEmpty() && !capturing) {
@@ -1156,6 +1150,32 @@ private fun WorkingRow() {
     ) {
         PulseDot(Tok.muted)
         Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
+
+/**
+ * The usage statusline above the composer (issue #15): "Context ▱▱▱ NN%" — how full the model's
+ * window is after the last turn. Seeded on resume from the daemon's transcript snapshot, then
+ * refreshed each turn from TurnDone; hidden until there's a number (a brand-new session before its
+ * first turn). Same thresholds as the session sheet's ContextBar: accent < 80% ≤ warn < 95% ≤ danger.
+ */
+@Composable
+private fun ContextStatusline(used: Long?, window: Long?) {
+    used ?: return // no turn yet / older daemon — nothing to show
+    val cap = window ?: 200_000L
+    val frac = (used.toFloat() / cap).coerceIn(0f, 1f)
+    val c = contextColor(frac)
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(Res.string.label_context), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+        Spacer(Modifier.width(9.dp))
+        Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(Tok.hair)) {
+            if (frac > 0f) Box(Modifier.fillMaxWidth(frac).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c))
+        }
+        Spacer(Modifier.width(9.dp))
+        Text("${(frac * 100).toInt()}%", color = c, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
     }
 }
 

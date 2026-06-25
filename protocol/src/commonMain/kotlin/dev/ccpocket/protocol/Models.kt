@@ -63,7 +63,15 @@ data class TokenUsage(
     val outputTokens: Long,
     val cacheCreationInputTokens: Long? = null,
     val cacheReadInputTokens: Long? = null,
-)
+) {
+    /**
+     * Tokens occupying the model's context window after this turn: the fresh prompt plus the cached
+     * prefix still in the window (output isn't in-window yet). The single definition of "context
+     * occupancy" — the daemon seeds it on resume, the phone shows it live, both read it from here.
+     * Computed (no backing field) so it never crosses the wire.
+     */
+    val contextTokens: Long get() = inputTokens + (cacheReadInputTokens ?: 0) + (cacheCreationInputTokens ?: 0)
+}
 
 /**
  * Built by the daemon's TranscriptScanner from `~/.claude/projects/<key>/<sid>.jsonl`.

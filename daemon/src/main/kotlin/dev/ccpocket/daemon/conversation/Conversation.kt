@@ -112,9 +112,14 @@ class Conversation(
     @Volatile
     private var reemitLive = false
 
+    // context tokens the resumed transcript's last turn left in the window — seeds the phone's usage
+    // statusline before the first new turn lands. Null for a brand-new session (nothing used yet).
+    @Volatile
+    private var resumeContextUsed: Long? = null
+
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
-        SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort, agent = backend.kind)
+        SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort, contextUsed = resumeContextUsed, agent = backend.kind)
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
     fun currentMode(): PermissionMode = mode
@@ -138,6 +143,10 @@ class Conversation(
         // now (we own convoId + workdir), and replay the resumed transcript up front; the pump later re-emits
         // SessionLive with the real sessionId.
         scope.launch {
+            // Seed the usage statusline from the resumed transcript's last turn so it shows on open
+            // (before the first new TurnDone). Done here, off the relay inbound loop — the transcript
+            // read can be a multi-MB parse. Null for a brand-new session / no prior usage.
+            resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             sink.emit(live(resumeId))
             if (resumeId != null) {
                 val history = backend.replayHistory(workdir.toString(), resumeId)
@@ -286,13 +295,11 @@ class Conversation(
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
                     is AgentEvent.TurnResult -> {
                         executing = false
-                        sink.emit(
-                            TurnDone(
-                                convoId,
-                                ev.finalText,
-                                TokenUsage(ev.inputTokens, ev.outputTokens, ev.cacheCreationInputTokens, ev.cacheReadInputTokens),
-                            ),
-                        )
+                        val usage = TokenUsage(ev.inputTokens, ev.outputTokens, ev.cacheCreationInputTokens, ev.cacheReadInputTokens)
+                        // keep the resume seed current: a mid-session reconnect then seeds the latest
+                        // occupancy, not the stale open-time snapshot (same value the phone shows live).
+                        resumeContextUsed = usage.contextTokens
+                        sink.emit(TurnDone(convoId, ev.finalText, usage))
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
                         // so a control-plane send never stalls stdout parsing.
                         pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText) } }

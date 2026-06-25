@@ -850,6 +850,9 @@ class PocketRepository(private val scope: CoroutineScope) {
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
                 contextWindow.value = f.contextWindow ?: contextWindowFor(f.model ?: model.value)
+                // seed the usage statusline on resume (before the first new turn). Only when we have no
+                // value yet — a TurnDone this session is fresher than the daemon's transcript snapshot.
+                if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
                 // daemon truth beats the local guess: a turn that ended (or started) while the link was
                 // down would otherwise leave the ■/mic button stuck; null = old daemon, keep local state
                 f.executing?.let { exec ->
@@ -870,7 +873,7 @@ class PocketRepository(private val scope: CoroutineScope) {
             is TurnDone -> if (f.convoId == convoId.value) {
                 finishThinking(); streaming.value = false
                 // ~context occupancy: the prompt claude just saw (fresh input + the cached prefix still in the window)
-                f.usage?.let { contextUsed.value = it.inputTokens + (it.cacheReadInputTokens ?: 0) + (it.cacheCreationInputTokens ?: 0) }
+                f.usage?.let { contextUsed.value = it.contextTokens }
             }
             is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
             is PocketError -> {

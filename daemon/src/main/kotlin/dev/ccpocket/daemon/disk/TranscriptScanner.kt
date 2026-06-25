@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.SessionSummary
+import dev.ccpocket.protocol.TokenUsage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -9,6 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.bufferedReader
+import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
 import kotlin.io.path.isDirectory
 
@@ -77,6 +79,35 @@ object TranscriptScanner {
         )
     }
 
+    /**
+     * Context tokens the LAST completed assistant turn left in the window — `input + cache_read +
+     * cache_creation` of its `message.usage` (output isn't in-window yet). Mirrors the live TurnDone
+     * sum so the phone's usage statusline reads the same on resume as mid-session. Null when the file
+     * is absent or no turn carries usage yet.
+     */
+    fun lastContextTokens(file: Path): Long? {
+        if (!file.exists()) return null
+        var last: Long? = null
+        file.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                if (obj.str("type") != "assistant") continue
+                val usage = (obj["message"] as? JsonObject)?.get("usage") as? JsonObject ?: continue
+                // build the wire's TokenUsage so occupancy comes from the one shared accessor, not a re-sum
+                val total = TokenUsage(
+                    inputTokens = usage.long("input_tokens") ?: 0,
+                    outputTokens = usage.long("output_tokens") ?: 0,
+                    cacheCreationInputTokens = usage.long("cache_creation_input_tokens"),
+                    cacheReadInputTokens = usage.long("cache_read_input_tokens"),
+                ).contextTokens
+                if (total > 0) last = total // last assistant turn with usage wins
+            }
+        }
+        return last
+    }
+
     /** A real user turn has no `toolUseResult` and content is not a `tool_result` array. (C5) */
     private fun isRealUserTurn(obj: JsonObject): Boolean {
         if (obj.containsKey("toolUseResult")) return false
@@ -104,4 +135,5 @@ object TranscriptScanner {
     }
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject.long(key: String): Long? = (this[key] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
 }

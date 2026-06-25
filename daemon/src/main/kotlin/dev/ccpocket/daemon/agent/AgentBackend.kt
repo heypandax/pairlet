@@ -64,6 +64,11 @@ interface AgentBackend {
 
     /** Prior transcript of [sessionId] under [workdir], flattened for replay to the phone. */
     fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage>
+
+    /** Context tokens the last completed turn of [sessionId] left in the window — seeds the phone's
+     *  usage statusline on resume. Null when unknown (no transcript / no usage yet / backend doesn't
+     *  surface per-turn usage on disk, e.g. Codex). */
+    fun resumeContextTokens(workdir: String, sessionId: String): Long?
 }
 
 /** Builds a fresh [AgentBackend] per conversation. One factory per [AgentKind], registered in the daemon core. */
