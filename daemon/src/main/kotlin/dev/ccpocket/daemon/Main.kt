@@ -86,6 +86,16 @@ private class RunCmd : CliktCommand(name = "run") {
             echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
+            // Windows: if we're not yet registered as a logon background service, self-install so closing this
+            // window no longer takes the daemon offline (issue #16). No-op on macOS/Linux and when already set up.
+            ServiceInstaller.selfInstallIfMissingWindows(
+                ProcessHandle.current().info().command().orElse(""),
+                buildList {
+                    add("run"); add("--relay"); add(relay)
+                    claudeBin?.let { add("--claude-bin"); add(it) }
+                    codexBin?.let { add("--codex-bin"); add(it) }
+                },
+            )?.let { echo(it) }
             PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }

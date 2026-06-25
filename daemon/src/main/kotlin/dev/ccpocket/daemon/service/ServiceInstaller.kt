@@ -8,12 +8,49 @@ import kotlin.io.path.writeText
 /** Generates (and optionally installs) a background-service definition for the current OS. */
 object ServiceInstaller {
 
+    const val WINDOWS_TASK = "cc-pocket-daemon" // per-user logon Scheduled Task name (issue #16 self-heal + service-install)
+
     fun install(exec: String, runArgs: List<String>, apply: Boolean): String {
         val os = System.getProperty("os.name").lowercase()
         return when {
             os.contains("mac") -> mac(exec, runArgs, apply)
             os.contains("win") -> windows(exec, runArgs, apply)
             else -> linux(exec, runArgs, apply)
+        }
+    }
+
+    /** True iff the Windows logon Scheduled Task is already registered (queried via schtasks; false on any error). */
+    fun isWindowsTaskInstalled(taskName: String = WINDOWS_TASK): Boolean = runCatching {
+        val p = ProcessBuilder("schtasks", "/Query", "/TN", taskName).redirectErrorStream(true).start()
+        p.inputStream.bufferedReader().readText() // drain so the child can exit cleanly
+        p.waitFor() == 0 // 0 = task exists, non-zero = not found
+    }.getOrDefault(false)
+
+    /**
+     * Windows self-heal (issue #16): if `cc-pocket-daemon run` starts without the logon Scheduled Task
+     * registered, register it so the daemon survives closing the terminal. Idempotent — a no-op on non-Windows
+     * and when the task already exists. It registers WITHOUT starting now: the current foreground process is
+     * already serving, and launching a second hidden instance would put two daemons on the relay under one
+     * account — so the task instead takes over at the next logon. Never throws; returns a short status/hint
+     * line, or null when there's nothing to say. Mirrors macOS's auto-install via the cask postflight, for
+     * raw-binary installs (no Scoop post_install) or a post_install that silently failed.
+     */
+    fun selfInstallIfMissingWindows(exec: String, runArgs: List<String>): String? {
+        if (!System.getProperty("os.name").lowercase().contains("win")) return null
+        if (isWindowsTaskInstalled()) return null
+        if (exec.isBlank() || !File(exec).canExecute()) {
+            return "note: can't auto-register the background service (launcher not found) — the daemon stops " +
+                "when this window closes. Fix: cc-pocket-daemon service-install --apply"
+        }
+        val msg = runCatching { windows(exec, runArgs, apply = true, startNow = false) }.getOrElse {
+            return "note: couldn't auto-register the background service (${it.message}) — the daemon stops " +
+                "when this window closes. Fix: cc-pocket-daemon service-install --apply"
+        }
+        return if (msg.startsWith("could not register")) {
+            "note: $msg"
+        } else {
+            "registered a logon background service — from your next sign-in the daemon starts automatically " +
+                "(this window keeps it running until then)"
         }
     }
 
@@ -124,9 +161,9 @@ object ServiceInstaller {
     // directly would flash a console window every login — instead we point the task at a tiny VBScript
     // that launches the daemon with window style 0 (hidden) and returns immediately. Registered via
     // PowerShell cmdlets (Execute/Argument passed separately → avoids schtasks /tr quote hell).
-    private fun windows(exec: String, args: List<String>, apply: Boolean): String {
+    private fun windows(exec: String, args: List<String>, apply: Boolean, startNow: Boolean = true): String {
         val home = System.getProperty("user.home")
-        val taskName = "cc-pocket-daemon"
+        val taskName = WINDOWS_TASK
         val ccDir = Path.of(home, ".cc-pocket")
         val vbs = ccDir.resolve("cc-pocket-daemon-service.vbs")
 
@@ -135,13 +172,15 @@ object ServiceInstaller {
         val cmd = (listOf(exec) + args).joinToString(" ") { "\"\"$it\"\"" }
         val vbsBody = "CreateObject(\"WScript.Shell\").Run \"$cmd\", 0, False\n"
 
-        val ps = """
+        val register = """
             |${'$'}a = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument '"$vbs"'
             |${'$'}t = New-ScheduledTaskTrigger -AtLogOn
             |${'$'}s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
             |Register-ScheduledTask -TaskName '$taskName' -Action ${'$'}a -Trigger ${'$'}t -Settings ${'$'}s -Force | Out-Null
-            |Start-ScheduledTask -TaskName '$taskName'
         """.trimMargin()
+        // self-heal from a running `run` registers for next logon WITHOUT starting a second instance now (the
+        // foreground process already serves) — avoids a duplicate relay connection under one account (issue #16).
+        val ps = if (startNow) "$register\nStart-ScheduledTask -TaskName '$taskName'" else register
 
         if (!apply) {
             return "Windows logon Scheduled Task — write $vbs with:\n\n$vbsBody\n" +
