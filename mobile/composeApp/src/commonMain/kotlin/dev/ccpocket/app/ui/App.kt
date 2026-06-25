@@ -890,6 +890,13 @@ private fun ChatScreen(repo: PocketRepository) {
                         modelAlias(repo.model.value).takeIf { it.isNotBlank() }?.let {
                             Text(" · $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
                         }
+                        // live context-window usage (issue #15): % of the model's window filled by the last turn
+                        repo.contextUsed.value?.let { used ->
+                            val cap = repo.contextWindow.value ?: 200_000L
+                            val frac = if (cap > 0) (used.toFloat() / cap).coerceIn(0f, 1f) else 0f
+                            val c = when { frac >= 0.95f -> Tok.danger; frac >= 0.80f -> Tok.warn; else -> Tok.muted }
+                            Text(" · ${(frac * 100).toInt()}%", color = c, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                        }
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
                     }
                 }
