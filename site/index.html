@@ -3,12 +3,103 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>cc-pocket — Drive Claude Code from your phone</title>
-<meta name="description" content="Drive the claude CLI on your computer from your phone. Resume sessions, stream output, and approve tool permissions remotely — end-to-end encrypted, zero-knowledge relay, open source." />
+<title>CC Pocket — Drive Claude Code from your phone</title>
+<meta name="description" content="Drive Claude Code or OpenAI Codex from your phone — resume sessions, stream output, approve tool permissions remotely. End-to-end encrypted, zero-knowledge relay, open source (MIT)." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+<meta name="keywords" content="Claude Code, claude code mobile, OpenAI Codex, AI coding agent, remote AI coding, drive Claude from phone, coding agent app, end-to-end encrypted, zero-knowledge relay, iOS, Android, developer tools" />
+<meta name="author" content="heypandax" />
+<meta name="application-name" content="CC Pocket" />
+<meta name="theme-color" content="#0E0F11" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#FAF9F7" media="(prefers-color-scheme: light)" />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="CC Pocket — Drive Claude Code from your phone" />
+<meta property="og:description" content="Drive Claude Code or OpenAI Codex from your phone — resume sessions, stream output, approve tool permissions remotely. End-to-end encrypted, open source." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="CC Pocket — drive Claude Code from your phone, with a remote tool-permission approval card." />
+<meta property="og:locale" content="en_US" />
+<meta property="og:locale:alternate" content="zh_CN" />
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CC Pocket — Drive Claude Code from your phone" />
+<meta name="twitter:description" content="Drive Claude Code or OpenAI Codex from your phone — resume sessions, stream output, approve tool permissions remotely. End-to-end encrypted, open source." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<meta name="twitter:image:alt" content="CC Pocket — drive Claude Code from your phone." />
+
+<!-- Icons & manifest -->
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="manifest" href="site.webmanifest" />
+
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://heypandax.github.io/cc-pocket/#app",
+      "name": "CC Pocket",
+      "alternateName": "cc-pocket",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "iOS, iPadOS, Android, macOS, Windows, Linux",
+      "url": "https://heypandax.github.io/cc-pocket/",
+      "downloadUrl": "https://github.com/heypandax/cc-pocket/releases/latest",
+      "softwareHelp": "https://github.com/heypandax/cc-pocket#readme",
+      "image": "https://heypandax.github.io/cc-pocket/og-image.png",
+      "screenshot": "https://heypandax.github.io/cc-pocket/og-image.png",
+      "description": "Drive Claude Code or OpenAI Codex running on your computer from your phone or another computer. Resume sessions, stream output, browse projects, and approve or deny the agent's tool-permission requests remotely. Traffic flows end-to-end encrypted through a zero-knowledge relay that only forwards ciphertext.",
+      "license": "https://github.com/heypandax/cc-pocket/blob/main/LICENSE",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "featureList": [
+        "Approve or deny the agent's tool-permission requests remotely",
+        "Resume or start Claude Code and OpenAI Codex sessions from anywhere",
+        "Live streaming output with code blocks, tool events and background-task status",
+        "Tree project browser with breadcrumbs and per-project session counts",
+        "Four execution modes plus a persisted default mode and reasoning effort",
+        "Voice dictation, image attachments and slash-command autocomplete",
+        "Background tasks with finish-time push notifications",
+        "End-to-end encryption (P-256 ECDH + HKDF + AES-256-GCM) over a zero-knowledge relay"
+      ],
+      "keywords": "Claude Code, OpenAI Codex, AI coding agent, remote coding, end-to-end encryption, developer tools",
+      "publisher": { "@id": "https://github.com/heypandax#org" }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://heypandax.github.io/cc-pocket/#website",
+      "name": "CC Pocket",
+      "url": "https://heypandax.github.io/cc-pocket/",
+      "inLanguage": ["en", "zh-CN"],
+      "about": { "@id": "https://heypandax.github.io/cc-pocket/#app" },
+      "publisher": { "@id": "https://github.com/heypandax#org" }
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://github.com/heypandax#org",
+      "name": "heypandax",
+      "url": "https://github.com/heypandax",
+      "logo": "https://heypandax.github.io/cc-pocket/apple-touch-icon.png",
+      "sameAs": [
+        "https://github.com/heypandax/cc-pocket",
+        "https://apps.apple.com/cn/app/id6778773969"
+      ]
+    }
+  ]
+}
+</script>
 </head>
 <body>
 

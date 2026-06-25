@@ -30,8 +30,9 @@ captures/
 # Firebase service-account / admin SDK keys for the relay's FCM sender
 /firebase/
 *-adminsdk-*.json
-# build artifacts produced by scripts/release-macos.sh
+# build artifacts produced by scripts/release-*.sh
 /cc-pocket-daemon-*.tar.gz
+/cc-pocket-desktop-*.dmg
 
 # generated App Preview videos (rebuild with marketing/preview/make-preview.sh)
 /marketing/preview/out/

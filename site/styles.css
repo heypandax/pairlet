@@ -91,6 +91,8 @@ a{color:inherit;text-decoration:none;}
 }
 .nav .wrap{display:flex;align-items:center;gap:24px;width:100%;}
 .brand{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.brand-mark{width:22px;height:22px;flex-shrink:0;border-radius:6px;
+  background:url('favicon.svg') center/contain no-repeat;}
 .brand .wordmark{font-size:16px;font-weight:600;letter-spacing:-0.02em;white-space:nowrap;}
 .nav-links{display:flex;gap:28px;margin-left:8px;flex:1;}
 .nav-links a{

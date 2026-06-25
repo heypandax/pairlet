@@ -1,0 +1,67 @@
+# CC Pocket
+
+> CC Pocket (also written cc-pocket) is an open-source companion app that lets you drive Claude Code — or OpenAI Codex — running on your computer from your phone, tablet, or another computer, from anywhere (not just your LAN). You can resume or start sessions, stream the agent's output live, browse your project folders, and approve or deny the agent's tool-permission requests remotely. All traffic is end-to-end encrypted and routed through a zero-knowledge relay that only ever forwards ciphertext. It is MIT-licensed, requires no account, and is built in clean-room Kotlin Multiplatform.
+
+CC Pocket is a remote control for command-line AI coding agents. The coding agent (Claude Code or OpenAI Codex) keeps running on your own computer; CC Pocket gives you a phone, tablet, or desktop client to watch and steer it from elsewhere — most importantly, to answer the tool-permission prompts the agent raises (run this command? edit this file?) without being at the keyboard.
+
+## What it is
+
+- **Category:** developer tool / mobile + desktop client for AI coding agents (Claude Code, OpenAI Codex).
+- **Problem it solves:** coding agents pause to ask permission and stream long output; you don't want to be chained to your laptop. CC Pocket moves the approval loop and the live session to your pocket.
+- **Who it's for:** developers who run Claude Code or Codex locally and want to monitor or approve runs while away from their desk.
+- **Cost:** free, open source (MIT). No account or sign-up.
+- **Not** a cloud IDE and **not** a re-host of the model: your code and the agent stay on your machine; CC Pocket only relays encrypted control traffic.
+
+## Key features
+
+- **Approve from anywhere** — tool-permission requests reach your phone the instant Claude or Codex raises one; allow or deny in seconds. If you don't respond, it times out to a safe deny.
+- **Pick your agent per session** — choose Claude Code or OpenAI Codex when you start a session; streaming output, command/file-change approvals, and interrupts work the same for both. A session stays bound to one backend.
+- **Execution modes** — four modes (ask each step, auto-edit, plan, full auto), a persisted default mode and reasoning effort, plus per-session allow rules, switchable mid-conversation. Codex sessions map to a permission preset (Cautious / Balanced / Autonomous / Full auto) over Codex's approval-policy × sandbox.
+- **Resume any session** — pick up the exact session you left running on your computer, or start a fresh one in any repo, and hand it back to the desktop later with `claude --resume`.
+- **Live streaming** — real-time output, code blocks, tool events, and background-task status, exactly as they render in the terminal.
+- **Tree project browser** — drill through your computer's folders level by level (or a flat recents list), filter as you type, with a live breadcrumb and per-project session counts.
+- **Voice & images** — voice dictation, image attachments, slash-command autocomplete, and model switching.
+- **Background tasks & notifications** — long jobs keep running; you get a push notification when the agent finishes.
+- **Native desktop app** — besides phone and tablet, CC Pocket runs as a native macOS / Linux / Windows app (a two-pane "mission control") to drive an agent on *another* computer with the same remote, step-by-step approval.
+
+## How it works
+
+The architecture is three parts plus the agent:
+
+`phone / desktop client  →  relay (zero-knowledge broker)  →  daemon (your computer)  →  claude / codex CLI`
+
+- The **daemon** runs on your computer and drives the `claude` or `codex` CLI as a subprocess; it dials out to the relay (no inbound ports to open).
+- The **relay** is a cloud broker that pairs your phone with your computer and routes opaque encrypted frames between them. It holds no message content and no private keys.
+- The **client** (CC Pocket on phone, tablet, or another computer) and the daemon run an end-to-end encrypted session so plaintext never leaves the two trusted endpoints.
+
+## Security model
+
+- **End-to-end encryption** between the client and the daemon: P-256 ECDH key agreement + HKDF + AES-256-GCM, using an X3DH / Noise-style handshake.
+- **Zero-knowledge relay:** the relay only forwards ciphertext; it cannot read messages and never holds private keys.
+- **No account:** pairing is device-to-device; there is no login or central user database.
+- **Dial-out daemon:** your computer connects outward to the relay, so you don't expose any inbound ports.
+- Full details: see the security model document linked below.
+
+## Platforms & install
+
+- **iOS / iPadOS:** [App Store](https://apps.apple.com/cn/app/id6778773969) (iPhone & iPad).
+- **Android:** [APK from GitHub Releases](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk).
+- **Desktop app:** [macOS (.dmg, signed)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Windows (.msi)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi) · Linux.
+- **Daemon (runs on your computer):** Homebrew on macOS, Scoop on Windows, or the install script — see the website's Download section.
+
+## Technical facts
+
+- **Languages / stack:** Kotlin Multiplatform; UI in Compose Multiplatform (Android, iOS, desktop); daemon and relay in Kotlin/JVM with Ktor; shared wire protocol via kotlinx.serialization.
+- **License:** MIT.
+- **Repository modules:** `:protocol` (shared wire protocol), `:daemon` (runs on your computer), `:relay` (cloud broker), `:mobile` (the CC Pocket app).
+- **Supported agents:** Anthropic Claude Code and OpenAI Codex command-line agents.
+
+## Links
+
+- [Website](https://heypandax.github.io/cc-pocket/)
+- [Full feature list](https://heypandax.github.io/cc-pocket/features.html)
+- [GitHub repository](https://github.com/heypandax/cc-pocket)
+- [README / user guide](https://github.com/heypandax/cc-pocket#readme)
+- [Security model](https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md)
+- [Privacy policy](https://heypandax.github.io/cc-pocket/privacy.html)
+- [Latest releases & downloads](https://github.com/heypandax/cc-pocket/releases/latest)

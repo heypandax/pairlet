@@ -277,29 +277,24 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/cert.p12"
 
-      - name: Build + sign the DMG
+      - name: Build + sign + notarize the DMG
         env:
           DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
-        run: |
-          ./gradlew :mobile:composeApp:packageDmg --no-daemon \
-            -Dorg.gradle.java.home="$JAVA_HOME" \
-            -Pcompose.desktop.packaging.checkJdkVendor=false \
-            -PccpocketSignId="$DEVELOPER_ID"
-
-      - name: Notarize, staple & upload DMG to release v${{ inputs.version }}
-        env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          chmod +x scripts/release-desktop-macos.sh gradlew
+          scripts/release-desktop-macos.sh "${{ inputs.version }}"
+
+      - name: Upload DMG to release v${{ inputs.version }}
+        env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          DMG=$(ls mobile/composeApp/build/compose/binaries/main/dmg/*.dmg | head -1)
-          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          xcrun stapler staple "$DMG"
-          OUT="cc-pocket-desktop-macos-arm64.dmg"
-          cp "$DMG" "$OUT"
-          echo "sha256: $(shasum -a 256 "$OUT" | awk '{print $1}')"
-          gh release upload "v${{ inputs.version }}" "$OUT" --clobber
+          VER="${{ inputs.version }}"
+          VERSIONED="cc-pocket-desktop-${VER}-macos-arm64.dmg"
+          cp "$VERSIONED" cc-pocket-desktop-macos-arm64.dmg   # stable version-less permalink
+          gh release upload "v${VER}" "$VERSIONED" cc-pocket-desktop-macos-arm64.dmg --clobber
 
   windows-desktop:
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
