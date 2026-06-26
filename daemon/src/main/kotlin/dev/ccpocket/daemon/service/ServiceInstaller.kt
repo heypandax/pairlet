@@ -69,6 +69,12 @@ object ServiceInstaller {
         val path = (System.getenv("PATH")?.split(":").orEmpty() + wellKnown)
             .map { it.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(":")
 
+        // A jpackage cask binary bundles its own JRE, but a dev `installDist` launcher needs JAVA_HOME (keg-only
+        // openjdk isn't on PATH). Seed it from ours when present so `service-install` works for a dev build too,
+        // without a hand-rolled agent (harmless for the cask app-image, which ignores it).
+        val javaHomeXml = System.getenv("JAVA_HOME")?.takeIf { it.isNotBlank() }
+            ?.let { "\n        <key>JAVA_HOME</key><string>${xml(it)}</string>" } ?: ""
+
         val argsXml = (listOf(exec) + args).joinToString("\n") { "        <string>${xml(it)}</string>" }
         val plist = """
             |<?xml version="1.0" encoding="UTF-8"?>
@@ -80,7 +86,7 @@ object ServiceInstaller {
             |    </array>
             |    <key>EnvironmentVariables</key><dict>
             |        <key>PATH</key><string>${xml(path)}</string>
-            |        <key>HOME</key><string>${xml(home)}</string>
+            |        <key>HOME</key><string>${xml(home)}</string>$javaHomeXml
             |    </dict>
             |    <key>RunAtLoad</key><true/>
             |    <key>KeepAlive</key><true/>
@@ -100,15 +106,42 @@ object ServiceInstaller {
         }
         Files.createDirectories(logDir)
         Files.createDirectories(plistPath.parent)
+        // Single-instance: a second registered agent (a hand-rolled dev one, a stale label) would
+        // RunAtLoad another daemon that fights this one for the pair port + relay identity. Drop every
+        // other cc-pocket daemon agent first so exactly one auto-starts (idempotent across re-installs).
+        val removed = removeSiblingAgents(plistPath)
         plistPath.writeText(plist)
         runCatching { ProcessBuilder("launchctl", "unload", plistPath.toString()).start().waitFor() }
         ProcessBuilder("launchctl", "load", plistPath.toString()).start().waitFor()
-        return "installed + loaded launchd agent: $plistPath\n  logs: $errLog"
+        val cleaned = if (removed.isEmpty()) "" else "\n  removed duplicate agent(s): ${removed.joinToString(", ")}"
+        return "installed + loaded launchd agent: $plistPath$cleaned\n  logs: $errLog"
     }
 
     /** Minimal XML text escaping for plist <string> values. */
     private fun xml(s: String): String =
         s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    /**
+     * Unload + delete every OTHER dev.ccpocket.daemon*.plist LaunchAgent (keeping [keep]), so exactly one
+     * cc-pocket daemon auto-starts. Catches the cask agent and a hand-rolled dev agent both being
+     * registered — each RunAtLoad+KeepAlive would spawn a daemon that fights the other for the pair port
+     * + relay identity (BindException flapping, relay double-connect). Best-effort; never throws.
+     */
+    internal fun removeSiblingAgents(keep: Path): List<String> {
+        val dir = keep.parent ?: return emptyList()
+        return runCatching {
+            val removed = mutableListOf<String>()
+            Files.newDirectoryStream(dir, "dev.ccpocket.daemon*.plist").use { ds ->
+                for (sibling in ds) {
+                    if (sibling == keep) continue
+                    runCatching { ProcessBuilder("launchctl", "unload", sibling.toString()).start().waitFor() }
+                    runCatching { Files.deleteIfExists(sibling) }
+                    removed += sibling.fileName.toString()
+                }
+            }
+            removed.toList()
+        }.getOrDefault(emptyList())
+    }
 
     private fun linux(exec: String, args: List<String>, apply: Boolean): String {
         val home = System.getProperty("user.home")

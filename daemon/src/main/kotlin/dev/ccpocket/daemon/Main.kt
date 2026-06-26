@@ -68,6 +68,7 @@ private class RunCmd : CliktCommand(name = "run") {
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
+    private val takeover by option("--takeover", help = "if another cc-pocket daemon is already running, stop it and run this one instead (default: exit and leave it running)").flag()
 
     override fun run() {
         val exe = ClaudeLauncher.resolveExecutable(claudeBin)
@@ -96,6 +97,10 @@ private class RunCmd : CliktCommand(name = "run") {
                     codexBin?.let { add("--codex-bin"); add(it) }
                 },
             )?.let { echo(it) }
+            // A daemon is a singleton (owns the pair port + one relay identity). If another instance is
+            // already up — the cask's KeepAlive LaunchAgent, or a stray dev run — don't bind/attach a
+            // duplicate that fights it on the relay; exit cleanly (or --takeover to replace it).
+            SingleInstance.ensureSolo(pairPort, takeover) { echo(it) }
             PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
