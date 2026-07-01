@@ -150,4 +150,7 @@ class ClaudeBackend(private val exe: Path) : AgentBackend {
 
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
         TranscriptScanner.lastContextTokens(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
+
+    override fun resumeModel(workdir: String, sessionId: String): String? =
+        TranscriptScanner.lastModel(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 }

@@ -5,6 +5,7 @@ import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class TranscriptScannerTest {
 
@@ -61,5 +62,28 @@ class TranscriptScannerTest {
         f.writeText("""{"type":"custom-title","customTitle":"My Renamed Session"}""")
         val s = assertNotNull(TranscriptScanner.summarize(f))
         assertEquals("My Renamed Session", s.title)
+    }
+
+    @Test
+    fun last_model_returns_the_newest_assistant_model() {
+        // a cold resume reads the session's real model from the last assistant turn (issue #27)
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-m.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"hi"}}""",
+                """{"type":"assistant","message":{"model":"claude-sonnet-4-5","content":[{"type":"text","text":"a"}]}}""",
+                """{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"b"}]}}""",
+            ).joinToString("\n"),
+        )
+        assertEquals("claude-opus-4-8", TranscriptScanner.lastModel(f))
+    }
+
+    @Test
+    fun last_model_is_null_without_an_assistant_turn() {
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-n.jsonl")
+        f.writeText("""{"type":"user","message":{"role":"user","content":"hi"}}""")
+        assertNull(TranscriptScanner.lastModel(f))
     }
 }

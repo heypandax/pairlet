@@ -152,9 +152,12 @@ class Conversation(
         // now (we own convoId + workdir), and replay the resumed transcript up front; the pump later re-emits
         // SessionLive with the real sessionId.
         scope.launch {
-            // Seed the usage statusline from the resumed transcript's last turn so it shows on open
-            // (before the first new TurnDone). Done here, off the relay inbound loop — the transcript
-            // read can be a multi-MB parse. Null for a brand-new session / no prior usage.
+            // Seed model + usage from the resumed transcript so the header shows the real model/window and the
+            // usage statusline on open — before the first new turn's init lands (a headless claude is silent
+            // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
+            if (model == null && resumeId != null) {
+                runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { this@Conversation.model = it }
+            }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             sink.emit(live(resumeId))
             if (resumeId != null) {

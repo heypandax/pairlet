@@ -108,6 +108,24 @@ object TranscriptScanner {
         return last
     }
 
+    /** The model id of the LAST assistant turn in [file] (`message.model`), or null if none/absent. Lets a cold
+     *  resume announce the session's real model (and derive its context window) before the first new turn's init
+     *  lands — a headless claude is silent until then (issue #27). */
+    fun lastModel(file: Path): String? {
+        if (!file.exists()) return null
+        var last: String? = null
+        file.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                if (obj.str("type") != "assistant") continue
+                (obj["message"] as? JsonObject)?.str("model")?.takeIf { it.isNotBlank() }?.let { last = it }
+            }
+        }
+        return last
+    }
+
     /** A real user turn has no `toolUseResult` and content is not a `tool_result` array. (C5) */
     private fun isRealUserTurn(obj: JsonObject): Boolean {
         if (obj.containsKey("toolUseResult")) return false

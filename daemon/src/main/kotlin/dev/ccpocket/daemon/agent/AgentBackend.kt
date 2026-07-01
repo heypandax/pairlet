@@ -69,6 +69,11 @@ interface AgentBackend {
      *  usage statusline on resume. Null when unknown (no transcript / no usage yet / backend doesn't
      *  surface per-turn usage on disk, e.g. Codex). */
     fun resumeContextTokens(workdir: String, sessionId: String): Long?
+
+    /** The model id the last completed turn of [sessionId] used — lets a cold resume announce the session's real
+     *  model + context window before the first new turn's init lands. Null when unknown / not on disk (default;
+     *  e.g. Codex). Claude reads it from the transcript. */
+    fun resumeModel(workdir: String, sessionId: String): String? = null
 }
 
 /** Builds a fresh [AgentBackend] per conversation. One factory per [AgentKind], registered in the daemon core. */
