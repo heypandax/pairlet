@@ -8,6 +8,7 @@ local.properties
 *.iml
 .DS_Store
 captures/
+.cc-connect
 
 # local agent / IDE state
 .claude/
