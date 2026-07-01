@@ -204,6 +204,9 @@
     <string name="ob_secure">配对码不会离开你的设备——中继只看得到密文。</string>
     <string name="ob_pair_now">去配对</string>
     <string name="ob_guide">完整安装指南</string>
+    <string name="model_switch_hint">切换会重启会话——历史会保留。</string>
+    <string name="model_switching">正在重启会话……历史保留。</string>
+    <string name="model_not_installed">未安装</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>

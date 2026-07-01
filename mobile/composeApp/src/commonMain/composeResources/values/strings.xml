@@ -205,6 +205,9 @@
     <string name="ob_secure">Your pairing code never leaves your devices — the relay only ever sees ciphertext.</string>
     <string name="ob_pair_now">Pair now</string>
     <string name="ob_guide">Full setup guide</string>
+    <string name="model_switch_hint">Switching restarts the session — your history is kept.</string>
+    <string name="model_switching">Restarting session… history is kept.</string>
+    <string name="model_not_installed">not installed</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_hint">git status</string>

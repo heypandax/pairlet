@@ -39,10 +39,12 @@ import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
 // ── model + effort option sets (what `--model` / `--effort` accept) ──
-private val MODEL_OPTIONS = listOf("opus", "sonnet", "haiku")
 private val CODEX_MODEL_OPTIONS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex") // Codex sessions get Codex models
 internal val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max") // shared: live /effort picker + Settings default
 
@@ -153,15 +155,7 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onDismiss:
                         }
                     }
                 }
-                QaSub.MODEL -> {
-                    val codex = repo.sessionAgent.value == AgentKind.CODEX // Codex sessions pick Codex models, not Claude aliases
-                    OptionPicker(
-                        title = stringResource(Res.string.qa_model),
-                        options = if (codex) CODEX_MODEL_OPTIONS else MODEL_OPTIONS,
-                        selected = if (codex) repo.model.value else modelAlias(repo.model.value),
-                        onBack = { sub = QaSub.MAIN },
-                    ) { repo.switchModel(it); onDismiss() }
-                }
+                QaSub.MODEL -> ModelPicker(repo, onBack = { sub = QaSub.MAIN }, onDone = onDismiss)
                 QaSub.EFFORT -> OptionPicker(
                     title = stringResource(Res.string.label_effort),
                     options = EFFORT_OPTIONS,
@@ -204,6 +198,104 @@ private fun OptionPicker(title: String, options: List<String>, selected: String?
                 Text(opt, color = if (isSel) Tok.accent else Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 if (isSel) Text("✓", color = Tok.accent, fontSize = 14.sp)
             }
+        }
+    }
+}
+
+/** One row in the [ModelPicker]: a display [name], the `--model` value [pick] shown in mono as [id], and a
+ *  context-window pill ([ctx], filled terracotta when [big]). Uses the app's real model aliases, not invented ids. */
+private data class ModelChoice(val name: String, val id: String, val pick: String, val ctx: String, val big: Boolean, val unavailable: Boolean = false)
+
+/** Context-window pill — filled terracotta for a 1M window, muted outline otherwise. */
+@Composable
+private fun CtxPill(ctx: String, big: Boolean) {
+    Text(
+        ctx, color = if (big) Tok.base else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(999.dp))
+            .then(if (big) Modifier.background(Tok.accent) else Modifier.border(1.dp, Tok.hair, RoundedCornerShape(999.dp)))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * Model picker (design cc-pocket/Model Picker.html) — reached from Quick actions → Model (NOT a new top-bar
+ * button; the bar is already busy). Rich rows: display name + mono `--model` value + a 1M/200K context pill +
+ * a check. Tapping starts a switch: the row shows a spinner while the daemon relaunches; the sheet closes once
+ * the model is re-announced (or after a short timeout, so it never hangs). Claude uses the real opus/sonnet/haiku
+ * aliases; Codex sessions list Codex model ids.
+ */
+@Composable
+private fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) {
+    val codex = repo.sessionAgent.value == AgentKind.CODEX
+    val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
+    else listOf(
+        ModelChoice("Opus", "opus", "opus", "1M", big = true),
+        ModelChoice("Sonnet", "sonnet", "sonnet", "1M", big = true),
+        ModelChoice("Haiku", "haiku", "haiku", "200K", big = false),
+    )
+    val selected = if (codex) repo.model.value else modelAlias(repo.model.value)
+    var switchingTo by remember { mutableStateOf<String?>(null) }
+    // close once the daemon confirms the switch (model re-announced through SessionLive)…
+    LaunchedEffect(switchingTo, repo.model.value) {
+        val target = switchingTo ?: return@LaunchedEffect
+        val now = if (codex) repo.model.value else modelAlias(repo.model.value)
+        if (now.equals(target, ignoreCase = true)) onDone()
+    }
+    // …or after a short timeout, so a silent relaunch never leaves the sheet stuck spinning
+    LaunchedEffect(switchingTo) { if (switchingTo != null) { delay(4000); onDone() } }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
+        Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+    }
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        choices.forEach { c ->
+            val isSel = c.pick.equals(selected, ignoreCase = true)
+            val isSwitching = switchingTo?.equals(c.pick, ignoreCase = true) == true
+            val raised = isSwitching || (isSel && switchingTo == null)
+            val dimmed = (switchingTo != null && !isSwitching) || c.unavailable
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(if (raised) Tok.raised else Color.Transparent)
+                    .then(if (raised) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(12.dp)) else Modifier)
+                    .clickable(enabled = switchingTo == null && !c.unavailable) { switchingTo = c.pick; repo.switchModel(c.pick) }
+                    .alpha(if (dimmed) 0.45f else 1f)
+                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.name, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        if (c.unavailable) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(Res.string.model_not_installed), color = Tok.muted, fontSize = 10.5.sp,
+                                modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 1.dp),
+                            )
+                        }
+                    }
+                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1)
+                        if (c.ctx.isNotEmpty()) { Spacer(Modifier.width(8.dp)); CtxPill(c.ctx, c.big) }
+                    }
+                }
+                Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        isSwitching -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
+                        isSel -> Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+    Column(Modifier.padding(top = 14.dp)) {
+        Hairline()
+        Box(Modifier.padding(top = 12.dp)) {
+            if (switchingTo != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+            } else Text(stringResource(Res.string.model_switch_hint), color = Tok.muted, fontSize = 12.5.sp)
         }
     }
 }
