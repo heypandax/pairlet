@@ -9,9 +9,11 @@ import dev.ccpocket.daemon.agent.PermissionBridge
 import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.SlashCommandScanner
 import dev.ccpocket.daemon.util.logger
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.CommandList
+import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -119,7 +121,14 @@ class Conversation(
 
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
-        SessionLive(convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort, contextUsed = resumeContextUsed, agent = backend.kind)
+        SessionLive(
+            convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort,
+            // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
+            // (issue #20) instead of sniffing the id itself. Claude-only (Codex windows differ); null model → let
+            // the phone fall back. Phones that predate the field simply ignore it.
+            contextWindow = if (backend.kind == AgentKind.CLAUDE) model?.let(::contextWindowFor) else null,
+            contextUsed = resumeContextUsed, agent = backend.kind,
+        )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
     fun currentMode(): PermissionMode = mode

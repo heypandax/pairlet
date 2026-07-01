@@ -24,6 +24,7 @@ import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
+import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.HistoryMessage
@@ -1337,12 +1338,6 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     /** True when `/simplify` is an available command in this workdir (gates the quick-action row). */
     fun hasSimplify(): Boolean = slashCommands.any { it.name == "simplify" }
-
-    /** Context-window capacity for a model id: 1M for the `[1m]` variants, else the standard 200k. */
-    private fun contextWindowFor(model: String?): Long {
-        val m = model?.lowercase() ?: return 200_000
-        return if ("[1m]" in m || "-1m" in m) 1_000_000 else 200_000
-    }
 
     fun clearRule(rule: String) {
         allowRules.remove(rule)

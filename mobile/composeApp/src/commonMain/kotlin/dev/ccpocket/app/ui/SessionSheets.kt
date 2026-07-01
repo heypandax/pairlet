@@ -35,6 +35,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.BackgroundJob
+import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
@@ -108,7 +109,7 @@ private fun ContextBar(used: Long?, total: Long?) {
     Column(Modifier.padding(top = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(Res.string.label_context), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
-            val cap = total ?: 200_000
+            val cap = total ?: DEFAULT_CONTEXT_WINDOW
             val label = if (used == null) "— / ${formatTokens(cap)}" else "~${formatTokens(used)} / ${formatTokens(cap)}"
             Text(label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
         }
