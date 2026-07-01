@@ -66,6 +66,11 @@ object TranscriptPatcher {
 
         if (!hasSdk && dropped.isEmpty()) return false // nothing left to rewrite (false positives, or all kept)
 
+        // preserve the transcript's real last-activity mtime across the rewrite: unhide is daemon bookkeeping,
+        // not a new turn. If the rewrite bumped mtime, a just-reaped phone session would look freshly written and
+        // re-opening it would read as a live foreign session — the phone shows a bogus "Continue here"/take-over
+        // (and take-over would even fork a duplicate). See SessionRegistry's transcriptRecentlyWritten guard.
+        val originalMtime = runCatching { Files.getLastModifiedTime(file) }.getOrNull()
         val tmp = file.resolveSibling("${file.fileName}.pocket-tmp")
         return try {
             Files.newBufferedWriter(tmp).use { w ->
@@ -83,6 +88,7 @@ object TranscriptPatcher {
             }
             runCatching { Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------")) }
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+            originalMtime?.let { runCatching { Files.setLastModifiedTime(file, it) } } // rewrite must not read as fresh activity
             true
         } catch (_: Throwable) {
             false

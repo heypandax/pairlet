@@ -156,6 +156,20 @@ class TranscriptPatcherTest {
     }
 
     @Test
+    fun unhide_preserves_the_transcript_mtime_so_a_reaped_session_isnt_seen_as_live() {
+        // the rewrite is daemon bookkeeping — it must NOT bump mtime, else a just-reaped phone session reads as a
+        // live foreign one and the phone shows a bogus take-over (issue #33 follow-up / #18 A-1)
+        val f = tmpFile("sess-mtime.jsonl")
+        f.writeText("""{"type":"assistant","entrypoint":"sdk-cli","message":{"content":[{"type":"text","text":"ok"}]}}""")
+        val old = java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L) // a fixed whole-second past instant
+        Files.setLastModifiedTime(f, old)
+
+        assertTrue(TranscriptPatcher.unhide(f)) // it DID rewrite (sdk-cli -> cli)
+        assertTrue(f.readText().contains(""""entrypoint":"cli""""))
+        assertEquals(old.toMillis(), Files.getLastModifiedTime(f).toMillis()) // ...but the mtime is unchanged
+    }
+
+    @Test
     fun missing_file_is_a_quiet_noop() {
         val dir = Files.createTempDirectory("ccp-patch")
         assertFalse(TranscriptPatcher.unhide(dir.resolve("nope.jsonl")))
