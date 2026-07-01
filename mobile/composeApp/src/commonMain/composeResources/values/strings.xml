@@ -187,6 +187,7 @@
     <string name="text_size_section">TEXT SIZE</string>
     <string name="text_size_sample">Sample message text — 示例 123</string>
     <string name="new_path_open">New session in a folder</string>
+    <string name="new_path_open_row">Open another folder by path…</string>
     <string name="new_path_title">New session in a folder</string>
     <string name="new_path_sub">Type the absolute path to a folder on your computer — it doesn\'t need any prior history. (To create a brand-new folder, make it first from the in-chat terminal.)</string>
     <string name="new_path_start">Start session</string>

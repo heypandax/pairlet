@@ -437,6 +437,16 @@ private fun DirectoryScreen(repo: PocketRepository) {
             query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
+        // discoverable entry to open ANY folder by absolute path — the browser only shows folders that already
+        // have history, and the top-bar "+" reads as "new", so this spells out how to reach a fresh folder (#32)
+        Row(
+            Modifier.fillMaxWidth().clickable { showNewPath = true }.padding(horizontal = 16.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(Res.string.new_path_open_row), color = Tok.tx2, fontSize = 13.sp)
+        }
         // ── breadcrumb (tree, drilled below root) ──
         if (treeMode && base != root) {
             val segs = remember(base) { crumbs(base) }
@@ -512,7 +522,7 @@ private fun DirectoryScreen(repo: PocketRepository) {
         actionTarget?.let { ProjectActionsSheet(repo, it) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
-            parent = base.takeIf { treeMode && base != root },
+            parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
             onDismiss = { showNewPath = false },
         ) { p -> showNewPath = false; newPathTarget = p }
         // chosen a new path → reuse the standard mode/agent picker, then open the session there
