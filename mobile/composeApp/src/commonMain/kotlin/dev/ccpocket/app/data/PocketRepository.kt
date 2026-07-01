@@ -167,6 +167,8 @@ class PocketRepository(private val scope: CoroutineScope) {
     private var pairingInvalid = false      // relay AuthError -> needs re-pair, never auto-retry
     private var hadReadyThisSession = false // reached Ready at least once -> a later drop shows Reconnecting
     private var relayDeadlinePassed = false // grace elapsed without attaching -> RelayUnreachable
+    private var reconnectGraceJob: Job? = null // brief hold before showing the Reconnecting banner on a blip (#28)
+    private var reconnectGracePassed = false   // that hold elapsed -> the Reconnecting banner may show
 
     // ── push notifications: register the device's APNs/FCM token so the relay can wake it while offline ──
     private var pushToken: PushToken? = null
@@ -214,16 +216,17 @@ class PocketRepository(private val scope: CoroutineScope) {
         SecureStore.putString(K_PINNED, pinnedPaths.joinToString("\n"))
     }
 
-    /** Composer draft persisted per working directory: a half-typed message survives leaving the chat
-     *  (or backgrounding the app) and returns on reopening that project. Blank clears it; sending clears it. */
-    fun draftFor(wd: String?): String = wd?.let { SecureStore.getString(K_DRAFT_PREFIX + it) } ?: ""
+    /** Composer draft persisted per conversation (by convoId; a brand-new session falls back to its workdir):
+     *  a half-typed message survives leaving the chat or backgrounding and returns on reopening that
+     *  conversation — without bleeding into a sibling session of the same project (#29). Blank/sending clears it. */
+    fun draftFor(key: String?): String = key?.let { SecureStore.getString(K_DRAFT_PREFIX + it) } ?: ""
 
-    fun saveDraft(wd: String?, text: String) {
-        wd ?: return
-        if (text.isBlank()) SecureStore.remove(K_DRAFT_PREFIX + wd) else SecureStore.putString(K_DRAFT_PREFIX + wd, text)
+    fun saveDraft(key: String?, text: String) {
+        key ?: return
+        if (text.isBlank()) SecureStore.remove(K_DRAFT_PREFIX + key) else SecureStore.putString(K_DRAFT_PREFIX + key, text)
     }
 
-    fun clearDraft(wd: String?) { wd?.let { SecureStore.remove(K_DRAFT_PREFIX + it) } }
+    fun clearDraft(key: String?) { key?.let { SecureStore.remove(K_DRAFT_PREFIX + it) } }
 
     /** Current tree drill-down path (null = root). Hoisted here (not screen-local) so it survives opening a
      *  session and returning — DirectoryScreen leaves the composition on that navigation. Not persisted. */
@@ -380,6 +383,9 @@ class PocketRepository(private val scope: CoroutineScope) {
             pairingInvalid                                   -> ConnPhase.PairingInvalid
             ready                                            -> ConnPhase.Ready
             attachedThisSession && daemonOffline && useRelay -> ConnPhase.ComputerOffline
+            // brief grace on a drop from a healthy link: hold the Ready look so a quick re-attach doesn't flash
+            // the Reconnecting banner (#28 — every background→foreground otherwise blipped it)
+            hadReadyThisSession && !reconnectGracePassed     -> ConnPhase.Ready
             hadReadyThisSession                              -> ConnPhase.Reconnecting
             relayDeadlinePassed                              -> ConnPhase.RelayUnreachable
             else                                             -> ConnPhase.Connecting
@@ -388,6 +394,7 @@ class PocketRepository(private val scope: CoroutineScope) {
             phase.value = next
             Telemetry.track(TelEvent.ConnPhase, mapOf(TelKey.Phase to next.name, TelKey.Transport to transportName()))
         }
+        if (ready) { reconnectGraceJob?.cancel(); reconnectGraceJob = null; reconnectGracePassed = false } // truly back — reset for the next blip
         consumePendingOpenIfReady() // a push-tap target waits here until the link is actually Ready
     }
 
@@ -407,7 +414,7 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     private fun consumePendingOpenIfReady() {
         val t = pendingOpen ?: return
-        if (phase.value != ConnPhase.Ready) return
+        if (phase.value != ConnPhase.Ready || !attachedThisSession) return // real ready, not the grace-held Ready (#28)
         pendingOpen = null
         if (convoId.value != null && currentSessionId == t.sessionId) return // already in this session — don't churn it
         sessionsDir.value = null // drop any half-open session list so the chat is what shows
@@ -515,6 +522,20 @@ class PocketRepository(private val scope: CoroutineScope) {
         }
     }
 
+    /** Briefly hold the Ready look on a drop from a healthy link so a fast re-attach doesn't flash the
+     *  Reconnecting banner (#28). [restart] forces a fresh window (used on foreground return); otherwise it
+     *  arms once per reconnect episode, so a genuinely stuck reconnect still surfaces the banner after the window. */
+    private fun startReconnectGrace(restart: Boolean) {
+        if (!restart && (reconnectGracePassed || reconnectGraceJob?.isActive == true)) return
+        reconnectGracePassed = false
+        reconnectGraceJob?.cancel()
+        reconnectGraceJob = scope.launch {
+            delay(RECONNECT_BANNER_GRACE_MS)
+            reconnectGracePassed = true
+            recomputePhase()
+        }
+    }
+
     /** After [Attached], wait briefly for the first Directories. The relay sends no daemon-presence snapshot
      *  on attach, so a silent computer (offline / zombie daemon) would otherwise hang on the skeleton — escalate
      *  to ComputerOffline. A real Directories reply (handle()) cancels this and proves the computer is online. */
@@ -605,6 +626,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (err is RelayAuthException || pairingInvalid) { // expired/invalid pairing — re-pair, never auto-retry
             pairingInvalid = true; recomputePhase(); return
         }
+        if (hadReadyThisSession) startReconnectGrace(restart = false) // a blip holds Ready briefly before the banner (#28)
         status.value = StatusMsg(Res.string.status_conn_lost)
         recomputePhase() // hadReady -> Reconnecting (keep list); else stays Connecting until grace -> RelayUnreachable
         scheduleRetry()
@@ -627,6 +649,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (sessionActive.value && !connected.value) {
             retryJob?.cancel()
             retryAttempts = 0
+            if (hadReadyThisSession) startReconnectGrace(restart = true) // fresh Ready-hold on return so a quick reconnect shows no banner (#28)
             launchTransport(reconnect = true)
         }
     }
@@ -657,13 +680,13 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
-        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel()
-        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null
+        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
+        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
         connected.value = false
         phase.value = ConnPhase.Connecting
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
-        hadReadyThisSession = false; relayDeadlinePassed = false; directoriesLoaded.value = false
+        hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; directoriesLoaded.value = false
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         convoId.value = null
         sessionsDir.value = null
@@ -1412,6 +1435,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     private companion object {
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
+        const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
         const val LIST_WAIT_MS = 6_000L       // after Attached, wait this long for the list before "computer offline"
         const val CONNECT_TIMEOUT_MS = 12_000L // no Attached within this → treat the connect as wedged, force a retry
         const val MAX_IMAGES = 4
@@ -1432,7 +1456,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
-        const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<workdir>" → unsent composer text for that project
+        const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<convoId|workdir>" → unsent composer text for that conversation
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)

@@ -843,8 +843,9 @@ private fun SessionsScreen(repo: PocketRepository) {
 
 @Composable
 private fun ChatScreen(repo: PocketRepository) {
-    // restore the per-project composer draft (keyed by workdir); re-inits when the session/workdir changes
-    var input by remember(repo.workdir.value) { mutableStateOf(repo.draftFor(repo.workdir.value)) }
+    // restore the composer draft (keyed per conversation, workdir for a brand-new session); re-inits on switch (#29)
+    val draftKey = repo.convoId.value ?: repo.workdir.value
+    var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
@@ -864,7 +865,7 @@ private fun ChatScreen(repo: PocketRepository) {
     var landed by remember(repo.convoId.value) { mutableStateOf(false) }
     LaunchedEffect(repo.convoId.value) { delay(180); landed = true }
     // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
-    LaunchedEffect(input, repo.workdir.value) { delay(400); repo.saveDraft(repo.workdir.value, input) }
+    LaunchedEffect(input, draftKey) { delay(400); repo.saveDraft(draftKey, input) }
     LaunchedEffect(Unit) {
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
@@ -1018,7 +1019,7 @@ private fun ChatScreen(repo: PocketRepository) {
                                     RoundActionButton(
                                         onClick = {
                                             val t = input.trim()
-                                            if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = ""; repo.clearDraft(repo.workdir.value) }
+                                            if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = ""; repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
