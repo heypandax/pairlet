@@ -93,6 +93,47 @@ class TranscriptPatcherTest {
     }
 
     @Test
+    fun keeps_a_notification_whose_parent_is_a_system_record_so_resume_chain_stays_valid() {
+        // issue #24: after /compact the chain root is a `type:"system"` compact_boundary. If the first turn
+        // under it is a pure <task-notification>, dropping it would relink the surviving assistant straight
+        // onto the system record, and `claude --resume` then fails with 400 "System message must be at the
+        // beginning". So that notification is KEPT — claude's own well-formed chain stays intact — while the
+        // entrypoint is still rewritten so the session shows up in the desktop picker.
+        val f = tmpFile("sess-sysroot.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"system","uuid":"s","parentUuid":null,"subtype":"compact_boundary"}""",
+                """{"type":"user","uuid":"n","parentUuid":"s","entrypoint":"sdk-cli","message":{"role":"user","content":"<task-notification>\n</task-notification>"}}""",
+                """{"type":"assistant","uuid":"b","parentUuid":"n","entrypoint":"sdk-cli","message":{"content":[{"type":"text","text":"ok"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        assertTrue(TranscriptPatcher.unhide(f)) // still rewrites: the sdk-cli entrypoint must become cli
+        val patched = f.readText().trimEnd().lines()
+        assertEquals(3, patched.size) // the notification is KEPT (not dropped) to protect the resume chain
+        assertTrue(patched.any { it.contains("task-notification") })
+        assertTrue(patched.none { it.contains("sdk-cli") }) // entrypoints rewritten to cli
+        // the assistant is NOT relinked onto the system record — its parent is still the kept notification
+        assertTrue(patched[2].contains(""""uuid":"b""""))
+        assertTrue(patched[2].contains(""""parentUuid":"n""""))
+    }
+
+    @Test
+    fun system_rooted_notification_with_no_sdk_tag_is_a_quiet_noop() {
+        // same dangerous shape but already-cli: nothing is safe to drop, so the file must be left untouched
+        val f = tmpFile("sess-sysroot-cli.jsonl")
+        val lines = listOf(
+            """{"type":"system","uuid":"s","parentUuid":null,"subtype":"compact_boundary"}""",
+            """{"type":"user","uuid":"n","parentUuid":"s","message":{"role":"user","content":"<task-notification>\n</task-notification>"}}""",
+            """{"type":"assistant","uuid":"b","parentUuid":"n","message":{"content":[{"type":"text","text":"ok"}]}}""",
+        )
+        f.writeText(lines.joinToString("\n"))
+
+        assertFalse(TranscriptPatcher.unhide(f)) // nothing droppable, no sdk tag -> no rewrite
+        assertEquals(lines, f.readText().trimEnd().lines())
+    }
+
+    @Test
     fun keeps_a_turn_with_real_text_after_the_notification() {
         val f = tmpFile("sess-mixed.jsonl")
         val line = """{"type":"user","uuid":"a","parentUuid":null,"message":{"role":"user","content":"<task-notification>\n</task-notification>\nplease deploy"}}"""

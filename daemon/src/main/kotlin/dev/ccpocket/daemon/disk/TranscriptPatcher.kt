@@ -32,7 +32,7 @@ object TranscriptPatcher {
     private const val QUEUE_OP_TAG = "\"queue-operation\"" // cheap substring marker for the noise prefilter
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    private class Row(val raw: String, val uuid: String?, val parentUuid: String?, val noise: Boolean)
+    private class Row(val raw: String, val uuid: String?, val parentUuid: String?, val type: String?, val noise: Boolean)
 
     /** Rewrite [file] in place. True if anything changed; never throws. */
     fun unhide(file: Path): Boolean {
@@ -46,18 +46,33 @@ object TranscriptPatcher {
         if (!hasSdk && !maybeNoise) return false
 
         val rows = lines.map(::classify) // parse only once we know something might actually change
-        if (!hasSdk && rows.none { it.noise }) return false // markers were false positives (e.g. tag quoted in text)
 
-        // uuid -> parentUuid for the whole file, and the set of dropped (uuid-bearing) turns to re-link past
+        // uuid -> parentUuid and uuid -> type for the whole file
         val parentOf = HashMap<String, String?>()
-        rows.forEach { if (it.uuid != null) parentOf[it.uuid] = it.parentUuid }
-        val dropped = rows.asSequence().filter { it.noise && it.uuid != null }.mapNotNull { it.uuid }.toHashSet()
+        val typeOf = HashMap<String, String?>()
+        rows.forEach { if (it.uuid != null) { parentOf[it.uuid] = it.parentUuid; typeOf[it.uuid] = it.type } }
+
+        // The set of dropped (uuid-bearing) noise turns to re-link past — EXCEPT a noise turn whose parent is
+        // a `type:"system"` record (a /compact compact_boundary, or a pre-prompt local_command). Dropping that
+        // turn would relink the surviving child straight onto the system record; `claude --resume` then can't
+        // rebuild the API prompt and fails the whole turn with 400 "System message must be at the beginning"
+        // (issue #24). Keeping it leaves claude's own well-formed chain (system → user → assistant) intact —
+        // the only cost is one stray task-notification bubble on a desktop resume, in that rare shape.
+        val dropped = rows.asSequence()
+            .filter { it.noise && it.uuid != null }
+            .filterNot { it.parentUuid != null && typeOf[it.parentUuid] == "system" }
+            .mapNotNull { it.uuid }
+            .toHashSet()
+
+        if (!hasSdk && dropped.isEmpty()) return false // nothing left to rewrite (false positives, or all kept)
 
         val tmp = file.resolveSibling("${file.fileName}.pocket-tmp")
         return try {
             Files.newBufferedWriter(tmp).use { w ->
                 for (row in rows) {
-                    if (row.noise) continue
+                    // drop noise, but keep a noise turn rescued from `dropped` by the system-parent guard
+                    // (uuid-less noise like queue-operation is always dropped — it can't be a relink target)
+                    if (row.noise && (row.uuid == null || row.uuid in dropped)) continue
                     var out = row.raw
                     if (row.parentUuid != null && row.parentUuid in dropped) {
                         out = relinkParent(out, row.parentUuid, resolveSurvivor(row.parentUuid, dropped, parentOf))
@@ -93,14 +108,14 @@ object TranscriptPatcher {
 
     private fun classify(line: String): Row {
         val obj = runCatching { json.parseToJsonElement(line) as? JsonObject }.getOrNull()
-            ?: return Row(line, null, null, noise = false)
+            ?: return Row(line, null, null, null, noise = false)
         val type = str(obj["type"])
         val noise = when (type) {
             "queue-operation" -> true
             "user" -> TranscriptNoise.isPureTaskNotification(userText(obj))
             else -> false
         }
-        return Row(line, str(obj["uuid"]), str(obj["parentUuid"]), noise)
+        return Row(line, str(obj["uuid"]), str(obj["parentUuid"]), type, noise)
     }
 
     private fun userText(obj: JsonObject): String? {
