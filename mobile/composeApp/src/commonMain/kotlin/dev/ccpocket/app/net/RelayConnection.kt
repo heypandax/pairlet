@@ -35,9 +35,12 @@ class RelayConnection {
         client.webSocket(urlString = url) {
             val writer = launch {
                 for (f in outbox) {
-                    outgoing.send(WsFrame.Text(PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))))
+                    sendOrDie { outgoing.send(WsFrame.Text(PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f)))) }
                 }
             }
+            // heartbeat (see LinkHealth.launchHeartbeat): idle-link WS ping under sendOrDie, so a dead link
+            // (Wi-Fi↔cellular switch, NAT drop) is caught by the write timeout and reconnected instead of hanging.
+            val pinger = launchHeartbeat()
             try {
                 for (frame in incoming) {
                     if (frame is WsFrame.Text) {
@@ -46,7 +49,7 @@ class RelayConnection {
                     }
                 }
             } finally {
-                writer.cancel()
+                writer.cancel(); pinger.cancel()
             }
         }
     }

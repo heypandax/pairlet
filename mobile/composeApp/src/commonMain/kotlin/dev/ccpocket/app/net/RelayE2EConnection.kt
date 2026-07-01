@@ -65,11 +65,15 @@ class RelayE2EConnection {
             val writer = launch {
                 for (f in outbox) {
                     val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
-                    outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray()))))
+                    sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                 }
             }
             // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
-            val ctrlWriter = launch { for (c in controlOutbox) outgoing.send(WsFrame.Text(control(c))) }
+            val ctrlWriter = launch { for (c in controlOutbox) sendOrDie { outgoing.send(WsFrame.Text(control(c))) } }
+            // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
+            // (network switch / NAT / relay idle-drop) trips the write timeout and reconnects. Ktor's own ping
+            // can't catch this — it rides the same outgoing path and wedges too. The relay's ktor auto-pongs it.
+            val pinger = launchHeartbeat()
             try {
                 for (frame in incoming) when {
                     frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
@@ -82,7 +86,7 @@ class RelayE2EConnection {
                     else -> {}
                 }
             } finally {
-                writer.cancel(); ctrlWriter.cancel()
+                writer.cancel(); ctrlWriter.cancel(); pinger.cancel()
             }
         }
     }
