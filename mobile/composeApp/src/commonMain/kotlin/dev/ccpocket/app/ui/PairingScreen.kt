@@ -64,6 +64,8 @@ import qrscanner.QrScanner
 /** "Connect your computer" — pair by 6-digit code (or scan/paste a link). Matches the design mock. */
 @Composable
 fun PairingScreen(repo: PocketRepository) {
+    var showOnboarding by remember { mutableStateOf(false) }
+    if (showOnboarding) { OnboardingScreen(onBack = { showOnboarding = false }, onPairNow = { showOnboarding = false }); return }
     var code by remember { mutableStateOf("") }
     var showPaste by remember { mutableStateOf(false) }
     var link by remember { mutableStateOf("") }
@@ -111,6 +113,7 @@ fun PairingScreen(repo: PocketRepository) {
             Text(" " + stringResource(Res.string.run_code_suffix), color = Tok.tx2, fontSize = 13.sp)
         }
 
+        TextButton({ showOnboarding = true }) { Text(stringResource(Res.string.ob_open), color = Tok.muted, fontSize = 12.sp) }
         TextButton({ showPaste = !showPaste }) { Text(stringResource(if (showPaste) Res.string.hide else Res.string.cant_scan_paste_link), color = Tok.muted, fontSize = 12.sp) }
         if (showPaste) {
             Spacer(Modifier.height(14.dp))
