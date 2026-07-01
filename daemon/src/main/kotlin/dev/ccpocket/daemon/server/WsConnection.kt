@@ -70,7 +70,9 @@ class WsConnection(
             outbox.close()
             writer.cancel()
             withContext(NonCancellable) {
-                owned.toList().forEach { runCatching { registry.close(it) } }
+                // grace-close, not immediate: a flaky LAN socket / backgrounded phone can reconnect and reattach
+                // the still-warm session instead of paying a kill + transcript rewrite + cold resume every blip.
+                owned.toList().forEach { runCatching { registry.scheduleClose(it) } }
             }
         }
     }
