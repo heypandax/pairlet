@@ -118,6 +118,14 @@ data class DirectoryEntry(
     val gitBranch: String? = null,
 )
 
+/** One day in the usage trend (issue #26): a short [label] (e.g. "Mon") and its total tokens. */
+@Serializable
+data class UsageDay(val label: String, val tokens: Long)
+
+/** One model's slice of usage: the [model] id, its [tokens], and which [agent] it belongs to (for the color). */
+@Serializable
+data class UsageModel(val model: String, val tokens: Long, val agent: AgentKind = AgentKind.CLAUDE)
+
 /** What kind of background work a [BackgroundJob] is. */
 @Serializable
 enum class JobKind {

@@ -49,7 +49,9 @@ import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
+import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Sessions
+import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
@@ -878,6 +880,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 recomputePhase()
             }
             is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items) }
+            is Usage -> { usage.value = f; usageLoading.value = false }
             is SessionLive -> {
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
@@ -988,6 +991,16 @@ class PocketRepository(private val scope: CoroutineScope) {
 
     /** Keep the open-project list fresh without the pull-to-refresh spinner (the daemon list is pull-only). */
     fun refreshDirectoriesSilently() = scope.launch { runCatching { send(ListDirectories()) } }
+
+    /** Token-usage dashboard (issue #26): the latest daemon-aggregated snapshot + a fetch-in-flight flag. */
+    val usage = mutableStateOf<Usage?>(null)
+    val usageLoading = mutableStateOf(false)
+
+    /** Ask the daemon to aggregate usage over the last [days] local days; the reply lands in [usage]. */
+    fun fetchUsage(days: Int = 7) {
+        usageLoading.value = true
+        scope.launch { send(FetchUsage(days)) }
+    }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from

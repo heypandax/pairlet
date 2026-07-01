@@ -21,6 +21,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +54,8 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
  */
 @Composable
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
+    var showUsage by remember { mutableStateOf(false) }
+    if (showUsage) { UsageScreen(repo, onBack = { showUsage = false }); return } // full-screen usage dashboard (#26)
     // back closes Settings — register a handler so it doesn't fall through to the app-level navigation
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
@@ -68,6 +74,15 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
             // Paired computers are NOT managed here — switching/adding happens on the disconnected picker
             // (ConnectScreen) reached via Exit below. Keeps Settings to per-session preferences.
 
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .clickable { showUsage = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(Res.string.settings_usage), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                Text("›", color = Tok.muted, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(8.dp))
             SectionLabel(stringResource(Res.string.notifications_section))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
                 ToggleRow(

@@ -17,6 +17,11 @@ data class ListDirectories(val root: String? = null) : ToDaemon
 @SerialName("pocket/sessions.list")
 data class ListSessions(val workdir: String) : ToDaemon
 
+/** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
+@Serializable
+@SerialName("pocket/usage.fetch")
+data class FetchUsage(val days: Int = 7) : ToDaemon
+
 /** Open a session: resume (resumeId != null) or start new (resumeId == null). */
 @Serializable
 @SerialName("pocket/session.open")
@@ -119,6 +124,22 @@ data class Directories(val entries: List<DirectoryEntry>, val root: String? = nu
 @Serializable
 @SerialName("pocket/sessions")
 data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPhone
+
+/**
+ * Aggregated token usage (issue #26). [tokensToday]/[requestsToday]/[cacheHitPct]/[costUsdToday] are for the
+ * current local day; [days] is the per-day trend (oldest→newest, last element = today); [models] is the by-model
+ * breakdown (desc by tokens). Cost comes from the transcript's own costUSD (null when none is recorded).
+ */
+@Serializable
+@SerialName("pocket/usage")
+data class Usage(
+    val days: List<UsageDay> = emptyList(),
+    val models: List<UsageModel> = emptyList(),
+    val tokensToday: Long = 0,
+    val requestsToday: Long = 0,
+    val cacheHitPct: Int? = null,
+    val costUsdToday: Double? = null,
+) : ToPhone
 
 /**
  * The conversation is live. sessionId is backfilled once claude reports system.init.

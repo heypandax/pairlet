@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
+import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
@@ -11,6 +12,7 @@ import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Directories
+import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListSessions
@@ -45,6 +47,9 @@ class RequestRouter(
                     .map { if (it.sessionId in busy) it.copy(busy = true) else it }
                 sink.emit(Sessions(frame.workdir, items))
             }
+
+            // heavy transcript scan → off the inbound pump so it can't wedge the socket
+            is FetchUsage -> scope.launch { sink.emit(UsageService.aggregate(frame.days)) }
 
             is OpenSession -> {
                 // a new project: create the named folder if it doesn't exist yet (under an existing writable parent)
