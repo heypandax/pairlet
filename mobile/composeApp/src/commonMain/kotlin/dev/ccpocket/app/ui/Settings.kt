@@ -11,7 +11,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Switch
@@ -117,6 +120,37 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     }
                 }
             }
+
+            SectionLabel(stringResource(Res.string.af_show_from))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val afOpts = listOf(
+                    Triple("both", stringResource(Res.string.af_both), null as androidx.compose.ui.graphics.Color?),
+                    Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
+                    Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
+                )
+                afOpts.forEach { (key, label, dot) ->
+                    val sel = repo.agentFilter.value == key
+                    Box(
+                        Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                            .then(if (sel) Modifier.background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)) else Modifier)
+                            .clickable { repo.setAgentFilter(key) }.padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            dot?.let {
+                                Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(it))
+                                Spacer(Modifier.width(5.dp))
+                            }
+                            Text(label, color = if (sel) Tok.tx else Tok.muted, fontSize = 12.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                        }
+                    }
+                }
+            }
+            Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 
             SectionLabel(stringResource(Res.string.text_size_section))
             Column(

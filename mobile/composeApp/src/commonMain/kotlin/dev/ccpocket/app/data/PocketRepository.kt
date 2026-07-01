@@ -193,6 +193,10 @@ class PocketRepository(private val scope: CoroutineScope) {
         SecureStore.getString(K_DEFAULT_AGENT)?.let { s -> AgentKind.entries.firstOrNull { it.name == s } } ?: AgentKind.CLAUDE,
     )
 
+    /** Session-list agent filter: "both" | "claude" | "codex" (persisted). Hides the other agent's sessions
+     *  from the Sessions list; each row keeps its own identity color (issue #31). */
+    val agentFilter = mutableStateOf(SecureStore.getString(K_AGENT_FILTER)?.takeIf { it.isNotEmpty() } ?: "both")
+
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
     val treeView = mutableStateOf(SecureStore.getString(K_VIEW_MODE) != "flat")
 
@@ -499,6 +503,13 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (a == defaultAgent.value) return
         defaultAgent.value = a
         SecureStore.putString(K_DEFAULT_AGENT, a.name)
+    }
+
+    /** Settings: persist the session-list agent filter ("both" | "claude" | "codex"). */
+    fun setAgentFilter(v: String) {
+        if (v == agentFilter.value) return
+        agentFilter.value = v
+        SecureStore.putString(K_AGENT_FILTER, v)
     }
 
     /** Settings: persist the chat text scale (clamped to the slider range). Applies live to every message. */
@@ -1454,6 +1465,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
+        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<convoId|workdir>" → unsent composer text for that conversation

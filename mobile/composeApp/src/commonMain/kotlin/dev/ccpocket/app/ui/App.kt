@@ -775,6 +775,25 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
     }
 }
 
+/** Removable filter chip pinned atop the Sessions list when a single agent is selected (issue #31). */
+@Composable
+private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
+    val color = if (filter == "codex") Tok.codex else Tok.accent
+    val label = stringResource(if (filter == "codex") Res.string.af_codex_only else Res.string.af_claude_only)
+    Row(
+        Modifier.clip(RoundedCornerShape(999.dp)).background(color.copy(alpha = 0.12f))
+            .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
+            .clickable(onClick = onClear).padding(start = 11.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(color))
+        Spacer(Modifier.width(7.dp))
+        Text(label, color = color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.width(6.dp))
+        Text("✕", color = color, fontSize = 12.sp)
+    }
+}
+
 @Composable
 private fun SessionsScreen(repo: PocketRepository) {
     val dir = repo.sessionsDir.value ?: return
@@ -797,7 +816,16 @@ private fun SessionsScreen(repo: PocketRepository) {
                     Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
             }
+            val af = repo.agentFilter.value
+            val filtered = repo.sessions.filter {
+                when (af) {
+                    "claude" -> (it.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+                    "codex" -> it.agent == AgentKind.CODEX
+                    else -> true
+                }
+            }
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (af != "both") item { AgentFilterChip(af) { repo.setAgentFilter("both") } }
                 item {
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.16f))
@@ -811,7 +839,7 @@ private fun SessionsScreen(repo: PocketRepository) {
                         )
                     }
                 }
-                items(repo.sessions) { s ->
+                items(filtered) { s ->
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                             .clickable { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) }.padding(14.dp),

@@ -207,6 +207,11 @@
     <string name="model_switch_hint">切换会重启会话——历史会保留。</string>
     <string name="model_switching">正在重启会话……历史保留。</string>
     <string name="model_not_installed">未安装</string>
+    <string name="af_show_from">显示哪个 agent 的会话</string>
+    <string name="af_both">全部</string>
+    <string name="af_claude_only">仅 Claude</string>
+    <string name="af_codex_only">仅 Codex</string>
+    <string name="af_hint">选择列表里显示哪个 agent 的会话。Claude 与 Codex 仍以各自颜色标注。</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>
