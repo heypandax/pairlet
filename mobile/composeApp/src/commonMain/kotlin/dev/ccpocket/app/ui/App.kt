@@ -115,6 +115,7 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.openAppSettings
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
+import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.SlashCommand
@@ -371,7 +372,7 @@ private fun DirectoryScreen(repo: PocketRepository) {
     val browse = repo.browsePath.value
     // a browse path the daemon no longer has (dirs changed) falls back to root
     val base = remember(dirsSnapshot, browse, root) {
-        browse?.takeIf { b -> dirsSnapshot.any { it.path == b || it.path.startsWith("$b/") } } ?: root
+        browse?.takeIf { b -> dirsSnapshot.any { it.path == b || it.path.startsWith(b + sepOf(b)) } } ?: root // sep-aware: a Windows daemon's paths use '\' (issue #19/#22 — tree drill-in)
     }
     val treeMode = tree && query.isBlank() // filtering or flat mode both render the flat grouped list
 
@@ -441,8 +442,13 @@ private fun DirectoryScreen(repo: PocketRepository) {
             val segs = remember(base) { crumbs(base) }
             Breadcrumb(
                 segs,
-                onUp = { repo.browsePath.value = base.substringBeforeLast('/').takeIf { it.length > root.length } },
-                onSegment = { i -> repo.browsePath.value = if (i <= 0) null else (root + "/" + segs.drop(1).take(i).joinToString("/")).takeIf { it.length > root.length } },
+                onUp = { repo.browsePath.value = base.substringBeforeLast(sepOf(base)).takeIf { it.length > root.length } },
+                onSegment = { i ->
+                    repo.browsePath.value = if (i <= 0) null else {
+                        val s = sepOf(root)
+                        (root + s + segs.drop(1).take(i).joinToString("$s")).takeIf { it.length > root.length }
+                    }
+                },
             )
         }
         PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxSize()) {
@@ -1171,7 +1177,7 @@ private fun WorkingRow() {
 @Composable
 private fun ContextStatusline(used: Long?, window: Long?, modifier: Modifier = Modifier) {
     used ?: return // no turn yet / older daemon — nothing to show
-    val cap = window ?: 200_000L
+    val cap = window ?: DEFAULT_CONTEXT_WINDOW
     val frac = (used.toFloat() / cap).coerceIn(0f, 1f)
     Text(
         "${stringResource(Res.string.label_context)} ${(frac * 100).toInt()}%",

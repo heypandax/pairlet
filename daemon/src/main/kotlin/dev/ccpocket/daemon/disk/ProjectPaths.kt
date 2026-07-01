@@ -48,11 +48,27 @@ object ProjectPaths {
         return findByRecordedCwd(root, workdir) ?: byKey
     }
 
-    /** The project dir whose newest transcript records exactly [workdir] as its `cwd`, or null. */
+    private val onWindows = System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)
+
+    /**
+     * Normalize a cwd for cross-OS equality before matching: unify back/forward slashes and drop a trailing
+     * separator; on Windows also lowercase (its filesystem is case-insensitive, and the resume path hands us a
+     * `toRealPath()`-canonicalized workdir that can differ from Claude's recorded cwd in case / slash direction
+     * / trailing separator — notably for UNC `\\host\share` paths). A no-op on ordinary Unix paths, so the fast
+     * path and Unix behavior are unchanged.
+     */
+    private fun normCwd(p: String): String {
+        var s = p.replace('\\', '/')
+        if (s.length > 1 && s.endsWith('/')) s = s.dropLast(1)
+        return if (onWindows) s.lowercase() else s
+    }
+
+    /** The project dir whose newest transcript records [workdir] as its `cwd` (OS-normalized match), or null. */
     private fun findByRecordedCwd(root: Path, workdir: String): Path? {
         if (!root.isDirectory()) return null
+        val target = normCwd(workdir)
         return Files.newDirectoryStream(root).use { stream ->
-            stream.firstOrNull { dir -> dir.isDirectory() && recordedCwd(dir) == workdir }
+            stream.firstOrNull { dir -> dir.isDirectory() && recordedCwd(dir)?.let(::normCwd) == target }
         }
     }
 

@@ -66,6 +66,24 @@ class ProjectPathsTest {
     }
 
     @Test
+    fun dirForUnder_matches_recorded_cwd_across_slash_and_trailing_separator() {
+        // issue #19/#22 Windows: the resume path can ask with a different slash direction / trailing separator
+        // (and, on Windows, casing) than claude recorded — e.g. after a toRealPath() canonicalization, or for
+        // a UNC path. The fallback normalizes both sides before matching so the transcript is still found.
+        val root = Files.createTempDirectory("ccp-proj")
+        try {
+            val realDir = root.resolve("windows-encoded-dir").also { it.createDirectories() }
+            realDir.resolve("s.jsonl").writeText(
+                """{"type":"user","cwd":"C:\\Users\\x\\proj","message":{"role":"user","content":"hi"}}""" + "\n",
+            )
+            // asked with forward slashes AND a trailing separator — the divergent form that missed before
+            assertEquals(realDir, ProjectPaths.dirForUnder(root, "C:/Users/x/proj/"))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun dirForUnder_returns_dirkey_path_when_nothing_matches() {
         // brand-new session: no dir exists yet → keep the dirKey path so claude creates/uses it as before
         val root = Files.createTempDirectory("ccp-proj")
