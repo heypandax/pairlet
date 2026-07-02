@@ -76,8 +76,15 @@ private fun money(v: Double): String {
 @Composable
 fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
-    var days by remember { mutableStateOf(7) }
-    LaunchedEffect(days) { repo.fetchUsage(days) }
+    var days by remember { mutableStateOf(1) } // default to "Today"
+    var timedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(days) {
+        timedOut = false
+        repo.fetchUsage(days)
+        kotlinx.coroutines.delay(10_000)
+        // no reply after the deadline → most likely an older daemon that can't aggregate usage yet (or a huge scan)
+        if (repo.usage.value == null) timedOut = true
+    }
 
     val u = repo.usage.value
     val connected = repo.phase.value == ConnPhase.Ready
@@ -85,7 +92,7 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         // header
         Column(Modifier.fillMaxWidth().background(Tok.base)) {
-            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 6.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Text(stringResource(Res.string.usage_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
@@ -105,7 +112,7 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
         when {
             u != null && (u.tokensToday > 0 || u.models.isNotEmpty() || u.days.any { it.tokens > 0 }) -> Populated(u)
             u != null -> Empty()
-            !connected -> Offline()
+            !connected || timedOut -> Offline()
             else -> Loading()
         }
     }
