@@ -86,4 +86,35 @@ class TranscriptScannerTest {
         f.writeText("""{"type":"user","message":{"role":"user","content":"hi"}}""")
         assertNull(TranscriptScanner.lastModel(f))
     }
+
+    @Test
+    fun last_model_skips_sidechain_and_synthetic_records() {
+        // Task-subagent turns land in the same .jsonl with isSidechain:true and may run a different model;
+        // API-error placeholders carry the literal "<synthetic>". Neither must win the backfill.
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-sc.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"main"}]}}""",
+                """{"type":"assistant","isSidechain":true,"message":{"model":"claude-haiku-4-5","content":[{"type":"text","text":"subagent"}]}}""",
+                """{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"api error"}]}}""",
+            ).joinToString("\n"),
+        )
+        assertEquals("claude-opus-4-8", TranscriptScanner.lastModel(f))
+    }
+
+    @Test
+    fun last_context_tokens_skips_sidechain_records() {
+        // the subagent's usage describes the SUBAGENT's context window — seeding the main thread's
+        // occupancy from it would show a bogus statusline on resume
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-su.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"model":"m","usage":{"input_tokens":1000,"output_tokens":10,"cache_read_input_tokens":500},"content":[]}}""",
+                """{"type":"assistant","isSidechain":true,"message":{"model":"m","usage":{"input_tokens":99999,"output_tokens":10},"content":[]}}""",
+            ).joinToString("\n"),
+        )
+        assertEquals(1500L, TranscriptScanner.lastContextTokens(f))
+    }
 }

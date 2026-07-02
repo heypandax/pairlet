@@ -110,6 +110,19 @@ class Conversation(
     @Volatile
     private var openedResumeId: String? = null
 
+    // whether open() decided to --fork-session (the desktop was actively writing the resumed transcript).
+    // A pre-first-turn relaunch must REUSE this decision: sessionId is still null then, and the old
+    // `resumeId != sessionId` heuristic read that as "foreign id → fork", minting a duplicate session
+    // from a mere mode switch before the first message (issue #18/#21 residual).
+    @Volatile
+    private var openedWithFork = false
+
+    // model read back from the resumed transcript, for DISPLAY only (header + context window before the
+    // first init lands). Never baked into an AgentSpec: pinning a historical — possibly retired — model
+    // onto a relaunch or /clear would silently override the user's configured default (issue #27 residual).
+    @Volatile
+    private var backfilledModel: String? = null
+
     // set when a mode switch relaunches the process: re-announce SessionLive on the next init so the phone clears "switching"
     @Volatile
     private var reemitLive = false
@@ -119,14 +132,17 @@ class Conversation(
     @Volatile
     private var resumeContextUsed: Long? = null
 
+    /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
+    private fun displayModel(): String? = model ?: backfilledModel
+
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
         SessionLive(
-            convoId, workdir.toString(), sid, mode = mode, executing = executing, model = model, effort = effort,
+            convoId, workdir.toString(), sid, mode = mode, executing = executing, model = displayModel(), effort = effort,
             // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
             // (issue #20) instead of sniffing the id itself. Claude-only (Codex windows differ); null model → let
             // the phone fall back. Phones that predate the field simply ignore it.
-            contextWindow = if (backend.kind == AgentKind.CLAUDE) model?.let(::contextWindowFor) else null,
+            contextWindow = if (backend.kind == AgentKind.CLAUDE) displayModel()?.let(::contextWindowFor) else null,
             contextUsed = resumeContextUsed, agent = backend.kind,
         )
 
@@ -137,6 +153,7 @@ class Conversation(
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
+        this.openedWithFork = fork
         // Resume in-place by default — appending to the resumed transcript. The registry already ruled out the
         // dangerous concurrent-writer cases before we get here: a live daemon session reattaches, and an
         // externally-active Claude transcript routes to a read-only ObserveSession. Forking unconditionally (the
@@ -156,7 +173,7 @@ class Conversation(
             // usage statusline on open — before the first new turn's init lands (a headless claude is silent
             // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
             if (model == null && resumeId != null) {
-                runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { this@Conversation.model = it }
+                runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { backfilledModel = it }
             }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             sink.emit(live(resumeId))
@@ -199,12 +216,15 @@ class Conversation(
      * live `model`/`mode`/`effort` fields. Used by the Claude path (which bakes flags at launch); Codex applies
      * settings to the next turn and skips relaunch. No pendingResumeId: a resume relaunch must not re-replay history.
      *
-     * Fork only when [resumeId] is NOT our own materialized [sessionId] (Claude take-over case; see [open]).
+     * Fork decision: pre-first-turn ([sessionId] still null) reuse open()'s call — the desktop's liveness
+     * hasn't changed just because the phone flipped a setting; the old `resumeId != sessionId` heuristic
+     * forked a duplicate session here. Post-init, fork only for a genuinely foreign id (never today's callers).
      */
     private suspend fun relaunch(resumeId: String? = sessionId) {
         stopProcess()
+        val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
-            AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = resumeId != sessionId),
+            AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = fork),
         )
     }
 
@@ -234,13 +254,17 @@ class Conversation(
     /** Switch the model. Claude relaunches under --model; Codex applies it to the next turn. */
     suspend fun switchModel(newModel: String?) {
         model = newModel
-        if (backend.applySettings(mode = null, model = newModel, effort = null)) relaunch() else sink.emit(live(sessionId))
+        backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
+        // pre-first-turn fall back to the opened resumeId, like switchMode — relaunch(sessionId=null)
+        // would drop --resume entirely and orphan the resumed session's history
+        if (backend.applySettings(mode = null, model = newModel, effort = null)) relaunch(sessionId ?: openedResumeId) else sink.emit(live(sessionId))
     }
 
     /** Switch reasoning effort. Claude relaunches under --effort; Codex applies it to the next turn. */
     suspend fun switchEffort(newEffort: String?) {
         effort = newEffort
-        if (backend.applySettings(mode = null, model = null, effort = newEffort)) relaunch() else sink.emit(live(sessionId))
+        // same pre-first-turn anchor as switchModel/switchMode
+        if (backend.applySettings(mode = null, model = null, effort = newEffort)) relaunch(sessionId ?: openedResumeId) else sink.emit(live(sessionId))
     }
 
     fun clearAllowRule(rule: String?) {
@@ -268,7 +292,7 @@ class Conversation(
                     is AgentEvent.SessionInit -> {
                         val firstTime = sessionId == null
                         ev.sessionId?.let { sessionId = it }
-                        ev.model?.let { model = it } // the agent's resolved model (real name even when opened with model=null)
+                        ev.model?.let { model = it; backfilledModel = null } // the agent's resolved model beats the transcript guess
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")
@@ -377,7 +401,7 @@ class Conversation(
     private suspend fun handleModelCommand(text: String) {
         val arg = text.removePrefix("/model").trim()
         if (arg.isEmpty()) {
-            reply("Current model: ${model ?: "default"}.\nUsage: /model <name> — e.g. /model opus, /model sonnet, /model haiku (or a full model id).")
+            reply("Current model: ${displayModel() ?: "default"}.\nUsage: /model <name> — e.g. /model opus, /model sonnet, /model haiku (or a full model id).")
             return
         }
         switchModel(arg)
@@ -408,6 +432,8 @@ class Conversation(
         stopProcess() // also clears + re-emits background jobs (the killed tree took its bg shells with it)
         sessionId = null
         openedResumeId = null // brand-new session — no resume lineage left to preserve
+        openedWithFork = false
+        backfilledModel = null
         launchProcess(AgentSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
@@ -439,6 +465,8 @@ class Conversation(
         workdir = newWorkdir
         sessionId = null
         openedResumeId = null // fresh session in the new cwd — no resume lineage left to preserve
+        openedWithFork = false
+        backfilledModel = null
         launchProcess(AgentSpec(workdir, resumeId = null, model = null, mode = mode, effort = effort))
         emitCommands() // project commands differ per workdir
     }

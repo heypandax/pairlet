@@ -94,6 +94,7 @@ object TranscriptScanner {
                 if (line.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
                 if (obj.str("type") != "assistant") continue
+                if (obj.bool("isSidechain") == true) continue // Task-subagent turns share the file; their usage is the SUBAGENT's window, not this session's
                 val usage = (obj["message"] as? JsonObject)?.get("usage") as? JsonObject ?: continue
                 // build the wire's TokenUsage so occupancy comes from the one shared accessor, not a re-sum
                 val total = TokenUsage(
@@ -110,7 +111,8 @@ object TranscriptScanner {
 
     /** The model id of the LAST assistant turn in [file] (`message.model`), or null if none/absent. Lets a cold
      *  resume announce the session's real model (and derive its context window) before the first new turn's init
-     *  lands — a headless claude is silent until then (issue #27). */
+     *  lands — a headless claude is silent until then (issue #27). Skips Task-subagent turns (isSidechain — they
+     *  share the file but ran the SUBAGENT's model) and `<synthetic>` records (API-error/notice placeholders). */
     fun lastModel(file: Path): String? {
         if (!file.exists()) return null
         var last: String? = null
@@ -120,7 +122,10 @@ object TranscriptScanner {
                 if (line.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
                 if (obj.str("type") != "assistant") continue
-                (obj["message"] as? JsonObject)?.str("model")?.takeIf { it.isNotBlank() }?.let { last = it }
+                if (obj.bool("isSidechain") == true) continue
+                (obj["message"] as? JsonObject)?.str("model")
+                    ?.takeIf { it.isNotBlank() && it != "<synthetic>" }
+                    ?.let { last = it }
             }
         }
         return last
@@ -154,4 +159,5 @@ object TranscriptScanner {
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.long(key: String): Long? = (this[key] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+    private fun JsonObject.bool(key: String): Boolean? = (this[key] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
 }
