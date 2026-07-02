@@ -43,42 +43,42 @@
 
 > 注：记忆中「networkChangeLoop + 重建 client（编译过未发版）」与代码不符——仓库全分支 grep 无此实现；手机端实际落地的是 sendOrDie 方案（515ced9）。记忆已修正。
 
-### P2 LAN 侧稳定（#24 评审新发现）
+### ~~P2 LAN 侧稳定~~ ✅ 已修（5e40d34，2026-07-02）
 
-9. **scheduleClose 无归属校验**：`daemon/.../session/SessionRegistry.kt:159` + `WsConnection.kt:75`。僵尸旧 socket 迟到的 `finally` 会对**已被新连接接管**的 convoId 排 30s 关闭 → 活会话被杀。加 sink identity / generation 校验。
-10. **LAN 服务端无僵尸检测**：`DaemonServer.kt:24` 裸 `install(WebSockets)` 无 pingPeriod/timeout；`WsConnection.kt:45` 写无超时。僵尸手机 socket 会让 outbox（64）塞满、pump 卡死。
-11. **reaper 看不见 LAN attach**：`RelayClient.kt:117-125` 只 gate relay `peerOnline`，LAN 挂着但 agent 空闲 >90s 的会话会被回收——「LAN 会话莫名丢失」的一个来源。
+9. ~~scheduleClose 无归属校验~~ → `scheduleClose(convoId, owner)` 到期时校验会话仍归属该 sink 才关（顺带消灭 reattach-vs-到期微竞态）。
+10. ~~LAN 服务端无僵尸检测~~ → `DaemonServer` 加 ping 15s/timeout 30s；`WsConnection` 写套 10s 超时，卡死即撤链。
+11. ~~reaper 看不见 LAN attach~~ → registry 记 LAN 连接计数，reaper 在 `peerOnline || lanConnected` 时不回收。
 
-### P2 Windows / 发版链路（#25、#23 评论中已对外承诺）
+### ~~P2 Windows / 发版链路~~ ✅ 代码全落（26c205f + 7e87448；仅剩发版动作本身）
 
-12. **发版 + scoop bump**：v1.1.9 后 18 个提交未发布；scoop-bucket 无自动 bump（checkver/autoupdate 无 excavator，是死配置）。发版后同步 `packaging/scoop/cc-pocket-daemon.json` → bucket 仓库，并把 bump 接进 release.yml（参考 cask 回填 70b46ef）。
-13. **pair 可操作诊断 + 自动重试**：`Main.kt:167-191` 解码 503 给人话 + 轮询 30-60s 骑过重连退避（退避最长 30s vs 取票窗口 10s，`RelayClient.kt:104-106`/:130）；connection-refused 时 Windows 提示/代跑 `schtasks /Run /TN cc-pocket-daemon`；`PairLoopback.kt` 错误体带链路状态。
-14. **Windows 后台 daemon 无日志**：`ServiceInstaller.kt:204-206` vbs `Run …, 0, False` 无重定向且 slf4j-simple 只到 stderr。重定向到 `%USERPROFILE%\.cc-pocket\logs\`。
-15. **status / doctor 子命令**：`Main.kt:227-228` 现只有 run/test-client/pair/service-install。
-16. **install.ps1 一键化** + 引导页 Pair 步骤展示具体命令（`OnboardingScreen.kt:87/91/96`）；scoop 计划任务指向 shims 路径更稳（`Main.kt:216-224`）。
-17. **`cc-pocket pair` 文档 bug**：`README.md:84` 与 `PairingScreen.kt:109` 写的是不存在的 `cc-pocket` 二进制 → 改 `cc-pocket-daemon pair`；顺带对齐 mac 引导页步骤数（cask postflight 已自动 service-install，可去掉第 2 步）。
-18. **Codex cwd 精确比较**：`daemon/.../codex/CodexTranscriptScanner.kt:38` 仍是 `cwd != workdir` 字面比较——Windows 上大小写/斜杠差异让 Codex 会话从列表静默消失（#19 同类根因）。把 `ProjectPaths.normCwd` 提为共享工具复用。
+12. **scoop 自动 bump 已接入 release.yml**（bump-scoop job，需在仓库 Secrets 配 `SCOOP_BUCKET_TOKEN`——对 heypandax/scoop-bucket 有 contents:write 的 fine-grained PAT；缺失则告警跳过）。⚠️ **发版动作未执行**：版本号已 lockstep 预升 1.2.0，等真机验证通过后按 runbook 建 release + 跑 workflow。
+13. ~~pair 诊断重试~~ → 自动等待 60s 骑过退避、失败输出链路状态 + 可能原因 + 每 OS 启动命令；`/pair` 503 带 attached/lastPongAgeMs。
+14. ~~Windows 无日志~~ → 计划任务经 `cmd /c … >> %USERPROFILE%\.cc-pocket\logs\daemon.log 2>&1`。
+15. ~~status 子命令~~ → daemon/relay/服务注册/claude/codex 五项检查，异常退出码非零（本机实测 ✓）。
+16. ~~install.ps1 一键化~~ → `irm … | iex` 下载最新版 + 注册启动服务 + 直接进 pair；引导页 Pair 步骤展示命令。scoop shims 路径项未做（影响极小：post_install 传的是 $dir 版本路径，scoop cleanup 后由 checkver 版本更新覆盖）。
+17. ~~`cc-pocket pair` 文档 bug~~ → README（中英）/PairingScreen 均改 `cc-pocket-daemon pair`；mac 引导页收敛为 2 步；官网 Windows 面板同步 irm 一键。
+18. ~~Codex cwd 精确比较~~ → 复用 `ProjectPaths.normCwd`（提为 internal），附单测。
 
-### P3 上下文 / 显示
+### ~~P3 上下文 / 显示~~ ✅ 已修（72aaee2 + c74f4e3）
 
-19. **ContextWindow 清单修正**（`protocol/.../ContextWindow.kt:17-21`）：补 `"sonnet-4-20"`（命中 claude-sonnet-4-20250514 而不碰 4-5/4-6）与 `"mythos-5"`；加别名 exact-map（`opus/sonnet→1M、haiku→200k`，裸 substring 不安全）；`sonnet-4-5` 属 beta 门控（未开 beta 的用户分母被放大 5 倍，反向 #20）——可在 `Conversation.live()` 用观测用量自愈升级：`used > 200k ⇒ 1M`。
-20. **Codex 上下文分母**：daemon 对 Codex 发 null，手机却拿 Claude 的 200k 兜底给 `gpt-*` 画百分比（`Conversation.kt:129` + `PocketRepository.kt:890`）。daemon 加 Codex 窗口表，或手机端 Codex 且窗口 null 时隐藏分母。
-21. **ObserveSession 不带模型/窗口/占用**（`ObserveSession.kt:35`）：直接复用 `lastModel` + `lastContextTokens` + `contextWindowFor`。
-22. **switchModel 后不重播 live()**（`Conversation.kt:235-238`）：手机端模型/窗口滞后到下次 init，靠 4s 超时兜底——修完 19 的别名表后补发。
-23. **Usage 看板纳入 Codex**：`UsageService.kt` 只扫 `~/.claude/projects`；按模型分布里的 Codex 色是死路径。另：`costUSD` 缺失时可考虑本地价格表兜底。
-24. **contextWindowFor 单测**（protocol/commonTest 现只有序列化往返）。
+19. ~~ContextWindow 清单~~ → 原生 1M 表（+mythos-5、-sonnet-4-5）+ 别名 exact-map + **观测用量自愈升级**（used>200k ⇒ 1M，live/observe 两处）。注：beta 门控的 sonnet-4-20 同 sonnet-4-5 走自愈，不进静态表。
+20. ~~Codex 分母~~ → 手机端 Codex 且窗口 null 时显示原始 token 数（statusline/ContextBar），不再画假百分比。daemon 侧 Codex 窗口表暂缓（app-server schema 会漂移；rollout 的 `model_context_window` 字段已确认存在，将来可接）。
+21. ~~ObserveSession~~ → 每次文件变化重发 SessionLive（model/window/used 全带）。
+22. ~~switchModel 重播 live()~~ → switchModel/switchEffort 均镜像 switchMode（reemitLive + 立即确认帧）。
+23. ~~Usage 纳入 Codex~~ → 摄入 rollout `token_count` 增量（按模型、去重、mtime 跳旧文件）；costUSD 价格表兜底**有意不做**（价格漂移风险 > 收益，成本保持 Claude-only）。
+24. ~~contextWindowFor 单测~~ → 6 个用例。
 
-### P3 移动端小项
+### ~~P3 移动端小项~~ ✅ 已修（3c73889）
 
-25. **草稿持久性回退**：按 convoId 键控后，离开聊天→重进/重启 App 基本拿不回草稿（convoId 是 daemon 每次 open 的随机 UUID）。改稳定键（Claude sessionId，回退 workdir）。
-26. **前台回来 stale-Ready 窗口**：链路在后台死掉但心跳未判死时，`onAppForeground`（`PocketRepository.kt:662`）不重连，最长约 25s 假 Ready。前台且距上次流量 > PING_INTERVAL 时主动探测。
-27. **握手段防死锁空窗**：`RelayE2EConnection.kt:57-76` DeviceHello/Noise 握手在心跳启动前、无本地超时——Attached 与握手完成之间的死链两个看门狗都逃过。`withTimeout` 包住或提早 arm pinger。
-28. **≤20s 快速离开重进残留**（#33 尾巴）：刚回复完 20s 内离开再进仍会误入 observe/可 fork。daemon 记一份自己刚关闭的 (sessionId, closedAt) LRU 短路掉。
-29. **Windows 树布局边缘**：裸 `C:` 根渲染为空（`DirList.kt:119-143` sep 推断/双写）；多盘符项目被 home 推断过滤；root ≠ home 时面包屑中段跳转错（`App.kt:456-460`）。补 DirList 单测（现无）。
-30. **杂项**：`RelayClient.kt:209` 陈旧注释（仍说 cold-fork）；`SessionRegistry.kt:53` pre-first-turn 重连 reattach 匹配不到（sessionId 为 null）会再起一个 Conversation；mode/effort 历史恢复（`sessionParams` 仅内存，可持久化）；`TranscriptPatcher.relinkParent` 不修 summary 的 leafUuid（悬空，非 400）。
+25. ~~草稿持久性~~ → 键改 `sessionId ?: convoId ?: workdir`，sid 落地瞬间静默迁移草稿（打字中也不丢）。
+26. ~~前台 stale-Ready~~ → 前台且自认连接时主动发一次静默目录刷新（练写路径），死链 ≤10s 被写超时揪出。
+27. ~~握手空窗~~ → attach+Noise 前奏套 15s `withTimeout`，超时转 `DeadLinkException`（避免被当作主动断开吞掉）。
+28. ~~≤20s 快速重进~~ → daemon 记自关 (sessionId, closedAt) LRU；mtime 不晚于自关时刻即视为无外部写手（observe/fork 双入口）。
+29. ~~Windows 树布局边缘~~ → 裸 `C:`/`/` 根 sep 从条目推断且不重复拼接；根级 append 根外项目 leaf；面包屑改 `crumbTargets`（锚定 root 的真实跳转目标）；DirList 首批 6 个单测。
+30. ~~杂项~~ → 陈旧注释已改（48170a4）；pre-init reattach 用 `resumeAnchor` 匹配（85fcb32）；`sessionParams` 持久化（TSV，末 100 条）；summary `leafUuid` 重链 + 单测。
 
-## 三、发版备忘
+## 三、剩余事项（P2/P3 清零后）
 
-- 全部修复**尚未发版**：v1.1.9（06-25）后 18+ 提交在 main。发版即完成 P2-12 的前半，并兑现各 issue 评论里的「随下个版本发布」。
-- 发版 runbook 见记忆 `cc-pocket-daemon-hosts-and-release`（4 处版本号 lockstep、cask sha 回填、relay 单独 redeploy、iOS 加密声明）。
-- 本机验证 daemon 改动：`bash scripts/update-local-daemon.sh`（工作区代码 ≠ 设备行为）。
+1. **发版 v1.2.0**（唯一剩余动作）：版本号已就位；按 runbook（记忆 `cc-pocket-daemon-hosts-and-release`）建 release → 跑 release.yml/ios-release.yml → cask sha 回填 → 配 `SCOOP_BUCKET_TOKEN` 后 scoop 自动 bump 生效。发版兑现全部 issue 评论承诺。
+2. 真机验证清单：换网自愈（Mac 切 WiFi 后手机可用、pair 探针非 relay_offline）、接续后未发言切模式/模型不 fork 不丢史、LAN 挂 90s+ 不被回收、Usage 看板出现 gpt-* 条目、Codex 会话上下文显示原始 token。
+3. 观察项：`selfClosed` 1.5s slack 在慢盘上是否够；install.ps1 在真实 Windows 上过一遍（Expand-Archive/计划任务权限）。
