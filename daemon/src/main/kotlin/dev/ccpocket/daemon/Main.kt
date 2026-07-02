@@ -71,6 +71,7 @@ private class RunCmd : CliktCommand(name = "run") {
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
     private val takeover by option("--takeover", help = "if another cc-pocket daemon is already running, stop it and run this one instead (default: exit and leave it running)").flag()
+    private val autoUpdate by option("--auto-update", help = "apply daemon updates automatically (installer-managed macOS/Linux installs; others get a notification)").flag()
 
     override fun run() {
         val exe = ClaudeLauncher.resolveExecutable(claudeBin)
@@ -104,6 +105,10 @@ private class RunCmd : CliktCommand(name = "run") {
             // duplicate that fights it on the relay; exit cleanly (or --takeover to replace it).
             SingleInstance.ensureSolo(pairPort, takeover) { echo(it) }
             PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
+            // daily new-version check: log + one phone push per version; --auto-update (or the env
+            // toggle, so the flag survives service reinstalls) hot-swaps installer-managed installs
+            val auto = autoUpdate || System.getenv("CC_POCKET_AUTO_UPDATE") == "1"
+            dev.ccpocket.daemon.update.UpdateChecker.start(relayClient, auto)
             Runtime.getRuntime().addShutdownHook(Thread { runBlocking { core.shutdown() } })
             runBlocking { relayClient.run() }
         } else {
@@ -222,12 +227,38 @@ private class PairCmd : CliktCommand(name = "pair") {
     private companion object { const val PAIR_RETRY_WINDOW_MS = 60_000L }
 }
 
+private class UpdateCmd : CliktCommand(name = "update") {
+    private val check by option("--check", help = "only report whether a newer release exists").flag()
+
+    override fun run() {
+        val current = dev.ccpocket.daemon.update.UpdateService.currentVersion()
+        echo("current: $current")
+        val latest = dev.ccpocket.daemon.update.UpdateService.latestRelease()
+            ?: throw com.github.ajalt.clikt.core.CliktError("could not reach GitHub releases — check network/proxy")
+        if (!dev.ccpocket.daemon.update.UpdateService.isNewer(latest.version, current)) {
+            echo("already up to date (latest: ${latest.version})")
+            return
+        }
+        echo("newer release available: ${latest.version}")
+        if (check) return
+        val exe = dev.ccpocket.daemon.update.UpdateService.selfExe()
+        val install = dev.ccpocket.daemon.update.UpdateService.managedInstallOf(exe)
+            ?: throw com.github.ajalt.clikt.core.CliktError(dev.ccpocket.daemon.update.UpdateService.ownerHint(exe))
+        val newLauncher = dev.ccpocket.daemon.update.UpdateService.apply(latest, install)
+        echo("installed ${latest.version} → ${install.versionsDir.resolve(latest.version)}")
+        echo("restarting the background service onto it…")
+        dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher)
+        echo("✅ updated to ${latest.version}")
+    }
+}
+
 private class StatusCmd : CliktCommand(name = "status") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
 
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         var healthy = true
+        echo("  version:  ${dev.ccpocket.daemon.update.UpdateService.currentVersion()}")
         try {
             // 1. daemon process + relay link (via the loopback /status the running daemon serves)
             val body = runCatching { client.get("http://127.0.0.1:$pairPort/status").bodyAsText() }.getOrNull()
@@ -306,4 +337,4 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
 }
 
 fun main(args: Array<String>) =
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), UpdateCmd(), ServiceInstallCmd()).main(args)

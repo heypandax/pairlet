@@ -92,7 +92,7 @@ fun OnboardingScreen(onBack: () -> Unit, onPairNow: () -> Unit) {
             OStep(2, stringResource(Res.string.ob_step_pair), listOf("cc-pocket-daemon pair"), stringResource(Res.string.ob_pair_hint), last = true),
         )
         else -> listOf(
-            OStep(1, stringResource(Res.string.ob_step_install), listOf("brew install --cask heypandax/tap/cc-pocket"), stringResource(Res.string.ob_note_mac_run)),
+            OStep(1, stringResource(Res.string.ob_step_install), listOf("curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash"), stringResource(Res.string.ob_note_mac_run)),
             OStep(2, stringResource(Res.string.ob_step_pair), listOf("cc-pocket-daemon pair"), stringResource(Res.string.ob_pair_hint), last = true),
         )
     }

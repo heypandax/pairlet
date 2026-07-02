@@ -50,12 +50,13 @@ Two pieces: the **app** on your phone, and a hosted-relay **daemon** on your com
 **macOS** (Apple Silicon and Intel — each gets its own signed, notarized build):
 
 ```bash
-brew install --cask heypandax/tap/cc-pocket
-cc-pocket-daemon service-install --apply   # run on login, auto-reconnect
+curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
 cc-pocket-daemon pair                       # prints a QR + 6-digit code
 ```
 
-Then pair your phone (open the app, scan the QR or type the 6-digit code) and start driving Claude from it — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `brew upgrade --cask cc-pocket`.
+The installer verifies the download against the release's SHA256SUMS, installs under `~/.local` (one dir per version, Claude Code-style), and registers the launchd service — runs on login, auto-reconnects. Then pair your phone (open the app, scan the QR or type the 6-digit code) — full walkthrough in [`docs/USAGE.md`](docs/USAGE.md). Upgrade with `cc-pocket-daemon update` (the daemon checks daily and notifies your phone; add `--auto-update` to `run` to apply silently).
+
+Prefer Homebrew? `brew install --cask heypandax/tap/cc-pocket` does the same (upgrade via `brew upgrade --cask heypandax/tap/cc-pocket` — full name, there's an unrelated cask named `cc-pocket`).
 
 **Linux (x86_64)** is one-click too:
 
@@ -64,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/in
 cc-pocket-daemon pair                       # prints a QR + 6-digit code
 ```
 
-The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; re-run it to upgrade. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`.
+The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; upgrade with `cc-pocket-daemon update` (or re-run it). Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`.
 
 **Windows (x86_64)** is one line too (needs the [Claude Code CLI](https://github.com/anthropics/claude-code) installed — the daemon drives it):
 
@@ -72,7 +73,7 @@ The installer pulls a self-contained tarball (bundled JRE — no system Java) fr
 irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex
 ```
 
-That downloads the latest self-contained build, registers a logon Scheduled Task (the daemon runs in the background, connecting to the hosted relay), and drops straight into pairing — one command does install + start + pair. Re-run the same line to upgrade.
+That downloads the latest self-contained build, registers a logon Scheduled Task (the daemon runs in the background, connecting to the hosted relay), and drops straight into pairing — one command does install + start + pair. Upgrade with `cc-pocket-daemon update` (or re-run the same line).
 
 Prefer [Scoop](https://scoop.sh)? Same result:
 

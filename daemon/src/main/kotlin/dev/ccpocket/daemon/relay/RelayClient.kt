@@ -133,6 +133,12 @@ class RelayClient(
         }
     }
 
+    /** Queue a plain notification for the phone (e.g. "new daemon version"). The relay only actually
+     *  pushes when no device is attached — an attached user doesn't need APNs to hear from us. */
+    suspend fun notifyPhone(title: String, body: String) {
+        controlOutbox.send(NotifyPush(title = title, body = body, workdir = "", sessionId = null))
+    }
+
     /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK. */
     suspend fun mintTicket(): PairTicket? {
         controlOutbox.send(PairBegin(identity.e2ePubB64)) // relay needs our E2E pub to serve the code path

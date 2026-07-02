@@ -199,7 +199,7 @@
     <string name="ob_step_bucket">Add the bucket</string>
     <string name="ob_step_pair">Pair</string>
     <string name="ob_pair_hint">Then tap Pair now below and scan the code shown on your computer.</string>
-    <string name="ob_note_mac_run">The cask registers the background service for you — runs on login and auto-reconnects.</string>
+    <string name="ob_note_mac_run">One command: installs (signed &amp; notarized) and registers the background service — runs on login, auto-reconnects.</string>
     <string name="ob_note_win">One command: installs, registers the background service, and opens pairing. Needs the Claude Code CLI installed.</string>
     <string name="ob_note_linux">Registers a systemd --user service; re-run to upgrade.</string>
     <string name="ob_secure">Your pairing code never leaves your devices — the relay only ever sees ciphertext.</string>

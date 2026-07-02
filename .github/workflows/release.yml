@@ -399,3 +399,22 @@ jobs:
             -d "$(jq -n --arg msg "cc-pocket-daemon $VER" --arg content "$CONTENT" --arg sha "$CUR_SHA" \
                   '{message:$msg, content:$content, sha:$sha}')" >/dev/null
           echo "scoop bucket bumped to $VER (sha256 $SHA)"
+
+  # One SHA256SUMS over every release asset, for the installers' + self-updater's download verification
+  # (the Claude Code pattern: manifest + per-platform checksum). Runs after all uploads so the sums
+  # cover the final artifacts; --clobber makes re-runs safe.
+  checksums:
+    if: ${{ !inputs.only_android }}
+    needs: [macos, windows, linux, android, macos-desktop, windows-desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate + upload SHA256SUMS for v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir assets && cd assets
+          gh release download "v${{ inputs.version }}" --repo "${{ github.repository }}" --pattern '*'
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          gh release upload "v${{ inputs.version }}" SHA256SUMS --clobber --repo "${{ github.repository }}"
+          echo "──"; cat SHA256SUMS

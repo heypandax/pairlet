@@ -11,6 +11,16 @@ application {
     applicationName = "cc-pocket-daemon"
 }
 
+// The release version: -PappVersion in CI, fallback for local builds. Baked into the
+// cc-pocket-version.properties resource so the daemon knows its own version at runtime —
+// the self-update check compares it against GitHub releases/latest.
+val appVersion = (findProperty("appVersion") as String?) ?: "1.2.0"
+
+tasks.processResources {
+    inputs.property("appVersion", appVersion)
+    filesMatching("cc-pocket-version.properties") { expand("appVersion" to appVersion) }
+}
+
 dependencies {
     implementation(project(":protocol"))
 
@@ -58,7 +68,6 @@ tasks.register<Exec>("packageDaemon") {
     // on Windows. The release version comes from -PappVersion (falls back for plain local builds).
     val isWindows = System.getProperty("os.name").lowercase().contains("win")
     val jpackageBin = "${System.getProperty("java.home")}/bin/jpackage" + if (isWindows) ".exe" else ""
-    val appVersion = (findProperty("appVersion") as String?) ?: "1.2.0"
     val jpackageArgs = buildList {
         add(jpackageBin)
         add("--type"); add("app-image")
