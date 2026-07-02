@@ -55,9 +55,10 @@ object ProjectPaths {
      * separator; on Windows also lowercase (its filesystem is case-insensitive, and the resume path hands us a
      * `toRealPath()`-canonicalized workdir that can differ from Claude's recorded cwd in case / slash direction
      * / trailing separator — notably for UNC `\\host\share` paths). A no-op on ordinary Unix paths, so the fast
-     * path and Unix behavior are unchanged.
+     * path and Unix behavior are unchanged. Shared: the Codex scanner compares its rollouts' recorded cwd
+     * against the phone's workdir with the same rules (issue #19's sibling — exact compare lost sessions).
      */
-    private fun normCwd(p: String): String {
+    internal fun normCwd(p: String): String {
         var s = p.replace('\\', '/')
         if (s.length > 1 && s.endsWith('/')) s = s.dropLast(1)
         return if (onWindows) s.lowercase() else s

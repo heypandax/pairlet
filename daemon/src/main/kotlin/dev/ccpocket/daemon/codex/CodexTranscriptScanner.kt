@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.codex
 
+import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionSummary
 import kotlinx.serialization.json.Json
@@ -35,7 +36,10 @@ object CodexTranscriptScanner {
             val meta = (runCatching { json.parseToJsonElement(first.trim()) }.getOrNull() as? JsonObject)
                 ?.takeIf { it.str("type") == "session_meta" }?.obj("payload") ?: return null
             id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
-            if (workdir != null && cwd != workdir) return null // not this project — skip reading the rest
+            // OS-normalized compare (slashes / trailing sep / Windows case): codex records the cwd its own
+            // way, and an exact string compare silently dropped sessions on Windows (issue #19's sibling)
+            val recorded = cwd
+            if (workdir != null && (recorded == null || ProjectPaths.normCwd(recorded) != ProjectPaths.normCwd(workdir))) return null
             var line = r.readLine()
             while (line != null) {
                 val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject

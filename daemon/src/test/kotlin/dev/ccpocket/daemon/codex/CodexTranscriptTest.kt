@@ -42,6 +42,18 @@ class CodexTranscriptTest {
     }
 
     @Test
+    fun summarize_matches_cwd_os_normalized() {
+        // slash direction / trailing separator must not hide a session (issue #19's Codex sibling —
+        // an exact compare silently dropped Windows sessions whose recorded cwd differed in form)
+        val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-win", ".jsonl").also {
+            it.writeText("""{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-win","cwd":"C:\\Users\\X\\proj","cli_version":"0.124.0"}}""" + "\n" +
+                """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}""")
+        }
+        assertEquals("thr-win", CodexTranscriptScanner.summarize(f, "C:/Users/X/proj")?.sessionId)
+        assertEquals("thr-win", CodexTranscriptScanner.summarize(f, "C:\\Users\\X\\proj\\")?.sessionId)
+    }
+
+    @Test
     fun replay_flattens_user_assistant_and_tool() {
         val msgs = CodexTranscriptReplay.read(tempRollout())
         // synthetic <permissions>/<environment_context> + reasoning are skipped; user + tool + assistant remain
