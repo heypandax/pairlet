@@ -404,7 +404,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     }
 
     private companion object {
-        const val CLIENT_VERSION = "1.1.9"
+        const val CLIENT_VERSION = "1.2.0"
         const val MAX_DIFF_CHARS = 6000 // approval diff cap — keeps the PermissionAsk frame well under the relay's 256 KiB limit
         val CLAUDE_ALIASES = setOf("opus", "sonnet", "haiku")
     }

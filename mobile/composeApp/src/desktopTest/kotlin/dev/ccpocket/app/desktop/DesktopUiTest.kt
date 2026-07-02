@@ -147,7 +147,7 @@ class DesktopUiTest {
         assertEquals(AgentKind.CLAUDE, m.defaultAgent)
         m.defaultAgent = AgentKind.CODEX
         assertEquals(AgentKind.CODEX, m.defaultAgent)
-        assertEquals("1.1.9", m.appVersion)
+        assertEquals("1.2.0", m.appVersion)
     }
 
     @Test

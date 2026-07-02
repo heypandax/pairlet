@@ -48,7 +48,7 @@ class SeedDesktopModel : DesktopModel {
     override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)
 
-    override val appVersion = "1.1.9"
+    override val appVersion = "1.2.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
