@@ -152,6 +152,10 @@ class Conversation(
     /** True while this conversation still streams to [s] — the LAN grace-close ownership check. */
     fun isAttachedTo(s: OutboundSink): Boolean = sink === s
 
+    /** The id this conversation is resuming while [sessionId] is still null (pre-first-turn) — lets a
+     *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
+    val resumeAnchor: String? get() = openedResumeId
+
     fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)

@@ -32,7 +32,7 @@ object TranscriptPatcher {
     private const val QUEUE_OP_TAG = "\"queue-operation\"" // cheap substring marker for the noise prefilter
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    private class Row(val raw: String, val uuid: String?, val parentUuid: String?, val type: String?, val noise: Boolean)
+    private class Row(val raw: String, val uuid: String?, val parentUuid: String?, val leafUuid: String?, val type: String?, val noise: Boolean)
 
     /** Rewrite [file] in place. True if anything changed; never throws. */
     fun unhide(file: Path): Boolean {
@@ -82,6 +82,11 @@ object TranscriptPatcher {
                     if (row.parentUuid != null && row.parentUuid in dropped) {
                         out = relinkParent(out, row.parentUuid, resolveSurvivor(row.parentUuid, dropped, parentOf))
                     }
+                    // a summary's leafUuid can point AT a dropped noise turn — remap it to the nearest surviving
+                    // ancestor, else the summary dangles and claude loses the branch linkage on resume
+                    if (row.leafUuid != null && row.leafUuid in dropped) {
+                        out = relinkLeaf(out, row.leafUuid, resolveSurvivor(row.leafUuid, dropped, parentOf))
+                    }
                     if (out.contains(SDK_TAG)) out = out.replace(SDK_TAG, CLI_TAG)
                     w.write(out); w.newLine()
                 }
@@ -112,16 +117,19 @@ object TranscriptPatcher {
     private fun relinkParent(line: String, old: String, new: String?): String =
         line.replace("\"parentUuid\":\"$old\"", if (new == null) "\"parentUuid\":null" else "\"parentUuid\":\"$new\"")
 
+    private fun relinkLeaf(line: String, old: String, new: String?): String =
+        line.replace("\"leafUuid\":\"$old\"", if (new == null) "\"leafUuid\":null" else "\"leafUuid\":\"$new\"")
+
     private fun classify(line: String): Row {
         val obj = runCatching { json.parseToJsonElement(line) as? JsonObject }.getOrNull()
-            ?: return Row(line, null, null, null, noise = false)
+            ?: return Row(line, null, null, null, null, noise = false)
         val type = str(obj["type"])
         val noise = when (type) {
             "queue-operation" -> true
             "user" -> TranscriptNoise.isPureTaskNotification(userText(obj))
             else -> false
         }
-        return Row(line, str(obj["uuid"]), str(obj["parentUuid"]), type, noise)
+        return Row(line, str(obj["uuid"]), str(obj["parentUuid"]), str(obj["leafUuid"]), type, noise)
     }
 
     private fun userText(obj: JsonObject): String? {

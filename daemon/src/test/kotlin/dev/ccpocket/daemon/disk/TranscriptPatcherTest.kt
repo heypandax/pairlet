@@ -174,4 +174,23 @@ class TranscriptPatcherTest {
         val dir = Files.createTempDirectory("ccp-patch")
         assertFalse(TranscriptPatcher.unhide(dir.resolve("nope.jsonl")))
     }
+
+    @Test
+    fun summary_leaf_uuid_pointing_at_a_dropped_turn_is_remapped_to_the_survivor() {
+        // claude's summary records reference a branch leaf via leafUuid; if that leaf is a dropped
+        // notification the summary would dangle — remap it up to the nearest surviving ancestor
+        val f = tmpFile("sess-leaf.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"summary","summary":"deploy work","leafUuid":"n"}""",
+                """{"type":"user","uuid":"a","parentUuid":null,"message":{"role":"user","content":"deploy please"}}""",
+                """{"type":"user","uuid":"n","parentUuid":"a","message":{"role":"user","content":"<task-notification>\n</task-notification>"}}""",
+            ).joinToString("\n"),
+        )
+
+        assertTrue(TranscriptPatcher.unhide(f))
+        val patched = f.readText().trimEnd().lines()
+        assertEquals(2, patched.size) // the notification turn is gone
+        assertTrue(patched[0].contains(""""leafUuid":"a"""")) // summary re-points at the surviving ancestor
+    }
 }

@@ -48,6 +48,23 @@ class SessionRegistry(
     fun onLanDisconnect() { lanConnections.decrementAndGet() }
     fun lanConnected(): Boolean = lanConnections.get() > 0
 
+    // sessions the DAEMON itself closed recently: sessionId -> closedAt (bounded LRU, guarded by [mutex]).
+    // A close right after an assistant reply leaves a genuinely fresh transcript mtime; without this record,
+    // re-entering within the 20s liveness window misreads our own last write as "an external claude is
+    // writing" — bogus observe banner, and a take-over would fork a duplicate (issue #33 residual).
+    private val selfClosed = object : LinkedHashMap<String, Long>(16, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>) = size > 64
+    }
+
+    /** True if [file]'s recent mtime is explained by an EXTERNAL writer — i.e. recently written AND not
+     *  merely the tail of a session we closed ourselves (writes after our close mean a real foreign claude). */
+    private suspend fun externallyActive(sessionId: String, file: Path): Boolean {
+        if (!transcriptRecentlyWritten(file)) return false
+        val closedAt = mutex.withLock { selfClosed[sessionId] } ?: return true
+        val mtime = runCatching { file.getLastModifiedTime().toMillis() }.getOrNull() ?: return true
+        return mtime > closedAt + SELF_CLOSE_SLACK_MS
+    }
+
     /** Installed by the relay client; null in local-server mode. Read per turn so a conversation opened
      *  before the relay attached still sees it. */
     @Volatile
@@ -57,14 +74,18 @@ class SessionRegistry(
     suspend fun open(open: OpenSession, sink: OutboundSink): String {
         val resume = open.resumeId
         if (resume != null) {
-            // re-attach to a session the daemon is already running (a cc-pocket background session)
-            val live = mutex.withLock { convos.values.firstOrNull { it.sessionId == resume } }
+            // re-attach to a session the daemon is already running (a cc-pocket background session).
+            // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too,
+            // else a reconnect re-open spawns a second Conversation onto the same transcript.
+            val live = mutex.withLock {
+                convos.values.firstOrNull { it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume) }
+            }
             if (live != null) { cancelPendingClose(live.convoId); live.reattach(sink); return live.convoId }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
             // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
             if (open.agent == AgentKind.CLAUDE && !open.takeOver) {
                 val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
-                val recent = transcriptRecentlyWritten(file)
+                val recent = externallyActive(resume, file)
                 if (recent) {
                     val convoId = UUID.randomUUID().toString()
                     val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
@@ -91,8 +112,8 @@ class SessionRegistry(
         // same sessionId: the phone truly takes over (issue #18 — no duplicate session) and the desktop picks up
         // the phone's turns on its next --resume (issue #22 — sync). Ordinary cold/idle resume already appends in
         // place. mtime is the same cross-platform liveness signal the ObserveSession guard above uses.
-        val forkForTakeOver = open.takeOver && open.resumeId != null &&
-            transcriptRecentlyWritten(ProjectPaths.dirFor(open.workdir).resolve("${open.resumeId}.jsonl"))
+        val forkForTakeOver = open.takeOver && resume != null &&
+            externallyActive(resume, ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl"))
         val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver) }
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
@@ -124,7 +145,7 @@ class SessionRegistry(
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
-        stale.forEach { it.close() }
+        stale.forEach { it.close(); noteSelfClosed(it) }
         return stale.size
     }
 
@@ -154,6 +175,14 @@ class SessionRegistry(
             Triple(pendingClose.remove(convoId), convos.remove(convoId), observes.remove(convoId))
         }
         job?.cancel(); convo?.close(); obs?.close()
+        convo?.let { noteSelfClosed(it) }
+    }
+
+    /** Remember that WE closed this session just now — see [selfClosed]/[externallyActive]. Call AFTER
+     *  [Conversation.close] returns: the dying process's final transcript flush must predate closedAt. */
+    private suspend fun noteSelfClosed(convo: Conversation) {
+        val sid = convo.sessionId ?: return // pre-first-turn: our silent process never wrote the transcript
+        mutex.withLock { selfClosed[sid] = System.currentTimeMillis() }
     }
 
     /**
@@ -183,6 +212,7 @@ class SessionRegistry(
                 }
             }
             convo?.close(); obs?.close()
+            convo?.let { noteSelfClosed(it) }
         }
         mutex.withLock { pendingClose.put(convoId, job) }?.cancel()
     }
@@ -215,5 +245,9 @@ class SessionRegistry(
         // how long a LAN conversation survives a socket drop before being reaped, so a reconnecting phone can
         // reattach the still-warm claude process instead of paying a kill + transcript rewrite + cold resume.
         const val LAN_DISCONNECT_GRACE_MS = 30_000L
+
+        // transcript writes no later than this past our own close are still "our" writes (FS timestamp
+        // granularity + the post-exit unhide); anything newer means a real external claude took over.
+        const val SELF_CLOSE_SLACK_MS = 1_500L
     }
 }
