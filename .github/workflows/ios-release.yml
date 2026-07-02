@@ -23,6 +23,14 @@ on:
         description: "Marketing version (CFBundleShortVersionString), e.g. 1.0.1. Bump for a new App Store version; reuse to attach another build to the same version."
         required: true
         default: "1.0.1"
+      submit_for_review:
+        description: "After the build finishes ASC processing: attach it to the version and submit for review (release notes + review notes ride along)."
+        type: boolean
+        default: true
+      automatic_release:
+        description: "Release automatically once App Review approves (false = you press Release in ASC)."
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -133,21 +141,78 @@ jobs:
           # destination=upload means success is the upload, not an IPA on disk; gate on the marker
           grep -q "EXPORT SUCCEEDED" "$RUNNER_TEMP/export.log"
 
-      - name: Push "What's New" release notes to App Store Connect
-        # fastlane deliver (preinstalled on macOS runners) syncs fastlane/metadata/<locale>/release_notes.txt
-        # into the ASC version record for MARKETING_VERSION — creating that version when it doesn't exist yet,
-        # so the notes land without opening App Store Connect at all. Edit the txt files BEFORE dispatching.
-        # Metadata-only: skip_binary_upload/skip_screenshots live in fastlane/Deliverfile. If this step fails,
-        # the BINARY ABOVE IS ALREADY UPLOADED — fix the notes and push them by hand:
-        #   fastlane deliver --app_version <ver> --api_key_path <key.json>
+  # The App-Store half runs on a CHEAP ubuntu runner: fastlane deliver is pure ASC-API work (no Xcode),
+  # and waiting out build processing (5-30min, sometimes more) on the 10x-billed macOS runner would be
+  # money down the drain. Polls the uploaded build until ASC finishes processing, then one deliver call
+  # pushes fastlane/metadata (What's New + review notes), attaches the build to the version (creating the
+  # version record when absent), and — unless submit_for_review=false — submits it for App Review.
+  submit:
+    needs: ios
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby + fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - run: gem install fastlane --no-document
+
+      - name: Stage App Store Connect API key
         env:
+          ASC_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
           ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
-          MARKETING_VERSION: ${{ inputs.marketing_version }}
         run: |
-          # deliver authenticates with an api-key JSON: the .p8 content must be an embedded JSON string
+          echo "$ASC_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
           jq -n --arg key_id "$ASC_KEY_ID" --arg issuer_id "$ASC_ISSUER_ID" \
                 --rawfile key "$RUNNER_TEMP/AuthKey.p8" \
                 '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' \
                 > "$RUNNER_TEMP/asc_api_key.json"
-          fastlane deliver --api_key_path "$RUNNER_TEMP/asc_api_key.json" --app_version "$MARKETING_VERSION"
+
+      - name: Wait for ASC build processing (BUILD ${{ github.run_number }})
+        # No public push/callback fits a one-shot CI run, so this is the industry-standard poll: the
+        # builds resource's processingState flips PROCESSING → VALID (or FAILED/INVALID). 60s cadence,
+        # 45min ceiling — beyond that something is genuinely wrong with the upload.
+        env:
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          cat > "$RUNNER_TEMP/wait_processing.rb" <<'RUBY'
+          require "spaceship"
+          token = Spaceship::ConnectAPI::Token.create(
+            key_id: ENV.fetch("ASC_KEY_ID"), issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+            filepath: File.join(ENV.fetch("RUNNER_TEMP"), "AuthKey.p8"),
+          )
+          Spaceship::ConnectAPI.token = token
+          app = Spaceship::ConnectAPI::App.find("com.panda.ccpocket") or abort("app not found in ASC")
+          deadline = Time.now + 45 * 60
+          loop do
+            build = app.get_builds(filter: { version: ENV.fetch("BUILD_NUMBER") }, sort: "-uploadedDate").first
+            state = build&.processing_state
+            puts "#{Time.now.strftime('%H:%M:%S')} build #{ENV['BUILD_NUMBER']}: #{state || 'not visible yet'}"
+            break if state == "VALID"
+            abort("build ended in #{state} — fix the upload before submitting") if %w[FAILED INVALID].include?(state.to_s)
+            abort("timed out after 45min of processing") if Time.now > deadline
+            sleep 60
+          end
+          RUBY
+          ruby "$RUNNER_TEMP/wait_processing.rb"
+
+      - name: Deliver — metadata + attach build ${{ github.run_number }}${{ inputs.submit_for_review && ' + submit for review' || '' }}
+        # One deliver call does it all: syncs release_notes/review notes from fastlane/metadata, creates
+        # the ASC version when absent, pins THIS run's build to it, and (input-gated) submits. The
+        # questionnaire answers live in fastlane/Deliverfile (submission_information). If this fails,
+        # the binary is already uploaded & processed — rerun just this job, or finish by hand in ASC.
+        env:
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          SUBMIT: ${{ inputs.submit_for_review }}
+          AUTO_RELEASE: ${{ inputs.automatic_release }}
+        run: |
+          fastlane deliver --api_key_path "$RUNNER_TEMP/asc_api_key.json" \
+            --app_version "$MARKETING_VERSION" \
+            --build_number "$BUILD_NUMBER" \
+            --submit_for_review "$SUBMIT" \
+            --automatic_release "$AUTO_RELEASE"

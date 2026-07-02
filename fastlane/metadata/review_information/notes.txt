@@ -1,0 +1,5 @@
+CC Pocket is a companion app for the open-source cc-pocket daemon that runs on the user's own computer (https://github.com/heypandax/cc-pocket). Pairing therefore requires a desktop machine.
+
+TO REVIEW WITHOUT A COMPUTER: on the pairing screen, tap "Try Demo · no computer needed". The entire UI (project list, chat, tool approvals, usage dashboard) then runs on built-in sample data — no account, no pairing, no network dependency.
+
+No login or account exists anywhere in the app. All communication with the user's own computer is end-to-end encrypted (standard algorithms only: TLS + Noise/X25519/AES-GCM — ITSAppUsesNonExemptEncryption is false).
