@@ -40,6 +40,14 @@ class SessionRegistry(
     private val observes = mutableMapOf<String, ObserveSession>()
     private val pendingClose = mutableMapOf<String, Job>() // convoId -> delayed-close job during a LAN disconnect grace
 
+    // live LAN sockets — the reaper must treat "a phone is attached over LAN" like relay peerOnline,
+    // else a LAN session idle past the reap window is killed under the user's thumbs
+    private val lanConnections = java.util.concurrent.atomic.AtomicInteger(0)
+
+    fun onLanConnect() { lanConnections.incrementAndGet() }
+    fun onLanDisconnect() { lanConnections.decrementAndGet() }
+    fun lanConnected(): Boolean = lanConnections.get() > 0
+
     /** Installed by the relay client; null in local-server mode. Read per turn so a conversation opened
      *  before the relay attached still sees it. */
     @Volatile
@@ -153,15 +161,28 @@ class SessionRegistry(
      * The LAN server uses this on socket drop instead of closing immediately: a flaky link / backgrounded phone
      * would otherwise instantly kill the claude process and rewrite the transcript, forcing the reconnect into a
      * cold `--resume` (issue #24's amplifier) and losing warm session state. Relay drops have their own grace
-     * (reaperLoop's 90s idle window); this is the LAN equivalent. A second schedule replaces the first; close() is
-     * idempotent so any race just reaps once.
+     * (reaperLoop's 90s idle window); this is the LAN equivalent. A second schedule replaces the first.
+     *
+     * [owner] is the scheduling connection's sink: at expiry the close only fires if the conversation is STILL
+     * attached to it. A zombie socket's late `finally` (TCP can take minutes to give up) must not kill a
+     * conversation a newer connection has since reattached — and the same check closes the reattach-vs-expiry
+     * race (a reattach re-points the sink before cancelPendingClose lands).
      */
-    suspend fun scheduleClose(convoId: String, graceMs: Long = LAN_DISCONNECT_GRACE_MS) {
+    suspend fun scheduleClose(convoId: String, owner: OutboundSink, graceMs: Long = LAN_DISCONNECT_GRACE_MS) {
         val job = scope.launch {
             delay(graceMs)
             // deregister BEFORE closing: otherwise close() below would cancel this very job mid-flight
             mutex.withLock { pendingClose.remove(convoId) }
-            close(convoId)
+            val (convo, obs) = mutex.withLock {
+                val c = convos[convoId]
+                val o = observes[convoId]
+                when {
+                    c != null && c.isAttachedTo(owner) -> { convos.remove(convoId); c to null }
+                    o != null && o.isAttachedTo(owner) -> { observes.remove(convoId); null to o }
+                    else -> null to null // reattached elsewhere (or already gone) — not ours to kill
+                }
+            }
+            convo?.close(); obs?.close()
         }
         mutex.withLock { pendingClose.put(convoId, job) }?.cancel()
     }

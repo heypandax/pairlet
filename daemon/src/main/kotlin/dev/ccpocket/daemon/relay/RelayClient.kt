@@ -113,13 +113,14 @@ class RelayClient(
      * While no phone is attached, reclaim conversations idle longer than [IDLE_REAP_MS]. Reaping stops the
      * claude process and unhides its (possibly forked) transcript, so a session the phone is done with
      * surfaces in the desktop `claude --resume` picker promptly instead of staying hidden behind a warm
-     * process. Gated on `!peerOnline`: an actively-attached phone is never reaped, so its live session
-     * stays warm and its id stable (only sessions whose phone has already left are handed back).
+     * process. Gated on `!peerOnline` AND no live LAN socket: an actively-attached phone — via relay or
+     * LAN — is never reaped, so its live session stays warm and its id stable (only sessions whose phone
+     * has already left are handed back).
      */
     private suspend fun reaperLoop() {
         while (true) {
             delay(REAP_SCAN_MS)
-            if (!peerOnline) {
+            if (!peerOnline && !core.registry.lanConnected()) {
                 val n = core.registry.reapIdle(IDLE_REAP_MS)
                 if (n > 0) log.info("reaped $n idle session(s) — transcripts unhidden for desktop resume")
             }

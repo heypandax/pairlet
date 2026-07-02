@@ -21,7 +21,12 @@ class DaemonServer(
 
     fun run() {
         val server = embeddedServer(CIO, host = host, port = port) {
-            install(WebSockets)
+            install(WebSockets) {
+                // detect zombie phone sockets (screen-locked / walked-out-of-range): without a transport
+                // ping the dead TCP stays ESTABLISHED for minutes and its WsConnection writer wedges
+                pingPeriodMillis = 15_000
+                timeoutMillis = 30_000
+            }
             routing {
                 webSocket("/v1/ws") {
                     val peer = runCatching { call.request.origin.remoteHost }.getOrDefault("?")

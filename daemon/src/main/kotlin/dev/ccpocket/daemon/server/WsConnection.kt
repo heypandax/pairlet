@@ -40,9 +40,15 @@ class WsConnection(
     }
 
     suspend fun serve() = coroutineScope {
+        registry.onLanConnect() // while any LAN socket lives, the idle reaper holds off (like relay peerOnline)
         val writer = launch {
             for (env in outbox) {
-                session.outgoing.send(WsFrame.Text(PocketJson.encodeToString(env)))
+                val text = PocketJson.encodeToString(env)
+                // bounded write: on a zombie phone socket a send stalls forever (TCP buffer fills, no error),
+                // wedging this writer and, once outbox fills, every pump feeding it. Stalled → tear down.
+                if (kotlinx.coroutines.withTimeoutOrNull(WRITE_TIMEOUT_MS) { session.outgoing.send(WsFrame.Text(text)) } == null) {
+                    error("socket write stalled — dead LAN link")
+                }
             }
         }
         try {
@@ -67,13 +73,19 @@ class WsConnection(
                 }
             }
         } finally {
+            registry.onLanDisconnect()
             outbox.close()
             writer.cancel()
             withContext(NonCancellable) {
                 // grace-close, not immediate: a flaky LAN socket / backgrounded phone can reconnect and reattach
                 // the still-warm session instead of paying a kill + transcript rewrite + cold resume every blip.
-                owned.toList().forEach { runCatching { registry.scheduleClose(it) } }
+                // Scoped to this connection's sink: if a newer connection reattached meanwhile, expiry is a no-op.
+                owned.toList().forEach { runCatching { registry.scheduleClose(it, sink) } }
             }
         }
+    }
+
+    private companion object {
+        const val WRITE_TIMEOUT_MS = 10_000L // a healthy loopback/LAN write is instant; stalled this long = zombie
     }
 }

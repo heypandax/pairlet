@@ -149,6 +149,9 @@ class Conversation(
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
     fun currentMode(): PermissionMode = mode
 
+    /** True while this conversation still streams to [s] — the LAN grace-close ownership check. */
+    fun isAttachedTo(s: OutboundSink): Boolean = sink === s
+
     fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)

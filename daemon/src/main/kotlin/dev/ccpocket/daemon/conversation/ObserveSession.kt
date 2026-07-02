@@ -46,5 +46,8 @@ class ObserveSession(
         }
     }
 
+    /** True while this observer still streams to [s] — the LAN grace-close ownership check. */
+    fun isAttachedTo(s: OutboundSink): Boolean = sink === s
+
     fun close() = scope.cancel()
 }
