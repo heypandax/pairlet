@@ -77,8 +77,12 @@
 29. ~~Windows 树布局边缘~~ → 裸 `C:`/`/` 根 sep 从条目推断且不重复拼接；根级 append 根外项目 leaf；面包屑改 `crumbTargets`（锚定 root 的真实跳转目标）；DirList 首批 6 个单测。
 30. ~~杂项~~ → 陈旧注释已改（48170a4）；pre-init reattach 用 `resumeAnchor` 匹配（85fcb32）；`sessionParams` 持久化（TSV，末 100 条）；summary `leafUuid` 重链 + 单测。
 
-## 三、剩余事项（P2/P3 清零后）
+## 三、发版记录（2026-07-02，v1.2.0 已发布）
 
-1. **发版 v1.2.0**（唯一剩余动作）：版本号已就位；按 runbook（记忆 `cc-pocket-daemon-hosts-and-release`）建 release → 跑 release.yml/ios-release.yml → cask sha 回填 → 配 `SCOOP_BUCKET_TOKEN` 后 scoop 自动 bump 生效。发版兑现全部 issue 评论承诺。
-2. 真机验证清单：换网自愈（Mac 切 WiFi 后手机可用、pair 探针非 relay_offline）、接续后未发言切模式/模型不 fork 不丢史、LAN 挂 90s+ 不被回收、Usage 看板出现 gpt-* 条目、Codex 会话上下文显示原始 token。
-3. 观察项：`selfClosed` 1.5s slack 在慢盘上是否够；install.ps1 在真实 Windows 上过一遍（Expand-Archive/计划任务权限）。
+- ✅ release v1.2.0 已建，`release.yml`（8 job 全绿：daemon 四平台签名公证 + 签名 APK + 桌面 dmg/msi）与 `ios-release.yml`（ASC 上传 + What's New 自动推送）均成功。
+- ✅ cask sha 已回填 tap 仓（arm64 `f5c4…`、x86_64 `8ee8…`）；scoop manifest 已手动 bump 至 1.2.0（`bump-scoop` 因缺 `SCOOP_BUCKET_TOKEN` 跳过——**下次发版前在仓库 Secrets 配上即全自动**）；packaging 模板已同步。
+- ✅ 官网已 PUT 上线（Windows 一键命令）；`install.ps1` raw 地址 HTTP 200。
+- ✅ #23、#25 已关闭；#26/#30/#31 此前已关——本轮 issue 全部清零。
+- ⏳ 人工余项：App Store Connect 里**提交审核**（What's New 已就位）；`SCOOP_BUCKET_TOKEN` secret。
+- 观察项：`selfClosed` 1.5s slack 慢盘表现；install.ps1 真实 Windows 首跑；换网自愈在其他机器的实际表现。
+- 注：**发版流程不涉及 .80 服务器**（与本项目无关，勿升级——2026-07-02 纠正）。
