@@ -19,11 +19,14 @@ import kotlin.io.path.bufferedReader
 import kotlin.io.path.isDirectory
 
 /**
- * Aggregates token usage from Claude transcripts under ~/.claude/projects — the same files ccusage reads.
- * Per assistant turn it sums `message.usage` (input + output + cache) and reads the transcript's OWN `costUSD`
- * (so we don't maintain a fragile price table — the field ccusage's default "auto" mode prefers). Turns are
- * deduped by `message.id` + `requestId` so a turn duplicated across resumed/forked `.jsonl` isn't double counted.
- * Only Claude transcripts are aggregated (Codex sessions live elsewhere in a different format). Issue #26.
+ * Aggregates token usage from BOTH agents' on-disk records (issue #26):
+ *  - Claude transcripts under ~/.claude/projects — the same files ccusage reads. Per assistant turn it sums
+ *    `message.usage` (input + output + cache) and reads the transcript's OWN `costUSD` (no fragile price
+ *    table). Turns are deduped by `message.id` + `requestId` so a turn duplicated across resumed/forked
+ *    `.jsonl` isn't double counted.
+ *  - Codex rollouts under ~/.codex/sessions — `event_msg`/`token_count` records carry the turn's delta
+ *    (`last_token_usage`) with a timestamp, and `turn_context` carries the model. Codex stamps no cost, so
+ *    `costUsdToday` remains Claude-only.
  */
 object UsageService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -75,6 +78,48 @@ object UsageService {
                                 (obj["costUSD"] as? JsonPrimitive)?.doubleOrNull?.let { costToday += it; costSeen = true }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        // ── Codex rollouts: per-turn deltas from token_count events (the Codex by-model bars were a
+        // dead path before this). Dedup by timestamp+total — a resumed thread's rollout can carry
+        // copied history. OpenAI counts cached ⊂ input, Claude splits them; normalize to Claude's
+        // split so the shared cache-hit formula (cacheRead / (input + cacheRead)) stays correct.
+        for (file in runCatching { dev.ccpocket.daemon.codex.CodexPaths.sessionFiles() }.getOrDefault(emptyList())) runCatching {
+            val mtime = runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrNull() ?: return@runCatching
+            if (Instant.ofEpochMilli(mtime).atZone(zone).toLocalDate().isBefore(start)) return@runCatching // whole file predates the window
+            var model = "codex"
+            file.bufferedReader().useLines { lines ->
+                for (raw in lines) {
+                    val line = raw.trim()
+                    if (line.isEmpty()) continue
+                    if ("\"turn_context\"" in line) {
+                        ((runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject)?.get("payload") as? JsonObject)
+                            ?.str("model")?.takeIf { it.isNotBlank() }?.let { model = it }
+                        continue
+                    }
+                    if ("\"token_count\"" !in line) continue // cheap prefilter before JSON parse
+                    val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                    val payload = obj["payload"] as? JsonObject ?: continue
+                    if (payload.str("type") != "token_count") continue
+                    val info = payload["info"] as? JsonObject ?: continue // null info = rate-limit-only event
+                    val last = info["last_token_usage"] as? JsonObject ?: continue
+                    val total = last.long("total_tokens").takeIf { it > 0 }
+                        ?: (last.long("input_tokens") + last.long("output_tokens")).takeIf { it > 0 } ?: continue
+                    val ts = obj.str("timestamp") ?: continue
+                    val date = runCatching { Instant.parse(ts).atZone(zone).toLocalDate() }.getOrNull() ?: continue
+                    if (date.isBefore(start)) continue
+                    if (!seen.add("cx:$ts:$total")) continue
+                    perDay[date] = (perDay[date] ?: 0) + total
+                    perModel[model] = (perModel[model] ?: 0) + total
+                    if (date == today) {
+                        tokensToday += total
+                        requestsToday++
+                        val cached = last.long("cached_input_tokens")
+                        inputToday += (last.long("input_tokens") - cached).coerceAtLeast(0)
+                        cacheReadToday += cached
                     }
                 }
             }
