@@ -13,10 +13,10 @@ cask "cc-pocket" do
   arch arm: "arm64", intel: "x86_64"
 
   on_arm do
-    sha256 "9f96bef70038850ea87997c0d0c875610602cb8a190566e5161656cbe7674600"
+    sha256 "f5c483579599534bf8e12478b588a8d475cfcf4d2a7a5d7d4901030a82026ff8"
   end
   on_intel do
-    sha256 "125ec0022f264a66470b792e0ba04701962950e03a7e8755e60109753d3cef80"
+    sha256 "8ee8fea9b9b8326acd5bfc04e3340b923eaf0d3b22e91d4eea1b67b429842c60"
   end
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
