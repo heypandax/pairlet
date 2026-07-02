@@ -14,6 +14,8 @@ import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.contextWindowFor
+import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
+import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -135,14 +137,22 @@ class Conversation(
     /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
     private fun displayModel(): String? = model ?: backfilledModel
 
+    /** The 1M/200k denominator the phone renders usage % against. Claude-only (Codex windows differ; null →
+     *  the phone falls back). Observed occupancy beyond the 200k default PROVES the 1M window — beta-gated
+     *  models report a canonical id that declares 200k (capability ≠ enablement) — so upgrade, never downgrade. */
+    private fun claudeWindow(): Long? {
+        if (backend.kind != AgentKind.CLAUDE) return null
+        if ((resumeContextUsed ?: 0) > DEFAULT_CONTEXT_WINDOW) return LARGE_CONTEXT_WINDOW
+        return displayModel()?.let(::contextWindowFor)
+    }
+
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
         SessionLive(
             convoId, workdir.toString(), sid, mode = mode, executing = executing, model = displayModel(), effort = effort,
             // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
-            // (issue #20) instead of sniffing the id itself. Claude-only (Codex windows differ); null model → let
-            // the phone fall back. Phones that predate the field simply ignore it.
-            contextWindow = if (backend.kind == AgentKind.CLAUDE) displayModel()?.let(::contextWindowFor) else null,
+            // (issue #20) instead of sniffing the id itself. Phones that predate the field simply ignore it.
+            contextWindow = claudeWindow(),
             contextUsed = resumeContextUsed, agent = backend.kind,
         )
 
@@ -262,16 +272,25 @@ class Conversation(
     suspend fun switchModel(newModel: String?) {
         model = newModel
         backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
-        // pre-first-turn fall back to the opened resumeId, like switchMode — relaunch(sessionId=null)
-        // would drop --resume entirely and orphan the resumed session's history
-        if (backend.applySettings(mode = null, model = newModel, effort = null)) relaunch(sessionId ?: openedResumeId) else sink.emit(live(sessionId))
+        if (backend.applySettings(mode = null, model = newModel, effort = null)) {
+            reemitLive = true // the next init re-announces too — it carries the post-resume sessionId
+            // pre-first-turn fall back to the opened resumeId, like switchMode — relaunch(sessionId=null)
+            // would drop --resume entirely and orphan the resumed session's history
+            val sid = sessionId ?: openedResumeId
+            relaunch(sid)
+            sink.emit(live(sid)) // confirm now (new model + window) — init won't arrive until the next turn
+        } else sink.emit(live(sessionId))
     }
 
     /** Switch reasoning effort. Claude relaunches under --effort; Codex applies it to the next turn. */
     suspend fun switchEffort(newEffort: String?) {
         effort = newEffort
-        // same pre-first-turn anchor as switchModel/switchMode
-        if (backend.applySettings(mode = null, model = null, effort = newEffort)) relaunch(sessionId ?: openedResumeId) else sink.emit(live(sessionId))
+        if (backend.applySettings(mode = null, model = null, effort = newEffort)) {
+            reemitLive = true
+            val sid = sessionId ?: openedResumeId // same pre-first-turn anchor as switchModel/switchMode
+            relaunch(sid)
+            sink.emit(live(sid))
+        } else sink.emit(live(sessionId))
     }
 
     fun clearAllowRule(rule: String?) {
