@@ -111,8 +111,12 @@ private fun ContextBar(used: Long?, total: Long?) {
     Column(Modifier.padding(top = 14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(Res.string.label_context), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = Modifier.weight(1f))
-            val cap = total ?: DEFAULT_CONTEXT_WINDOW
-            val label = if (used == null) "— / ${formatTokens(cap)}" else "~${formatTokens(used)} / ${formatTokens(cap)}"
+            // total == null → no known denominator (Codex): show raw occupancy instead of a fake /200k
+            val label = when {
+                total == null -> if (used == null) "—" else "~${formatTokens(used)}"
+                used == null -> "— / ${formatTokens(total)}"
+                else -> "~${formatTokens(used)} / ${formatTokens(total)}"
+            }
             Text(label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
         }
         val frac = if (used == null || total == null || total <= 0) 0f else (used.toFloat() / total).coerceIn(0f, 1f)

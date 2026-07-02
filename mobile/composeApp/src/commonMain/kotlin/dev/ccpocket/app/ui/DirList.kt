@@ -137,30 +137,64 @@ fun treeRoot(dirs: List<DirectoryEntry>): String {
  * A child that has ANY deeper project is a Folder (drillable) EVEN if it is itself a project — otherwise
  * dirs like ~/Desktop (a project that also holds many projects) would dead-end as a leaf. When [base]
  * itself is a project, its own sessions appear as a leaf at the top of this level.
+ *
+ * [includeOrphans] (pass true at the tree ROOT): projects NOT under [base] — another drive on Windows,
+ * or outside the inferred home — are appended as plain leaves, else tree mode simply loses them (the
+ * home-pinned root filters them out and no drill can reach them; flat view always had them).
  */
-fun buildTree(dirs: List<DirectoryEntry>, base: String): List<TreeRow> {
-    val sep = sepOf(base)
-    val relevant = dirs.filter { it.path == base || it.path.startsWith("$base$sep") }
+fun buildTree(dirs: List<DirectoryEntry>, base: String, includeOrphans: Boolean = false): List<TreeRow> {
+    // sep from base when it carries one; a degenerate root ("C:" from the common-prefix walk, or "/")
+    // has none to detect, so fall back to what the entries actually use
+    val sep = if (base.contains('\\') || base.contains('/')) sepOf(base) else dirs.firstOrNull()?.path?.let(::sepOf) ?: '/'
+    val prefix = if (base.endsWith(sep)) base else "$base$sep" // don't double the sep when base already ends with it ("/", "C:\")
+    val relevant = dirs.filter { it.path == base || it.path.startsWith(prefix) }
     val rows = ArrayList<TreeRow>()
     relevant.firstOrNull { it.path == base }?.let { rows += TreeRow.Leaf(it) } // base's own sessions, if any
     val byChild = LinkedHashMap<String, MutableList<DirectoryEntry>>()
     for (e in relevant) {
         if (e.path == base) continue
-        val seg = e.path.removePrefix("$base$sep").split(PATH_SEP).first()
+        val seg = e.path.removePrefix(prefix).split(PATH_SEP).first()
         byChild.getOrPut(seg) { mutableListOf() }.add(e)
     }
     byChild.entries
         .sortedByDescending { (_, es) -> es.maxOf { it.lastModified } }
         .forEach { (seg, es) ->
-            val childPath = "$base$sep$seg"
+            val childPath = prefix + seg
             if (es.any { it.path.startsWith("$childPath$sep") }) { // has deeper projects → drillable folder
                 rows += TreeRow.Folder(seg, childPath, project = es.firstOrNull { it.path == childPath })
             } else {
                 rows += TreeRow.Leaf(es.first { it.path == childPath })
             }
         }
+    if (includeOrphans) {
+        dirs.filterNot { it.path == base || it.path.startsWith(prefix) }
+            .sortedByDescending { it.lastModified }
+            .forEach { rows += TreeRow.Leaf(it) }
+    }
     return rows
 }
 
 /** Breadcrumb segments for [base], home collapsed to ~. e.g. /Users/x/proj/app -> [~, proj, app]. */
 fun crumbs(base: String): List<String> = tilde(base).split(PATH_SEP).filter { it.isNotEmpty() }
+
+/**
+ * Breadcrumb labels WITH their drill targets, anchored at the tree [root]. The old label-only
+ * reconstruction assumed the first segment WAS the root — wrong whenever root is deeper than one
+ * segment (a common-prefix root like `/opt/x` or `C:\dev`), where a middle-crumb jump then composed
+ * a nonsense path and bounced the view back to root.
+ */
+fun crumbTargets(base: String, root: String): List<Pair<String, String>> {
+    val sep = sepOf(base)
+    val rs = root.split(PATH_SEP)
+    // the home root itself is exactly [drive-or-empty, Users|home, <user>] — tilde() only collapses DEEPER paths
+    val rootLabel = if (rs.size == 3 && (rs[1] == "Users" || rs[1] == "home")) "~" else rs.lastOrNull { it.isNotEmpty() } ?: root
+    val rest = base.removePrefix(root).split(PATH_SEP).filter { it.isNotEmpty() }
+    val out = ArrayList<Pair<String, String>>()
+    out += rootLabel to root
+    var acc = root
+    for (seg in rest) {
+        acc = if (acc.endsWith(sep)) "$acc$seg" else "$acc$sep$seg"
+        out += seg to acc
+    }
+    return out
+}

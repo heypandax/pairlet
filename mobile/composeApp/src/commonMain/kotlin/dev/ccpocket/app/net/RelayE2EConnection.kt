@@ -17,10 +17,12 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.readText
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import io.ktor.websocket.Frame as WsFrame
@@ -54,13 +56,23 @@ class RelayE2EConnection {
     /** @param firstTicket the pairing ticket — supplied as PSK only on the very first connect after pairing. */
     suspend fun connect(paired: PairedDaemon, keys: E2ECrypto.KeyPair, firstTicket: String?) = coroutineScope {
         client.webSocket(urlString = "${paired.relay}/v1/device") {
-            outgoing.send(WsFrame.Text(control(DeviceHello(paired.deviceId, paired.credential))))
-            awaitAttached()
-
-            val psk = (firstTicket ?: "").encodeToByteArray()
-            val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, B64Url.decode(paired.daemonPub), psk)
-            outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, init.ephPublic)))
-            val session = awaitHandshake(init)
+            // Bound the whole pre-heartbeat prelude: the repo's connect watchdog only guards up to Attached,
+            // and the pinger below isn't armed yet — a link that wedges BETWEEN Attached and the Noise
+            // handshake would otherwise hang forever with no guard. Rethrown as DeadLinkException because a
+            // TimeoutCancellationException IS a CancellationException, which the repo reads as intentional
+            // teardown and would swallow without reconnecting.
+            val session = try {
+                withTimeout(HANDSHAKE_TIMEOUT_MS) {
+                    outgoing.send(WsFrame.Text(control(DeviceHello(paired.deviceId, paired.credential))))
+                    awaitAttached()
+                    val psk = (firstTicket ?: "").encodeToByteArray()
+                    val init = E2ESession.initiator(keys.privateRaw, keys.publicRaw, B64Url.decode(paired.daemonPub), psk)
+                    outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.HANDSHAKE, init.ephPublic)))
+                    awaitHandshake(init)
+                }
+            } catch (e: TimeoutCancellationException) {
+                throw DeadLinkException()
+            }
 
             val writer = launch {
                 for (f in outbox) {

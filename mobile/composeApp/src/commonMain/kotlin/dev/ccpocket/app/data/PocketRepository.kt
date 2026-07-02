@@ -222,9 +222,10 @@ class PocketRepository(private val scope: CoroutineScope) {
         SecureStore.putString(K_PINNED, pinnedPaths.joinToString("\n"))
     }
 
-    /** Composer draft persisted per conversation (by convoId; a brand-new session falls back to its workdir):
-     *  a half-typed message survives leaving the chat or backgrounding and returns on reopening that
-     *  conversation — without bleeding into a sibling session of the same project (#29). Blank/sending clears it. */
+    /** Composer draft persisted per conversation. Keyed most-durable-first: the real sessionId (stable across
+     *  daemon reopens AND app restarts) → convoId (daemon-run-scoped) → workdir. #29 fixed the cross-session
+     *  bleed with convoId keying, but convoIds are minted per open, so a draft rarely survived leave-and-reopen;
+     *  [sessionKey] restores that durability. Blank/sending clears it. */
     fun draftFor(key: String?): String = key?.let { SecureStore.getString(K_DRAFT_PREFIX + it) } ?: ""
 
     fun saveDraft(key: String?, text: String) {
@@ -233,6 +234,22 @@ class PocketRepository(private val scope: CoroutineScope) {
     }
 
     fun clearDraft(key: String?) { key?.let { SecureStore.remove(K_DRAFT_PREFIX + it) } }
+
+    /** The active session's durable draft key (its real sessionId when known). Set optimistically from the
+     *  resumeId on open; corrected by SessionLive. Null for a not-yet-materialized brand-new session. */
+    val sessionKey = mutableStateOf<String?>(null)
+
+    private fun composerKey(): String? = sessionKey.value ?: convoId.value ?: workdir.value
+
+    /** Carry a mid-typing draft onto [to] BEFORE the composer re-keys (a brand-new session's first init
+     *  flips the key from convoId to the freshly-minted sessionId while the user may be typing). */
+    private fun migrateDraft(to: String?) {
+        to ?: return
+        val from = composerKey() ?: return
+        if (from == to) return
+        val text = draftFor(from)
+        if (text.isNotBlank() && draftFor(to).isBlank()) { saveDraft(to, text); clearDraft(from) }
+    }
 
     /** Current tree drill-down path (null = root). Hoisted here (not screen-local) so it survives opening a
      *  session and returning — DirectoryScreen leaves the composition on that navigation. Not persisted. */
@@ -294,8 +311,24 @@ class PocketRepository(private val scope: CoroutineScope) {
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
     // session closes its process; reopening resumes a FRESH process that would otherwise default these.
     // Remember the last-known set per sessionId so a reopen restores the badge + relaunches under them.
+    // Persisted (TSV in SecureStore, last 100) so an app restart doesn't reset every session to defaults.
     private data class SessionParams(val mode: PermissionMode, val model: String?, val effort: String?, val agent: AgentKind = AgentKind.CLAUDE)
     private val sessionParams = mutableMapOf<String, SessionParams>()
+
+    init {
+        SecureStore.getString(K_SESSION_PARAMS)?.lineSequence()?.forEach { line ->
+            val t = line.split('\t')
+            if (t.size >= 5) runCatching {
+                sessionParams[t[0]] = SessionParams(PermissionMode.valueOf(t[1]), t[2].ifEmpty { null }, t[3].ifEmpty { null }, AgentKind.valueOf(t[4]))
+            }
+        }
+    }
+
+    private fun persistSessionParams() {
+        val lines = sessionParams.entries.toList().takeLast(100)
+            .joinToString("\n") { (sid, p) -> listOf(sid, p.mode.name, p.model ?: "", p.effort ?: "", p.agent.name).joinToString("\t") }
+        SecureStore.putString(K_SESSION_PARAMS, lines)
+    }
 
     // ── voice input (dictation) ───────────────────────────────────────────
     val voice = mutableStateOf<VoiceState>(VoiceState.Idle)
@@ -664,6 +697,11 @@ class PocketRepository(private val scope: CoroutineScope) {
             retryAttempts = 0
             if (hadReadyThisSession) startReconnectGrace(restart = true) // fresh Ready-hold on return so a quick reconnect shows no banner (#28)
             launchTransport(reconnect = true)
+        } else if (sessionActive.value && connected.value) {
+            // `connected` may be a lie after a background suspension (the heartbeat was frozen; the TCP died
+            // silently). Exercise a WRITE right now: healthy link → this merely refreshes the stale project
+            // list; wedged link → the bounded send trips DeadLink in ≤10s instead of ~25s of fake Ready.
+            refreshDirectoriesSilently()
         }
     }
 
@@ -882,12 +920,18 @@ class PocketRepository(private val scope: CoroutineScope) {
             is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items) }
             is Usage -> { usage.value = f; usageLoading.value = false }
             is SessionLive -> {
+                migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
+                f.sessionId?.let { sessionKey.value = it }
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
                 f.model?.let { model.value = it }
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
-                contextWindow.value = f.contextWindow ?: contextWindowFor(f.model ?: model.value)
+                // window fallback is Claude-only: contextWindowFor knows nothing about gpt-* ids, and a Codex
+                // session with no daemon-sent window was rendering a % against a meaningless Claude 200k —
+                // null instead, and the UI shows raw tokens without a denominator
+                val claudeish = (f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+                contextWindow.value = f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
                 // seed the usage statusline on resume (before the first new turn). Only when we have no
                 // value yet — a TurnDone this session is fresher than the daemon's transcript snapshot.
                 if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
@@ -900,6 +944,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 switching.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
+                persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
             }
             // Stream/turn frames carry their source convoId; this single-active-view model has one `messages`
             // list, so a frame from a just-left conversation (its tail still in flight when we switched) must
@@ -1008,6 +1053,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
         convoId.value?.let { send(CloseSession(it)) } // reclaim any lingering claude process first
         messages.clear(); convoId.value = null
+        sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         pendingAsk.value = null
@@ -1481,7 +1527,8 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
-        const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<convoId|workdir>" → unsent composer text for that conversation
+        const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<sessionId|convoId|workdir>" → unsent composer text for that conversation
+        const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)

@@ -17,6 +17,7 @@ class DeadLinkException : Exception("socket write stalled — dead link")
 
 internal const val WRITE_TIMEOUT_MS = 10_000L   // a healthy send is instant; 10s stalled means the socket is wedged
 internal const val PING_INTERVAL_MS = 15_000L   // WS-ping cadence: keep a write flowing so a dead idle link is caught
+internal const val HANDSHAKE_TIMEOUT_MS = 15_000L // attach + Noise handshake cap — pre-heartbeat, nothing else guards it
 
 /**
  * Run [block] (a socket write) under [WRITE_TIMEOUT_MS]; a timeout means the link is dead → [DeadLinkException].

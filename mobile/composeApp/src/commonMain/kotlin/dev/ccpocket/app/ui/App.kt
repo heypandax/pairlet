@@ -389,7 +389,8 @@ private fun DirectoryScreen(repo: PocketRepository) {
     val flatRows = remember(dirsSnapshot, query, pinnedSnapshot, openSessionsLabel, projectsLabel) {
         buildDirRows(repo.directories, query, pinnedSnapshot, pinnedLabel, openSessionsLabel, projectsLabel)
     }
-    val treeRows = remember(dirsSnapshot, base) { buildTree(repo.directories, base) }
+    // at the root, also surface projects OUTSIDE it (other drives / off-home) as plain leaves
+    val treeRows = remember(dirsSnapshot, base, root) { buildTree(repo.directories, base, includeOrphans = base == root) }
     // when drilled into a folder that is itself a project, buildTree leads with its own leaf — split it out
     // as the "current project" row (the rest are its subfolders). Computed once here, not per recomposition.
     val currentLeaf = remember(treeRows, base, root) {
@@ -449,16 +450,13 @@ private fun DirectoryScreen(repo: PocketRepository) {
         }
         // ── breadcrumb (tree, drilled below root) ──
         if (treeMode && base != root) {
-            val segs = remember(base) { crumbs(base) }
+            // labels + real drill targets anchored at root — a reconstruction from display labels broke
+            // whenever root was deeper than one segment (common-prefix roots like /opt/x or C:\dev)
+            val segs = remember(base, root) { crumbTargets(base, root) }
             Breadcrumb(
-                segs,
-                onUp = { repo.browsePath.value = base.substringBeforeLast(sepOf(base)).takeIf { it.length > root.length } },
-                onSegment = { i ->
-                    repo.browsePath.value = if (i <= 0) null else {
-                        val s = sepOf(root)
-                        (root + s + segs.drop(1).take(i).joinToString("$s")).takeIf { it.length > root.length }
-                    }
-                },
+                segs.map { it.first },
+                onUp = { repo.browsePath.value = segs.getOrNull(segs.size - 2)?.second?.takeIf { it != root } },
+                onSegment = { i -> repo.browsePath.value = segs.getOrNull(i)?.second?.takeIf { it != root } },
             )
         }
         PullToRefreshBox(isRefreshing = repo.refreshing.value, onRefresh = { repo.refreshDirectories() }, modifier = Modifier.fillMaxSize()) {
@@ -882,7 +880,9 @@ private fun SessionsScreen(repo: PocketRepository) {
 @Composable
 private fun ChatScreen(repo: PocketRepository) {
     // restore the composer draft (keyed per conversation, workdir for a brand-new session); re-inits on switch (#29)
-    val draftKey = repo.convoId.value ?: repo.workdir.value
+    // most-durable-first: sessionId survives daemon reopens AND app restarts; convoId covers a
+    // brand-new not-yet-materialized session; workdir covers pre-open (repo migrates drafts on re-key)
+    val draftKey = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
     var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var showModeSheet by remember { mutableStateOf(false) }
@@ -1216,10 +1216,15 @@ private fun WorkingRow() {
 @Composable
 private fun ContextStatusline(used: Long?, window: Long?, modifier: Modifier = Modifier) {
     used ?: return // no turn yet / older daemon — nothing to show
-    val cap = window ?: DEFAULT_CONTEXT_WINDOW
-    val frac = (used.toFloat() / cap).coerceIn(0f, 1f)
+    // no known denominator (Codex — gpt-* windows aren't in our table): show raw occupancy, not a fake %
+    val label = if (window == null) {
+        "${stringResource(Res.string.label_context)} ~${if (used >= 1000) "${used / 1000}k" else "$used"}"
+    } else {
+        "${stringResource(Res.string.label_context)} ${(used.toFloat() / window).coerceIn(0f, 1f).times(100).toInt()}%"
+    }
+    val frac = if (window == null) 0f else (used.toFloat() / window).coerceIn(0f, 1f)
     Text(
-        "${stringResource(Res.string.label_context)} ${(frac * 100).toInt()}%",
+        label,
         color = contextColor(frac, Tok.muted),
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
