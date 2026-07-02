@@ -58,7 +58,7 @@ tasks.register<Exec>("packageDaemon") {
     // on Windows. The release version comes from -PappVersion (falls back for plain local builds).
     val isWindows = System.getProperty("os.name").lowercase().contains("win")
     val jpackageBin = "${System.getProperty("java.home")}/bin/jpackage" + if (isWindows) ".exe" else ""
-    val appVersion = (findProperty("appVersion") as String?) ?: "1.1.9"
+    val appVersion = (findProperty("appVersion") as String?) ?: "1.2.0"
     val jpackageArgs = buildList {
         add(jpackageBin)
         add("--type"); add("app-image")

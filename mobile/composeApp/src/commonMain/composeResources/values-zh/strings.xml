@@ -198,8 +198,8 @@
     <string name="ob_step_bucket">添加 bucket</string>
     <string name="ob_step_pair">配对</string>
     <string name="ob_pair_hint">然后点下方「配对」，扫描电脑上显示的码。</string>
-    <string name="ob_note_mac_run">开机自动运行、自动重连。</string>
-    <string name="ob_note_win">自动后台运行。需已安装 Claude Code CLI。</string>
+    <string name="ob_note_mac_run">cask 会自动注册后台服务 —— 开机自动运行、自动重连。</string>
+    <string name="ob_note_win">一条命令：安装、注册后台服务并直接进入配对。需已安装 Claude Code CLI。</string>
     <string name="ob_note_linux">注册 systemd --user 服务；重跑即升级。</string>
     <string name="ob_secure">配对码不会离开你的设备——中继只看得到密文。</string>
     <string name="ob_pair_now">去配对</string>

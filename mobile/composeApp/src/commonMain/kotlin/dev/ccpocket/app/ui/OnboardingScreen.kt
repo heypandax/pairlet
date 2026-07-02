@@ -80,20 +80,20 @@ fun OnboardingScreen(onBack: () -> Unit, onPairNow: () -> Unit) {
     var os by remember { mutableStateOf("macOS") }
     val uri = LocalUriHandler.current
 
+    // every OS is now: one install command (service auto-registers + starts) → pair. The pair step
+    // SHOWS the command — a phone-only reader previously had nothing to type on the computer (#23).
     val steps: List<OStep> = when (os) {
         "Windows" -> listOf(
-            OStep(1, stringResource(Res.string.ob_step_bucket), listOf("scoop bucket add heypandax https://github.com/heypandax/scoop-bucket")),
-            OStep(2, stringResource(Res.string.ob_step_install), listOf("scoop install cc-pocket-daemon"), stringResource(Res.string.ob_note_win)),
-            OStep(3, stringResource(Res.string.ob_step_pair), note = stringResource(Res.string.ob_pair_hint), last = true),
+            OStep(1, stringResource(Res.string.ob_step_install), listOf("irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex"), stringResource(Res.string.ob_note_win)),
+            OStep(2, stringResource(Res.string.ob_step_pair), listOf("cc-pocket-daemon pair"), stringResource(Res.string.ob_pair_hint), last = true),
         )
         "Linux" -> listOf(
             OStep(1, stringResource(Res.string.ob_step_install), listOf("curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash"), stringResource(Res.string.ob_note_linux)),
-            OStep(2, stringResource(Res.string.ob_step_pair), note = stringResource(Res.string.ob_pair_hint), last = true),
+            OStep(2, stringResource(Res.string.ob_step_pair), listOf("cc-pocket-daemon pair"), stringResource(Res.string.ob_pair_hint), last = true),
         )
         else -> listOf(
-            OStep(1, stringResource(Res.string.ob_step_install), listOf("brew install --cask heypandax/tap/cc-pocket")),
-            OStep(2, stringResource(Res.string.ob_step_run), listOf("cc-pocket-daemon service-install --apply"), stringResource(Res.string.ob_note_mac_run)),
-            OStep(3, stringResource(Res.string.ob_step_pair), note = stringResource(Res.string.ob_pair_hint), last = true),
+            OStep(1, stringResource(Res.string.ob_step_install), listOf("brew install --cask heypandax/tap/cc-pocket"), stringResource(Res.string.ob_note_mac_run)),
+            OStep(2, stringResource(Res.string.ob_step_pair), listOf("cc-pocket-daemon pair"), stringResource(Res.string.ob_pair_hint), last = true),
         )
     }
 

@@ -15,7 +15,7 @@ on:
       version:
         description: "Version stamped into the build (no leading v, e.g. 1.1.8)"
         required: true
-        default: "1.1.9"
+        default: "1.2.0"
       skip_daemon:
         description: "Skip the daemon build (only build the desktop app)"
         required: false

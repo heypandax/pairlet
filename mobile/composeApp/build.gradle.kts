@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.1.9"
+val appVersionName = "1.2.0"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -130,7 +130,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
             packageName = "cc-pocket"
-            packageVersion = "1.1.9"
+            packageVersion = "1.2.0"
             macOS {
                 bundleID = "dev.ccpocket.app"
                 // Developer ID signing — pass -PccpocketSignId="Developer ID Application: … (TEAMID)".

@@ -106,7 +106,7 @@ fun PairingScreen(repo: PocketRepository) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(Res.string.run_code_prefix) + " ", color = Tok.tx2, fontSize = 13.sp)
             Text(
-                "cc-pocket pair", color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
+                "cc-pocket-daemon pair", color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.surface)
                     .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp),
             )

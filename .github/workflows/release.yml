@@ -360,3 +360,42 @@ jobs:
           [ -n "$MSI" ] || { echo "::error::no MSI produced (WiX missing?)"; exit 1; }
           cp "$MSI" cc-pocket-desktop-windows-x86_64.msi
           gh release upload "v${{ inputs.version }}" cc-pocket-desktop-windows-x86_64.msi --clobber
+
+  # Keep the Scoop bucket (heypandax/scoop-bucket) on the release we just published: without this the
+  # manifest stays pinned to an old version forever (its checkver/autoupdate fields are inert — no
+  # excavator runs on a personal bucket), which stranded every Windows user on 1.1.9 (issue #25).
+  # Needs a repo secret SCOOP_BUCKET_TOKEN: a fine-grained PAT with contents:write on
+  # heypandax/scoop-bucket. Skips gracefully (with a warning) when the secret is absent.
+  bump-scoop:
+    if: ${{ !inputs.only_android }}
+    needs: [windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update scoop manifest to v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          if [ -z "$BUCKET_TOKEN" ]; then
+            echo "::warning::SCOOP_BUCKET_TOKEN not set — scoop bucket NOT bumped. Update heypandax/scoop-bucket by hand (bucket/cc-pocket-daemon.json: version/url/hash)."
+            exit 0
+          fi
+          VER="${{ inputs.version }}"
+          ZIP="cc-pocket-daemon-$VER-windows-x86_64.zip"
+          gh release download "v$VER" --pattern "$ZIP" --repo "${{ github.repository }}"
+          SHA=$(sha256sum "$ZIP" | awk '{print $1}')
+          # keep the repo's template manifest in lockstep, then push the same content to the bucket repo
+          jq --arg v "$VER" --arg sha "$SHA" \
+             '.version=$v
+              | .architecture."64bit".url="https://github.com/heypandax/cc-pocket/releases/download/v\($v)/cc-pocket-daemon-\($v)-windows-x86_64.zip"
+              | .architecture."64bit".hash=$sha' \
+             packaging/scoop/cc-pocket-daemon.json > manifest.json
+          CONTENT=$(base64 -w0 manifest.json)
+          CUR_SHA=$(curl -fsS -H "Authorization: Bearer $BUCKET_TOKEN" \
+            "https://api.github.com/repos/heypandax/scoop-bucket/contents/bucket/cc-pocket-daemon.json" | jq -r '.sha')
+          curl -fsS -X PUT -H "Authorization: Bearer $BUCKET_TOKEN" \
+            "https://api.github.com/repos/heypandax/scoop-bucket/contents/bucket/cc-pocket-daemon.json" \
+            -d "$(jq -n --arg msg "cc-pocket-daemon $VER" --arg content "$CONTENT" --arg sha "$CUR_SHA" \
+                  '{message:$msg, content:$content, sha:$sha}')" >/dev/null
+          echo "scoop bucket bumped to $VER (sha256 $SHA)"

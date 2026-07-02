@@ -66,7 +66,15 @@ cc-pocket-daemon pair                       # prints a QR + 6-digit code
 
 The installer pulls a self-contained tarball (bundled JRE — no system Java) from GitHub Releases, drops it under `~/.local`, and registers a `systemd --user` service; re-run it to upgrade. Voice transcription on Linux uses `ffmpeg` instead of macOS's built-in `afconvert`.
 
-**Windows (x86_64)** — install with [Scoop](https://scoop.sh) (needs the [Claude Code CLI](https://github.com/anthropics/claude-code) installed — the daemon drives it):
+**Windows (x86_64)** is one line too (needs the [Claude Code CLI](https://github.com/anthropics/claude-code) installed — the daemon drives it):
+
+```powershell
+irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex
+```
+
+That downloads the latest self-contained build, registers a logon Scheduled Task (the daemon runs in the background, connecting to the hosted relay), and drops straight into pairing — one command does install + start + pair. Re-run the same line to upgrade.
+
+Prefer [Scoop](https://scoop.sh)? Same result:
 
 ```powershell
 scoop bucket add heypandax https://github.com/heypandax/scoop-bucket
@@ -74,14 +82,14 @@ scoop install cc-pocket-daemon
 cc-pocket-daemon pair        # prints a QR + 6-digit code
 ```
 
-`scoop install` puts `cc-pocket-daemon` on your PATH and registers a logon Scheduled Task so the daemon runs in the background (connecting to the hosted relay) — you just pair. Upgrade with `scoop update cc-pocket-daemon`. Other architectures (Linux arm64): build from source — see [Quick start](#quick-start).
+Upgrade with `scoop update cc-pocket-daemon`. Other architectures (Linux arm64): build from source — see [Quick start](#quick-start).
 
 ## How pairing works
 
 No accounts, no login. The daemon generates a static keypair on first run (its `account id` is the public fingerprint). To add a phone:
 
 ```bash
-cc-pocket pair        # on your computer — prints a QR + a 6-digit code
+cc-pocket-daemon pair # on your computer — prints a QR + a 6-digit code
 ```
 
 On the phone, **scan the QR** (system camera or the in-app scanner) or **type the 6-digit code**. The phone registers its own device key and pairs end-to-end. Scanning the QR carries the daemon's key out-of-band, so even a malicious relay can't MITM that path.
