@@ -7,6 +7,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.response.respondText
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
@@ -21,6 +22,15 @@ data class LoopbackPair(
     val code: String,
     val ttlSec: Int,
     val relay: String,
+)
+
+/** The daemon's loopback /status response — consumed by the `status` CLI (and shown when `pair` fails). */
+@Serializable
+data class LoopbackStatus(
+    val accountId: String,
+    val relay: String,
+    val attached: Boolean,
+    val lastPongAgeMs: Long?,
 )
 
 /**
@@ -42,14 +52,27 @@ class PairLoopback(
                 post("/pair") {
                     val ticket = relay.mintTicket()
                     if (ticket == null) {
-                        call.respondText("""{"error":"relay_offline"}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
+                        // carry the link state so the CLI can say WHY instead of a bare relay_offline:
+                        // attached=false → still (re)connecting (backoff reaches 30s, the mint window is 10s);
+                        // attached=true with a stale pong → a wedged link the watchdog is about to recycle
+                        val age = relay.lastPongAgeMs()
+                        call.respondText(
+                            """{"error":"relay_offline","attached":${relay.attached},"lastPongAgeMs":${age ?: "null"}}""",
+                            ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
+                        )
                     } else {
                         val info = LoopbackPair(relay.accountId, daemonPubB64, ticket.ticket, ticket.code, ticket.expiresInSec, relayWsBase)
                         call.respondText(PocketJson.encodeToString(info), ContentType.Application.Json)
                     }
                 }
+                get("/status") {
+                    call.respondText(
+                        PocketJson.encodeToString(LoopbackStatus(relay.accountId, relayWsBase, relay.attached, relay.lastPongAgeMs())),
+                        ContentType.Application.Json,
+                    )
+                }
             }
         }.start(wait = false)
-        log.info("pair loopback on http://127.0.0.1:$port (POST /pair)")
+        log.info("pair loopback on http://127.0.0.1:$port (POST /pair, GET /status)")
     }
 }

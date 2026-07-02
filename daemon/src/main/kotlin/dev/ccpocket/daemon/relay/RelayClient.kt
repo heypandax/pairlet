@@ -81,6 +81,12 @@ class RelayClient(
 
     val accountId: String get() = identity.accountId
 
+    /** Loopback diagnostics (`pair`/`status`): is a relay session currently attached… */
+    val attached: Boolean get() = dataOut != null
+
+    /** …and how stale is its liveness signal (ms since the last Pong, or since attach before the first one). */
+    fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
+
     suspend fun run() = coroutineScope {
         // wake an offline phone when a turn completes. peerOnline gates it here (an attached phone got the
         // TurnDone over the data plane already); the relay re-checks deviceCount before actually pushing.

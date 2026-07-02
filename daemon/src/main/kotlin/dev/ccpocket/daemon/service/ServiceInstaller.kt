@@ -199,11 +199,16 @@ object ServiceInstaller {
         val taskName = WINDOWS_TASK
         val ccDir = Path.of(home, ".cc-pocket")
         val vbs = ccDir.resolve("cc-pocket-daemon-service.vbs")
+        val logFile = ccDir.resolve("logs").resolve("daemon.log")
 
         // VBScript escapes a double-quote by doubling it. Quote every token so spaces in the exe path
         // are safe: WScript.Shell.Run "<cmd>", 0, False  (0 = hidden window, False = don't wait).
+        // The daemon runs through `cmd /c … >> daemon.log 2>&1`: a hidden-window process otherwise has
+        // NO output anywhere (slf4j goes to a stderr nobody sees), which made Windows reports like
+        // "pair says relay_offline" undiagnosable. cmd's quote rule: with /c and a leading quote, the
+        // first+last quotes of the tail are stripped, so the doubly-wrapped form below runs intact.
         val cmd = (listOf(exec) + args).joinToString(" ") { "\"\"$it\"\"" }
-        val vbsBody = "CreateObject(\"WScript.Shell\").Run \"$cmd\", 0, False\n"
+        val vbsBody = "CreateObject(\"WScript.Shell\").Run \"cmd /c \"\"$cmd >> \"\"$logFile\"\" 2>&1\"\"\", 0, False\n"
 
         val register = """
             |${'$'}a = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument '"$vbs"'
@@ -223,7 +228,7 @@ object ServiceInstaller {
         require(File(exec).canExecute()) {
             "launcher not executable: $exec — pass --exec with the real cc-pocket-daemon.exe path"
         }
-        Files.createDirectories(ccDir)
+        Files.createDirectories(logFile.parent) // also creates ccDir; the redirect fails silently without it
         vbs.writeText(vbsBody)
         val proc = ProcessBuilder("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps)
             .redirectErrorStream(true).start()
@@ -233,6 +238,6 @@ object ServiceInstaller {
             return "could not register the Scheduled Task (exit $code):\n$out\n" +
                 "the daemon still runs by hand: \"$exec\" run"
         }
-        return "installed + started logon Scheduled Task '$taskName'\n  hidden launcher: $vbs"
+        return "installed + started logon Scheduled Task '$taskName'\n  hidden launcher: $vbs\n  logs: $logFile"
     }
 }

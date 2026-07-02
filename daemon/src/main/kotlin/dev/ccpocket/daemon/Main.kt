@@ -15,6 +15,7 @@ import dev.ccpocket.daemon.codex.CodexLauncher
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.daemon.relay.LoopbackPair
+import dev.ccpocket.daemon.relay.LoopbackStatus
 import dev.ccpocket.daemon.relay.PairLoopback
 import dev.ccpocket.daemon.relay.RelayClient
 import dev.ccpocket.daemon.server.DaemonServer
@@ -23,6 +24,7 @@ import dev.ccpocket.daemon.util.QrTerminal
 import dev.ccpocket.protocol.PocketJson
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.runBlocking
@@ -164,29 +166,108 @@ private class TestClientCmd : CliktCommand(name = "test-client") {
     }
 }
 
+/** The per-OS way to (re)start the background daemon — shown whenever the loopback port is unreachable. */
+private fun daemonStartHint(): String {
+    val os = System.getProperty("os.name").lowercase()
+    return when {
+        os.contains("win") -> "start it:  schtasks /Run /TN ${ServiceInstaller.WINDOWS_TASK}    (or run it by hand: cc-pocket-daemon run)"
+        os.contains("mac") -> "start it:  launchctl kickstart -k gui/$(id -u)/dev.ccpocket.daemon    (or run it by hand: cc-pocket-daemon run)"
+        else -> "start it:  systemctl --user start cc-pocket-daemon    (or run it by hand: cc-pocket-daemon run)"
+    }
+}
+
 private class PairCmd : CliktCommand(name = "pair") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
 
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         try {
-            val body = runCatching { client.post("http://127.0.0.1:$pairPort/pair").bodyAsText() }.getOrElse {
-                echo("could not reach the running daemon on 127.0.0.1:$pairPort — is `run --relay` up?"); return@runBlocking
+            // The daemon's relay link may legitimately be mid-reconnect (backoff reaches 30s) while the mint
+            // window is only 10s — a one-shot pair failed spuriously on a HEALTHY daemon. Ride it out: retry
+            // until the link comes back or the window closes, and only then diagnose.
+            val deadline = System.currentTimeMillis() + PAIR_RETRY_WINDOW_MS
+            var lastBody = ""
+            var waiting = false
+            while (true) {
+                val body = runCatching { client.post("http://127.0.0.1:$pairPort/pair").bodyAsText() }.getOrElse {
+                    echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
+                    return@runBlocking
+                }
+                val info = runCatching { PocketJson.decodeFromString<LoopbackPair>(body) }.getOrNull()
+                if (info != null) {
+                    echo("")
+                    echo("  Open CC Pocket on your phone and scan this — or type the code (valid ${info.ttlSec}s):")
+                    echo("")
+                    echo(QrTerminal.render("ccpocket://pair?code=${info.code}"))
+                    echo("        code:  ${info.code.chunked(3).joinToString(" ")}")
+                    echo("")
+                    return@runBlocking
+                }
+                lastBody = body
+                if (System.currentTimeMillis() > deadline) break
+                if (!waiting) {
+                    waiting = true
+                    echo("daemon is up but its relay link is down — waiting for it to reconnect (up to ${PAIR_RETRY_WINDOW_MS / 1000}s)…")
+                }
+                kotlinx.coroutines.delay(3_000)
             }
-            val info = runCatching { PocketJson.decodeFromString<LoopbackPair>(body) }.getOrNull()
-            if (info == null) {
-                echo("pairing failed: $body")
-            } else {
-                echo("")
-                echo("  Open CC Pocket on your phone and scan this — or type the code (valid ${info.ttlSec}s):")
-                echo("")
-                echo(QrTerminal.render("ccpocket://pair?code=${info.code}"))
-                echo("        code:  ${info.code.chunked(3).joinToString(" ")}")
-                echo("")
-            }
+            echo("✗ pairing failed — the daemon can't reach the relay ($lastBody)")
+            echo("  likely: no internet, or a proxy/firewall blocking $DEFAULT_RELAY, or the relay is down.")
+            echo("  inspect: cc-pocket-daemon status")
         } finally {
             client.close()
         }
+    }
+
+    private companion object { const val PAIR_RETRY_WINDOW_MS = 60_000L }
+}
+
+private class StatusCmd : CliktCommand(name = "status") {
+    private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
+
+    override fun run() = runBlocking {
+        val client = HttpClient(CIO)
+        var healthy = true
+        try {
+            // 1. daemon process + relay link (via the loopback /status the running daemon serves)
+            val body = runCatching { client.get("http://127.0.0.1:$pairPort/status").bodyAsText() }.getOrNull()
+            val st = body?.let { runCatching { PocketJson.decodeFromString<LoopbackStatus>(it) }.getOrNull() }
+            if (st == null) {
+                healthy = false
+                echo("  daemon:   ✗ not reachable on 127.0.0.1:$pairPort — ${daemonStartHint()}")
+            } else {
+                echo("  daemon:   ✓ running (account ${st.accountId.take(8)}…, relay ${st.relay})")
+                if (st.attached) {
+                    echo("  relay:    ✓ attached${st.lastPongAgeMs?.let { " — liveness ${it / 1000}s ago" } ?: ""}")
+                } else {
+                    healthy = false
+                    echo("  relay:    ✗ link down (reconnecting — backoff reaches 30s; check network/proxy to $DEFAULT_RELAY)")
+                }
+            }
+            // 2. background service registered?
+            val os = System.getProperty("os.name").lowercase()
+            val service = when {
+                os.contains("win") -> if (ServiceInstaller.isWindowsTaskInstalled()) "✓ logon Scheduled Task '${ServiceInstaller.WINDOWS_TASK}'" else "✗ no Scheduled Task — cc-pocket-daemon service-install --apply"
+                os.contains("mac") -> {
+                    val plist = java.io.File(System.getProperty("user.home"), "Library/LaunchAgents/dev.ccpocket.daemon.plist")
+                    if (plist.exists()) "✓ launchd agent (${plist.path})" else "✗ no launchd agent — cc-pocket-daemon service-install --apply"
+                }
+                else -> {
+                    val unit = java.io.File(System.getProperty("user.home"), ".config/systemd/user/cc-pocket-daemon.service")
+                    if (unit.exists()) "✓ systemd user unit (${unit.path})" else "✗ no systemd unit — cc-pocket-daemon service-install --apply"
+                }
+            }
+            echo("  service:  $service")
+            // 3. agent CLIs resolvable?
+            val claude = runCatching { ClaudeLauncher.resolveExecutable(null) }.getOrNull()
+            echo("  claude:   ${claude?.let { "✓ $it" } ?: "✗ not found — install Claude Code first"}")
+            if (claude == null) healthy = false
+            val codex = runCatching { CodexLauncher.resolveExecutable(null) }.getOrNull()
+            echo("  codex:    ${codex?.let { "✓ $it" } ?: "– not found (optional; Codex sessions unavailable)"}")
+        } finally {
+            client.close()
+        }
+        if (!healthy) throw com.github.ajalt.clikt.core.ProgramResult(1)
     }
 }
 
@@ -225,4 +306,4 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
 }
 
 fun main(args: Array<String>) =
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), ServiceInstallCmd()).main(args)
