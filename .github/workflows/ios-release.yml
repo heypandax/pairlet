@@ -132,3 +132,22 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" | tee "$RUNNER_TEMP/export.log"
           # destination=upload means success is the upload, not an IPA on disk; gate on the marker
           grep -q "EXPORT SUCCEEDED" "$RUNNER_TEMP/export.log"
+
+      - name: Push "What's New" release notes to App Store Connect
+        # fastlane deliver (preinstalled on macOS runners) syncs fastlane/metadata/<locale>/release_notes.txt
+        # into the ASC version record for MARKETING_VERSION — creating that version when it doesn't exist yet,
+        # so the notes land without opening App Store Connect at all. Edit the txt files BEFORE dispatching.
+        # Metadata-only: skip_binary_upload/skip_screenshots live in fastlane/Deliverfile. If this step fails,
+        # the BINARY ABOVE IS ALREADY UPLOADED — fix the notes and push them by hand:
+        #   fastlane deliver --app_version <ver> --api_key_path <key.json>
+        env:
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          MARKETING_VERSION: ${{ inputs.marketing_version }}
+        run: |
+          # deliver authenticates with an api-key JSON: the .p8 content must be an embedded JSON string
+          jq -n --arg key_id "$ASC_KEY_ID" --arg issuer_id "$ASC_ISSUER_ID" \
+                --rawfile key "$RUNNER_TEMP/AuthKey.p8" \
+                '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' \
+                > "$RUNNER_TEMP/asc_api_key.json"
+          fastlane deliver --api_key_path "$RUNNER_TEMP/asc_api_key.json" --app_version "$MARKETING_VERSION"

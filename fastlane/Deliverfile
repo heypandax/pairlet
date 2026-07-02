@@ -1,0 +1,10 @@
+# fastlane deliver — metadata-only pushes to App Store Connect (the "What's New" automation).
+# The binary upload stays with xcodebuild in ios-release.yml; deliver ONLY syncs
+# fastlane/metadata/<locale>/release_notes.txt into the editable App Store version
+# (creating the version record when it doesn't exist yet — one less manual ASC step).
+app_identifier "com.panda.ccpocket"
+skip_binary_upload true
+skip_screenshots true
+run_precheck_before_submit false
+# non-interactive: skip the HTML metadata preview/confirmation
+force true
