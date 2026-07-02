@@ -25,21 +25,23 @@
 
 ## 二、遗留待办（按优先级）
 
-### P1 会话完整性 —— #21 的字面复现路径仍在 main 上
+### ~~P1 会话完整性~~ ✅ 已修（e630a86，2026-07-02）
 
-1. **relaunch 旧 fork 启发式**：`daemon/.../conversation/Conversation.kt:207` 仍是 `forkSession = resumeId != sessionId`（always-fork 时代遗留）。接续会话后、第一条消息前切权限模式（「选择全部权限」正是此流程）→ fork 出重复会话。修法：`open()` 时把 fork 决策存成字段（如 `openedWithFork`），relaunch 在 `sessionId == null` 时沿用；或重算 `transcriptRecentlyWritten`。
-2. **switchModel / switchEffort 缺回退**：`Conversation.kt:235-243` 未像 `switchMode`（:228）那样回退 `sessionId ?: openedResumeId`。接续后未发言即 `/model` 或 `/effort` → 空白重启、孤立已接续历史（比 fork 更糟）。#30 关闭评论中已向用户声明此边缘。
-3. **lastModel 不过滤侧链/合成记录**：`daemon/.../disk/TranscriptScanner.kt:114-127` 接受任意 `type=="assistant"`。尾部是 Task 子 agent turn 时回填子 agent 的模型；`model=="<synthetic>"` 会字面进标题。同一过滤也应加到 `lastContextTokens`（:88-109，会把子 agent 的占用当主线程种子）。
-4. **回填模型泄漏进启动参数**：回填写入的 `model` 字段会被 `relaunch()`（:204-209）与 `/clear`（:411）烘进 `AgentSpec(--model …)`，把历史模型钉到新进程/新会话上。修法：拆 `requestedModel`（驱动参数）与 `displayModel`（仅展示）。
+1. ~~relaunch 旧 fork 启发式~~ → `open()` 存 `openedWithFork`，relaunch 在 `sessionId == null` 时沿用；#21 字面复现路径消除。
+2. ~~switchModel / switchEffort 缺回退~~ → 均改为 `relaunch(sessionId ?: openedResumeId)`，接续后未发言切模型/effort 不再孤立历史。
+3. ~~lastModel 不过滤侧链/合成记录~~ → `lastModel` 跳过 `isSidechain` 与 `<synthetic>`；`lastContextTokens` 跳过 `isSidechain`。附两个单测。
+4. ~~回填模型泄漏进启动参数~~ → 新增 `backfilledModel` 仅供展示（`displayModel()`），`AgentSpec` 只用显式 `model`；init/显式切换会清掉回填值。
 
-### P1 daemon 侧 relay 死链 —— #25 relay_offline 根因（实证）
+### ~~P1 daemon 侧 relay 死链~~ ✅ 已修（48170a4，2026-07-02）
 
-5. **写超时**：`daemon/.../relay/RelayClient.kt:145-146` 两个 writer 都是裸 `outgoing.send`。移植手机端 `mobile/.../net/LinkHealth.kt` 的 `sendOrDie`（10s）。
-6. **硬断代替优雅关**：`RelayClient.kt:156` 心跳判死后走 `close(CloseReason)`——实证（ktor 3.1.3 探针）：链路写死且**有数据在写**时 `close()` 挂住 25s+ 不返回，daemon 僵尸直到 TCP 超时（约 15 分钟）。改为从心跳协程抛异常/cancel session scope 硬断（探针证明可行）。
-7. **sawPong 盲区**：`RelayClient.kt:154` 判死门槛要求见过 Pong，且每次重连清零（:149）——attach 后首个 Pong 前（约 20s/次）永不判死。放宽为「attach 后 45s 无 Pong 也判死」。
-8. 可选：每次 `connectOnce` 重建 `HttpClient`（:61，TUN/fake-IP 环境翻转的逃生门）。
+5. ~~写超时~~ → `sendOrDie`（10s）包住 dataWriter/ctrlWriter 的所有稳态写。
+6. ~~硬断代替优雅关~~ → 心跳判死改为抛 `DeadLinkException` 硬撤整个 session scope（不再往死链写 close 帧）。
+7. ~~sawPong 盲区~~ → 判死基线改为 attach 时刻，无论是否见过 Pong 一律 45s 强制；`sawPong` 仅保留日志用途。
+8. ~~重建 HttpClient~~ → 每次 `connectOnce` 走 `newClient().use{}`，selector 不再跨网络切换复用。
 
-> 注：记忆中「networkChangeLoop + 重建 client（编译过未发版）」与代码不符——仓库全分支 grep 无此实现；手机端实际落地的是 sendOrDie 方案（515ced9），daemon 端什么都没有。记忆已修正。
+验证：单测 7/7 过；`update-local-daemon.sh` 后本机单实例连上 relay，`pair` 探针返回真实 ticket（非 relay_offline）。真机换网自愈需发版后观察。
+
+> 注：记忆中「networkChangeLoop + 重建 client（编译过未发版）」与代码不符——仓库全分支 grep 无此实现；手机端实际落地的是 sendOrDie 方案（515ced9）。记忆已修正。
 
 ### P2 LAN 侧稳定（#24 评审新发现）
 
