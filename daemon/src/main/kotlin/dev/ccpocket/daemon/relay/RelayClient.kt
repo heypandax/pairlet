@@ -26,8 +26,6 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
-import io.ktor.websocket.CloseReason
-import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
@@ -57,9 +55,13 @@ class RelayClient(
     private val core: DaemonCore,
 ) {
     private val log = logger("RelayClient")
-    // keepalive ping well under Cloudflare's ~100s idle WS timeout, so the relay link stays up
-    private val client = HttpClient(CIO) {
+
+    // A FRESH client (and CIO selector) per connection attempt: a selector that lived through an interface
+    // change (VPN/TUN flip, network switch) can keep dialing a dead path forever. Rebuilding is cheap at
+    // reconnect cadence and guarantees every attempt starts from the current network state.
+    private fun newClient() = HttpClient(CIO) {
         install(WebSockets) {
+            // keepalive ping well under Cloudflare's ~100s idle WS timeout, so the relay link stays up
             pingIntervalMillis = 20_000
             maxFrameSize = 4L * 1024 * 1024 // accept big frames forwarded from the phone (matches relay cap)
         }
@@ -71,8 +73,8 @@ class RelayClient(
 
     @Volatile private var dataOut: Channel<ByteArray>? = null
     @Volatile private var peerOnline = false
-    @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness)
-    @Volatile private var sawPong = false  // this relay speaks Pong -> only then enforce the dead-link timeout
+    @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness; baselined at attach)
+    @Volatile private var sawPong = false  // logging only: notes when this relay first proves it speaks Pong
     private val sessions = DeviceSessions(core, identity) { deviceId, payload ->
         dataOut?.send(Wire.wrapDevice(deviceId, payload))
     }
@@ -132,46 +134,65 @@ class RelayClient(
     }
 
     private suspend fun connectOnce() {
-        client.webSocket(urlString = "$relayWsBase/v1/daemon") {
-            // Bound the pre-attach handshake: the socket can connect yet the relay/network stay silent (the
-            // half-open path a heartbeat-forced reconnect lands back on), and authenticate() would otherwise
-            // block on incoming.receive() forever — before the heartbeat below is even armed — wedging the
-            // daemon until a manual restart. A timeout throws instead, so run()'s loop backs off and retries.
-            if (withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { authenticate() } == null) error("relay handshake timed out")
-            log.info("attached to relay as daemon (account=${identity.accountId})")
+        newClient().use { client ->
+            client.webSocket(urlString = "$relayWsBase/v1/daemon") {
+                // Bound the pre-attach handshake: the socket can connect yet the relay/network stay silent (the
+                // half-open path a heartbeat-forced reconnect lands back on), and authenticate() would otherwise
+                // block on incoming.receive() forever — before the heartbeat below is even armed — wedging the
+                // daemon until a manual restart. A timeout throws instead, so run()'s loop backs off and retries.
+                if (withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { authenticate() } == null) error("relay handshake timed out")
+                log.info("attached to relay as daemon (account=${identity.accountId})")
 
-            val outbox = Channel<ByteArray>(Channel.BUFFERED)
-            dataOut = outbox
-            val dataWriter = launch { for (bytes in outbox) outgoing.send(WsFrame.Binary(true, bytes)) }
-            val ctrlWriter = launch { for (c in controlOutbox) outgoing.send(WsFrame.Text(controlText(c))) }
-            // App-level heartbeat: a half-open/zombie link keeps the TCP socket ESTABLISHED and Ktor's
-            // transport ping satisfied, yet no Pong returns through the dead relay app. Force a reconnect.
-            sawPong = false; lastPongAt = System.currentTimeMillis()
-            val heartbeat = launch {
-                while (true) {
-                    delay(HEARTBEAT_INTERVAL_MS)
-                    controlOutbox.send(Ping(System.currentTimeMillis()))
-                    if (sawPong && System.currentTimeMillis() - lastPongAt > HEARTBEAT_DEAD_MS) {
-                        log.warn("relay heartbeat timeout (no pong in ${HEARTBEAT_DEAD_MS}ms); forcing reconnect")
-                        close(CloseReason(CloseReason.Codes.GOING_AWAY, "heartbeat timeout")); break
+                val outbox = Channel<ByteArray>(Channel.BUFFERED)
+                dataOut = outbox
+                // Every steady-state write is bounded (sendOrDie): on a wedged socket a write never errors —
+                // the TCP send buffer just fills silently (network switch, NAT rebind) — and it would otherwise
+                // hang this writer, back up the outbox, and wedge the pumps feeding it. Same pattern as the
+                // phone's LinkHealth. The throw hard-cancels the whole session; run()'s loop reconnects.
+                val dataWriter = launch { for (bytes in outbox) sendOrDie { outgoing.send(WsFrame.Binary(true, bytes)) } }
+                val ctrlWriter = launch { for (c in controlOutbox) sendOrDie { outgoing.send(WsFrame.Text(controlText(c))) } }
+                // App-level heartbeat: a half-open/zombie link keeps the TCP socket ESTABLISHED and Ktor's
+                // transport ping satisfied, yet no Pong returns through the dead relay app. The deadline runs
+                // from ATTACH, not from the first Pong — a link that wedges before ever ponging must die too
+                // (the old sawPong gate left that window undetectable). And it THROWS instead of close():
+                // a graceful close writes a close frame down the same wedged path and can itself hang for
+                // minutes (probed on ktor 3.1.3); a thrown exception tears the session down without writing.
+                sawPong = false; lastPongAt = System.currentTimeMillis()
+                val heartbeat = launch {
+                    while (true) {
+                        delay(HEARTBEAT_INTERVAL_MS)
+                        controlOutbox.send(Ping(System.currentTimeMillis()))
+                        if (System.currentTimeMillis() - lastPongAt > HEARTBEAT_DEAD_MS) {
+                            log.warn("relay heartbeat timeout (no pong in ${HEARTBEAT_DEAD_MS}ms${if (!sawPong) ", none since attach — relay predates Pong?" else ""}); forcing reconnect")
+                            throw DeadLinkException("no relay pong in ${HEARTBEAT_DEAD_MS}ms")
+                        }
                     }
                 }
-            }
-            try {
-                for (frame in incoming) when (frame) {
-                    is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
-                        sessions.onFrame(deviceId, payload) // sequential: preserves per-device frame order
+                try {
+                    for (frame in incoming) when (frame) {
+                        is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
+                            sessions.onFrame(deviceId, payload) // sequential: preserves per-device frame order
+                        }
+                        is WsFrame.Text -> onControl(runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull())
+                        else -> {}
                     }
-                    is WsFrame.Text -> onControl(runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull())
-                    else -> {}
+                } finally {
+                    dataOut = null
+                    outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()
+                    withContext(NonCancellable) { sessions.onDisconnect() }
                 }
-            } finally {
-                dataOut = null
-                outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()
-                withContext(NonCancellable) { sessions.onDisconnect() }
             }
         }
     }
+
+    /** Run [block] (a socket write) under [WRITE_TIMEOUT_MS]; a stall means the link is a zombie → throw. */
+    private suspend fun sendOrDie(block: suspend () -> Unit) {
+        if (withTimeoutOrNull(WRITE_TIMEOUT_MS) { block() } == null) throw DeadLinkException("socket write stalled")
+    }
+
+    /** A dead relay link, detected by a stalled write or a missed Pong deadline. A plain Exception (not a
+     *  CancellationException) so it fails the session scope and surfaces to run()'s retry loop. */
+    private class DeadLinkException(msg: String) : Exception(msg)
 
     /** DaemonHello -> Challenge -> DaemonAuth -> Attached. Throws on rejection (caller retries). */
     private suspend fun DefaultClientWebSocketSession.authenticate() {
@@ -206,12 +227,13 @@ class RelayClient(
     private companion object {
         // Once the phone detaches, hand an idle (no background work) session back to the desktop quickly:
         // stop + unhide so it surfaces in `claude --resume`. Short enough to feel prompt, long enough to
-        // ride out brief app-backgrounding / network blips — a reaped session re-opened later cold-forks
-        // into a fresh id (see Conversation.open), so too-short here trades desktop freshness for id churn.
+        // ride out brief app-backgrounding / network blips — a reaped session re-opened later resumes in
+        // place on the same id (see Conversation.open), so too-short here mostly costs process churn.
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
-        const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this (after one was seen) -> reconnect
+        const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this of attach/the last one -> reconnect
         const val HANDSHAKE_TIMEOUT_MS = 15_000L  // pre-attach (connect→auth→attached) cap, else assume a wedged link
+        const val WRITE_TIMEOUT_MS = 10_000L      // a healthy socket write is instant; stalled this long = zombie link
     }
 }
