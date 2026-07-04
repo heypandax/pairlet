@@ -114,6 +114,11 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
         run: |
           set -o pipefail   # tee must not mask xcodebuild's exit code (the classic "tail ate the failure")
+          # CODE_SIGN_IDENTITY override: archive straight for DISTRIBUTION. The default (development)
+          # identity mints a brand-new development cert on every ephemeral runner — the account hit
+          # Apple's cert cap after a few releases ("Choose a certificate to revoke", 1.2.2 run). The
+          # cloud-managed Apple Distribution cert is held by Apple and REUSED across runners, so no
+          # cert accumulates; -allowProvisioningUpdates fetches the App Store profile to match.
           xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/CCPocket.xcarchive" \
@@ -121,6 +126,7 @@ jobs:
             -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
             archive | tee "$RUNNER_TEMP/archive.log"
           grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
 
