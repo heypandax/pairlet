@@ -12,8 +12,14 @@ object DeepLink {
     fun handle(url: String) { pending.value = url }
 }
 
-/** A session to resume, delivered by tapping a task-complete push notification. */
-data class SessionRoute(val workdir: String, val sessionId: String)
+/** A session to resume — from a tapped task-complete push, or the desktop's cross-machine pin jump.
+ *  [title]/[agent] are display seeds the opener may know (pins do; pushes don't — null keeps defaults). */
+data class SessionRoute(
+    val workdir: String,
+    val sessionId: String,
+    val title: String? = null,
+    val agent: dev.ccpocket.protocol.AgentKind? = null,
+)
 
 /**
  * A pending "open this session" request from a tapped push. The platform entry points set it

@@ -32,7 +32,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -58,7 +57,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
@@ -68,7 +66,6 @@ import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.StringResource
-import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
 // ── the autonomy ladder (top = most cautious) ───────────────────
@@ -115,36 +112,6 @@ fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
             Box(Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp).size(width = 38.dp, height = 5.dp).clip(CircleShape).background(Tok.hair))
             content()
         }
-    }
-}
-
-// ── persistent mode badge (chat header) ─────────────────────────
-@Composable
-fun ModeBadge(mode: PermissionMode, rules: Int, onClick: () -> Unit) {
-    val m = MODE_BY[mode] ?: MODES[0]
-    val shape = RoundedCornerShape(999.dp)
-    Row(
-        Modifier.height(28.dp).clip(shape).background(m.color.copy(alpha = 0.12f))
-            .border(1.dp, m.color.copy(alpha = 0.32f), shape).clickable(onClick = onClick).padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (m.warn) Icon(Icons.Rounded.WarningAmber, null, tint = m.color, modifier = Modifier.size(13.dp))
-        else Box(Modifier.size(6.dp).clip(CircleShape).background(m.color))
-        Text(stringResource(m.short), color = m.color, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, lineHeight = 12.5.sp, style = TightCenter)
-        if (rules > 0) Text(pluralStringResource(Res.plurals.mode_rules, rules, rules), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, lineHeight = 11.sp, style = TightCenter)
-        ChevronDown(m.color.copy(alpha = 0.85f), 12.dp)
-    }
-}
-
-/** A tight, centered down-chevron — the Material icon carries internal whitespace that unbalances the pill. */
-@Composable
-private fun ChevronDown(color: Color, size: Dp) {
-    Canvas(Modifier.size(size)) {
-        val w = this.size.width
-        val h = this.size.height
-        val sw = (w * 0.14f).coerceAtLeast(1.4f)
-        drawLine(color, Offset(w * 0.22f, h * 0.40f), Offset(w * 0.5f, h * 0.61f), strokeWidth = sw, cap = StrokeCap.Round)
-        drawLine(color, Offset(w * 0.78f, h * 0.40f), Offset(w * 0.5f, h * 0.61f), strokeWidth = sw, cap = StrokeCap.Round)
     }
 }
 

@@ -28,11 +28,35 @@ sealed interface DirRow {
 private val PATH_SEP = Regex("""[/\\]""")
 internal fun sepOf(path: String): Char = if (path.contains('\\')) '\\' else '/' // shared with App.kt's NewPathSheet seed
 
-/** Collapse $HOME to ~ (so paths stop repeating /Users/<name>/ everywhere). */
-fun tilde(path: String): String {
-    val seg = path.split(PATH_SEP)
-    return if (seg.size > 3 && (seg[1] == "Users" || seg[1] == "home")) "~/" + seg.drop(3).joinToString("/") else path
+/** Collapse $HOME to ~ (so paths stop repeating /Users/<name>/ everywhere) — one home-detection
+ *  rule for the whole file: [homePrefix]. */
+fun tilde(path: String): String =
+    homePrefix(path)?.let { "~" + path.substring(it.length).replace('\\', '/') } ?: path
+
+/** Drop a trailing separator so a session never opens at "/foo/bar/", keeping a bare root ("/",
+ *  "C:\") intact — shared by the two new-session inputs (mobile NewPathSheet, desktop popover). */
+fun trimTrailingSep(s: String): String = s.trimEnd('/', '\\').ifEmpty { s }
+
+/** Just the project folder ("cc-pocket") — for tight surfaces like the chat header's meta line, where
+ *  even a tail-truncated path is noise. Handles both host separators and trailing slashes; a bare
+ *  root ("/", "C:\") falls back to the path itself. */
+fun folderName(path: String?): String {
+    val p = path?.trimEnd('/', '\\') ?: return ""
+    return p.split(PATH_SEP).lastOrNull { it.isNotBlank() } ?: path
 }
+
+/** The home-dir prefix of one absolute path ("/Users/x", "/home/x", "C:\Users\x"), else null. Keeps
+ *  seg[0] (the drive on Windows, "" on Unix) so the result stays a real prefix of the input. */
+fun homePrefix(path: String): String? {
+    val s = path.split(PATH_SEP)
+    return if (s.size > 3 && (s[1] == "Users" || s[1] == "home")) s.take(3).joinToString(sepOf(path).toString()) else null
+}
+
+private val DRIVE_PREFIX = Regex("""^[A-Za-z]:[\\/].*""")
+
+/** Light "absolute or ~ path" check shared by the new-session inputs (mobile NewPathSheet, desktop
+ *  popover); the daemon stays the authority on whether the dir is actually usable. */
+fun looksAbsolutePath(s: String): Boolean = s.startsWith("/") || s.startsWith("~") || DRIVE_PREFIX.matches(s)
 
 /**
  * A one-line monospace path that overflows from the FRONT — the project folder (the tail) is what
@@ -117,11 +141,7 @@ sealed interface TreeRow {
 
 /** The tree root: the user's home (~/…) inferred from the project paths, else their common parent dir. */
 fun treeRoot(dirs: List<DirectoryEntry>): String {
-    dirs.firstNotNullOfOrNull { e ->
-        val s = e.path.split(PATH_SEP)
-        // keep s[0] (the drive on Windows, "" on Unix) so the root stays a real prefix of the entries
-        if (s.size > 3 && (s[1] == "Users" || s[1] == "home")) s.take(3).joinToString(sepOf(e.path).toString()) else null
-    }?.let { return it }
+    dirs.firstNotNullOfOrNull { homePrefix(it.path) }?.let { return it }
     val paths = dirs.map { it.path }
     if (paths.isEmpty()) return "/"
     val sep = sepOf(paths.first())

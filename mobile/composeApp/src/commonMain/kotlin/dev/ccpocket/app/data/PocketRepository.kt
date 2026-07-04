@@ -1,11 +1,16 @@
 package dev.ccpocket.app.data
 
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.app.ensureLocalNetworkAccess
+import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.net.DirectE2EConnection
+import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.RelayE2EConnection
+import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
 import dev.ccpocket.app.push.PushController
@@ -47,7 +52,9 @@ import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.ShellResult
+import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.SessionLive
+import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Sessions
@@ -148,11 +155,30 @@ class PendingImage(val id: Long, val bytes: ByteArray, val state: ImgState)
  *  an intentional teardown and skip the retry). */
 class ConnectWedgedException : Exception("connect wedged: no attach within timeout")
 
-/** State hub: consumes inbound [Frame]s into observable Compose state, exposes user actions. */
-class PocketRepository(private val scope: CoroutineScope) {
+/**
+ * State hub: consumes inbound [Frame]s into observable Compose state, exposes user actions.
+ *
+ * [pinnedTo] makes this a fleet SATELLITE: an instance bound to one specific computer, running the same
+ * battle-tested connection stack (reconnect/backoff/heartbeat/watchdog) but never reading or writing the
+ * global active binding — the [FleetCoordinator] keeps exactly one such link per non-active binding so
+ * every paired machine stays live at once. Satellites are passive data links: the UI never routes pairing,
+ * switching, settings writes, or session-opening through them today, and they skip push registration
+ * (the platform push singleton stays owned by the primary until the per-machine policy work).
+ */
+class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: PairedDaemon? = null) {
     private val direct = RelayConnection()
     private val relay = RelayE2EConnection()
+    private val directE2E = DirectE2EConnection()
     private var useRelay = false
+    // direct-first routing: a failed direct attempt silently falls back to the relay and cools down,
+    // so a dead stored address costs one 3s probe per minute, not one per reconnect tick. Both maps are
+    // per ACCOUNT — this repo switches bindings, and machine A's failed probe must not gate machine B's.
+    private val directCooldownUntil = HashMap<String, Long>()
+    // addresses that ANSWERED the handshake with the wrong daemon key (a remote daemon advertising its
+    // own 127.0.0.1 reaches a DIFFERENT local daemon here) — dead for this binding, don't re-dial or
+    // re-persist them; the daemon re-teaches a good address via DaemonInfo if it ever gets one
+    private val badDirectUrl = HashMap<String, String>()
+    private var directAttemptInFlight = false
     private var firstTicket: String? = null // pairing ticket, used as PSK on the first relay connect only
     private var lastDirectUrl: String? = null
     private var inboundJob: Job? = null     // persistent collector over the transport's inbound flow
@@ -163,6 +189,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     private var graceJob: Job? = null       // silent window before showing RelayUnreachable
     private var listWaitJob: Job? = null    // post-attach wait for the first list before assuming the computer is offline
     private var connectWatchdog: Job? = null // forces a retry if a connect wedges pre-attach (no socket error)
+    private var listWaitRetried = false     // one deaf-link re-handshake per episode (see startListWait); reset on Ready
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
     private var daemonOffline = false       // explicit: got PeerPresence(false), or the post-attach list-wait elapsed
@@ -269,7 +296,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     val phase = mutableStateOf(ConnPhase.Connecting)
     val status = mutableStateOf(StatusMsg(Res.string.status_disconnected))
     /** The active binding the transport talks to. Stays a single value so all transport code is unchanged. */
-    val paired = mutableStateOf<PairedDaemon?>(Pairing.active())
+    val paired = mutableStateOf<PairedDaemon?>(pinnedTo ?: Pairing.active())
     /** Every bound computer (observable mirror of [Pairing.loadAll]); drives the device picker + settings list. */
     val pairedList = mutableStateListOf<PairedDaemon>().also { it.addAll(Pairing.loadAll()) }
     /** Pair-another-computer mode: routes to PairingScreen even though bindings already exist. */
@@ -301,12 +328,30 @@ class PocketRepository(private val scope: CoroutineScope) {
     val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
     val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
+
+    /** Observed occupancy beyond the declared window PROVES a bigger one (beta-1M, or an alias the window
+     *  table didn't know — a `/model fable` session once pinned the statusline at 100% mid-1M-session).
+     *  The rule itself lives in ONE place — [dev.ccpocket.protocol.provenWindow] (daemon announce paths
+     *  call it too); this is the phone's defensive re-check against old daemons. Codex sessions
+     *  keep window=null (raw-token display) and are untouched. */
+    private fun upgradeWindowIfProven() {
+        val win = contextWindow.value ?: return
+        contextWindow.value = dev.ccpocket.protocol.provenWindow(win, contextUsed.value)
+    }
     val backgroundJobs = mutableStateListOf<BackgroundJob>() // bg shells / sub-agents / monitors the daemon is tracking
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
+
+    /** The last prompt sent that the daemon hasn't visibly started processing (no chunk/tool/done yet).
+     *  If the daemon answers [SessionGone] (convo idle-reaped while the link was down), we auto-reopen the
+     *  session and resend this once — the fix for "sent a message into a ghost session, nothing happened".
+     *  Cleared on the first sign of processing; consumed (single retry, no loops) by the resend. */
+    private class PromptRetry(val text: String, val images: List<ImageData>, val workdir: String)
+    private var promptRetry: PromptRetry? = null
+    private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
     // session closes its process; reopening resumes a FRESH process that would otherwise default these.
@@ -433,19 +478,23 @@ class PocketRepository(private val scope: CoroutineScope) {
             phase.value = next
             Telemetry.track(TelEvent.ConnPhase, mapOf(TelKey.Phase to next.name, TelKey.Transport to transportName()))
         }
-        if (ready) { reconnectGraceJob?.cancel(); reconnectGraceJob = null; reconnectGracePassed = false } // truly back — reset for the next blip
+        if (ready) { reconnectGraceJob?.cancel(); reconnectGraceJob = null; reconnectGracePassed = false; listWaitRetried = false } // truly back — reset for the next blip
         consumePendingOpenIfReady() // a push-tap target waits here until the link is actually Ready
     }
 
-    private fun transportName() = if (useRelay) "relay" else "direct"
+    private fun transportName() = when {
+        useRelay && directE2E.connected -> "direct-e2e"
+        useRelay -> "relay"
+        else -> "direct"
+    }
 
     /**
      * A tapped task-complete push wants to resume a specific session. Stash it, bring the link up if the
      * app was disconnected, and open it now if we're already Ready — otherwise [recomputePhase] opens it
      * the moment the directory list lands (proving the computer is online). Idempotent for repeat taps.
      */
-    fun requestOpenSession(workdir: String, sessionId: String) {
-        pendingOpen = dev.ccpocket.app.SessionRoute(workdir, sessionId)
+    fun requestOpenSession(workdir: String, sessionId: String, title: String? = null, agent: AgentKind? = null) {
+        pendingOpen = dev.ccpocket.app.SessionRoute(workdir, sessionId, title, agent)
         if (demoMode.value) { pendingOpen = null; return }
         if (paired.value != null && !sessionActive.value) startRelay()
         consumePendingOpenIfReady()
@@ -457,7 +506,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         pendingOpen = null
         if (convoId.value != null && currentSessionId == t.sessionId) return // already in this session — don't churn it
         sessionsDir.value = null // drop any half-open session list so the chat is what shows
-        openSession(t.workdir, t.sessionId)
+        openSession(t.workdir, t.sessionId, title = t.title, agent = t.agent ?: defaultAgent.value)
     }
 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
@@ -485,6 +534,7 @@ class PocketRepository(private val scope: CoroutineScope) {
     /** Start platform push registration once, after the first relay attach (so the iOS permission prompt
      *  follows pairing). The token callback may land later — [registerPush] also runs on every Attached. */
     private fun ensurePushStarted() {
+        if (pinnedTo != null) return // satellites leave the platform push singleton to the primary link
         if (pushStarted || !notificationsOn.value) return
         pushStarted = true
         PushController.start { token -> pushToken = token; registerPush() }
@@ -494,7 +544,7 @@ class PocketRepository(private val scope: CoroutineScope) {
      *  notifications are off. Skips when unchanged since the last send (the relay persists it), so the
      *  foreground-triggered reconnect storm doesn't rewrite the same row. Relay transport only. */
     private fun registerPush() {
-        if (!useRelay) return
+        if (!useRelay || directE2E.connected) return // direct transport has no relay control plane; register on the next real relay attach
         val tok = pushToken ?: return
         val sent = tok.platform to (if (notificationsOn.value) tok.token else "")
         if (sent == pushRegistered) return
@@ -592,6 +642,15 @@ class PocketRepository(private val scope: CoroutineScope) {
             if (sessionActive.value && attachedThisSession && !directoriesLoaded.value && !daemonOffline && !pairingInvalid) {
                 daemonOffline = true
                 recomputePhase()
+                // A silent computer here is EITHER really offline or a DEAF E2E link: the daemon keeps one
+                // session per device, so if another of this device's sockets (fleet satellite, reconnect
+                // overlap) re-keyed it, both sides silently drop every frame while the relay socket still
+                // pings fine. One forced re-handshake per episode tells the cases apart — a deaf link comes
+                // back alive; a truly offline computer costs one extra handshake and stays on this screen.
+                if (!listWaitRetried) {
+                    listWaitRetried = true
+                    launchTransport(reconnect = true)
+                }
             }
         }
     }
@@ -606,12 +665,13 @@ class PocketRepository(private val scope: CoroutineScope) {
         status.value = StatusMsg(if (reconnect) Res.string.status_reconnecting else Res.string.status_connecting)
         if (inboundJob == null) {
             inboundJob = scope.launch {
-                if (useRelay) relay.inbound.collect { handle(it) } else direct.inbound.collect { handle(it) }
+                // only the transport that's actually connected emits — merging idle flows is free
+                merge(relay.inbound, direct.inbound, directE2E.inbound).collect { handle(it) }
             }
         }
         if (controlJob == null) {
             controlJob = scope.launch {
-                (if (useRelay) relay.control else direct.control).collect { handleControl(it) }
+                merge(relay.control, direct.control, directE2E.control).collect { handleControl(it) }
             }
         }
         connectJob?.cancel()
@@ -619,6 +679,28 @@ class PocketRepository(private val scope: CoroutineScope) {
             val result = runCatching {
                 if (useRelay) {
                     val p = paired.value ?: error("not paired")
+                    // direct-first: the daemon-advertised LAN/loopback address skips the relay AND the
+                    // proxy leg entirely. Unreachable/refused/bad handshake → silent same-attempt relay
+                    // fallback + cooldown. A drop AFTER it was live exits normally into the reconnect path.
+                    val du = p.directUrl?.takeIf { it != badDirectUrl[p.accountId] }
+                    if (du != null && epochMillis() >= (directCooldownUntil[p.accountId] ?: 0L)) {
+                        directAttemptInFlight = true
+                        try {
+                            directE2E.connect(du, p, Pairing.deviceKeys())
+                            return@runCatching
+                        } catch (e: DirectUnreachableException) {
+                            directCooldownUntil[p.accountId] = epochMillis() + DIRECT_RETRY_COOLDOWN_MS
+                            if (e.keyMismatch) { // wrong daemon at that address — retries can never succeed
+                                badDirectUrl[p.accountId] = du
+                                rememberDirectUrl(p.accountId, null)
+                            }
+                        } finally {
+                            directAttemptInFlight = false
+                        }
+                    }
+                    // frames optimistically queued for the direct leg (incl. this attempt's ListDirectories)
+                    // ride the relay instead — nothing silently evaporates in the fallback
+                    directE2E.drainPending().forEach { relay.send(it) }
                     relay.connect(p, Pairing.deviceKeys(), firstTicket).also { firstTicket = null }
                 } else {
                     direct.connect(lastDirectUrl ?: error("no direct url"))
@@ -733,11 +815,15 @@ class PocketRepository(private val scope: CoroutineScope) {
         sessionActive.value = false
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
+        // frames queued for the binding we're leaving must not leak into the next link (both transports
+        // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
+        directAttemptInFlight = false
+        directE2E.drainPending(); relay.drainPending()
         connected.value = false
         phase.value = ConnPhase.Connecting
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
-        hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; directoriesLoaded.value = false
+        hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         convoId.value = null
         sessionsDir.value = null
@@ -786,14 +872,27 @@ class PocketRepository(private val scope: CoroutineScope) {
         }
     }
 
+    /** Runs synchronously at the top of [switchDaemon]. The FleetCoordinator registers itself here (its
+     *  satellite for the target machine must die BEFORE we dial it — see its class doc); a repo without a
+     *  coordinator (tests, satellites, headless) has nothing to retire. Keeps the repo core off the fleet global. */
+    var onBeforeSwitch: ((accountId: String) -> Unit)? = null
+
     /** Switch the active computer: tear down the current link, pin [target], reconnect to it. */
     fun switchDaemon(target: PairedDaemon) {
         if (paired.value?.accountId == target.accountId && sessionActive.value) return
+        onBeforeSwitch?.invoke(target.accountId)
         disconnect()
         paired.value = target
         Pairing.setActive(target.accountId)
         firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
+    }
+
+    /** Write-through for a binding's stored direct URL: persist, refresh the list, patch the active copy.
+     *  Uses [Pairing.setDirectUrl]'s returned list — no second store read. */
+    private fun rememberDirectUrl(accountId: String, url: String?) {
+        replace(pairedList, Pairing.setDirectUrl(accountId, url))
+        paired.value?.takeIf { it.accountId == accountId }?.let { paired.value = it.copy(directUrl = url) }
     }
 
     /** Give a binding a local nickname (blank clears it). */
@@ -818,7 +917,16 @@ class PocketRepository(private val scope: CoroutineScope) {
     private suspend fun send(frame: Frame) {
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
-            if (useRelay) relay.send(frame) else direct.send(frame)
+            when {
+                // direct leg live (or being dialed) FOR THIS BINDING: queue there — on fallback, drainPending
+                // re-routes to the relay. The account guard matters on a machine switch: the old machine's
+                // socket dies asynchronously, so `connected` alone can still read true while we're already
+                // dialing the new machine — routing there would strand the frame in a dead outbox.
+                useRelay && (directAttemptInFlight || (directE2E.connected && directE2E.account == paired.value?.accountId)) ->
+                    directE2E.send(frame)
+                useRelay -> relay.send(frame)
+                else -> direct.send(frame)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -917,8 +1025,15 @@ class PocketRepository(private val scope: CoroutineScope) {
                 }
                 recomputePhase()
             }
-            is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items) }
+            is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items); sessionsRefreshing.value = false }
             is Usage -> { usage.value = f; usageLoading.value = false }
+            // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
+            // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
+            // address that already answered with the WRONG daemon key stays blacklisted — the daemon
+            // re-advertises the same value on every handshake, which must not resurrect a dead probe.
+            is DaemonInfo -> paired.value?.takeIf { it.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[it.accountId]) }?.let { p ->
+                rememberDirectUrl(p.accountId, f.lanUrl)
+            }
             is SessionLive -> {
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
@@ -935,6 +1050,7 @@ class PocketRepository(private val scope: CoroutineScope) {
                 // seed the usage statusline on resume (before the first new turn). Only when we have no
                 // value yet — a TurnDone this session is fresher than the daemon's transcript snapshot.
                 if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
+                upgradeWindowIfProven()
                 // daemon truth beats the local guess: a turn that ended (or started) while the link was
                 // down would otherwise leave the ■/mic button stuck; null = old daemon, keep local state
                 f.executing?.let { exec ->
@@ -945,25 +1061,55 @@ class PocketRepository(private val scope: CoroutineScope) {
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
                 persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
+                // SessionGone recovery: the reopen landed — resend the prompt that hit the dead convo. Single
+                // shot: a second SessionGone for the resent prompt takes the honest-error branch, never a loop.
+                // Workdir-matched so a user who navigated elsewhere mid-recovery doesn't get it misdelivered.
+                val retry = promptRetry
+                if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
+                    promptRetry = null; promptResendArmed = false
+                    streaming.value = true
+                    scope.launch { send(SendPrompt(f.convoId, retry.text, retry.images)) }
+                }
             }
             // Stream/turn frames carry their source convoId; this single-active-view model has one `messages`
             // list, so a frame from a just-left conversation (its tail still in flight when we switched) must
             // be dropped — else it renders into whatever convo is now open. Reopening the source replays its
             // full transcript via ConvoHistory, so nothing is actually lost. (Matches the BackgroundJobs guard.)
-            is AssistantChunk -> if (f.convoId == convoId.value) appendChunk(f)
-            is ToolEvent -> if (f.convoId == convoId.value) { finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
+            is AssistantChunk -> if (f.convoId == convoId.value) { promptRetry = null; appendChunk(f) }
+            is ToolEvent -> if (f.convoId == convoId.value) { promptRetry = null; finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
             is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
             is TurnDone -> if (f.convoId == convoId.value) {
+                promptRetry = null
                 finishThinking(); streaming.value = false
-                // ~context occupancy: the prompt claude just saw (fresh input + the cached prefix still in the window)
-                f.usage?.let { contextUsed.value = it.contextTokens }
+                // ~context occupancy: the prompt claude just saw + the reply it wrote (null = interrupted/
+                // error turn without usage — keep showing the last known value, never snap to 0). A ZERO
+                // footprint is equally never a real turn: daemons predating hasUsage send zero-filled
+                // placeholders for interrupted turns, which snapped the statusline to 0% (07-04 report).
+                f.usage?.takeIf { it.contextTokens > 0 }?.let { contextUsed.value = it.contextTokens }
+                upgradeWindowIfProven()
             }
             is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
             is PocketError -> {
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
+                    promptRetry = null
                     finishThinking(); streaming.value = false
+                }
+            }
+            // The daemon no longer holds this conversation (idle-reaped during a link drop / daemon restart).
+            // Recover instead of spinning: re-open (resume) the same session, and the SessionLive handler
+            // resends the pending prompt exactly once. No session to resume → surface it honestly.
+            is SessionGone -> if (f.convoId == convoId.value && !observing.value) {
+                val sid = sessionKey.value ?: currentSessionId
+                val wd = workdir.value
+                if (promptRetry != null && !promptResendArmed && sid != null && wd != null) {
+                    promptResendArmed = true
+                    scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE)) }
+                } else {
+                    promptRetry = null; promptResendArmed = false
+                    finishThinking(); streaming.value = false
+                    messages.add(ChatItem.Sys("session expired on the computer — send again to restart it"))
                 }
             }
             // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript
@@ -1026,12 +1172,14 @@ class PocketRepository(private val scope: CoroutineScope) {
     }
 
     /** Pull-to-refresh the project list (re-scans the daemon's directories + live state). */
-    fun refreshDirectories() {
-        refreshing.value = true
-        scope.launch {
-            runCatching { send(ListDirectories()) }
-            delay(4000); refreshing.value = false // safety: clear the spinner even if no reply
-        }
+    fun refreshDirectories() = refreshWithSpinner(refreshing, ListDirectories())
+
+    /** One-shot list refresh behind a pull-to-refresh spinner: the frame handler clears [flag] when the
+     *  reply lands; a safety window clears it even if no reply ever does (send() swallows transport
+     *  errors itself). One copy of that knowledge for both the project and session lists. */
+    private fun refreshWithSpinner(flag: MutableState<Boolean>, frame: Frame) {
+        flag.value = true
+        scope.launch { send(frame); delay(REFRESH_SPINNER_SAFETY_MS); flag.value = false }
     }
 
     /** Keep the open-project list fresh without the pull-to-refresh spinner (the daemon list is pull-only). */
@@ -1048,10 +1196,24 @@ class PocketRepository(private val scope: CoroutineScope) {
     }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
+
+    /** Pull-to-refresh spinner for the sessions list (mirrors [refreshing] for the project list). */
+    val sessionsRefreshing = mutableStateOf(false)
+
+    /** Re-scan the open project's sessions with the pull-to-refresh spinner. */
+    fun refreshSessions() {
+        val wd = sessionsDir.value ?: return
+        refreshWithSpinner(sessionsRefreshing, ListSessions(wd))
+    }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker. A session opened before keeps its own (saved).
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
-        convoId.value?.let { send(CloseSession(it)) } // reclaim any lingering claude process first
+        // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
+        // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
+        // (sidebar click → here, no backToBrowse in between), so an unconditional close was killing
+        // the previous session's in-flight work on every switch. Switching back later resumes by
+        // sessionId and reattaches the still-live conversation (registry live-match), no fork.
+        convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
         messages.clear(); convoId.value = null
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
@@ -1123,6 +1285,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
         pendingImages.clear()
         streaming.value = true
+        workdir.value?.let { promptRetry = PromptRetry(text, images, it); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
         scope.launch { send(SendPrompt(c, text, images)) }
     }
@@ -1508,6 +1671,7 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
         const val LIST_WAIT_MS = 6_000L       // after Attached, wait this long for the list before "computer offline"
         const val CONNECT_TIMEOUT_MS = 12_000L // no Attached within this → treat the connect as wedged, force a retry
+        const val DIRECT_RETRY_COOLDOWN_MS = 60_000L // after a failed direct probe, stay on the relay this long before re-probing
         const val MAX_IMAGES = 4
         const val IMG_MAX_DIM = 1024 // longest side, true 1× pixels
         const val IMG_MAX_BYTES = 90_000 // per-image compression target (~120 KB base64); lets ~2 share a frame
@@ -1534,3 +1698,5 @@ class PocketRepository(private val scope: CoroutineScope) {
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
     }
 }
+
+private const val REFRESH_SPINNER_SAFETY_MS = 4_000L // spinner never outlives a lost reply by more than this

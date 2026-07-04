@@ -79,6 +79,9 @@ kotlin {
             implementation(libs.cryptography.provider.openssl3.prebuilt) // Apple provider lacks ECDH at 0.4.0
             implementation(libs.peekaboo) // image picker + resize (ios native variant)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test")) // Native-run coverage for commonMain logic (e.g. regex constructs K/N must accept)
+        }
         val desktopTest by getting
         desktopTest.dependencies {
             implementation(compose.desktop.currentOs) // skiko runtime for headless ui-test rendering

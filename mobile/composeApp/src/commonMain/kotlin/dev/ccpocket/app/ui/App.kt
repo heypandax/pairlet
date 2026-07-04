@@ -4,6 +4,7 @@ package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.size
@@ -11,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -72,7 +75,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -90,6 +95,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +114,8 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.ui.fleet.crossMachineAttention
+import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.PocketTheme
@@ -125,6 +133,13 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun App(scope: CoroutineScope) {
     val repo = remember { PocketRepository(scope) }
+    // one live link per paired computer: the primary repo keeps its exact semantics; the coordinator
+    // maintains pinned satellites for the other bindings so the whole fleet is live at once
+    remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
+    // fleet surfaces (machine-first triage) overlay the content stack from anywhere: header machine
+    // name → Fleet home; attention banner / cross-machine banner → inbox. UI-local like the sheets.
+    var fleetOpen by remember { mutableStateOf(false) }
+    var inboxOpen by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // already paired -> straight to the list
@@ -134,7 +149,10 @@ fun App(scope: CoroutineScope) {
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
-    dev.ccpocket.app.OnAppForeground { repo.onAppForeground() } // iOS kills sockets in background — reconnect on return
+    dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
+        repo.onAppForeground()
+        dev.ccpocket.app.data.FleetRuntime.coordinator?.onAppForeground()
+    }
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
     // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
     // registers its own handler later in composition, which wins while it is showing (LIFO).
@@ -142,6 +160,10 @@ fun App(scope: CoroutineScope) {
         enabled = repo.sessionActive.value && (repo.convoId.value != null || repo.sessionsDir.value != null),
     ) {
         if (repo.convoId.value != null) repo.backToBrowse() else repo.backToDirectories()
+    }
+    // registered after the content handler so it wins (LIFO) while a fleet overlay is up
+    dev.ccpocket.app.SystemBackHandler(enabled = fleetOpen || inboxOpen) {
+        if (inboxOpen) inboxOpen = false else fleetOpen = false
     }
     PocketTheme(repo.fontScale.value) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
@@ -156,12 +178,18 @@ fun App(scope: CoroutineScope) {
                         !repo.sessionActive.value ->
                             if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingScreen(repo) else ConnectScreen(repo)
                         repo.demoConnecting.value -> DemoConnectScreen { repo.finishDemoConnect() } // PREVIEW opener
-                        else -> ConnectionGate(repo) {
-                            when {
-                                repo.convoId.value != null -> ChatScreen(repo)
-                                repo.sessionsDir.value != null -> SessionsScreen(repo)
-                                else -> DirectoryScreen(repo)
+                        else -> Box(Modifier.fillMaxSize()) {
+                            ConnectionGate(repo) {
+                                when {
+                                    repo.convoId.value != null -> ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
+                                    repo.sessionsDir.value != null -> SessionsScreen(repo)
+                                    else -> DirectoryScreen(repo, onOpenFleet = { fleetOpen = true })
+                                }
                             }
+                            // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
+                            // want to be while this machine is reconnecting or another one has news
+                            if (fleetOpen) dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true })
+                            if (inboxOpen) dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false }
                         }
                     }
                 }
@@ -260,7 +288,7 @@ private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Un
                 hint = stringResource(Res.string.conn_computer_offline_hint),
             )
         ConnPhase.Connecting ->
-            if (repo.directoriesLoaded.value || repo.convoId.value != null) content() else DirectorySkeleton()
+            if (repo.directoriesLoaded.value || repo.convoId.value != null) content() else DirectorySkeleton(repo)
         ConnPhase.Reconnecting, ConnPhase.Ready -> content()
     }
 }
@@ -293,19 +321,44 @@ private fun CenteredState(
     }
 }
 
-/** First-connect placeholder: the directory header over a few shimmering rows (never a blank screen). */
+/** The Projects top bar (title + status dot + monospace machine line, then [actions]) — ONE implementation
+ *  shared by [DirectoryScreen] and its connect/switch skeleton, so the skeleton→list swap can never drift. */
 @Composable
-private fun DirectorySkeleton() {
+private fun ProjectsTopBar(
+    title: String,
+    dotColor: Color,
+    machine: String?,
+    machineLineModifier: Modifier = Modifier,
+    machineTrailing: @Composable RowScope.() -> Unit = {},
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    Row(Modifier.fillMaxWidth().background(Tok.surface).padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp).then(machineLineModifier)) {
+                PulseDot(dotColor, size = 6.dp)
+                Spacer(Modifier.width(6.dp))
+                machine?.let {
+                    Text(it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                machineTrailing()
+            }
+        }
+        actions()
+    }
+}
+
+/** Connect/switch placeholder: the REAL Projects header (amber dot while the link comes up) over
+ *  shimmering rows — so landing on a machine only swaps skeleton→list and amber→green, instead of
+ *  flashing a differently-shaped "Choose a directory" screen first. */
+@Composable
+private fun DirectorySkeleton(repo: PocketRepository) {
     val shimmer by rememberInfiniteTransition().animateFloat(
         initialValue = 0.25f, targetValue = 0.6f,
         animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
     )
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().background(Tok.surface).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            PulseDot(Tok.warn)
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.choose_directory), color = Tok.tx, fontWeight = FontWeight.SemiBold)
-        }
+        ProjectsTopBar(stringResource(Res.string.dir_projects), Tok.warn, repo.paired.value?.displayName())
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             repeat(5) {
                 Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).graphicsLayer { alpha = shimmer }.background(Tok.surface))
@@ -360,7 +413,7 @@ private fun ConnectScreen(repo: PocketRepository) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DirectoryScreen(repo: PocketRepository) {
+private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}) {
     var query by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
@@ -414,17 +467,24 @@ private fun DirectoryScreen(repo: PocketRepository) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
         // ── top bar: "Projects" + connection sub-line · view toggle · settings ──
-        Row(Modifier.fillMaxWidth().background(Tok.surface).padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(headerTitle, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn, size = 6.dp)
+        ProjectsTopBar(
+            headerTitle,
+            if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn,
+            repo.paired.value?.displayName(),
+            // the machine line is the doorway into the fleet: tap → Your computers (live overview)
+            machineLineModifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onOpenFleet).padding(vertical = 2.dp),
+            machineTrailing = {
+                val waiting = repo.fleetAttention().size
+                if (repo.pairedList.size > 1 || waiting > 0) {
                     Spacer(Modifier.width(6.dp))
-                    repo.paired.value?.let {
-                        Text(it.displayName(), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                    Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
                 }
-            }
+                if (waiting > 0) {
+                    Spacer(Modifier.width(4.dp))
+                    dev.ccpocket.app.ui.fleet.AttentionBadge(waiting)
+                }
+            },
+        ) {
             IconButton({ showNewPath = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Rounded.Add, stringResource(Res.string.new_path_open), tint = Tok.tx2, modifier = Modifier.size(22.dp))
             }
@@ -549,9 +609,8 @@ private fun NewPathSheet(parent: String?, onDismiss: () -> Unit, onStart: (Strin
     }
     val trimmed = field.text.trim()
     // drop a trailing separator so we never open a session at "/foo/bar/", but keep a bare root ("/") intact
-    val target = trimmed.trimEnd('/', '\\').ifEmpty { trimmed }
-    // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
-    val looksAbsolute = trimmed.startsWith("/") || trimmed.startsWith("~") || Regex("^[A-Za-z]:[\\\\/].*").matches(trimmed)
+    val target = trimTrailingSep(trimmed)
+    val looksAbsolute = looksAbsolutePath(trimmed)
     PocketSheet(onDismiss = onDismiss) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp, top = 4.dp)) {
             Text(stringResource(Res.string.new_path_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
@@ -567,6 +626,61 @@ private fun NewPathSheet(parent: String?, onDismiss: () -> Unit, onStart: (Strin
                 Modifier.fillMaxWidth().padding(top = 14.dp).alpha(if (looksAbsolute) 1f else 0.4f),
                 bg = Tok.accent, fg = Tok.base,
             ) { if (looksAbsolute) onStart(target) }
+        }
+    }
+}
+
+/** "/" autocomplete: the query while the user is still typing the command word (no space yet), else null. */
+internal fun slashQueryOf(input: String): String? =
+    input.takeIf { it.startsWith("/") && ' ' !in it && '\n' !in it }?.drop(1)
+
+/** Matching commands for [query], prefix matches first — shared by the mobile composer and desktop ChatPane. */
+internal fun slashSuggestions(query: String?, commands: List<SlashCommand>): List<SlashCommand> =
+    if (query == null) emptyList()
+    else commands.filter { it.name.contains(query, ignoreCase = true) }
+        .sortedBy { !it.name.startsWith(query, ignoreCase = true) }
+
+/** Glued-to-newest tracker for a transcript list: a user scroll away unpins, scrolling back to the very
+ *  bottom re-pins. Shared by the mobile ChatScreen and desktop ChatPane — the unpin heuristic is subtle
+ *  and has been tuned before; keep it in one place.
+ *
+ *  [userGesturesOnly] (touch platforms): only a real drag (and its fling tail) may change the pin.
+ *  Programmatic follows — the ime-follow and stream-follow snaps — briefly sample as "scrolling & not
+ *  at bottom" while the keyboard resizes the viewport, which used to permanently unpin after the first
+ *  keyboard open. Desktop passes false: mouse-wheel scrolls emit no DragInteraction, and with no ime
+ *  there is no corrupting resize in the first place. */
+@Composable
+internal fun rememberBottomPinned(
+    listState: LazyListState,
+    vararg resetKeys: Any?,
+    userGesturesOnly: Boolean = true,
+): MutableState<Boolean> {
+    val pinned = remember(*resetKeys) { mutableStateOf(true) }
+    // keyed on the pinned INSTANCE too: resetKeys mint a fresh state, and a collector keyed only on
+    // the list would keep writing the previous one (desktop resets per selected session)
+    LaunchedEffect(listState, userGesturesOnly, pinned) {
+        var userDriven = !userGesturesOnly
+        if (userGesturesOnly) launch {
+            listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) userDriven = true }
+        }
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canFwd) ->
+                if (scrolling && userDriven) pinned.value = !canFwd
+                if (!scrolling && userGesturesOnly) userDriven = false // gesture + fling fully settled
+            }
+    }
+    return pinned
+}
+
+/** Leaf recomposition scope for the keyboard-follow: reads the ime inset in composition (required on
+ *  iOS) so the per-frame invalidation during the keyboard animation stays inside this empty leaf
+ *  instead of re-executing the whole ChatScreen. ONE collector scrolls (no restart per frame). */
+@Composable
+private fun ImeFollower(listState: LazyListState, repo: PocketRepository, pinned: () -> Boolean) {
+    val imeBottom = rememberUpdatedState(WindowInsets.ime.getBottom(LocalDensity.current))
+    LaunchedEffect(listState) {
+        snapshotFlow { imeBottom.value }.collect { bottom ->
+            if (pinned() && bottom > 0 && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
         }
     }
 }
@@ -792,6 +906,7 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class) // PullToRefreshBox
 @Composable
 private fun SessionsScreen(repo: PocketRepository) {
     val dir = repo.sessionsDir.value ?: return
@@ -822,6 +937,7 @@ private fun SessionsScreen(repo: PocketRepository) {
                     else -> true
                 }
             }
+            PullToRefreshBox(isRefreshing = repo.sessionsRefreshing.value, onRefresh = { repo.refreshSessions() }, modifier = Modifier.fillMaxSize()) {
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (af != "both") item { AgentFilterChip(af) { repo.setAgentFilter("both") } }
                 item {
@@ -864,6 +980,7 @@ private fun SessionsScreen(repo: PocketRepository) {
                     }
                 }
             }
+            }
         }
         if (pickMode) {
             StartSessionModeSheet(
@@ -878,13 +995,14 @@ private fun SessionsScreen(repo: PocketRepository) {
 }
 
 @Composable
-private fun ChatScreen(repo: PocketRepository) {
+private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
     // restore the composer draft (keyed per conversation, workdir for a brand-new session); re-inits on switch (#29)
     // most-durable-first: sessionId survives daemon reopens AND app restarts; convoId covers a
     // brand-new not-yet-materialized session; workdir covers pre-open (repo migrates drafts on re-key)
     val draftKey = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
     var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
+    var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
@@ -896,7 +1014,7 @@ private fun ChatScreen(repo: PocketRepository) {
     val listState = rememberLazyListState()
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
-    var pinned by remember { mutableStateOf(true) }
+    var pinned by rememberBottomPinned(listState)
     // keep the message list hidden until it's first parked at the bottom, so opening a session with
     // history doesn't flash the top then visibly scroll down. Resets per session (convoId); a short
     // grace reveals an empty/new session that has no history to position on.
@@ -904,19 +1022,14 @@ private fun ChatScreen(repo: PocketRepository) {
     LaunchedEffect(repo.convoId.value) { delay(180); landed = true }
     // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
     LaunchedEffect(input, draftKey) { delay(400); repo.saveDraft(draftKey, input) }
-    LaunchedEffect(Unit) {
-        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
-            .collect { (scrolling, canFwd) -> if (scrolling) pinned = !canFwd }
-    }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
         if (pinned && repo.messages.isNotEmpty()) { listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE); landed = true }
     }
-    // when the keyboard opens/animates, keep the latest message pinned above the input
-    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
-    LaunchedEffect(imeBottom) {
-        if (pinned && imeBottom > 0 && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
-    }
+    // keyboard-follow lives in its own leaf composable: the ime inset must be a COMPOSITION read
+    // (iOS misses the animation otherwise), and reading it here would re-execute all of ChatScreen
+    // every animation frame — the leaf confines that per-frame invalidation to itself.
+    ImeFollower(listState, repo) { pinned }
     val focus = LocalFocusManager.current
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() } // scrolling dismisses the keyboard
     Box(Modifier.fillMaxSize()) {
@@ -929,23 +1042,44 @@ private fun ChatScreen(repo: PocketRepository) {
                         repo.chatTitle.value ?: stringResource(Res.string.chat_title),
                         color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + workdir + model
+                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + machine · folder · model
                         PulseDot(Tok.ok)
                         Spacer(Modifier.width(5.dp))
-                        TailPathText(repo.workdir.value ?: "", modifier = Modifier.weight(1f)) // tail-truncated: the folder stays visible
+                        // ONE style for every segment — the machine name used to force lineHeight=11 while
+                        // the path/model kept the font's default, so the three never shared a baseline
+                        val metaStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
+                        // which computer this conversation lives on — its own tap target: switch machines
+                        // without leaving the chat (the surrounding column still opens session info)
+                        repo.paired.value?.let { d ->
+                            Text(
+                                d.displayName(), color = Tok.tx2, style = metaStyle, maxLines = 1,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .clickable { showSwitcher = true }
+                                    .padding(horizontal = 2.dp),
+                            )
+                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
+                        }
+                        // just the project FOLDER: the full path routinely ate the whole line on a phone,
+                        // and it's one tap away in the session-info sheet (this row opens it)
+                        Text(
+                            folderName(repo.workdir.value), color = Tok.tx2, style = metaStyle,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                        )
                         modelAlias(repo.model.value).takeIf { it.isNotBlank() }?.let {
-                            Text(" · $it", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
+                            Text(it, color = Tok.muted, style = metaStyle, maxLines = 1)
                         }
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
                     }
                 }
                 if (!repo.observing.value) {
+                    // mode switching moved into the ⋯ quick-actions sheet — the persistent badge was one
+                    // more thing crowding the header for a setting touched a few times per session
                     Box(
                         Modifier.size(32.dp).clip(CircleShape).clickable { showQuickActions = true },
                         contentAlignment = Alignment.Center,
                     ) { Text("⋯", color = Tok.tx2, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
-                    Spacer(Modifier.width(4.dp))
-                    ModeBadge(repo.mode.value, repo.allowRules.size) { showModeSheet = true }
                 }
             }
             Box(Modifier.weight(1f)) {
@@ -979,6 +1113,13 @@ private fun ChatScreen(repo: PocketRepository) {
                     repo.contextUsed.value, repo.contextWindow.value,
                     Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
                 )
+                // approvals waiting on OTHER machines pull you over without reflowing this stream —
+                // floats under the connection bar; this machine's own ask keeps its sheet (Fleet ⑤)
+                dev.ccpocket.app.ui.fleet.CrossMachineBanner(
+                    repo.crossMachineAttention(),
+                    onReview = onOpenInbox,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
+                )
             }
             if (repo.observing.value) {
                 Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -991,13 +1132,9 @@ private fun ChatScreen(repo: PocketRepository) {
                 // the timer stays visible (frozen) through S3, after Recording stopped carrying it
                 var recElapsed by remember { mutableStateOf(0L) }
                 if (voiceState is VoiceState.Recording) recElapsed = voiceState.elapsedMs
-                // "/" autocomplete: live while the user is still typing the command word (no space yet)
-                val slashQuery = input.takeIf { it.startsWith("/") && ' ' !in it && '\n' !in it }?.drop(1)
+                val slashQuery = slashQueryOf(input)
                 val suggestions = remember(slashQuery, repo.slashCommands.toList()) {
-                    if (slashQuery == null) emptyList()
-                    else repo.slashCommands
-                        .filter { it.name.contains(slashQuery, ignoreCase = true) }
-                        .sortedBy { !it.name.startsWith(slashQuery, ignoreCase = true) } // prefix matches first
+                    slashSuggestions(slashQuery, repo.slashCommands)
                 }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
@@ -1091,8 +1228,9 @@ private fun ChatScreen(repo: PocketRepository) {
             )
         }
         if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }
-        if (showQuickActions) QuickActionsSheet(repo, onTerminal = { showTerminal = true }) { showQuickActions = false }
+        if (showQuickActions) QuickActionsSheet(repo, onTerminal = { showTerminal = true }, onMode = { showModeSheet = true }) { showQuickActions = false }
         if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs) { showBgJobs = false }
+        if (showSwitcher) dev.ccpocket.app.ui.fleet.MachineSwitcherSheet(repo, onDismiss = { showSwitcher = false }, onManage = onOpenFleet)
     }
 }
 

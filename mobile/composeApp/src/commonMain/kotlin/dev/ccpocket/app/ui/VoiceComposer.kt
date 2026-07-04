@@ -51,10 +51,10 @@ import org.jetbrains.compose.resources.stringResource
 /** Design easing for the recording-bar morph: cubic-bezier(.22,1,.36,1), 220ms. */
 private val MorphEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 
-internal fun fmtElapsed(ms: Long): String {
-    val s = ms / 1000
-    return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
-}
+/** m:ss from whole seconds — the one countdown/elapsed format (recording timer, fleet cards, palette rows). */
+internal fun fmtMmSs(seconds: Int): String = "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
+
+internal fun fmtElapsed(ms: Long): String = fmtMmSs((ms / 1000).toInt())
 
 /** The composer text field per the design: base bg, hairline border, radius 12, minHeight 44. */
 @Composable

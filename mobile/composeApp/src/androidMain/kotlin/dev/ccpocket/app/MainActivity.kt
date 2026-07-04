@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
         initSecureStore(this)
         initTelemetry(this)
         initVoice(this)
+        initUrlOpener(this)
         setupNotifications()
         setContent {
             val scope = rememberCoroutineScope()

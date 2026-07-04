@@ -56,7 +56,6 @@
     <string name="dir_no_matches">没有匹配项</string>
 
     <!-- ── 目录浏览 ──────────────────────────────────────────────── -->
-    <string name="choose_directory">选择目录</string>
     <string name="exit">退出</string>
     <string name="filter_hint">筛选…</string>
     <string name="history_badge">历史</string>
@@ -130,9 +129,6 @@
     <string name="note_change_anytime">之后随时可以点击徽章更改。</string>
     <string name="rules_remembered_header">本会话已记住</string>
     <string name="clear_all">全部清除</string>
-    <plurals name="mode_rules">
-        <item quantity="other">· %1$d 条规则</item>
-    </plurals>
 
     <!-- ── 权限弹层 ──────────────────────────────────────────────── -->
     <string name="auto_deny">自动拒绝</string>

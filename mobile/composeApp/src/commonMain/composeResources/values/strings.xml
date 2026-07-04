@@ -56,7 +56,6 @@
     <string name="dir_no_matches">No matches</string>
 
     <!-- ── directory browser ─────────────────────────────────────── -->
-    <string name="choose_directory">Choose a directory</string>
     <string name="exit">Exit</string>
     <string name="filter_hint">filter…</string>
     <string name="history_badge">history</string>
@@ -130,10 +129,6 @@
     <string name="note_change_anytime">You can change this anytime from the badge.</string>
     <string name="rules_remembered_header">REMEMBERED THIS SESSION</string>
     <string name="clear_all">Clear all</string>
-    <plurals name="mode_rules">
-        <item quantity="one">· %1$d rule</item>
-        <item quantity="other">· %1$d rules</item>
-    </plurals>
 
     <!-- ── permission sheet ──────────────────────────────────────── -->
     <string name="auto_deny">auto-deny</string>

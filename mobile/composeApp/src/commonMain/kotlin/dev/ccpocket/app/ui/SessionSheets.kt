@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
+import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.BackgroundJob
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.JobKind
@@ -136,7 +138,7 @@ private fun Hairline() = Box(Modifier.fillMaxWidth().height(1.dp).background(Tok
 private enum class QaSub { MAIN, MODEL, EFFORT }
 
 @Composable
-fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onDismiss: () -> Unit) {
+fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: () -> Unit, onDismiss: () -> Unit) {
     var sub by remember { mutableStateOf(QaSub.MAIN) }
     var clearArmed by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
@@ -147,6 +149,13 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onDismiss:
                     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         ActionRow(stringResource(Res.string.qa_model), value = modelAlias(repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
                         ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
+                        // the permission-mode switch lives here now (was a persistent header badge — one
+                        // more thing crowding the top bar for a setting touched a few times per session)
+                        ActionRow(
+                            stringResource(Res.string.label_mode),
+                            value = (MODE_BY[repo.mode.value]?.short ?: MODES[0].short).let { stringResource(it) },
+                            chevron = true,
+                        ) { onMode(); onDismiss() }
                         ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
                         ActionRow(stringResource(Res.string.qa_compact)) { repo.sendPrompt("/compact"); onDismiss() }
                         if (repo.hasSimplify()) ActionRow(stringResource(Res.string.qa_simplify)) { repo.sendPrompt("/simplify"); onDismiss() }
@@ -232,11 +241,11 @@ private fun CtxPill(ctx: String, big: Boolean) {
 private fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) {
     val codex = repo.sessionAgent.value == AgentKind.CODEX
     val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
-    else listOf(
-        ModelChoice("Opus", "opus", "opus", "1M", big = true),
-        ModelChoice("Sonnet", "sonnet", "sonnet", "1M", big = true),
-        ModelChoice("Haiku", "haiku", "haiku", "200K", big = false),
-    )
+    // window pill derives from the protocol table, so registering a new alias THERE is the only edit
+    else listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku").map { (name, alias) ->
+        val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW
+        ModelChoice(name, alias, alias, if (big) "1M" else "200K", big)
+    }
     val selected = if (codex) repo.model.value else modelAlias(repo.model.value)
     var switchingTo by remember { mutableStateOf<String?>(null) }
     // close once the daemon confirms the switch (model re-announced through SessionLive)…

@@ -2,13 +2,19 @@ package dev.ccpocket.app
 
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.window.ComposeUIViewController
+import androidx.compose.ui.uikit.OnFocusBehavior
 import dev.ccpocket.app.push.PushController
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.telemetry.TelemetrySink
 import dev.ccpocket.app.ui.App
 
 @Suppress("unused", "FunctionName")
-fun MainViewController() = ComposeUIViewController {
+fun MainViewController() = ComposeUIViewController(configure = {
+    // The app owns keyboard avoidance (root imePadding + the chat's bottom re-pin scroller). The default
+    // FocusableAboveKeyboard ALSO lifts the whole UIKit view when the composer focuses while covered —
+    // double compensation that bounced the chat up-then-down on first open (race-dependent, hence "偶现").
+    onFocusBehavior = OnFocusBehavior.DoNothing
+}) {
     val scope = rememberCoroutineScope()
     App(scope)
 }

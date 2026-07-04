@@ -24,16 +24,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +46,95 @@ import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.Tok
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
+
+/**
+ * Linkifies filesystem paths in transcript text when the host platform can open them locally —
+ * the desktop shell provides an opener (Finder / Explorer); mobile leaves this null so text
+ * renders plain there. [exists] gates linkification, so only paths real on THIS machine become
+ * links (a remote session's paths stay inert instead of dead-clicking).
+ */
+interface PathOpener {
+    fun exists(path: String): Boolean
+    fun open(path: String)
+}
+
+val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
+
+// unix `/a/b` (≥2 segments so prose like "/help" rarely trips it) or `~/a`, plus windows drive
+// paths; the lookbehind keeps URL tails ("https://host/a/b") and word/word compounds from matching.
+// Segments use \p{L} + 0-9, not [A-Za-z0-9] — CJK filenames are routine here ("~/…/设计提示词.md")
+// and an ASCII-only class truncated them mid-path, so exists() failed and the link never formed.
+//
+// LAZY + FAULT-TOLERANT, never a top-level `val`: Kotlin/Native's regex engine rejects constructs
+// the JVM accepts (\p{N} → "No such character class"), and a throwing top-level initializer took
+// down the whole FILE on iOS — first Markdown render (= tapping any session) died with
+// FileFailedToInitializeException. Null here just disables path links; the transcript must render.
+private val pathRx: Regex? by lazy {
+    runCatching {
+        Regex("""(?<![\w:/])(?:~(?:/[\p{L}0-9._+@%-]+)+|/[\p{L}0-9._+@%-]+(?:/[\p{L}0-9._+@%-]+)+|[A-Za-z]:[\\/][\p{L}0-9._+@%\\/-]+)/?""")
+    }.getOrNull()
+}
+
+/** Adds clickable link spans over every path in [this] that [opener] confirms exists locally. */
+fun AnnotatedString.withPathLinks(opener: PathOpener?): AnnotatedString {
+    if (opener == null || (!text.contains('/') && !text.contains('\\'))) return this
+    val rx = pathRx ?: return this
+    // verify matches BEFORE paying for an AnnotatedString copy: this runs per streamed chunk on the
+    // desktop transcript, and most lines have no live local path (URLs, remote-machine paths)
+    val hits = rx.findAll(text).mapNotNull { m ->
+        val path = m.value.trimEnd('.') // sentence-final period is punctuation, not the path
+        if (opener.exists(path)) m.range.first to path else null
+    }.toList()
+    return withLinks(hits, "path", opener::open)
+}
+
+/** The one link-span builder both passes share: [hits] are (startOffset, matchedText) pairs. */
+private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String, open: (String) -> Unit): AnnotatedString {
+    if (hits.isEmpty()) return this
+    return buildAnnotatedString {
+        append(this@withLinks)
+        for ((start, s) in hits) {
+            addLink(
+                LinkAnnotation.Clickable(
+                    tag,
+                    TextLinkStyles(SpanStyle(color = Tok.info, textDecoration = TextDecoration.Underline)),
+                ) { open(s) },
+                start,
+                start + s.length,
+            )
+        }
+    }
+}
+
+// http(s) only (matches what the platform viewers accept); the trailing trim drops sentence
+// punctuation that prose glues onto a URL ("see https://x.dev/docs." / 中文句读)
+private val urlRx: Regex? by lazy {
+    runCatching { Regex("""https?://[^\s<>"'`一-鿿）】」，。；！？]+""") }.getOrNull()
+}
+private const val URL_TRAIL = ".,;:!?)]}>"
+
+/** Adds browser link spans over every http(s) URL — phones open an in-app browser, desktop the system
+ *  one (see [dev.ccpocket.app.openWebUrl]). Unlike path links this needs no host gate: a URL is
+ *  openable from any machine. */
+fun AnnotatedString.withUrlLinks(): AnnotatedString {
+    if (!text.contains("http")) return this
+    val rx = urlRx ?: return this
+    val hits = rx.findAll(text).mapNotNull { m ->
+        val url = m.value.trimEnd { it in URL_TRAIL }
+        if (url.length <= "https://".length) null else m.range.first to url
+    }.toList()
+    return withLinks(hits, "url") { dev.ccpocket.app.openWebUrl(it) }
+}
+
+/** URL + path link pass against the ambient [LocalPathOpener], memoized per text (exists() hits disk). */
+@Composable
+fun pathLinked(text: AnnotatedString): AnnotatedString {
+    val opener = LocalPathOpener.current
+    return remember(text, opener) { text.withPathLinks(opener).withUrlLinks() }
+}
+
+@Composable
+fun pathLinked(text: String): AnnotatedString = pathLinked(AnnotatedString(text))
 
 /**
  * A focused Markdown renderer for assistant output — covers fenced code blocks (language label +
@@ -60,17 +153,26 @@ fun MarkdownText(text: String, color: Color) {
     }
 }
 
-/** A small "copy/copied" affordance that copies [text] to the clipboard and flashes confirmation. */
+/** Copy-with-feedback state shared by every copy affordance (mobile [CopyChip], desktop chat's button):
+ *  `copied` flashes true for the same beat after `copy(text)` writes the clipboard, so confirmations
+ *  read identically everywhere. */
 @Composable
-fun CopyChip(text: String, modifier: Modifier = Modifier) {
+fun rememberCopied(): Pair<Boolean, (String) -> Unit> {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { delay(1500); copied = false } }
+    return copied to { s: String -> clipboard.setText(AnnotatedString(s)); copied = true }
+}
+
+/** A small "copy/copied" affordance that copies [text] to the clipboard and flashes confirmation. */
+@Composable
+fun CopyChip(text: String, modifier: Modifier = Modifier) {
+    val (copied, copy) = rememberCopied()
     Text(
         stringResource(if (copied) Res.string.code_copied else Res.string.code_copy),
         color = if (copied) Tok.ok else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp * LocalFontScale.current,
         modifier = modifier.clip(RoundedCornerShape(5.dp))
-            .clickable { clipboard.setText(AnnotatedString(text)); copied = true }
+            .clickable { copy(text) }
             .padding(horizontal = 7.dp, vertical = 3.dp),
     )
 }
@@ -89,7 +191,7 @@ private fun CodeBlock(code: String, lang: String?) {
             CopyChip(code)
         }
         Text(
-            code, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp * scale,
+            pathLinked(code), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp * scale,
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(10.dp),
         )
     }
@@ -106,7 +208,7 @@ private fun MdLine(raw: String, color: Color) {
         line.startsWith("#") -> {
             val level = line.takeWhile { it == '#' }.length
             Text(
-                inline(line.drop(level).trim()),
+                pathLinked(inline(line.drop(level).trim())),
                 color = color,
                 fontWeight = FontWeight.Bold,
                 fontSize = (when (level) { 1 -> 19.sp; 2 -> 17.sp; else -> 15.sp }) * scale,
@@ -116,11 +218,10 @@ private fun MdLine(raw: String, color: Color) {
             val indent = (line.length - trimmed.length).coerceAtMost(8)
             Row(Modifier.padding(start = (indent * 3).dp)) {
                 Text("•  ", color = color, fontSize = body)
-                Text(inline(trimmed.drop(2)), color = color, fontSize = body)
+                Text(pathLinked(inline(trimmed.drop(2))), color = color, fontSize = body)
             }
         }
-        Regex("^\\d+\\. ").containsMatchIn(trimmed) -> Text(inline(line), color = color, fontSize = body)
-        else -> Text(inline(line), color = color, fontSize = body)
+        else -> Text(pathLinked(inline(line)), color = color, fontSize = body)
     }
 }
 
@@ -145,7 +246,7 @@ private fun TableRow(cells: List<String>, cols: Int, color: Color, header: Boole
         for (c in 0 until cols) {
             if (c > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
             Text(
-                inline(cells.getOrElse(c) { "" }.trim()),
+                pathLinked(inline(cells.getOrElse(c) { "" }.trim())),
                 color = color,
                 fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
                 fontSize = 13.sp * LocalFontScale.current,
