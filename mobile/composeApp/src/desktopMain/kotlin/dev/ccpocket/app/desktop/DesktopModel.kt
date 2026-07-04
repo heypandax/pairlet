@@ -40,7 +40,6 @@ data class DkProject(
     val path: String,
     val name: String,
     val running: Boolean = false,
-    val history: Boolean = false,
 )
 
 data class DkSession(
@@ -51,6 +50,18 @@ data class DkSession(
     val running: Boolean = false,
     val pending: Int = 0,
     val model: String? = null, // last turn's model id (row shows its alias; null = unknown/older daemon)
+)
+
+/**
+ * One RECENT group — a project the user listed this run, with the sessions we know it has. The
+ * current (live-listed) group's rows refresh with the repo; the others are this run's snapshots,
+ * kept so the sidebar shows work across projects without a per-directory protocol round-trip.
+ */
+data class DkSessionGroup(
+    val path: String,
+    val name: String,
+    val current: Boolean,
+    val sessions: List<DkSession>,
 )
 
 /**
@@ -92,6 +103,9 @@ data class DkAttention(
     val live: Boolean, // resolvable through the live connection
 )
 
+/** What the ⌘K palette shows: everything, or just project rows ("All projects…"). */
+enum class PaletteScope { ALL, PROJECTS }
+
 /** A second session watched read-only beside the open chat (split pane). */
 data class DkWatch(
     val machine: String,
@@ -119,19 +133,22 @@ interface DesktopModel {
     var switcherOpen: Boolean
     var showNewSession: Boolean
     var showTray: Boolean
-    var showPalette: Boolean // ⌘K command palette (jump to computer / project / session)
+    var palette: PaletteScope? // ⌘K command palette; null = closed — the scope can't outlive the open
     var showSettings: Boolean
     var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
 
+    /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
+    fun browseProjects() { palette = PaletteScope.PROJECTS }
+
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = showPalette || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
-        showPalette = false; showSettings = false; showAddComputer = false; showNewSession = false; showTray = false
-        showAttention = false; switcherOpen = false
+        palette = null; showSettings = false; showAddComputer = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -159,6 +176,15 @@ interface DesktopModel {
     val running: List<Pair<DkMachine, DkProject>>
         get() = machines.flatMap { m -> m.projects.filter { it.running }.map { m to it } }
 
+    /**
+     * RUNNING rows minus projects already represented by a pinned session known to be running there —
+     * so one piece of live work never shows twice in the sidebar. Unknown state (remote pins) keeps the row.
+     */
+    val runningVisible: List<Pair<DkMachine, DkProject>>
+        get() = running.filterNot { (m, p) ->
+            pins.any { it.accountId == m.computer.accountId && it.cwd == p.path && liveSession(it.sessionId)?.running == true }
+        }
+
     /** Open a RUNNING row: the focused machine opens in place; another machine switches over then opens. */
     fun openRunning(m: DkMachine, p: DkProject) {
         if (m.active) openProject(p) else selectComputer(m.computer)
@@ -170,6 +196,14 @@ interface DesktopModel {
     val selectedSessionId: String?
     fun openProject(p: DkProject)
     fun selectSession(s: DkSession)
+
+    /** RECENT — session groups for the projects visited this run, most recent first (head = current). */
+    val sessionGroups: List<DkSessionGroup>
+
+    /** A session's live row anywhere we know it — the current list first, then the recent groups. */
+    fun liveSession(sessionId: String): DkSession? =
+        sessions.firstOrNull { it.sessionId == sessionId }
+            ?: sessionGroups.firstNotNullOfOrNull { g -> g.sessions.firstOrNull { it.sessionId == sessionId } }
     /** The current project's folder (the open session list's, else the active chat's). Null = none yet. */
     val newSessionDir: String?
     /** Seed for the new-session popover's editable path field, display form ("~/…"). */

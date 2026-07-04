@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -231,6 +232,34 @@ fun StartSessionModeSheet(
                 }
             }
         }
+    }
+}
+
+/** The Codex preset behind an agent+mode defaults pair — null for Claude (its modes stand alone). */
+fun codexPresetFor(agent: AgentKind, mode: PermissionMode): CodexPreset? =
+    if (agent == AgentKind.CODEX) CODEX_PRESETS.first { it.mode == mode } else null
+
+/** What [SessionDefaultsChip] is labeled for [agent]+[mode] — one owner for the rule, shared with tests. */
+fun sessionDefaultsLabel(agent: AgentKind, mode: PermissionMode): StringResource =
+    codexPresetFor(agent, mode)?.name ?: MODE_BY.getValue(mode).short
+
+/** Compact "what you'll get" chip beside the one-tap new-session entries: default agent glyph + the
+ *  mode it will start in (Codex shows its preset name), tap → the full [StartSessionModeSheet]. Keeps
+ *  the up-front agent/mode choice reachable now that a plain tap starts immediately with the defaults. */
+@Composable
+fun SessionDefaultsChip(agent: AgentKind, mode: PermissionMode, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    val preset = codexPresetFor(agent, mode)
+    val label = stringResource(sessionDefaultsLabel(agent, mode))
+    val color = when { preset == null -> MODE_BY.getValue(mode).color; preset.danger -> Tok.danger; else -> Tok.codex }
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier.clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        AgentGlyph(agent, agentColor(agent), 13)
+        Text(label, color = color, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, style = TightCenter)
+        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
     }
 }
 

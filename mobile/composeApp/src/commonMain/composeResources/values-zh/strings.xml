@@ -80,7 +80,7 @@
     <string name="time_hours_ago">%1$d 小时前</string>
     <string name="time_yesterday">昨天</string>
     <string name="time_days_ago">%1$d 天前</string>
-    <string name="start_claude_in">在 %1$s 启动 Claude</string>
+    <string name="start_agent_in">在 %2$s 启动 %1$s</string>
 
     <!-- ── 对话 ──────────────────────────────────────────────────── -->
     <string name="chat_title">对话</string>

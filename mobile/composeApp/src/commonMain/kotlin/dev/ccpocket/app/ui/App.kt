@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -126,6 +127,7 @@ import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
@@ -581,9 +583,12 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
             parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
+            agent = repo.defaultAgent.value,
+            mode = repo.defaultMode.value,
             onDismiss = { showNewPath = false },
-        ) { p -> showNewPath = false; newPathTarget = p }
-        // chosen a new path → reuse the standard mode/agent picker, then open the session there
+            onOptions = { p -> showNewPath = false; newPathTarget = p },
+        ) { p -> showNewPath = false; repo.openSession(p) } // one tap: start with the defaults right away
+        // wants a different agent/mode for the new path → the standard picker, then open the session there
         newPathTarget?.let { path ->
             StartSessionModeSheet(
                 workdir = path,
@@ -598,9 +603,13 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
 
 /** Start a session in a folder that has no prior cc-pocket/claude history by typing its absolute path (issue #7).
  *  The daemon validates the path is a readable directory; a not-yet-created folder can be made first via the
- *  in-chat terminal. On confirm, [onStart] hands the trimmed path to the standard new-session mode picker. */
+ *  in-chat terminal. [onStart] opens the session immediately with the default agent/mode (shown on the chip);
+ *  [onOptions] routes the path through the full new-session picker instead. */
 @Composable
-private fun NewPathSheet(parent: String?, onDismiss: () -> Unit, onStart: (String) -> Unit) {
+private fun NewPathSheet(
+    parent: String?, agent: AgentKind, mode: PermissionMode,
+    onDismiss: () -> Unit, onOptions: (String) -> Unit, onStart: (String) -> Unit,
+) {
     // drilled into a folder → seed the field with "<folder>/" and park the cursor at the end, so the user types
     // only the new project's leaf name. sepOf() keeps a Windows daemon's "\" paths native (issue #7).
     var field by remember(parent) {
@@ -621,11 +630,18 @@ private fun NewPathSheet(parent: String?, onDismiss: () -> Unit, onStart: (Strin
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
-            SheetButton(
-                stringResource(Res.string.new_path_start),
+            Row(
                 Modifier.fillMaxWidth().padding(top = 14.dp).alpha(if (looksAbsolute) 1f else 0.4f),
-                bg = Tok.accent, fg = Tok.base,
-            ) { if (looksAbsolute) onStart(target) }
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                // default agent+mode preview; tap → the full picker for this path (52dp to pair with the button)
+                SessionDefaultsChip(agent, mode, Modifier.height(52.dp), enabled = looksAbsolute) { onOptions(target) }
+                SheetButton(
+                    stringResource(Res.string.new_path_start),
+                    Modifier.weight(1f),
+                    bg = Tok.accent, fg = Tok.base,
+                ) { if (looksAbsolute) onStart(target) }
+            }
         }
     }
 }
@@ -908,9 +924,13 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class) // PullToRefreshBox
 @Composable
-private fun SessionsScreen(repo: PocketRepository) {
+internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to-end by MobileNewSessionUiTest (demo mode)
     val dir = repo.sessionsDir.value ?: return
     var pickMode by remember { mutableStateOf(false) }
+    // an open is in flight (the screen only switches once the daemon answers with the live convo).
+    // Repo-owned so every entry point is guarded: entries disable — a double-tap can't open two fresh
+    // sessions — and the repo clears it on SessionLive/PocketError (8s safety net).
+    val starting = repo.opening.value
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
     Box(Modifier.fillMaxSize()) {
@@ -941,16 +961,29 @@ private fun SessionsScreen(repo: PocketRepository) {
             LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (af != "both") item { AgentFilterChip(af) { repo.setAgentFilter("both") } }
                 item {
-                    Column(
+                    // one tap starts right away with the persisted defaults (openSession's own fallbacks);
+                    // the trailing chip shows those defaults and opens the full agent+mode picker instead
+                    Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.16f))
-                            .clickable { pickMode = true }.padding(14.dp),
+                            .clickable(enabled = !starting) { repo.openSession(dir) }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(stringResource(Res.string.new_session_cta), color = Tok.accent, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            stringResource(Res.string.start_claude_in, tilde(dir)),
-                            color = Tok.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(stringResource(Res.string.new_session_cta), color = Tok.accent, fontWeight = FontWeight.SemiBold)
+                                if (starting) {
+                                    Spacer(Modifier.width(8.dp))
+                                    CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.5.dp)
+                                }
+                            }
+                            Text(
+                                stringResource(Res.string.start_agent_in, agentName(repo.defaultAgent.value), tilde(dir)),
+                                color = Tok.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
                     }
                 }
                 items(filtered) { s ->

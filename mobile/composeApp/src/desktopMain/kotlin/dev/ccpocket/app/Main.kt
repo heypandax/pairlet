@@ -31,6 +31,7 @@ import dev.ccpocket.app.desktop.AddComputerModal
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
 import dev.ccpocket.app.desktop.DkTitleBar
+import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.PocketTheme
@@ -86,7 +87,7 @@ fun main() = application {
                 else -> -1
             }
             when {
-                e.type == KeyEventType.KeyDown && mod && e.key == Key.K && connected -> { model.showPalette = true; true }
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.K && connected -> { model.palette = PaletteScope.ALL; true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.N && connected -> { model.openNewSession(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Zero && connected -> { model.switcherOpen = !model.switcherOpen; true }
                 e.type == KeyEventType.KeyDown && digit >= 0 && connected && model.switcherOpen -> {
@@ -157,7 +158,7 @@ fun main() = application {
                         }
                     },
                     onTray = { model.showTray = !model.showTray },
-                    onSearch = { model.showPalette = true },
+                    onSearch = { model.palette = PaletteScope.ALL },
                 )
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     if (connected) DesktopApp(model) else ConnectPanel(repo)

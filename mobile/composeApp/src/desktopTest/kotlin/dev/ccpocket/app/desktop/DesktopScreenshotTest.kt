@@ -100,7 +100,7 @@ class DesktopScreenshotTest {
         shot("04-new-session.png", W, H) { WindowFrame(seed { showNewSession = true }) }
         shot("05-tray-quick-approve.png", W, H) { WindowFrame(seed { showTray = true }) }
         shot("06-focused-permission.png", W, H) { WindowFrame(seed { selectSession(sessions[2]); showPermissionModal = true }) }
-        shot("07-command-palette.png", W, H) { WindowFrame(seed { showPalette = true }) }
+        shot("07-command-palette.png", W, H) { WindowFrame(seed { palette = PaletteScope.ALL }) }
         shot("08-settings.png", W, H) { WindowFrame(seed { showSettings = true }) }
 
         val shots = outDir.listFiles { f -> f.name.endsWith(".png") }?.sortedBy { it.name }.orEmpty()

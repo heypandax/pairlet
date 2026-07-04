@@ -1,13 +1,14 @@
 package dev.ccpocket.app.ui.fleet
 
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.present
 import dev.ccpocket.app.theme.PocketTheme
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -24,12 +25,6 @@ class FleetUiTest {
 
     @BeforeTest
     fun resetDemo() = DemoFleet.reset()
-
-    private fun ComposeUiTest.present(text: String, substring: Boolean = false): Boolean =
-        onAllNodes(hasText(text, substring = substring)).fetchSemanticsNodes().isNotEmpty()
-
-    private fun ComposeUiTest.assertPresent(text: String, substring: Boolean = false) =
-        assertTrue(present(text, substring), "expected a node with text: \"$text\"")
 
     @Test
     fun fleetHomeShowsTheLiveOverview() = runComposeUiTest {

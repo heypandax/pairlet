@@ -16,15 +16,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Notifications
@@ -41,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -68,7 +68,6 @@ import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.fleet.AttentionBadge
-import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.modelAlias
 import dev.ccpocket.protocol.AgentKind
 import kotlin.math.roundToInt
@@ -80,18 +79,23 @@ internal fun osIcon(os: DkOs): ImageVector = when (os) {
 }
 
 /**
- * The "Sidebar Redesign" board: three stable zones so each vertical region has ONE job.
- * ① header owns machines (remote machines live in its ⌘0 dropdown, not the body) · ② PINNED (⌘1–9)
- * + RUNNING own fast switching · ③ the browse zone below is only ever the current machine, with the
- * open project's sessions docked at the bottom so a 100-item project list can never bury them.
+ * The sidebar answers "where is my work right now" — nothing else. ① header owns machines (the fleet
+ * lives in its ⌘0 dropdown) · ② one New-session entry point · ③ PINNED (⌘1–9) + RUNNING own fast
+ * switching, and every live thing appears exactly once (a running project already represented by a
+ * running pin is not repeated) · ④ RECENT — the visited projects' sessions, grouped under collapsible
+ * project headers, ONE scroll. Browsing the full project list is a search problem, not a scroll
+ * problem: it lives in the ⌘K palette, reachable via "All projects…" docked above Settings.
  */
 @Composable
 fun Sidebar(model: DesktopModel, modifier: Modifier = Modifier) {
     Column(modifier.width(Dk.sidebarWidth).fillMaxHeight().background(Tok.surface)) {
         SwitcherHeader(model)
+        NewSessionRow { model.openNewSession() }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         PinnedZone(model)
         RunningZone(model)
-        BrowseZone(model, Modifier.weight(1f))
+        RecentZone(model, Modifier.weight(1f))
+        AllProjectsRow { model.browseProjects() }
         SettingsFooter { model.showSettings = true }
     }
 }
@@ -150,16 +154,9 @@ private fun SwitcherHeader(model: DesktopModel) {
 @Composable
 private fun PinnedZone(model: DesktopModel) {
     val pins = model.pins
+    if (pins.isEmpty()) return // pinning is discoverable from the hover pin on any session row
     Column(Modifier.fillMaxWidth()) {
         SectionLabel("Pinned", trailing = { Key("⌘1–9") })
-        if (pins.isEmpty()) {
-            Text(
-                "Pin a session to keep it here — hover any session and hit the pin.",
-                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 17.sp,
-                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp),
-            )
-            return@Column
-        }
         var dragFrom by remember(pins.size) { mutableStateOf(-1) }
         var dragDy by remember { mutableStateOf(0f) }
         val rowPx = with(LocalDensity.current) { 32.dp.toPx() }
@@ -217,8 +214,8 @@ private fun PinRow(
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     val remote = p.accountId != model.activeComputer?.accountId
-    // live state is only knowable for the current machine's loaded session list
-    val live = if (remote) null else model.sessions.firstOrNull { it.sessionId == p.sessionId }
+    // live state is only knowable for the current machine's loaded session lists
+    val live = if (remote) null else model.liveSession(p.sessionId)
     val running = live?.running ?: (!remote && p.sessionId == model.selectedSessionId && model.streaming)
     val pending = live?.pending ?: 0
     val dim = !remote && model.activeComputer?.online == false
@@ -275,8 +272,8 @@ private fun PinRow(
                 PinSlashIcon, null, tint = Tok.tx2,
                 modifier = Modifier.size(13.dp).clickable { model.unpin(p) },
             )
+            Key("⌘${index + 1}") // keycap on hover only — at rest the row is just title + state
         }
-        Key("⌘${index + 1}")
     }
 }
 
@@ -284,7 +281,7 @@ private fun PinRow(
 
 @Composable
 private fun RunningZone(model: DesktopModel) {
-    val running = model.running
+    val running = model.runningVisible
     if (running.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         SectionLabel("Running")
@@ -312,69 +309,95 @@ private fun RunningRow(m: DkMachine, p: DkProject, onClick: () -> Unit) {
     }
 }
 
-// ── zone 4: browse — the current machine's projects, with its sessions docked at the bottom ─────
+// ── zone 4: RECENT — the visited projects' sessions, grouped, one scroll ────────────────────────
 
 @Composable
-private fun BrowseZone(model: DesktopModel, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth().padding(top = 10.dp)) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-        SectionLabel("Projects")
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-            // leads the group (after the project list it would sit below a hundred rows) — type any
-            // path, the daemon creates a missing leaf folder
-            NewSessionRow("New session at path…") { model.openNewSession("~/") }
-            model.projects.forEach { ProjectRow(it) { model.openProject(it) } }
+private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        SectionLabel("Recent")
+        val groups = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
+        if (groups.isEmpty()) {
+            Text(
+                "No sessions yet — open a project from All projects below, or start a new session.",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 17.sp,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            return@Column
         }
-        // SESSIONS — bounded, ALWAYS-VISIBLE, its own scroll: a long projects list (119 real ones)
-        // must never bury the open project's sessions off-screen
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-        Column(Modifier.fillMaxWidth().heightIn(max = 216.dp)) {
-            val project = folderName(model.newSessionDir).takeIf { it.isNotBlank() }
-            SectionLabel(if (project != null) "Sessions · $project" else "Sessions")
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                NewSessionRow("New session", keyHint = "⌘N") { model.openNewSession() }
-                if (model.sessions.isEmpty()) {
-                    Text(
-                        "Open a project to see its sessions",
-                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    )
+        val collapsed = remember { mutableStateListOf<String>() }
+        val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
+        LazyColumn(Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
+            groups.forEach { g ->
+                val closed = g.path in collapsed
+                item(key = "h:${g.path}") {
+                    GroupHeader(g, closed) { if (closed) collapsed.remove(g.path) else collapsed.add(g.path) }
                 }
-                model.sessions.forEach { s ->
-                    SessionRow(model, s, selected = s.sessionId == model.selectedSessionId) { model.selectSession(s) }
+                if (!closed) {
+                    if (g.sessions.isEmpty()) {
+                        item(key = "e:${g.path}") {
+                            Text(
+                                "No sessions here yet",
+                                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                                modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
+                            )
+                        }
+                    }
+                    items(g.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
+                        SessionRow(model, s, selected = s.sessionId == selectedId) { model.selectSession(s) }
+                    }
                 }
             }
         }
     }
 }
 
+/** A RECENT group header: folder + project name (mono, muted) · running pulse · collapse chevron. */
 @Composable
-private fun ProjectRow(p: DkProject, onClick: () -> Unit) {
+private fun GroupHeader(g: DkSessionGroup, closed: Boolean, onToggle: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().height(30.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(28.dp).hoverFill().clickable(onClick = onToggle).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
+        Icon(Icons.Outlined.Folder, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
         Text(
-            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp,
+            g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
-        if (p.running) PulseDot(Tok.accent, 5.dp)
-        else if (p.history) OutlinePill("history", Tok.muted)
+        if (closed && g.sessions.any { it.running }) PulseDot(Tok.ok, 5.dp) // running stays visible when folded
+        Icon(
+            Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
+            modifier = Modifier.size(13.dp).rotate(if (closed) -90f else 0f),
+        )
+    }
+}
+
+/** The browse escape hatch, docked above Settings — opens the ⌘K palette scoped to every project. */
+@Composable
+private fun AllProjectsRow(onClick: () -> Unit) {
+    Column {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        Row(
+            Modifier.fillMaxWidth().height(34.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
+            Text("All projects…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        }
     }
 }
 
 @Composable
-private fun NewSessionRow(label: String, keyHint: String? = null, onClick: () -> Unit) {
+private fun NewSessionRow(onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().height(32.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
-        Text(label, color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        keyHint?.let { Key(it) }
+        Text("New session", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Key("⌘N")
     }
 }
 

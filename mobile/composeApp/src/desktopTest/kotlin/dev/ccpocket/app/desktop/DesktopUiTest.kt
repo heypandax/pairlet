@@ -1,6 +1,5 @@
 package dev.ccpocket.app.desktop
 
-import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -9,6 +8,8 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
+import dev.ccpocket.app.assertPresent
+import dev.ccpocket.app.present
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
@@ -25,23 +26,37 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalTestApi::class)
 class DesktopUiTest {
 
-    private fun ComposeUiTest.present(text: String, substring: Boolean = false): Boolean =
-        onAllNodes(hasText(text, substring = substring)).fetchSemanticsNodes().isNotEmpty()
-
-    private fun ComposeUiTest.assertPresent(text: String, substring: Boolean = false) =
-        assertTrue(present(text, substring), "expected a node with text: \"$text\"")
-
     @Test
     fun shellShowsCoreNavigation() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        assertPresent("PROJECTS")
-        assertPresent("SESSIONS", substring = true) // docked pane label carries the project: "SESSIONS · CC-POCKET"
+        assertPresent("RECENT")                // the grouped sessions zone replaced PROJECTS + docked SESSIONS
         assertPresent("PINNED")
-        assertPresent("New session")
+        assertPresent("New session")           // the single entry point under the header
+        assertPresent("All projects…")         // the browse escape hatch docked above Settings
         assertPresent("Lidapeng-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
+        assertPresent("Bump maxFrame to 4MB")  // a previously visited project's session — no expanding needed
         assertPresent("sonnet", substring = true) // Claude session header model line
+    }
+
+    @Test
+    fun recentGroupsCollapse() = runComposeUiTest {
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        assertPresent("Bump maxFrame to 4MB")                // the relay group renders expanded
+        // "relay" labels a RUNNING row first, then the RECENT group header — the header composes last
+        onAllNodes(hasText("relay")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!present("Bump maxFrame to 4MB"), "a collapsed group hides its sessions")
+    }
+
+    @Test
+    fun runningRowsDedupeAgainstRunningPins() {
+        val m = SeedDesktopModel()
+        assertEquals(3, m.running.size)
+        // cc-pocket is already represented by the running pin "Refactor auth module" — shown once, not twice
+        assertEquals(2, m.runningVisible.size)
+        assertTrue(m.runningVisible.none { it.second.name == "cc-pocket" })
     }
 
     @Test
@@ -166,11 +181,24 @@ class DesktopUiTest {
 
     @Test
     fun newSessionAtPathSeedsHome() = runComposeUiTest {
-        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        onAllNodes(hasText("New session at path…")).onFirst().performClick() // the Projects-group row
+        val model = SeedDesktopModel().apply { browseProjects() } // "All projects…" → project-scoped palette
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText("New session at path…")).onFirst().performClick() // the scoped palette's lead action
         waitForIdle()
         assertPresent("Start session")
         assertPresent("~/") // path field seeded at the daemon host's home, ready to type into
+    }
+
+    @Test
+    fun allProjectsOpensProjectScopedPalette() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        onAllNodes(hasText("All projects…")).onFirst().performClick()
+        waitForIdle()
+        assertPresent("Open a project", substring = true)  // the scoped placeholder
+        assertPresent("dotfiles")                          // every project row, even ones without sessions
+        assertTrue(!present("Switch to mac-studio"), "machine verbs stay out of the project browser")
     }
 
     @Test
@@ -205,7 +233,7 @@ class DesktopUiTest {
 
     @Test
     fun shellOpensCommandPaletteFromFlag() = runComposeUiTest {
-        val model = SeedDesktopModel().apply { showPalette = true }
+        val model = SeedDesktopModel().apply { palette = PaletteScope.ALL }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
         assertPresent("Jump to a project", substring = true) // palette-unique placeholder

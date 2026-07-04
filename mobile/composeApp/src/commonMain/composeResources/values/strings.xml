@@ -80,7 +80,7 @@
     <string name="time_hours_ago">%1$dh ago</string>
     <string name="time_yesterday">yesterday</string>
     <string name="time_days_ago">%1$dd ago</string>
-    <string name="start_claude_in">Start Claude in %1$s</string>
+    <string name="start_agent_in">Start %1$s in %2$s</string>
 
     <!-- ── chat ──────────────────────────────────────────────────── -->
     <string name="chat_title">Chat</string>

@@ -35,7 +35,8 @@ fun DesktopApp(model: DesktopModel) {
             }
         }
         if (model.showNewSession) {
-            Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 118.dp)) {
+            // anchored under the sidebar's New-session row (header 48 + row 32)
+            Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 84.dp)) {
                 NewSessionPopover(model.newSessionSeed ?: "~/") { dir, agent, mode -> model.newSession(dir, agent, mode) }
             }
         }
@@ -56,9 +57,9 @@ fun DesktopApp(model: DesktopModel) {
                 AttentionPopover(model)
             }
         }
-        if (model.showPalette) {
-            Overlay(onDismiss = { model.showPalette = false }, alignment = Alignment.TopCenter, padding = PaddingValues(top = 80.dp), scrim = true) {
-                CommandPalette(model) { model.showPalette = false }
+        if (model.palette != null) {
+            Overlay(onDismiss = { model.palette = null }, alignment = Alignment.TopCenter, padding = PaddingValues(top = 80.dp), scrim = true) {
+                CommandPalette(model) { model.palette = null }
             }
         }
         if (model.showSettings) {

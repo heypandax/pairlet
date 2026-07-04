@@ -78,6 +78,14 @@ private class PItem(
 
 /** Flatten the model into palette rows: machine verbs lead (Fleet ⑧), then projects and sessions. */
 private fun buildItems(model: DesktopModel): List<PItem> = buildList {
+    fun projectItem(p: DkProject) = PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder, false) { model.openProject(p) }
+    // scoped mode ("All projects…"): the full project list plus the type-any-path entry, nothing else
+    if (model.palette == PaletteScope.PROJECTS) {
+        // type any path — the daemon creates a missing leaf folder
+        add(PItem(PKind.ACTION, "New session at path…", "~/", Icons.Outlined.Folder, false) { model.openNewSession("~/") })
+        model.projects.forEach { add(projectItem(it)) }
+        return@buildList
+    }
     // MACHINES — reachable via the switcher (⌘0, then the digit); badges surface approvals waiting over there
     model.machines.forEachIndexed { i, m ->
         val c = m.computer
@@ -106,7 +114,7 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
             ) { model.showAttention = true },
         )
     }
-    model.projects.forEach { p -> add(PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder, false) { model.openProject(p) }) }
+    model.projects.forEach { add(projectItem(it)) }
     model.sessions.forEach { s -> add(PItem(PKind.SESSION, s.title, tilde(s.cwd), Icons.Outlined.ChatBubbleOutline, s.agent == AgentKind.CODEX) { model.selectSession(s) }) }
 }
 
@@ -132,7 +140,7 @@ private fun PItem.score(q: String): Int {
 fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(0) }
-    val all = remember(model.machines, model.attention, model.projects, model.sessions) { buildItems(model) }
+    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.palette) { buildItems(model) }
     val items = remember(all, query) {
         if (query.isBlank()) all.take(60) // blank query keeps source order — skip the score/sort/strip pass
         else all.mapNotNull { it.score(query).takeIf { s -> s > 0 }?.let { s -> it to s } }
@@ -158,7 +166,12 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
         ) {
             Icon(Icons.Rounded.Search, null, tint = Tok.muted, modifier = Modifier.size(17.dp))
             Box(Modifier.weight(1f)) {
-                if (query.isEmpty()) Text("Jump to a project, session, or computer…", color = Tok.muted, fontFamily = Dk.ui, fontSize = 14.5.sp)
+                if (query.isEmpty()) {
+                    Text(
+                        if (model.palette == PaletteScope.PROJECTS) "Open a project…" else "Jump to a project, session, or computer…",
+                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 14.5.sp,
+                    )
+                }
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },

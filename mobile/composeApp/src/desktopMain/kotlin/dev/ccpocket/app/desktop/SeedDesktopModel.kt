@@ -26,13 +26,25 @@ class SeedDesktopModel : DesktopModel {
 
     override val projects = listOf(
         DkProject("~/code/cc-pocket", "cc-pocket", running = true),
-        DkProject("~/code/relay", "relay", history = true),
+        DkProject("~/code/relay", "relay"),
         DkProject("~/dotfiles", "dotfiles"),
     )
     override val sessions = listOf(
         DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929"),
         DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8"),
         DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1), // keeps the Codex diff-approval surface exercised
+    )
+
+    // RECENT: the live project plus a previously visited one — exercises the grouped sidebar zone
+    override val sessionGroups = listOf(
+        DkSessionGroup("~/code/cc-pocket", "cc-pocket", current = true, sessions = sessions),
+        DkSessionGroup(
+            "~/code/relay", "relay", current = false,
+            sessions = listOf(
+                DkSession("s4", "~/code/relay", "Bump maxFrame to 4MB", model = "claude-sonnet-5-20250929"),
+                DkSession("s5", "~/code/relay", "Rate-limit pairing", model = "claude-opus-4-8"),
+            ),
+        ),
     )
 
     // the design's three pins: one local + running, one on devbox-linux, one Codex on mac-studio
@@ -109,7 +121,7 @@ class SeedDesktopModel : DesktopModel {
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
     override var showTray by mutableStateOf(false)
-    override var showPalette by mutableStateOf(false)
+    override var palette by mutableStateOf<PaletteScope?>(null)
     override var showSettings by mutableStateOf(false)
     override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)

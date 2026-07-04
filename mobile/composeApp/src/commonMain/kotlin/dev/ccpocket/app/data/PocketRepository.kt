@@ -351,6 +351,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val backgroundJobs = mutableStateListOf<BackgroundJob>() // bg shells / sub-agents / monitors the daemon is tracking
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
+    val opening = mutableStateOf(false)                      // an OpenSession is in flight — one-tap entries disable on it (a double-tap would open two fresh sessions)
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
@@ -1068,6 +1069,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     streaming.value = exec
                 }
                 switching.value = false
+                opening.value = false // the open (or reattach) landed
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
                 persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
@@ -1100,6 +1102,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
             is PocketError -> {
+                opening.value = false // a failed open re-enables the one-tap entries right away
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
@@ -1227,6 +1230,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker. A session opened before keeps its own (saved).
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
+        opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
         // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
         // (sidebar click → here, no backToBrowse in between), so an unconditional close was killing
@@ -1253,6 +1257,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = openEffort, agent = openAgent))
+        delay(8000); opening.value = false // safety: clear if the daemon never answers (matches `switching`)
     }
 
     fun hasReadyImages() = pendingImages.any { it.state == ImgState.Ready }

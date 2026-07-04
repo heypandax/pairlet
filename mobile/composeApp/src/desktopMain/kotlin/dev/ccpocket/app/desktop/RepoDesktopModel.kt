@@ -1,5 +1,6 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -14,6 +15,7 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.ui.fleet.MachineOs
 import dev.ccpocket.app.ui.fleet.osFromName
+import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.modelAlias
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.app.ui.trimTrailingSep
@@ -46,7 +48,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
     override var showTray by mutableStateOf(false)
-    override var showPalette by mutableStateOf(false)
+    override var palette by mutableStateOf<PaletteScope?>(null)
     override var showSettings by mutableStateOf(false)
     override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)
@@ -66,7 +68,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         DkComputer(accountId = accountId, name = displayName(), os = dkOs(), online = online, meta = if (online) "online" else "")
 
     private fun DirectoryEntry.toDkProject() =
-        DkProject(path = path, name = name.ifBlank { path }, running = open || busy, history = hasSessions)
+        DkProject(path = path, name = name.ifBlank { path }, running = open || busy)
 
     override val activeComputer: DkComputer?
         get() = repo.paired.value?.toDk(online = repo.phase.value == ConnPhase.Ready)
@@ -141,22 +143,68 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     private fun openSummary() = repo.sessions.firstOrNull { it.cwd == repo.workdir.value && it.title == repo.chatTitle.value }
 
-    override val sessions: List<DkSession>
-        get() {
-            val askWd = repo.pendingAsk.value?.let { repo.workdir.value }
-            return repo.sessions.map {
-                DkSession(
-                    sessionId = it.sessionId, cwd = it.cwd, title = it.title, agent = it.agent ?: AgentKind.CLAUDE,
-                    running = it.live || it.busy,
-                    pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
-                    model = it.model,
-                )
-            }
+    // derived so the many per-row readers (pin rows, RECENT rows, runningVisible) share one mapping
+    // per snapshot instead of re-mapping the whole repo list on every read
+    private val sessionsDerived = derivedStateOf {
+        val askWd = repo.pendingAsk.value?.let { repo.workdir.value }
+        repo.sessions.map {
+            DkSession(
+                sessionId = it.sessionId, cwd = it.cwd, title = it.title, agent = it.agent ?: AgentKind.CLAUDE,
+                running = it.live || it.busy,
+                pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
+                model = it.model,
+            )
         }
+    }
+    override val sessions: List<DkSession> get() = sessionsDerived.value
 
     override val selectedSessionId: String? get() = openSummary()?.sessionId
 
-    override fun openProject(p: DkProject) { repo.listSessions(p.path) }
+    // ── RECENT groups: session lists cached per visited project (per account) ─────────────────────
+    // The protocol only lists sessions per directory (ListSessions), so cross-project RECENT is built
+    // client-side: each visit carries a snapshot of its list, and the current dir always reads live.
+    private data class Visit(val accountId: String, val path: String, val snapshot: List<DkSession> = emptyList())
+    private val visits = mutableStateListOf<Visit>() // most recent first
+
+    /** Upsert the live list under its dir before [openProject] points the repo somewhere else — this is
+     *  also how a dir listed outside openProject (e.g. a restored chat's) enters RECENT. */
+    private fun snapshotCurrent() {
+        val acct = repo.paired.value?.accountId ?: return
+        val dir = repo.sessionsDir.value ?: return
+        val i = visits.indexOfFirst { it.accountId == acct && it.path == dir }
+        if (i >= 0) visits[i] = visits[i].copy(snapshot = sessions)
+        else visits.add(0, Visit(acct, dir, sessions))
+    }
+
+    override fun openProject(p: DkProject) {
+        val acct = repo.paired.value?.accountId
+        if (acct != null) {
+            snapshotCurrent()
+            val i = visits.indexOfFirst { it.accountId == acct && it.path == p.path }
+            val v = if (i >= 0) visits.removeAt(i) else Visit(acct, p.path)
+            visits.add(0, v)
+            visits.filter { it.accountId == acct }.drop(MAX_RECENT).forEach { visits.remove(it) }
+        }
+        repo.listSessions(p.path)
+    }
+
+    private val sessionGroupsDerived = derivedStateOf {
+        val acct = repo.paired.value?.accountId ?: return@derivedStateOf emptyList()
+        val liveDir = repo.sessionsDir.value
+        val keys = visits.filter { it.accountId == acct }.toMutableList()
+        // a list opened outside openProject shows before its first snapshotCurrent lands it in visits
+        if (liveDir != null && keys.none { it.path == liveDir }) keys.add(0, Visit(acct, liveDir))
+        keys.map { v ->
+            val current = v.path == liveDir
+            DkSessionGroup(
+                path = v.path,
+                name = folderName(v.path),
+                current = current,
+                sessions = if (current) sessions else v.snapshot,
+            )
+        }
+    }
+    override val sessionGroups: List<DkSessionGroup> get() = sessionGroupsDerived.value
 
     override fun selectSession(s: DkSession) {
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
@@ -265,5 +313,6 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     private companion object {
         const val K_PINS = "desktop_pins"
+        const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
     }
 }
