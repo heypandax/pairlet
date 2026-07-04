@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.claude
 
 import dev.ccpocket.daemon.agent.AgentEvent
+import dev.ccpocket.protocol.TokenUsage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -60,9 +61,10 @@ object StreamParser {
     }
 
     private fun parseAssistant(root: JsonObject): List<AgentEvent> {
-        val content = (root["message"] as? JsonObject)?.get("content") as? JsonArray
+        val message = root["message"] as? JsonObject
+        val content = message?.get("content") as? JsonArray
             ?: return listOf(AgentEvent.Ignored("assistant"))
-        return content.mapNotNull { el ->
+        val blocks = content.mapNotNull { el ->
             val block = el as? JsonObject ?: return@mapNotNull null
             when (block.str("type")) {
                 "text" -> block.str("text")?.let { AgentEvent.AssistantText(it) }
@@ -75,6 +77,15 @@ object StreamParser {
                 else -> null
             }
         }
+        // per-call usage rides every assistant message — the turn's `result` only carries the SUM of all
+        // calls (see [AgentEvent.AssistantUsage]). Skip subagent-originated events: their usage is the
+        // SUBAGENT's own window (same rule as the transcript scanner's isSidechain guard).
+        val usage = (message["usage"] as? JsonObject)?.takeIf { root.str("parent_tool_use_id") == null }
+        return if (usage == null) blocks else blocks + AgentEvent.AssistantUsage(
+            inputTokens = usage.long("input_tokens") ?: 0,
+            cacheCreationInputTokens = usage.long("cache_creation_input_tokens"),
+            cacheReadInputTokens = usage.long("cache_read_input_tokens"),
+        )
     }
 
     /**
@@ -109,10 +120,15 @@ object StreamParser {
             (root.str("subtype")?.let { it != "success" } ?: false)
         return AgentEvent.TurnResult(
             finalText = root.str("result"),
-            inputTokens = usage.long("input_tokens") ?: 0,
-            outputTokens = usage.long("output_tokens") ?: 0,
-            cacheCreationInputTokens = usage.long("cache_creation_input_tokens"),
-            cacheReadInputTokens = usage.long("cache_read_input_tokens"),
+            // interrupted/error results can omit usage — null then means "unknown", not "empty window"
+            usage = usage?.let {
+                TokenUsage(
+                    inputTokens = it.long("input_tokens") ?: 0,
+                    outputTokens = it.long("output_tokens") ?: 0,
+                    cacheCreationInputTokens = it.long("cache_creation_input_tokens"),
+                    cacheReadInputTokens = it.long("cache_read_input_tokens"),
+                )
+            },
             isError = isError,
         )
     }

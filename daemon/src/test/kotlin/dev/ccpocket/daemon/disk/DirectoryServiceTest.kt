@@ -14,6 +14,13 @@ class DirectoryServiceTest {
     private val svc = DirectoryService()
 
     @Test
+    fun tilde_paths_expand_to_the_daemon_users_home() {
+        val home = java.nio.file.Path.of(System.getProperty("user.home")).toRealPath()
+        assertEquals(home, svc.validateWorkdir("~"))
+        assertEquals(home, svc.validateOrCreateWorkdir("~"))
+    }
+
+    @Test
     fun open_existing_directory_passes_through() {
         val dir = Files.createTempDirectory("ccp-ds")
         try {

@@ -41,6 +41,10 @@ class ContextWindowTest {
         assertEquals(LARGE_CONTEXT_WINDOW, contextWindowFor("opus"))
         assertEquals(LARGE_CONTEXT_WINDOW, contextWindowFor("sonnet"))
         assertEquals(DEFAULT_CONTEXT_WINDOW, contextWindowFor("haiku"))
+        // Claude 5 family — "fable-5" is not a substring of "fable", so the alias table must carry them
+        // (a `/model fable` session once declared 200k and pinned the phone statusline at 100%)
+        assertEquals(LARGE_CONTEXT_WINDOW, contextWindowFor("fable"))
+        assertEquals(LARGE_CONTEXT_WINDOW, contextWindowFor("mythos"))
         assertEquals(LARGE_CONTEXT_WINDOW, contextWindowFor(" Opus ")) // trimmed + case-folded
     }
 
@@ -48,5 +52,14 @@ class ContextWindowTest {
     fun null_and_unknown_default_to_200k() {
         assertEquals(DEFAULT_CONTEXT_WINDOW, contextWindowFor(null))
         assertEquals(DEFAULT_CONTEXT_WINDOW, contextWindowFor("gpt-5.1-codex"))
+    }
+
+    @Test
+    fun observed_usage_beyond_the_declared_window_proves_1m() {
+        assertEquals(LARGE_CONTEXT_WINDOW, provenWindow(DEFAULT_CONTEXT_WINDOW, DEFAULT_CONTEXT_WINDOW + 1))
+        assertEquals(DEFAULT_CONTEXT_WINDOW, provenWindow(DEFAULT_CONTEXT_WINDOW, 50_000))
+        assertEquals(LARGE_CONTEXT_WINDOW, provenWindow(LARGE_CONTEXT_WINDOW, 300_000)) // never downgrade
+        assertEquals(LARGE_CONTEXT_WINDOW, provenWindow(null, 300_000)) // occupancy alone proves it
+        assertEquals(null, provenWindow(null, 10_000)) // no denominator, nothing proven
     }
 }

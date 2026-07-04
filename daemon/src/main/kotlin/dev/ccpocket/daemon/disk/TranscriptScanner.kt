@@ -34,6 +34,7 @@ object TranscriptScanner {
         var version: String? = null
         var aiTitle: String? = null
         var customTitle: String? = null // the user's rename, persisted by Claude as a `custom-title` record (issue #14)
+        var model: String? = null       // last assistant turn's model — same rules as [lastModel], captured in this pass
         var userCount = 0
 
         file.bufferedReader().useLines { lines ->
@@ -51,6 +52,7 @@ object TranscriptScanner {
                             version = obj.str("version")
                         }
                     }
+                    "assistant" -> assistantModel(obj)?.let { model = it }
                     "ai-title" -> aiTitle = obj.str("aiTitle")
                     // the user's explicit rename — rewritten through the session, last wins (issue #14)
                     "custom-title" -> customTitle = obj.str("customTitle")
@@ -76,6 +78,7 @@ object TranscriptScanner {
             gitBranch = gitBranch,
             version = version,
             live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
+            model = model,
         )
     }
 
@@ -122,13 +125,17 @@ object TranscriptScanner {
                 if (line.isEmpty()) continue
                 val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
                 if (obj.str("type") != "assistant") continue
-                if (obj.bool("isSidechain") == true) continue
-                (obj["message"] as? JsonObject)?.str("model")
-                    ?.takeIf { it.isNotBlank() && it != "<synthetic>" }
-                    ?.let { last = it }
+                assistantModel(obj)?.let { last = it }
             }
         }
         return last
+    }
+
+    /** `message.model` of a MAIN-chain assistant line — null for Task-subagent turns (isSidechain: they share
+     *  the file but ran the SUBAGENT's model) and `<synthetic>` placeholders (API-error/notice records). */
+    private fun assistantModel(obj: JsonObject): String? {
+        if (obj.bool("isSidechain") == true) return null
+        return (obj["message"] as? JsonObject)?.str("model")?.takeIf { it.isNotBlank() && it != "<synthetic>" }
     }
 
     /** A real user turn has no `toolUseResult` and content is not a `tool_result` array. (C5) */

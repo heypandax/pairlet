@@ -14,8 +14,7 @@ import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.contextWindowFor
-import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
-import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
+import dev.ccpocket.protocol.provenWindow
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -134,6 +133,10 @@ class Conversation(
     @Volatile
     private var resumeContextUsed: Long? = null
 
+    /** The turn's most recent per-call usage (see [AgentEvent.AssistantUsage]) — consumed and cleared by
+     *  the TurnResult branch, which prefers it over the result event's across-calls sum. */
+    private var lastCallUsage: AgentEvent.AssistantUsage? = null
+
     /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
     private fun displayModel(): String? = model ?: backfilledModel
 
@@ -142,8 +145,7 @@ class Conversation(
      *  models report a canonical id that declares 200k (capability ≠ enablement) — so upgrade, never downgrade. */
     private fun claudeWindow(): Long? {
         if (backend.kind != AgentKind.CLAUDE) return null
-        if ((resumeContextUsed ?: 0) > DEFAULT_CONTEXT_WINDOW) return LARGE_CONTEXT_WINDOW
-        return displayModel()?.let(::contextWindowFor)
+        return provenWindow(displayModel()?.let(::contextWindowFor), resumeContextUsed)
     }
 
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
@@ -215,6 +217,10 @@ class Conversation(
 
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
     fun hasBackgroundWork(): Boolean = jobs.hasRunning()
+
+    /** True while a turn is streaming — the LAN disconnect grace-close re-arms instead of killing it
+     *  (in-flight work must survive its owner app quitting; see SessionRegistry.scheduleClose). */
+    fun isExecuting(): Boolean = executing
 
     /**
      * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
@@ -355,12 +361,24 @@ class Conversation(
                         if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, System.currentTimeMillis())) emitJobs()
                     is AgentEvent.BackgroundTaskUpdated ->
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
+                    is AgentEvent.AssistantUsage -> lastCallUsage = ev
                     is AgentEvent.TurnResult -> {
                         executing = false
-                        val usage = TokenUsage(ev.inputTokens, ev.outputTokens, ev.cacheCreationInputTokens, ev.cacheReadInputTokens)
+                        // A result WITHOUT usage (interrupted turn, some error exits) surfaces as usage=null,
+                        // never zeros — a zero snaps the phone's statusline to 0% and poisons the resume seed.
+                        // Context fields prefer the turn's LAST API call: the result event SUMS input/cache
+                        // across every call of the turn (N tool batches ≈ N× the real occupancy — the phone
+                        // read 88% on a 44% session). Output keeps the result's turn total. Same
+                        // last-vs-total rule as the Codex backend.
+                        val last = lastCallUsage
+                        lastCallUsage = null
+                        val usage = when {
+                            last != null -> TokenUsage(last.inputTokens, ev.usage?.outputTokens ?: 0, last.cacheCreationInputTokens, last.cacheReadInputTokens)
+                            else -> ev.usage
+                        }
                         // keep the resume seed current: a mid-session reconnect then seeds the latest
                         // occupancy, not the stale open-time snapshot (same value the phone shows live).
-                        resumeContextUsed = usage.contextTokens
+                        usage?.contextTokens?.takeIf { it > 0 }?.let { resumeContextUsed = it }
                         sink.emit(TurnDone(convoId, ev.finalText, usage))
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
                         // so a control-plane send never stalls stdout parsing.

@@ -115,6 +115,6 @@ class TranscriptScannerTest {
                 """{"type":"assistant","isSidechain":true,"message":{"model":"m","usage":{"input_tokens":99999,"output_tokens":10},"content":[]}}""",
             ).joinToString("\n"),
         )
-        assertEquals(1500L, TranscriptScanner.lastContextTokens(f))
+        assertEquals(1510L, TranscriptScanner.lastContextTokens(f)) // input 1000 + output 10 + cache_read 500
     }
 }

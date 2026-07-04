@@ -22,11 +22,16 @@ import kotlin.io.path.nameWithoutExtension
  */
 object SlashCommandScanner {
 
-    // claude `-p` ignores most interactive commands (/cost, /status, /config, /vim, /agents, …) — sending
-    // them as stdin text silently no-ops, so they are deliberately absent. Only list what actually works:
+    // claude `-p` ignores most interactive commands (/cost, /status, /config, /usage, /context, /agents, …) —
+    // sending them as stdin text silently no-ops, so they are deliberately absent. Only list what actually works:
     //  - intercepted by [Conversation] (relaunch under a new flag): /model, /effort, /clear
-    //  - claude expands the prompt itself in headless stream-json: /compact, /review, /security-review,
-    //    /init, /pr-comments  (these are prompt-backed, not interactive-TUI-only)
+    //  - claude expands the prompt itself in headless stream-json: /compact, /review, /security-review, /init
+    //  - skills embedded in the claude CLI (no SKILL.md on disk, so the scan below can't find them; the model
+    //    expands them via its Skill tool): /simplify, /code-review, /verify, /run, /deep-research,
+    //    /fewer-permission-prompts
+    // Deliberately excluded even though they are CLI-embedded skills: /loop and /schedule (need a long-lived
+    // self-waking process — the daemon LRU-closes idle claude processes, so they'd silently break) and
+    // reference-style skills (/dataviz, /claude-api, /update-config) that the model pulls in on its own.
     private val builtins = listOf(
         SlashCommand("model", "Switch the model for this session", "<name>"),
         SlashCommand("effort", "Set reasoning effort (low/medium/high/xhigh/max)", "<level>"),
@@ -35,6 +40,12 @@ object SlashCommandScanner {
         SlashCommand("review", "Review the current changes"),
         SlashCommand("security-review", "Security review of the pending changes"),
         SlashCommand("init", "Generate or update CLAUDE.md"),
+        SlashCommand("simplify", "Clean up the changed code (reuse/simplification/efficiency)"),
+        SlashCommand("code-review", "Review the current diff for bugs and cleanups", "[effort]"),
+        SlashCommand("verify", "Verify the latest change end-to-end"),
+        SlashCommand("run", "Launch the project's app to see a change working"),
+        SlashCommand("deep-research", "Multi-source fact-checked research report", "<question>"),
+        SlashCommand("fewer-permission-prompts", "Allowlist common read-only tools to cut permission prompts"),
     )
 
     fun scan(workdir: Path, home: Path = Path.of(System.getProperty("user.home"))): List<SlashCommand> {

@@ -36,6 +36,7 @@ class SessionRegistry(
     private val backends: Map<AgentKind, AgentBackendFactory>,
 ) {
     private val mutex = Mutex()
+    private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
     private val convos = mutableMapOf<String, Conversation>()
     private val observes = mutableMapOf<String, ObserveSession>()
     private val pendingClose = mutableMapOf<String, Job>() // convoId -> delayed-close job during a LAN disconnect grace
@@ -56,13 +57,29 @@ class SessionRegistry(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>) = size > 64
     }
 
+    /** When THIS daemon process booted — see the restart-amnesia guard in [externallyActive]. */
+    private val startedAt = System.currentTimeMillis()
+
     /** True if [file]'s recent mtime is explained by an EXTERNAL writer — i.e. recently written AND not
      *  merely the tail of a session we closed ourselves (writes after our close mean a real foreign claude). */
     private suspend fun externallyActive(sessionId: String, file: Path): Boolean {
-        if (!transcriptRecentlyWritten(file)) return false
-        val closedAt = mutex.withLock { selfClosed[sessionId] } ?: return true
-        val mtime = runCatching { file.getLastModifiedTime().toMillis() }.getOrNull() ?: return true
-        return mtime > closedAt + SELF_CLOSE_SLACK_MS
+        // one stat serves both the freshness gate and the ownership checks below
+        val mtime = runCatching { if (file.exists()) file.getLastModifiedTime().toMillis() else null }.getOrNull() ?: return false
+        if (System.currentTimeMillis() - mtime >= TranscriptScanner.LIVE_WINDOW_MS) return false
+        // Restart amnesia: a write that predates this daemon's boot came from our PREVIOUS instance's own
+        // claude (children die with the daemon, and the restart wiped [selfClosed], which would otherwise
+        // prove ownership). Never read it as a foreign writer — the app auto-reopens its session seconds
+        // after a daemon update, and landed in read-only observe with a spurious "Continue here" banner.
+        // A real terminal claude keeps writing, so its mtime moves past our boot within one turn.
+        if (mtime < startedAt) return false
+        val closedAt = mutex.withLock { selfClosed[sessionId] }
+        val verdict = closedAt == null || mtime > closedAt + SELF_CLOSE_SLACK_MS
+        val now = System.currentTimeMillis()
+        log.info(
+            "externallyActive(${sessionId.take(8)}…): mtime ${now - mtime}ms ago, " +
+                "selfClosed ${closedAt?.let { "${now - it}ms ago" } ?: "absent"} → $verdict",
+        )
+        return verdict
     }
 
     /** Installed by the relay client; null in local-server mode. Read per turn so a conversation opened
@@ -80,7 +97,10 @@ class SessionRegistry(
             val live = mutex.withLock {
                 convos.values.firstOrNull { it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume) }
             }
-            if (live != null) { cancelPendingClose(live.convoId); live.reattach(sink); return live.convoId }
+            if (live != null) {
+                log.info("open ${resume.take(8)}… → reattach ${live.convoId.take(8)}…")
+                cancelPendingClose(live.convoId); live.reattach(sink); return live.convoId
+            }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
             // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
             if (open.agent == AgentKind.CLAUDE && !open.takeOver) {
@@ -88,6 +108,7 @@ class SessionRegistry(
                 val recent = externallyActive(resume, file)
                 if (recent) {
                     val convoId = UUID.randomUUID().toString()
+                    log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (foreign writer suspected)")
                     val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
                     mutex.withLock { observes[convoId] = obs }
                     obs.start()
@@ -114,6 +135,10 @@ class SessionRegistry(
         // place. mtime is the same cross-platform liveness signal the ObserveSession guard above uses.
         val forkForTakeOver = open.takeOver && resume != null &&
             externallyActive(resume, ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl"))
+        log.info(
+            "open ${resume?.take(8) ?: "new"}${if (open.takeOver) " (take-over)" else ""} → " +
+                "convo ${convoId.take(8)}… agent=${open.agent}${if (forkForTakeOver) " FORK" else ""}",
+        )
         val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver) }
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
@@ -157,7 +182,14 @@ class SessionRegistry(
     suspend fun busySessionIds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.mapNotNull { it.sessionId }.toSet() }
 
-    suspend fun sendPrompt(p: SendPrompt) = get(p.convoId)?.sendPrompt(p.text, p.images) ?: Unit
+    /** Routes a prompt into its conversation. False = the convo is gone (idle-reaped / daemon restarted):
+     *  the router answers [dev.ccpocket.protocol.SessionGone] so the phone can re-open + resend instead of
+     *  the prompt vanishing into silence (the root of "sent a message, nothing happened"). */
+    suspend fun sendPrompt(p: SendPrompt): Boolean {
+        val convo = get(p.convoId) ?: return false
+        convo.sendPrompt(p.text, p.images)
+        return true
+    }
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode) ?: Unit
@@ -175,6 +207,7 @@ class SessionRegistry(
             Triple(pendingClose.remove(convoId), convos.remove(convoId), observes.remove(convoId))
         }
         job?.cancel(); convo?.close(); obs?.close()
+        if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
         convo?.let { noteSelfClosed(it) }
     }
 
@@ -202,6 +235,17 @@ class SessionRegistry(
             delay(graceMs)
             // deregister BEFORE closing: otherwise close() below would cancel this very job mid-flight
             mutex.withLock { pendingClose.remove(convoId) }
+            // A conversation still WORKING (streaming turn / running background jobs) survives its owner's
+            // disconnect: re-arm and check again next window, close only once truly idle. Killing in-flight
+            // work because the app quit (update/relaunch/crash) is exactly what the task-complete push
+            // promises never happens — the relay path's idle reaper already spares busy convos this way.
+            val busy = mutex.withLock {
+                convos[convoId]?.takeIf { it.isAttachedTo(owner) }?.let { it.isExecuting() || it.hasBackgroundWork() } == true
+            }
+            if (busy) {
+                log.info("grace expiry ${convoId.take(8)}… still working → re-armed ${graceMs}ms")
+                scheduleClose(convoId, owner, graceMs); return@launch
+            }
             val (convo, obs) = mutex.withLock {
                 val c = convos[convoId]
                 val o = observes[convoId]
@@ -210,6 +254,9 @@ class SessionRegistry(
                     o != null && o.isAttachedTo(owner) -> { observes.remove(convoId); null to o }
                     else -> null to null // reattached elsewhere (or already gone) — not ours to kill
                 }
+            }
+            if (convo != null || obs != null) {
+                log.info("grace expiry closed ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
             }
             convo?.close(); obs?.close()
             convo?.let { noteSelfClosed(it) }
@@ -229,13 +276,6 @@ class SessionRegistry(
     }
 
     private suspend fun get(id: String): Conversation? = mutex.withLock { convos[id] }
-
-    /** True if [file] (a transcript) was written within [TranscriptScanner.LIVE_WINDOW_MS] — i.e. a claude is
-     *  likely still actively writing it. The liveness signal behind both the ObserveSession guard and the
-     *  take-over fork decision. */
-    private fun transcriptRecentlyWritten(file: Path): Boolean = runCatching {
-        file.exists() && System.currentTimeMillis() - file.getLastModifiedTime().toMillis() < TranscriptScanner.LIVE_WINDOW_MS
-    }.getOrDefault(false)
 
     private companion object {
         // a backgrounded shell silent this long (no started/updated/result event) is treated as dead. Well above

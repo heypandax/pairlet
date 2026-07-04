@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.codex
 
+import dev.ccpocket.protocol.TokenUsage
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -60,6 +61,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     // a turn's running state, reset on turn/completed
     @Volatile private var lastAgentText: String? = null
     @Volatile private var lastUsage = Usage()
+    @Volatile private var usageSeen = false // no tokenUsage event yet → TurnResult must say "no usage", not zeros
     private val deltaSeen = ConcurrentHashMap.newKeySet<String>() // agentMessage itemIds that streamed deltas → don't re-emit final
     private val fileChangePaths = ConcurrentHashMap<String, String>() // fileChange itemId → first changed path (for the approval preview)
     private val fileChangeDiffs = ConcurrentHashMap<String, String>() // fileChange itemId → unified diff (for the approval diff view)
@@ -85,7 +87,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         // reset per-process protocol state (this runs on every (re)launch)
         threadId = null; currentTurnId = null
         bootstrap.withLock { pendingPrompt = null }
-        lastAgentText = null; lastUsage = Usage()
+        lastAgentText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
         // kick off the handshake — initialized + thread open happen when the response lands (see handleResponse)
         initializeId = rpcRequest("initialize", buildJsonObject {
@@ -168,7 +170,15 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
                 params.str("delta")?.let { listOf(AgentEvent.AssistantThinking(it)) } ?: emptyList()
             "item/started" -> onItemStarted(params.obj("item"))
             "item/completed" -> onItemCompleted(params.obj("item"))
-            "thread/tokenUsage/updated" -> { captureUsage(params.obj("tokenUsage")?.obj("total")); emptyList() }
+            "thread/tokenUsage/updated" -> {
+                val tu = params.obj("tokenUsage")
+                // `last` is the finished call's usage ≈ what's occupying the context window; `total` is the
+                // SESSION-CUMULATIVE sum, which only grows and reads as absurd occupancy after a few turns.
+                // Prefer last, fall back to total only for server builds that don't send it (app-server is
+                // experimental and drifts — see the probe regression notes).
+                captureUsage(tu?.obj("last") ?: tu?.obj("total"))
+                emptyList()
+            }
             "turn/completed" -> onTurnCompleted(params.obj("turn"))
             "error" -> {
                 val msg = params.obj("error")?.str("message") ?: "codex error"
@@ -231,10 +241,8 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         val u = lastUsage
         val ev = AgentEvent.TurnResult(
             finalText = lastAgentText,
-            inputTokens = u.input,
-            outputTokens = u.output,
-            cacheCreationInputTokens = null,
-            cacheReadInputTokens = u.cached,
+            // a turn that never saw a tokenUsage event reports "unknown" (null), not an empty window
+            usage = if (usageSeen) TokenUsage(u.input, u.output, null, u.cached) else null,
             isError = status == "failed",
         )
         lastAgentText = null
@@ -244,13 +252,14 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         return listOf(ev)
     }
 
-    private fun captureUsage(total: JsonObject?) {
-        total ?: return
+    private fun captureUsage(usage: JsonObject?) {
+        usage ?: return
         lastUsage = Usage(
-            input = total.long("inputTokens") ?: lastUsage.input,
-            output = total.long("outputTokens") ?: lastUsage.output,
-            cached = total.long("cachedInputTokens") ?: lastUsage.cached,
+            input = usage.long("inputTokens") ?: lastUsage.input,
+            output = usage.long("outputTokens") ?: lastUsage.output,
+            cached = usage.long("cachedInputTokens") ?: lastUsage.cached,
         )
+        usageSeen = true
     }
 
     // ---- inbound: server→client requests (approvals) ----

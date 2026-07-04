@@ -123,10 +123,39 @@ class CodexBackendTest {
         val ev = b.parse("""{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"completed"}}}""")
         val tr = ev.single()
         assertIs<AgentEvent.TurnResult>(tr)
-        assertEquals(10, tr.inputTokens)
-        assertEquals(5, tr.outputTokens)
-        assertEquals(2, tr.cacheReadInputTokens)
+        assertEquals(10L, tr.usage?.inputTokens)
+        assertEquals(5L, tr.usage?.outputTokens)
+        assertEquals(2L, tr.usage?.cacheReadInputTokens)
         assertTrue(!tr.isError)
+    }
+
+    @Test
+    fun token_usage_prefers_per_turn_last_over_cumulative_total() = runBlocking {
+        // `total` is the session-cumulative sum — after a few turns it dwarfs real window occupancy;
+        // `last` is the finished call's usage, which IS the occupancy. Prefer last, total is only a fallback.
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse(
+            """{"method":"thread/tokenUsage/updated","params":{"threadId":"thr-1","tokenUsage":{""" +
+                """"total":{"inputTokens":900,"outputTokens":400,"cachedInputTokens":800},""" +
+                """"last":{"inputTokens":120,"outputTokens":30,"cachedInputTokens":100}}}}""",
+        )
+        val ev = b.parse("""{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"completed"}}}""")
+        val tr = ev.single()
+        assertIs<AgentEvent.TurnResult>(tr)
+        assertEquals(120L, tr.usage?.inputTokens)
+        assertEquals(30L, tr.usage?.outputTokens)
+        assertEquals(100L, tr.usage?.cacheReadInputTokens)
+    }
+
+    @Test
+    fun turn_completed_without_any_token_usage_reports_no_usage() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        val ev = b.parse("""{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"completed"}}}""")
+        val tr = ev.single()
+        assertIs<AgentEvent.TurnResult>(tr)
+        assertEquals(null, tr.usage) // zeros would read as "empty window" on the phone's statusline
     }
 
     @Test

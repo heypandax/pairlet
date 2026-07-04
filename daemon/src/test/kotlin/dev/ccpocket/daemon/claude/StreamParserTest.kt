@@ -37,15 +37,50 @@ class StreamParserTest {
     }
 
     @Test
+    fun assistant_message_usage_becomes_a_per_call_usage_event() {
+        // the result event SUMS usage across every API call of the turn (2 tool batches ≈ 2× the real
+        // window footprint — statusline read 88% on a 44% session), so each call's usage must surface
+        val evs = StreamParser.parse(
+            """{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":38,"cache_read_input_tokens":26854,"cache_creation_input_tokens":304,"output_tokens":3}}}""",
+        )
+        assertEquals(2, evs.size)
+        val usage = evs.filterIsInstance<AgentEvent.AssistantUsage>().single()
+        assertEquals(38, usage.inputTokens)
+        assertEquals(26854, usage.cacheReadInputTokens)
+        assertEquals(304, usage.cacheCreationInputTokens)
+    }
+
+    @Test
+    fun subagent_assistant_usage_is_not_surfaced() {
+        // a Task subagent's usage is the SUBAGENT's own window, not this session's (isSidechain rule)
+        val evs = StreamParser.parse(
+            """{"type":"assistant","parent_tool_use_id":"t9","message":{"content":[{"type":"text","text":"sub"}],"usage":{"input_tokens":5,"cache_read_input_tokens":100}}}""",
+        )
+        assertTrue(evs.filterIsInstance<AgentEvent.AssistantUsage>().isEmpty())
+    }
+
+    @Test
     fun result_success_with_usage() {
         val ev = StreamParser.parse(
             """{"type":"result","subtype":"success","is_error":false,"result":"PONG","usage":{"input_tokens":10,"output_tokens":5}}""",
         ).single()
         assertIs<AgentEvent.TurnResult>(ev)
         assertEquals("PONG", ev.finalText)
-        assertEquals(10, ev.inputTokens)
-        assertEquals(5, ev.outputTokens)
+        assertEquals(10L, ev.usage?.inputTokens)
+        assertEquals(5L, ev.usage?.outputTokens)
         assertEquals(false, ev.isError)
+    }
+
+    @Test
+    fun result_without_usage_reports_no_usage_not_zeros() {
+        // interrupted/error turns can end with a usage-less result — the zeros are placeholders, and
+        // treating them as real snapped the phone's context statusline to 0% (and poisoned the resume seed)
+        val ev = StreamParser.parse(
+            """{"type":"result","subtype":"error_during_execution","is_error":true,"result":null}""",
+        ).single()
+        assertIs<AgentEvent.TurnResult>(ev)
+        assertEquals(null, ev.usage)
+        assertEquals(true, ev.isError)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.protocol.TokenUsage
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -16,6 +17,16 @@ sealed interface AgentEvent {
     data class AssistantThinking(val text: String) : AgentEvent
     data class AssistantToolUse(val id: String?, val name: String, val input: JsonObject?) : AgentEvent
 
+    /** The context-bearing usage of ONE assistant API call (`message.usage`). The turn's `result` event
+     *  SUMS these across every call in the turn — a 2-tool-batch turn reported ~2× the real window
+     *  footprint and the phone statusline read 88% on a 44% session — so occupancy must come from the
+     *  LAST call, never the result total (the same last-vs-total rule the Codex backend applies). */
+    data class AssistantUsage(
+        val inputTokens: Long,
+        val cacheCreationInputTokens: Long?,
+        val cacheReadInputTokens: Long?,
+    ) : AgentEvent
+
     /** a tool/command result — carries the originating tool_use id + (text) content. */
     data class ToolResult(val toolUseId: String?, val content: String?, val isError: Boolean) : AgentEvent
 
@@ -28,12 +39,13 @@ sealed interface AgentEvent {
     /** replayed user turn (Claude --replay-user-messages). */
     data object UserReplay : AgentEvent
 
+    /** Turn finished. [usage] carries the backend result's own numbers — null when the result had NO
+     *  usage (interrupted turn, some error exits): absence is a null, never placeholder zeros a consumer
+     *  could mistake for an empty window. NOTE: Claude's result SUMS input/cache across the turn's API
+     *  calls — Conversation prefers the last [AssistantUsage] for occupancy (last-vs-total). */
     data class TurnResult(
         val finalText: String?,
-        val inputTokens: Long,
-        val outputTokens: Long,
-        val cacheCreationInputTokens: Long?,
-        val cacheReadInputTokens: Long?,
+        val usage: TokenUsage?,
         val isError: Boolean,
     ) : AgentEvent
 

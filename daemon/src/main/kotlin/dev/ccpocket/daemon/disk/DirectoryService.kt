@@ -82,8 +82,16 @@ class DirectoryService {
         return null
     }
 
+    /** `~` / `~/...` → the daemon user's home. Clients accept `~` paths in their "new session" inputs and may
+     *  send them raw; the daemon owns the expansion because only it knows the remote machine's home. */
+    private fun expandTilde(path: String): String = when {
+        path == "~" -> System.getProperty("user.home")
+        path.startsWith("~/") || path.startsWith("~\\") -> System.getProperty("user.home") + path.drop(1)
+        else -> path
+    }
+
     fun validateWorkdir(path: String): Path? {
-        val p = runCatching { Path.of(path).toRealPath() }.getOrNull() ?: return null
+        val p = runCatching { Path.of(expandTilde(path)).toRealPath() }.getOrNull() ?: return null
         return if (p.isDirectory() && p.isReadable()) p else null
     }
 
@@ -100,7 +108,7 @@ class DirectoryService {
      */
     fun validateOrCreateWorkdir(path: String): Path? {
         validateWorkdir(path)?.let { return it }                       // already a readable directory → done
-        val raw = runCatching { Path.of(path).normalize() }.getOrNull() ?: return null
+        val raw = runCatching { Path.of(expandTilde(path)).normalize() }.getOrNull() ?: return null
         if (raw.exists()) return null                                  // exists but not a readable dir (e.g. a file)
         val leaf = raw.fileName ?: return null                         // need a leaf name to create
         val parent = raw.parent?.let { p -> runCatching { p.toRealPath() }.getOrNull() } ?: return null

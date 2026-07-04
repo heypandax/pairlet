@@ -26,6 +26,13 @@ class SlashCommandScannerTest {
         assertTrue(cmds.any { it.name == "clear" })
         assertTrue(cmds.any { it.name == "review" })
         assertTrue(cmds.any { it.name == "security-review" })
+        // CLI-embedded skills (no SKILL.md on disk) must come from the builtin list
+        assertTrue(cmds.any { it.name == "simplify" && it.source == CommandSource.BUILTIN })
+        assertTrue(cmds.any { it.name == "code-review" && it.source == CommandSource.BUILTIN })
+        assertTrue(cmds.any { it.name == "verify" && it.source == CommandSource.BUILTIN })
+        assertTrue(cmds.any { it.name == "run" && it.source == CommandSource.BUILTIN })
+        assertTrue(cmds.any { it.name == "deep-research" && it.source == CommandSource.BUILTIN })
+        assertTrue(cmds.any { it.name == "fewer-permission-prompts" && it.source == CommandSource.BUILTIN })
     }
 
     @Test

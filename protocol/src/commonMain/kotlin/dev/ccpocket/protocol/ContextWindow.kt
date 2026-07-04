@@ -34,6 +34,10 @@ private val ALIAS_WINDOWS = mapOf(
     "opus" to LARGE_CONTEXT_WINDOW,
     "sonnet" to LARGE_CONTEXT_WINDOW,
     "haiku" to DEFAULT_CONTEXT_WINDOW,
+    // Claude 5 family: substring can't save a bare alias ("fable-5" isn't IN "fable"), so a session
+    // relaunched via `/model fable` declared 200k and the statusline pinned at 100% mid-1M-session
+    "fable" to LARGE_CONTEXT_WINDOW,
+    "mythos" to LARGE_CONTEXT_WINDOW,
 )
 
 /**
@@ -46,3 +50,13 @@ fun contextWindowFor(model: String?): Long {
     if ("[1m]" in m || "-1m" in m) return LARGE_CONTEXT_WINDOW
     return if (KNOWN_1M_MODELS.any { it in m }) LARGE_CONTEXT_WINDOW else DEFAULT_CONTEXT_WINDOW
 }
+
+/**
+ * The observed-usage upgrade, in ONE place (daemon live/observe announce + the phone's defensive copy
+ * all call this): occupancy beyond the declared window PROVES a bigger one — beta-gated 1M models
+ * declare a 200k canonical id, and an alias this table doesn't know yet declares the default — so
+ * upgrade, never downgrade. Null [declared] means "no denominator known" (e.g. model unseen): it stays
+ * null unless the occupancy alone proves 1M.
+ */
+fun provenWindow(declared: Long?, used: Long?): Long? =
+    if ((used ?: 0) > (declared ?: DEFAULT_CONTEXT_WINDOW)) LARGE_CONTEXT_WINDOW else declared

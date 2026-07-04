@@ -19,6 +19,7 @@ import dev.ccpocket.daemon.relay.LoopbackStatus
 import dev.ccpocket.daemon.relay.PairLoopback
 import dev.ccpocket.daemon.relay.RelayClient
 import dev.ccpocket.daemon.server.DaemonServer
+import dev.ccpocket.daemon.server.LanE2E
 import dev.ccpocket.daemon.service.ServiceInstaller
 import dev.ccpocket.daemon.util.QrTerminal
 import dev.ccpocket.protocol.PocketJson
@@ -69,6 +70,11 @@ private class RunCmd : CliktCommand(name = "run") {
     private val codexBin by option("--codex-bin", help = "codex executable (default: auto-detect the installed Codex CLI)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
+    private val directBind by option(
+        "--direct-bind",
+        help = "relay mode: also listen for E2E direct connections on this interface (paired devices skip the relay). " +
+            "Default 127.0.0.1 = same-machine apps only; pass 0.0.0.0 to open it to your LAN (still Noise-gated), or 'none' to disable",
+    ).default("127.0.0.1")
     private val pairPort by option("--pair-port", help = "loopback port for the `pair` command").int().default(8799)
     private val takeover by option("--takeover", help = "if another cc-pocket daemon is already running, stop it and run this one instead (default: exit and leave it running)").flag()
     private val autoUpdate by option("--auto-update", help = "apply daemon updates automatically (installer-managed macOS/Linux installs; others get a notification)").flag()
@@ -86,10 +92,31 @@ private class RunCmd : CliktCommand(name = "run") {
         )
         if (!local) {
             val identity = Identity.loadOrCreate()
-            val relayClient = RelayClient(relay, identity, core)
+            // What DaemonInfo advertises after each handshake: where paired devices can reach us without
+            // the relay. Bind-specific IP → advertise it; 0.0.0.0 → advertise the current LAN IP (recomputed
+            // per handshake, so a DHCP move heals itself); none/no usable interface → null (devices clear
+            // any stored address and stay on the relay).
+            val directUrl: () -> String? = {
+                when {
+                    directBind == "none" -> null
+                    directBind == "0.0.0.0" -> lanIp()?.let { "ws://$it:$port/v1/ws" }
+                    else -> "ws://$directBind:$port/v1/ws"
+                }
+            }
+            val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl)
             echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
+            // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
+            // straight to us (no proxy/relay leg — the fix for flaky-uplink send/receive). Unlike the
+            // plaintext --local path this REQUIRES the Noise handshake, so a wide bind stays safe. A bind
+            // failure (port taken) degrades to relay-only instead of killing the daemon.
+            if (directBind != "none") {
+                val gate = LanE2E(identity, directUrl, firstContactPending = relayClient::deviceFirstContactPending)
+                runCatching { DaemonServer(core, directBind, port, gate).run(wait = false) }
+                    .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
+                    .onFailure { echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }
+            }
             // Windows: if we're not yet registered as a logon background service, self-install so closing this
             // window no longer takes the daemon offline (issue #16). No-op on macOS/Linux and when already set up.
             ServiceInstaller.selfInstallIfMissingWindows(
@@ -336,5 +363,10 @@ private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     }
 }
 
-fun main(args: Array<String>) =
+fun main(args: Array<String>) {
+    // BEFORE the first logger materializes: slf4j-simple freezes its config at init, and bare
+    // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
+    System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
+    System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
     Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), UpdateCmd(), ServiceInstallCmd()).main(args)
+}

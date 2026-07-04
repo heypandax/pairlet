@@ -69,7 +69,7 @@ object TranscriptPatcher {
         // preserve the transcript's real last-activity mtime across the rewrite: unhide is daemon bookkeeping,
         // not a new turn. If the rewrite bumped mtime, a just-reaped phone session would look freshly written and
         // re-opening it would read as a live foreign session — the phone shows a bogus "Continue here"/take-over
-        // (and take-over would even fork a duplicate). See SessionRegistry's transcriptRecentlyWritten guard.
+        // (and take-over would even fork a duplicate). See SessionRegistry's externallyActive guard.
         val originalMtime = runCatching { Files.getLastModifiedTime(file) }.getOrNull()
         val tmp = file.resolveSibling("${file.fileName}.pocket-tmp")
         return try {

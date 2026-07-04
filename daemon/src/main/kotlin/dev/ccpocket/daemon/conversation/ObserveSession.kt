@@ -4,8 +4,6 @@ import dev.ccpocket.daemon.disk.TranscriptReplay
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ConvoHistory
-import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
-import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.contextWindowFor
 import kotlinx.coroutines.CoroutineName
@@ -57,11 +55,7 @@ class ObserveSession(
     private suspend fun emitLive() {
         val model = runCatching { TranscriptScanner.lastModel(file) }.getOrNull()
         val used = runCatching { TranscriptScanner.lastContextTokens(file) }.getOrNull()
-        val window = when {
-            (used ?: 0) > DEFAULT_CONTEXT_WINDOW -> LARGE_CONTEXT_WINDOW
-            model != null -> contextWindowFor(model)
-            else -> null
-        }
+        val window = dev.ccpocket.protocol.provenWindow(model?.let(::contextWindowFor), used)
         sink.emit(
             SessionLive(
                 convoId, workdir, sessionId, observing = true,
