@@ -4,7 +4,7 @@
 # Releases (heypandax/cc-pocket) — the url below points there. The tap holds only this description.
 # Users: brew install --cask heypandax/tap/cc-pocket
 cask "cc-pocket" do
-  version "1.2.1"
+  version "1.2.2"
 
   # Apple Silicon and Intel each get their own notarized build (jpackage bundles an arch-specific
   # JRE — see .github/workflows/release.yml). `arch` maps the running CPU to the asset suffix; the
@@ -13,10 +13,10 @@ cask "cc-pocket" do
   arch arm: "arm64", intel: "x86_64"
 
   on_arm do
-    sha256 "1d00b111faf1deccac1498eb39f86741325e09305e1ea5f0b8704e50a05d2d93"
+    sha256 "d6fe1321f4d3327793938aa05e19c2ad7670915623894aabdfaa0cf606a052c3"
   end
   on_intel do
-    sha256 "7bd406fec5c58d92f649f082c7308aaccebedf5fc406a078190c3573572d3f51"
+    sha256 "67954ca14b5d462a627fccd24a4a75a6f1979ea3bb8d05ad798e9a8c161f6a84"
   end
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
