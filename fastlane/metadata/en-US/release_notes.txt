@@ -1,19 +1,16 @@
-What's new in 1.2.0
+What's new in 1.2.2
 
 New
-• Token usage dashboard: today's tokens, requests, cost and cache-hit rate, with 7/30-day trends and a per-model breakdown (Settings → Usage) — covering both Claude and Codex
-• Switch models mid-session: Opus / Sonnet / Haiku with full history preserved; Codex sessions get the gpt-5.1-codex family
-• Show one agent only: using both Claude and Codex? Filter the session list in Settings
-• Install guide: the pairing screen now walks you through installing the computer daemon — one command each on macOS / Windows / Linux
-• Open any folder by path right from the list header
+• See what a session changed: browse the files Claude touched and read each change, right from your phone
+• One-tap new session: tap once and it starts under your default agent and mode — the chip beside it shows what you'll get and opens the full picker
+• All your computers on one screen: online state, running projects and waiting approvals per machine, one tap to jump over
+• LAN direct connect: on the same network the app talks straight to your computer for lower latency; removing a device now disconnects it immediately
+• Links in replies are tappable, and lists refresh with a pull
 
 Fixes & improvements
-• Taking over a desktop session no longer creates duplicate sessions, and the desktop picks up your phone-side messages afterwards
-• Accurate context usage: 1M-context windows supported; resumed sessions show their model immediately
-• Smoother reconnects: no more "reconnecting" flash when returning from the background; network switches self-heal
-• Drafts are saved per conversation and survive app restarts
-• Windows computers: folder-tree drill-in, session resume and Codex session lists now work properly
-• Codex sessions show their real token occupancy instead of a misleading percentage
-• Fixed the occasional "API Error 400" and easy disconnects in LAN mode
+• A quick double-tap can no longer start two sessions
+• Keyboard fixes around the composer; smoother model/mode switching
+• Interrupted turns no longer snap context usage to a misleading 0%
+• Resuming and observing desktop sessions is more reliable
 
-Note: some features also need the computer-side cc-pocket-daemon updated to 1.2.0 (brew upgrade / scoop update / re-run the install one-liner).
+Note: some features also need the computer-side cc-pocket-daemon on 1.2.2 — it now updates itself: run "cc-pocket-daemon update" (or brew upgrade / scoop update).
