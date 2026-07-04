@@ -21,6 +21,7 @@ import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.SendPrompt
+import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SwitchDirectory
@@ -63,7 +64,7 @@ class RequestRouter(
                 }
             }
 
-            is SendPrompt -> registry.sendPrompt(frame)
+            is SendPrompt -> if (!registry.sendPrompt(frame)) sink.emit(SessionGone(frame.convoId))
             // a verdict may resolve a SHELL ask (issue #3) or an agent tool ask — shell claims its own by askId
             is PermissionVerdict -> if (!shell.onVerdict(frame)) registry.verdict(frame)
             is SwitchMode -> registry.switchMode(frame)

@@ -65,12 +65,14 @@ data class TokenUsage(
     val cacheReadInputTokens: Long? = null,
 ) {
     /**
-     * Tokens occupying the model's context window after this turn: the fresh prompt plus the cached
-     * prefix still in the window (output isn't in-window yet). The single definition of "context
-     * occupancy" — the daemon seeds it on resume, the phone shows it live, both read it from here.
-     * Computed (no backing field) so it never crosses the wire.
+     * Tokens occupying the model's context window after this turn: the prompt the model saw (fresh
+     * input + the cached prefix) PLUS the reply it just wrote — that reply is in the conversation
+     * and is prompt-side from the next turn on, so omitting it under-reports right after a long
+     * response. The single definition of "context occupancy" — the daemon seeds it on resume, the
+     * phone shows it live, both read it from here. Computed (no backing field) so it never crosses
+     * the wire.
      */
-    val contextTokens: Long get() = inputTokens + (cacheReadInputTokens ?: 0) + (cacheCreationInputTokens ?: 0)
+    val contextTokens: Long get() = inputTokens + outputTokens + (cacheReadInputTokens ?: 0) + (cacheCreationInputTokens ?: 0)
 }
 
 /**
@@ -91,6 +93,7 @@ data class SessionSummary(
     val live: Boolean = false, // transcript written very recently — a session running right now
     val busy: Boolean = false, // has running background work (bg bash / subagent / monitor) — keep it "active" even when idle
     val agent: AgentKind? = null, // which backend owns this transcript (null = older daemon → phone assumes Claude)
+    val model: String? = null, // the LAST assistant turn's model id (null = older daemon / no turn yet) — list rows show its alias
 )
 
 /** One filesystem entry returned by the daemon's DirectoryService. */

@@ -60,6 +60,51 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun sessionGone_roundtrips() {
+        val env = Envelope(id = "3", ts = 0, body = SessionGone("c9"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/session.gone\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun deviceRevoked_roundtrips() {
+        val env = Envelope(id = "7", ts = 0, to = Route.RELAY, body = DeviceRevoked("devX"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/device.revoked\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun lanHello_roundtrips() {
+        val env = Envelope(id = "4", ts = 0, body = LanHello("devA"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/lan.hello\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun unknown_frame_discriminator_throws() {
+        // The invariant the whole forward-compat story rests on: an unknown "t" must THROW (each decode
+        // site wraps in runCatching and drops the frame). A default polymorphic deserializer added later
+        // would silently break that contract — this test pins it.
+        val json = """{"id":"9","ts":0,"to":"PEER","body":{"t":"pocket/from.the.future","x":1}}"""
+        assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(json) }.isFailure)
+    }
+
+    @Test
+    fun daemonInfo_roundtrips_and_omits_null_lanUrl() {
+        val with = Envelope(id = "5", ts = 0, body = DaemonInfo("ws://192.168.1.2:8765/v1/ws"))
+        val json = PocketJson.encodeToString(with)
+        assertTrue("\"t\":\"pocket/daemon.info\"" in json, json)
+        assertEquals(with, PocketJson.decodeFromString<Envelope>(json))
+        // null lanUrl (listener disabled) is omitted on the wire and decodes back to null
+        val without = PocketJson.encodeToString(Envelope(id = "6", ts = 0, body = DaemonInfo(null)))
+        assertFalse("lanUrl" in without, without)
+        assertEquals(DaemonInfo(null), PocketJson.decodeFromString<Envelope>(without).body)
+    }
+
+    @Test
     fun sessionSummary_omits_null_gitBranch() {
         val s = SessionSummary(
             sessionId = "s", title = "t", firstPrompt = "p",
@@ -68,6 +113,27 @@ class SerializationRoundTripTest {
         val json = PocketJson.encodeToString(s)
         assertFalse("gitBranch" in json, json)
         assertEquals(s, PocketJson.decodeFromString<SessionSummary>(json))
+    }
+
+    @Test
+    fun sessionSummary_model_roundtrips_and_defaults_for_old_daemons() {
+        val s = SessionSummary(
+            sessionId = "s", title = "t", firstPrompt = "p",
+            messageCount = 1, cwd = "/x", lastModified = 0, model = "claude-opus-4-8",
+        )
+        assertEquals(s, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(s)))
+        // an old daemon's summary has no `model` key → decodes to null, not an error
+        val old = """{"sessionId":"s","title":"t","firstPrompt":"p","messageCount":1,"cwd":"/x","lastModified":0}"""
+        assertEquals(null, PocketJson.decodeFromString<SessionSummary>(old).model)
+    }
+
+    @Test
+    fun tokenUsage_contextTokens_is_computed_not_serialized() {
+        // occupancy = prompt (fresh + cached) + the reply just written; a getter, so it must never
+        // appear on the wire (older peers would reject or double-count a baked field)
+        val u = TokenUsage(inputTokens = 10, outputTokens = 5, cacheCreationInputTokens = 100, cacheReadInputTokens = 1000)
+        assertEquals(1115L, u.contextTokens)
+        assertFalse("contextTokens" in PocketJson.encodeToString(u))
     }
 
     @Test

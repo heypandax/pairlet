@@ -3,7 +3,9 @@ package dev.ccpocket.daemon.relay
 import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.identity.Identity
+import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.util.logger
+import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PocketError
@@ -29,7 +31,8 @@ import java.util.concurrent.atomic.AtomicLong
 class DeviceSessions(
     private val core: DaemonCore,
     private val identity: Identity,
-    private val store: File = devicesFile(),
+    private val store: File = PairedDevices.file(),
+    private val lanUrl: () -> String? = { null }, // advertised in DaemonInfo after each handshake (null = direct listener off)
     private val send: suspend (deviceId: String, payload: ByteArray) -> Unit,
 ) {
     private val log = logger("DeviceSessions")
@@ -40,6 +43,7 @@ class DeviceSessions(
     private val sessions = HashMap<String, E2ESession>()
     private val owned = HashMap<String, MutableList<String>>()
     private val nextId = AtomicLong(0)
+    private val seenThisAttach = HashSet<String>()          // devices the relay re-announced since the last attach
 
     /** A freshly minted pairing ticket becomes a candidate PSK for the next device that pairs. */
     fun onMintedTicket(ticket: String) {
@@ -49,14 +53,60 @@ class DeviceSessions(
     /** The relay forwarded a newly-redeemed device's static key; allow-list + bind its PSK. */
     suspend fun onDevicePaired(deviceId: String, devicePubB64: String) {
         val pub = runCatching { B64dec.decode(devicePubB64) }.getOrNull() ?: return
-        mutex.withLock {
+        val known = mutex.withLock {
+            seenThisAttach.add(deviceId)
+            val already = devicePubs[deviceId]?.contentEquals(pub) == true
             devicePubs[deviceId] = pub
-            // LIFO: the device scanned the most recently minted link
-            pskFor[deviceId] = synchronized(psks) { psks.removeLastOrNull() } ?: ByteArray(0)
+            if (!already) {
+                // LIFO: the device scanned the most recently minted link. Attach-replays of an
+                // already-known key must NOT re-arm a PSK (that would lock its next LAN connect out).
+                pskFor[deviceId] = synchronized(psks) { psks.removeLastOrNull() } ?: ByteArray(0)
+            }
+            already
+        }
+        if (!known) {
+            persist()
+            log.info("device paired: ${deviceId.take(8)}… (e2e pub ${pub.size}B)")
+        }
+    }
+
+    /** A relay (re)attach begins: reset the replay set — [reconcileReplay] prunes against what follows. */
+    suspend fun beginAttachReplay() = mutex.withLock { seenThisAttach.clear() }
+
+    /**
+     * The relay re-announces every NON-REVOKED device right after attach — that replay is the
+     * authoritative set. Prune anything we still hold that wasn't in it (revoked while we were offline),
+     * so the direct-LAN gate stops honoring keys the user already revoked. An EMPTY replay means an
+     * older/foreign relay that doesn't re-announce — do nothing rather than brick every binding.
+     */
+    suspend fun reconcileReplay() {
+        val stale = mutex.withLock {
+            if (seenThisAttach.isEmpty()) return
+            (devicePubs.keys - seenThisAttach).toList().onEach {
+                devicePubs.remove(it); sessions.remove(it); pskFor.remove(it)
+            }
+        }
+        if (stale.isNotEmpty()) {
+            persist()
+            log.info("pruned ${stale.size} revoked device(s) after attach replay")
+        }
+    }
+
+    /** The relay says this device was just revoked: cut key + live E2E session immediately. The persist
+     *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. */
+    suspend fun onDeviceRevoked(deviceId: String) {
+        mutex.withLock {
+            devicePubs.remove(deviceId); sessions.remove(deviceId); pskFor.remove(deviceId)
+            seenThisAttach.remove(deviceId)
         }
         persist()
-        log.info("device paired: ${deviceId.take(8)}… (e2e pub ${pub.size}B)")
+        log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list")
     }
+
+    /** True while this device's FIRST post-pairing handshake (the ticket-PSK-bound one) hasn't completed
+     *  over the relay. The LAN gate refuses such devices, so first contact stays bound to the pairing
+     *  ceremony — the one guarantee the LAN path's deliberate empty-PSK handshake cannot provide. */
+    suspend fun firstContactPending(deviceId: String): Boolean = mutex.withLock { pskFor.containsKey(deviceId) }
 
     /** A device's inner E2E payload arrived (handshake or transport). */
     suspend fun onFrame(deviceId: String, payload: ByteArray) {
@@ -82,6 +132,9 @@ class DeviceSessions(
         mutex.withLock { sessions[deviceId] = session }
         log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B) → session established")
         send(deviceId, Wire.payload(Wire.HANDSHAKE, responderEph))
+        // teach the device where this daemon lives on the LAN so its next connect can skip the relay;
+        // null actively clears a stale stored address (listener since disabled / no usable interface)
+        sealAndSend(deviceId, DaemonInfo(lanUrl()))
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {
@@ -118,27 +171,13 @@ class DeviceSessions(
         send(deviceId, payload)
     }
 
-    // ---- persistence of paired device public keys ----
+    // ---- persistence of paired device public keys (shared with the direct-LAN gate) ----
 
-    private fun persist() {
-        runCatching {
-            store.parentFile?.mkdirs()
-            store.writeText(PocketJson.encodeToString(devicePubs.mapValues { B64.encodeToString(it.value) }))
-        }
-    }
+    private fun persist() = PairedDevices.save(devicePubs, store)
 
-    private fun loadPersisted(): Map<String, ByteArray> = runCatching {
-        if (!store.exists()) return emptyMap()
-        PocketJson.decodeFromString<Map<String, String>>(store.readText()).mapValues { B64dec.decode(it.value) }
-    }.getOrDefault(emptyMap())
+    private fun loadPersisted(): Map<String, ByteArray> = PairedDevices.load(store)
 
     private companion object {
-        val B64: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
         val B64dec: Base64.Decoder = Base64.getUrlDecoder()
-        fun devicesFile(): File {
-            val dir = System.getenv("CC_POCKET_IDENTITY")?.let { File(it).parentFile }
-                ?: File(System.getProperty("user.home"), ".cc-pocket")
-            return File(dir, "devices.json")
-        }
     }
 }

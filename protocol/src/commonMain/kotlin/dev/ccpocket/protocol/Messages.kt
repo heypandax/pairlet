@@ -220,6 +220,36 @@ data class PocketError(
     val convoId: String? = null,
 ) : ToPhone
 
+/**
+ * daemon -> phone: a [SendPrompt] referenced a conversation the daemon no longer holds (idle-reaped
+ * while the link was down, or lost to a daemon restart). The phone auto-reopens the session and
+ * resends the prompt instead of spinning forever. Older daemons silently dropped these; older phones
+ * ignore this frame (unknown type) and behave as before — both directions stay wire-compatible.
+ */
+@Serializable
+@SerialName("pocket/session.gone")
+data class SessionGone(val convoId: String) : ToPhone
+
+/**
+ * device -> daemon, direct-LAN transport only: the opening claim naming the paired device, sent as
+ * the first TEXT frame on the socket. The daemon looks up the device's paired static key and runs
+ * the same Noise handshake as the relay data plane (unknown deviceIds are dropped). Consumed by the
+ * transport layer — never routed to request handling.
+ */
+@Serializable
+@SerialName("pocket/lan.hello")
+data class LanHello(val deviceId: String) : ToDaemon
+
+/**
+ * daemon -> phone, sent once after each E2E session establishes (relay or LAN): where this daemon
+ * can also be reached directly. [lanUrl] is a `ws://` URL on the daemon's LAN interface (loopback
+ * when bound conservatively), null when the direct listener is disabled — the phone then clears any
+ * stored address. The phone persists it per binding and tries it before the relay on later connects.
+ */
+@Serializable
+@SerialName("pocket/daemon.info")
+data class DaemonInfo(val lanUrl: String? = null) : ToPhone
+
 @Serializable
 enum class ChatRole {
     @SerialName("user") USER,
@@ -365,6 +395,13 @@ data class DevicePaired(val deviceId: String, val devicePubKey: String) : ToRela
 @Serializable
 @SerialName("pocket/device.revoke")
 data class RevokeDevice(val deviceId: String) : ToRelay
+
+/** relay -> daemon: a device was just revoked — prune it from the local paired allow-list NOW. Without
+ *  this the direct-LAN gate (which trusts that list) would keep honoring a revoked device's key until
+ *  the next attach-replay reconcile. Older daemons ignore the unknown frame (replay covers them). */
+@Serializable
+@SerialName("pocket/device.revoked")
+data class DeviceRevoked(val deviceId: String) : ToRelay
 
 /** relay -> peer: the other end's online/offline transition. */
 @Serializable

@@ -37,9 +37,15 @@ class Broker {
         Unit
     }
 
-    suspend fun attachDevice(conn: Conn): Unit = mutex.withLock {
-        devices.getOrPut(conn.account) { mutableSetOf() }.add(conn)
-        Unit
+    /** Register a device socket; returns the superseded previous socket with the same deviceId, if any
+     *  (caller closes it — newest wins, like daemons). One live socket per device matters: the daemon keeps
+     *  a single E2E session per deviceId, so two sockets racing their handshakes deafen whichever loses. */
+    suspend fun attachDevice(conn: Conn): Conn? = mutex.withLock {
+        val set = devices.getOrPut(conn.account) { mutableSetOf() }
+        val old = conn.deviceId?.let { id -> set.firstOrNull { it.deviceId == id } }
+        if (old != null) set.remove(old)
+        set.add(conn)
+        old
     }
 
     suspend fun detachDevice(conn: Conn): Unit = mutex.withLock {

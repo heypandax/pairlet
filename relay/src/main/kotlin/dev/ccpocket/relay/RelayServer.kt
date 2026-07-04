@@ -5,6 +5,7 @@ import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.DaemonAuth
 import dev.ccpocket.protocol.DaemonHello
 import dev.ccpocket.protocol.DevicePaired
+import dev.ccpocket.protocol.DeviceRevoked
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
@@ -207,7 +208,12 @@ class RelayServer(
                     is PairingService.MintResult.Err -> broker.controlToDaemon(account, controlText(AuthError(m.code)))
                 }
             }
-            is RevokeDevice -> if (store.revokeDevice(account, body.deviceId)) broker.closeDevice(account, body.deviceId)
+            is RevokeDevice -> if (store.revokeDevice(account, body.deviceId)) {
+                broker.closeDevice(account, body.deviceId)
+                // tell the daemon NOW: it must prune the key from its local allow-list, or its direct-LAN
+                // gate keeps accepting the revoked device until the next attach-replay reconcile
+                broker.controlToDaemon(account, controlText(DeviceRevoked(body.deviceId)))
+            }
             is Ping -> broker.controlToDaemon(account, controlText(Pong(body.ts))) // app-level liveness echo
             // wake an offline phone: push only when no device socket is live (an online phone got TurnDone already)
             is NotifyPush -> if (broker.deviceCount(account) == 0) pushScope.launch {
@@ -246,7 +252,10 @@ class RelayServer(
         }
 
         val conn = conn(account, Role.DEVICE, hello.deviceId)
-        broker.attachDevice(conn)
+        // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
+        // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
+        // per-device E2E session and deafen it
+        broker.attachDevice(conn)?.let { runCatching { it.close("superseded") } }
         sendControl(Attached(Role.DEVICE, account))
         broker.controlToDaemon(account, controlText(PeerPresence(true)))
         try {
@@ -257,7 +266,9 @@ class RelayServer(
             }
         } finally {
             broker.detachDevice(conn)
-            broker.controlToDaemon(account, controlText(PeerPresence(false)))
+            // "peer offline" only when the LAST device socket left — a superseded/overlapping socket's exit
+            // while another is live must not arm the daemon's idle reaper against a watched conversation
+            if (broker.deviceCount(account) == 0) broker.controlToDaemon(account, controlText(PeerPresence(false)))
         }
     }
 

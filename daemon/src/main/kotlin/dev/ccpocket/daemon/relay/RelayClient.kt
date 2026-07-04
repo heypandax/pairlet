@@ -10,6 +10,7 @@ import dev.ccpocket.protocol.Challenge
 import dev.ccpocket.protocol.DaemonAuth
 import dev.ccpocket.protocol.DaemonHello
 import dev.ccpocket.protocol.DevicePaired
+import dev.ccpocket.protocol.DeviceRevoked
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
 import dev.ccpocket.protocol.PairBegin
@@ -53,6 +54,7 @@ class RelayClient(
     private val relayWsBase: String, // e.g. ws://127.0.0.1:9000
     private val identity: Identity,
     private val core: DaemonCore,
+    private val lanUrl: () -> String? = { null }, // direct-listener address advertised to devices (DaemonInfo)
 ) {
     private val log = logger("RelayClient")
 
@@ -75,7 +77,7 @@ class RelayClient(
     @Volatile private var peerOnline = false
     @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness; baselined at attach)
     @Volatile private var sawPong = false  // logging only: notes when this relay first proves it speaks Pong
-    private val sessions = DeviceSessions(core, identity) { deviceId, payload ->
+    private val sessions = DeviceSessions(core, identity, lanUrl = lanUrl) { deviceId, payload ->
         dataOut?.send(Wire.wrapDevice(deviceId, payload))
     }
 
@@ -83,6 +85,9 @@ class RelayClient(
 
     /** Loopback diagnostics (`pair`/`status`): is a relay session currently attached… */
     val attached: Boolean get() = dataOut != null
+
+    /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
+    suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
 
     /** …and how stale is its liveness signal (ms since the last Pong, or since attach before the first one). */
     fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
@@ -155,6 +160,11 @@ class RelayClient(
                 // daemon until a manual restart. A timeout throws instead, so run()'s loop backs off and retries.
                 if (withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { authenticate() } == null) error("relay handshake timed out")
                 log.info("attached to relay as daemon (account=${identity.accountId})")
+                // the relay re-announces every non-revoked device right after attach; once that replay
+                // settles, prune local keys it didn't include (devices revoked while we were away) so the
+                // direct-LAN gate stops honoring them. Cancelled harmlessly if the link drops first.
+                sessions.beginAttachReplay()
+                val reconcile = launch { delay(ATTACH_REPLAY_SETTLE_MS); sessions.reconcileReplay() }
 
                 val outbox = Channel<ByteArray>(Channel.BUFFERED)
                 dataOut = outbox
@@ -191,7 +201,7 @@ class RelayClient(
                     }
                 } finally {
                     dataOut = null
-                    outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()
+                    outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel(); reconcile.cancel()
                     withContext(NonCancellable) { sessions.onDisconnect() }
                 }
             }
@@ -228,6 +238,7 @@ class RelayClient(
         when (body) {
             is PairTicket -> inboundControl.emit(body)
             is DevicePaired -> sessions.onDevicePaired(body.deviceId, body.devicePubKey)
+            is DeviceRevoked -> sessions.onDeviceRevoked(body.deviceId)
             is PeerPresence -> { peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
             is Pong -> { if (!sawPong) log.info("relay heartbeat armed (pong received)"); sawPong = true; lastPongAt = System.currentTimeMillis() }
             else -> {}
@@ -243,6 +254,7 @@ class RelayClient(
         // ride out brief app-backgrounding / network blips — a reaped session re-opened later resumes in
         // place on the same id (see Conversation.open), so too-short here mostly costs process churn.
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
+        const val ATTACH_REPLAY_SETTLE_MS = 3_000L // relay device re-announce rides the attach; settled well within this
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
         const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this of attach/the last one -> reconnect

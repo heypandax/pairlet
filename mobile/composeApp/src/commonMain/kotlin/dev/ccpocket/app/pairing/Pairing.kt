@@ -26,6 +26,10 @@ data class PairedDaemon(
     val deviceId: String,
     val credential: String,  // relay bearer credential
     val label: String? = null, // user-assigned local nickname; null -> displayName() falls back to accountId
+    // daemon-advertised direct (LAN/loopback) ws URL, learned from DaemonInfo after each handshake and
+    // tried BEFORE the relay on later connects. Same Noise-authenticated channel, zero relay/proxy legs;
+    // a failed attempt falls back to the relay silently. Null = daemon has no direct listener (or predates it).
+    val directUrl: String? = null,
 )
 
 /** What this binding shows in the device list: the user's nickname, else the truncated account id. */
@@ -105,6 +109,10 @@ object Pairing {
     /** Set/clear a binding's local nickname (blank clears it back to the accountId fallback). */
     fun rename(accountId: String, label: String?): List<PairedDaemon> =
         loadAll().map { if (it.accountId == accountId) it.copy(label = label?.ifBlank { null }) else it }.also(::saveAll)
+
+    /** Persist the daemon-advertised direct (LAN) URL for a binding — tried before the relay on reconnects. */
+    fun setDirectUrl(accountId: String, url: String?): List<PairedDaemon> =
+        loadAll().map { if (it.accountId == accountId) it.copy(directUrl = url) else it }.also(::saveAll)
 
     fun activeAccount(): String? = SecureStore.getString(K_ACTIVE)
     fun setActive(accountId: String?) { if (accountId == null) SecureStore.remove(K_ACTIVE) else SecureStore.putString(K_ACTIVE, accountId) }

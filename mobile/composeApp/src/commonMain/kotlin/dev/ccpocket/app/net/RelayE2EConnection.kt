@@ -105,6 +105,11 @@ class RelayE2EConnection {
 
     suspend fun send(frame: Frame) = outbox.send(frame)
 
+    /** Frames queued but not yet written. The outbox deliberately buffers across reconnects to the SAME
+     *  daemon; a machine SWITCH must drain it instead — leftover frames would otherwise flush into the
+     *  next machine's link (a session open meant for computer A landing on computer B). */
+    fun drainPending(): List<Frame> = outbox.drainAll()
+
     /** Send a relay control-plane frame (e.g. RegisterPush) on the TEXT plane. Buffers until connected. */
     suspend fun sendControl(frame: dev.ccpocket.protocol.ToRelay) = controlOutbox.send(frame)
 
