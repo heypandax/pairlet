@@ -119,11 +119,16 @@ jobs:
 
   linux:
     if: ${{ !inputs.only_android }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        # Linux x86_64 covers the vast majority of self-hosted boxes; add arm64 later if needed.
-        arch: [x86_64]
+        # jpackage bundles the HOST JRE (no cross-build), so each arch needs a native runner.
+        # ubuntu-24.04-arm is GitHub's free arm64 runner for public repos (issue #34).
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 

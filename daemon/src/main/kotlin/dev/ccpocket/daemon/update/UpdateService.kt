@@ -80,7 +80,7 @@ object UpdateService {
         return when {
             o.contains("mac") -> "cc-pocket-daemon-$v-macos-$a.tar.gz"
             o.contains("win") -> if (a == "x86_64") "cc-pocket-daemon-$v-windows-x86_64.zip" else null
-            else -> if (a == "x86_64") "cc-pocket-daemon-$v-linux-x86_64.tar.gz" else null
+            else -> "cc-pocket-daemon-$v-linux-$a.tar.gz"
         }
     }
 

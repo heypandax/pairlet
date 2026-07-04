@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot installer for the cc-pocket daemon — macOS (arm64/x86_64) and Linux (x86_64):
+# One-shot installer for the cc-pocket daemon — macOS (arm64/x86_64) and Linux (x86_64/arm64):
 #
 #   curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
 #
@@ -37,8 +37,6 @@ case "$arch" in
   aarch64|arm64) arch="arm64" ;;
   *) err "unsupported architecture: $arch" ;;
 esac
-[ "$plat/$arch" != "linux/arm64" ] || err "no prebuilt Linux arm64 tarball yet — build from source: ./gradlew :daemon:packageDaemon (see README)"
-
 for c in curl tar; do command -v "$c" >/dev/null 2>&1 || err "missing required command: $c"; done
 shasum_cmd=""
 if command -v sha256sum >/dev/null 2>&1; then shasum_cmd="sha256sum"

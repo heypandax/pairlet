@@ -58,7 +58,7 @@ The installer verifies the download against the release's SHA256SUMS, installs u
 
 Prefer Homebrew? `brew install --cask heypandax/tap/cc-pocket` does the same (upgrade via `brew upgrade --cask heypandax/tap/cc-pocket` — full name, there's an unrelated cask named `cc-pocket`).
 
-**Linux (x86_64)** is one-click too:
+**Linux (x86_64 / arm64)** is one-click too:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
@@ -83,7 +83,7 @@ scoop install cc-pocket-daemon
 cc-pocket-daemon pair        # prints a QR + 6-digit code
 ```
 
-Upgrade with `scoop update cc-pocket-daemon`. Other architectures (Linux arm64): build from source — see [Quick start](#quick-start).
+Upgrade with `scoop update cc-pocket-daemon`. Other architectures: build from source — see [Quick start](#quick-start).
 
 ## How pairing works
 

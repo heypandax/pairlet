@@ -15,7 +15,12 @@ VERSION="${1:-1.0.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-ARCH="$(uname -m)" # x86_64 | aarch64
+# Normalize to the release asset spelling: install.sh, UpdateService.assetNameFor and the macOS
+# artifacts all say "arm64", while uname on Linux reports "aarch64".
+case "$(uname -m)" in
+  aarch64|arm64) ARCH="arm64" ;;
+  *)             ARCH="$(uname -m)" ;;
+esac
 
 echo "==> gradle build + jpackage (bundled JRE)"
 # The repo's gradle.properties pins org.gradle.java.home to the Mac dev box's Homebrew JDK,

@@ -25,7 +25,7 @@ class UpdateServiceTest {
         assertEquals("cc-pocket-daemon-1.2.0-macos-x86_64.tar.gz", UpdateService.assetNameFor("v1.2.0", "Mac OS X", "x86_64"))
         assertEquals("cc-pocket-daemon-1.2.0-windows-x86_64.zip", UpdateService.assetNameFor("1.2.0", "Windows 11", "amd64"))
         assertEquals("cc-pocket-daemon-1.2.0-linux-x86_64.tar.gz", UpdateService.assetNameFor("1.2.0", "Linux", "amd64"))
-        assertNull(UpdateService.assetNameFor("1.2.0", "Linux", "aarch64")) // no linux arm64 artifact yet
+        assertEquals("cc-pocket-daemon-1.2.0-linux-arm64.tar.gz", UpdateService.assetNameFor("1.2.0", "Linux", "aarch64"))
         assertNull(UpdateService.assetNameFor("1.2.0", "Linux", "riscv64"))
     }
 
