@@ -55,7 +55,8 @@ base="https://github.com/$REPO/releases/download/${VERSION}"
 # --- download + verify ---
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 say "downloading $asset"
-curl -fSL --progress-bar "$base/$asset" -o "$tmp/$asset" || err "download failed: $base/$asset"
+curl -fSL --progress-bar "$base/$asset" -o "$tmp/$asset" \
+  || err "download failed: $base/$asset — if the URL 404s, release $VERSION predates ${plat}/${arch} builds; retry when the next release is out, or build from source: ./gradlew :daemon:packageDaemon"
 if [ -n "$shasum_cmd" ] && curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
   expected="$(awk -v a="$asset" '$2==a || $2=="*"a {print tolower($1)}' "$tmp/SHA256SUMS" | head -1)"
   if [ -n "$expected" ]; then
