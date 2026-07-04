@@ -114,18 +114,21 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
         run: |
           set -o pipefail   # tee must not mask xcodebuild's exit code (the classic "tail ate the failure")
-          # The archive is deliberately UNSIGNED (CODE_SIGNING_ALLOWED=NO): automatic signing used to
-          # sign archives for development, which minted a fresh development cert on every ephemeral
-          # runner until the account hit Apple's cert cap ("Choose a certificate to revoke", 1.2.2).
-          # A global CODE_SIGN_IDENTITY override is no better — it hits the app target's
-          # automatic-vs-manual conflict check and makes every SPM dependency demand a team. The
-          # export step signs everything with the cloud-managed Apple Distribution cert (held by
-          # Apple, reused across runners) via signingStyle=automatic + the ASC key, so nothing
-          # accumulates on the account.
+          # Dev-signed archive on purpose; the export step re-signs everything (nested frameworks
+          # included) with the cloud-managed distribution cert. Each ephemeral runner mints a fresh
+          # development cert here, so the account fills up after a handful of releases ("Choose a
+          # certificate to revoke", 1.2.2) — run asc-maintenance.yml to purge them when that hits.
+          # The two dead ends (1.2.2): a global CODE_SIGN_IDENTITY=Apple Distribution override trips
+          # the app target's automatic-vs-manual conflict and makes every SPM package demand a team;
+          # CODE_SIGNING_ALLOWED=NO uploads with UNSIGNED Firebase frameworks — exportArchive only
+          # re-signs what the archive signed, and ASC rejects the binary ("Invalid Signature").
           xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/CCPocket.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             archive | tee "$RUNNER_TEMP/archive.log"
           grep -q "ARCHIVE SUCCEEDED" "$RUNNER_TEMP/archive.log"
 

@@ -1,0 +1,88 @@
+name: asc-maintenance
+
+# Purges DEVELOPMENT certificates from the Apple Developer account. Why this exists: ios-release.yml
+# archives with cloud-managed automatic signing, and every ephemeral runner mints a brand-new Apple
+# Development certificate (the private key dies with the runner). After a handful of releases the
+# account hits Apple's cert cap and archives fail with "Choose a certificate to revoke. Your account
+# has reached the maximum number of certificates." (first seen on the 1.2.2 release). Run this, then
+# re-dispatch ios-release.yml.
+#
+# Scope guard: ONLY certificateType DEVELOPMENT / IOS_DEVELOPMENT is touched. DISTRIBUTION (App Store
+# signing) and DEVELOPER_ID_APPLICATION (daemon notarization) are never revoked — losing those would
+# break shipping, while a revoked development cert costs nothing (Xcode / the next CI run re-mints
+# one on demand).
+#
+# Uses the same App Store Connect API key secrets as ios-release.yml. Revoking certificates needs the
+# key's role to be Admin — if the run fails with 403, revoke by hand at
+# https://developer.apple.com/account/resources/certificates/list instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List matching development certificates without revoking them."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  purge-dev-certs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revoke development certificates via the ASC API
+        env:
+          ASC_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          pip install --quiet PyJWT cryptography
+          python3 - <<'PY'
+          import jwt, json, os, sys, time, urllib.request
+
+          key = __import__("base64").b64decode(os.environ["ASC_KEY_P8"]).decode()
+          kid, iss = os.environ["ASC_KEY_ID"], os.environ["ASC_ISSUER_ID"]
+          dry = os.environ.get("DRY_RUN", "false") == "true"
+
+          def token():
+              now = int(time.time())
+              return jwt.encode({"iss": iss, "iat": now, "exp": now + 900, "aud": "appstoreconnect-v1"},
+                                key, algorithm="ES256", headers={"kid": kid})
+
+          def call(method, path):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, method=method)
+              req.add_header("Authorization", f"Bearer {token()}")
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      body = r.read()
+                      return r.status, json.loads(body) if body else {}
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          status, data = call("GET", "/v1/certificates?limit=200")
+          if status != 200:
+              print(f"::error::listing certificates failed ({status}): {data}"); sys.exit(1)
+
+          DEV_TYPES = {"DEVELOPMENT", "IOS_DEVELOPMENT"}
+          certs = data.get("data", [])
+          for c in certs:
+              a = c["attributes"]
+              print(f"{c['id']}  {a['certificateType']:<26} {a.get('name','')}  expires {a.get('expirationDate','?')}")
+          targets = [c for c in certs if c["attributes"]["certificateType"] in DEV_TYPES]
+          print(f"\n{len(certs)} certificates total, {len(targets)} development certs to revoke")
+
+          if dry:
+              print("dry run — nothing revoked"); sys.exit(0)
+          failed = False
+          for c in targets:
+              status, body = call("DELETE", f"/v1/certificates/{c['id']}")
+              ok = status in (200, 204)
+              failed = failed or not ok
+              print(f"revoke {c['id']}: {'ok' if ok else f'FAILED ({status}) {body}'}")
+          if failed:
+              print("::error::some revocations failed — the API key likely lacks the Admin role; "
+                    "revoke by hand at https://developer.apple.com/account/resources/certificates/list")
+              sys.exit(1)
+          PY
