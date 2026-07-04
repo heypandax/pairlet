@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,12 +36,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.FrameWindowScope
 import dev.ccpocket.app.theme.Tok
-import kotlin.math.roundToInt
 
 /**
  * The custom (undecorated) title bar — draggable, with platform-appropriate window controls: macOS traffic
- * lights on the left, Windows/Linux min/max/close on the right. The label region is the drag handle; the
- * search chip and status dot sit outside it so they stay clickable. The dot opens the tray popover.
+ * lights on the left, Windows/Linux min/max/close on the right. The label region is the drag handle and
+ * ALSO the zoom handle (double-click toggles fill-screen, the macOS title-bar convention); the search chip
+ * and status dot sit outside it so they stay clickable. The dot opens the tray popover.
  */
 @Composable
 fun FrameWindowScope.DkTitleBar(
@@ -58,13 +59,29 @@ fun FrameWindowScope.DkTitleBar(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (mac) TrafficLights(onClose, onMinimize, onToggleMax)
-            // the label region is the drag handle — move the undecorated AWT window by the pointer delta
+            // the label region is the drag handle. Anchor to the GLOBAL mouse position (AWT points), not the
+            // compose drag delta: deltas are physical px (2× on Retina → the window outruns the cursor) and
+            // are measured relative to the moving window itself (feedback loop → jitter). Grab the
+            // mouse-to-window offset on press and pin the window to it — density-independent, no feedback.
             Row(
                 Modifier.weight(1f).fillMaxHeight().pointerInput(Unit) {
-                    detectDragGestures { change, drag ->
+                    detectTapGestures(onDoubleTap = { onToggleMax() }) // double-click zoom, beside the drag detector
+                }.pointerInput(Unit) {
+                    var grab: java.awt.Point? = null // mouse−window offset at press, in screen points
+                    detectDragGestures(
+                        onDragStart = {
+                            grab = java.awt.MouseInfo.getPointerInfo()?.location?.let {
+                                java.awt.Point(it.x - window.x, it.y - window.y)
+                            }
+                        },
+                        onDragEnd = { grab = null },
+                        onDragCancel = { grab = null },
+                    ) { change, _ ->
                         change.consume()
-                        val loc = window.location
-                        window.setLocation((loc.x + drag.x).roundToInt(), (loc.y + drag.y).roundToInt())
+                        val g = grab ?: return@detectDragGestures
+                        java.awt.MouseInfo.getPointerInfo()?.location?.let { m ->
+                            window.setLocation(m.x - g.x, m.y - g.y)
+                        }
                     }
                 },
                 verticalAlignment = Alignment.CenterVertically,

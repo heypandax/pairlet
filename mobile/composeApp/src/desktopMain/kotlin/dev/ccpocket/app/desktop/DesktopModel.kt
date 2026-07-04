@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -49,6 +50,56 @@ data class DkSession(
     val agent: AgentKind = AgentKind.CLAUDE,
     val running: Boolean = false,
     val pending: Int = 0,
+    val model: String? = null, // last turn's model id (row shows its alias; null = unknown/older daemon)
+)
+
+/**
+ * A pinned session — the sidebar's ⌘1–9 fast-switch list ("Sidebar Redesign" board). Carries only
+ * durable identity; live state (running / pending) and the machine's display name are looked up at
+ * render time so renames and reconnects don't stale the pin.
+ */
+data class DkPin(
+    val accountId: String,
+    val sessionId: String,
+    val cwd: String,
+    val title: String,
+    val agent: AgentKind = AgentKind.CLAUDE,
+)
+
+// ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention · watch pane ──
+
+/**
+ * A machine group in the sidebar. The ACTIVE machine renders the live projects+sessions panes inside its
+ * group; other bindings render their [projects] or a "not connected" line — clicking them switches.
+ */
+data class DkMachine(
+    val computer: DkComputer,
+    val active: Boolean = false,      // the binding the shell is driving right now
+    val thisMachine: Boolean = false, // the daemon on the machine this desktop app runs on ("this Mac" tag)
+    val pending: Int = 0,             // approvals waiting on this machine (AttentionBadge)
+    val projects: List<DkProject> = emptyList(), // a non-active machine's live directory list (its satellite link)
+)
+
+/** One approval waiting somewhere in the fleet — a bell-popover / palette row. */
+data class DkAttention(
+    val id: String,
+    val accountId: String,
+    val machine: String,
+    val os: DkOs,
+    val tool: String,
+    val preview: String,
+    val seconds: Int?, // countdown when the deadline is known (seed); null = don't invent one (live)
+    val live: Boolean, // resolvable through the live connection
+)
+
+/** A second session watched read-only beside the open chat (split pane). */
+data class DkWatch(
+    val machine: String,
+    val os: DkOs,
+    val title: String,
+    val mode: String,
+    val output: String,
+    val waiting: DkAttention?,
 )
 
 /**
@@ -72,13 +123,45 @@ interface DesktopModel {
     var showSettings: Boolean
     var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
+    var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = showPalette || showSettings || showAddComputer || showNewSession || showTray
+        get() = showPalette || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         showPalette = false; showSettings = false; showAddComputer = false; showNewSession = false; showTray = false
+        showAttention = false; switcherOpen = false
+    }
+
+    // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
+    val pins: List<DkPin>
+    fun pin(s: DkSession)
+    fun unpin(p: DkPin)
+    fun movePin(from: Int, to: Int)
+    /** Jump to a pin: same machine opens the session in place; another machine switches over first. */
+    fun openPin(p: DkPin)
+    fun jumpPin(i: Int) { pins.getOrNull(i)?.let { openPin(it) } }
+    fun isPinned(sessionId: String): Boolean = pins.any { it.sessionId == sessionId }
+    val pinsFull: Boolean get() = pins.size >= MAX_PINS
+
+    // fleet: the sidebar's machine groups, the attention queue, and the read-only watch pane
+    val machines: List<DkMachine>
+    val attention: List<DkAttention>
+    val watch: DkWatch?
+    fun resolveAttention(a: DkAttention, allow: Boolean)
+    /** ⌘1–⌘4 — jump to the n-th machine group (switching the active binding when it isn't already). */
+    fun jumpMachine(i: Int) {
+        machines.getOrNull(i)?.takeIf { !it.active }?.let { selectComputer(it.computer) }
+    }
+
+    /** The cross-machine RUNNING rows — every live project on every machine, no expanding required. */
+    val running: List<Pair<DkMachine, DkProject>>
+        get() = machines.flatMap { m -> m.projects.filter { it.running }.map { m to it } }
+
+    /** Open a RUNNING row: the focused machine opens in place; another machine switches over then opens. */
+    fun openRunning(m: DkMachine, p: DkProject) {
+        if (m.active) openProject(p) else selectComputer(m.computer)
     }
 
     // sidebar: projects + the current project's sessions
@@ -87,7 +170,18 @@ interface DesktopModel {
     val selectedSessionId: String?
     fun openProject(p: DkProject)
     fun selectSession(s: DkSession)
-    fun newSession(agent: AgentKind, mode: PermissionMode)
+    /** The current project's folder (the open session list's, else the active chat's). Null = none yet. */
+    val newSessionDir: String?
+    /** Seed for the new-session popover's editable path field, display form ("~/…"). */
+    var newSessionSeed: String?
+    /** Open the new-session popover. Null [seed] targets the CURRENT project (⌘N, the Sessions-pane row,
+     *  the palette verb); pass "~/" to type a fresh path under the daemon's home (the Projects-group row). */
+    fun openNewSession(seed: String? = null) {
+        newSessionSeed = seed ?: newSessionDir?.let { tilde(it) } ?: "~/"
+        showNewSession = true
+    }
+    /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home). */
+    fun newSession(dir: String, agent: AgentKind, mode: PermissionMode)
 
     // main pane: the open chat
     val hasChat: Boolean
@@ -102,6 +196,15 @@ interface DesktopModel {
     var composer: String
     fun send(text: String)
 
+    /** Daemon-pushed "/" commands for the open session — the composer's slash autocomplete reads this. */
+    val slashCommands: List<dev.ccpocket.protocol.SlashCommand> get() = emptyList()
+
+    // composer image attachments (⌘V paste / attach icon → file picker); ride the next send
+    val pendingImages: List<dev.ccpocket.app.data.PendingImage>
+    fun attachImages(raw: List<ByteArray>)
+    fun removePendingImage(id: Long)
+    fun hasReadyImages(): Boolean
+
     // permission (live: inline card in the stream; seed: also drives the focused modal)
     val ask: PermissionAsk?
     fun resolve(allow: Boolean, remember: Boolean)
@@ -114,6 +217,11 @@ interface DesktopModel {
     var defaultMode: PermissionMode
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
     fun revokeComputer(c: DkComputer)
+
+    companion object {
+        /** Pin cap — ⌘1–9 is the whole affordance, so the list never outgrows the keycaps. */
+        const val MAX_PINS = 9
+    }
 }
 
 /** A status dot that gently pulses (scale + alpha + soft glow) — "this is live / working". */

@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -56,10 +57,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
+import dev.ccpocket.app.ui.fleet.AttentionBadge
+import dev.ccpocket.app.ui.fmtMmSs
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 
-private enum class PKind(val tag: String) { COMPUTER("computer"), PROJECT("project"), SESSION("session") }
+private enum class PKind(val tag: String) { MACHINE("machine"), ACTION("action"), PROJECT("project"), SESSION("session") }
 
 private class PItem(
     val kind: PKind,
@@ -67,12 +70,42 @@ private class PItem(
     val detail: String,
     val icon: ImageVector,
     val codex: Boolean,
+    val hint: String? = null,   // right-aligned keycap ("⌘2")
+    val badge: Int = 0,         // AttentionBadge count (approvals waiting on that machine)
+    val accent: Boolean = false, // terracotta label — the "needs you" verbs
     val activate: () -> Unit,
 )
 
-/** Flatten the model into palette rows. Projects are the headline at scale (a real app has 100+ of them). */
+/** Flatten the model into palette rows: machine verbs lead (Fleet ⑧), then projects and sessions. */
 private fun buildItems(model: DesktopModel): List<PItem> = buildList {
-    model.computers.forEach { c -> add(PItem(PKind.COMPUTER, c.name, c.accountId, osIcon(c.os), false) { model.selectComputer(c) }) }
+    // MACHINES — reachable via the switcher (⌘0, then the digit); badges surface approvals waiting over there
+    model.machines.forEachIndexed { i, m ->
+        val c = m.computer
+        val detail = when {
+            m.thisMachine -> "this Mac"
+            m.active -> "current"
+            else -> c.meta.ifBlank { c.accountId }
+        }
+        add(
+            PItem(
+                PKind.MACHINE, "Switch to ${c.name}", detail, osIcon(c.os), false,
+                hint = if (i < 9) "⌘0 ${i + 1}" else null, badge = m.pending,
+            ) { model.selectComputer(c) },
+        )
+    }
+    // ACTIONS — start work on a machine / clear what's waiting, straight from the keyboard
+    model.activeComputer?.let { c ->
+        val where = model.newSessionDir?.let { tilde(it) } ?: "" // the dir it will actually start in
+        add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, false) { model.openNewSession() })
+    }
+    model.attention.forEach { a ->
+        add(
+            PItem(
+                PKind.ACTION, "Approve pending on ${a.machine}", "${a.tool} · ${a.preview}", Icons.Outlined.Shield, false,
+                hint = a.seconds?.let(::fmtMmSs), accent = true,
+            ) { model.showAttention = true },
+        )
+    }
     model.projects.forEach { p -> add(PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder, false) { model.openProject(p) }) }
     model.sessions.forEach { s -> add(PItem(PKind.SESSION, s.title, tilde(s.cwd), Icons.Outlined.ChatBubbleOutline, s.agent == AgentKind.CODEX) { model.selectSession(s) }) }
 }
@@ -99,7 +132,7 @@ private fun PItem.score(q: String): Int {
 fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(0) }
-    val all = remember(model.computers, model.projects, model.sessions) { buildItems(model) }
+    val all = remember(model.machines, model.attention, model.projects, model.sessions) { buildItems(model) }
     val items = remember(all, query) {
         if (query.isBlank()) all.take(60) // blank query keeps source order — skip the score/sort/strip pass
         else all.mapNotNull { it.score(query).takeIf { s -> s > 0 }?.let { s -> it to s } }
@@ -188,7 +221,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             }
             Text(
                 highlight(item.label, query),
-                color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
+                color = if (item.accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (item.codex) AgentTag(AgentKind.CODEX)
@@ -196,7 +229,11 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
                 item.detail, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
-            Text(item.kind.tag, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+            if (item.badge > 0) AttentionBadge(item.badge)
+            when {
+                item.hint != null -> Key(item.hint)
+                else -> Text(item.kind.tag, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+            }
         }
     }
 }

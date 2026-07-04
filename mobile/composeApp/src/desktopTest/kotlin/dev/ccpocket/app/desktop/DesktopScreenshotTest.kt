@@ -94,12 +94,12 @@ class DesktopScreenshotTest {
     @Test
     fun generate() {
         val W = 1180; val H = 798
-        shot("01-shell.png", W, H) { WindowFrame(seed()) }
-        shot("02-codex-diff-approval.png", W, H) { WindowFrame(seed { selectSession(sessions[1]) }) }
-        shot("03-computer-switcher.png", W, H) { WindowFrame(seed { switcherOpen = true }) }
+        shot("01-shell.png", W, H) { WindowFrame(seed()) } // fleet: machine-grouped sidebar + split watch pane
+        shot("02-codex-diff-approval.png", W, H) { WindowFrame(seed { selectSession(sessions[2]) }) }
+        shot("03-attention-popover.png", W, H) { WindowFrame(seed { showAttention = true }) }
         shot("04-new-session.png", W, H) { WindowFrame(seed { showNewSession = true }) }
         shot("05-tray-quick-approve.png", W, H) { WindowFrame(seed { showTray = true }) }
-        shot("06-focused-permission.png", W, H) { WindowFrame(seed { selectSession(sessions[1]); showPermissionModal = true }) }
+        shot("06-focused-permission.png", W, H) { WindowFrame(seed { selectSession(sessions[2]); showPermissionModal = true }) }
         shot("07-command-palette.png", W, H) { WindowFrame(seed { showPalette = true }) }
         shot("08-settings.png", W, H) { WindowFrame(seed { showSettings = true }) }
 

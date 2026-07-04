@@ -24,16 +24,36 @@ fun DesktopApp(model: DesktopModel) {
         Row(Modifier.fillMaxSize()) {
             Sidebar(model)
             Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair)) // pane splitter
-            ChatPane(model, Modifier.weight(1f))
+            val watch = model.watch
+            if (watch == null) {
+                ChatPane(model, Modifier.weight(1f))
+            } else {
+                // split: chat with the focused session while watching a second one read-only (Fleet ⑥)
+                ChatPane(model, Modifier.weight(1f), focused = true)
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                WatchPane(watch, model, Modifier.weight(1f))
+            }
         }
         if (model.showNewSession) {
             Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 118.dp)) {
-                NewSessionPopover { agent, mode -> model.newSession(agent, mode) }
+                NewSessionPopover(model.newSessionSeed ?: "~/") { dir, agent, mode -> model.newSession(dir, agent, mode) }
             }
         }
         if (model.showTray) {
             Overlay(onDismiss = { model.showTray = false }, alignment = Alignment.TopEnd, padding = PaddingValues(end = 12.dp, top = 4.dp)) {
                 TrayPopover()
+            }
+        }
+        if (model.switcherOpen) {
+            // anchored under the sidebar header — the fleet lives here now, not in the sidebar body
+            Overlay(onDismiss = { model.switcherOpen = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 10.dp, top = 52.dp)) {
+                MachineSwitcher(model)
+            }
+        }
+        if (model.showAttention) {
+            // anchored under the sidebar bell — cross-machine approvals without leaving the session
+            Overlay(onDismiss = { model.showAttention = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 52.dp)) {
+                AttentionPopover(model)
             }
         }
         if (model.showPalette) {

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runComposeUiTest
@@ -34,19 +35,119 @@ class DesktopUiTest {
     fun shellShowsCoreNavigation() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertPresent("PROJECTS")
-        assertPresent("SESSIONS")
+        assertPresent("SESSIONS", substring = true) // docked pane label carries the project: "SESSIONS · CC-POCKET"
+        assertPresent("PINNED")
         assertPresent("New session")
-        assertPresent("Lidapeng-MBP")          // computer switcher
-        assertPresent("Fix relay reconnect")   // selected session (sidebar + chat header)
-        assertPresent("Port parser to Rust")   // a Codex session in the list
+        assertPresent("Lidapeng-MacBook")      // machine switcher header
+        assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
+        assertPresent("Tidy CI workflow")      // a Codex session in the list
         assertPresent("sonnet", substring = true) // Claude session header model line
+    }
+
+    @Test
+    fun machineSwitcherListsTheFleet() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { switcherOpen = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("mac-studio")            // every paired machine, in the dropdown now
+        assertPresent("devbox-linux")
+        assertPresent("win-desktop")
+        assertPresent("this Mac")              // local-daemon tag on the active row
+        assertPresent("Add computer")          // pairing entry docked at the dropdown's bottom
+        // "mac-studio" also labels a RUNNING row behind the scrim — the dropdown's node composes last
+        onAllNodes(hasText("mac-studio")).onLast().performClick()
+        waitForIdle()
+        assertEquals("acct-studio", model.activeComputer?.accountId)
+        assertTrue(!model.switcherOpen, "selecting a machine closes the switcher")
+    }
+
+    @Test
+    fun pinnedZoneRendersAndJumps() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        assertPresent("PINNED")
+        assertPresent("Port parser to Rust")   // a pinned session living on mac-studio
+        model.jumpPin(2)                       // ⌘3 → remote pin switches the active machine
+        waitForIdle()
+        assertEquals("acct-studio", model.activeComputer?.accountId)
+    }
+
+    @Test
+    fun pinAndUnpinRoundTrip() {
+        val m = SeedDesktopModel()
+        assertEquals(3, m.pins.size)
+        m.pin(m.sessions[1])                   // "Fix stream parser test"
+        assertEquals(4, m.pins.size)
+        assertTrue(m.isPinned("s2"))
+        m.pin(m.sessions[1])                   // idempotent — no duplicate pin
+        assertEquals(4, m.pins.size)
+        m.movePin(3, 0)
+        assertEquals("s2", m.pins[0].sessionId)
+        m.unpin(m.pins[0])
+        assertEquals(3, m.pins.size)
+        assertTrue(!m.isPinned("s2"))
+    }
+
+    @Test
+    fun slashMenuFiltersAndCompletes() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { composer = "/re" }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("/review")                                      // the matching command surfaces
+        assertTrue(!present("/help"), "non-matching commands are filtered out")
+        onAllNodes(hasText("/review")).onLast().performClick()
+        waitForIdle()
+        assertEquals("/review", model.composer)                       // click completes the command word
+    }
+
+    @Test
+    fun runningSectionAggregatesAcrossMachines() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        assertPresent("RUNNING")
+        assertPresent("api-server")            // mac-studio's live project — visible with NO group expanded
+        assertPresent("relay")                 // devbox-linux's live project
+        onAllNodes(hasText("api-server")).onFirst().performClick() // remote row → switch over to that machine
+        waitForIdle()
+        assertEquals("acct-studio", model.activeComputer?.accountId)
+    }
+
+    @Test
+    fun watchPaneRidesBesideTheChat() = runComposeUiTest {
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        assertPresent("Run integration tests")                          // watch pane header
+        assertPresent("pytest -x tests/integration", substring = true)  // its read-only stream
+        assertPresent("waiting approval", substring = true)             // the ⏸ strip
+    }
+
+    @Test
+    fun attentionPopoverListsAndResolvesCrossMachineApprovals() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showAttention = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("Needs you")
+        assertPresent("rm -rf ./build && ./gradlew clean") // mac-studio's Bash ask
+        assertEquals(2, model.attention.size)
+        onAllNodes(hasText("Allow")).onFirst().performClick() // rows compose in queue order — first Allow = first row
+        waitForIdle()
+        assertEquals(1, model.attention.size) // a resolved row leaves the queue (and the badges)
+    }
+
+    @Test
+    fun jumpMachineSwitchesTheActiveBinding() {
+        val m = SeedDesktopModel()
+        assertEquals("acct-mbp", m.activeComputer?.accountId)
+        m.jumpMachine(1)
+        assertEquals("acct-studio", m.activeComputer?.accountId)
+        m.jumpMachine(0)
+        assertEquals("acct-mbp", m.activeComputer?.accountId)
     }
 
     @Test
     fun selectingCodexSessionRevealsDiffApprovalAndModel() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertTrue(!present("Codex wants to edit files"), "no Codex diff before selecting it")
-        onAllNodes(hasText("Port parser to Rust")).onFirst().performClick()
+        onAllNodes(hasText("Tidy CI workflow")).onFirst().performClick()
         waitForIdle()
         assertPresent("Codex wants to edit files")       // inline diff approval card
         assertPresent("gpt-5.1-codex", substring = true) // header model flipped to Codex
@@ -56,10 +157,20 @@ class DesktopUiTest {
     fun newSessionOpensPopover() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertTrue(!present("Start session"), "popover closed initially")
-        onAllNodes(hasText("New session")).onFirst().performClick()
+        onAllNodes(hasText("New session")).onFirst().performClick() // the Sessions-pane row (exact match)
         waitForIdle()
         assertPresent("Start session")
         assertPresent("Ask each step")
+        assertPresent("~/code/cc-pocket") // path field seeded with the current project
+    }
+
+    @Test
+    fun newSessionAtPathSeedsHome() = runComposeUiTest {
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        onAllNodes(hasText("New session at path…")).onFirst().performClick() // the Projects-group row
+        waitForIdle()
+        assertPresent("Start session")
+        assertPresent("~/") // path field seeded at the daemon host's home, ready to type into
     }
 
     @Test
@@ -69,14 +180,27 @@ class DesktopUiTest {
         setContent { PocketTheme { CommandPalette(SeedDesktopModel()) {} } }
         waitForIdle()
         assertPresent("Jump to a project", substring = true) // placeholder
-        assertPresent("Fix relay reconnect")                 // a session row
+        assertPresent("Switch to mac-studio")                // machine verbs lead the blank-query list
         assertPresent("cc-pocket")                           // a project row
-        assertPresent("computer")                            // per-row type tag
-        onAllNodes(hasSetTextAction()).onFirst().performTextInput("relay")
+        // sessions sit below the lazy viewport on a blank query (machine verbs push them down) —
+        // filtering brings one into view, which is also the real usage path
+        onAllNodes(hasSetTextAction()).onFirst().performTextInput("parser")
         waitForIdle()
-        assertPresent("Fix relay reconnect")                            // label matches "relay"
+        assertPresent("Fix stream parser test")              // label matches "parser"
+        assertPresent("session")                             // per-row type tag (machine rows carry ⌘n keycaps instead)
         assertTrue(!present("Tidy CI workflow"), "non-matching session filtered out")
         assertTrue(!present("dotfiles"), "non-matching project filtered out")
+    }
+
+    @Test
+    fun commandPaletteCarriesMachineVerbs() = runComposeUiTest {
+        setContent { PocketTheme { CommandPalette(SeedDesktopModel()) {} } }
+        waitForIdle()
+        assertPresent("Switch to mac-studio")                     // machine verb + ⌘n hint
+        assertPresent("⌘0 2") // switcher chord: ⌘0 opens it, the digit picks the machine
+        assertPresent("New session on Lidapeng-MacBook…")         // machine-scoped action
+        assertPresent("Approve pending on mac-studio")            // the "needs you" verb from the attention queue
+        assertPresent("this Mac")                                 // local machine detail
     }
 
     @Test
@@ -130,11 +254,11 @@ class DesktopUiTest {
     fun seedModelSelectionTracksSession() {
         val m = SeedDesktopModel()
         assertEquals("s1", m.selectedSessionId)
-        assertEquals("Fix relay reconnect", m.chatTitle)
+        assertEquals("Refactor auth module", m.chatTitle)
         assertEquals(AgentKind.CLAUDE, m.chatAgent)
         assertEquals(null, m.ask) // Claude session, not pending
-        m.selectSession(m.sessions[1])              // the Codex pending session
-        assertEquals("s2", m.selectedSessionId)
+        m.selectSession(m.sessions[2])              // the Codex pending session
+        assertEquals("s3", m.selectedSessionId)
         assertEquals(AgentKind.CODEX, m.chatAgent)
         assertTrue(m.ask?.diff != null, "Codex pending session surfaces a diff approval")
         m.resolve(allow = true, remember = false)

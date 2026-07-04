@@ -1,6 +1,7 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.ccpocket.app.data.ChatItem
@@ -15,8 +16,9 @@ import dev.ccpocket.protocol.PermissionMode
 class SeedDesktopModel : DesktopModel {
     override val connected = true
     override val computers = listOf(
-        DkComputer("acct-mac", "Lidapeng-MBP", DkOs.MAC, online = true, meta = "online · active now"),
-        DkComputer("acct-linux", "devbox-linux", DkOs.LINUX, online = true, meta = "online · 3m ago"),
+        DkComputer("acct-mbp", "Lidapeng-MacBook", DkOs.MAC, online = true, meta = "online · active now"),
+        DkComputer("acct-studio", "mac-studio", DkOs.MAC, online = true, meta = "online · 2m ago"),
+        DkComputer("acct-linux", "devbox-linux", DkOs.LINUX, online = true, meta = "online · just now"),
         DkComputer("acct-win", "win-desktop", DkOs.WIN, online = false, meta = "offline · 2d ago"),
     )
     override var activeComputer: DkComputer? by mutableStateOf(computers.first())
@@ -28,12 +30,76 @@ class SeedDesktopModel : DesktopModel {
         DkProject("~/dotfiles", "dotfiles"),
     )
     override val sessions = listOf(
-        DkSession("s1", "~/code/cc-pocket", "Fix relay reconnect", running = true),
-        DkSession("s2", "~/code/cc-pocket", "Port parser to Rust", AgentKind.CODEX, running = true, pending = 1),
-        DkSession("s3", "~/code/cc-pocket", "Add WS reconnect test", running = true),
-        DkSession("s4", "~/code/cc-pocket", "Refactor auth module"),
-        DkSession("s5", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX),
+        DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929"),
+        DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8"),
+        DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1), // keeps the Codex diff-approval surface exercised
     )
+
+    // the design's three pins: one local + running, one on devbox-linux, one Codex on mac-studio
+    private val pinList = mutableStateListOf(
+        DkPin("acct-mbp", "s1", "~/code/cc-pocket", "Refactor auth module"),
+        DkPin("acct-linux", "m3s1", "~/src/relay", "Run integration tests"),
+        DkPin("acct-studio", "m2s2", "~/work/api-server", "Port parser to Rust", AgentKind.CODEX),
+    )
+    override val pins: List<DkPin> get() = pinList
+    override fun pin(s: DkSession) {
+        if (pinList.size >= DesktopModel.MAX_PINS || pinList.any { it.sessionId == s.sessionId }) return
+        pinList += DkPin(activeComputer?.accountId ?: "acct-mbp", s.sessionId, s.cwd, s.title, s.agent)
+    }
+    override fun unpin(p: DkPin) { pinList.removeAll { it.sessionId == p.sessionId } }
+    override fun movePin(from: Int, to: Int) {
+        if (from in pinList.indices && to in pinList.indices && from != to) pinList.add(to, pinList.removeAt(from))
+    }
+    override fun openPin(p: DkPin) {
+        if (p.accountId == activeComputer?.accountId) sessions.firstOrNull { it.sessionId == p.sessionId }?.let(::selectSession)
+        else computers.firstOrNull { it.accountId == p.accountId }?.let(::selectComputer)
+    }
+
+    // the fleet boards' other machines — the design's four-machine command-center scenario
+    private val resolvedAttention = mutableStateListOf<String>()
+    private val allAttention = listOf(
+        DkAttention("ask-1", "acct-studio", "mac-studio", DkOs.MAC, "Bash", "rm -rf ./build && ./gradlew clean", seconds = 23, live = false),
+        DkAttention("ask-2", "acct-linux", "devbox-linux", DkOs.LINUX, "Write", "Relay.kt  +42 −7", seconds = 41, live = false),
+    )
+    override val attention: List<DkAttention> get() = allAttention.filterNot { it.id in resolvedAttention }
+    override fun resolveAttention(a: DkAttention, allow: Boolean) { if (a.id !in resolvedAttention) resolvedAttention.add(a.id) }
+
+    override val machines: List<DkMachine>
+        get() = listOf(
+            DkMachine(computers[0], active = activeComputer == computers[0], thisMachine = true, projects = projects),
+            DkMachine(
+                computers[1], active = activeComputer == computers[1],
+                pending = attention.count { it.accountId == "acct-studio" },
+                projects = listOf(DkProject("~/work/api-server", "api-server", running = true)),
+            ),
+            DkMachine(
+                computers[2], active = activeComputer == computers[2],
+                pending = attention.count { it.accountId == "acct-linux" },
+                projects = listOf(DkProject("~/src/relay", "relay", running = true)),
+            ),
+            DkMachine(computers[3], active = activeComputer == computers[3]),
+        )
+
+    override val watch: DkWatch?
+        get() = DkWatch(
+            machine = "devbox-linux", os = DkOs.LINUX, title = "Run integration tests", mode = "acceptEdits",
+            output = """
+                $ pytest -x tests/integration
+                ============ test session starts ============
+                platform linux · python 3.12.1
+                collected 48 items
+
+                tests/integration/test_relay.py ......   [ 12%]
+                tests/integration/test_ws.py ........    [ 29%]
+                tests/integration/test_pairing.py ....   [ 37%]
+                tests/integration/test_e2e.py ....F
+
+                FAILED test_e2e.py::test_reconnect_backoff
+                  socket closed before backoff timer fired
+                  retrying with --lf
+            """.trimIndent(),
+            waiting = attention.firstOrNull { it.id == "ask-2" },
+        )
 
     private var selectedIndex by mutableStateOf(0)
     private var askResolved by mutableStateOf(false)
@@ -47,6 +113,7 @@ class SeedDesktopModel : DesktopModel {
     override var showSettings by mutableStateOf(false)
     override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)
+    override var showAttention by mutableStateOf(false)
 
     override val appVersion = "1.2.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
@@ -55,6 +122,9 @@ class SeedDesktopModel : DesktopModel {
     override fun renameComputer(c: DkComputer, label: String?) {}
     override fun revokeComputer(c: DkComputer) {}
     override var composer by mutableStateOf("")
+
+    // same canned set the mobile demo uses — keeps the slash menu renderable without a daemon
+    override val slashCommands: List<dev.ccpocket.protocol.SlashCommand> = dev.ccpocket.app.data.DemoData.commands()
 
     override val hasChat = true
     override val chatTitle: String get() = selected.title
@@ -94,8 +164,15 @@ class SeedDesktopModel : DesktopModel {
     override fun addComputer() {}
     override fun openProject(p: DkProject) {}
     override fun selectSession(s: DkSession) { sessions.indexOfFirst { it.sessionId == s.sessionId }.takeIf { it >= 0 }?.let { selectedIndex = it; askResolved = false } }
-    override fun newSession(agent: AgentKind, mode: PermissionMode) { showNewSession = false }
+    override val newSessionDir = "~/code/cc-pocket"
+    override var newSessionSeed: String? by mutableStateOf(null)
+    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode) { showNewSession = false }
     override fun send(text: String) { composer = "" }
+
+    override val pendingImages: List<dev.ccpocket.app.data.PendingImage> = emptyList()
+    override fun attachImages(raw: List<ByteArray>) {}
+    override fun removePendingImage(id: Long) {}
+    override fun hasReadyImages(): Boolean = false
     override fun resolve(allow: Boolean, remember: Boolean) { askResolved = true; showPermissionModal = false }
     override fun dismissAsk() { askResolved = true; showPermissionModal = false }
 }

@@ -3,6 +3,7 @@ package dev.ccpocket.app.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,9 +31,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,15 +59,38 @@ internal val CLAUDE_MODES = listOf(
     DkMode("Full auto", "bypass", PermissionMode.BYPASS_PERMISSIONS, Tok.warn, danger = true),
 )
 
+/**
+ * Agent + mode picker with an EDITABLE path field seeded by whoever opened it (the current project from
+ * ⌘N / the Sessions-pane row, "~/" from the Projects-group row). A path whose leaf folder doesn't exist
+ * yet is created by the daemon (one level, under an existing parent) — same contract as mobile's NewPathSheet.
+ */
 @Composable
-fun NewSessionPopover(onStart: (AgentKind, PermissionMode) -> Unit) {
+fun NewSessionPopover(initialPath: String, onStart: (String, AgentKind, PermissionMode) -> Unit) {
     var agent by remember { mutableStateOf(AgentKind.CLAUDE) }
     var modeIdx by remember { mutableStateOf(0) }
+    var path by remember(initialPath) { mutableStateOf(TextFieldValue(initialPath, selection = TextRange(initialPath.length))) }
+    val trimmed = path.text.trim()
+    // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
+    val looksAbsolute = trimmed.startsWith("/") || trimmed.startsWith("~") || Regex("^[A-Za-z]:[\\\\/].*").matches(trimmed)
     Column(
         Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(14.dp)),
     ) {
         Text("New session", color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 15.dp, end = 15.dp, top = 13.dp))
         Column(Modifier.padding(15.dp)) {
+            PopoverLabel("Where")
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 14.dp).clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Icon(Icons.Outlined.Folder, null, tint = Tok.muted, modifier = Modifier.size(12.dp))
+                BasicTextField(
+                    path, { path = it }, singleLine = true,
+                    textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
+                    cursorBrush = SolidColor(Tok.accent),
+                    modifier = Modifier.weight(1f),
+                )
+            }
             PopoverLabel("Agent")
             Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 AgentCard(AgentKind.CLAUDE, agent == AgentKind.CLAUDE, Modifier.weight(1f)) { agent = AgentKind.CLAUDE }
@@ -85,8 +114,9 @@ fun NewSessionPopover(onStart: (AgentKind, PermissionMode) -> Unit) {
             }
             Text(
                 "Start session", color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(10.dp)).background(Tok.accent)
-                    .clickable { onStart(agent, CLAUDE_MODES[modeIdx].mode) }.padding(vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
+                    .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
+                    .clickable(enabled = looksAbsolute) { onStart(trimmed, agent, CLAUDE_MODES[modeIdx].mode) }.padding(vertical = 10.dp),
             )
         }
     }
