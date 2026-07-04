@@ -24,6 +24,7 @@ import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.BackgroundJob
 import dev.ccpocket.protocol.BackgroundJobs
+import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
@@ -39,8 +40,12 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.ReadFile
+import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
@@ -322,6 +327,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
     val terminalEntries = mutableStateListOf<TerminalEntry>() // quick-terminal history for the active session (issue #3)
     val terminalBusy = mutableStateOf(false)                  // a shell command is awaiting approval/result
+    val changedFiles = mutableStateListOf<ChangedFile>()      // files this session touched (issue #36) — filled on demand
+    val changedFilesLoading = mutableStateOf(false)
+    val changedFilesUnavailable = mutableStateOf(false)       // no reply (old daemon silently drops the frame) — distinct from "no files"
+    val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
+    val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -1121,6 +1131,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 val i = terminalEntries.indexOfLast { it.result == null } // fill the in-flight command's slot
                 if (i >= 0) terminalEntries[i] = terminalEntries[i].copy(result = f)
             }
+            // matched on the persistent identity (not convoId): a reply for a session we've left is dropped
+            is SessionFiles -> if (f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
+                changedFilesDeadline?.cancel()
+                replace(changedFiles, f.files); changedFilesLoading.value = false; changedFilesUnavailable.value = false
+            }
+            // full-identity match: a late reply for the SAME path from a session we've since left must not land
+            is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
+                viewedFileDeadline?.cancel(); viewedFile.value = f
+            }
             else -> {}
         }
     }
@@ -1217,6 +1236,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         messages.clear(); convoId.value = null
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
+        changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
@@ -1305,6 +1325,47 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Clear the quick-terminal scrollback for the active session. */
     fun clearTerminal() = terminalEntries.clear()
+
+    // A daemon that predates issue #36 silently DROPS these frames (unknown type — by design), so both
+    // requests carry a client-side deadline: better an honest "update the daemon" than an eternal spinner.
+    private var changedFilesDeadline: Job? = null
+    private var viewedFileDeadline: Job? = null
+
+    /** Ask the daemon for the files this session touched (issue #36); the reply lands in [changedFiles].
+     *  Needs the persistent sessionId — pre-first-turn sessions have nothing to list anyway. */
+    fun fetchChangedFiles() {
+        val wd = workdir.value ?: return
+        val sid = sessionKey.value ?: currentSessionId ?: return
+        changedFilesLoading.value = true
+        changedFilesUnavailable.value = false
+        changedFilesDeadline?.cancel()
+        changedFilesDeadline = scope.launch {
+            delay(8_000)
+            if (changedFilesLoading.value) { changedFilesLoading.value = false; changedFilesUnavailable.value = true }
+        }
+        scope.launch { send(ListSessionFiles(wd, sid, sessionAgent.value ?: AgentKind.CLAUDE)) }
+    }
+
+    /** Open one changed file in the viewer; the daemon replies with a capped [FileContent]. */
+    fun openChangedFile(path: String) {
+        val wd = workdir.value ?: return
+        val sid = sessionKey.value ?: currentSessionId ?: return
+        viewedFilePath.value = path
+        viewedFile.value = null // show the loading state, not the previous file
+        viewedFileDeadline?.cancel()
+        viewedFileDeadline = scope.launch {
+            delay(8_000)
+            if (viewedFilePath.value == path && viewedFile.value == null) {
+                viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
+            }
+        }
+        scope.launch { send(ReadFile(wd, sid, path, sessionAgent.value ?: AgentKind.CLAUDE)) }
+    }
+
+    fun closeFileViewer() {
+        viewedFileDeadline?.cancel()
+        viewedFilePath.value = null; viewedFile.value = null
+    }
 
     // ── voice input actions ───────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
+import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
@@ -15,7 +16,10 @@ import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.ReadFile
+import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
@@ -51,6 +55,14 @@ class RequestRouter(
 
             // heavy transcript scan → off the inbound pump so it can't wedge the socket
             is FetchUsage -> scope.launch { sink.emit(UsageService.aggregate(frame.days)) }
+
+            // both re-scan the transcript from disk (issue #36) → same off-pump rule as FetchUsage
+            is ListSessionFiles -> scope.launch {
+                sink.emit(SessionFiles(frame.workdir, frame.sessionId, SessionFilesService.changedFiles(frame.agent, frame.workdir, frame.sessionId)))
+            }
+            is ReadFile -> scope.launch {
+                sink.emit(SessionFilesService.readFile(frame.agent, frame.workdir, frame.sessionId, frame.path))
+            }
 
             is OpenSession -> {
                 // a new project: create the named folder if it doesn't exist yet (under an existing writable parent)

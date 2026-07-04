@@ -230,6 +230,14 @@
     <string name="terminal_denied">denied</string>
     <string name="terminal_timed_out">timed out</string>
 
+    <!-- ── changed files (issue #36) ─────────────────────────────── -->
+    <string name="qa_files">Changed files</string>
+    <string name="files_title">Changed files</string>
+    <string name="files_empty">This session hasn\'t changed any files yet.</string>
+    <string name="files_unavailable">No reply from the computer — update the daemon there and try again.</string>
+    <string name="file_truncated">Preview truncated — first %1$d KB of %2$d KB</string>
+    <string name="file_undecodable">Couldn\'t display this image</string>
+
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>
     <string name="choose_computer">Choose a computer</string>

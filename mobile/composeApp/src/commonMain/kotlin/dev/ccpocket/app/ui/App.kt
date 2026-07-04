@@ -1008,7 +1008,9 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     var showQuickActions by remember { mutableStateOf(false) }
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
+    var showChangedFiles by remember { mutableStateOf(false) }
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
+    if (repo.viewedFilePath.value != null) { FileViewerScreen(repo) { repo.closeFileViewer() }; return } // changed-file viewer (issue #36)
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val listState = rememberLazyListState()
@@ -1228,7 +1230,15 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
             )
         }
         if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }
-        if (showQuickActions) QuickActionsSheet(repo, onTerminal = { showTerminal = true }, onMode = { showModeSheet = true }) { showQuickActions = false }
+        if (showQuickActions) {
+            QuickActionsSheet(
+                repo,
+                onTerminal = { showTerminal = true },
+                onMode = { showModeSheet = true },
+                onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
+            ) { showQuickActions = false }
+        }
+        if (showChangedFiles) ChangedFilesSheet(repo, onOpen = { repo.openChangedFile(it) }) { showChangedFiles = false }
         if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs) { showBgJobs = false }
         if (showSwitcher) dev.ccpocket.app.ui.fleet.MachineSwitcherSheet(repo, onDismiss = { showSwitcher = false }, onManage = onOpenFleet)
     }

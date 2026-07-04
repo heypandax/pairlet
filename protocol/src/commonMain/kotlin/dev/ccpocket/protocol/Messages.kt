@@ -113,6 +113,35 @@ data class RunShellCommand(
     val timeoutMs: Long = 30_000,
 ) : ToDaemon
 
+/**
+ * phone -> daemon: list the files this session created/edited, extracted from the session's own
+ * transcript (Claude tool_use inputs / Codex patch envelopes) — so it works for historical sessions
+ * too, not just the live one. Keyed on the persistent (workdir, sessionId) identity like
+ * [ListSessions]. The reply is one [SessionFiles]. A daemon that predates this drops it.
+ */
+@Serializable
+@SerialName("pocket/files.list")
+data class ListSessionFiles(
+    val workdir: String,
+    val sessionId: String,
+    val agent: AgentKind = AgentKind.CLAUDE,
+) : ToDaemon
+
+/**
+ * phone -> daemon: read one file the session touched. The daemon re-derives the session's
+ * changed-file set from the transcript and ONLY serves paths in it — the phone can already see
+ * these files' contents through the transcript/diffs, so this adds no new read surface (unlike an
+ * arbitrary-path read, which would bypass the approval firewall). Reply is one [FileContent].
+ */
+@Serializable
+@SerialName("pocket/file.read")
+data class ReadFile(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val agent: AgentKind = AgentKind.CLAUDE,
+) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -320,6 +349,36 @@ data class ShellResult(
     val timedOut: Boolean = false,
     val denied: Boolean = false,   // approval denied (or timed out) → the command was not run
     val error: String? = null,     // a spawn/system error (e.g. bad workdir), distinct from a non-zero exit
+) : ToPhone
+
+/** daemon -> phone: reply to [ListSessionFiles]. Matched client-side on (workdir, sessionId). */
+@Serializable
+@SerialName("pocket/files")
+data class SessionFiles(
+    val workdir: String,
+    val sessionId: String,
+    val files: List<ChangedFile> = emptyList(),
+    val error: String? = null, // transcript not found / unreadable — files is empty then
+) : ToPhone
+
+/**
+ * daemon -> phone: reply to [ReadFile]. Exactly one of [text]/[base64] is set on success: text for
+ * anything decodable as UTF-8, base64 for images. Both are capped server-side ([truncated] +
+ * [totalBytes] tell the phone it's looking at a prefix) so one file can't blow the 4 MiB relay frame.
+ */
+@Serializable
+@SerialName("pocket/file.content")
+data class FileContent(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val ok: Boolean = true,
+    val error: String? = null,     // not in the session's changed set / gone from disk / too large
+    val text: String? = null,
+    val base64: String? = null,
+    val mediaType: String? = null, // e.g. "image/png" when base64 is set
+    val truncated: Boolean = false,
+    val totalBytes: Long = 0,
 ) : ToPhone
 
 // ===========================================================================

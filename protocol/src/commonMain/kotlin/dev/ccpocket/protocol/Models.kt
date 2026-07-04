@@ -96,6 +96,18 @@ data class SessionSummary(
     val model: String? = null, // the LAST assistant turn's model id (null = older daemon / no turn yet) — list rows show its alias
 )
 
+/**
+ * One file a session created/edited, as recorded in its transcript (see ListSessionFiles).
+ * [op] is the LAST operation seen: "write" | "edit" | "delete" | "notebook"; [edits] counts how
+ * many tool calls touched the path. Ordered newest-touched first by the daemon.
+ */
+@Serializable
+data class ChangedFile(
+    val path: String,
+    val op: String = "edit",
+    val edits: Int = 1,
+)
+
 /** One filesystem entry returned by the daemon's DirectoryService. */
 @Serializable
 data class DirectoryEntry(

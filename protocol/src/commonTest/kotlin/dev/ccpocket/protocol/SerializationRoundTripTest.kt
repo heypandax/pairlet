@@ -84,6 +84,36 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun sessionFiles_pair_roundtrips_with_wire_safe_defaults() {
+        // request: agent defaults to CLAUDE like OpenSession (an app predating Codex sends none)
+        val req = Envelope(id = "f1", ts = 0, body = ListSessionFiles("/w", "sid"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/files.list\"" in reqJson, reqJson)
+        assertTrue("\"agent\":\"claude\"" in reqJson, reqJson) // encodeDefaults
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+
+        val resp = Envelope(id = "f2", ts = 0, body = SessionFiles("/w", "sid", listOf(ChangedFile("/w/a.md", "write", 2))))
+        val respJson = PocketJson.encodeToString(resp)
+        assertTrue("\"t\":\"pocket/files\"" in respJson, respJson)
+        assertEquals(resp, PocketJson.decodeFromString<Envelope>(respJson))
+    }
+
+    @Test
+    fun fileContent_roundtrips_and_omits_null_payloads() {
+        val req = Envelope(id = "f3", ts = 0, body = ReadFile("/w", "sid", "/w/a.md"))
+        assertTrue("\"t\":\"pocket/file.read\"" in PocketJson.encodeToString(req))
+
+        val ok = Envelope(id = "f4", ts = 0, body = FileContent("/w", "sid", "/w/a.md", text = "# hi", totalBytes = 4))
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/file.content\"" in okJson, okJson)
+        assertFalse("base64" in okJson, okJson) // explicitNulls=false — image fields absent on a text reply
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        val err = FileContent("/w", "sid", "/w/x", ok = false, error = "not a file this session changed")
+        assertEquals(err, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "f5", ts = 0, body = err))).body)
+    }
+
+    @Test
     fun unknown_frame_discriminator_throws() {
         // The invariant the whole forward-compat story rests on: an unknown "t" must THROW (each decode
         // site wraps in runCatching and drops the frame). A default polymorphic deserializer added later

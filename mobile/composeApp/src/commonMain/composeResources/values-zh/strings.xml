@@ -230,6 +230,14 @@
     <string name="terminal_denied">已拒绝</string>
     <string name="terminal_timed_out">已超时</string>
 
+    <!-- ── 改动文件（issue #36）──────────────────────────────────── -->
+    <string name="qa_files">改动文件</string>
+    <string name="files_title">改动文件</string>
+    <string name="files_empty">本会话还没有改动过文件。</string>
+    <string name="files_unavailable">电脑没有响应——请更新电脑上的 daemon 后重试。</string>
+    <string name="file_truncated">预览已截断——前 %1$d KB / 共 %2$d KB</string>
+    <string name="file_undecodable">无法显示这张图片</string>
+
     <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
     <string name="devices_section">已配对设备</string>
     <string name="choose_computer">选择电脑</string>
