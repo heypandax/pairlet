@@ -70,8 +70,11 @@ jobs:
           for c in certs:
               a = c["attributes"]
               print(f"{c['id']}  {a['certificateType']:<26} {a.get('name','')}  expires {a.get('expirationDate','?')}")
-          targets = [c for c in certs if c["attributes"]["certificateType"] in DEV_TYPES]
-          print(f"\n{len(certs)} certificates total, {len(targets)} development certs to revoke")
+          # only the CI runners' orphans ("Created via API") — a developer's own machine-named
+          # development cert stays, so local device debugging keeps working untouched
+          targets = [c for c in certs if c["attributes"]["certificateType"] in DEV_TYPES
+                     and "Created via API" in (c["attributes"].get("name") or "")]
+          print(f"\n{len(certs)} certificates total, {len(targets)} CI-minted development certs to revoke")
 
           if dry:
               print("dry run — nothing revoked"); sys.exit(0)
