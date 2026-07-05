@@ -1,11 +1,11 @@
 {
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Drive Claude Code from your phone \u2014 the cc-pocket daemon.",
   "homepage": "https://github.com/heypandax/cc-pocket",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/heypandax/cc-pocket/releases/download/v1.2.2/cc-pocket-daemon-1.2.2-windows-x86_64.zip",
+      "url": "https://github.com/heypandax/cc-pocket/releases/download/v1.3.0/cc-pocket-daemon-1.3.0-windows-x86_64.zip",
       "hash": "eccae2d04872fa1fac0a9c53039883839df64911ace6b8cdff9c41235ef7442f"
     }
   },
