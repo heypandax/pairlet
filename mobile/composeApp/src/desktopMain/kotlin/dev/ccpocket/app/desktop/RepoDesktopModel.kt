@@ -53,6 +53,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
+    override var showQuickActions by mutableStateOf(false)
     override var composer by mutableStateOf("")
 
     override val connected: Boolean get() = repo.sessionActive.value
@@ -114,6 +115,13 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         FleetRuntime.forPrimary(repo)?.focusProject(m.computer.accountId, p.path) ?: super.openRunning(m, p)
     }
 
+    override fun browseRunning(m: DkMachine, p: DkProject) {
+        // same machine: the ordinary project open (RECENT bookkeeping included); another machine:
+        // switch over and list — but never auto-resume, that's what separates this from openRunning
+        if (repo.paired.value?.accountId == m.computer.accountId) openProject(p)
+        else FleetRuntime.forPrimary(repo)?.browseProject(m.computer.accountId, p.path) ?: super.browseRunning(m, p)
+    }
+
     override val attention: List<DkAttention>
         get() {
             // aggregated across every live link; satellites carry asks once the daemon broadcasts them
@@ -147,18 +155,45 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     // per snapshot instead of re-mapping the whole repo list on every read
     private val sessionsDerived = derivedStateOf {
         val askWd = repo.pendingAsk.value?.let { repo.workdir.value }
-        repo.sessions.map {
+        val openId = repo.sessionKey.value.takeIf { repo.convoId.value != null }
+        val listed = repo.sessions.map {
             DkSession(
                 sessionId = it.sessionId, cwd = it.cwd, title = it.title, agent = it.agent ?: AgentKind.CLAUDE,
-                running = it.live || it.busy,
+                // the open chat's row uses the LIVE streaming state — the listed `live` is a snapshot
+                // from listing time and kept a finished turn's dot pulsing until a manual refresh
+                running = if (it.sessionId == openId) repo.streaming.value || it.busy else it.live || it.busy,
                 pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
                 model = it.model,
             )
         }
+        // a just-created session isn't on disk until its first turn persists, so ListSessions can't
+        // return it — synthesize its row at the top of its group until a later listing has it (#42)
+        // openChatUnlisted() already returns null once the listing contains the session, so no re-check here
+        val synth = openChatUnlisted()
+        if (synth != null) listOf(synth) + listed else listed
     }
     override val sessions: List<DkSession> get() = sessionsDerived.value
 
-    override val selectedSessionId: String? get() = openSummary()?.sessionId
+    /** The open chat as a DkSession when it belongs to the listed dir but the listing doesn't know it yet
+     *  (brand-new session pre-first-persist). Null once ListSessions returns it — the real row wins. */
+    private fun openChatUnlisted(): DkSession? {
+        // real sessionId only (SessionLive echoes it moments after open): the row's id doubles as the
+        // resumeId when clicked, and a convoId there would send the daemon a bogus resume
+        val id = repo.sessionKey.value ?: return null
+        val wd = repo.workdir.value ?: return null
+        val dir = repo.sessionsDir.value ?: return null
+        if (repo.convoId.value == null || (wd != dir && tilde(wd) != dir)) return null
+        if (repo.sessions.any { it.sessionId == id }) return null
+        if (openSummary() != null) return null // already listed under (cwd, title) — e.g. resumed before SessionLive echoes the id
+        return DkSession(
+            sessionId = id, cwd = wd, title = repo.chatTitle.value ?: "Chat",
+            agent = repo.sessionAgent.value ?: AgentKind.CLAUDE,
+            running = repo.streaming.value, // live truth — a hardcoded true kept the dot pulsing after the turn
+            model = repo.model.value,
+        )
+    }
+
+    override val selectedSessionId: String? get() = openSummary()?.sessionId ?: openChatUnlisted()?.sessionId
 
     // ── RECENT groups: session lists cached per visited project (per account) ─────────────────────
     // The protocol only lists sessions per directory (ListSessions), so cross-project RECENT is built
@@ -205,6 +240,14 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         }
     }
     override val sessionGroups: List<DkSessionGroup> get() = sessionGroupsDerived.value
+
+    override val sessionsRefreshing: Boolean get() = repo.sessionsRefreshing.value
+
+    override fun refresh(g: DkSessionGroup?) {
+        repo.refreshDirectoriesSilently() // manual refresh means "sync the sidebar" — projects/running state rides along
+        if (g != null && !g.current) snapshotCurrent() // keep the outgoing live group's rows before repointing
+        repo.refreshSessions(g?.path) // null → the current dir; no-op when nothing is listed yet
+    }
 
     override fun selectSession(s: DkSession) {
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
@@ -265,6 +308,9 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         val typed = trimTrailingSep(dir.trim())
         if (typed.isEmpty()) return
         showNewSession = false
+        // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
+        // this the group never appeared for a dir typed straight into the popover (#42)
+        openProject(DkProject(path = typed, name = folderName(typed)))
         repo.openSession(wd = typed, startMode = mode, agent = agent)
     }
 
@@ -274,9 +320,17 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override val chatWorkdir: String get() = repo.workdir.value?.let { tilde(it) } ?: ""
     override val chatBranch: String? get() = openSummary()?.gitBranch
     override val chatModel: String get() = modelAlias(repo.model.value)
+    override val chatModelId: String get() = repo.model.value ?: ""
     override val chatMode: PermissionMode get() = repo.mode.value
+    override val chatEffort: String? get() = repo.effort.value
     override val messages: List<ChatItem> get() = repo.messages
     override val streaming: Boolean get() = repo.streaming.value
+
+    override fun switchMode(m: PermissionMode) = repo.switchMode(m)
+    override fun switchModel(name: String) = repo.switchModel(name)
+    override fun switchEffort(level: String) = repo.switchEffort(level)
+    override fun compactConversation() = repo.sendPrompt("/compact")
+    override fun clearConversation() = repo.clearConversation()
 
     override fun send(text: String) {
         if (text.isBlank() && !repo.hasReadyImages()) return // an image-only send is legitimate
@@ -306,6 +360,35 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var defaultMode: PermissionMode
         get() = repo.defaultMode.value
         set(v) { repo.setDefaultMode(v) }
+    // desktop-only pref (the daemon/mobile never open local terminals) — persisted beside the pins
+    private var terminalAppState by mutableStateOf(TerminalApp.fromId(SecureStore.getString(K_TERMINAL_APP)))
+    override var terminalApp: TerminalApp
+        get() = terminalAppState
+        set(v) { terminalAppState = v; SecureStore.putString(K_TERMINAL_APP, v.id) }
+
+    override val phonePush: Boolean? get() = repo.pushPrefs.value
+    override fun setPhonePush(enabled: Boolean) { repo.setPushEnabled(enabled) }
+    override fun refreshPushPrefs() { repo.fetchPushPrefs() }
+
+    override val observing: Boolean get() = repo.observing.value
+    override fun takeOver() { repo.takeOver() }
+
+    override fun stopTurn() {
+        // hand the interrupted prompt back for editing/resending (#48) — never clobber a typed draft.
+        // The transcript keeps its User bubble: the daemon-side transcript already recorded the turn.
+        if (composer.isBlank()) {
+            (repo.messages.lastOrNull { it is ChatItem.User } as? ChatItem.User)
+                ?.text?.takeIf { it.isNotBlank() }?.let { composer = it }
+        }
+        repo.cancelTurn()
+    }
+
+    override val authState: dev.ccpocket.protocol.AuthState? get() = repo.authState.value
+    override fun refreshAuth() { repo.fetchAuthStatus() }
+    override fun switchAccount() { repo.authLogin() }
+    override fun submitAuthCode(code: String) { repo.authSubmitCode(code) }
+    override fun cancelAuthLogin() { repo.authCancelLogin() }
+    override fun logoutAccount() { repo.authLogout() }
 
     private fun paired(c: DkComputer) = repo.pairedList.firstOrNull { it.accountId == c.accountId }
     override fun renameComputer(c: DkComputer, label: String?) { paired(c)?.let { repo.renameDaemon(it, label) } }
@@ -313,6 +396,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     private companion object {
         const val K_PINS = "desktop_pins"
+        const val K_TERMINAL_APP = "desktop_terminal_app"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
     }
 }

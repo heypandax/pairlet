@@ -68,9 +68,16 @@ class Conversation(
     )
     private val log = logger("Convo")
 
-    // the device sink is re-pointed when a phone re-opens a session that kept running in the background
-    @Volatile
-    private var sink: OutboundSink = initialSink
+    // FAN-OUT (issue #47): every client that opened this conversation gets the stream. The old single
+    // field made the last reattach steal it from everyone else — a phone foregrounding auto-reopens its
+    // last session and silently blinded an attached desktop mid-turn (no TurnDone, caret forever).
+    // Keyed by client identity so a reconnecting device replaces its stale sink instead of stacking one.
+    private val sinks = java.util.concurrent.ConcurrentHashMap<Any, OutboundSink>().apply {
+        put(sinkKey(initialSink), initialSink)
+    }
+
+    // every existing emit site goes through this fan-out; one failing transport must not break the rest
+    private val sink: OutboundSink = OutboundSink { f -> sinks.values.forEach { s -> runCatching { s.emit(f) } } }
 
     /** Wall-clock of the last agent activity — drives the daemon's idle reaper. */
     @Volatile
@@ -162,7 +169,13 @@ class Conversation(
     fun currentMode(): PermissionMode = mode
 
     /** True while this conversation still streams to [s] — the LAN grace-close ownership check. */
-    fun isAttachedTo(s: OutboundSink): Boolean = sink === s
+    fun isAttachedTo(s: OutboundSink): Boolean = sinks.containsKey(sinkKey(s))
+
+    /** Remove [s]'s view of this conversation; true when no clients remain (caller may close for real). */
+    fun detach(s: OutboundSink): Boolean {
+        sinks.remove(sinkKey(s))
+        return sinks.isEmpty()
+    }
 
     /** The id this conversation is resuming while [sessionId] is still null (pre-first-turn) — lets a
      *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
@@ -339,11 +352,20 @@ class Conversation(
                             sink.emit(live(sessionId))
                         }
                     }
-                    is AgentEvent.AssistantText ->
+                    // stream evidence also arms `executing`: a message sent MID-turn is queued by claude and
+                    // may start its own follow-up turn after the current result — that turn has no sendPrompt
+                    // to arm the flag, and without it the grace-close reaper could kill the in-flight work
+                    // (mirrors the phone, whose appendChunk sets `streaming` on the same evidence).
+                    is AgentEvent.AssistantText -> {
+                        executing = true
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
-                    is AgentEvent.AssistantThinking ->
+                    }
+                    is AgentEvent.AssistantThinking -> {
+                        executing = true
                         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
+                    }
                     is AgentEvent.AssistantToolUse -> {
+                        executing = true
                         // ExitPlanMode's input IS the proposed plan (input["plan"]) — surface it in full via the
                         // shared ToolMetadata extractor so the plan is readable in the phone's chat, not truncated
                         // to 280 chars of raw JSON (issue #10). Other tools keep the compact JSON preview.
@@ -399,15 +421,21 @@ class Conversation(
             executing = false // a dead process never delivers TurnResult
             p.awaitExit()
             backend.onProcessEnded(sessionId)
-            sink.emit(PocketError("process_exited", "agent process ended", convoId))
+            // carry the exit code + the agent's last stderr line: a --resume that dies before its first
+            // init (bad session id, context overflow) used to surface as a bare "agent process ended"
+            val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
+            sink.emit(PocketError("process_exited", "agent process ended (exit ${p.exitCode() ?: "?"})$why", convoId))
         }
     }
 
-    /** Re-point this live conversation to a re-opened device, replaying its transcript so far. */
+    /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
+     *  replaying the transcript so far to the newcomer only. */
     suspend fun reattach(newSink: OutboundSink) {
-        sink = newSink
+        sinks[sinkKey(newSink)] = newSink
         lastActivityMs = System.currentTimeMillis()
-        val sid = sessionId ?: return
+        // pre-first-turn the agent hasn't minted a sessionId yet — anchor on the resume id (same trick
+        // as switchMode) so the reattach still confirms + replays instead of leaving a blank chat
+        val sid = sessionId ?: resumeAnchor ?: return
         // executing rights the phone's stale ■: a turn that finished (or started) while it was away
         newSink.emit(live(sid))
         val history = backend.replayHistory(workdir.toString(), sid)

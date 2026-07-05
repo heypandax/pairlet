@@ -70,4 +70,21 @@ class CodexTranscriptTest {
     fun replay_handles_missing_file() {
         assertTrue(CodexTranscriptReplay.read(Files.createTempDirectory("x").resolve("nope.jsonl")).isEmpty())
     }
+
+    @Test
+    fun cwdsByNewest_aggregates_per_cwd_and_skips_metaless_files() {
+        // a Codex-only dir must surface in the directory list even with zero Claude history
+        fun rolloutFor(cwd: String, id: String) = Files.createTempFile("rollout-x-$id", ".jsonl").also {
+            it.writeText("""{"timestamp":"t0","type":"session_meta","payload":{"id":"$id","cwd":"$cwd","cli_version":"0.124.0"}}""")
+        }
+        val a1 = rolloutFor("/only-codex", "thr-a1")
+        val a2 = rolloutFor("/only-codex", "thr-a2")
+        val b = rolloutFor("/other", "thr-b")
+        val junk = Files.createTempFile("rollout-x-junk", ".jsonl").also { it.writeText("not json") }
+        Files.setLastModifiedTime(a1, java.nio.file.attribute.FileTime.fromMillis(1_000))
+        Files.setLastModifiedTime(a2, java.nio.file.attribute.FileTime.fromMillis(2_000))
+        Files.setLastModifiedTime(b, java.nio.file.attribute.FileTime.fromMillis(3_000))
+        val cwds = CodexTranscriptScanner.cwdsByNewest(listOf(a1, a2, b, junk))
+        assertEquals(mapOf("/only-codex" to 2_000L, "/other" to 3_000L), cwds)
+    }
 }

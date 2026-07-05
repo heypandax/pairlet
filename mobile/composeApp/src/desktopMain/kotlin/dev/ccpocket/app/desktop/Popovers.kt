@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,8 +34,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -44,6 +52,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
+import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
+import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
+import dev.ccpocket.app.ui.EFFORT_OPTIONS
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
@@ -65,15 +76,28 @@ internal val CLAUDE_MODES = listOf(
  * yet is created by the daemon (one level, under an existing parent) — same contract as mobile's NewPathSheet.
  */
 @Composable
-fun NewSessionPopover(initialPath: String, onStart: (String, AgentKind, PermissionMode) -> Unit) {
-    var agent by remember { mutableStateOf(AgentKind.CLAUDE) }
-    var modeIdx by remember { mutableStateOf(0) }
+fun NewSessionPopover(
+    initialPath: String,
+    defaultAgent: AgentKind = AgentKind.CLAUDE,
+    defaultMode: PermissionMode = PermissionMode.DEFAULT,
+    onStart: (String, AgentKind, PermissionMode) -> Unit,
+) {
+    var agent by remember { mutableStateOf(defaultAgent) }
+    var modeIdx by remember { mutableStateOf(CLAUDE_MODES.indexOfFirst { it.mode == defaultMode }.coerceAtLeast(0)) }
     var path by remember(initialPath) { mutableStateOf(TextFieldValue(initialPath, selection = TextRange(initialPath.length))) }
     val trimmed = path.text.trim()
     // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
     val looksAbsolute = trimmed.startsWith("/") || trimmed.startsWith("~") || Regex("^[A-Za-z]:[\\\\/].*").matches(trimmed)
+    val pathFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { pathFocus.requestFocus() }
     Column(
-        Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(14.dp)),
+        Modifier.width(300.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+            // Enter anywhere in the popover = the Start button (the path field holds focus)
+            .onPreviewKeyEvent { e ->
+                if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute) {
+                    onStart(trimmed, agent, CLAUDE_MODES[modeIdx].mode); true
+                } else false
+            },
     ) {
         Text("New session", color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 15.dp, end = 15.dp, top = 13.dp))
         Column(Modifier.padding(15.dp)) {
@@ -88,7 +112,7 @@ fun NewSessionPopover(initialPath: String, onStart: (String, AgentKind, Permissi
                     path, { path = it }, singleLine = true,
                     textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
                     cursorBrush = SolidColor(Tok.accent),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).focusRequester(pathFocus),
                 )
             }
             PopoverLabel("Agent")
@@ -119,6 +143,133 @@ fun NewSessionPopover(initialPath: String, onStart: (String, AgentKind, Permissi
                     .clickable(enabled = looksAbsolute) { onStart(trimmed, agent, CLAUDE_MODES[modeIdx].mode) }.padding(vertical = 10.dp),
             )
         }
+    }
+}
+
+// ── quick actions (the chat-header ⋯): model / effort / mode / terminal / compact / clear ──
+// Mirrors mobile's QuickActionsSheet so the two shells stay in sync (mobile moved the mode
+// switch here off the top bar); drives the same repo verbs via DesktopModel.
+private enum class QaPage { MAIN, MODEL, EFFORT, MODE }
+
+@Composable
+fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
+    var page by remember { mutableStateOf(QaPage.MAIN) }
+    var clearArmed by remember { mutableStateOf(false) }
+    Column(
+        Modifier.width(280.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(14.dp)).padding(15.dp),
+    ) {
+        when (page) {
+            QaPage.MAIN -> {
+                PopoverLabel("Quick actions")
+                QaRow("Model", value = model.chatModel.ifBlank { "default" }, chevron = true) { page = QaPage.MODEL }
+                QaRow("Effort", value = model.chatEffort ?: "default", chevron = true) { page = QaPage.EFFORT }
+                QaRow("Mode", value = CLAUDE_MODES.first { it.mode == model.chatMode }.token, chevron = true) { page = QaPage.MODE }
+                // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every
+                // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader
+                val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
+                if (canOpenTerminal) {
+                    QaRow("Open terminal") { TerminalLauncher.open(model.terminalApp, model.chatWorkdir); onDismiss() }
+                }
+                QaRow("Compact context") { model.compactConversation(); onDismiss() }
+                QaRow(
+                    if (clearArmed) "Clear chat — tap again" else "Clear chat", danger = true,
+                ) { if (clearArmed) { model.clearConversation(); onDismiss() } else clearArmed = true }
+            }
+            QaPage.MODEL -> {
+                QaBack("Model") { page = QaPage.MAIN }
+                val options = if (model.chatAgent == AgentKind.CODEX) CODEX_MODEL_OPTIONS.map { it to it } else CLAUDE_MODEL_OPTIONS
+                fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
+                options.forEach { (label, pick) ->
+                    QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
+                }
+                // custom id (issue #54): third-party gateways route ids the preset list can't know;
+                // `--model` takes any string, so pass it through. Enter submits. Prefilled when the
+                // session already runs a non-preset id.
+                val presetActive = options.any { (_, pick) -> isActive(pick) }
+                var custom by remember {
+                    mutableStateOf(if (!presetActive) model.chatModelId.ifBlank { model.chatModel } else "")
+                }
+                PopoverLabel("Custom")
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    BasicTextField(
+                        custom, { custom = it }, singleLine = true,
+                        textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
+                        cursorBrush = SolidColor(Tok.accent),
+                        modifier = Modifier.weight(1f).onPreviewKeyEvent { e ->
+                            if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && custom.isNotBlank()) {
+                                model.switchModel(custom.trim()); onDismiss(); true
+                            } else false
+                        },
+                    )
+                    if (custom.isNotBlank()) Text(
+                        "→", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                            .clickable { model.switchModel(custom.trim()); onDismiss() }.padding(horizontal = 4.dp),
+                    )
+                }
+            }
+            QaPage.EFFORT -> {
+                QaBack("Effort") { page = QaPage.MAIN }
+                EFFORT_OPTIONS.forEach { opt ->
+                    QaOption(opt, opt.equals(model.chatEffort, true)) { model.switchEffort(opt); onDismiss() }
+                }
+            }
+            QaPage.MODE -> {
+                QaBack("Mode") { page = QaPage.MAIN }
+                CLAUDE_MODES.forEach { m ->
+                    QaOption(m.label, m.mode == model.chatMode, dot = m.dot, danger = m.danger, token = m.token) {
+                        model.switchMode(m.mode); onDismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QaRow(label: String, value: String? = null, danger: Boolean = false, chevron: Boolean = false, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 4.dp).clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(label, color = if (danger) Tok.danger else Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        value?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp) }
+        if (chevron) Text("›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun QaBack(title: String, onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 9.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("‹", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 15.sp)
+        Text(title.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    }
+}
+
+@Composable
+private fun QaOption(label: String, selected: Boolean, dot: Color? = null, danger: Boolean = false, token: String? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (selected) Tok.surface else Color.Transparent)
+            .border(1.dp, if (selected) Tok.accent else Tok.hair, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        dot?.let { Dot(it, 7.dp) }
+        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp)
+        if (danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
+        Spacer(Modifier.weight(1f))
+        token?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp) }
+        if (selected && token == null) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp)
     }
 }
 

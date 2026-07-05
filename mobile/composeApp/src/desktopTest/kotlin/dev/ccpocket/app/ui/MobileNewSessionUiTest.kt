@@ -16,6 +16,7 @@ import dev.ccpocket.app.resources.new_session_subtitle
 import dev.ccpocket.app.theme.PocketTheme
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -58,6 +59,19 @@ class MobileNewSessionUiTest {
         assertNotNull(repo.convoId.value, "one tap must open the conversation")
         assertEquals(dir, repo.workdir.value)
         assertEquals(repo.defaultMode.value, repo.mode.value) // started under the persisted default mode
+    }
+
+    @Test
+    fun newSessionArmsComposerAutoFocusResumeDoesNot() = runComposeUiTest {
+        val repo = composeSessionsScreen()
+        val cta = runBlocking { getString(Res.string.new_session_cta) }
+        onAllNodes(hasText(cta)).onFirst().performClick()
+        waitForIdle()
+        // ChatScreen consumes this to focus the composer + raise the keyboard on first landing
+        assertTrue(repo.autoFocusComposer.value, "a brand-new session must arm the composer auto-focus")
+        repo.openSession(dir, resumeId = "sess-resume")
+        waitForIdle()
+        assertFalse(repo.autoFocusComposer.value, "resuming an existing session must not pop the keyboard")
     }
 
     @Test

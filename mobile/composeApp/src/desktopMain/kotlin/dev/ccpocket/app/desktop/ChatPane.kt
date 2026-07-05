@@ -53,6 +53,8 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -93,9 +95,9 @@ import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
 import dev.ccpocket.app.ui.slashQueryOf
 import dev.ccpocket.app.ui.slashSuggestions
+import dev.ccpocket.app.ui.turnDurLabel
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
-import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SlashCommand
 
 @Composable
@@ -136,7 +138,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                             if (ask != null) {
                                 InlinePermCard(
                                     ask, model.chatAgent, model.chatWorkdir, model.chatBranch,
-                                    onAllow = { model.resolve(allow = true, remember = false) },
+                                    onAllow = { rem -> model.resolve(allow = true, remember = rem) },
                                     onDeny = { model.resolve(allow = false, remember = false) },
                                 )
                             } else if (model.streaming) {
@@ -147,7 +149,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                 }
             }
         }
-        Composer(model)
+        if (model.observing) ObserveBar(model) else Composer(model, paneFocused = focused)
     }
 }
 
@@ -169,13 +171,6 @@ private fun EmptyChat() {
     }
 }
 
-private fun modeLabel(m: PermissionMode): String = when (m) {
-    PermissionMode.DEFAULT -> "default"
-    PermissionMode.ACCEPT_EDITS -> "acceptEdits"
-    PermissionMode.PLAN -> "plan"
-    PermissionMode.BYPASS_PERMISSIONS -> "bypass"
-}
-
 @Composable
 private fun ChatSubHeader(model: DesktopModel) {
     Column(Modifier.fillMaxWidth()) {
@@ -189,15 +184,25 @@ private fun ChatSubHeader(model: DesktopModel) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             if (model.chatAgent == AgentKind.CODEX) AgentTag(AgentKind.CODEX)
-            Row(
-                Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                    .padding(start = 9.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Text(modeLabel(model.chatMode), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp)
-                Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(12.dp))
+            // quick terminal at the session's cwd — only when that directory exists on THIS machine, so a
+            // remote machine's session never shows it (same locality contract as DesktopPathOpener). #44
+            // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every recomposition.
+            val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
+            if (canOpenTerminal) {
+                Text(
+                    ">_", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                        .clickable { TerminalLauncher.open(model.terminalApp, model.chatWorkdir) }
+                        .padding(horizontal = 9.dp, vertical = 3.dp),
+                )
             }
-            Icon(Icons.Rounded.MoreHoriz, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
+            // the permission-mode switch lives in the ⋯ popover now, mirroring mobile's quick-actions
+            // sheet (the old header pill was display-only and read as a broken control)
+            Icon(
+                Icons.Rounded.MoreHoriz, null, tint = Tok.tx2,
+                modifier = Modifier.size(26.dp).clip(RoundedCornerShape(999.dp))
+                    .clickable { model.showQuickActions = true }.padding(4.dp),
+            )
         }
         val branch = model.chatBranch?.let { "  ·  ⑂ $it" } ?: ""
         // machine-first line: which computer this session lives on leads the mono meta (fleet language)
@@ -240,6 +245,20 @@ private fun MessageRow(item: ChatItem) {
             "Always allowing  ${item.rule}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp,
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
         )
+        // question-exchange residue (AskUserQuestion); desktop still answers via the generic flow for now
+        is ChatItem.QuestionsAnswered -> Text(
+            "?  Answered" + if (item.items.isEmpty()) "" else "  ·  ${item.items.joinToString(" · ") { it.second }}",
+            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        is ChatItem.QuestionsWithdrawn -> Text(
+            "Claude moved on — answers no longer needed", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
+        )
+        // a live turn's end: quiet ✓ divider so "finished" stays visible after the caret stops blinking
+        is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
+            Text("✓ done" + (item.seconds?.let { "  ·  ${turnDurLabel(it)}" } ?: ""), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.sp)
+            Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
+        }
     }
 }
 
@@ -335,8 +354,32 @@ private fun Modifier.blinkAccent(): Modifier = composed {
     background(Tok.accent.copy(alpha = a))
 }
 
+/** Replaces the composer while the session is a read-only OBSERVE view (owned by a terminal/VS Code
+ *  on the computer). Take-over forks a branch the app can drive — same gesture as mobile. */
 @Composable
-private fun Composer(model: DesktopModel) {
+private fun ObserveBar(model: DesktopModel) {
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Dot(Tok.warn, 7.dp)
+            Text(
+                "Read-only — this session is running in a terminal on the computer",
+                color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f),
+            )
+            Text(
+                "Continue here", color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Tok.accent)
+                    .clickable { model.takeOver() }.padding(horizontal = 12.dp, vertical = 7.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun Composer(model: DesktopModel, paneFocused: Boolean = true) {
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Column(
@@ -346,6 +389,12 @@ private fun Composer(model: DesktopModel) {
             Column(Modifier.widthIn(max = Dk.maxStreamWidth).fillMaxWidth()) {
                 val scope = rememberCoroutineScope()
                 val submit = { if (model.composer.isNotBlank() || model.hasReadyImages()) model.send(model.composer) }
+                // ⌘1-9 pin jumps / palette / sidebar switches land ready-to-type (#46). Keyed on the
+                // session identity so mere recompositions don't steal focus from other UI (e.g. a modal).
+                val composerFocus = remember { FocusRequester() }
+                LaunchedEffect(model.selectedSessionId, paneFocused) {
+                    if (paneFocused && model.hasChat) runCatching { composerFocus.requestFocus() }
+                }
                 // "/" autocomplete — query/filter/rank shared with the mobile composer (one ranking to tune)
                 val slashQuery = slashQueryOf(model.composer)
                 val slashCmds = remember(slashQuery, model.slashCommands) {
@@ -396,7 +445,7 @@ private fun Composer(model: DesktopModel) {
                             onValueChange = { field = it; model.composer = it.text },
                             textStyle = fieldStyle,
                             cursorBrush = SolidColor(Tok.accent),
-                            modifier = Modifier.fillMaxWidth().onPreviewKeyEvent { e ->
+                            modifier = Modifier.fillMaxWidth().focusRequester(composerFocus).onPreviewKeyEvent { e ->
                                 when {
                                     // ⌘V/Ctrl+V with an image on the clipboard attaches it; plain text
                                     // falls through (return false) to the field's normal paste
@@ -413,6 +462,10 @@ private fun Composer(model: DesktopModel) {
                                     }
                                     slashOpen && e.type == KeyEventType.KeyDown && e.key == Key.Escape -> {
                                         slashDismissed = true; true
+                                    }
+                                    // CLI muscle memory: Esc interrupts the running turn (slash menu already handled above)
+                                    e.type == KeyEventType.KeyDown && e.key == Key.Escape && model.streaming -> {
+                                        model.stopTurn(); true
                                     }
                                     slashOpen && e.type == KeyEventType.KeyDown && !e.isShiftPressed &&
                                         (e.key == Key.Tab || e.key == Key.Enter) -> {
@@ -436,6 +489,15 @@ private fun Composer(model: DesktopModel) {
                             },
                         )
                     }
+                    // ■ interrupt rides BESIDE send while a turn runs (send itself never morphs) — the
+                    // interrupted prompt returns to the composer via stopTurn (#48); Esc does the same
+                    if (model.streaming) {
+                        Box(
+                            Modifier.size(34.dp).clip(RoundedCornerShape(999.dp))
+                                .border(1.dp, Tok.hair, RoundedCornerShape(999.dp)).clickable { model.stopTurn() },
+                            contentAlignment = Alignment.Center,
+                        ) { Box(Modifier.size(11.dp).clip(RoundedCornerShape(2.dp)).background(Tok.danger)) }
+                    }
                     Box(
                         Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent).clickable { submit() },
                         contentAlignment = Alignment.Center,
@@ -444,6 +506,7 @@ private fun Composer(model: DesktopModel) {
                 Row(Modifier.fillMaxWidth().padding(top = 7.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Key("⏎"); Text("send", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
                     Key("⇧⏎"); Text("newline", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                    if (model.streaming) { Key("esc"); Text("stop", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
                 }
             }
         }

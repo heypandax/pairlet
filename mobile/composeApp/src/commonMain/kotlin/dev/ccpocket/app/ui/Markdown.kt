@@ -145,7 +145,7 @@ fun MarkdownText(text: String, color: Color) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         parseBlocks(text).forEach { block ->
             when (block) {
-                is MdBlock.Code -> CodeBlock(block.code, block.lang)
+                is MdBlock.Code -> CodeBlock(block.code, block.lang, block.closed)
                 is MdBlock.Table -> TableBlock(block, color)
                 is MdBlock.Lines -> block.lines.forEach { MdLine(it, color) }
             }
@@ -179,7 +179,7 @@ fun CopyChip(text: String, modifier: Modifier = Modifier) {
 
 /** Fenced block per the design: hairline container, surface header (language + copy), mono body. */
 @Composable
-private fun CodeBlock(code: String, lang: String?) {
+private fun CodeBlock(code: String, lang: String?, closed: Boolean = true) {
     val shape = RoundedCornerShape(10.dp)
     val scale = LocalFontScale.current
     Column(Modifier.fillMaxWidth().clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)) {
@@ -190,8 +190,16 @@ private fun CodeBlock(code: String, lang: String?) {
             Text(lang ?: "code", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp * scale, modifier = Modifier.weight(1f))
             CopyChip(code)
         }
+        // Syntax-highlighted body when the fence names a language we know (issue #51). A still-OPEN
+        // fence is the block being streamed: its `code` grows every chunk, so remember() can't cache
+        // it and each append would re-tokenize the whole tail from scratch (O(n²) over the block's
+        // growth, on the composition thread) — stay plain until the closing fence lands.
+        // Trade-off: a highlighted block drops pathLinked()'s clickable file paths/URLs — token spans
+        // and link spans would fight over the same ranges, and a clickable path inside real code is
+        // rarely worth the collision. Blocks that stay plain (no/unknown lang) keep the linkified pipeline.
+        val highlighted = remember(code, lang, closed) { if (closed) highlightCodeOrNull(code, lang) else null }
         Text(
-            pathLinked(code), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp * scale,
+            highlighted ?: pathLinked(code), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp * scale,
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(10.dp),
         )
     }
@@ -277,7 +285,7 @@ private fun inline(s: String): AnnotatedString = buildAnnotatedString {
 }
 
 private sealed interface MdBlock {
-    data class Code(val code: String, val lang: String?) : MdBlock
+    data class Code(val code: String, val lang: String?, val closed: Boolean = true) : MdBlock
     data class Table(val header: List<String>, val rows: List<List<String>>) : MdBlock
     data class Lines(val lines: List<String>) : MdBlock
 }
@@ -308,8 +316,10 @@ private fun parseBlocks(text: String): List<MdBlock> {
             val code = ArrayList<String>()
             i++
             while (i < lines.size && !lines[i].trimStart().startsWith("```")) { code += lines[i]; i++ }
-            i++ // skip the closing fence
-            blocks += MdBlock.Code(code.joinToString("\n"), lang)
+            // an unterminated fence = the block still being streamed — CodeBlock defers highlighting on it
+            val closed = i < lines.size
+            if (closed) i++ // skip the closing fence
+            blocks += MdBlock.Code(code.joinToString("\n"), lang, closed)
         } else if (lines[i].contains('|') && i + 1 < lines.size && isTableDelim(lines[i + 1])) {
             // GFM table: a header row followed by a delimiter row (the delimiter guards against false positives).
             flush()

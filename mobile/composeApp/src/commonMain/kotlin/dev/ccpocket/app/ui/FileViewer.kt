@@ -69,7 +69,10 @@ fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismis
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     items(repo.changedFiles, key = { it.path }) { f ->
-                        ChangedFileRow(f) { onOpen(f.path); onDismiss() }
+                        // Deliberately NOT dismissing: the viewer replaces the whole screen while it's up,
+                        // and keeping the sheet's state alive means the viewer's back lands here again —
+                        // browse the next file without re-digging through ⋯ → changed files (issue #53).
+                        ChangedFileRow(f) { onOpen(f.path) }
                     }
                 }
             }
@@ -108,7 +111,7 @@ private fun ChangedFileRow(f: ChangedFile, onClick: () -> Unit) {
  */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun FileViewerScreen(repo: PocketRepository, onBack: () -> Unit) {
+fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     val path = repo.viewedFilePath.value ?: return
     val content = repo.viewedFile.value
@@ -123,6 +126,9 @@ fun FileViewerScreen(repo: PocketRepository, onBack: () -> Unit) {
                 Text(path.substringAfterLast(sep), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 TailPathText(path.substringBeforeLast(sep, ""), fontSize = 11.sp)
             }
+            // ← goes back UP one level (the changed-files list when that's where we came from);
+            // ✕ skips the list and drops straight to the chat (issue #53's "一键返回").
+            onExit?.let { TextButton(it) { Text("✕", color = Tok.tx2, fontSize = 16.sp) } }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
@@ -155,12 +161,16 @@ fun FileViewerScreen(repo: PocketRepository, onBack: () -> Unit) {
                         color = Tok.muted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
                     )
                     val text = content.text ?: ""
-                    if (path.substringAfterLast('.', "").lowercase() in setOf("md", "markdown")) {
+                    val ext = path.substringAfterLast('.', "").lowercase()
+                    if (ext in setOf("md", "markdown")) {
                         MarkdownText(text, Tok.tx)
                     } else {
+                        // tint by file extension (issue #51 — "生成文件的 sql, py"); unknown or oversize
+                        // files come back as the plain single-color string
+                        val body = remember(text, ext) { highlightCode(text, ext) }
                         SelectionContainer {
                             Text(
-                                text, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
+                                body, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
                                 softWrap = false,
                                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                             )

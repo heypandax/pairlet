@@ -73,6 +73,7 @@ private class PItem(
     val hint: String? = null,   // right-aligned keycap ("⌘2")
     val badge: Int = 0,         // AttentionBadge count (approvals waiting on that machine)
     val accent: Boolean = false, // terracotta label — the "needs you" verbs
+    val id: String? = null,     // stable unique key when label+detail can collide (sessions share titles — fork twins)
     val activate: () -> Unit,
 )
 
@@ -97,7 +98,7 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
         add(
             PItem(
                 PKind.MACHINE, "Switch to ${c.name}", detail, osIcon(c.os), false,
-                hint = if (i < 9) "⌘0 ${i + 1}" else null, badge = m.pending,
+                hint = if (i < 9) "⌘0 ${i + 1}" else null, badge = m.pending, id = c.accountId,
             ) { model.selectComputer(c) },
         )
     }
@@ -110,12 +111,12 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
         add(
             PItem(
                 PKind.ACTION, "Approve pending on ${a.machine}", "${a.tool} · ${a.preview}", Icons.Outlined.Shield, false,
-                hint = a.seconds?.let(::fmtMmSs), accent = true,
+                hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.id}",
             ) { model.showAttention = true },
         )
     }
     model.projects.forEach { add(projectItem(it)) }
-    model.sessions.forEach { s -> add(PItem(PKind.SESSION, s.title, tilde(s.cwd), Icons.Outlined.ChatBubbleOutline, s.agent == AgentKind.CODEX) { model.selectSession(s) }) }
+    model.sessions.forEach { s -> add(PItem(PKind.SESSION, s.title, tilde(s.cwd), Icons.Outlined.ChatBubbleOutline, s.agent == AgentKind.CODEX, id = s.sessionId) { model.selectSession(s) }) }
 }
 
 /** Case-insensitive rank: label-prefix > label-substring > detail-substring; 0 filters the row out. */
@@ -197,7 +198,7 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
             Text("No matches", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp))
         } else {
             LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).padding(6.dp)) {
-                itemsIndexed(items, key = { _, it -> it.kind.name + it.label + it.detail }) { i, it ->
+                itemsIndexed(items, key = { _, it -> it.kind.name + (it.id ?: (it.label + it.detail)) }) { i, it ->
                     PaletteRow(it, query, selected = i == active, onClick = { open(i) })
                 }
             }

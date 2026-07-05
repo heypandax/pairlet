@@ -19,6 +19,7 @@ import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.Telemetry
+import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
@@ -61,6 +62,12 @@ import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.SessionSummary
+import dev.ccpocket.protocol.AuthLogin
+import dev.ccpocket.protocol.AuthLoginCancel
+import dev.ccpocket.protocol.AuthLoginCode
+import dev.ccpocket.protocol.AuthLogout
+import dev.ccpocket.protocol.AuthState
+import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.Usage
@@ -74,6 +81,8 @@ import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.TurnDone
+import dev.ccpocket.protocol.SetPushPrefs
+import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.preview_cmd_title
@@ -118,7 +127,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed interface ChatItem {
-    data class User(val text: String, val images: List<ByteArray> = emptyList()) : ChatItem
+    /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
+     *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
+     *  frames queue in the transport outbox indefinitely and would otherwise look "sent" (issue #41). */
+    data class User(val text: String, val images: List<ByteArray> = emptyList(), val pending: Boolean = false) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
     /** Extended reasoning, rendered as a collapsible row. [seconds] lands when thinking finishes (null while streaming). */
@@ -126,6 +138,17 @@ sealed interface ChatItem {
     data class Tool(val tool: String, val preview: String) : ChatItem
     data class Sys(val text: String) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
+
+    /** The compact transcript row left behind after answering an AskUserQuestion card:
+     *  (question → answer) pairs; a freeform reply is a single ("" → response) pair. */
+    data class QuestionsAnswered(val items: List<Pair<String, String>>) : ChatItem
+
+    /** Claude withdrew its questions (control_cancel) — muted one-liner where the card used to be. */
+    data object QuestionsWithdrawn : ChatItem
+
+    /** A live turn finished here — muted "✓ done · 42s" divider so turn boundaries stay visible after
+     *  the streaming caret stops. Appended on TurnDone only, never present in replayed history. */
+    data class TurnEnded(val seconds: Int? = null) : ChatItem
 }
 
 enum class ImgState { Compressing, Ready, Rejected }
@@ -211,8 +234,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
     val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
 
-    /** Persisted default execution mode for NEW sessions (Settings binds to it; the new-session picker pre-selects it).
-     *  Resumed sessions keep their own remembered mode — this only seeds brand-new ones. Default: Ask each step. */
+    /** Persisted default execution mode (Settings binds to it; the new-session picker pre-selects it).
+     *  Applies to new sessions AND resumes (issue #50) — a resumed session no longer revives its old mode. */
     val defaultMode = mutableStateOf(
         SecureStore.getString(K_DEFAULT_MODE)?.let { s -> PermissionMode.entries.firstOrNull { it.name == s } } ?: PermissionMode.DEFAULT,
     )
@@ -352,6 +375,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val opening = mutableStateOf(false)                      // an OpenSession is in flight — one-tap entries disable on it (a double-tap would open two fresh sessions)
+    val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
+    private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
+    val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
@@ -363,6 +389,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private class PromptRetry(val text: String, val images: List<ImageData>, val workdir: String)
     private var promptRetry: PromptRetry? = null
     private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
+    private var promptPending = false // a User bubble is marked pending until the daemon shows signs of life
+    private var turnStartMark: kotlin.time.TimeSource.Monotonic.ValueTimeMark? = null // stamps TurnEnded's duration
+
+    /** Desktop notifier seam: fires when the active conversation's turn completes (after the TurnEnded
+     *  marker lands). The UI layer decides whether that deserves a system notification / dock badge. */
+    var onTurnFinished: ((title: String, preview: String?) -> Unit)? = null
+
+    /** First daemon evidence for the in-flight prompt (chunk/tool/turn-end/error): drop the retry copy
+     *  and flip the pending User bubble to delivered (issue #41). */
+    private fun promptEvidence() {
+        promptRetry = null
+        if (!promptPending) return
+        promptPending = false
+        val i = messages.indexOfLast { it is ChatItem.User }
+        (messages.getOrNull(i) as? ChatItem.User)?.takeIf { it.pending }?.let { messages[i] = it.copy(pending = false) }
+    }
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
     // session closes its process; reopening resumes a FRESH process that would otherwise default these.
@@ -1038,6 +1080,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items); sessionsRefreshing.value = false }
             is Usage -> { usage.value = f; usageLoading.value = false }
+            is AuthState -> authState.value = f
+            is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
@@ -1070,6 +1114,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
                 switching.value = false
                 opening.value = false // the open (or reattach) landed
+                openTimedOut.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
                 persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
@@ -1087,12 +1132,31 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // list, so a frame from a just-left conversation (its tail still in flight when we switched) must
             // be dropped — else it renders into whatever convo is now open. Reopening the source replays its
             // full transcript via ConvoHistory, so nothing is actually lost. (Matches the BackgroundJobs guard.)
-            is AssistantChunk -> if (f.convoId == convoId.value) { promptRetry = null; appendChunk(f) }
-            is ToolEvent -> if (f.convoId == convoId.value) { promptRetry = null; finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
+            is AssistantChunk -> if (f.convoId == convoId.value) { promptEvidence(); appendChunk(f) }
+            is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
             is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
+            // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
+            is AskWithdrawn -> if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
+                if (pendingAsk.value?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
+                pendingAsk.value = null
+            }
             is TurnDone -> if (f.convoId == convoId.value) {
-                promptRetry = null
+                promptEvidence()
+                val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
+                if (turnWasLive) {
+                    messages.add(ChatItem.TurnEnded(turnStartMark?.elapsedNow()?.inWholeSeconds?.toInt()))
+                    turnStartMark = null
+                    val preview = (messages.lastOrNull { it is ChatItem.Assistant } as? ChatItem.Assistant)
+                        ?.text?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140)
+                    onTurnFinished?.invoke(chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket", preview)
+                }
+                // the listed snapshot said `live` at listing time — correct it locally so sidebar/list
+                // dots stop pulsing the moment the turn ends instead of waiting for a manual re-list
+                sessionKey.value?.let { sid ->
+                    val i = sessions.indexOfFirst { it.sessionId == sid }
+                    if (i >= 0 && sessions[i].live) sessions[i] = sessions[i].copy(live = false)
+                }
                 // ~context occupancy: the prompt claude just saw + the reply it wrote (null = interrupted/
                 // error turn without usage — keep showing the last known value, never snap to 0). A ZERO
                 // footprint is equally never a real turn: daemons predating hasUsage send zero-filled
@@ -1106,23 +1170,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
-                    promptRetry = null
+                    promptEvidence()
                     finishThinking(); streaming.value = false
                 }
             }
             // The daemon no longer holds this conversation (idle-reaped during a link drop / daemon restart).
             // Recover instead of spinning: re-open (resume) the same session, and the SessionLive handler
             // resends the pending prompt exactly once. No session to resume → surface it honestly.
-            is SessionGone -> if (f.convoId == convoId.value && !observing.value) {
-                val sid = sessionKey.value ?: currentSessionId
-                val wd = workdir.value
-                if (promptRetry != null && !promptResendArmed && sid != null && wd != null) {
-                    promptResendArmed = true
-                    scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE)) }
+            is SessionGone -> if (f.convoId == convoId.value) {
+                if (observing.value) {
+                    // an observe view can't run turns — a stray send must not leave the caret spinning
+                    // forever (the old blanket ignore did exactly that, issue #45 ②)
+                    promptEvidence(); finishThinking(); streaming.value = false
                 } else {
-                    promptRetry = null; promptResendArmed = false
-                    finishThinking(); streaming.value = false
-                    messages.add(ChatItem.Sys("session expired on the computer — send again to restart it"))
+                    val sid = sessionKey.value ?: currentSessionId
+                    val wd = workdir.value
+                    if (promptRetry != null && !promptResendArmed && sid != null && wd != null) {
+                        promptResendArmed = true
+                        scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE)) }
+                    } else {
+                        promptEvidence(); promptResendArmed = false
+                        finishThinking(); streaming.value = false
+                        messages.add(ChatItem.Sys("session expired on the computer — send again to restart it"))
+                    }
                 }
             }
             // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript
@@ -1207,6 +1277,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Keep the open-project list fresh without the pull-to-refresh spinner (the daemon list is pull-only). */
     fun refreshDirectoriesSilently() = scope.launch { runCatching { send(ListDirectories()) } }
 
+    /** The daemon host's Claude CLI login (Settings ▸ Account) — the latest [AuthState] push wins;
+     *  the client never builds its own login state machine. Null until first fetched (or the daemon
+     *  predates pocket/auth.* and silently drops the request). */
+    val authState = mutableStateOf<AuthState?>(null)
+
+    fun fetchAuthStatus() = scope.launch { runCatching { send(FetchAuthStatus) } }
+
+    /** Whether the daemon pushes "turn complete" alerts to phones — daemon truth via [PushPrefs].
+     *  Null until first fetched (or the daemon predates pocket/push.prefs.* — hide the toggle then). */
+    val pushPrefs = mutableStateOf<Boolean?>(null)
+
+    fun fetchPushPrefs() = scope.launch { runCatching { send(SetPushPrefs()) } }
+
+    fun setPushEnabled(enabled: Boolean) = scope.launch { runCatching { send(SetPushPrefs(enabled)) } }
+
+    /** Switch account: the daemon logs the CLI out (when needed) and starts `claude auth login` —
+     *  the browser opens on the daemon host; [authState] turns loginPending with the OAuth URL. */
+    fun authLogin() = scope.launch { runCatching { send(AuthLogin()) } }
+
+    /** The authorization code the user copied from the browser — completion arrives as a fresh [AuthState]. */
+    fun authSubmitCode(code: String) = scope.launch { runCatching { send(AuthLoginCode(code)) } }
+
+    fun authCancelLogin() = scope.launch { runCatching { send(AuthLoginCancel) } }
+
+    fun authLogout() = scope.launch { runCatching { send(AuthLogout) } }
+
     /** Token-usage dashboard (issue #26): the latest daemon-aggregated snapshot + a fetch-in-flight flag. */
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
@@ -1222,15 +1318,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Pull-to-refresh spinner for the sessions list (mirrors [refreshing] for the project list). */
     val sessionsRefreshing = mutableStateOf(false)
 
-    /** Re-scan the open project's sessions with the pull-to-refresh spinner. */
-    fun refreshSessions() {
-        val wd = sessionsDir.value ?: return
-        refreshWithSpinner(sessionsRefreshing, ListSessions(wd))
+    /** Re-scan a project's sessions with the pull-to-refresh spinner ([wd] defaults to the open list's dir). */
+    fun refreshSessions(wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        refreshWithSpinner(sessionsRefreshing, ListSessions(dir))
     }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
-    // the list applies it too — not just the new-session picker. A session opened before keeps its own (saved).
+    // the list applies it too — not just the new-session picker.
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
+        openTimedOut.value = false
+        promptPending = false // the pending marker belongs to the previous conversation's transcript
+        val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
         // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
         // (sidebar click → here, no backToBrowse in between), so an unconditional close was killing
@@ -1244,11 +1343,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
+        autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
         // restore the session's last-known launch flags: shows the right badge immediately (no default flash)
         // AND relaunches under them if the daemon closed the process while we were away. A live session's
         // reattach SessionLive still wins as the source of truth right after.
         val saved = resumeId?.let { sessionParams[it] }
-        val openMode = saved?.mode ?: startMode
+        // Mode intentionally ignores the session's remembered value: resuming applies the caller's mode
+        // (default = the persisted Settings mode), so "continue here" honors what Settings says instead of
+        // silently reviving a stale per-session mode (issue #50). Model/effort/agent still restore per-session.
+        val openMode = startMode
         val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
         mode.value = openMode; allowRules.clear()
@@ -1257,7 +1360,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = openEffort, agent = openAgent))
-        delay(8000); opening.value = false // safety: clear if the daemon never answers (matches `switching`)
+        delay(8000) // safety: clear if the daemon never answers (matches `switching`)
+        if (gen == openGen && opening.value) {
+            opening.value = false
+            openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
+        }
     }
 
     fun hasReadyImages() = pendingImages.any { it.state == ImgState.Ready }
@@ -1306,7 +1413,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (text.isBlank() && ready.isEmpty()) return
         if (voice.value is VoiceState.Failed) clearVoice() // sending dismisses the error chip
         val images = ready.map { ImageData("image/jpeg", Base64.Default.encode(it)) }
-        messages.add(ChatItem.User(text, ready))
+        messages.add(ChatItem.User(text, ready, pending = true))
+        promptPending = true
+        turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
         if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
         pendingImages.clear()
         streaming.value = true
@@ -1597,7 +1706,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private fun randomCaptureId(): String =
         Random.nextBytes(8).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
-    fun resolve(decision: Decision, remember: Boolean = false) {
+    fun resolve(decision: Decision, remember: Boolean = false, message: String? = null) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
         pendingAsk.value = null
@@ -1606,7 +1715,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             messages.add(ChatItem.RuleChip(r)) // drop the "always allowing X" chip into the stream
         }
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to (if (remember) "always" else decision.name.lowercase())))
-        scope.launch { send(PermissionVerdict(c, a.askId, decision, remember = remember)) }
+        scope.launch { send(PermissionVerdict(c, a.askId, decision, message = message, remember = remember)) }
+    }
+
+    /** Answer an AskUserQuestion prompt: the picks (question text → label/comma-joined labels/"Other…" text)
+     *  and/or a freeform [response] ride the ALLOW verdict; the daemon merges them into claude's updatedInput. */
+    fun answerQuestions(answers: Map<String, String>?, response: String? = null) {
+        val a = pendingAsk.value ?: return
+        val c = convoId.value ?: return
+        pendingAsk.value = null
+        val items = response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
+            ?: a.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
+        messages.add(ChatItem.QuestionsAnswered(items))
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to "answered"))
+        scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
 
     /** Timeout: the daemon already auto-denied at 30s; just clear the prompt without re-sending. */
@@ -1710,7 +1832,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch {
             obs?.let { send(CloseSession(it)) }
             messages.clear(); convoId.value = null; observing.value = false
-            send(OpenSession(wd, sid, takeOver = true))
+            // "Continue here" resumes under the Settings default mode — omitting it fell back to the
+            // wire default (ask each step), ignoring the user's chosen mode (issue #50). Model/effort
+            // still restore per-session, same as openSession.
+            val saved = sessionParams[sid]
+            mode.value = defaultMode.value
+            send(OpenSession(wd, sid, model = saved?.model, mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true))
         }
     }
 

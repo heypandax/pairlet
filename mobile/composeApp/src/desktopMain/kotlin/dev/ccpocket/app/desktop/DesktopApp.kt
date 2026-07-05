@@ -37,7 +37,13 @@ fun DesktopApp(model: DesktopModel) {
         if (model.showNewSession) {
             // anchored under the sidebar's New-session row (header 48 + row 32)
             Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 84.dp)) {
-                NewSessionPopover(model.newSessionSeed ?: "~/") { dir, agent, mode -> model.newSession(dir, agent, mode) }
+                NewSessionPopover(model.newSessionSeed ?: "~/", model.defaultAgent, model.defaultMode) { dir, agent, mode -> model.newSession(dir, agent, mode) }
+            }
+        }
+        if (model.showQuickActions) {
+            // anchored under the chat header's ⋯ (header row ≈44 + meta line ≈30)
+            Overlay(onDismiss = { model.showQuickActions = false }, alignment = Alignment.TopEnd, padding = PaddingValues(end = 14.dp, top = 44.dp)) {
+                QuickActionsPopover(model) { model.showQuickActions = false }
             }
         }
         if (model.showTray) {
@@ -72,7 +78,7 @@ fun DesktopApp(model: DesktopModel) {
                 FocusedModal(
                     computer = model.activeComputer?.name ?: "your computer",
                     ask = ask, agent = model.chatAgent, workdir = model.chatWorkdir, branch = model.chatBranch,
-                    onAllow = { model.resolve(allow = true, remember = false) },
+                    onAllow = { rem -> model.resolve(allow = true, remember = rem) },
                     onDeny = { model.resolve(allow = false, remember = false) },
                     onDismiss = { model.dismissAsk() },
                 )

@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +49,8 @@ import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
 // ── model + effort option sets (what `--model` / `--effort` accept) ──
-private val CODEX_MODEL_OPTIONS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex") // Codex sessions get Codex models
+internal val CODEX_MODEL_OPTIONS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex") // Codex sessions get Codex models; shared with the desktop ⋯ popover
+internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku") // display name → alias; shared by both shells' pickers
 internal val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max") // shared: live /effort picker + Settings default
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
@@ -243,7 +246,7 @@ private fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -
     val codex = repo.sessionAgent.value == AgentKind.CODEX
     val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
-    else listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku").map { (name, alias) ->
+    else CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
         val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW
         ModelChoice(name, alias, alias, if (big) "1M" else "200K", big)
     }
@@ -253,7 +256,8 @@ private fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -
     LaunchedEffect(switchingTo, repo.model.value) {
         val target = switchingTo ?: return@LaunchedEffect
         val now = if (codex) repo.model.value else modelAlias(repo.model.value)
-        if (now.equals(target, ignoreCase = true)) onDone()
+        // raw compare too: a custom id ("kimi-k2…") never alias-matches, but the daemon echoes it verbatim
+        if (now.equals(target, ignoreCase = true) || repo.model.value?.equals(target, ignoreCase = true) == true) onDone()
     }
     // …or after a short timeout, so a silent relaunch never leaves the sheet stuck spinning
     LaunchedEffect(switchingTo) { if (switchingTo != null) { delay(4000); onDone() } }
@@ -298,6 +302,38 @@ private fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -
                         isSwitching -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
                         isSel -> Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     }
+                }
+            }
+        }
+    }
+    // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
+    // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
+    // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
+    val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) }
+    val customActive = !presetActive && !repo.model.value.isNullOrBlank()
+    var custom by remember { mutableStateOf(if (customActive) repo.model.value.orEmpty() else "") }
+    Column(Modifier.padding(top = 12.dp)) {
+        Text(stringResource(Res.string.model_custom_label), color = Tok.muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                custom, { custom = it },
+                placeholder = { Text(stringResource(Res.string.model_custom_hint), color = Tok.muted, fontSize = 12.5.sp) },
+                singleLine = true, enabled = switchingTo == null,
+                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
+                modifier = Modifier.weight(1f),
+            )
+            Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
+                val t = custom.trim()
+                val isSwitchingCustom = switchingTo != null && switchingTo.equals(t, ignoreCase = true) && !presetActive
+                when {
+                    isSwitchingCustom -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
+                    customActive && t.equals(repo.model.value, ignoreCase = true) && switchingTo == null ->
+                        Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    t.isNotEmpty() && switchingTo == null -> Text(
+                        "→", color = Tok.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                            .clickable { switchingTo = t; repo.switchModel(t) }.padding(6.dp),
+                    )
                 }
             }
         }

@@ -1,5 +1,10 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,10 +40,12 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LaptopMac
 import androidx.compose.material.icons.rounded.LaptopWindows
 import androidx.compose.material.icons.rounded.PriorityHigh
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -285,15 +292,19 @@ private fun RunningZone(model: DesktopModel) {
     if (running.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
         SectionLabel("Running")
-        running.forEach { (m, p) -> RunningRow(m, p) { model.openRunning(m, p) } }
+        running.forEach { (m, p) -> RunningRow(m, p, onBrowse = { model.browseRunning(m, p) }) { model.openRunning(m, p) } }
     }
 }
 
-/** One cross-machine RUNNING row: accent pulse · project (mono) · which machine, right-aligned muted. */
+/** One cross-machine RUNNING row: accent pulse · project (mono) · which machine, right-aligned muted.
+ *  Click = jump to the live session; the hover ≡ = the project's session LIST instead (issue #49 —
+ *  the direct jump made the dir's other/historical sessions look unreachable). */
 @Composable
-private fun RunningRow(m: DkMachine, p: DkProject, onClick: () -> Unit) {
+private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
     Row(
-        Modifier.fillMaxWidth().height(30.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(30.dp).hoverable(src).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -302,7 +313,10 @@ private fun RunningRow(m: DkMachine, p: DkProject, onClick: () -> Unit) {
             p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 12.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
-        Text(
+        if (hovered) Text(
+            "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp,
+            modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onBrowse).padding(horizontal = 3.dp),
+        ) else Text(
             m.computer.name, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
@@ -314,7 +328,7 @@ private fun RunningRow(m: DkMachine, p: DkProject, onClick: () -> Unit) {
 @Composable
 private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
-        SectionLabel("Recent")
+        SectionLabel("Recent", trailing = { Key("⌘R") })
         val groups = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
         if (groups.isEmpty()) {
             Text(
@@ -325,12 +339,21 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
             return@Column
         }
         val collapsed = remember { mutableStateListOf<String>() }
+        // which header's refresh icon spins: the clicked group's; ⌘R has no click, so the current one's
+        var refreshTarget by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(model.sessionsRefreshing) { if (!model.sessionsRefreshing) refreshTarget = null }
+        val spinningPath = if (model.sessionsRefreshing) refreshTarget ?: groups.firstOrNull { it.current }?.path else null
         val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
         LazyColumn(Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
             groups.forEach { g ->
                 val closed = g.path in collapsed
                 item(key = "h:${g.path}") {
-                    GroupHeader(g, closed) { if (closed) collapsed.remove(g.path) else collapsed.add(g.path) }
+                    GroupHeader(
+                        g, closed,
+                        refreshing = g.path == spinningPath,
+                        onRefresh = { refreshTarget = g.path; model.refresh(g) },
+                        onToggle = { if (closed) collapsed.remove(g.path) else collapsed.add(g.path) },
+                    )
                 }
                 if (!closed) {
                     if (g.sessions.isEmpty()) {
@@ -351,11 +374,13 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     }
 }
 
-/** A RECENT group header: folder + project name (mono, muted) · running pulse · collapse chevron. */
+/** A RECENT group header: folder + project name (mono, muted) · hover refresh · running pulse · collapse chevron. */
 @Composable
-private fun GroupHeader(g: DkSessionGroup, closed: Boolean, onToggle: () -> Unit) {
+private fun GroupHeader(g: DkSessionGroup, closed: Boolean, refreshing: Boolean, onRefresh: () -> Unit, onToggle: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
     Row(
-        Modifier.fillMaxWidth().height(28.dp).hoverFill().clickable(onClick = onToggle).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(28.dp).hoverable(src).hoverFill().clickable(onClick = onToggle).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
@@ -364,6 +389,19 @@ private fun GroupHeader(g: DkSessionGroup, closed: Boolean, onToggle: () -> Unit
             g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
+        when {
+            refreshing -> {
+                val angle by rememberInfiniteTransition().animateFloat(
+                    initialValue = 0f, targetValue = 360f,
+                    animationSpec = infiniteRepeatable(tween(900, easing = LinearEasing)),
+                )
+                Icon(Icons.Rounded.Refresh, null, tint = Tok.tx2, modifier = Modifier.size(13.dp).rotate(angle))
+            }
+            hovered -> Icon(
+                Icons.Rounded.Refresh, null, tint = Tok.tx2,
+                modifier = Modifier.size(13.dp).clickable(onClick = onRefresh),
+            )
+        }
         if (closed && g.sessions.any { it.running }) PulseDot(Tok.ok, 5.dp) // running stays visible when folded
         Icon(
             Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,

@@ -74,6 +74,49 @@ class PermissionBridgeTest {
     }
 
     @Test
+    fun askUserQuestion_carries_questions_and_merges_answers_into_updatedInput() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        val input = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"questions":[{"question":"Which color?","header":"Color","multiSelect":false,
+                "options":[{"label":"Red","description":"r"},{"label":"Blue","description":"b"}]}]}""",
+        ) as kotlinx.serialization.json.JsonObject
+        b.onControlRequest(AgentEvent.ControlRequest("q1", "AskUserQuestion", input))
+
+        val ask = emitted.single()
+        assertIs<PermissionAsk>(ask)
+        assertEquals("Which color?", ask.questions?.single()?.question) // phone gets the structured card
+        assertEquals(listOf("Red", "Blue"), ask.questions?.single()?.options?.map { it.label })
+
+        b.onVerdict(PermissionVerdict("c1", "q1", Decision.ALLOW, answers = mapOf("Which color?" to "Red")))
+        val r = responses.single()
+        assertTrue(r.allow)
+        assertTrue(r.updated!!.contains(""""Which color?":"Red""""))  // answers merged into updatedInput
+        assertTrue(r.updated!!.contains("questions"))                 // original input preserved
+        scope.cancel()
+    }
+
+    @Test
+    fun askUserQuestion_still_asks_under_bypass_and_ignores_remembered_rules() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        // a stale "always allow" for AskUserQuestion must not swallow questions either
+        val rules = mutableSetOf("AskUserQuestion")
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("q2", "AskUserQuestion", null))
+        assertEquals(1, emitted.size) // asked the phone despite bypass + remembered rule
+        assertTrue(responses.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
     fun remembered_rule_auto_allows_next_matching_request() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val responses = mutableListOf<Resp>()

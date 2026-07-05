@@ -32,11 +32,42 @@ class DirectoryService {
     }
 
     /**
-     * M0: list directories that have Claude history (from ~/.claude/projects), recents flagged.
-     * We read the authoritative `cwd` from each project's newest .jsonl rather than decoding the
-     * (lossy) dir-key.
+     * List directories that have agent history: Claude's (from ~/.claude/projects, the authoritative
+     * `cwd` read from each project's newest .jsonl rather than the lossy dir-key) merged with Codex's
+     * (cwds recorded in ~/.codex/sessions rollouts). A dir the user only ever ran Codex in has no
+     * Claude project folder — without the merge it never appears at all, so its Codex sessions are
+     * unreachable from the app.
      */
     fun listDirectories(root: String?, busyCwds: Set<String> = emptySet()): List<DirectoryEntry> {
+        val claude = claudeDirectories(busyCwds)
+        val codex = runCatching { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() }.getOrDefault(emptyMap())
+        if (codex.isEmpty()) return claude
+        val known = claude.mapTo(HashSet()) { ProjectPaths.normCwd(it.path) }
+        val codexByNorm = codex.entries.groupBy({ ProjectPaths.normCwd(it.key) }, { it.value })
+        val codexOnly = codex.entries
+            .filter { (cwd, _) -> ProjectPaths.normCwd(cwd) !in known }
+            .map { (cwd, mtime) ->
+                DirectoryEntry(
+                    path = cwd,
+                    name = Path.of(cwd).fileName?.toString() ?: cwd,
+                    isDir = true,
+                    hasSessions = true,
+                    recent = cwd in recents,
+                    lastModified = mtime,
+                    busy = cwd in busyCwds,
+                )
+            }
+            .distinctBy { ProjectPaths.normCwd(it.path) }
+        // a dir with both histories sorts by whichever agent wrote last
+        val merged = claude.map { e ->
+            val codexM = codexByNorm[ProjectPaths.normCwd(e.path)]?.max() ?: 0L
+            if (codexM > e.lastModified) e.copy(lastModified = codexM) else e
+        }
+        return (merged + codexOnly).sortedByDescending { it.lastModified }
+    }
+
+    /** Directories with Claude history, newest-first, deduped per cwd. */
+    private fun claudeDirectories(busyCwds: Set<String>): List<DirectoryEntry> {
         val projects = ProjectPaths.projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }

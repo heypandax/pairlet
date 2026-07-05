@@ -146,7 +146,9 @@ class DeviceSessions(
         val env = runCatching { PocketJson.decodeFromString<Envelope>(plaintext.decodeToString()) }.getOrNull() ?: return
         log.info("← ${env.body::class.simpleName} from ${deviceId.take(8)}…")
 
-        val sink = OutboundSink { frame -> sealAndSend(deviceId, frame) }
+        // keyed: relay sinks are minted per frame — the deviceId key makes every frame from this device
+        // read as the SAME attached client in a conversation's fan-out set (issue #47)
+        val sink = dev.ccpocket.daemon.conversation.KeyedSink("dev:$deviceId", OutboundSink { frame -> sealAndSend(deviceId, frame) })
         try {
             core.router.handle(env.body, sink) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }

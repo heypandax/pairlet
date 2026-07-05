@@ -5,6 +5,7 @@ import dev.ccpocket.daemon.conversation.Conversation
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.conversation.PushHook
+import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.AgentKind
@@ -19,11 +20,13 @@ import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.nio.file.Path
 import java.util.UUID
 import kotlin.io.path.exists
@@ -34,6 +37,10 @@ import kotlin.io.path.getLastModifiedTime
 class SessionRegistry(
     private val scope: CoroutineScope,
     private val backends: Map<AgentKind, AgentBackendFactory>,
+    // "is a claude OUTSIDE the daemon alive on this workdir/transcript?" — injectable so the fork/observe
+    // decision matrix is unit-testable; the real probe shells out to lsof (LiveProcesses.externalClaudeAt)
+    private val processProbe: (workdir: String, transcript: Path) -> LiveProcesses.ExternalClaude =
+        LiveProcesses::externalClaudeAt,
 ) {
     private val mutex = Mutex()
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
@@ -61,8 +68,13 @@ class SessionRegistry(
     private val startedAt = System.currentTimeMillis()
 
     /** True if [file]'s recent mtime is explained by an EXTERNAL writer — i.e. recently written AND not
-     *  merely the tail of a session we closed ourselves (writes after our close mean a real foreign claude). */
-    private suspend fun externallyActive(sessionId: String, file: Path): Boolean {
+     *  merely the tail of a session we closed ourselves (writes after our close mean a real foreign claude).
+     *  mtime freshness is only the cheap GATE: a hit is confirmed by a real process probe (is a claude
+     *  outside the daemon actually alive on [workdir]?), because a terminal claude the user just quit
+     *  leaves a fresh mtime for up to 20s — trusting it blindly forked take-overs and demoted plain opens
+     *  to read-only observe against a writer that no longer exists (the main "mystery fork" source).
+     *  Internal (not private) so the decision matrix is unit-testable with a stubbed [processProbe]. */
+    internal suspend fun externallyActive(sessionId: String, workdir: String, file: Path): Boolean {
         // one stat serves both the freshness gate and the ownership checks below
         val mtime = runCatching { if (file.exists()) file.getLastModifiedTime().toMillis() else null }.getOrNull() ?: return false
         if (System.currentTimeMillis() - mtime >= TranscriptScanner.LIVE_WINDOW_MS) return false
@@ -73,11 +85,21 @@ class SessionRegistry(
         // A real terminal claude keeps writing, so its mtime moves past our boot within one turn.
         if (mtime < startedAt) return false
         val closedAt = mutex.withLock { selfClosed[sessionId] }
-        val verdict = closedAt == null || mtime > closedAt + SELF_CLOSE_SLACK_MS
         val now = System.currentTimeMillis()
+        if (closedAt != null && mtime <= closedAt + SELF_CLOSE_SLACK_MS) {
+            log.info("externallyActive(${sessionId.take(8)}…): mtime ${now - mtime}ms ago is our own close tail (selfClosed ${now - closedAt}ms ago) → false")
+            return false
+        }
+        // mtime alone can't tell "terminal claude still running" from "user quit it seconds ago" — ask the
+        // OS. Only reached on a fresh foreign-looking mtime, so the lsof cost stays off every ordinary open.
+        // UNKNOWN (Windows / lsof failure / timeout) keeps the old mtime verdict: a wrongly forked session
+        // is recoverable, two writers clobbering one transcript is not.
+        val probe = runCatching { withContext(Dispatchers.IO) { processProbe(workdir, file) } }
+            .getOrDefault(LiveProcesses.ExternalClaude.UNKNOWN)
+        val verdict = probe != LiveProcesses.ExternalClaude.ABSENT
         log.info(
             "externallyActive(${sessionId.take(8)}…): mtime ${now - mtime}ms ago, " +
-                "selfClosed ${closedAt?.let { "${now - it}ms ago" } ?: "absent"} → $verdict",
+                "selfClosed ${closedAt?.let { "${now - it}ms ago" } ?: "absent"}, probe=$probe → $verdict",
         )
         return verdict
     }
@@ -103,12 +125,14 @@ class SessionRegistry(
             }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
             // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
+            // externallyActive requires a LIVE external process, not just a fresh mtime — a terminal claude
+            // the user quit seconds ago falls through to an ordinary in-place resume, not read-only observe.
             if (open.agent == AgentKind.CLAUDE && !open.takeOver) {
                 val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
-                val recent = externallyActive(resume, file)
+                val recent = externallyActive(resume, open.workdir, file)
                 if (recent) {
                     val convoId = UUID.randomUUID().toString()
-                    log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (foreign writer suspected)")
+                    log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (live foreign writer)")
                     val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
                     mutex.withLock { observes[convoId] = obs }
                     obs.start()
@@ -129,12 +153,13 @@ class SessionRegistry(
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
-        // when it was touched very recently — the desktop is actively writing. Otherwise resume IN PLACE on the
-        // same sessionId: the phone truly takes over (issue #18 — no duplicate session) and the desktop picks up
-        // the phone's turns on its next --resume (issue #22 — sync). Ordinary cold/idle resume already appends in
-        // place. mtime is the same cross-platform liveness signal the ObserveSession guard above uses.
+        // when [externallyActive] confirms it — fresh mtime AND a claude process alive outside the daemon (the
+        // mtime window alone mistook "user quit the terminal seconds ago" for an active writer and minted bogus
+        // forks). Otherwise resume IN PLACE on the same sessionId: the phone truly takes over (issue #18 — no
+        // duplicate session) and the desktop picks up the phone's turns on its next --resume (issue #22 — sync).
+        // Ordinary cold/idle resume already appends in place. Same detector as the ObserveSession guard above.
         val forkForTakeOver = open.takeOver && resume != null &&
-            externallyActive(resume, ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl"))
+            externallyActive(resume, open.workdir, ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl"))
         log.info(
             "open ${resume?.take(8) ?: "new"}${if (open.takeOver) " (take-over)" else ""} → " +
                 "convo ${convoId.take(8)}… agent=${open.agent}${if (forkForTakeOver) " FORK" else ""}",
@@ -174,6 +199,26 @@ class SessionRegistry(
         return stale.size
     }
 
+    /** Conversations mid-work (turn in flight or background jobs) — these BLOCK an account switch:
+     *  swapping credentials under an agent that is actively talking to the API breaks it mid-turn.
+     *  Merely-open idle conversations don't count — [closeIdleForAuth] reaps those instead (otherwise
+     *  the desktop could never switch: its own open chat would always hold the guard). Observe
+     *  sessions never count (they spawn no agent and hold no token). */
+    suspend fun busyForAuthCount(): Int =
+        mutex.withLock { convos.values.count { it.isExecuting() || it.hasBackgroundWork() } }
+
+    /** Close every idle conversation ahead of a credential swap. Transcripts persist on disk, so the
+     *  client resumes them like any cold session afterwards — new turns just bill the new account. */
+    suspend fun closeIdleForAuth(): Int {
+        val idle = mutex.withLock {
+            val s = convos.filterValues { !it.isExecuting() && !it.hasBackgroundWork() }
+            convos.keys.removeAll(s.keys)
+            s.values.toList()
+        }
+        idle.forEach { it.close(); noteSelfClosed(it) }
+        return idle.size
+    }
+
     /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
     suspend fun busyCwds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }
@@ -202,13 +247,24 @@ class SessionRegistry(
     /** The conversation's current permission mode — the authoritative input to the shell approval gate (issue #3). */
     suspend fun modeOf(convoId: String): PermissionMode? = get(convoId)?.currentMode()
 
-    suspend fun close(convoId: String) {
+    /** Close [convoId]. With a [requester] (a client closing ITS view) this only detaches that client's
+     *  sink when others are still attached (fan-out, issue #47) — the conversation keeps streaming to
+     *  them. Returns true when the conversation was actually closed. */
+    suspend fun close(convoId: String, requester: OutboundSink? = null): Boolean {
+        if (requester != null) {
+            val othersRemain = mutex.withLock { convos[convoId]?.let { !it.detach(requester) } == true }
+            if (othersRemain) {
+                log.info("detach ${convoId.take(8)}… (other clients still attached)")
+                return false
+            }
+        }
         val (job, convo, obs) = mutex.withLock {
             Triple(pendingClose.remove(convoId), convos.remove(convoId), observes.remove(convoId))
         }
         job?.cancel(); convo?.close(); obs?.close()
         if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
         convo?.let { noteSelfClosed(it) }
+        return convo != null || obs != null
     }
 
     /** Remember that WE closed this session just now — see [selfClosed]/[externallyActive]. Call AFTER
@@ -250,7 +306,9 @@ class SessionRegistry(
                 val c = convos[convoId]
                 val o = observes[convoId]
                 when {
-                    c != null && c.isAttachedTo(owner) -> { convos.remove(convoId); c to null }
+                    // fan-out: the dead socket only takes ITS view with it — close only if it was the last
+                    c != null && c.isAttachedTo(owner) ->
+                        if (c.detach(owner)) { convos.remove(convoId); c to null } else null to null
                     o != null && o.isAttachedTo(owner) -> { observes.remove(convoId); null to o }
                     else -> null to null // reattached elsewhere (or already gone) — not ours to kill
                 }

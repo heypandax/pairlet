@@ -96,7 +96,7 @@ class RelayClient(
         // wake an offline phone when a turn completes. peerOnline gates it here (an attached phone got the
         // TurnDone over the data plane already); the relay re-checks deviceCount before actually pushing.
         core.registry.pushHook = PushHook { workdir, sessionId, finalText ->
-            if (!peerOnline) controlOutbox.send(
+            if (!peerOnline && core.prefs.pushEnabled) controlOutbox.send(
                 NotifyPush(
                     title = workdir.fileName?.toString() ?: "CC Pocket",
                     body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",

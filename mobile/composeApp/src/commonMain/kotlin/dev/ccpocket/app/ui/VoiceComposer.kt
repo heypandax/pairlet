@@ -34,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
@@ -58,7 +60,13 @@ internal fun fmtElapsed(ms: Long): String = fmtMmSs((ms / 1000).toInt())
 
 /** The composer text field per the design: base bg, hairline border, radius 12, minHeight 44. */
 @Composable
-fun ComposerField(value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+fun ComposerField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+) {
     val shape = RoundedCornerShape(12.dp)
     Box(
         modifier.heightIn(min = 44.dp).clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)
@@ -70,7 +78,8 @@ fun ComposerField(value: String, onValueChange: (String) -> Unit, placeholder: S
             textStyle = TextStyle(color = Tok.tx, fontSize = 14.5.sp, lineHeight = 21.sp),
             cursorBrush = SolidColor(Tok.accent),
             maxLines = 4,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp)
+                .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
         )
         if (value.isEmpty()) Text(placeholder, color = Tok.muted, fontSize = 14.5.sp, maxLines = 1)
     }

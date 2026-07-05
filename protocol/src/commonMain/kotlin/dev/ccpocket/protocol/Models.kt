@@ -171,3 +171,20 @@ data class BackgroundJob(
     val startedAt: Long,
     val lastUpdate: Long,
 )
+
+/** One option of an [AskQuestion]: a short label (what gets sent back as the answer) + a one-line description. */
+@Serializable
+data class AskOption(val label: String, val description: String? = null)
+
+/**
+ * One question of an AskUserQuestion call (Claude asking the user, tool schema: 1–4 questions,
+ * 2–4 options each). [header] is a short chip label (≤12 chars). The phone renders a question card
+ * and answers with [PermissionVerdict.answers] keyed by the exact [question] text.
+ */
+@Serializable
+data class AskQuestion(
+    val question: String,
+    val header: String? = null,
+    val multiSelect: Boolean = false,
+    val options: List<AskOption> = emptyList(),
+)

@@ -65,6 +65,7 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.oneOff
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
@@ -520,8 +521,9 @@ private fun DiffView(diff: String, modifier: Modifier = Modifier) {
 
 @Composable
 private fun Decision(ask: PermissionAsk, onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit) {
-    if (ask.tool == "ExitPlanMode" || ask.tool == "exit_plan_mode") {
-        // A plan is a one-off human decision — never "Always allow" (the daemon treats it as neverRemember). Issue #10.
+    if (ask.oneOff) {
+        // A one-off human decision (plan approval etc.) — never "Always allow"; the flag rides the ask
+        // from the daemon's ToolMeta (issue #10), with a legacy tool-name fallback inside oneOff.
         Row(Modifier.padding(top = 16.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DecisionButton(stringResource(Res.string.deny), Modifier.weight(1f).fillMaxHeight(), outline = Tok.danger, fg = Tok.danger, onClick = onDeny)
             DecisionButton(stringResource(Res.string.allow_once), Modifier.weight(1f).fillMaxHeight(), bg = Tok.accent, fg = Tok.base, bold = true, onClick = onOnce)

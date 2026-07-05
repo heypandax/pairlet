@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          APP=mobile/composeApp/build/compose/binaries/main/app/cc-pocket
+          APP="mobile/composeApp/build/compose/binaries/main/app/CC Pocket"   # jpackage dir = packageName
           if [ -d "$APP" ]; then
             powershell -Command "Compress-Archive -Path '$APP' -DestinationPath 'out/cc-pocket-desktop-${{ inputs.version }}-windows-x64-portable.zip' -Force"
           fi

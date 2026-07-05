@@ -59,6 +59,12 @@ data class PermissionVerdict(
     val updatedInput: String? = null,
     val message: String? = null,
     val remember: Boolean = false, // ALLOW + remember => add an allow-rule so future matches auto-allow this session
+    // AskUserQuestion only (the ask carried questions): the user's picks, keyed by the EXACT question text;
+    // value = the chosen option label, comma-joined labels for multiSelect, or free "Other…" text.
+    val answers: Map<String, String>? = null,
+    // AskUserQuestion only: a freeform reply INSTEAD of answering the structured questions
+    // (claude renders it as "The user responded: …").
+    val response: String? = null,
 ) : ToDaemon
 
 /** Switch the live conversation's permission mode (relaunches claude with --resume + the new mode). */
@@ -142,9 +148,78 @@ data class ReadFile(
     val agent: AgentKind = AgentKind.CLAUDE,
 ) : ToDaemon
 
+/** phone -> daemon: query the daemon-host CLI's login state (`claude auth status`). Reply is one
+ *  [AuthState]. A daemon that predates this drops it — the client shows no account info then. */
+@Serializable
+@SerialName("pocket/auth.fetch")
+data object FetchAuthStatus : ToDaemon
+
+/**
+ * phone -> daemon: start a login / account switch (`claude auth login`). If already logged in the
+ * daemon logs out first — this is the "switch account" gesture, and `auth login` over a live
+ * credential is not a verified path. Refused (AuthState.error) while any conversation is mid-task
+ * (executing turn / background jobs): swapping credentials under an agent actively talking to the
+ * API breaks it. Idle-but-open conversations are closed automatically instead (they resume from
+ * disk under the new account). The daemon replies with [AuthState] (loginPending + loginUrl), the
+ * browser opens on the daemon host, and the user pastes the code back via [AuthLoginCode].
+ */
+@Serializable
+@SerialName("pocket/auth.login")
+data class AuthLogin(val console: Boolean = false) : ToDaemon
+
+/** phone -> daemon: the OAuth authorization code the user copied from the browser. */
+@Serializable
+@SerialName("pocket/auth.code")
+data class AuthLoginCode(val code: String) : ToDaemon
+
+/** phone -> daemon: abandon a pending login (kills the CLI child; logged-out state stands). */
+@Serializable
+@SerialName("pocket/auth.login.cancel")
+data object AuthLoginCancel : ToDaemon
+
+/** phone -> daemon: `claude auth logout`. Same mid-task guard + idle auto-close as [AuthLogin]. */
+@Serializable
+@SerialName("pocket/auth.logout")
+data object AuthLogout : ToDaemon
+
+/**
+ * client -> daemon: set (or, with [enabled] null, just query) whether the daemon asks the relay to
+ * push "turn complete" alerts to phones — lets someone working AT the computer silence their phone
+ * without unpairing. Reply is one [PushPrefs]. A daemon that predates this drops it — the client
+ * hides the toggle then.
+ */
+@Serializable
+@SerialName("pocket/push.prefs.set")
+data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
+
+/** daemon -> client: the current push preference — the single reply to every [SetPushPrefs]. */
+@Serializable
+@SerialName("pocket/push.prefs")
+data class PushPrefs(val enabled: Boolean) : ToPhone
+
+/**
+ * daemon -> phone: the CLI's auth state — the single reply to every pocket/auth.* request and pushed
+ * again when a pending login resolves. The client renders the LATEST one; it never builds its own
+ * login state machine. [loginPending]+[loginUrl] mean a login child is waiting for the browser
+ * dance / pasted code. [error] is a user-facing refusal (live sessions, spawn failure); the other
+ * fields still carry the actual current state alongside it.
+ */
+@Serializable
+@SerialName("pocket/auth.state")
+data class AuthState(
+    val loggedIn: Boolean = false,
+    val email: String? = null,
+    val orgName: String? = null,
+    val subscriptionType: String? = null, // e.g. "max" / "pro" — shown as the plan badge
+    val authMethod: String? = null,       // e.g. "claude.ai" / "console"
+    val loginPending: Boolean = false,
+    val loginUrl: String? = null,
+    val error: String? = null,
+) : ToPhone
 
 @Serializable
 @SerialName("pocket/dirs")
@@ -229,7 +304,28 @@ data class PermissionAsk(
     val danger: Boolean = false,       // destructive tool (rm, force-push…): nudge to "Allow once"
     val dangerNote: String? = null,    // e.g. "delete files"
     val diff: String? = null,          // unified-diff text for a file-change approval (Codex patch) — phone renders it as +/- lines
+    // AskUserQuestion: the parsed questions — a new phone renders a question card and answers via
+    // PermissionVerdict.answers/response; an old phone ignores this field and shows the generic
+    // allow/deny card (a bare allow makes claude synthesize "the user did not answer").
+    val questions: List<AskQuestion>? = null,
+    // One-off human decision (plan approval, questions): "always allow / remember" must not be offered.
+    // Mirrors the daemon's ToolMeta.neverRemember, which stays enforced server-side; this flag only
+    // drives client UI. Old daemons omit it — clients fall back through [oneOff].
+    val neverRemember: Boolean = false,
 ) : ToPhone
+
+/** Whether this ask is a one-off decision the UI must not offer to remember. The daemon's flag is the
+ *  source of truth; the tool-name check covers daemons that predate [PermissionAsk.neverRemember] —
+ *  kept HERE so neither client re-encodes the legacy literal. */
+val PermissionAsk.oneOff: Boolean
+    get() = neverRemember || tool == "ExitPlanMode" || tool == "exit_plan_mode"
+
+/** The agent withdrew a pending ask (claude's control_cancel_request) — dismiss the card/sheet.
+ *  Old phones drop the unknown frame type (every decode path is runCatching) and keep their
+ *  timeout fallback; that degradation is intentional. */
+@Serializable
+@SerialName("pocket/ask.withdrawn")
+data class AskWithdrawn(val convoId: String, val askId: String) : ToPhone
 
 /** Turn finished. finalText is the result text (if any); usage is token accounting (if present). */
 @Serializable

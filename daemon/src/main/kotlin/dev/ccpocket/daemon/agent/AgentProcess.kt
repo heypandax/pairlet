@@ -24,6 +24,16 @@ class AgentProcess private constructor(
 
     val pid: Long get() = process.pid()
 
+    /** The last non-blank stderr line — a dying agent's parting words ("No conversation found with
+     *  session ID …", context-overflow errors). Carried into the process_exited error so the phone
+     *  sees WHY a resume died before its first init, not just "agent process ended". */
+    @Volatile
+    var lastStderr: String? = null
+        private set
+
+    /** Exit code once the process has terminated, else null (also null if it can't be read). */
+    fun exitCode(): Int? = runCatching { process.exitValue() }.getOrNull()
+
     /** Raw stdout lines; closed when the process exits. Bounded -> backpressure to the agent. */
     val stdout: Channel<String> = Channel(capacity = 256)
 
@@ -47,7 +57,14 @@ class AgentProcess private constructor(
         }
         scope.launch(Dispatchers.IO + CoroutineName("agent-stderr-$pid")) {
             // must drain stderr or the child can block on a full pipe
-            runCatching { process.errorStream.bufferedReader().forEachLine { if (it.isNotBlank()) log.warn("agent stderr: ${it.take(200)}") } }
+            runCatching {
+                process.errorStream.bufferedReader().forEachLine {
+                    if (it.isNotBlank()) {
+                        lastStderr = it
+                        log.warn("agent stderr: ${it.take(200)}")
+                    }
+                }
+            }
         }
         scope.launch(Dispatchers.IO + CoroutineName("agent-stdin-$pid")) {
             val w = process.outputStream.bufferedWriter()

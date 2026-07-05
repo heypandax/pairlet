@@ -25,10 +25,12 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,12 +42,16 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
+import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentTintFill
@@ -54,6 +60,7 @@ import dev.ccpocket.protocol.AgentKind
 
 private enum class SettingsTab(val label: String, val icon: ImageVector) {
     GENERAL("General", Icons.Outlined.Tune),
+    ACCOUNT("Account", Icons.Rounded.Person),
     COMPUTERS("Computers", Icons.Rounded.Devices),
     SHORTCUTS("Shortcuts", Icons.Rounded.Keyboard),
     ABOUT("About", Icons.Outlined.Info),
@@ -83,6 +90,7 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
             Box(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(24.dp)) {
                 when (tab) {
                     SettingsTab.GENERAL -> GeneralPane(model)
+                    SettingsTab.ACCOUNT -> AccountPane(model)
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
                     SettingsTab.ABOUT -> AboutPane(model)
@@ -122,6 +130,55 @@ private fun GeneralPane(model: DesktopModel) {
         Group("Default permission mode", "How much a new session may do before it asks.") {
             CLAUDE_MODES.forEach { m -> ModeRow(m, selected = m.mode == model.defaultMode) { model.defaultMode = m.mode } }
         }
+        // only terminals actually present on this machine are offered (issue #44)
+        Group("Terminal", "Which app the chat header's >_ button opens at the session's folder.") {
+            TerminalApp.entries.filter(TerminalLauncher::installed).forEach { t ->
+                TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
+            }
+        }
+        // daemon-side switch: silence phone alerts while working at the computer. Null = old daemon.
+        LaunchedEffect(Unit) { model.refreshPushPrefs() }
+        Group("Notifications", "Turn-complete alerts pushed to your phone by this computer.") {
+            when (val on = model.phonePush) {
+                null -> Text(
+                    "Phone alerts need the computer's daemon updated first.",
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
+                )
+                else -> ToggleRow("Notify my phone when a turn finishes", on) { model.setPhonePush(!on) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(label: String, on: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 7.dp).clip(RoundedCornerShape(9.dp))
+            .background(if (on) Tok.surface else Color.Transparent)
+            .border(1.5.dp, if (on) Tok.accent else Tok.hair, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Dot(if (on) Tok.ok else Tok.muted, 8.dp)
+        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Spacer(Modifier.weight(1f))
+        Text(if (on) "on" else "off", color = if (on) Tok.ok else Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun TerminalRow(t: TerminalApp, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 7.dp).clip(RoundedCornerShape(9.dp))
+            .background(if (selected) Tok.surface else Color.Transparent)
+            .border(1.5.dp, if (selected) Tok.accent else Tok.hair, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(">_", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp)
+        Text(t.label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Spacer(Modifier.weight(1f))
+        Text(t.id, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
     }
 }
 
@@ -155,6 +212,126 @@ private fun ModeRow(m: DkMode, selected: Boolean, onClick: () -> Unit) {
         if (m.danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
         Spacer(Modifier.weight(1f))
         Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+    }
+}
+
+/**
+ * The active computer's Claude CLI account (issue: switch accounts without a terminal). One account at a
+ * time, mirroring the official desktop app: "Switch account" signs the CLI out and starts `claude auth
+ * login` on the daemon host; the OAuth page yields a code the user pastes back here. All state is the
+ * daemon's latest AuthState push — this pane holds no login state machine of its own.
+ */
+@Composable
+private fun AccountPane(model: DesktopModel) {
+    // an old daemon silently drops pocket/auth.fetch — flip to an explicit "update it" line instead of loading forever
+    var timedOut by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { model.refreshAuth(); delay(4_000); timedOut = true }
+    val s = model.authState
+    var confirmSwitch by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
+    val clipboard = LocalClipboardManager.current
+
+    Column {
+        Group("Claude account", "The account the ${model.activeComputer?.name ?: "active computer"}'s Claude CLI is signed in with.") {
+            when {
+                s == null -> Text(
+                    when {
+                        !model.connected -> "Connect a computer to see its account."
+                        timedOut -> "No reply — the daemon on this computer predates account management. Update it to switch accounts from here."
+                        else -> "Loading account…"
+                    },
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 19.sp,
+                )
+
+                s.loginPending -> Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+                ) {
+                    Text("Finish signing in", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "A browser window opened on the computer. Authorize there, copy the code, and paste it below.",
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                    )
+                    s.loginUrl?.let { url ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
+                            Text(
+                                url, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                            )
+                            TextBtn("Open here", Tok.accent) { runCatching { uriHandler.openUri(url) } }
+                            TextBtn("Copy", Tok.tx2) { clipboard.setText(AnnotatedString(url)) }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(7.dp)).background(Tok.base)
+                                .border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 7.dp),
+                        ) {
+                            if (code.isEmpty()) Text("Paste authorization code", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
+                            BasicTextField(
+                                code, { code = it }, singleLine = true,
+                                textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp),
+                                cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        TextBtn("Submit", Tok.accent) { if (code.isNotBlank()) { model.submitAuthCode(code); code = "" } }
+                        TextBtn("Cancel", Tok.muted) { code = ""; model.cancelAuthLogin() }
+                    }
+                }
+
+                s.loggedIn -> Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Rounded.Person, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(s.email ?: "Signed in", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            s.orgName?.let { Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        }
+                        s.subscriptionType?.let { plan ->
+                            Text(
+                                plan.uppercase(), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (confirmSwitch) {
+                        Text(
+                            "Switching signs this account out first. Idle sessions on that computer are closed (resume them anytime); a session still working on a task blocks the switch.",
+                            color = Tok.warn, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextBtn("Continue", Tok.accent) { confirmSwitch = false; model.switchAccount() }
+                            TextBtn("Cancel", Tok.muted) { confirmSwitch = false }
+                        }
+                    } else Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        TextBtn("Switch account…", Tok.accent) { confirmSwitch = true }
+                        TextBtn("Log out", Tok.danger) { model.logoutAccount() }
+                    }
+                }
+
+                else -> Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+                ) {
+                    Text("Not signed in", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "The Claude CLI on this computer has no active account.",
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                    )
+                    Row { TextBtn("Sign in…", Tok.accent) { model.switchAccount() } }
+                }
+            }
+            s?.error?.let {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 10.dp)) {
+                    Icon(Icons.Rounded.Warning, null, tint = Tok.danger, modifier = Modifier.size(13.dp))
+                    Text(it, color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)
+                }
+            }
+        }
     }
 }
 

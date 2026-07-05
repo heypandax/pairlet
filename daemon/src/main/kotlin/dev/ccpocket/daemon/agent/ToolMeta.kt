@@ -60,6 +60,18 @@ object ToolMetadata {
                 dangerNote = null,
                 neverRemember = true,
             )
+            // Claude asking the user multiple-choice questions. The answers ride in the verdict, so a
+            // remembered/auto allow would answer NOTHING ("the user did not answer") — every occurrence
+            // must reach a human, even in bypass mode (see PermissionBridge). Preview = the first question,
+            // so even an old phone's generic card shows something meaningful.
+            AskQuestions.TOOL -> ToolMeta(
+                title = "Answer questions",
+                preview = AskQuestions.parse(input)?.firstOrNull()?.question ?: "Claude has a question",
+                rule = AskQuestions.TOOL,
+                danger = false,
+                dangerNote = null,
+                neverRemember = true,
+            )
             else -> {
                 val p = listOf("command", "file_path", "path", "pattern", "url", "description", "content")
                     .firstNotNullOfOrNull { str(it)?.takeIf(String::isNotBlank) } ?: tool

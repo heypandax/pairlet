@@ -57,6 +57,75 @@ class SerializationRoundTripTest {
             """{"id":"9","ts":0,"to":"PEER","body":{"t":"pocket/prompt","convoId":"c","text":"hey","future":123}}"""
         val back = PocketJson.decodeFromString<Envelope>(json)
         assertEquals(SendPrompt("c", "hey"), back.body)
+        // structured unknown keys too — the exact skip path an OLD peer takes over a NEW peer's
+        // added array-of-objects/map fields (e.g. PermissionAsk.questions, PermissionVerdict.answers)
+        val structured =
+            """{"id":"10","ts":0,"to":"PEER","body":{"t":"pocket/verdict","convoId":"c","askId":"a","decision":"allow",
+               "future":[{"q":"x","opts":[{"a":1}]}],"futureMap":{"k":"v"}}}"""
+        assertEquals(PermissionVerdict("c", "a", Decision.ALLOW), PocketJson.decodeFromString<Envelope>(structured).body)
+    }
+
+    @Test
+    fun permissionAsk_questions_roundtrip_and_are_absent_by_default() {
+        // AskUserQuestion: a new daemon attaches the structured questions
+        val ask = PermissionAsk(
+            convoId = "c1", askId = "a1", tool = "AskUserQuestion", inputPreview = "Which color?",
+            questions = listOf(
+                AskQuestion("Which color?", header = "Color", options = listOf(AskOption("Red", "r"), AskOption("Blue"))),
+                AskQuestion("Which sections?", multiSelect = true),
+            ),
+        )
+        val env = Envelope(id = "q1", ts = 0, body = ask)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"questions\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        // an ordinary ask omits the field entirely (explicitNulls=false) — old daemons' frames decode as-is
+        val plain = PocketJson.encodeToString(Envelope(id = "q2", ts = 0, body = PermissionAsk("c1", "a2", "Bash", "ls")))
+        assertFalse("questions" in plain, plain)
+        // an OLD-daemon-shaped ask (no questions key) decodes on a new phone with questions == null
+        val fromOld = PocketJson.decodeFromString<Envelope>(plain)
+        assertEquals(PermissionAsk("c1", "a2", "Bash", "ls"), fromOld.body)
+    }
+
+    @Test
+    fun permissionAsk_neverRemember_roundtrips_and_oneOff_falls_back_for_old_daemons() {
+        // a new daemon flags one-off decisions explicitly
+        val flagged = PermissionAsk("c1", "a1", "ExitPlanMode", "plan text", neverRemember = true)
+        val json = PocketJson.encodeToString(Envelope(id = "n1", ts = 0, body = flagged))
+        assertTrue("\"neverRemember\":true" in json, json)
+        val back = PocketJson.decodeFromString<Envelope>(json).body as PermissionAsk
+        assertTrue(back.neverRemember)
+        assertTrue(back.oneOff)
+        // an OLD-daemon-shaped plan ask (no neverRemember key) still reads as one-off via the tool-name fallback
+        val old = """{"id":"n2","ts":0,"to":"PEER","body":{"t":"pocket/ask","convoId":"c1","askId":"a2","tool":"ExitPlanMode","inputPreview":"plan"}}"""
+        val fromOld = PocketJson.decodeFromString<Envelope>(old).body as PermissionAsk
+        assertFalse(fromOld.neverRemember)
+        assertTrue(fromOld.oneOff)
+        // an ordinary ask is neither flagged nor one-off
+        assertFalse(PermissionAsk("c1", "a3", "Bash", "ls").oneOff)
+    }
+
+    @Test
+    fun askWithdrawn_roundtrips() {
+        val env = Envelope(id = "w1", ts = 0, body = AskWithdrawn("c1", "a1"))
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(env)))
+    }
+
+    @Test
+    fun permissionVerdict_answers_roundtrip_and_old_frames_still_decode() {
+        val v = PermissionVerdict(
+            "c1", "a1", Decision.ALLOW,
+            answers = mapOf("Which color?" to "Red", "Which sections?" to "Intro, Conclusion"),
+            response = null,
+        )
+        val env = Envelope(id = "v1", ts = 0, body = v)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"answers\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        // a frame from an OLD phone (no answers/response fields) decodes with null defaults
+        val old = """{"id":"v2","ts":0,"to":"PEER","body":{"t":"pocket/verdict","convoId":"c1","askId":"a1","decision":"allow","remember":false}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old)
+        assertEquals(PermissionVerdict("c1", "a1", Decision.ALLOW), back.body)
     }
 
     @Test
@@ -244,5 +313,52 @@ class SerializationRoundTripTest {
         val json = PocketJson.encodeToString(env)
         assertTrue("\"t\":\"pocket/pair.begin\"" in json, json)
         assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun auth_objects_and_state_roundtrip() {
+        // argless requests are data objects — encode as bare {"t": …} and decode back to the singleton
+        for ((body, tag) in listOf<Pair<Frame, String>>(
+            FetchAuthStatus to "pocket/auth.fetch",
+            AuthLoginCancel to "pocket/auth.login.cancel",
+            AuthLogout to "pocket/auth.logout",
+        )) {
+            val json = PocketJson.encodeToString(Envelope(id = "a", ts = 0, body = body))
+            assertTrue("\"t\":\"$tag\"" in json, json)
+            assertEquals(body, PocketJson.decodeFromString<Envelope>(json).body)
+        }
+
+        val login = Envelope(id = "a1", ts = 0, body = AuthLogin())
+        val loginJson = PocketJson.encodeToString(login)
+        assertTrue("\"console\":false" in loginJson, loginJson) // encodeDefaults
+        assertEquals(login, PocketJson.decodeFromString<Envelope>(loginJson))
+
+        val state = Envelope(
+            id = "a2", ts = 0,
+            body = AuthState(loggedIn = true, email = "a@b.c", orgName = "Org", subscriptionType = "max", authMethod = "claude.ai"),
+        )
+        val stateJson = PocketJson.encodeToString(state)
+        assertTrue("\"t\":\"pocket/auth.state\"" in stateJson, stateJson)
+        assertFalse("loginUrl" in stateJson, stateJson) // explicitNulls=false
+        assertFalse("error" in stateJson, stateJson)
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(stateJson))
+    }
+
+    @Test
+    fun pushPrefs_set_and_state_roundtrip() {
+        // query form: enabled stays null and is omitted on the wire (explicitNulls=false)
+        val query = Envelope(id = "p1", ts = 0, body = SetPushPrefs())
+        val queryJson = PocketJson.encodeToString(query)
+        assertTrue("\"t\":\"pocket/push.prefs.set\"" in queryJson, queryJson)
+        assertFalse("enabled" in queryJson, queryJson)
+        assertEquals(query, PocketJson.decodeFromString<Envelope>(queryJson))
+
+        val set = Envelope(id = "p2", ts = 0, body = SetPushPrefs(enabled = false))
+        assertEquals(set, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(set)))
+
+        val state = Envelope(id = "p3", ts = 0, body = PushPrefs(enabled = true))
+        val stateJson = PocketJson.encodeToString(state)
+        assertTrue("\"t\":\"pocket/push.prefs\"" in stateJson, stateJson)
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(stateJson))
     }
 }

@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon
 
 import dev.ccpocket.daemon.agent.AgentBackendFactory
+import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -19,7 +20,9 @@ class DaemonCore(backends: Map<AgentKind, AgentBackendFactory>) {
     val dirs = DirectoryService()
     val transcribe = TranscribeService(scope, registry::workdirOf)
     val shell = ShellService(scope)
-    val router = RequestRouter(registry, dirs, transcribe, shell, scope)
+    val auth = AuthService(scope, registry::busyForAuthCount, registry::closeIdleForAuth)
+    val prefs = DaemonPrefs.load()
+    val router = RequestRouter(registry, dirs, transcribe, shell, scope, auth, prefs)
 
     suspend fun shutdown() = registry.closeAll()
 }

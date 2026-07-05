@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.server
 
+import dev.ccpocket.daemon.DaemonPrefs
+import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.SessionFilesService
@@ -9,10 +11,15 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
+import dev.ccpocket.protocol.AuthLogin
+import dev.ccpocket.protocol.AuthLoginCancel
+import dev.ccpocket.protocol.AuthLoginCode
+import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Directories
+import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
@@ -23,10 +30,12 @@ import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
+import dev.ccpocket.protocol.SetPushPrefs
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
@@ -40,6 +49,8 @@ class RequestRouter(
     private val transcribe: TranscribeService,
     private val shell: ShellService,
     private val scope: CoroutineScope,
+    private val auth: AuthService,
+    private val prefs: DaemonPrefs,
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
@@ -106,12 +117,26 @@ class RequestRouter(
                 }
             }
 
-            is CloseSession -> { registry.close(frame.convoId); shell.forget(frame.convoId) }
+            // fan-out: only a REAL close (last attached client) drops the quick-terminal state with it
+            is CloseSession -> { if (registry.close(frame.convoId, sink)) shell.forget(frame.convoId) }
             is CancelTurn -> registry.cancelTurn(frame)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
             is AudioCancel -> transcribe.onCancel(frame)
+
+            // account switching: each spawns a `claude auth …` child — off the inbound pump, like FetchUsage
+            is FetchAuthStatus -> scope.launch { auth.sendStatus(sink::emit) }
+            is AuthLogin -> scope.launch { auth.login(frame.console, sink::emit) }
+            is AuthLoginCode -> scope.launch { auth.submitCode(frame.code, sink::emit) }
+            is AuthLoginCancel -> scope.launch { auth.cancelLogin(sink::emit) }
+            is AuthLogout -> scope.launch { auth.logout(sink::emit) }
+
+            // phone-push switch: null enabled = query only; either way the daemon's truth is the reply
+            is SetPushPrefs -> {
+                frame.enabled?.let(prefs::setPushEnabled)
+                sink.emit(PushPrefs(prefs.pushEnabled))
+            }
 
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
         }

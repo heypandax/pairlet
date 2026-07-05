@@ -48,6 +48,10 @@
     <string name="conn_computer_offline_body">CC Pocket can\'t see your computer. Make sure it\'s awake and the cc-pocket app is running.</string>
     <string name="conn_computer_offline_hint">We\'ll reconnect automatically as soon as it\'s back.</string>
     <string name="conn_computer_offline_banner">Computer offline — waiting for it to come back…</string>
+    <string name="conn_connecting_banner">Connecting to your computer…</string>
+    <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
+    <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
+    <string name="turn_done_marker">done</string>
     <string name="conn_pairing_invalid_title">Pairing expired</string>
     <string name="conn_pairing_invalid_body">This phone is no longer paired with your computer. Pair again to reconnect.</string>
     <string name="dir_empty_title">No projects yet</string>
@@ -86,6 +90,8 @@
     <string name="chat_title">Chat</string>
     <string name="stop">Stop</string>
     <string name="thinking_streaming">Thinking…</string>
+    <string name="chat_running">running</string>
+    <string name="message_queued_hint">Working… — sends will queue</string>
     <string name="thought_for">Thought for %1$ds</string>
     <string name="code_copy">copy</string>
     <string name="code_copied">copied</string>
@@ -201,6 +207,8 @@
     <string name="ob_pair_now">Pair now</string>
     <string name="ob_guide">Full setup guide</string>
     <string name="model_switch_hint">Switching restarts the session — your history is kept.</string>
+    <string name="model_custom_label">Custom</string>
+    <string name="model_custom_hint">model id passed to --model</string>
     <string name="model_switching">Restarting session… history is kept.</string>
     <string name="model_not_installed">not installed</string>
     <string name="af_show_from">Show sessions from</string>
@@ -302,4 +310,17 @@
     <string name="codex_chip_fs_read">fs: read</string>
     <string name="codex_chip_fs_workspace">fs: workspace</string>
     <string name="codex_chip_fs_full">fs: full</string>
+    <string name="question_header">Claude has a question</string>
+    <string name="question_progress">%1$d/%2$d</string>
+    <string name="question_other">Other…</string>
+    <string name="question_other_hint">Type your answer…</string>
+    <string name="question_freeform_link">Reply in your own words…</string>
+    <string name="question_freeform_back">Back to choices</string>
+    <string name="question_freeform_hint">Answer in your own words…</string>
+    <string name="question_answer">Answer</string>
+    <string name="question_skip">Skip</string>
+    <string name="question_skip_message">User skipped the questions</string>
+    <string name="questions_answered_one">Answered %1$d question</string>
+    <string name="questions_answered_many">Answered %1$d questions</string>
+    <string name="questions_withdrawn">Claude moved on — answers no longer needed</string>
 </resources>

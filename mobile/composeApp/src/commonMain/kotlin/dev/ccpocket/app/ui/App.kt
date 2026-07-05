@@ -43,6 +43,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PushPin
@@ -93,13 +95,16 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -174,6 +179,12 @@ fun App(scope: CoroutineScope) {
                 // preview/recording mode hides the demo banner for a clean marketing capture
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
                 if (repo.sessionActive.value && repo.phase.value == ConnPhase.Reconnecting) StatusBanner(Tok.danger, stringResource(Res.string.reconnect_banner))
+                // entering a chat before the first link-up used to look identical to "connected" — say so (issue #41)
+                if (repo.sessionActive.value && repo.phase.value == ConnPhase.Connecting && repo.convoId.value != null) StatusBanner(Tok.warn, stringResource(Res.string.conn_connecting_banner))
+                if (repo.openTimedOut.value) {
+                    StatusBanner(Tok.warn, stringResource(Res.string.open_session_timeout))
+                    LaunchedEffect(Unit) { delay(6000); repo.openTimedOut.value = false } // transient; leaves composition → effect cancels
+                }
                 Box(Modifier.weight(1f)) {
                     when {
                         // a dead transport does NOT leave the content screens — ConnectionGate + auto-retry handle it
@@ -201,7 +212,10 @@ fun App(scope: CoroutineScope) {
             LaunchedEffect(repo.pendingAsk.value?.askId) {
                 if (repo.pendingAsk.value != null) rootFocus.clearFocus()
             }
-            repo.pendingAsk.value?.let { ask ->
+            // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
+            // ChatScreen instead — questions are conversation, not a safety gate, and the user
+            // should be able to scroll the chat for context while answering.
+            repo.pendingAsk.value?.takeIf { it.questions == null }?.let { ask ->
                 PermissionSheet(
                     ask, repo.workdir.value,
                     onDeny = { repo.resolve(Decision.DENY) },
@@ -628,6 +642,8 @@ private fun NewPathSheet(
                 field, { field = it },
                 placeholder = { Text("/Users/me/new-project", fontFamily = FontFamily.Monospace, fontSize = 13.sp) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { if (looksAbsolute) onStart(target) }),
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
             Row(
@@ -712,7 +728,10 @@ private fun PocketRepository.openProject(e: DirectoryEntry) {
 private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean, onLongPress: (() -> Unit)? = null) {
     val sid = e.activeSessionId
     val pinned = repo.isPinned(e.path)
-    if (direct && e.open && sid != null) LiveProjectCell(e, pinned, onLongPress) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
+    if (direct && e.open && sid != null) {
+        // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
+        LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
+    }
     else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, e.hasSessions, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
 }
 
@@ -745,10 +764,11 @@ private fun PinGlyph() = Icon(Icons.Filled.PushPin, null, tint = Tok.accent, mod
 
 /** The terracotta "history" pill shown on a dir/folder/leaf that has Claude history. */
 @Composable
-private fun HistoryBadge() {
+private fun HistoryBadge(onClick: (() -> Unit)? = null) {
+    val base = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f))
     Text(
         stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp,
-        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 8.dp, vertical = 3.dp),
+        modifier = (if (onClick != null) base.clickable(onClick = onClick) else base).padding(horizontal = 8.dp, vertical = 3.dp),
     )
 }
 
@@ -871,9 +891,11 @@ private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: B
     }
 }
 
-/** A live session row: the session title leads, the folder + branch demote to metadata — tap resumes it. */
+/** A live session row: the session title leads, the folder + branch demote to metadata — tap resumes it.
+ *  [onBrowse] is the secondary affordance (issue #49): open the project's session LIST instead of the
+ *  live session, so a running project's history stays reachable — the row tap only ever auto-resumes. */
 @Composable
-private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
+private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onBrowse: (() -> Unit)? = null, onClick: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
             .combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(12.dp),
@@ -884,6 +906,7 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
                 fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             if (pinned) { Spacer(Modifier.width(6.dp)); PinGlyph() }
+            if (onBrowse != null && e.hasSessions) { Spacer(Modifier.width(8.dp)); HistoryBadge(onClick = onBrowse) }
             Spacer(Modifier.width(8.dp))
             val active = e.executing || e.busy // background work counts as "running" even when the turn is idle
             if (active) {
@@ -939,8 +962,8 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                 TextButton({ repo.backToDirectories() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Column(Modifier.weight(1f)) {
                     Text(stringResource(Res.string.sessions_title), color = Tok.tx, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + workdir
-                        PulseDot(Tok.ok)
+                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: honest dot (green only when Ready) + workdir
+                        PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
                         Spacer(Modifier.width(5.dp))
                         TailPathText(dir)
                     }
@@ -1043,7 +1066,10 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
-    if (repo.viewedFilePath.value != null) { FileViewerScreen(repo) { repo.closeFileViewer() }; return } // changed-file viewer (issue #36)
+    if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
+        FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
+        return
+    }
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val listState = rememberLazyListState()
@@ -1055,6 +1081,19 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     // grace reveals an empty/new session that has no history to position on.
     var landed by remember(repo.convoId.value) { mutableStateOf(false) }
     LaunchedEffect(repo.convoId.value) { delay(180); landed = true }
+    // a just-created session opens on an empty chat — focus the composer and raise the keyboard
+    // right away instead of making the user tap the field first. openSession arms the flag only
+    // for resumeId == null (never on resume/reattach/fleet-follow); consumed here exactly once.
+    val composerFocus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(repo.convoId.value) {
+        if (repo.convoId.value != null && repo.autoFocusComposer.value && !repo.observing.value) {
+            repo.autoFocusComposer.value = false
+            delay(250) // let the screen land (180ms grace above) before the IME animates in
+            composerFocus.requestFocus()
+            keyboard?.show()
+        }
+    }
     // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
     LaunchedEffect(input, draftKey) { delay(400); repo.saveDraft(draftKey, input) }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
@@ -1077,8 +1116,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         repo.chatTitle.value ?: stringResource(Res.string.chat_title),
                         color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: live dot + machine · folder · model
-                        PulseDot(Tok.ok)
+                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: honest dot (green only when Ready) + machine · folder · model
+                        PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
                         Spacer(Modifier.width(5.dp))
                         // ONE style for every segment — the machine name used to force lineHeight=11 while
                         // the path/model kept the font's default, so the three never shared a baseline
@@ -1109,6 +1148,18 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     }
                 }
                 if (!repo.observing.value) {
+                    // execution state gets its own persistent header chip (issue #52): re-entering a mid-turn
+                    // session showed nothing alive — the connection dot only says "linked", not "working",
+                    // and the composer stays enabled (queueing), which read as "disconnected".
+                    if (repo.streaming.value) Row(
+                        Modifier.padding(end = 6.dp).clip(RoundedCornerShape(10.dp)).background(Tok.raised)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        PulseDot(Tok.accent)
+                        Text(stringResource(Res.string.chat_running), color = Tok.accent, fontSize = 11.sp)
+                    }
                     // mode switching moved into the ⋯ quick-actions sheet — the persistent badge was one
                     // more thing crowding the header for a setting touched a few times per session
                     Box(
@@ -1126,13 +1177,25 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     // empty space (with a gap) instead of covering the last copy button (issue #15)
                     contentPadding = PaddingValues(bottom = 30.dp),
                 ) {
-                    items(repo.messages) { m -> MessageItem(m) { imgs, i -> viewer = imgs to i } }
-                    // a turn is running but nothing live is on screen yet — e.g. just after sending, or
-                    // after re-entering a mid-turn session (the streamed Thinking row isn't in the replayed
-                    // transcript). A live Thinking/Assistant row already shows progress, so don't double up.
+                    items(repo.messages) { m ->
+                        // a prompt the daemon hasn't acknowledged while the link is down: say so under the
+                        // bubble instead of letting it look sent (issue #41 — frames queue silently offline)
+                        val undelivered = m is ChatItem.User && m.pending && repo.phase.value != ConnPhase.Ready
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            MessageItem(m) { imgs, i -> viewer = imgs to i }
+                            if (undelivered) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                PulseDot(Tok.warn, size = 5.dp)
+                                Text(stringResource(Res.string.msg_pending_undelivered), color = Tok.warn, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                    // a running turn ALWAYS ends the stream with something alive (issue #52 — desktop's
+                    // blinking tail cursor equivalent): the full "Thinking…" row when nothing live is on
+                    // screen yet, else just a pulsing dot — a replayed Assistant tail (re-entered mid-turn
+                    // session) doesn't move on its own, so without this the screen looks dead.
                     val last = repo.messages.lastOrNull()
                     val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
-                    if (repo.streaming.value && !liveContent) item { WorkingRow() }
+                    if (repo.streaming.value) item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
                 }
                 if (!pinned) {
                     val pillScope = rememberCoroutineScope()
@@ -1156,7 +1219,23 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
                 )
             }
-            if (repo.observing.value) {
+            // Claude paused its turn to ask questions — the card docks above the composer; the
+            // stream above stays scrollable so the user can re-read context before answering.
+            // While one of the card's text fields owns input, the composer hides (design ③).
+            var cardOwnsInput by remember(repo.pendingAsk.value?.askId) { mutableStateOf(false) }
+            val questionAsk = repo.pendingAsk.value?.takeIf { it.questions != null }
+            questionAsk?.let { ask ->
+                val skipMessage = stringResource(Res.string.question_skip_message)
+                QuestionCard(
+                    ask,
+                    onAnswer = { answers, response -> repo.answerQuestions(answers, response) },
+                    onSkip = { repo.resolve(Decision.DENY, message = skipMessage) },
+                    onOwnsInput = { cardOwnsInput = it },
+                )
+            }
+            if (questionAsk != null && cardOwnsInput) {
+                // composer yields while the card's field has the keyboard
+            } else if (repo.observing.value) {
                 Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(Res.string.observing_notice), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
                     Button({ repo.takeOver() }) { Text(stringResource(Res.string.continue_here)) }
@@ -1211,19 +1290,29 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                             Spacer(Modifier.width(8.dp))
                             ComposerField(
                                 input, { input = it },
-                                placeholder = stringResource(if (repo.pendingImages.isNotEmpty()) Res.string.add_message_hint else Res.string.message_claude_hint),
+                                // mid-turn the field stays enabled (sends queue into the running turn) — say so,
+                                // or an editable composer under a "running" session reads as disconnected (issue #52)
+                                placeholder = stringResource(
+                                    when {
+                                        repo.pendingImages.isNotEmpty() -> Res.string.add_message_hint
+                                        repo.streaming.value -> Res.string.message_queued_hint
+                                        else -> Res.string.message_claude_hint
+                                    },
+                                ),
                                 modifier = Modifier.weight(1f),
+                                focusRequester = composerFocus,
                             )
                             Spacer(Modifier.width(8.dp))
+                            // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
+                            // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
+                            // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
+                            // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
+                            if (repo.streaming.value && (input.isNotBlank() || hasReady)) {
+                                StopButton { repo.cancelTurn() }
+                                Spacer(Modifier.width(8.dp))
+                            }
                             when {
-                                // generating -> the action slot morphs into Stop (interrupts the turn, session stays)
-                                repo.streaming.value -> {
-                                    val stopLabel = stringResource(Res.string.stop)
-                                    RoundActionButton(
-                                        onClick = { repo.cancelTurn() },
-                                        filled = false, contentDescription = stopLabel,
-                                    ) { Box(Modifier.size(12.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent)) }
-                                }
+                                // text/image staged -> SEND, even mid-turn (claude queues it; see above)
                                 input.isNotBlank() || hasReady -> {
                                     val sendLabel = stringResource(Res.string.send)
                                     RoundActionButton(
@@ -1234,6 +1323,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
                                 }
+                                // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
+                                repo.streaming.value -> StopButton { repo.cancelTurn() }
                                 else -> {
                                     val dictateLabel = stringResource(Res.string.dictate)
                                     RoundActionButton(
@@ -1364,6 +1455,28 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
         }
         is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)
         is ChatItem.RuleChip -> AllowChip(m.rule)
+        // the quiet residue of a question exchange: an expandable answered row / a muted withdrawn note
+        is ChatItem.QuestionsAnswered -> QuestionsAnsweredRow(m.items)
+        is ChatItem.QuestionsWithdrawn -> QuestionsWithdrawnRow()
+        // a live turn's end: quiet ✓ line so "finished" stays visible in the transcript
+        is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Text(
+                "✓ " + stringResource(Res.string.turn_done_marker) + (m.seconds?.let { " · ${turnDurLabel(it)}" } ?: ""),
+                color = Tok.ok, fontSize = 11.sp,
+            )
+        }
+    }
+}
+
+/** A turn's wall-clock as "42s" / "1m 3s". `internal` so the desktop ChatPane renderer shares it. */
+internal fun turnDurLabel(s: Int) = if (s >= 60) "${s / 60}m ${s % 60}s" else "${s}s"
+
+/** The ■ interrupt button in the composer action slot — same glyph whether it rides beside Send or stands alone. */
+@Composable
+private fun StopButton(onClick: () -> Unit) {
+    val stopLabel = stringResource(Res.string.stop)
+    RoundActionButton(onClick = onClick, filled = false, contentDescription = stopLabel) {
+        Box(Modifier.size(12.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent))
     }
 }
 

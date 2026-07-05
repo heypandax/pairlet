@@ -54,8 +54,9 @@ data class DkSession(
 
 /**
  * One RECENT group — a project the user listed this run, with the sessions we know it has. The
- * current (live-listed) group's rows refresh with the repo; the others are this run's snapshots,
- * kept so the sidebar shows work across projects without a per-directory protocol round-trip.
+ * current (live-listed) group's rows refresh with the repo; the others are snapshots from their
+ * last listing (a header refresh re-lists them), kept so the sidebar shows work across projects
+ * without a per-directory protocol round-trip.
  */
 data class DkSessionGroup(
     val path: String,
@@ -138,17 +139,18 @@ interface DesktopModel {
     var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
+    var showQuickActions: Boolean // chat-header ⋯ popover: model/effort/mode + compact/clear (mirrors mobile's sheet)
 
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -190,6 +192,12 @@ interface DesktopModel {
         if (m.active) openProject(p) else selectComputer(m.computer)
     }
 
+    /** Browse a RUNNING row's project (issue #49): its session LIST, without auto-resuming the live one —
+     *  the hover affordance for picking a historical session next to a running turn. */
+    fun browseRunning(m: DkMachine, p: DkProject) {
+        if (m.active) openProject(p) else selectComputer(m.computer)
+    }
+
     // sidebar: projects + the current project's sessions
     val projects: List<DkProject>
     val sessions: List<DkSession>
@@ -197,8 +205,16 @@ interface DesktopModel {
     fun openProject(p: DkProject)
     fun selectSession(s: DkSession)
 
-    /** RECENT — session groups for the projects visited this run, most recent first (head = current). */
+    /** RECENT — session groups for the projects visited this run, most recently visited first. */
     val sessionGroups: List<DkSessionGroup>
+
+    /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
+    val sessionsRefreshing: Boolean get() = false
+
+    /** Sync the sidebar with the daemon (⌘R / a RECENT header's hover refresh): re-pull the project list
+     *  and re-list [g]'s sessions (null = the current group). The repo lists one directory at a time, so
+     *  refreshing a non-current group makes it the live-listed one — its RECENT position doesn't change. */
+    fun refresh(g: DkSessionGroup? = null) {}
 
     /** A session's live row anywhere we know it — the current list first, then the recent groups. */
     fun liveSession(sessionId: String): DkSession? =
@@ -224,11 +240,21 @@ interface DesktopModel {
     val chatWorkdir: String
     val chatBranch: String?
     val chatModel: String
+    /** Raw model id (unaliased) — the quick-actions picker compares options against this. */
+    val chatModelId: String get() = chatModel
     val chatMode: PermissionMode
+    val chatEffort: String? get() = null
     val messages: List<ChatItem>
     val streaming: Boolean
     var composer: String
     fun send(text: String)
+
+    // live-session switches (the ⋯ quick-actions popover; same repo verbs mobile's sheet drives)
+    fun switchMode(m: PermissionMode) {}
+    fun switchModel(name: String) {}
+    fun switchEffort(level: String) {}
+    fun compactConversation() {}
+    fun clearConversation() {}
 
     /** Daemon-pushed "/" commands for the open session — the composer's slash autocomplete reads this. */
     val slashCommands: List<dev.ccpocket.protocol.SlashCommand> get() = emptyList()
@@ -249,8 +275,32 @@ interface DesktopModel {
     val relayUrl: String
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
+    var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
+
+    // phone-push switch (pocket/push.prefs.*): daemon truth; null = daemon predates it (toggle hidden)
+    val phonePush: Boolean? get() = null
+    fun setPhonePush(enabled: Boolean) {}
+    fun refreshPushPrefs() {}
+
+    // read-only OBSERVE view (the session is owned by a terminal/VS Code on the computer): the composer
+    // must yield — a prompt sent into an observe convo is silently unroutable on the daemon (issue #45 ②)
+    val observing: Boolean get() = false
+    fun takeOver() {}
+
+    // interrupt the running turn (■ beside send / Esc); the interrupted prompt returns to the composer (#48)
+    fun stopTurn() {}
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
     fun revokeComputer(c: DkComputer)
+
+    // account (Settings ▸ Account): the ACTIVE computer's Claude CLI login, driven over pocket/auth.*.
+    // Null = not fetched yet, or the daemon predates the messages (it silently drops the request).
+    val authState: dev.ccpocket.protocol.AuthState? get() = null
+    fun refreshAuth() {}
+    /** Switch account: daemon logs out (when needed) + starts `claude auth login`; state updates stream in. */
+    fun switchAccount() {}
+    fun submitAuthCode(code: String) {}
+    fun cancelAuthLogin() {}
+    fun logoutAccount() {}
 
     companion object {
         /** Pin cap — ⌘1–9 is the whole affordance, so the list never outgrows the keycaps. */

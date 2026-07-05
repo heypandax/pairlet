@@ -48,6 +48,10 @@
     <string name="conn_computer_offline_body">CC Pocket 找不到你的电脑。请确认电脑已唤醒，且 cc-pocket 正在运行。</string>
     <string name="conn_computer_offline_hint">电脑恢复后会自动重新连接。</string>
     <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
+    <string name="conn_connecting_banner">正在连接电脑…</string>
+    <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
+    <string name="open_session_timeout">会话没有打开——电脑未响应</string>
+    <string name="turn_done_marker">已完成</string>
     <string name="conn_pairing_invalid_title">配对已失效</string>
     <string name="conn_pairing_invalid_body">这台手机已不再与你的电脑配对。请重新配对以恢复连接。</string>
     <string name="dir_empty_title">还没有项目</string>
@@ -86,6 +90,8 @@
     <string name="chat_title">对话</string>
     <string name="stop">停止</string>
     <string name="thinking_streaming">思考中…</string>
+    <string name="chat_running">运行中</string>
+    <string name="message_queued_hint">正在运行 — 发送将排队</string>
     <string name="thought_for">思考了 %1$d 秒</string>
     <string name="code_copy">复制</string>
     <string name="code_copied">已复制</string>
@@ -201,6 +207,8 @@
     <string name="ob_pair_now">去配对</string>
     <string name="ob_guide">完整安装指南</string>
     <string name="model_switch_hint">切换会重启会话——历史会保留。</string>
+    <string name="model_custom_label">自定义</string>
+    <string name="model_custom_hint">输入传给 --model 的模型 id</string>
     <string name="model_switching">正在重启会话……历史保留。</string>
     <string name="model_not_installed">未安装</string>
     <string name="af_show_from">显示哪个 agent 的会话</string>
@@ -302,4 +310,17 @@
     <string name="codex_chip_fs_read">沙箱：只读</string>
     <string name="codex_chip_fs_workspace">沙箱：工作区</string>
     <string name="codex_chip_fs_full">沙箱：完全</string>
+    <string name="question_header">Claude 有问题想确认</string>
+    <string name="question_progress">%1$d/%2$d</string>
+    <string name="question_other">其他…</string>
+    <string name="question_other_hint">输入你的答案…</string>
+    <string name="question_freeform_link">改用自由回复…</string>
+    <string name="question_freeform_back">返回选项</string>
+    <string name="question_freeform_hint">用自己的话回答…</string>
+    <string name="question_answer">回答</string>
+    <string name="question_skip">跳过</string>
+    <string name="question_skip_message">User skipped the questions</string>
+    <string name="questions_answered_one">回答了 %1$d 个问题</string>
+    <string name="questions_answered_many">回答了 %1$d 个问题</string>
+    <string name="questions_withdrawn">Claude 已继续，无需再回答</string>
 </resources>

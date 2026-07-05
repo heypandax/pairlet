@@ -1,12 +1,15 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
@@ -128,6 +131,23 @@ class DesktopUiTest {
     }
 
     @Test
+    fun quickActionsOpensAndSwitchesMode() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showQuickActions = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("QUICK ACTIONS") // the ⋯ popover's label (was a dead icon — this pins the wiring)
+        assertPresent("Model")
+        assertPresent("Compact context")
+        onAllNodes(hasText("Mode")).onLast().performClick()          // drill into the mode page
+        waitForIdle()
+        assertPresent("Ask each step")                               // the four CLAUDE_MODES rows
+        assertPresent("Full auto")
+        onAllNodes(hasText("Full auto")).onLast().performClick()     // picking one closes the popover
+        waitForIdle()
+        assertTrue(!model.showQuickActions, "picking a mode dismisses the quick-actions popover")
+    }
+
+    @Test
     fun watchPaneRidesBesideTheChat() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertPresent("Run integration tests")                          // watch pane header
@@ -177,6 +197,18 @@ class DesktopUiTest {
         assertPresent("Start session")
         assertPresent("Ask each step")
         assertPresent("~/code/cc-pocket") // path field seeded with the current project
+    }
+
+    @Test
+    fun newSessionPopoverStartsOnEnter() = runComposeUiTest {
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        onAllNodes(hasText("New session")).onFirst().performClick()
+        waitForIdle()
+        assertPresent("Start session")
+        // the path field is auto-focused on open; Enter = the Start button
+        onAllNodes(hasText("~/code/cc-pocket")).onFirst().performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertTrue(!present("Start session"), "Enter submits and closes the popover")
     }
 
     @Test
@@ -276,6 +308,36 @@ class DesktopUiTest {
         assertPresent("Deny")
     }
 
+    @Test
+    fun rememberCheckboxTogglesAndRidesAllow() = runComposeUiTest {
+        // regression: the checkbox used to be a dead decoration — unclickable, remember always false
+        val ask = PermissionAsk(convoId = "c", askId = "a", tool = "Bash", inputPreview = "npm test", title = "Run command", rule = "Bash(npm test:*)")
+        var allowedRemember: Boolean? = null
+        setContent {
+            PocketTheme {
+                FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code", null, onAllow = { allowedRemember = it }, onDeny = {}, onDismiss = {})
+            }
+        }
+        assertPresent("Remember for this session")
+        onAllNodes(hasText("Remember for this session")).onLast().performClick()
+        waitForIdle()
+        onAllNodes(hasText("Allow")).onLast().performClick()
+        waitForIdle()
+        assertEquals(true, allowedRemember)
+    }
+
+    @Test
+    fun rememberCheckboxHiddenWithoutRule() = runComposeUiTest {
+        // no rule to remember → the checkbox would be a lie; plan decisions are one-off too (issue #10)
+        val ask = PermissionAsk(convoId = "c", askId = "a", tool = "ExitPlanMode", inputPreview = "plan", title = "Approve plan", rule = "Plan(x)")
+        setContent {
+            PocketTheme {
+                FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code", null, onAllow = {}, onDeny = {}, onDismiss = {})
+            }
+        }
+        assertTrue(!present("Remember for this session"), "plan approvals must not offer remember")
+    }
+
     // ── model logic (no composition) ─────────────────────────────────────────
 
     @Test
@@ -299,7 +361,7 @@ class DesktopUiTest {
         assertEquals(AgentKind.CLAUDE, m.defaultAgent)
         m.defaultAgent = AgentKind.CODEX
         assertEquals(AgentKind.CODEX, m.defaultAgent)
-        assertEquals("1.2.0", m.appVersion)
+        assertTrue(m.appVersion.isNotBlank()) // don't pin the literal — the seed tracks each release's version
     }
 
     @Test

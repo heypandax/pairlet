@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.2.2"
+val appVersionName = "1.3.0"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -56,6 +56,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.websockets)
             implementation(libs.qrkit) // in-app camera QR scanner (ios/android/desktop)
+            implementation(libs.highlights) // syntax highlighting for chat code blocks (issue #51); Android consumes its jvm variant
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
@@ -102,7 +103,7 @@ android {
         applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 10
+        versionCode = 11
         versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
@@ -132,10 +133,17 @@ compose.desktop {
         mainClass = "dev.ccpocket.app.MainKt"
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
-            packageName = "cc-pocket"
-            packageVersion = "1.2.2"
+            // User-visible app name (Finder / Dock / taskbar). Release artifacts keep the cc-pocket-desktop-* names —
+            // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
+            // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
+            packageName = "CC Pocket"
+            packageVersion = "1.3.0"
+            windows {
+                iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
+            }
             macOS {
                 bundleID = "dev.ccpocket.app"
+                iconFile.set(project.file("desktop-icons/cc-pocket.icns"))
                 // Developer ID signing — pass -PccpocketSignId="Developer ID Application: … (TEAMID)".
                 // Off by default so unsigned dev builds still work. Notarization is done after packaging
                 // (xcrun notarytool) so the DMG installs with no Gatekeeper warning.

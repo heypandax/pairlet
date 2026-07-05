@@ -121,16 +121,24 @@ class FleetCoordinator(private val scope: CoroutineScope, val primary: PocketRep
      * does the same the moment the link is Ready — same wait-for-Ready idea as the push-tap deep link.
      * Bounded so a machine that never comes up doesn't leave a ghost navigation.
      */
-    fun focusProject(accountId: String, path: String) {
-        if (primary.paired.value?.accountId == accountId) { openLiveSession(path); return }
+    fun focusProject(accountId: String, path: String) = onMachine(accountId) { openLiveSession(path) }
+
+    /** The RUNNING row's secondary affordance (issue #49): list the project's sessions — switching machines
+     *  when needed — WITHOUT auto-resuming the live one, so the user can pick a historical session. */
+    fun browseProject(accountId: String, path: String) = onMachine(accountId) { primary.listSessions(path) }
+
+    /** Run [act] with the primary parked on [accountId]: immediately when already there, else switch and
+     *  act the moment the link is Ready — bounded so a machine that never comes up leaves no ghost nav. */
+    private fun onMachine(accountId: String, act: () -> Unit) {
+        if (primary.paired.value?.accountId == accountId) { act(); return }
         val target = primary.pairedList.firstOrNull { it.accountId == accountId } ?: return
         primary.switchDaemon(target)
         scope.launch {
             val ready = withTimeoutOrNull(30_000) {
                 snapshotFlow { primary.phase.value }.first { it == ConnPhase.Ready }
             }
-            // only open if we're still parked on that machine (the user may have switched again meanwhile)
-            if (ready != null && primary.paired.value?.accountId == accountId) openLiveSession(path)
+            // only act if we're still parked on that machine (the user may have switched again meanwhile)
+            if (ready != null && primary.paired.value?.accountId == accountId) act()
         }
     }
 

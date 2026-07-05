@@ -126,11 +126,16 @@ class SeedDesktopModel : DesktopModel {
     override var showAddComputer by mutableStateOf(false)
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
+    override var showQuickActions by mutableStateOf(false)
 
-    override val appVersion = "1.2.2"
+    override val appVersion = "1.3.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
+    override var terminalApp by mutableStateOf(TerminalApp.SYSTEM)
+    private var phonePushState by mutableStateOf(true)
+    override val phonePush: Boolean? get() = phonePushState
+    override fun setPhonePush(enabled: Boolean) { phonePushState = enabled }
     override fun renameComputer(c: DkComputer, label: String?) {}
     override fun revokeComputer(c: DkComputer) {}
     override var composer by mutableStateOf("")

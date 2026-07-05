@@ -24,6 +24,35 @@ object CodexTranscriptScanner {
         CodexPaths.sessionFiles().mapNotNull { runCatching { summarize(it, workdir) }.getOrNull() }
             .sortedByDescending { it.lastModified }
 
+    // rollout files are append-only, so a first-line cwd read is stable once cached (keyed by mtime
+    // anyway in case a file is replaced)
+    private val cwdCache = java.util.concurrent.ConcurrentHashMap<Path, Pair<Long, String?>>()
+
+    /** Every cwd with Codex history → its newest rollout mtime. First-line reads only, memoized —
+     *  cheap enough for the directory list, which must surface dirs that have no Claude history at all. */
+    fun cwdsByNewest(files: List<Path> = CodexPaths.sessionFiles()): Map<String, Long> {
+        val out = HashMap<String, Long>()
+        for (file in files) {
+            val mtime = runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(0L)
+            val cached = cwdCache[file]
+            val cwd = if (cached != null && cached.first == mtime) cached.second else {
+                runCatching { readCwd(file) }.getOrNull().also { cwdCache[file] = mtime to it }
+            }
+            if (cwd != null) out.merge(cwd, mtime, ::maxOf)
+        }
+        return out
+    }
+
+    private fun readCwd(file: Path): String? = file.bufferedReader().use { metaPayload(it)?.str("cwd") }
+
+    /** The rollout's first-line `session_meta` payload (id/cwd/cli_version live here), or null. Advances
+     *  [r] past that line so [summarize] can keep scanning turns from the same reader. */
+    private fun metaPayload(r: java.io.BufferedReader): JsonObject? {
+        val first = r.readLine() ?: return null
+        return (runCatching { json.parseToJsonElement(first.trim()) }.getOrNull() as? JsonObject)
+            ?.takeIf { it.str("type") == "session_meta" }?.obj("payload")
+    }
+
     /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn. */
     fun summarize(file: Path, workdir: String?): SessionSummary? {
         var id: String? = null
@@ -32,9 +61,7 @@ object CodexTranscriptScanner {
         var firstPrompt: String? = null
         var userCount = 0
         file.bufferedReader().use { r ->
-            val first = r.readLine() ?: return null
-            val meta = (runCatching { json.parseToJsonElement(first.trim()) }.getOrNull() as? JsonObject)
-                ?.takeIf { it.str("type") == "session_meta" }?.obj("payload") ?: return null
+            val meta = metaPayload(r) ?: return null
             id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
             // OS-normalized compare (slashes / trailing sep / Windows case): codex records the cwd its own
             // way, and an exact string compare silently dropped sessions on Windows (issue #19's sibling)

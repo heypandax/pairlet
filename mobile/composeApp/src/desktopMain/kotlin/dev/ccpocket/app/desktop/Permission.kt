@@ -24,6 +24,10 @@ import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +48,7 @@ import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
+import dev.ccpocket.protocol.oneOff
 
 /** Countdown ring — a hairline track with a [fraction] arc in [color] (terracotta, ambering as it nears 0). */
 @Composable
@@ -67,12 +72,24 @@ private fun ShieldChip(color: Color, box: Dp = 34.dp, glyph: Dp = 18.dp) {
 }
 
 @Composable
-private fun RememberCheck(label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        Box(Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)).border(1.5.dp, Tok.muted, RoundedCornerShape(4.dp)))
-        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+private fun RememberCheck(label: String, checked: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onToggle).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(
+            Modifier.size(16.dp).clip(RoundedCornerShape(4.dp))
+                .background(if (checked) Tok.accent else Color.Transparent)
+                .border(1.5.dp, if (checked) Tok.accent else Tok.muted, RoundedCornerShape(4.dp)),
+            contentAlignment = Alignment.Center,
+        ) { if (checked) Text("✓", color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+        Text(label, color = if (checked) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
     }
 }
+
+/** Whether "remember" is offered at all: needs a rule to remember, and one-off decisions (plan
+ *  approval, questions) never offer it — [oneOff] carries the daemon's ToolMeta policy. */
+private fun canRemember(ask: PermissionAsk): Boolean = ask.rule != null && !ask.oneOff
 
 @Composable
 private fun DenyButton(big: Boolean = false, onClick: () -> Unit) {
@@ -137,9 +154,10 @@ private fun DiffView(diff: String) {
 
 /** Inline approval card embedded in the chat stream — command box, or a diff when [PermissionAsk.diff] is set. */
 @Composable
-fun InlinePermCard(ask: PermissionAsk, agent: AgentKind, workdir: String, branch: String?, onAllow: () -> Unit, onDeny: () -> Unit) {
+fun InlinePermCard(ask: PermissionAsk, agent: AgentKind, workdir: String, branch: String?, onAllow: (remember: Boolean) -> Unit, onDeny: () -> Unit) {
     val color = agentColor(agent)
     val isDiff = ask.diff != null
+    var rememberRule by remember(ask.askId) { mutableStateOf(false) }
     Column(
         Modifier.widthIn(max = 680.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.raised)
             .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(15.dp),
@@ -176,11 +194,11 @@ fun InlinePermCard(ask: PermissionAsk, agent: AgentKind, workdir: String, branch
                 }
                 Spacer(Modifier.size(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (!isDiff) RememberCheck("Remember for this session")
+                    if (canRemember(ask)) RememberCheck("Remember for this session", rememberRule) { rememberRule = !rememberRule }
                     Spacer(Modifier.weight(1f))
                     CountdownRing(26.dp, 2.2.dp, color)
                     DenyButton(onClick = onDeny)
-                    AllowButton(key = !isDiff, onClick = onAllow)
+                    AllowButton(key = !isDiff, onClick = { onAllow(rememberRule) })
                 }
             }
         }
@@ -192,8 +210,9 @@ fun InlinePermCard(ask: PermissionAsk, agent: AgentKind, workdir: String, branch
  * tray / notification deep-link with the window in the background. Names the computer at the top.
  */
 @Composable
-fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir: String, branch: String?, onAllow: () -> Unit, onDeny: () -> Unit, onDismiss: () -> Unit) {
+fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir: String, branch: String?, onAllow: (remember: Boolean) -> Unit, onDeny: () -> Unit, onDismiss: () -> Unit) {
     val color = agentColor(agent)
+    var rememberRule by remember(ask.askId) { mutableStateOf(false) }
     Box(
         Modifier.fillMaxSize().background(Color(0xFF08090A).copy(alpha = 0.66f)).clickable(onClick = onDismiss),
         contentAlignment = Alignment.Center,
@@ -220,10 +239,10 @@ fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir
                 DirBranchLine(workdir, branch, 11f)
                 Spacer(Modifier.size(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    RememberCheck("Remember this session")
+                    if (canRemember(ask)) RememberCheck("Remember for this session", rememberRule) { rememberRule = !rememberRule }
                     Spacer(Modifier.weight(1f))
                     DenyButton(big = true, onClick = onDeny)
-                    AllowButton(big = true, onClick = onAllow)
+                    AllowButton(big = true, onClick = { onAllow(rememberRule) })
                 }
             }
         }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,6 +31,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
+import dev.ccpocket.app.desktop.DesktopNotify
 import dev.ccpocket.app.desktop.DkTitleBar
 import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
@@ -73,7 +75,10 @@ fun main() = application {
 
     Window(
         onCloseRequest = ::exitApplication,
-        title = "cc-pocket",
+        title = "CC Pocket",
+        // taskbar/window icon on Windows & Linux and the dev-run (gradle :run) Dock icon on macOS;
+        // the packaged macOS Dock icon comes from the bundle's .icns (build.gradle.kts iconFile)
+        icon = androidx.compose.ui.res.painterResource("app-icon.png"),
         state = windowState,
         undecorated = true,
         resizable = true,
@@ -89,6 +94,7 @@ fun main() = application {
             when {
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.K && connected -> { model.palette = PaletteScope.ALL; true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.N && connected -> { model.openNewSession(); true }
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.R && connected -> { model.refresh(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Zero && connected -> { model.switcherOpen = !model.switcherOpen; true }
                 e.type == KeyEventType.KeyDown && digit >= 0 && connected && model.switcherOpen -> {
                     model.jumpMachine(digit); model.switcherOpen = false; true
@@ -119,6 +125,31 @@ fun main() = application {
                     )
                 }
             }
+        }
+        // turn-finished signals (issue: no explicit "done" cue): while the window is unfocused, each
+        // completed turn fires a macOS notification and bumps the Dock badge; focus clears the badge.
+        var windowFocused by remember { mutableStateOf(true) }
+        var unseenDone by remember { mutableStateOf(0) }
+        DisposableEffect(Unit) {
+            val l = object : java.awt.event.WindowFocusListener {
+                override fun windowGainedFocus(e: java.awt.event.WindowEvent?) { windowFocused = true }
+                override fun windowLostFocus(e: java.awt.event.WindowEvent?) { windowFocused = false }
+            }
+            window.addWindowFocusListener(l)
+            repo.onTurnFinished = { title, preview ->
+                if (!windowFocused) {
+                    unseenDone++
+                    DesktopNotify.badge(unseenDone)
+                    DesktopNotify.notify(title, preview ?: "Turn complete")
+                }
+            }
+            onDispose {
+                window.removeWindowFocusListener(l)
+                repo.onTurnFinished = null
+            }
+        }
+        LaunchedEffect(windowFocused) {
+            if (windowFocused && unseenDone > 0) { unseenDone = 0; DesktopNotify.badge(0) }
         }
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(720, 480)
