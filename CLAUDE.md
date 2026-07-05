@@ -15,6 +15,14 @@ bash scripts/update-local-daemon.sh
 
 它幂等地：构建 `installDist` → 装到可执行位置 `~/Library/Application Support/cc-pocket/` → **杀干净所有现存 daemon + 清 8799** → `service-install` 注册单实例 → 校验「进程数=1 且 relay-socket≥1」，不达标就报错退出。
 
+**在 cc-pocket 驱动的 claude 会话里（手机/桌面 App 开的会话）不要直接跑上面这条**——bootout 会连坐杀掉会话本身（exit 137）。改用：
+
+```bash
+bash scripts/update-local-daemon-detached.sh
+```
+
+它先做谱系自检（是否 daemon 后代）：普通终端 → 等价于直接更新；daemon 驱动 → 预热构建后延迟 20s 脱离点火（python 双 fork+setsid），让会话来得及发完汇报。随后会话断开属**预期**，daemon 被 launchd 拉起后手机自动重连，重新进入会话即可。
+
 ### 绝对不要做（每一条都会制造第二个 daemon → 立刻不可用）
 
 - ❌ `./gradlew :daemon:run` —— 会起一个前台 daemon，和 launchd 的那个抢账号。
@@ -31,9 +39,10 @@ bash scripts/update-local-daemon.sh
 
 ```bash
 # 有几个 daemon 在跑？（正常应恰好 1 个）
-pgrep -f 'cc-pocket-daemon run|Application Support/cc-pocket.*MainKt|build/install/cc-pocket.*MainKt' | wc -l
+# ⚠️ 不要用 pgrep -f 判断：macOS pgrep 匹配不到超长 java classpath 里的关键字（实测漏报为 0），必须走 ps
+ps aux | grep 'cc-pocket-daemon/lib' | grep -v grep | wc -l
 # 谁真的连上了 relay（应有 1 条 :443 ESTABLISHED）
-for p in $(pgrep -f 'cc-pocket|MainKt'); do lsof -nP -p $p 2>/dev/null | grep ':443.*ESTABLISHED' && echo "  ^pid $p"; done
+for p in $(ps aux | grep 'cc-pocket-daemon/lib' | grep -v grep | awk '{print $2}'); do lsof -nP -p $p 2>/dev/null | grep ':443.*ESTABLISHED' && echo "  ^pid $p"; done
 lsof -nP -iTCP:8799 -sTCP:LISTEN            # pair loopback 端口占用者
 launchctl list | grep -i ccpocket          # launchd agent（应只有 dev.ccpocket.daemon 一个）
 # daemon 日志
@@ -52,5 +61,8 @@ tail -f ~/Library/Logs/cc-pocket/daemon.err.log
 
 - 本机需 `JAVA_HOME=/opt/homebrew/opt/openjdk@17`（keg-only，不在 PATH）。
 - 验证移动端编译：`JAVA_HOME=... ./gradlew :mobile:composeApp:compileKotlinDesktop`。
+- 三套测试一把跑：`bash scripts/check-all.sh`（protocol + daemon + mobile）。
+- 装机到 Pandaa iPhone：`bash scripts/install-pandaa.sh`（generic 构建 → 新鲜度校验 → devicectl 安装拉起）。
+- **升级 claude CLI 后**跑 `python3 scripts/probe-claude-wire.py`——回归 daemon 依赖的三条 stream-json 行为（中途消息排队/注入、AskUserQuestion answers 形状），漂移会让排队与提问卡静默变坏。
 
 > 更细的历史踩坑（daemon 三/四类冲突、relay 容量、fake-IP 代理等）见 Claude 记忆 `cc-pocket-daemon-service-collisions`。

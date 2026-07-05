@@ -20,8 +20,11 @@ The relay pairs phone ↔ computer and routes opaque encrypted frames between th
 - **Approve from anywhere** — tool-permission requests reach your phone the moment Claude raises one. Allow or deny in seconds; if you don't, it times out to a safe deny.
 - **Set how much it asks** — four execution modes (ask each step, auto-edit, plan, full auto), a persisted **default mode** and reasoning **effort**, plus per-session allow rules — switchable mid-conversation.
 - **Pick up any session** — resume the exact Claude session you left running on your computer, or start a fresh one in any repo; hand it back to the desktop later with `claude --resume`.
-- **Watch it think, live** — real-time streaming output, code blocks, tool events and background-task status, exactly as they render in the terminal.
+- **Watch it think, live** — real-time streaming output, syntax-highlighted code blocks, tool events and background-task status, exactly as they render in the terminal.
+- **See what changed** — browse every file a session touched and read each change from the phone, tinted per language (sql, py, kt, js and more).
+- **Take over without forking** — a terminal session is observed read-only; "Continue here" resumes it in place, branching only while the terminal claude is truly still writing.
 - **Browse projects as a tree** — drill through your computer's folders level by level (or a flat recents list), filter as you type, with a live breadcrumb and per-project session counts.
+- **Any model, even custom ids** — switch models mid-session; ids routed through third-party gateways (cc-switch and friends) work as-is.
 - **Pick Claude or Codex** — choose the agent when you start a session and drive **OpenAI Codex** with the same remote, step-by-step approval as Claude: stream its output, approve its commands and diffs one step at a time, interrupt anytime. Codex sessions get a permission preset (Cautious / Balanced / Autonomous / Full auto) mapped to Codex's approval-policy × sandbox, and are tagged teal in lists and headers. A session stays bound to one backend.
 
 Voice dictation, image attachments, slash-command autocomplete, model switching, and finish-time push notifications round it out. **[See the full feature list →](https://heypandax.github.io/cc-pocket/features.html)**

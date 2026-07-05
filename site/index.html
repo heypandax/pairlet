@@ -67,11 +67,16 @@
       "featureList": [
         "Approve or deny the agent's tool-permission requests remotely",
         "Resume or start Claude Code and OpenAI Codex sessions from anywhere",
-        "Live streaming output with code blocks, tool events and background-task status",
+        "Live streaming output with syntax-highlighted code blocks, tool events and background-task status",
+        "Browse the files a session changed, with per-language syntax highlighting",
+        "Native desktop app (macOS / Linux / Windows) — a two-pane mission control for driving one computer from another",
+        "Fleet overview: every paired computer's online state, running projects and waiting approvals on one screen",
         "Tree project browser with breadcrumbs and per-project session counts",
         "Four execution modes plus a persisted default mode and reasoning effort",
+        "Switch models mid-session, including custom model ids from third-party gateways",
         "Voice dictation, image attachments and slash-command autocomplete",
         "Background tasks with finish-time push notifications",
+        "LAN direct connect on the same network for lower latency",
         "End-to-end encryption (P-256 ECDH + HKDF + AES-256-GCM) over a zero-knowledge relay"
       ],
       "keywords": "Claude Code, OpenAI Codex, AI coding agent, remote coding, end-to-end encryption, developer tools",
@@ -191,10 +196,11 @@
               </div>
               <div class="codeblock">
                 <div class="cb-hd"><span class="cb-lang">kotlin</span><span class="cb-lang" style="color:var(--asec)">copy</span></div>
-                <pre>fun reconnect() {
+                <pre><span class="hl-k">fun</span> reconnect() {
   scope.launch {
-    delay(backoff)
-    open()        <span style="color:var(--asuccess)">// guarded</span>
+    delay(<span class="hl-n">250</span>)
+    open(<span class="hl-s">"relay"</span>)
+    <span class="hl-c">// reconnect guarded</span>
   }
 }</pre>
               </div>
@@ -556,6 +562,157 @@
     <div class="reveal" style="text-align:center;margin-top:48px">
       <a class="btn btn-primary" href="features.html">
         <span class="i18n-en">See everything it does →</span><span class="i18n-zh">查看全部能力 →</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ DESKTOP + FLEET (v1.3) ══════════════ -->
+<section class="section" id="desktop">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Desktop edition</span><span class="i18n-zh">桌面版</span></p>
+      <h2><span class="i18n-en">One app. Every computer.</span><span class="i18n-zh">一个应用，掌控每台电脑。</span></h2>
+      <p><span class="i18n-en">A native app for macOS, Linux and Windows — drive one computer from another, wrapped in the same end-to-end encryption as your phone.</span><span class="i18n-zh">面向 macOS、Linux 与 Windows 的原生应用——用一台电脑操控另一台，端到端加密与手机同款。</span></p>
+    </div>
+
+    <div class="s1-mock reveal">
+      <!-- desktop app window -->
+      <div class="win appdark">
+        <div class="win-bar">
+          <div class="win-lights"><i></i><i></i><i></i></div>
+          <div class="win-titlewrap">
+            <div class="win-title">Fix relay reconnect</div>
+            <div class="win-meta">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
+          </div>
+        </div>
+        <div class="win-body">
+          <aside class="ds-side">
+            <div>
+              <div class="ds-zlabel"><span class="i18n-en">Pinned</span><span class="i18n-zh">已固定</span></div>
+              <div class="ds-group">
+                <div class="ds-row">
+                  <svg class="pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
+                  <span class="nm">relay · reconnect</span><span class="kbd">⌘1</span>
+                </div>
+                <div class="ds-row">
+                  <svg class="pin-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
+                  <span class="nm">dashboard · api</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="ds-zlabel"><span class="i18n-en">Running</span><span class="i18n-zh">运行中</span></div>
+              <div class="ds-group">
+                <div class="ds-row"><span class="pulse"></span><span class="nm">Refactor auth module</span><span class="mtag">mac-studio</span></div>
+                <div class="ds-row"><span class="pulse"></span><span class="nm">Nightly test sweep</span><span class="mtag">devbox</span></div>
+              </div>
+            </div>
+            <div>
+              <div class="ds-zlabel"><span class="i18n-en">Recent</span><span class="i18n-zh">最近</span></div>
+              <div class="ds-group">
+                <div class="ds-phead">~/proj/app/cc-pocket</div>
+                <div class="ds-row sel"><span class="nm">Fix relay reconnect</span><span class="rmeta">2h</span></div>
+                <div class="ds-row"><span class="nm">Fix stream parser test</span><span class="rmeta">5h</span></div>
+              </div>
+            </div>
+          </aside>
+          <section class="ds-chat">
+            <div class="ds-chat-hd">
+              <span class="t">Fix relay reconnect</span>
+              <span class="ds-mode">default</span>
+              <span class="ds-kebab"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor"><circle cx="4" cy="10" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="16" cy="10" r="1.5"/></svg></span>
+            </div>
+            <div class="ds-chat-body">
+              <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes. I'll hoist the backoff timer to the parent scope.</div>
+              <div class="tool-row">
+                <span class="dot" style="background:var(--asuccess)"></span>
+                <span class="nm">Bash</span>
+                <span class="tg">gradle :daemon:test</span>
+                <span class="meta">12s</span>
+              </div>
+              <div class="codeblock">
+                <div class="cb-hd"><span class="cb-lang">kotlin</span><span class="cb-lang" style="color:var(--asec)">copy</span></div>
+<pre><span class="hl-k">fun</span> reconnect(): Job {
+  <span class="hl-k">val</span> backoff = <span class="hl-n">250</span>
+  <span class="hl-k">return</span> scope.launch {
+    log(<span class="hl-s">"relay: reopening"</span>)
+    delay(backoff)
+  }
+}  <span class="hl-c">// survives cancellation</span></pre>
+              </div>
+              <div class="atext amuted">Guard added — reconnect now survives scope cancellation.<span class="caret"></span></div>
+            </div>
+            <div class="ds-cmp">
+              <div class="field">Message Claude…</div>
+              <span class="esc"><span class="k">esc</span> stop</span>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- floating fleet overview card -->
+      <div class="fleet appdark">
+        <div class="fleet-hd">
+          <span class="ttl">3 computers</span>
+          <span class="sub">1 needs you</span>
+        </div>
+        <div class="mrow">
+          <svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2.5 19h19"/></svg>
+          <span class="nm">Lidapeng-MacBook</span>
+          <span class="sdot on"></span>
+          <span class="badge acc">2 running</span>
+        </div>
+        <div class="mrow approve">
+          <svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="10" rx="2"/><path d="M8 19h8M12 15.5V19"/></svg>
+          <span class="nm">mac-studio</span>
+          <span class="sdot on"></span>
+          <span class="badge warn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg>
+            1 approval
+          </span>
+        </div>
+        <div class="mrow offline">
+          <svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7 9l3 2.5-3 2.5M13 14.5h4"/></svg>
+          <span class="nm">devbox-linux</span>
+          <span class="sdot off"></span>
+          <span class="off-tag">offline</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mini3 reveal">
+      <div class="mi">
+        <svg class="mci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6.5 10h.01M10.5 10h.01M14.5 10h.01M18 10h.01M7 14h10"/></svg>
+        <div>
+          <div class="mt"><span class="mono">⌘K</span> <span class="i18n-en">everywhere</span><span class="i18n-zh">随处可用</span></div>
+          <div class="md"><span class="i18n-en">Jump to any project or session.</span><span class="i18n-zh">跳转到任意项目或会话。</span></div>
+        </div>
+      </div>
+      <div class="mi">
+        <svg class="mci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 5 2 6 2 6H4.5s2-1 2-6z"/><path d="M9.8 20.5a2.4 2.4 0 0 0 4.4 0"/></svg>
+        <div>
+          <div class="mt"><span class="i18n-en">Approvals follow you</span><span class="i18n-zh">授权跟着你走</span></div>
+          <div class="md"><span class="i18n-en">Tray popover when the window's behind.</span><span class="i18n-zh">窗口在后台时，托盘弹窗提醒。</span></div>
+        </div>
+      </div>
+      <div class="mi">
+        <svg class="mci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.7 6.5-11A6.5 6.5 0 0 0 5.5 10c0 5.3 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
+        <div>
+          <div class="mt"><span class="i18n-en">Pinned sessions</span><span class="i18n-zh">固定会话</span></div>
+          <div class="md"><span class="mono">⌘1–9</span> <span class="i18n-en">to jump straight in.</span><span class="i18n-zh">一键直达。</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dl-pair reveal">
+      <a class="btn btn-ghost" href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M5 19.5h14"/></svg>
+        <span class="i18n-en">Download for macOS</span><span class="i18n-zh">下载 macOS 版</span>&nbsp;<span class="mono" style="font-size:12px;color:var(--muted)">.dmg</span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5M5 19.5h14"/></svg>
+        <span class="i18n-en">Windows</span><span class="i18n-zh">Windows 版</span>&nbsp;<span class="mono" style="font-size:12px;color:var(--muted)">.msi</span>
       </a>
     </div>
   </div>

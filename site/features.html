@@ -420,6 +420,104 @@
   </div>
 </section>
 
+<!-- ══════════════ WHAT 1.3 ADDS ══════════════ -->
+<section class="fgroup section" id="v13">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">What 1.3 adds</span><span class="i18n-zh">1.3 新增</span></p>
+      <h2><span class="i18n-en">Sharper output, any model, cleaner handoffs.</span><span class="i18n-zh">输出更清晰，模型任你选，交接更干净。</span></h2>
+    </div>
+    <p class="fg-intro reveal"><span class="i18n-en">1.3 sweats the moments between you and the terminal: reading code, choosing a model, and taking a session back without leaving a mess behind.</span><span class="i18n-zh">1.3 打磨你与终端之间的每个瞬间：读代码、选模型、把会话接回来——还不留下一团乱。</span></p>
+
+    <!-- 01 — syntax highlighting -->
+    <div class="fg-block reveal">
+      <div class="fg-copy">
+        <div class="ft-num">01</div>
+        <h3><span class="i18n-en">Code you can actually read</span><span class="i18n-zh">看得清的代码</span></h3>
+        <p><span class="i18n-en">Syntax highlighting lands in chat code blocks <b>and</b> the changed-files viewer — <span class="mono">sql</span>, <span class="mono">py</span>, <span class="mono">kt</span>, <span class="mono">js</span> and more, colored the moment it streams in.</span><span class="i18n-zh">语法高亮同时进入聊天代码块<b>和</b>改动文件查看器——<span class="mono">sql</span>、<span class="mono">py</span>、<span class="mono">kt</span>、<span class="mono">js</span> 等，边流边着色。</span></p>
+      </div>
+      <div class="fg-visual">
+        <div class="fg-frame appdark">
+          <div class="cfile">
+            <span class="chev"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5l5 5 5-5"/></svg></span>
+            <span class="fn">schema.sql</span>
+            <span class="diff-stat"><span class="add">+42</span><span class="del">−7</span></span>
+          </div>
+          <div class="code-panel">
+            <div class="cp-hd"><span class="cp-lang">sql</span><span class="cp-lang"><span class="i18n-en">changed files</span><span class="i18n-zh">改动文件</span></span></div>
+<pre><span class="hl-k">SELECT</span> id, email, created_at
+<span class="hl-k">FROM</span> users u
+<span class="hl-k">JOIN</span> sessions s <span class="hl-k">ON</span> s.user_id = u.id
+<span class="hl-k">WHERE</span> u.plan = <span class="hl-s">'pro'</span>
+  <span class="hl-k">AND</span> s.seats > <span class="hl-n">3</span>;   <span class="hl-c">-- active pro seats</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 02 — custom model ids -->
+    <div class="fg-block flip reveal">
+      <div class="fg-copy">
+        <div class="ft-num">02</div>
+        <h3><span class="i18n-en">Any model, even yours</span><span class="i18n-zh">任何模型，包括你自己的</span></h3>
+        <p><span class="i18n-en">Point cc-pocket at any model id. Third-party gateways like <span class="mono">cc-switch</span> just work, and <span class="mono">--model</span> takes whatever you give it.</span><span class="i18n-zh">把 cc-pocket 指向任意模型 id。<span class="mono">cc-switch</span> 等第三方网关开箱即用，<span class="mono">--model</span> 照单全收。</span></p>
+      </div>
+      <div class="fg-visual">
+        <div class="fg-frame appdark" style="max-width:372px">
+          <div class="picker">
+            <div class="ph"><span class="i18n-en">Model</span><span class="i18n-zh">模型</span></div>
+            <div class="prow on">
+              <span class="chk"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5l3.5 3.5 7.5-8"/></svg></span>
+              <span class="pn">Fable</span><span class="psub">default</span>
+            </div>
+            <div class="prow"><span class="rdot"></span><span class="pn">Opus</span><span class="psub">claude-opus-4</span></div>
+            <div class="prow"><span class="rdot"></span><span class="pn">Sonnet</span><span class="psub">claude-sonnet-4</span></div>
+            <div class="prow"><span class="rdot"></span><span class="pn">Haiku</span><span class="psub">claude-haiku</span></div>
+            <div class="pcustom">
+              <span class="clab"><span class="i18n-en">Custom</span><span class="i18n-zh">自定义</span></span>
+              <span class="field">kimi-k2-instruct</span>
+              <span class="go"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="#0E0F11" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h9M9.5 5l4 4-4 4"/></svg></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 03 — take over, don't fork -->
+    <div class="fg-block reveal">
+      <div class="fg-copy">
+        <div class="ft-num">03</div>
+        <h3><span class="i18n-en">Take over, don't fork</span><span class="i18n-zh">接管，而不是分叉</span></h3>
+        <p><span class="i18n-en">Continue a terminal session from your phone and it resumes <b>in place</b> — no more duplicate branch. A fork only happens while the terminal is still writing.</span><span class="i18n-zh">在手机上续接终端会话，它会<b>原地</b>恢复——不再产生重复分支。只有终端仍在写入时才会分叉。</span></p>
+      </div>
+      <div class="fg-visual">
+        <div class="fg-frame">
+          <div class="forkdiag">
+            <div class="forklane">
+              <span class="flabel"><span class="i18n-en">Before</span><span class="i18n-zh">此前</span></span>
+              <div class="dnode"><span class="glyph"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg></span>Continue here</div>
+              <span class="darr"><svg width="34" height="14" viewBox="0 0 34 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h20M18 3l4 4-4 4"/></svg></span>
+              <div class="dstack">
+                <div class="dnode">session <span class="mono">live</span></div>
+                <div class="dnode ghost">session <span class="mono">⑂ duplicate</span></div>
+              </div>
+            </div>
+            <div class="forklane">
+              <span class="flabel after"><span class="i18n-en">After</span><span class="i18n-zh">此后</span></span>
+              <div class="dnode acc"><span class="glyph"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7 9l3 2.5-3 2.5M13 14.5h4"/></svg></span>terminal</div>
+              <span class="darr acc"><svg width="30" height="14" viewBox="0 0 30 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h18M16 3l4 4-4 4"/></svg></span>
+              <div class="dnode acc">one session</div>
+              <span class="darr acc"><svg width="30" height="14" viewBox="0 0 30 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h18M16 3l4 4-4 4"/></svg></span>
+              <div class="dnode"><span class="glyph"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg></span>phone</div>
+            </div>
+          </div>
+          <div class="forkcap">⑂ <span class="i18n-en">resumes in place — branches <span class="accent">only</span> while the terminal is still writing</span><span class="i18n-zh">原地恢复——<span class="accent">仅</span>在终端仍在写入时分叉</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ══════════════ CLOSING CTA ══════════════ -->
 <section class="feat-foot-cta">
   <div class="wrap reveal">

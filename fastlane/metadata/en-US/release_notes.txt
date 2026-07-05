@@ -1,16 +1,15 @@
-What's new in 1.2.2
+What's new in 1.3.0
 
 New
-• See what a session changed: browse the files Claude touched and read each change, right from your phone
-• One-tap new session: tap once and it starts under your default agent and mode — the chip beside it shows what you'll get and opens the full picker
-• All your computers on one screen: online state, running projects and waiting approvals per machine, one tap to jump over
-• LAN direct connect: on the same network the app talks straight to your computer for lower latency; removing a device now disconnects it immediately
-• Links in replies are tappable, and lists refresh with a pull
+• Syntax highlighting: code blocks in replies and the changed-files viewer are tinted per language — sql, py and other common files read at a glance
+• Custom models: type any model id into the model picker — models configured through third-party gateways (cc-switch and friends) just work
+• Always know it's running: a persistent "running" chip in the header; keep typing while Claude works — sends queue up instead of looking disconnected
+• Browse a running project's history: tap the "history" badge on the row to pick any past session; the row itself still jumps straight to the live one
 
 Fixes & improvements
-• A quick double-tap can no longer start two sessions
-• Keyboard fixes around the composer; smoother model/mode switching
-• Interrupted turns no longer snap context usage to a misleading 0%
-• Resuming and observing desktop sessions is more reliable
+• Taking over no longer forks by default: a session only branches when the terminal claude is truly still writing — sessions you already quit resume in place. The main source of "mystery duplicate sessions" is gone
+• "Continue here" now honors your default mode from Settings (full auto means full auto)
+• Finished reading a changed file? Back returns to the file list for the next one; ✕ jumps straight back to the chat
+• Desktop: the header ⋯ quick actions (model / effort / mode / compact / clear) now match the phone, and the permission dialog's "Remember for this session" checkbox actually works
 
-Note: some features also need the computer-side cc-pocket-daemon on 1.2.2 — it now updates itself: run "cc-pocket-daemon update" (or brew upgrade / scoop update).
+Note: some features also need the computer-side cc-pocket-daemon on 1.3.0 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
