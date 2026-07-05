@@ -9,7 +9,7 @@ New
 Fixes & improvements
 • Taking over no longer forks by default: a session only branches when the terminal claude is truly still writing — sessions you already quit resume in place. The main source of "mystery duplicate sessions" is gone
 • "Continue here" now honors your default mode from Settings (full auto means full auto)
-• Finished reading a changed file? Back returns to the file list for the next one; ✕ jumps straight back to the chat
+• Finished reading a changed file? Back returns to the file list for the next one; the close button jumps straight back to the chat
 • Desktop: the header ⋯ quick actions (model / effort / mode / compact / clear) now match the phone, and the permission dialog's "Remember for this session" checkbox actually works
 
 Note: some features also need the computer-side cc-pocket-daemon on 1.3.0 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).

@@ -20,9 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       marketing_version:
-        description: "Marketing version (CFBundleShortVersionString), e.g. 1.0.1. Bump for a new App Store version; reuse to attach another build to the same version."
-        required: true
-        default: "1.0.1"
+        description: "Marketing version override. LEAVE EMPTY to use the repo's lockstepped version (Info.plist CFBundleShortVersionString) — a stale hardcoded default shipped 1.0.1 twice and ASC rejected the upload after a 20-minute archive. Only set this to attach another build to a DIFFERENT already-open version."
+        required: false
+        default: ""
       submit_for_review:
         description: "After the build finishes ASC processing: attach it to the version and submit for review (release notes + review notes ride along)."
         type: boolean
@@ -38,8 +38,21 @@ permissions:
 jobs:
   ios:
     runs-on: macos-26  # Xcode 26 / macOS 26 SDK — matches the local toolchain that produced prior uploads
+    outputs:
+      version: ${{ steps.stamp.outputs.version }} # resolved marketing version (repo lockstep unless overridden)
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate store metadata (fail fast, before the 20-minute archive)
+        # ASC rejects certain characters in What's New with "attribute value has invalid characters" —
+        # but only at the deliver step, AFTER build+upload. ✕ actually burned a run (1.3.0); extend the
+        # blocklist when ASC teaches us a new one.
+        run: |
+          BAD='✕'
+          if grep -rn "[$BAD]" fastlane/metadata/*/release_notes.txt; then
+            echo "::error::release_notes.txt contains characters App Store Connect rejects ($BAD) — fix fastlane/metadata before dispatching."
+            exit 1
+          fi
 
       - name: Set up JDK 17
         # Exports JAVA_HOME for later steps; the Xcode "Compile Kotlin Framework" build phase reads
@@ -84,6 +97,11 @@ jobs:
         run: cd iosApp && xcodegen generate
 
       - name: Stamp version & build number
+        id: stamp
+        # Marketing version: the REPO is the source of truth — Info.plist is version-lockstepped with
+        # gradle by the release commit, so an empty input means "ship what the repo says". The input
+        # only OVERRIDES for the attach-to-another-version case. This replaced a hardcoded "1.0.1"
+        # default that ASC rejected twice (train closed) — each time only after a 20-minute archive.
         # Build number = the workflow run number: strictly increasing across runs, so every upload is
         # unique automatically (App Store Connect rejects a re-used build number under one marketing version).
         env:
@@ -91,9 +109,15 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           PLIST=iosApp/iosApp/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "$PLIST"
+          REPO_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
+          VERSION="${MARKETING_VERSION:-$REPO_VERSION}"
+          if [ -n "$MARKETING_VERSION" ] && [ "$MARKETING_VERSION" != "$REPO_VERSION" ]; then
+            echo "::warning::overriding repo version $REPO_VERSION with input $MARKETING_VERSION — make sure that ASC version train is still open."
+          fi
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          echo "building $MARKETING_VERSION ($BUILD_NUMBER)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "building $VERSION ($BUILD_NUMBER)"
 
       - name: Stage App Store Connect API key
         env:
@@ -214,7 +238,7 @@ jobs:
         # questionnaire answers live in fastlane/Deliverfile (submission_information). If this fails,
         # the binary is already uploaded & processed — rerun just this job, or finish by hand in ASC.
         env:
-          MARKETING_VERSION: ${{ inputs.marketing_version }}
+          MARKETING_VERSION: ${{ needs.ios.outputs.version }} # the RESOLVED version (repo lockstep unless overridden), never the raw input
           BUILD_NUMBER: ${{ github.run_number }}
           SUBMIT: ${{ inputs.submit_for_review }}
           AUTO_RELEASE: ${{ inputs.automatic_release }}
