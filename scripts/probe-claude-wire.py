@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """claude CLI stream-json 行为回归探针 —— 升级 claude 后跑一次，防依赖漂移。
 
-daemon 依赖三条未写进正式契约的 CLI 行为（2026-07-05 在 2.1.201 上实证）：
+daemon 依赖三条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 上实证）：
   steer  中途写入的 user 消息在下一个工具边界注入当前轮（单 result 收尾）
   queue  当前轮无工具边界时，排队消息在本轮结束后自动作为下一轮处理（两个 result）
   ask    AskUserQuestion 以 control_request/can_use_tool 浮现（requires_user_interaction=true），
-         allow + updatedInput.answers{"<问题原文>": "<label>"} 让模型拿到答案
+         allow + updatedInput.answers{"<问题原文>": "<label>"} 让模型拿到答案。
+         default 与 plan 两种 permission-mode 下这条 wire 完全一致（issue #55 排查所得，两模式都测）
 
 任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵）。
 
-用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|all]（默认 all）
+用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default），会消耗少量用量。
 """
@@ -144,14 +145,18 @@ def scenario_queue() -> bool:
         p.kill()
 
 
-def scenario_ask() -> bool:
-    print("── ask：AskUserQuestion 走 can_use_tool + answers map ──")
-    p = Probe(["--permission-mode", "default"])
+def scenario_ask(mode: str = "default") -> bool:
+    print(f"── ask（--permission-mode {mode}）：AskUserQuestion 走 can_use_tool + answers map ──")
+    # WIRE probe. The explicit 'use AskUserQuestion' prompt fires the tool in ~15s under BOTH default and
+    # plan mode, and the control_request is byte-identical across modes (verified CLI 2.1.201, issue #55).
+    # The ORGANIC plan flow ('add i18n, help me plan') emits the SAME wire too, but only after a long
+    # multi-subagent research phase — so we keep the explicit prompt here for a fast, deterministic check.
+    p = Probe(["--permission-mode", mode])
     try:
         p.send("Use the AskUserQuestion tool to ask me which color I prefer, options Red and Blue. "
                "After I answer, reply with exactly 'CHOSE: ' followed by my answer.")
-        if not p.wait_for("control_request", timeout=90):
-            return check("control_request arrived", False, "none within 90s")
+        if not p.wait_for("control_request", timeout=120):
+            return check("control_request arrived", False, "none within 120s")
         req = p.of("control_request")[0][2]
         inner = req.get("request", {})
         ok = True
@@ -179,11 +184,20 @@ def scenario_ask() -> bool:
         p.kill()
 
 
+def scenario_ask_plan() -> bool:
+    # issue #55: users reported the phone couldn't pick an AskUserQuestion option in PLAN mode. Root cause
+    # was NOT the wire — plan-mode's control_request is identical to default's (proven), so StreamParser and
+    # PermissionBridge handle it unchanged. This scenario locks that invariant: if a future CLI ever gates
+    # plan-mode questions differently (drops can_use_tool / changes subtype / stops sending it), it goes red
+    # HERE first, instead of silently breaking the phone's question card.
+    return scenario_ask("plan")
+
+
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     version = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
     print(f"claude: {CLAUDE} ({version})\n")
-    scenarios = {"steer": scenario_steer, "queue": scenario_queue, "ask": scenario_ask}
+    scenarios = {"steer": scenario_steer, "queue": scenario_queue, "ask": scenario_ask, "ask_plan": scenario_ask_plan}
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
     print()

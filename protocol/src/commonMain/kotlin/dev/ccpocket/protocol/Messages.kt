@@ -320,6 +320,11 @@ data class PermissionAsk(
 val PermissionAsk.oneOff: Boolean
     get() = neverRemember || tool == "ExitPlanMode" || tool == "exit_plan_mode"
 
+/** Whether this ask is an AskUserQuestion (the model asking the user to choose), not a permission gate — the
+ *  UI renders it as a question card instead of an allow/deny card. Kept HERE so every call site reads one
+ *  predicate instead of re-testing `questions != null` across both clients. */
+val PermissionAsk.isQuestion: Boolean get() = questions != null
+
 /** The agent withdrew a pending ask (claude's control_cancel_request) — dismiss the card/sheet.
  *  Old phones drop the unknown frame type (every decode path is runCatching) and keep their
  *  timeout fallback; that degradation is intentional. */

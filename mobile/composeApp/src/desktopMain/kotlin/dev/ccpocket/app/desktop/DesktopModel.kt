@@ -269,12 +269,21 @@ interface DesktopModel {
     val ask: PermissionAsk?
     fun resolve(allow: Boolean, remember: Boolean)
     fun dismissAsk()
+    // AskUserQuestion (ask.questions != null): the picks/free-text ride an ALLOW verdict; skip DENIES with a
+    // note. Kept distinct from resolve() because a bare ALLOW carries no answers → the CLI reads "did not
+    // answer" and the model never sees the choice. Default no-ops so seed/preview models can ignore them.
+    fun answerQuestions(answers: Map<String, String>?, response: String?) {}
+    fun skipQuestions(message: String) {}
 
     // settings (general prefs + paired-computer management)
     val appVersion: String
     val relayUrl: String
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
+    // default model new Claude sessions start under (null = the CLI's own default). Codex sessions ignore it.
+    var defaultModel: String?
+    // context-window override (tokens) for the usage statusline's 100% mark; null = follow the derived window (#60)
+    var contextWindowOverride: Long?
     var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
 
     // phone-push switch (pocket/push.prefs.*): daemon truth; null = daemon predates it (toggle hidden)

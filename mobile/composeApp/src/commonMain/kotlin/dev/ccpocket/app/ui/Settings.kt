@@ -37,11 +37,17 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
+import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import org.jetbrains.compose.resources.stringResource
 
 // new-session default effort: the canonical levels (shared with the live /effort picker) + a leading
 // null = "model default". Hoisted so it isn't rebuilt on every Settings recomposition.
 private val EFFORT_DEFAULT_OPTS: List<String?> = listOf(null) + EFFORT_OPTIONS
+
+// context-window override presets for the usage statusline's denominator (issue #60): null = follow the
+// model-derived / daemon-reported window. Covers the two standard windows a custom model id might really have.
+private val CONTEXT_WINDOW_OPTS: List<Long?> = listOf(null, DEFAULT_CONTEXT_WINDOW, LARGE_CONTEXT_WINDOW)
 
 // chat text-size presets (issue #8): five stops within PocketRepository.FONT_SCALE_MIN..MAX, rendered as an
 // "A"-gradient segmented control so it reads the same in any language.
@@ -135,6 +141,32 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     }
                 }
             }
+
+            SectionLabel(stringResource(Res.string.context_window_section))
+            val ctxDefaultLabel = stringResource(Res.string.value_default)
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CONTEXT_WINDOW_OPTS.forEach { opt ->
+                    val sel = repo.contextWindowOverride.value == opt
+                    Box(
+                        Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                            .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                            .clickable { repo.setContextWindowOverride(opt) }.padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" },
+                            color = if (sel) Tok.base else Tok.tx2,
+                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                        )
+                    }
+                }
+            }
+            Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 
             SectionLabel(stringResource(Res.string.af_show_from))
             Row(

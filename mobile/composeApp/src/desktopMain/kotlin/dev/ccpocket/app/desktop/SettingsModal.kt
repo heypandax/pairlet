@@ -51,12 +51,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
+import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 
 private enum class SettingsTab(val label: String, val icon: ImageVector) {
     GENERAL("General", Icons.Outlined.Tune),
@@ -127,6 +130,16 @@ private fun GeneralPane(model: DesktopModel) {
                 AgentCardRow(AgentKind.CODEX, model.defaultAgent == AgentKind.CODEX, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CODEX }
             }
         }
+        Group("Default model", "Which model new Claude sessions start on (Codex sessions keep their own).") {
+            // null = follow the CLI's own default; the rest are Claude aliases shared with the ⋯ picker
+            PrefRow("Default", "cli default", selected = model.defaultModel == null) { model.defaultModel = null }
+            CLAUDE_MODEL_OPTIONS.forEach { (label, alias) ->
+                PrefRow(label, alias, selected = model.defaultModel == alias) { model.defaultModel = alias }
+            }
+        }
+        Group("Context window", "The usage statusline's 100% mark. Set this when a custom model's real window isn't 200K — the CLI can't report it.") {
+            ContextWindowRows(model)
+        }
         Group("Default permission mode", "How much a new session may do before it asks.") {
             CLAUDE_MODES.forEach { m -> ModeRow(m, selected = m.mode == model.defaultMode) { model.defaultMode = m.mode } }
         }
@@ -195,6 +208,59 @@ private fun AgentCardRow(agent: AgentKind, selected: Boolean, modifier: Modifier
     ) {
         AgentGlyph(agent, size = 18)
         Text(if (agent == AgentKind.CODEX) "Codex" else "Claude", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+// a selectable pill row: label left, a monospace hint/alias right. Shared by the default-model and
+// context-window pickers (issue #60 folded two byte-identical copies into one).
+@Composable
+private fun PrefRow(label: String, trailing: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 7.dp).clip(RoundedCornerShape(9.dp))
+            .background(if (selected) Tok.surface else Color.Transparent)
+            .border(1.5.dp, if (selected) Tok.accent else Tok.hair, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Spacer(Modifier.weight(1f))
+        Text(trailing, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+    }
+}
+
+// context-window denominator: the two standard presets + a free-form token count for a custom model whose
+// real window is neither (the case #60 exists for). null = follow the model-derived / daemon-reported window.
+@Composable
+private fun ContextWindowRows(model: DesktopModel) {
+    val current = model.contextWindowOverride
+    val custom = current != null && current != DEFAULT_CONTEXT_WINDOW && current != LARGE_CONTEXT_WINDOW
+    PrefRow("Default", "follow model", selected = current == null) { model.contextWindowOverride = null }
+    PrefRow("200K", "200,000", selected = current == DEFAULT_CONTEXT_WINDOW) { model.contextWindowOverride = DEFAULT_CONTEXT_WINDOW }
+    PrefRow("1M", "1,000,000", selected = current == LARGE_CONTEXT_WINDOW) { model.contextWindowOverride = LARGE_CONTEXT_WINDOW }
+    var draft by remember { mutableStateOf(if (custom) current.toString() else "") }
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 7.dp).clip(RoundedCornerShape(9.dp))
+            .background(if (custom) Tok.surface else Color.Transparent)
+            .border(1.5.dp, if (custom) Tok.accent else Tok.hair, RoundedCornerShape(9.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Custom", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Spacer(Modifier.weight(1f))
+        Box(
+            Modifier.width(108.dp).clip(RoundedCornerShape(7.dp)).background(Tok.base)
+                .border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 6.dp),
+        ) {
+            if (draft.isEmpty()) Text("tokens", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+            BasicTextField(
+                draft,
+                { new -> draft = new.filter(Char::isDigit).take(9); model.contextWindowOverride = draft.toLongOrNull()?.takeIf { it > 0 } },
+                singleLine = true,
+                textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

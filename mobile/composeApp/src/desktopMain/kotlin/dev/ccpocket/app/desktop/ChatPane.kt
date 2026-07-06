@@ -90,6 +90,7 @@ import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.AttachImageIcon
 import dev.ccpocket.app.ui.MarkdownText
+import dev.ccpocket.app.ui.QuestionCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
@@ -98,6 +99,7 @@ import dev.ccpocket.app.ui.slashSuggestions
 import dev.ccpocket.app.ui.turnDurLabel
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
+import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.SlashCommand
 
 @Composable
@@ -135,7 +137,16 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     item(key = "tail") {
                         CenteredStreamRow {
                             val ask = model.ask
-                            if (ask != null) {
+                            if (ask?.isQuestion == true) {
+                                // AskUserQuestion is conversation, not a safety gate — render the shared
+                                // multiple-choice card (answers ride an ALLOW verdict) instead of a bare
+                                // Allow/Deny, which would tell the CLI the user "did not answer" (#57)
+                                QuestionCard(
+                                    ask,
+                                    onAnswer = { answers, response -> model.answerQuestions(answers, response) },
+                                    onSkip = { model.skipQuestions("User skipped the questions") },
+                                )
+                            } else if (ask != null) {
                                 InlinePermCard(
                                     ask, model.chatAgent, model.chatWorkdir, model.chatBranch,
                                     onAllow = { rem -> model.resolve(allow = true, remember = rem) },

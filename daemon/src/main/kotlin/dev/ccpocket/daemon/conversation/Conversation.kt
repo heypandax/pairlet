@@ -181,25 +181,34 @@ class Conversation(
      *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
     val resumeAnchor: String? get() = openedResumeId
 
-    fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false) {
+    suspend fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false, takeOver: Boolean = false) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
         this.openedWithFork = fork
-        // Resume in-place by default — appending to the resumed transcript. The registry already ruled out the
-        // dangerous concurrent-writer cases before we get here: a live daemon session reattaches, and an
-        // externally-active Claude transcript routes to a read-only ObserveSession. Forking unconditionally (the
-        // old behavior) minted a new .jsonl on every phone re-entry of an idle session, cluttering the list with
-        // duplicates (issue #12). We DO still fork for an explicit take-over ([fork] == OpenSession.takeOver):
-        // that path deliberately bypasses the ObserveSession guard, so a desktop `claude --resume` may still be
-        // writing — branching into a fresh id (carrying full history) leaves the original .jsonl untouched.
-        // Codex ignores forkSession. No-op when resumeId is null (a brand-new session).
-        launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = fork))
+        // LAZY START (issue #61): a plain open PREVIEWS the session — it announces SessionLive, replays history and
+        // lists commands — but does NOT spawn an agent process. Spawning on open bound a daemon-owned `claude
+        // --resume` to this session the instant a phone tapped in; that held the session so the desktop (or a
+        // terminal) could no longer use it, and with a phone online the idle reaper never fired to release it. The
+        // process now starts lazily on the first prompt (see sendPrompt) — the moment a spawn is actually needed.
+        // A plain open never forks: [fork] is only set on take-over, so the deferred first-prompt launch resumes
+        // in place (openedWithFork == false), appending to the resumed transcript.
+        //
+        // EXCEPTION — an explicit take-over ([takeOver] == OpenSession.takeOver, the phone's "Continue here") spawns
+        // EAGERLY, on purpose. Its whole semantics are "seize this session NOW", and the take-over fork decision
+        // (issue #35: branch a fresh id off a possibly-live desktop `claude --resume`, carried in [fork]) was already
+        // computed by the registry and must be honored at open time — deferring it to an uncertain first prompt would
+        // break "tap to take over" and could let two writers clobber one transcript. Codex ignores forkSession; a
+        // null resumeId is a brand-new session either way.
+        if (takeOver) {
+            launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = fork))
+        }
         // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
-        // init that would drive SessionLive — until the first user turn / handshake lands. But the phone needs
-        // convoId (carried by SessionLive) before it can send that first turn. So announce the session as live
-        // now (we own convoId + workdir), and replay the resumed transcript up front; the pump later re-emits
-        // SessionLive with the real sessionId.
+        // init that would drive SessionLive — until the first user turn / handshake lands (and on a lazy open there
+        // is no process at all yet). But the phone needs convoId (carried by SessionLive) before it can send that
+        // first turn. So announce the session as live now (we own convoId + workdir), and replay the resumed
+        // transcript up front; once the first prompt spawns the agent, the pump re-emits SessionLive with the real
+        // sessionId.
         scope.launch {
             // Seed model + usage from the resumed transcript so the header shows the real model/window and the
             // usage statusline on open — before the first new turn's init lands (a headless claude is silent
@@ -231,9 +240,31 @@ class Conversation(
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
     fun hasBackgroundWork(): Boolean = jobs.hasRunning()
 
+    /** True while a permission ask / AskUserQuestion is still awaiting the phone's verdict. Like
+     *  [hasBackgroundWork] this keeps the idle reaper off the conversation: a turn blocked on an unanswered
+     *  question is not idle, and reaping it would discard a card the user is expected to answer — the plan-mode
+     *  failure in issue #55, where the question lands long after a premature `result` while the phone is
+     *  backgrounded (past the 90s idle window). Bounded by the bridge's question timeout. */
+    fun hasPendingAsk(): Boolean = bridge?.hasPending() == true
+
     /** True while a turn is streaming — the LAN disconnect grace-close re-arms instead of killing it
      *  (in-flight work must survive its owner app quitting; see SessionRegistry.scheduleClose). */
     fun isExecuting(): Boolean = executing
+
+    /** True while the conversation is doing or awaiting anything that must outlive its owner leaving: a
+     *  streaming turn, running background jobs, or an unanswered permission/question card. The shared
+     *  keep-alive predicate for SessionRegistry.close/scheduleClose (reapIdle keeps its own idle-time
+     *  variant, where lastActivityMs already covers the streaming case). */
+    fun isBusy(): Boolean = isExecuting() || hasBackgroundWork() || hasPendingAsk()
+
+    /** Pre-first-turn (issue #61 lazy start): with no agent process yet, a mode/model/effort switch only
+     *  records the field and re-announces — relaunching would spawn the very process the lazy open avoided,
+     *  re-occupying the session before any message. Returns true when it handled this case (caller returns). */
+    private suspend fun recordedPreFirstTurn(): Boolean {
+        if (proc != null) return false
+        sink.emit(live(sessionId ?: openedResumeId))
+        return true
+    }
 
     /**
      * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
@@ -272,6 +303,7 @@ class Conversation(
             return
         }
         mode = newMode
+        if (recordedPreFirstTurn()) return // issue #61: no process yet → record the mode, don't relaunch
         if (!backend.applySettings(mode = newMode, model = null, effort = null)) {
             // Codex: no relaunch; the next turn/start carries the new approval policy
             sink.emit(live(sessionId))
@@ -291,6 +323,7 @@ class Conversation(
     suspend fun switchModel(newModel: String?) {
         model = newModel
         backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
+        if (recordedPreFirstTurn()) return // issue #61: no process yet → record the model, don't relaunch
         if (backend.applySettings(mode = null, model = newModel, effort = null)) {
             reemitLive = true // the next init re-announces too — it carries the post-resume sessionId
             // pre-first-turn fall back to the opened resumeId, like switchMode — relaunch(sessionId=null)
@@ -304,6 +337,7 @@ class Conversation(
     /** Switch reasoning effort. Claude relaunches under --effort; Codex applies it to the next turn. */
     suspend fun switchEffort(newEffort: String?) {
         effort = newEffort
+        if (recordedPreFirstTurn()) return // issue #61: no process yet → record the effort, don't relaunch
         if (backend.applySettings(mode = null, model = null, effort = newEffort)) {
             reemitLive = true
             val sid = sessionId ?: openedResumeId // same pre-first-turn anchor as switchModel/switchMode
@@ -316,15 +350,21 @@ class Conversation(
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
     }
 
-    private fun launchProcess(spec: AgentSpec) {
+    private suspend fun launchProcess(spec: AgentSpec) {
         intentionalStop = false
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
         val b = PermissionBridge(convoId, mode, scope, { sink.emit(it) }, allowRules, respond = backend::respondPermission)
         proc = p
         bridge = b
+        // Bind IO + kick off any handshake (Codex initialize → thread/start) SYNCHRONOUSLY, before returning. The
+        // lazy first prompt (issue #61) calls backend.sendPrompt right after this: sendPrompt reads the io attach
+        // installs (Claude) and the thread state attach resets (Codex). Running attach inside the pump coroutine
+        // (as before) let that first sendPrompt race ahead of it and silently drop the opening turn. attach only
+        // KICKS OFF the handshake — its writes buffer on the process's stdin channel — so this can't block on the
+        // agent; the pump below reads the replies (stdout is buffered until it starts).
+        backend.attach(io, spec)
         scope.launch(CoroutineName("pump-$convoId")) {
-            backend.attach(io, spec) // bind IO + run any handshake (Codex initialize/thread-start) before reading
             pump(p, b)
         }
     }
@@ -442,11 +482,31 @@ class Conversation(
         if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
+        // A permission ask / question still awaiting a verdict is re-shown to the reconnecting device: it fired
+        // while this phone was away (in plan mode the AskUserQuestion can land minutes after a premature `result`,
+        // so the phone is often backgrounded — socket suspended — when the live frame goes out), and without this
+        // its card never reappears and the turn wedges on an answer the user was never shown (issue #55). Emitted
+        // to the newcomer only; a device already showing the card is untouched. Ordered after SessionLive above so
+        // the phone's convoId is set before the PermissionAsk (its handler is convoId-gated).
+        bridge?.resurfacePending { newSink.emit(it) }
     }
 
     suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList()) {
         if (tryIntercept(text)) return
-        if (proc == null) return
+        // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
+        // open() recorded (openedResumeId), reusing its fork decision (openedWithFork — false for a plain open, so
+        // this appends in place). Without this, the first message after a lazy open would hit the old `proc == null`
+        // guard and be silently dropped. A spawn failure (CLI missing / bad resume id) surfaces as a PocketError so
+        // it can't propagate out and wedge the inbound pump; proc stays null, so the next prompt simply retries.
+        if (proc == null) {
+            val launched = runCatching {
+                launchProcess(AgentSpec(workdir, openedResumeId, model, mode, effort = effort, forkSession = openedWithFork))
+            }
+            if (launched.isFailure) {
+                sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
+                return
+            }
+        }
         executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         lastActivityMs = System.currentTimeMillis()
         backend.sendPrompt(text, images)

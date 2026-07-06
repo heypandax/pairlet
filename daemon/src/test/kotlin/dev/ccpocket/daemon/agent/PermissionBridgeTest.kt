@@ -117,6 +117,40 @@ class PermissionBridgeTest {
     }
 
     @Test
+    fun resurfacePending_reemits_open_ask_only_until_answered() = runBlocking {
+        // issue #55: a reattaching phone (backgrounded when the live PermissionAsk fired — plan mode surfaces the
+        // AskUserQuestion minutes after a premature `result`) must be re-shown the still-open card, and NOT one it
+        // already answered. resurfacePending re-emits exactly the open asks, to the reattaching sink only.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        val input = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"questions":[{"question":"Which color?","header":"Color","multiSelect":false,
+                "options":[{"label":"Red","description":"r"},{"label":"Blue","description":"b"}]}]}""",
+        ) as kotlinx.serialization.json.JsonObject
+        b.onControlRequest(AgentEvent.ControlRequest("q1", "AskUserQuestion", input))
+        assertTrue(b.hasPending()) // reaper must spare a conversation blocked on this
+
+        // reattach #1: the card is re-surfaced verbatim (same askId + structured questions) to the new sink
+        val reattached = mutableListOf<Frame>()
+        b.resurfacePending { reattached += it }
+        val re = reattached.single()
+        assertIs<PermissionAsk>(re)
+        assertEquals("q1", re.askId)
+        assertEquals("Which color?", re.questions?.single()?.question)
+
+        // once answered it leaves [pending] — a later reattach must NOT re-show a card the user already handled
+        b.onVerdict(PermissionVerdict("c1", "q1", Decision.ALLOW, answers = mapOf("Which color?" to "Red")))
+        assertFalse(b.hasPending())
+        val reattachedAgain = mutableListOf<Frame>()
+        b.resurfacePending { reattachedAgain += it }
+        assertTrue(reattachedAgain.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
     fun remembered_rule_auto_allows_next_matching_request() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val responses = mutableListOf<Resp>()

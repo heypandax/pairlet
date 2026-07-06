@@ -132,6 +132,7 @@ import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
@@ -215,7 +216,7 @@ fun App(scope: CoroutineScope) {
             // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
-            repo.pendingAsk.value?.takeIf { it.questions == null }?.let { ask ->
+            repo.pendingAsk.value?.takeIf { !it.isQuestion }?.let { ask ->
                 PermissionSheet(
                     ask, repo.workdir.value,
                     onDeny = { repo.resolve(Decision.DENY) },
@@ -1223,7 +1224,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
             // stream above stays scrollable so the user can re-read context before answering.
             // While one of the card's text fields owns input, the composer hides (design ③).
             var cardOwnsInput by remember(repo.pendingAsk.value?.askId) { mutableStateOf(false) }
-            val questionAsk = repo.pendingAsk.value?.takeIf { it.questions != null }
+            val questionAsk = repo.pendingAsk.value?.takeIf { it.isQuestion }
             questionAsk?.let { ask ->
                 val skipMessage = stringResource(Res.string.question_skip_message)
                 QuestionCard(

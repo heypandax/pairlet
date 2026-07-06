@@ -185,6 +185,8 @@
     <!-- ── new-session default mode ──────────────────────────────── -->
     <string name="default_mode_section">NEW SESSION DEFAULT</string>
     <string name="default_effort_section">DEFAULT REASONING EFFORT</string>
+    <string name="context_window_section">CONTEXT WINDOW</string>
+    <string name="context_window_hint">The token budget the usage statusline fills toward. Set this when a custom model\'s real window isn\'t 200K — the CLI can\'t report it.</string>
     <string name="text_size_section">TEXT SIZE</string>
     <string name="text_size_sample">Sample message text — 示例 123</string>
     <string name="new_path_open">New session in a folder</string>

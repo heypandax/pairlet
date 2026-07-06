@@ -201,21 +201,41 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     private data class Visit(val accountId: String, val path: String, val snapshot: List<DkSession> = emptyList())
     private val visits = mutableStateListOf<Visit>() // most recent first
 
+    /** Canonical identity of a workdir for RECENT-group dedup. Collapses $HOME → ~ (so the daemon's
+     *  absolute cwd like /Users/x/P and the new-session popover's tilde reseed ~/P name the SAME project
+     *  instead of splitting into two groups — issue #58), unifies separators, drops a trailing one, and
+     *  squeezes repeats. [tilde] is structural (matches /Users|/home layouts), so it converges even against
+     *  a REMOTE daemon whose $HOME the client can't expand. Comparison-only — never stored, so case is left
+     *  intact (a remote FS's case sensitivity is unknown, and the daemon already toRealPath()-canonicalizes). */
+    private val repeatSlash = Regex("/{2,}") // compiled once, not per normCwd call
+
+    private fun normCwd(path: String): String =
+        tilde(trimTrailingSep(path)).replace('\\', '/').replace(repeatSlash, "/")
+
+    /** Whether two paths name the same project — the RECENT-group dedup identity (issue #58). */
+    private fun sameDir(a: String, b: String): Boolean = normCwd(a) == normCwd(b)
+
     /** Upsert the live list under its dir before [openProject] points the repo somewhere else — this is
-     *  also how a dir listed outside openProject (e.g. a restored chat's) enters RECENT. */
+     *  also how a dir listed outside openProject (e.g. a restored chat's) enters RECENT. Converges the stored
+     *  key to the daemon's ABSOLUTE workdir once the open session resolved it (sessionsDir only echoes the raw,
+     *  maybe-tilde request), so a tilde reseed and a later absolute directory entry don't split (issue #58). */
     private fun snapshotCurrent() {
         val acct = repo.paired.value?.accountId ?: return
         val dir = repo.sessionsDir.value ?: return
-        val i = visits.indexOfFirst { it.accountId == acct && it.path == dir }
-        if (i >= 0) visits[i] = visits[i].copy(snapshot = sessions)
-        else visits.add(0, Visit(acct, dir, sessions))
+        val key = repo.workdir.value?.takeIf { repo.convoId.value != null && sameDir(it, dir) } ?: dir
+        val i = visits.indexOfFirst { it.accountId == acct && sameDir(it.path, key) }
+        if (i >= 0) visits[i] = visits[i].copy(path = key, snapshot = sessions)
+        else visits.add(0, Visit(acct, key, sessions))
     }
 
     override fun openProject(p: DkProject) {
+        focusDir(p.path) // the New-session target follows the project the user just opened
         val acct = repo.paired.value?.accountId
         if (acct != null) {
             snapshotCurrent()
-            val i = visits.indexOfFirst { it.accountId == acct && it.path == p.path }
+            // normCwd dedup so a tilde-reseeded new session (~/P) reuses the absolute directory-list visit
+            // (/Users/x/P) instead of adding a twin group; the surviving visit keeps its absolute path (#58)
+            val i = visits.indexOfFirst { it.accountId == acct && sameDir(it.path, p.path) }
             val v = if (i >= 0) visits.removeAt(i) else Visit(acct, p.path)
             visits.add(0, v)
             visits.filter { it.accountId == acct }.drop(MAX_RECENT).forEach { visits.remove(it) }
@@ -226,11 +246,13 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     private val sessionGroupsDerived = derivedStateOf {
         val acct = repo.paired.value?.accountId ?: return@derivedStateOf emptyList()
         val liveDir = repo.sessionsDir.value
+        val normLive = liveDir?.let(::normCwd) // constant across this derive — normalize once, not per visit
         val keys = visits.filter { it.accountId == acct }.toMutableList()
-        // a list opened outside openProject shows before its first snapshotCurrent lands it in visits
-        if (liveDir != null && keys.none { it.path == liveDir }) keys.add(0, Visit(acct, liveDir))
+        // a list opened outside openProject shows before its first snapshotCurrent lands it in visits.
+        // normCwd match so a live tilde dir (~/P) folds into its absolute visit (/Users/x/P) — no twin (#58)
+        if (liveDir != null && keys.none { normCwd(it.path) == normLive }) keys.add(0, Visit(acct, liveDir))
         keys.map { v ->
-            val current = v.path == liveDir
+            val current = normLive != null && normCwd(v.path) == normLive
             DkSessionGroup(
                 path = v.path,
                 name = folderName(v.path),
@@ -250,6 +272,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override fun selectSession(s: DkSession) {
+        focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
 
@@ -288,6 +311,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     override fun openPin(p: DkPin) {
         if (p.accountId == repo.paired.value?.accountId) {
+            focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
             repo.openSession(wd = p.cwd, resumeId = p.sessionId, title = p.title, agent = p.agent)
             return
         }
@@ -298,8 +322,24 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         repo.requestOpenSession(p.cwd, p.sessionId, title = p.title, agent = p.agent)
     }
 
-    // the open project's dir, else wherever the current chat lives — so ⌘N works before any project click
-    override val newSessionDir: String? get() = repo.sessionsDir.value ?: repo.workdir.value
+    // the project the New-session button targets. Set synchronously the moment the user focuses a project —
+    // by opening it (palette / All projects) OR by clicking one of its sessions — so ⌘N follows sidebar
+    // navigation instead of lagging on the async ListSessions reply (which set sessionsDir late, leaving a
+    // just-switched project's ⌘N pointed at the PREVIOUS project until a session there was clicked). Scoped
+    // to the account so a stale path from another machine can't leak in after a computer switch.
+    private var focus by mutableStateOf<Pair<String, String>?>(null) // accountId → dir
+    private fun focusDir(dir: String) { repo.paired.value?.accountId?.let { focus = it to dir } }
+
+    // the focused project's dir, else the open list's / current chat's — so ⌘N works before any project click.
+    // disconnect() (switchDaemon / leaving a machine) clears workdir alongside convoId + sessionsDir, so a
+    // just-switched machine starts clean instead of inheriting the PREVIOUS machine's path (which the target
+    // daemon would reject as bad_workdir — issue #56). Nothing focused/open on the new machine → null → the
+    // popover falls back to "~/", which the target daemon can always resolve.
+    override val newSessionDir: String?
+        get() {
+            val acct = repo.paired.value?.accountId
+            return focus?.takeIf { it.first == acct }?.second ?: repo.sessionsDir.value ?: repo.workdir.value
+        }
     override var newSessionSeed: String? by mutableStateOf(null)
 
     override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode) {
@@ -351,6 +391,10 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         repo.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember)
     }
     override fun dismissAsk() { showPermissionModal = false; repo.dismissAsk() }
+    // AskUserQuestion: answers ride an ALLOW verdict (the daemon merges them into claude's updatedInput);
+    // skip denies with a note so claude learns the user opted out rather than silently timing out (#57)
+    override fun answerQuestions(answers: Map<String, String>?, response: String?) = repo.answerQuestions(answers, response)
+    override fun skipQuestions(message: String) = repo.resolve(Decision.DENY, remember = false, message = message)
 
     override val appVersion: String get() = APP_VERSION
     override val relayUrl: String get() = repo.paired.value?.relay ?: ""
@@ -360,6 +404,12 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var defaultMode: PermissionMode
         get() = repo.defaultMode.value
         set(v) { repo.setDefaultMode(v) }
+    override var defaultModel: String?
+        get() = repo.defaultModel.value
+        set(v) { repo.setDefaultModel(v) }
+    override var contextWindowOverride: Long?
+        get() = repo.contextWindowOverride.value
+        set(v) { repo.setContextWindowOverride(v) }
     // desktop-only pref (the daemon/mobile never open local terminals) — persisted beside the pins
     private var terminalAppState by mutableStateOf(TerminalApp.fromId(SecureStore.getString(K_TERMINAL_APP)))
     override var terminalApp: TerminalApp

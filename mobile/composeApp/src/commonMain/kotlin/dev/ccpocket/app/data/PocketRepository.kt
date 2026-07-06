@@ -244,6 +244,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
 
+    /** Persisted default model for NEW Claude sessions (null = the CLI's own default). Applied only when the
+     *  new session's agent is Claude — the stored value is a Claude alias/id and would be meaningless to a
+     *  Codex launch. Resumed sessions keep their own model. Stored as "" for the null/default choice. */
+    val defaultModel = mutableStateOf(SecureStore.getString(K_DEFAULT_MODEL)?.takeIf { it.isNotEmpty() })
+
+    /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
+     *  the model-derived / daemon-reported window. Exists because the CLI never reports a CUSTOM model's real
+     *  window, so [contextWindowFor] falls back to 200k and the % reads wrong (issue #60). Global — one value for
+     *  every session — and applied AHEAD of the daemon's SessionLive.contextWindow, which for Claude is never null. */
+    val contextWindowOverride = mutableStateOf(SecureStore.getString(K_CONTEXT_WINDOW_OVERRIDE)?.toLongOrNull())
+
     /** Persisted default agent backend for NEW sessions (Claude unless the user switched to Codex). Resumed
      *  sessions keep their own backend (the picker only seeds new ones). */
     val defaultAgent = mutableStateOf(
@@ -636,6 +647,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
     }
 
+    /** Settings: persist the default model for new Claude sessions (null = the CLI's own default). */
+    fun setDefaultModel(id: String?) {
+        val v = id?.takeIf { it.isNotEmpty() }
+        if (v == defaultModel.value) return
+        defaultModel.value = v
+        SecureStore.putString(K_DEFAULT_MODEL, v ?: "")
+    }
+
+    /** Settings: persist the context-window override (tokens; null or ≤0 = follow the derived window). Sits ahead
+     *  of the daemon's value because the CLI can't report a custom model's real window. Re-applied to the open
+     *  session right away so its % updates without waiting for the next SessionLive/relaunch (issue #60). */
+    fun setContextWindowOverride(tokens: Long?) {
+        val v = tokens?.takeIf { it > 0 }
+        if (v == contextWindowOverride.value) return
+        contextWindowOverride.value = v
+        SecureStore.putString(K_CONTEXT_WINDOW_OVERRIDE, v?.toString() ?: "")
+        // reflect on the live statusline immediately — mirror SessionLive's derive + proven-window upgrade so a
+        // mid-session change isn't invisible until reopen (clearing falls back to the model-derived window, which
+        // for a Claude session equals the daemon's value; a custom id resolves to 200k either way)
+        if (convoId.value != null) {
+            val claudeish = (sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+            contextWindow.value = v ?: (if (claudeish) contextWindowFor(model.value) else null)
+            upgradeWindowIfProven() // keep the proven-window rule in ONE place instead of re-inlining provenWindow
+        }
+    }
+
     /** Settings: persist the default agent backend that new sessions start under. */
     fun setDefaultAgent(a: AgentKind) {
         if (a == defaultAgent.value) return
@@ -880,6 +917,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         convoId.value = null
         sessionsDir.value = null
+        workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         pendingAsk.value = null
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearBackgroundJobs()
         demoMode.value = false // leaving the demo returns to real pairing
@@ -1101,7 +1139,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // session with no daemon-sent window was rendering a % against a meaningless Claude 200k —
                 // null instead, and the UI shows raw tokens without a denominator
                 val claudeish = (f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
-                contextWindow.value = f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
+                // the user's override wins over the daemon's value (for Claude, f.contextWindow is never null and
+                // would otherwise pin a custom model at the CLI's 200k fallback — issue #60)
+                contextWindow.value = contextWindowOverride.value ?: f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
                 // seed the usage statusline on resume (before the first new turn). Only when we have no
                 // value yet — a TurnDone this session is fresher than the daemon's transcript snapshot.
                 if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
@@ -1354,12 +1394,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val openMode = startMode
         val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
+        // new Claude sessions seed from the persisted default model; resumed keep their own, and a Codex launch
+        // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend
+        val openModel = saved?.model ?: defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
         mode.value = openMode; allowRules.clear()
-        model.value = saved?.model; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
+        model.value = openModel; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
-        send(OpenSession(wd, resumeId, model = saved?.model, mode = openMode, effort = openEffort, agent = openAgent))
+        send(OpenSession(wd, resumeId, model = openModel, mode = openMode, effort = openEffort, agent = openAgent))
         delay(8000) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
             opening.value = false
@@ -1880,6 +1923,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
+        const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: model id for new Claude sessions ("" = CLI default)
+        const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: statusline denominator in tokens ("" = follow derived window)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen

@@ -164,7 +164,9 @@ class SessionRegistry(
             "open ${resume?.take(8) ?: "new"}${if (open.takeOver) " (take-over)" else ""} → " +
                 "convo ${convoId.take(8)}… agent=${open.agent}${if (forkForTakeOver) " FORK" else ""}",
         )
-        val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver) }
+        // takeOver → Conversation.open spawns EAGERLY (seize the session now); a plain open starts lazily on the
+        // first prompt (issue #61) so merely previewing a session never holds/occupies it for the desktop.
+        val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver, takeOver = open.takeOver) }
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
             runCatching { c.close() }
@@ -182,7 +184,10 @@ class SessionRegistry(
     /**
      * Close conversations with no agent activity for longer than [idleMs]. Returns the reap count.
      * A conversation with running background work is NEVER reaped — killing it would take its still-running
-     * background shells / sub-agents with it (the "I left it running" case this is meant to preserve).
+     * background shells / sub-agents with it (the "I left it running" case this is meant to preserve). Nor is
+     * one with an unanswered permission ask / question (issue #55): it's blocked on the user, not idle, and
+     * reaping it would silently discard a card the phone is expected to answer (plan mode surfaces the question
+     * long after a premature `result`, past this idle window, while the phone is backgrounded).
      */
     suspend fun reapIdle(idleMs: Long): Int {
         // first settle background jobs whose completion event never arrived — otherwise their forever-RUNNING
@@ -191,7 +196,7 @@ class SessionRegistry(
         mutex.withLock { convos.values.toList() }.forEach { runCatching { it.reapStaleJobs(STALE_JOB_MS) } }
         val now = System.currentTimeMillis()
         val stale = mutex.withLock {
-            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.hasBackgroundWork() }
+            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.hasBackgroundWork() && !it.hasPendingAsk() }
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
@@ -248,13 +253,23 @@ class SessionRegistry(
     suspend fun modeOf(convoId: String): PermissionMode? = get(convoId)?.currentMode()
 
     /** Close [convoId]. With a [requester] (a client closing ITS view) this only detaches that client's
-     *  sink when others are still attached (fan-out, issue #47) — the conversation keeps streaming to
-     *  them. Returns true when the conversation was actually closed. */
+     *  sink — the conversation keeps streaming (to any other clients, else headless) when others are still
+     *  attached (fan-out, issue #47) OR it is still busy (a turn in flight / background work / an unanswered
+     *  ask). The phone sends CloseSession when it leaves a session its `streaming` flag calls idle, but plan
+     *  mode's premature `result` clears that flag long before the turn truly ends (issue #55): a "done"-looking
+     *  session the user taps away from is often still researching and about to ask a question. Killing it here
+     *  would abort the turn and drop the question; instead it survives (the idle reaper reclaims it once it
+     *  really goes idle and the phone stays away — the same spare set as reapIdle/scheduleClose). Returns true
+     *  when the conversation was actually closed. */
     suspend fun close(convoId: String, requester: OutboundSink? = null): Boolean {
         if (requester != null) {
-            val othersRemain = mutex.withLock { convos[convoId]?.let { !it.detach(requester) } == true }
-            if (othersRemain) {
-                log.info("detach ${convoId.take(8)}… (other clients still attached)")
+            val keepAlive = mutex.withLock {
+                val c = convos[convoId] ?: return@withLock false // gone, or an observe session — fall through to close
+                val emptied = c.detach(requester) // drop THIS view; true if no sinks remain
+                !emptied || c.isBusy()
+            }
+            if (keepAlive) {
+                log.info("detach ${convoId.take(8)}… (other clients or still busy — kept alive)")
                 return false
             }
         }
@@ -296,7 +311,7 @@ class SessionRegistry(
             // work because the app quit (update/relaunch/crash) is exactly what the task-complete push
             // promises never happens — the relay path's idle reaper already spares busy convos this way.
             val busy = mutex.withLock {
-                convos[convoId]?.takeIf { it.isAttachedTo(owner) }?.let { it.isExecuting() || it.hasBackgroundWork() } == true
+                convos[convoId]?.takeIf { it.isAttachedTo(owner) }?.isBusy() == true
             }
             if (busy) {
                 log.info("grace expiry ${convoId.take(8)}… still working → re-armed ${graceMs}ms")

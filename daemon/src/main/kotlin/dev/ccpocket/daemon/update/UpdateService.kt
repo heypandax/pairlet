@@ -23,6 +23,7 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isExecutable
 import kotlin.io.path.name
 import kotlin.io.path.readText
+import kotlin.io.path.writeText
 
 /**
  * Self-update for curl/irm-managed installs — the Claude Code distribution model: each version in
@@ -98,7 +99,11 @@ object UpdateService {
         }
         val versionsDir = versionDir!!.parent
         val launcher = if (isWindows()) {
-            versionDir.resolve("cc-pocket-daemon").resolve("cc-pocket-daemon.exe") // no stable symlink on Windows — the task re-registers per version
+            // Stable .cmd shim on a fixed PATH dir (…/cc-pocket/bin), rewritten to the current version by
+            // apply() — the Windows analogue of the mac/linux ~/.local/bin symlink (issue #59). The logon
+            // task keeps pointing at the versioned exe (re-registered per update via restartService); this
+            // shim is what an interactive `cc-pocket-daemon …` resolves to.
+            versionsDir.parent!!.resolve("bin").resolve("cc-pocket-daemon.cmd")
         } else {
             home.resolve(".local").resolve("bin").resolve("cc-pocket-daemon")
         }
@@ -157,8 +162,9 @@ object UpdateService {
     /**
      * Download + verify + extract [release] into `versions/<ver>` and switch the stable launcher to it.
      * mac/linux: atomic symlink flip (the service ExecStart points at the symlink, so a restart lands on
-     * the new version). Windows: re-registers the Scheduled Task onto the new exe (default run args).
-     * Returns the new version's launcher path. Throws with a human message on any failure.
+     * the new version). Windows: rewrites the on-PATH .cmd shim to the new exe (the logon task is re-pointed
+     * onto the new exe separately by [restartService]). Returns the new version's real exe path (which
+     * [restartService] registers). Throws with a human message on any failure.
      */
     fun apply(release: Release, install: ManagedInstall): Path {
         val asset = assetNameFor(release.version) ?: error("no prebuilt artifact for this platform")
@@ -185,7 +191,14 @@ object UpdateService {
 
             val newLauncher = launcherUnder(target)
                 ?: error("launcher missing after extraction under $target")
-            if (!isWindows()) {
+            if (isWindows()) {
+                // No symlinks on Windows: rewrite the stable .cmd shim (install.launcher, on PATH) to forward
+                // to the new version's exe — the analogue of the symlink flip below, so an interactive
+                // `cc-pocket-daemon …` lands on the just-installed version (issue #59). The logon task is
+                // re-pointed at newLauncher separately by restartService().
+                Files.createDirectories(install.launcher.parent)
+                install.launcher.writeText("@echo off\r\n\"$newLauncher\" %*\r\n")
+            } else {
                 check(newLauncher.isExecutable()) { "launcher not executable: $newLauncher" }
                 // atomic flip: the service's ExecStart is the stable symlink, so the next (re)start runs this
                 val tmpLink = install.launcher.resolveSibling(".cc-pocket-daemon.new")

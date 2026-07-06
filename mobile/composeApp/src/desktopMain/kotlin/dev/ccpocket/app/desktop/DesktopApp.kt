@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.protocol.isQuestion
 
 /** The two-pane content (sidebar + chat) plus the popover/modal overlays. Window chrome lives in [Main]. */
 @Composable
@@ -74,7 +75,8 @@ fun DesktopApp(model: DesktopModel) {
             }
         }
         if (model.showPermissionModal) {
-            model.ask?.let { ask ->
+            // the focused modal is for permission gates only; an AskUserQuestion docks inline in ChatPane (#57)
+            model.ask?.takeIf { !it.isQuestion }?.let { ask ->
                 FocusedModal(
                     computer = model.activeComputer?.name ?: "your computer",
                     ask = ask, agent = model.chatAgent, workdir = model.chatWorkdir, branch = model.chatBranch,
