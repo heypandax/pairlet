@@ -17,9 +17,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version, no leading v (e.g. 1.1.4). The release tag must be v<version>."
+        description: "Release version, no leading v (e.g. 1.3.0). The release tag must be v<version>."
         required: true
-        default: "1.1.4"
       only_android:
         description: "Only build & attach the Android APK (skip daemon jobs). For testing the APK pipeline against an existing release WITHOUT re-uploading daemon tarballs (which would change their sha256 and break the published Homebrew cask)."
         type: boolean

@@ -1,0 +1,51 @@
+name: ci
+
+# PR gate: one cheap ubuntu job — run the protocol / daemon / relay test suites and
+# compile the mobile app's desktop target. Mobile UI tests (desktopTest) stay local
+# (scripts/check-all.sh): they exercise a real Skia renderer and are not stable on
+# headless CI runners. Release pipelines are separate dispatch-only workflows
+# (release.yml / ios-release.yml / build-windows.yml).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # composeApp applies the Android + google-services plugins at configuration time,
+      # so even JVM-only tasks need an Android SDK and a (placeholder) Firebase config.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Use the placeholder google-services.json
+        run: cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+
+      - name: Test protocol · daemon · relay, compile mobile (desktop target)
+        run: ./gradlew --no-daemon :protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:compileKotlinDesktop
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: '**/build/reports/tests/**'
+          retention-days: 7
