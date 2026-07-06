@@ -14,8 +14,8 @@ class ProjectPathsTest {
     fun dirKey_keeps_alnum_and_hyphens() {
         // hyphens in path segments are preserved (cc-pocket stays cc-pocket)
         assertEquals(
-            "-Users-lidapeng-Desktop-Project-app-cc-pocket",
-            ProjectPaths.dirKey("/Users/lidapeng/Desktop/Project/app/cc-pocket"),
+            "-Users-dev-Desktop-Project-app-cc-pocket",
+            ProjectPaths.dirKey("/Users/dev/Desktop/Project/app/cc-pocket"),
         )
     }
 

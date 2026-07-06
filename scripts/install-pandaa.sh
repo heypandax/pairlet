@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建 iOS App 并安装到 iPhone（默认 Pandaa = iPhone 14 Pro Max）。
+# 构建 iOS App 并安装到 iPhone（真机）。
 #
 # 坑位知识（都踩过）：
 #  - devicectl 的 Identifier 是 CoreDevice UUID ≠ xcodebuild 要的硬件 UDID —— 构建用 generic 目的地，
@@ -7,11 +7,18 @@
 #  - 管道接 tail 会吞掉 xcodebuild 非零退出码 → 日志落文件再 grep BUILD SUCCEEDED；
 #  - DerivedData 可能残留旧产物造成"装了但没更新"的假成功 → 装前校验二进制 5 分钟内新鲜。
 #
-# 用法：bash scripts/install-pandaa.sh [CoreDevice-UUID]
+# 用法：bash scripts/install-pandaa.sh [CoreDevice-UUID]（缺省读 .env 的 IOS_DEVICE_UUID）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DEVICE="${1:-24645275-94DF-5933-A570-22A9C5FE9AF9}" # Pandaa
+# 设备 UUID 是个人环境值，不进仓库：从 $1 或 .env 的 IOS_DEVICE_UUID 取
+[[ -f .env ]] && source .env
+DEVICE="${1:-${IOS_DEVICE_UUID:-}}"
+if [[ -z "$DEVICE" ]]; then
+  echo "❌ 未指定设备：bash scripts/install-pandaa.sh <CoreDevice-UUID>，或在 .env 写 IOS_DEVICE_UUID=<UUID>"
+  echo "   已配对设备列表：xcrun devicectl list devices"
+  exit 1
+fi
 BUNDLE_ID="com.panda.ccpocket"
 LOG=/tmp/ios-device-build.log
 

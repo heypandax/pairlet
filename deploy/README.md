@@ -90,7 +90,7 @@ systemctl enable --now caddy
 ## Rebuild (local)
 
 ```bash
-cd /Users/lidapeng/Desktop/Project/app/cc-pocket
+cd ~/path/to/cc-pocket
 JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist
 # → relay/build/install/cc-pocket-relay/  (bin/ + lib/)
 ```
@@ -99,7 +99,7 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist
 
 ```bash
 export SSHPASS='<root password>'
-REPO=/Users/lidapeng/Desktop/Project/app/cc-pocket
+REPO=~/path/to/cc-pocket
 DIST="$REPO/relay/build/install/cc-pocket-relay"
 
 # rebuild first (see above), then:

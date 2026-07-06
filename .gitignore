@@ -20,6 +20,9 @@ captures/
 # stray render/tool artifacts from the design phase
 .playwright-mcp/
 /claude-contact-sheet.png
+/design-progress-*.yml
+/*.jpeg
+/*.png
 
 # release secrets — never commit
 .env

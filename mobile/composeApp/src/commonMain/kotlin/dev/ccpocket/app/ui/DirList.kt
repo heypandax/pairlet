@@ -60,7 +60,7 @@ fun looksAbsolutePath(s: String): Boolean = s.startsWith("/") || s.startsWith("~
 
 /**
  * A one-line monospace path that overflows from the FRONT — the project folder (the tail) is what
- * identifies a workdir, so a long path renders as "…app/cc-pocket" instead of "/Users/lidapeng/…".
+ * identifies a workdir, so a long path renders as "…app/cc-pocket" instead of "/Users/yourname/…".
  * Compose 1.7 has no TextOverflow.StartEllipsis; this trims via onTextLayout until the tail fits.
  */
 @Composable

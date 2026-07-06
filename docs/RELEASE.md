@@ -169,7 +169,7 @@ MSI 在 `windows-latest` runner 上构建（jpackage 不能跨平台出包，且
 
 ## 前提（一次性）
 
-- Apple Developer 账号，Team `SC9S2SJ42G`（个人账号 `pandaleecn@gmail.com`；`dev.ccpocket.app` 被旧账号占用，故 bundle id 改用 `com.panda.ccpocket`）。
+- Apple Developer 账号，Team `SC9S2SJ42G`（Account Holder 的个人 Apple ID；`dev.ccpocket.app` 被旧账号占用，故 bundle id 改用 `com.panda.ccpocket`）。
 - **Xcode 登录该账号**：Settings（⌘,）→ Accounts → 加 Apple ID。自动签名 + 上传都依赖这个会话。
 - 自动签名已写进 `iosApp/project.yml`（`CODE_SIGN_STYLE: Automatic`、`DEVELOPMENT_TEAM: SC9S2SJ42G`）。
 - 发布证书是 **Apple 云端托管**，**不会**出现在本机 `security find-identity -v -p codesigning` 里——看不到属正常，不代表缺证书。

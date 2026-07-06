@@ -26,7 +26,7 @@
 | v1 连接范围 | **先局域网，再上 relay**（M0 局域网可用 → 后续加云端 relay） |
 | 远程授权 | **纳入 v1**：手机处理 Claude 的工具授权弹窗 |
 
-预期产出：一个名为 `cc-pocket`（工作名，最终命名由用户定）的**全新独立仓库**，与 cc-dashboard 平级（建议放 `/Users/lidapeng/Desktop/Project/app/cc-pocket/`），自带 MIT 协议。cc-dashboard 本身一行不改。
+预期产出：一个名为 `cc-pocket`（工作名，最终命名由用户定）的**全新独立仓库**，与 cc-dashboard 平级，自带 MIT 协议。cc-dashboard 本身一行不改。
 
 ---
 

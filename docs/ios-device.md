@@ -3,11 +3,11 @@
 ## 工程位置
 
 ```
-/Users/lidapeng/Desktop/Project/app/cc-pocket/iosApp/iosApp.xcodeproj
+iosApp/iosApp.xcodeproj   # 仓库根目录下
 ```
 
 ```bash
-open /Users/lidapeng/Desktop/Project/app/cc-pocket/iosApp/iosApp.xcodeproj
+open iosApp/iosApp.xcodeproj
 ```
 
 > 注意：这个工程是 xcodegen 从 `iosApp/project.yml` 生成的。**在 Xcode 里配好签名后，不要再跑 `xcodegen generate`**，否则会覆盖你在 Xcode 里改的设置（要持久化就改 `project.yml` 再重新生成）。
@@ -27,9 +27,9 @@ open /Users/lidapeng/Desktop/Project/app/cc-pocket/iosApp/iosApp.xcodeproj
 
 ## 二、选设备并运行
 
-1. Xcode 顶部设备下拉，选 **Pandaa**（iPhone 14 Pro Max，已配对）。手机用数据线连上、解锁、点「信任此电脑」。
+1. Xcode 顶部设备下拉，选你的 iPhone（需先与这台 Mac 配对）。手机用数据线连上、解锁、点「信任此电脑」。
 2. **Cmd + R** 运行。首次编译会触发那条「Compile Kotlin Framework」脚本（已注入 `JAVA_HOME`，无需你额外配 java）。
-3. 第一次装到真机后，手机上会因「未受信任的开发者」打不开。去手机：**设置 → 通用 → VPN 与设备管理 →** 信任 `Apple Development: Panda Lee`，再点开 App。
+3. 第一次装到真机后，手机上会因「未受信任的开发者」打不开。去手机：**设置 → 通用 → VPN 与设备管理 →** 信任 `Apple Development: <你的开发者名字>`，再点开 App。
 
 ---
 
@@ -71,5 +71,5 @@ open /Users/lidapeng/Desktop/Project/app/cc-pocket/iosApp/iosApp.xcodeproj
 - **首次连接弹「本地网络」授权**：iOS 14+ 首次访问局域网会弹系统授权框，授权未决时进行中的连接会被系统直接掐断。App 已做预检：点 Connect 先触发授权（状态行显示 `checking network access…`），你点「允许」后才真正发起连接；若误点「不允许」，去 **设置 → 隐私与安全性 → 本地网络** 打开 cc-pocket 再重试（App 内状态行也会提示）。
 - **「Compile Kotlin Framework」报找不到 java**：脚本已写 `export JAVA_HOME=/opt/homebrew/opt/openjdk@17`；若你的 JDK 在别处，改 `iosApp/project.yml` 里那行再 `xcodegen generate`。
 - **Bundle ID 冲突 / 无法注册**：bundle ID 跨 team 全局唯一，被任何账号（含自己的旧账号）注册过就不可用；免费账号没有 developer.apple.com 的 Identifiers 管理入口，删不掉旧注册。最快做法是换一个唯一 ID（如 `com.<你的名字>.ccpocket`），同步改 `iosApp/project.yml` 和 Xcode 里的值。
-- **真机能编不能连**：99% 是不同 Wi-Fi 或防火墙；先用电脑浏览器开 `http://172.16.2.49:8765`（应拒绝连接但说明端口可达），再排查。
+- **真机能编不能连**：99% 是不同 Wi-Fi 或防火墙；先用电脑浏览器开 `http://<电脑局域网 IP>:8765`（应拒绝连接但说明端口可达），再排查。
 - **模拟器版**：URL 用默认 `ws://127.0.0.1:8765/v1/ws` 即可（模拟器和电脑共享网络），不用改 daemon。

@@ -59,7 +59,7 @@ Choose a computer (daemon picker). Title "Choose a computer" + subtitle "Pick wh
 
 **Settings**
 ```
-Settings — a grouped list. Group "DEFAULT PERMISSION MODE": six selectable rows with a radio, "default" selected, each with a one-line description: default, acceptEdits, auto (terracotta lightning glyph), plan, dontAsk, bypass (warning triangle + amber tint). Group "PAIRED DEVICES": "This device · iPhone 15 Pro" (current) and "iPad Air · paired 3d ago" with a red "Revoke" button. Group "APPEARANCE": a segmented control System / Dark / Light (Dark selected, terracotta). Group "ABOUT": Version "0.1.0" (monospace), License "MIT", Daemon "ws://192.168.1.20:8765" (monospace).
+Settings — a grouped list. Group "DEFAULT PERMISSION MODE": six selectable rows with a radio, "default" selected, each with a one-line description: default, acceptEdits, auto (terracotta lightning glyph), plan, dontAsk, bypass (warning triangle + amber tint). Group "PAIRED DEVICES": "This device · iPhone 15 Pro" (current) and "iPad Air · paired 3d ago" with a red "Revoke" button. Group "APPEARANCE": a segmented control System / Dark / Light (Dark selected, terracotta). Group "ABOUT": Version "0.1.0" (monospace), License "MIT", Daemon "ws://192.168.1.100:8765" (monospace).
 ```
 
 ---

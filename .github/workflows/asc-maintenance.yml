@@ -67,13 +67,15 @@ jobs:
 
           DEV_TYPES = {"DEVELOPMENT", "IOS_DEVELOPMENT"}
           certs = data.get("data", [])
-          for c in certs:
-              a = c["attributes"]
-              print(f"{c['id']}  {a['certificateType']:<26} {a.get('name','')}  expires {a.get('expirationDate','?')}")
           # only the CI runners' orphans ("Created via API") — a developer's own machine-named
           # development cert stays, so local device debugging keeps working untouched
           targets = [c for c in certs if c["attributes"]["certificateType"] in DEV_TYPES
                      and "Created via API" in (c["attributes"].get("name") or "")]
+          # public repo → public Actions logs: list only the CI-minted certs being revoked,
+          # never the account's full certificate inventory
+          for c in targets:
+              a = c["attributes"]
+              print(f"{c['id']}  {a['certificateType']:<26} {a.get('name','')}  expires {a.get('expirationDate','?')}")
           print(f"\n{len(certs)} certificates total, {len(targets)} CI-minted development certs to revoke")
 
           if dry:

@@ -40,10 +40,10 @@ $D test-client
 
 ```
 dirs                                  # 列出有历史会话的目录
-ls /Users/lidapeng/Desktop/Project/app/cc-pocket   # 列该目录下的会话（不拉起 claude）
-open /Users/lidapeng/Desktop/Project/app/cc-pocket  # 新建会话；等出现 [live] convo=… session=…
+ls /Users/you/code/my-app             # 列该目录下的会话（不拉起 claude）
+open /Users/you/code/my-app           # 新建会话；等出现 [live] convo=… session=…
 say 用一句话说这个项目叫什么            # 看流式输出，结尾 [done] in/out token
-cd /Users/lidapeng/Desktop/Project/app/cc-dashboard # 切目录：同一 convo、新 cwd（旧 claude 进程被回收）
+cd /Users/you/code/another-app        # 切目录：同一 convo、新 cwd（旧 claude 进程被回收）
 say 你现在的工作目录 basename 是什么？  # 确认已在新目录
 quit
 ```
@@ -164,7 +164,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon run --claude-bin ~/.l
 # 4) App 里点 Connect → 看到目录列表 → 点目录 → 选/建会话 → Chat 发消息
 ```
 
-真机：用数据线连上、开 USB 调试，`adb devices` 能看到后同样 `installDebug`；真机连本机 daemon 要把 App 里的 URL 改成你电脑的局域网 IP（如 `ws://192.168.1.20:8765`），并让 daemon 监听 `0.0.0.0`（`run --host 0.0.0.0`）。
+真机：用数据线连上、开 USB 调试，`adb devices` 能看到后同样 `installDebug`；真机连本机 daemon 要把 App 里的 URL 改成你电脑的局域网 IP（如 `ws://192.168.1.100:8765`），并让 daemon 监听 `0.0.0.0`（`run --host 0.0.0.0`）。
 运行截图见 `docs/design/android/`。
 
 ---
