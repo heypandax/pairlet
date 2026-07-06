@@ -14,6 +14,18 @@ open iosApp/iosApp.xcodeproj
 
 ---
 
+## 〇、先放 Firebase 配置（否则第一步就编不过）
+
+`iosApp/iosApp/GoogleService-Info.plist` 被 gitignore（Firebase 客户端配置不进公开仓库），但 Xcode 工程的 Resources 阶段引用了它——干净 clone 直接构建会报 "Build input file cannot be found"。先复制占位文件：
+
+```bash
+cp iosApp/iosApp/GoogleService-Info.plist.template iosApp/iosApp/GoogleService-Info.plist
+```
+
+占位值可正常编译、运行（Firebase 初始化能通过，只是统计 / 推送不上报）；要真实上报就建自己的 Firebase iOS 应用，下载真 plist 放到同一位置。
+
+---
+
 ## 一、签名（在 Xcode 里）
 
 1. 左侧选 `iosApp` 工程 → TARGETS 选 `iosApp` → 顶部 **Signing & Capabilities**。

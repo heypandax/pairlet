@@ -1,7 +1,7 @@
 # cc-pocket 运行与测试
 
-> 前置：JDK 17（本机在 `/opt/homebrew/opt/openjdk@17`）；`claude` CLI 已安装并登录。所有 `./gradlew` 命令在仓库根目录执行。
-> `./gradlew` 已通过 `gradle.properties` 锁定 JDK，无需设 `JAVA_HOME`；下面用 installDist 启动器时若提示找不到 java，命令前加 `JAVA_HOME=/opt/homebrew/opt/openjdk@17`。
+> 前置：JDK 17（任意发行版——编译用的 17 由 Gradle toolchain 自动下载，启动 `./gradlew` 本身只要 PATH/`JAVA_HOME` 里有任一 JDK）+ Android SDK（`ANDROID_HOME` 或 `local.properties`）；`claude` CLI 已安装并登录。所有 `./gradlew` 命令在仓库根目录执行。
+> 用 installDist 启动器时若提示找不到 java，命令前加 `JAVA_HOME=<你的 JDK 路径>`（macOS Homebrew 例：`/opt/homebrew/opt/openjdk@17`）。
 
 ---
 

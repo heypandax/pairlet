@@ -102,7 +102,11 @@ See [`docs/SECURITY.md`](docs/SECURITY.md) for the full threat model and the tru
 
 ## Quick start
 
-Requires JDK 17 and an installed, logged-in `claude` CLI.
+Requires **JDK 17** (any distribution — the Gradle toolchain auto-downloads one if yours differs), the **Android SDK** (`ANDROID_HOME` or `local.properties`; the Android modules are configured even for JVM-only tasks), and an installed, logged-in `claude` CLI. To build the mobile app, also copy the committed Firebase placeholder once (a real Firebase project is only needed for push/analytics):
+
+```bash
+cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
+```
 
 **Local single-machine (no relay), for development:**
 
@@ -123,7 +127,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon \
 daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
 ```
 
-Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode). See [`docs/ios-device.md`](docs/ios-device.md) for on-device install.
+Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via `iosApp/iosApp.xcodeproj` (Xcode — first copy `iosApp/iosApp/GoogleService-Info.plist.template` to `GoogleService-Info.plist` next to it). See [`docs/ios-device.md`](docs/ios-device.md) for on-device install.
 
 ## Docs
 
