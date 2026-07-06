@@ -1,0 +1,64 @@
+name: Bug report
+description: Something broke — 报个 bug（中文填写完全 OK）
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! The four facts below make most cc-pocket bugs diagnosable in a single round-trip.
+        感谢反馈！下面几个必填项能让大多数问题一轮就定位。
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 现象
+      description: What did you do, what did you expect, and what happened instead? Screenshots welcome. / 做了什么、期望什么、实际发生了什么？欢迎截图。
+    validations:
+      required: true
+  - type: input
+    id: daemon-version
+    attributes:
+      label: Daemon version / daemon 版本
+      description: "Run `cc-pocket-daemon status` on the computer — it prints the version. / 在电脑上跑 `cc-pocket-daemon status` 可看到。"
+      placeholder: "e.g. 1.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: daemon-os
+    attributes:
+      label: Computer OS (where the daemon runs) / 电脑系统
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux x86_64
+        - Linux arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client / 客户端
+      options:
+        - iPhone / iPad
+        - Android
+        - Desktop app (macOS)
+        - Desktop app (Windows)
+        - Desktop app (Linux)
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent backend / 会话后端
+      options:
+        - Claude Code
+        - Codex
+        - Both / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon log excerpt (optional) / 日志片段（可选）
+      description: "macOS: `~/Library/Logs/cc-pocket/daemon.err.log`. Any platform: stop the service, run `cc-pocket-daemon run` in a terminal, reproduce, and paste the output. / 任何平台都可以：停掉服务后在终端前台跑 `cc-pocket-daemon run`，复现后把输出贴上来。"
+      render: text

@@ -1,7 +1,9 @@
 # cc-pocket 需求文档（Requirements）
 
+> 📦 **已归档**：v1 立项期文档，此后不再随版本更新；与现状不一致处以代码为准。
+
 > 本文定义 cc-pocket **要做什么**（WHAT，可验收的需求）。
-> **怎么做**（架构/协议/落地顺序）见实现计划 [`cc-connect-cc-connect-sequential-graham.md`](./cc-connect-cc-connect-sequential-graham.md)；**界面**见 [`design/`](./design/)（已用 claude.ai/design 产出 7 屏 handoff）。
+> **怎么做**（架构/协议/落地顺序）见实现计划 [`cc-connect-cc-connect-sequential-graham.md`](./cc-connect-cc-connect-sequential-graham.md)；**界面**见 [`design/`](../design/)（已用 claude.ai/design 产出 7 屏 handoff）。
 > 文档状态：v1.1（M0–M3 已实现并发布，M4 推送部分落地；daemon 1.1.0 / app 1.0.1）　｜　初稿 2026-06-05　｜　更新 2026-06-14
 
 ---
@@ -272,5 +274,5 @@
 
 ## 附：相关文档
 - 实现计划（HOW）：[`cc-connect-cc-connect-sequential-graham.md`](./cc-connect-cc-connect-sequential-graham.md)
-- 界面设计（已产出）：[`design/`](./design/)（`README.md` / `UI-DESIGN.md` / `claude-design-handoff/`）
+- 界面设计（已产出）：[`design/`](../design/)（`README.md` / `UI-DESIGN.md` / `claude-design-handoff/`）
 - 反抄袭声明（待建）：`docs/ANTIPLAGIARISM.md`

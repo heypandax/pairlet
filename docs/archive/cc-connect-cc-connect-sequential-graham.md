@@ -1,6 +1,8 @@
 # 手机操控电脑 Claude Code —— 实现计划（参考 cc-connect，全 Kotlin 重写）
 
-> 配套文档：需求 [`REQUIREMENTS.md`](./REQUIREMENTS.md)（要做什么）；界面设计 [`design/`](./design/)（**已产出**，claude.ai/design handoff）。本文聚焦实现（怎么做）。
+> 📦 **已归档**：v1 立项期的实现计划原稿，此后不再随版本更新；与现状不一致处以代码为准。
+
+> 配套文档：需求 [`REQUIREMENTS.md`](./REQUIREMENTS.md)（要做什么）；界面设计 [`design/`](../design/)（**已产出**，claude.ai/design handoff）。本文聚焦实现（怎么做）。
 >
 > **现状（2026-06-14）**：本计划的 M0–M4 已基本落地并发布（daemon 1.1.0 / app 1.0.1）。下文保留当初的实现规划原貌，与最终代码有几处出入，**以代码与 [`REQUIREMENTS.md`](./REQUIREMENTS.md) §6.1 为准**：E2E 实际用 **P-256**（非草案里的 X25519）且**默认启用**；权限模式实际为 **4 档**（`default / acceptEdits / plan / bypassPermissions`）；协议消息集已扩展（语音、图片、斜杠命令、思考块、观察模式等）。
 
@@ -178,7 +180,7 @@ cc-pocket/                                  ← 新独立仓库（不在 cc-dash
 
 ## 设计（UI/UX —— 已产出）
 
-界面设计**已完成**：用 **claude.ai/design** 按统一设计系统生成了全部 7 屏，并经 **Handoff to Code** 导出到 [`design/claude-design-handoff/`](./design/claude-design-handoff/)（各屏 `.html` + `.jsx` 原型 + 设计对话 + 给 coding agent 的 `README`）。M2 的 Compose 实现以它为**像素级参照**。
+界面设计**已完成**：用 **claude.ai/design** 按统一设计系统生成了全部 7 屏，并经 **Handoff to Code** 导出到 [`design/claude-design-handoff/`](../design/claude-design-handoff/)（各屏 `.html` + `.jsx` 原型 + 设计对话 + 给 coding agent 的 `README`）。M2 的 Compose 实现以它为**像素级参照**。
 
 > 选型经过：同一份 brief 同时跑过 Stitch 与 claude.ai/design，最终选 claude.ai/design（更贴 brief、强调色更克制、且 Handoff 闭环到 Claude Code）。对比报告与 Stitch 产物已归档到 Obsidian `~/Desktop/Brain/20_Projects/cc-pocket-设计工具评估/`，仓库内不再保留 Stitch。
 
@@ -190,7 +192,7 @@ cc-pocket/                                  ← 新独立仓库（不在 cc-dash
 - **字体**：UI 用 **Inter**；**JetBrains Mono 专用**于路径 / sessionId / 分支 / 代码 / token / 命令（开发者气质的关键）。
 - **层级**：靠**色阶叠加 + 1px 描边**表达，不用重阴影。圆角 12 卡片 / 20 底部 sheet / 999 胶囊；4pt 间距栅格；触达 ≥44pt。
 - 强调色**克制**：每屏一个主操作 + 流式光标 + 激活态。
-- 完整规格见 [`design/UI-DESIGN.md`](./design/UI-DESIGN.md)；喂给工具的 prompt 见 [`design/CLAUDE-DESIGN-PROMPT.md`](./design/CLAUDE-DESIGN-PROMPT.md)。
+- 完整规格见 [`design/UI-DESIGN.md`](../design/UI-DESIGN.md)；喂给工具的 prompt 见 [`design/CLAUDE-DESIGN-PROMPT.md`](../design/CLAUDE-DESIGN-PROMPT.md)。
 
 ### 7 屏 ⇄ 功能/流程对应
 
@@ -237,7 +239,7 @@ cc-pocket/                                  ← 新独立仓库（不在 cc-dash
 
 **M1 —— 云端 relay + 配对。** daemon 的 WS 从「服务端」翻成「外拨客户端」`RelayClient` 连 `relay`；建 `relay`（Ktor：`/v1/daemon`、`/v1/device`、`/v1/pair`、`broker`）。配对流程：daemon `PairBegin` → relay 发短码（终端里同时渲染成二维码）→ 手机扫码/输码 → relay 绑定设备 token → 两端 `Attach`。relay 用 `docker run` 部署到购买的小云主机。**验收**：两个进程在不同网络下经 relay 互通，A/B/C/D 在「手机不在同一局域网」下成立。
 
-**M2 —— 移动端多会话/多目录 UX。** **界面已设计完成**（见上「设计」节），Compose Multiplatform 据 [`design/claude-design-handoff/`](./design/claude-design-handoff/) **像素级重建** 7 屏：Chat / Permission / Sessions / Directory / Pairing / Computers / Settings + 切目录。**先 Android**（内循环最快），**再尽早起 iOS** target（先在最简单的 Pairing 页验证 iOS 工具链，别留到最后）。**验收**：真机 Android + iOS 都能经 relay 跑通三条流程 + 会话中途切目录，且视觉与 handoff 一致。
+**M2 —— 移动端多会话/多目录 UX。** **界面已设计完成**（见上「设计」节），Compose Multiplatform 据 [`design/claude-design-handoff/`](../design/claude-design-handoff/) **像素级重建** 7 屏：Chat / Permission / Sessions / Directory / Pairing / Computers / Settings + 切目录。**先 Android**（内循环最快），**再尽早起 iOS** target（先在最简单的 Pairing 页验证 iOS 工具链，别留到最后）。**验收**：真机 Android + iOS 都能经 relay 跑通三条流程 + 会话中途切目录，且视觉与 handoff 一致。
 
 **M3 —— 打包 + 后台常驻。** daemon 用 `jpackage`（内嵌 `jlink` 裁剪过的 runtime）出每个 OS 的安装包（~30–50MB；保底方案，GraalVM native-image 作为后续优化）。服务安装器：systemd `--user` unit（Linux）/ Windows Service（WinSW 或 `sc.exe` 包一层）/ launchd plist（macOS），`daemon service-install` 写入并加载。relay 出加固的容器镜像 + healthcheck。**验收**：daemon 注销/重启后存活并自动重连 relay；每个 OS 一条命令安装。
 

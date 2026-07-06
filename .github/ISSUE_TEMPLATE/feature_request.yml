@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose an improvement — 提个想法（中文填写完全 OK）
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 想解决什么
+      description: What are you trying to do that cc-pocket doesn't do (well) today? / 现在哪件事做不到或做得别扭？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal (optional) / 设想的样子（可选）
+      description: If you already picture how it should work, sketch it. / 已经有想法就描述一下。
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which part / 哪一端
+      multiple: true
+      options:
+        - Phone app
+        - Desktop app
+        - Daemon
+        - Relay
+        - Docs / website

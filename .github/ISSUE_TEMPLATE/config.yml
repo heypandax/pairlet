@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/heypandax/cc-pocket/security/advisories/new
+    about: Report privately — please don't open a public issue. 请走私密通道，不要发公开 issue。
+  - name: User guide / 使用文档
+    url: https://github.com/heypandax/cc-pocket/blob/main/docs/USAGE.md
+    about: Install, pairing, daily use, and a troubleshooting FAQ. 安装、配对、日常使用与故障排查。

@@ -1,10 +1,14 @@
 # CC Pocket
 
+[![CI](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml/badge.svg)](https://github.com/heypandax/cc-pocket/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/heypandax/cc-pocket)](https://github.com/heypandax/cc-pocket/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **English** | [简体中文](README.zh-CN.md)
 
 Drive Claude Code — or OpenAI Codex — on your computer from your phone, from anywhere, not just your LAN. Start/resume sessions, browse working directories, send prompts, and approve or deny the agent's tool-permission requests remotely. Pick your agent (Claude or Codex) per session; either way, streaming output, command and file-change approvals, and interrupts all work the same. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext. Clean-room Kotlin, MIT.
 
 **🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📱 Get the app:** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) (iPhone & iPad) · [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk) (GitHub Releases) · **🖥️ Desktop app:** [macOS (.dmg, signed)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Windows (.msi)](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)
+
+<p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/og-image.png" alt="CC Pocket — drive Claude Code on your computer from your phone" width="720"></a></p>
 
 ```mermaid
 flowchart LR
@@ -138,10 +142,13 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)
 - iOS device build & install — [`docs/ios-device.md`](docs/ios-device.md)
 - Relay deployment (Caddy + Cloudflare + systemd) — [`deploy/README.md`](deploy/README.md)
-- Requirements — [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md)
-- Implementation plan — [`docs/cc-connect-cc-connect-sequential-graham.md`](docs/cc-connect-cc-connect-sequential-graham.md)
+- Historical planning docs (v1 requirements & original plan; superseded by the code) — [`docs/archive/`](docs/archive/)
 - UI design (claude.ai/design handoff) — [`docs/design/`](docs/design/)
 - Provenance / clean-room statement — [`docs/ANTIPLAGIARISM.md`](docs/ANTIPLAGIARISM.md)
+
+## Contributing
+
+Issues and PRs welcome — [`CONTRIBUTING.md`](CONTRIBUTING.md) covers build prerequisites, test entry points, and which scripts are maintainer-only. Please report security issues privately via [GitHub security advisories](https://github.com/heypandax/cc-pocket/security/advisories/new) — see [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## License
 
