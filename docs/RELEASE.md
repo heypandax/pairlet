@@ -100,6 +100,7 @@ security find-identity -v -p codesigning
 - **装**：`brew install --cask heypandax/tap/cc-pocket`
 - **跑 + 配对**：`cc-pocket-daemon service-install --apply` 然后 `cc-pocket-daemon pair`，手机 App 扫码。
 - **卸载服务**：`launchctl unload ~/Library/LaunchAgents/dev.ccpocket.daemon.plist`
+- **双语同步**：改 README 必须 README.md 与 README.zh-CN.md 一起改（功能列表 / 安装章节 / 支持平台）——历史上中文版漏过整段功能；发版前对照一遍两份文件的章节结构。
 
 ---
 
