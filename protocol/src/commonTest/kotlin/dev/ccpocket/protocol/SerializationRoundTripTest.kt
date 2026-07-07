@@ -440,6 +440,26 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun authState_apiKeySource_roundtrips_and_defaults_null_on_old_frames() {
+        // new daemon → new app: the API-key source rides along and round-trips (issue #73)
+        val keyed = Envelope(
+            id = "k1", ts = 0,
+            body = AuthState(loggedIn = true, authMethod = "claude.ai", apiKeySource = "ANTHROPIC_API_KEY"),
+        )
+        val keyedJson = PocketJson.encodeToString(keyed)
+        assertTrue("\"apiKeySource\":\"ANTHROPIC_API_KEY\"" in keyedJson, keyedJson)
+        assertEquals(keyed, PocketJson.decodeFromString<Envelope>(keyedJson))
+
+        // an OAuth login (null apiKeySource) omits the key — a plain login frame stays byte-identical to the old shape
+        val oauthJson = PocketJson.encodeToString(Envelope(id = "k2", ts = 0, body = AuthState(loggedIn = true, authMethod = "claude.ai")))
+        assertFalse("apiKeySource" in oauthJson, oauthJson)
+
+        // an OLD daemon's state (no apiKeySource key) decodes to null → the new client falls back to the normal account pane
+        val old = """{"id":"k3","ts":0,"to":"PEER","body":{"t":"pocket/auth.state","loggedIn":true,"authMethod":"claude.ai"}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(old).body as AuthState).apiKeySource)
+    }
+
+    @Test
     fun pushPrefs_set_and_state_roundtrip() {
         // query form: enabled stays null and is omitted on the wire (explicitNulls=false)
         val query = Envelope(id = "p1", ts = 0, body = SetPushPrefs())

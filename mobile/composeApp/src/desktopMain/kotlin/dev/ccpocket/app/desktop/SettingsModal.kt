@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Keyboard
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
@@ -344,6 +345,31 @@ private fun AccountPane(model: DesktopModel) {
                         TextBtn("Submit", Tok.accent) { if (code.isNotBlank()) { model.submitAuthCode(code); code = "" } }
                         TextBtn("Cancel", Tok.muted) { code = ""; model.cancelAuthLogin() }
                     }
+                }
+
+                // an API key / forwarding endpoint authenticates via env var, not an OAuth login: the CLI
+                // still reports loggedIn + authMethod "claude.ai", but email/plan are null and `claude auth
+                // login/logout` can't override the key. Explain that instead of dangling a dead switch (#73).
+                s.loggedIn && !s.apiKeySource.isNullOrBlank() -> Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+                ) {
+                    val keySource = s.apiKeySource.orEmpty() // non-blank per the branch guard (a protocol prop can't smart-cast cross-module)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Authenticated with an API key", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                            Text(keySource, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "This computer's Claude CLI runs on an API key — a key or forwarding endpoint set in its " +
+                            "environment, not a Claude subscription login. Switching accounts and signing out here only " +
+                            "apply to claude.ai logins; to change the key or endpoint, edit $keySource / " +
+                            "ANTHROPIC_BASE_URL on the computer and reconnect.",
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp,
+                    )
                 }
 
                 s.loggedIn -> Column(

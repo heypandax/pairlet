@@ -250,6 +250,10 @@ data class AuthState(
     val orgName: String? = null,
     val subscriptionType: String? = null, // e.g. "max" / "pro" — shown as the plan badge
     val authMethod: String? = null,       // e.g. "claude.ai" / "console"
+    // non-null when a key/env var authenticates (e.g. "ANTHROPIC_API_KEY"): the CLI still reports
+    // authMethod "claude.ai" + loggedIn, but email/plan are null and `claude auth login/logout` can't
+    // override the key, so the client explains that instead of offering a dead account switch (#73).
+    val apiKeySource: String? = null,
     val loginPending: Boolean = false,
     val loginUrl: String? = null,
     val error: String? = null,

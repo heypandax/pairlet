@@ -226,6 +226,9 @@ class AuthService(
             orgName = str("orgName"),
             subscriptionType = str("subscriptionType"),
             authMethod = str("authMethod"),
+            // present when a key/env var (ANTHROPIC_API_KEY, a helper, etc.) drives the CLI — the client
+            // uses it to explain why account switching won't apply on this computer (issue #73)
+            apiKeySource = str("apiKeySource"),
         )
     }
 
