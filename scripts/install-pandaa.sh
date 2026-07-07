@@ -29,7 +29,7 @@ if ! xcrun devicectl list devices | grep "$DEVICE" | grep -q "available"; then
   exit 1
 fi
 
-echo "── 1/4 构建（generic/platform=iOS，日志 $LOG）──"
+echo "── 1/4 构建（generic/platform=iOS，日志 ${LOG}）──"
 (cd iosApp && xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
   -destination 'generic/platform=iOS' -allowProvisioningUpdates build > "$LOG" 2>&1) || true
 if ! grep -q "BUILD SUCCEEDED" "$LOG"; then
