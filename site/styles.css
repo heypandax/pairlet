@@ -325,6 +325,9 @@ a{color:inherit;text-decoration:none;}
 .dl-qr-box img,.dl-qr-box canvas{display:block;width:148px;height:148px;}
 .dl-qr-hint{font-size:12px;color:var(--muted);margin:12px 0 0;letter-spacing:0.04em;}
 .dl-btn{margin-top:20px;width:100%;justify-content:center;}
+.dl-beta{font-size:13px;color:var(--sec);margin:14px 0 0;}
+.dl-beta a{color:var(--accent);}
+.dl-beta a:hover{text-decoration:underline;}
 /* device gating: computers show the QR, phones show the install button */
 [data-device="mobile"] .dl-qr,
 [data-device="mobile"] .dl-qr-hint{display:none;}
