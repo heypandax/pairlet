@@ -115,7 +115,7 @@ class DesktopUiTest {
         assertTrue(!present("/help"), "non-matching commands are filtered out")
         onAllNodes(hasText("/review")).onLast().performClick()
         waitForIdle()
-        assertEquals("/review", model.composer)                       // click completes the command word
+        assertEquals("/review ", model.composer)                      // completes the word + a trailing space (cursor ready for args)
     }
 
     @Test

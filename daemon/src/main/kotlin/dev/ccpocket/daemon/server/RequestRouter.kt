@@ -55,7 +55,7 @@ class RequestRouter(
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
-            is ListDirectories -> sink.emit(Directories(dirs.listDirectories(frame.root, registry.busyCwds())))
+            is ListDirectories -> sink.emit(Directories(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd())))
 
             is ListSessions -> {
                 val busy = registry.busySessionIds()

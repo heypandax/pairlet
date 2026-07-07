@@ -401,4 +401,25 @@ class SerializationRoundTripTest {
         assertTrue("\"t\":\"pocket/push.prefs\"" in stateJson, stateJson)
         assertEquals(state, PocketJson.decodeFromString<Envelope>(stateJson))
     }
+
+    @Test
+    fun directoryEntry_activeSessions_roundtrip_and_old_daemon_defaults() {
+        // new daemon → new app: the per-session list rides along and round-trips
+        val entry = DirectoryEntry(
+            path = "/p", name = "p", isDir = true, open = true, executing = true,
+            activeSessionId = "s1", activeSessionTitle = "fix bug",
+            activeSessions = listOf(
+                ActiveSession("s1", "fix bug", executing = true, gitBranch = "main"),
+                ActiveSession("s2", "write docs", busy = true, agent = AgentKind.CODEX),
+            ),
+        )
+        val json = PocketJson.encodeToString(entry)
+        assertEquals(entry, PocketJson.decodeFromString<DirectoryEntry>(json))
+
+        // old daemon → new app: no activeSessions key at all → empty list, legacy single fields intact
+        val old = """{"path":"/p","name":"p","isDir":true,"open":true,"activeSessionId":"s1","activeSessionTitle":"fix bug"}"""
+        val back = PocketJson.decodeFromString<DirectoryEntry>(old)
+        assertEquals(emptyList(), back.activeSessions)
+        assertEquals("s1", back.activeSessionId)
+    }
 }

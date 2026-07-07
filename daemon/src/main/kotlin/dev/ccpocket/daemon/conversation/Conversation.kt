@@ -49,6 +49,9 @@ class Conversation(
     // read dynamically: the relay client installs the hook after this conversation may already exist
     private val pushHookProvider: () -> PushHook? = { null },
 ) {
+    /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
+    val kind: AgentKind get() = backend.kind
+
     // mutable: a phone can switch the permission mode mid-session (Claude relaunches; Codex applies next turn)
     @Volatile
     private var mode: PermissionMode = initialMode

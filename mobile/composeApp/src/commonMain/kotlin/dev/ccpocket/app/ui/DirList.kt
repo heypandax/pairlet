@@ -12,6 +12,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 
 /** A row in the project browser, computed from the flat [DirectoryEntry] list client-side. */
@@ -93,6 +94,26 @@ fun TailPathText(path: String, modifier: Modifier = Modifier, color: Color = Tok
 fun pinnedEntries(dirs: List<DirectoryEntry>, paths: List<String>): List<DirectoryEntry> =
     paths.mapNotNull { p -> dirs.firstOrNull { it.path == p } }
 
+/** One live-section row PER running session: a project whose daemon reports several
+ *  [DirectoryEntry.activeSessions] expands into one entry-copy per session, so every existing
+ *  cell/tap path keeps working. Each copy carries its session as the legacy single fields AND as a
+ *  one-element activeSessions (the tap needs its agent). Entries from older daemons pass through. */
+fun expandLiveSessions(e: DirectoryEntry): List<DirectoryEntry> =
+    if (e.activeSessions.size <= 1) listOf(e)
+    else e.activeSessions.map { s ->
+        e.copy(
+            activeSessionId = s.sessionId, activeSessionTitle = s.title, gitBranch = s.gitBranch,
+            executing = s.executing, busy = s.busy, activeSessions = listOf(s),
+        )
+    }
+
+/** The backend of the entry's linked live session ([DirectoryEntry.activeSessionId]). CLAUDE when the
+ *  daemon didn't say (older daemon / transcript-derived active — those are always Claude transcripts):
+ *  resuming must NOT fall back to the user's default-agent preference, which forked Claude sessions
+ *  under the Codex backend and vice versa. */
+fun liveAgent(e: DirectoryEntry): AgentKind =
+    e.activeSessions.firstOrNull { it.sessionId == e.activeSessionId }?.agent ?: AgentKind.CLAUDE
+
 fun buildDirRows(
     dirs: List<DirectoryEntry>,
     query: String,
@@ -109,8 +130,9 @@ fun buildDirRows(
             it.name.contains(q, ignoreCase = true) ||
             it.activeSessionTitle?.contains(q, ignoreCase = true) == true
     }
-    // a session with running background work stays "open" in the list even if its claude process check lags
-    val live = filtered.filter { it.open || it.busy }
+    // a session with running background work stays "open" in the list even if its claude process check lags;
+    // a project hosting several live sessions gets one row EACH (the row tap resumes that session directly)
+    val live = filtered.filter { it.open || it.busy }.flatMap(::expandLiveSessions)
     // pinned-to-top, in pin order; only those still present (and matching the filter). Like the live section,
     // a pinned project also keeps its copy in the full Projects list below.
     val pins = pinnedEntries(filtered, pinned)

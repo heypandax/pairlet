@@ -94,6 +94,7 @@ import dev.ccpocket.app.ui.QuestionCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
+import dev.ccpocket.app.ui.completion
 import dev.ccpocket.app.ui.slashQueryOf
 import dev.ccpocket.app.ui.slashSuggestions
 import dev.ccpocket.app.ui.turnDurLabel
@@ -415,9 +416,8 @@ private fun Composer(model: DesktopModel, paneFocused: Boolean = true) {
                 var slashSel by remember(slashQuery) { mutableStateOf(0) }          // keyed: retyping resets to the top hit
                 var slashDismissed by remember(slashQuery) { mutableStateOf(false) } // Esc hides until the query changes
                 val slashOpen = slashCmds.isNotEmpty() && !slashDismissed
-                val completeSlash = { cmd: SlashCommand ->
-                    model.composer = "/${cmd.name}" + if (cmd.argumentHint != null) " " else ""
-                }
+                // the field mirror below moves the cursor to the end of the completed text
+                val completeSlash = { cmd: SlashCommand -> model.composer = cmd.completion() }
                 if (model.pendingImages.isNotEmpty()) PendingImagesRow(model)
                 if (slashOpen) SlashMenu(slashCmds, slashSel, onPick = completeSlash)
                 Row(

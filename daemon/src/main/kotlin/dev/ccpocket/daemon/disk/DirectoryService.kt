@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.protocol.ActiveSession
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -38,8 +40,15 @@ class DirectoryService {
      * Claude project folder — without the merge it never appears at all, so its Codex sessions are
      * unreachable from the app.
      */
-    fun listDirectories(root: String?, busyCwds: Set<String> = emptySet()): List<DirectoryEntry> {
-        val claude = claudeDirectories(busyCwds)
+    fun listDirectories(
+        root: String?,
+        busyCwds: Set<String> = emptySet(),
+        // the daemon's OWN live conversations per cwd (exact turn state, any backend) — see SessionRegistry.liveByCwd
+        liveByCwd: Map<String, List<ActiveSession>> = emptyMap(),
+    ): List<DirectoryEntry> {
+        // normCwd-keyed so a tilde/absolute mismatch between OpenSession's workdir and a transcript's cwd still matches
+        val liveNorm = liveByCwd.entries.groupBy({ ProjectPaths.normCwd(it.key) }, { it.value }).mapValues { (_, v) -> v.flatten() }
+        val claude = claudeDirectories(busyCwds, liveNorm)
         val codex = runCatching { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() }.getOrDefault(emptyMap())
         if (codex.isEmpty()) return claude
         val known = claude.mapTo(HashSet()) { ProjectPaths.normCwd(it.path) }
@@ -47,6 +56,9 @@ class DirectoryService {
         val codexOnly = codex.entries
             .filter { (cwd, _) -> ProjectPaths.normCwd(cwd) !in known }
             .map { (cwd, mtime) ->
+                // daemon-driven sessions here (usually Codex ones) — before this, a running Codex session
+                // in a codex-only dir never surfaced in the live section at all
+                val live = liveNorm[ProjectPaths.normCwd(cwd)].orEmpty().sortedByDescending { it.executing }
                 DirectoryEntry(
                     path = cwd,
                     name = Path.of(cwd).fileName?.toString() ?: cwd,
@@ -54,7 +66,12 @@ class DirectoryService {
                     hasSessions = true,
                     recent = cwd in recents,
                     lastModified = mtime,
+                    open = live.isNotEmpty(),
+                    executing = live.any { it.executing },
                     busy = cwd in busyCwds,
+                    activeSessionId = live.firstOrNull()?.sessionId,
+                    activeSessionTitle = live.firstOrNull()?.title,
+                    activeSessions = live,
                 )
             }
             .distinctBy { ProjectPaths.normCwd(it.path) }
@@ -66,20 +83,41 @@ class DirectoryService {
         return (merged + codexOnly).sortedByDescending { it.lastModified }
     }
 
-    /** Directories with Claude history, newest-first, deduped per cwd. */
-    private fun claudeDirectories(busyCwds: Set<String>): List<DirectoryEntry> {
+    /** Directories with Claude history, newest-first, deduped per cwd. [liveNorm] = daemon conversations
+     *  keyed by normCwd (from [listDirectories]). */
+    private fun claudeDirectories(busyCwds: Set<String>, liveNorm: Map<String, List<ActiveSession>>): List<DirectoryEntry> {
         val projects = ProjectPaths.projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }
         val now = System.currentTimeMillis()
-        // open = a claude process is alive here (idle or active); executing = open AND wrote recently;
+        // open = a claude process is alive here (idle or active); executing = a session here is mid-turn;
         // busy = a daemon conversation here has running background work (keep it "active" even when idle).
         val liveCwds = LiveProcesses.claudeCwds()
         return dirs.mapNotNull { dir -> scanProject(dir) }
             .map { (cwd, mtime, newest) ->
-                val open = cwd in liveCwds
-                // for live dirs, surface the active session (the newest transcript) so the row links straight into it
-                val active = if (open) runCatching { TranscriptScanner.summarize(newest) }.getOrNull() else null
+                val osOpen = cwd in liveCwds
+                // the daemon's own conversations here carry EXACT turn state (isExecuting) — the mtime window
+                // below can't see turn boundaries, which kept "running" on for ~30s after a turn finished.
+                // Claude ones get their title/branch from their own transcript; Codex rollouts live outside
+                // ~/.claude/projects, so those rows fall back to the client's generic label.
+                val daemonLive = liveNorm[ProjectPaths.normCwd(cwd)].orEmpty().map { s ->
+                    if (s.agent == AgentKind.CLAUDE) {
+                        val sum = runCatching { TranscriptScanner.summarize(newest.resolveSibling("${s.sessionId}.jsonl")) }.getOrNull()
+                        s.copy(title = sum?.title, gitBranch = sum?.gitBranch)
+                    } else s
+                }
+                // a claude OUTSIDE the daemon (terminal): only the newest transcript can identify it — the
+                // legacy single-active heuristic, kept as a fallback when the daemon doesn't own that session.
+                // The filename-stem check skips the summarize entirely in the common case (the newest
+                // transcript IS a daemon session), which would otherwise re-parse a growing file per call.
+                val newestSid = newest.fileName?.toString()?.removeSuffix(".jsonl")
+                val external = if (osOpen && daemonLive.none { it.sessionId == newestSid }) {
+                    runCatching { TranscriptScanner.summarize(newest) }.getOrNull()
+                        ?.takeIf { s -> daemonLive.none { it.sessionId == s.sessionId } }
+                        ?.let { ActiveSession(it.sessionId, it.title, executing = now - mtime < ACTIVE_WINDOW_MS, gitBranch = it.gitBranch) }
+                } else null
+                val active = (daemonLive + listOfNotNull(external)).sortedByDescending { it.executing }
+                val first = active.firstOrNull()
                 DirectoryEntry(
                     path = cwd,
                     name = Path.of(cwd).fileName?.toString() ?: cwd,
@@ -87,12 +125,13 @@ class DirectoryService {
                     hasSessions = true,
                     recent = cwd in recents,
                     lastModified = mtime,
-                    open = open,
-                    executing = open && now - mtime < ACTIVE_WINDOW_MS,
+                    open = osOpen || daemonLive.isNotEmpty(),
+                    executing = active.any { it.executing },
                     busy = cwd in busyCwds,
-                    activeSessionId = active?.sessionId,
-                    activeSessionTitle = active?.title,
-                    gitBranch = active?.gitBranch,
+                    activeSessionId = first?.sessionId,
+                    activeSessionTitle = first?.title,
+                    gitBranch = first?.gitBranch,
+                    activeSessions = active,
                 )
             }
             .sortedByDescending { it.lastModified }

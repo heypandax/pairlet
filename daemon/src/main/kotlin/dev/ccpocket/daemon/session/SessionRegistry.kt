@@ -232,6 +232,18 @@ class SessionRegistry(
     suspend fun busySessionIds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.mapNotNull { it.sessionId }.toSet() }
 
+    /** Live daemon conversations grouped by cwd, with their REAL turn state — the project list's
+     *  authoritative live info (a dir can host several sessions; the transcript-mtime heuristic can't
+     *  see turn boundaries). Pre-first-turn conversations (no sessionId yet) are skipped: there is no
+     *  transcript to link a row to. Titles/branches are left null — DirectoryService enriches them. */
+    suspend fun liveByCwd(): Map<String, List<dev.ccpocket.protocol.ActiveSession>> =
+        mutex.withLock {
+            convos.values.mapNotNull { c ->
+                val sid = c.sessionId ?: return@mapNotNull null
+                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind)
+            }
+        }.groupBy({ it.first }, { it.second })
+
     /** Routes a prompt into its conversation. False = the convo is gone (idle-reaped / daemon restarted):
      *  the router answers [dev.ccpocket.protocol.SessionGone] so the phone can re-open + resend instead of
      *  the prompt vanishing into silence (the root of "sent a message, nothing happened"). */

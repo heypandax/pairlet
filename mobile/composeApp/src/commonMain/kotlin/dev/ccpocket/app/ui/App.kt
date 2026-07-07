@@ -434,7 +434,9 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     var query by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
-    LaunchedEffect(Unit) { while (true) { delay(10_000); repo.refreshDirectoriesSilently() } } // pull-only list: re-pull quietly
+    // pull-only list: refresh NOW — entering (and RE-entering, back from a session) shows fresh state
+    // instead of the pre-session snapshot — then keep re-pulling quietly
+    LaunchedEffect(Unit) { while (true) { repo.refreshDirectoriesSilently(); delay(10_000) } }
 
     val tree = repo.treeView.value
     val dirsSnapshot = repo.directories.toList()
@@ -467,7 +469,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
         (treeRows.firstOrNull() as? TreeRow.Leaf)?.takeIf { base != root && it.entry.path == base }
     }
     val childRows = remember(treeRows, currentLeaf) { if (currentLeaf != null) treeRows.drop(1) else treeRows }
-    val live = remember(dirsSnapshot) { dirsSnapshot.filter { it.open || it.busy } } // ACTIVE: live sessions
+    val live = remember(dirsSnapshot) { dirsSnapshot.filter { it.open || it.busy }.flatMap(::expandLiveSessions) } // ACTIVE: one row per live session
     // pinned projects shown at the tree root (in pin order, present-only) — mirrors the flat Pinned section
     val pinned = remember(dirsSnapshot, pinnedSnapshot) { pinnedEntries(dirsSnapshot, pinnedSnapshot) }
     // long-press a project → a small sheet to pin/unpin it
@@ -552,7 +554,8 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                         }
                         if (live.isNotEmpty()) {
                             item { Label(activeLabel) }
-                            items(live, key = { "a:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }) }
+                            // key carries the session too — expansion can put the same project here several times
+                            items(live, key = { "a:" + it.path + ":" + (it.activeSessionId ?: "") }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }) }
                         }
                         if (pinned.isNotEmpty() || live.isNotEmpty()) item { Label(projectsLabel) }
                     }
@@ -667,6 +670,11 @@ private fun NewPathSheet(
 internal fun slashQueryOf(input: String): String? =
     input.takeIf { it.startsWith("/") && ' ' !in it && '\n' !in it }?.drop(1)
 
+/** What picking a command puts in the composer. Trailing space always: it closes the menu
+ *  ([slashQueryOf] bails on a space) and leaves the cursor ready for arguments; send trims it off
+ *  a bare command. Shared by the mobile composer and desktop ChatPane. */
+internal fun SlashCommand.completion(): String = "/$name "
+
 /** Matching commands for [query], prefix matches first — shared by the mobile composer and desktop ChatPane. */
 internal fun slashSuggestions(query: String?, commands: List<SlashCommand>): List<SlashCommand> =
     if (query == null) emptyList()
@@ -718,10 +726,12 @@ private fun ImeFollower(listState: LazyListState, repo: PocketRepository, pinned
     }
 }
 
-/** Tap a project: jump straight into its live session when one is running, else open its session list. */
+/** Tap a project: jump straight into its live session when one is running, else open its session list.
+ *  The resume pins the session's OWN backend (liveAgent) — the default-agent preference must not decide
+ *  how someone else's live session is re-opened. */
 private fun PocketRepository.openProject(e: DirectoryEntry) {
     val sid = e.activeSessionId
-    if (e.open && sid != null) openSession(e.path, sid, title = e.activeSessionTitle) else listSessions(e.path)
+    if (e.open && sid != null) openSession(e.path, sid, title = e.activeSessionTitle, agent = liveAgent(e)) else listSessions(e.path)
 }
 
 /** A project row: jumps into the live session (when [direct] and running) or opens its session list. */
@@ -731,7 +741,7 @@ private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boo
     val pinned = repo.isPinned(e.path)
     if (direct && e.open && sid != null) {
         // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
-        LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openSession(e.path, sid, title = e.activeSessionTitle) }
+        LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
     }
     else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, e.hasSessions, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
 }
@@ -1255,9 +1265,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     if (suggestions.isNotEmpty() && !capturing) {
-                        SlashCommandMenu(suggestions) { cmd ->
-                            input = "/${cmd.name}" + if (cmd.argumentHint != null) " " else ""
-                        }
+                        SlashCommandMenu(suggestions) { cmd -> input = cmd.completion() }
                     }
                     AttachTray(repo.pendingImages, repo::removePendingImage)
                     repo.voiceNotice.value?.let { n ->

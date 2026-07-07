@@ -45,6 +45,10 @@ import org.jetbrains.compose.resources.stringResource
 // null = "model default". Hoisted so it isn't rebuilt on every Settings recomposition.
 private val EFFORT_DEFAULT_OPTS: List<String?> = listOf(null) + EFFORT_OPTIONS
 
+// new-session default model: the shared Claude aliases + a leading null = "CLI default". Claude-only —
+// a Codex launch never inherits it (see PocketRepository.openSession), so Codex needs no row here.
+private val MODEL_DEFAULT_OPTS: List<String?> = listOf(null) + CLAUDE_MODEL_OPTIONS.map { it.second }
+
 // context-window override presets for the usage statusline's denominator (issue #60): null = follow the
 // model-derived / daemon-reported window. Covers the two standard windows a custom model id might really have.
 private val CONTEXT_WINDOW_OPTS: List<Long?> = listOf(null, DEFAULT_CONTEXT_WINDOW, LARGE_CONTEXT_WINDOW)
@@ -115,57 +119,21 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 }
             }
 
+            SectionLabel(stringResource(Res.string.default_model_section))
+            val modelDefaultLabel = stringResource(Res.string.value_default)
+            SegmentedRow(MODEL_DEFAULT_OPTS, repo.defaultModel.value, label = { it ?: modelDefaultLabel }) { repo.setDefaultModel(it) }
+            Text(stringResource(Res.string.default_model_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+
             SectionLabel(stringResource(Res.string.default_effort_section))
             val effortDefaultLabel = stringResource(Res.string.value_default)
-            // horizontal segmented control: a surface track with equal-width segments; the selected one
-            // fills with accent (thumb), the rest stay flush with the track
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                EFFORT_DEFAULT_OPTS.forEach { opt ->
-                    val sel = repo.defaultEffort.value == opt
-                    Box(
-                        Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
-                            .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                            .clickable { repo.setDefaultEffort(opt) }.padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            opt ?: effortDefaultLabel,
-                            color = if (sel) Tok.base else Tok.tx2,
-                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
-                        )
-                    }
-                }
-            }
+            SegmentedRow(EFFORT_DEFAULT_OPTS, repo.defaultEffort.value, label = { it ?: effortDefaultLabel }) { repo.setDefaultEffort(it) }
 
             SectionLabel(stringResource(Res.string.context_window_section))
             val ctxDefaultLabel = stringResource(Res.string.value_default)
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CONTEXT_WINDOW_OPTS.forEach { opt ->
-                    val sel = repo.contextWindowOverride.value == opt
-                    Box(
-                        Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
-                            .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                            .clickable { repo.setContextWindowOverride(opt) }.padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" },
-                            color = if (sel) Tok.base else Tok.tx2,
-                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                            fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
-                        )
-                    }
-                }
-            }
+            SegmentedRow(
+                CONTEXT_WINDOW_OPTS, repo.contextWindowOverride.value,
+                label = { opt -> when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" } },
+            ) { repo.setContextWindowOverride(it) }
             Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 
             SectionLabel(stringResource(Res.string.af_show_from))
@@ -268,6 +236,34 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
     )
+}
+
+/** Horizontal segmented control: a surface track with equal-width segments; the selected one fills
+ *  with accent (thumb), the rest stay flush with the track. Shared by the model/effort/window pickers. */
+@Composable
+private fun <T> SegmentedRow(options: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        options.forEach { opt ->
+            val sel = selected == opt
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                    .clickable { onPick(opt) }.padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label(opt),
+                    color = if (sel) Tok.base else Tok.tx2,
+                    fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                )
+            }
+        }
+    }
 }
 
 /** A settings row with a title + subtitle on the left and a Switch on the right. */

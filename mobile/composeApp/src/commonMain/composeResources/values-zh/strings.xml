@@ -184,6 +184,8 @@
 
     <!-- ── 新会话默认模式 ────────────────────────────────────────── -->
     <string name="default_mode_section">新会话默认模式</string>
+    <string name="default_model_section">默认模型</string>
+    <string name="default_model_hint">新建 Claude 会话默认使用的模型（Codex 会话不受影响）。会话中可在 ⋯ → 模型 里临时切换。</string>
     <string name="default_effort_section">默认推理强度</string>
     <string name="context_window_section">上下文窗口</string>
     <string name="context_window_hint">用量状态栏对应的 token 上限。自定义模型真实窗口不是 200K 时在此设置（CLI 无法自动上报）。</string>

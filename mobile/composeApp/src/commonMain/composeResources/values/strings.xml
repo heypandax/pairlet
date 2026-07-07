@@ -184,6 +184,8 @@
 
     <!-- ── new-session default mode ──────────────────────────────── -->
     <string name="default_mode_section">NEW SESSION DEFAULT</string>
+    <string name="default_model_section">DEFAULT MODEL</string>
+    <string name="default_model_hint">Which model new Claude sessions start on — Codex sessions keep their own. A live session switches from ⋯ → Model.</string>
     <string name="default_effort_section">DEFAULT REASONING EFFORT</string>
     <string name="context_window_section">CONTEXT WINDOW</string>
     <string name="context_window_hint">The token budget the usage statusline fills toward. Set this when a custom model\'s real window isn\'t 200K — the CLI can\'t report it.</string>

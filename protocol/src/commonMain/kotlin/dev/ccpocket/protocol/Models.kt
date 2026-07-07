@@ -143,6 +143,25 @@ data class DirectoryEntry(
     val activeSessionTitle: String? = null,
     /** git branch of the active session, shown inline on the live row. */
     val gitBranch: String? = null,
+    /** ALL live sessions here, executing-first (a dir can host several). The single activeSessionId/Title/
+     *  gitBranch above stay populated with the first one so an older app keeps working. */
+    val activeSessions: List<ActiveSession> = emptyList(),
+)
+
+/** One live session in a project dir — [DirectoryEntry.activeSessions]. The daemon knows its own
+ *  conversations' turn state exactly; [executing] for a terminal-launched claude falls back to the
+ *  wrote-recently heuristic. */
+@Serializable
+data class ActiveSession(
+    val sessionId: String,
+    val title: String? = null,
+    /** mid-turn right now (authoritative for daemon-driven sessions). */
+    val executing: Boolean = false,
+    /** has running background work — stays "active" even when the turn is idle. */
+    val busy: Boolean = false,
+    val gitBranch: String? = null,
+    /** which backend owns it — a tap must resume with the right CLI. */
+    val agent: AgentKind = AgentKind.CLAUDE,
 )
 
 /** One day in the usage trend (issue #26): a short [label] (e.g. "Mon") and its total tokens. */

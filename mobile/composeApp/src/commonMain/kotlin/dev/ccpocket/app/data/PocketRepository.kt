@@ -1886,8 +1886,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun backToBrowse() {
         val c = convoId.value
-        // observing or idle -> reclaim; still executing -> leave it running in the background
-        if (c != null && (observing.value || !streaming.value)) scope.launch { send(CloseSession(c)) }
+        val dir = sessionsDir.value // non-null = we land on the session list: re-pull it so the rows reflect this session's run
+        // observing or idle -> reclaim; still executing -> leave it running in the background.
+        // One coroutine for both sends: the re-list must see the close, not race it.
+        val close = c != null && (observing.value || !streaming.value)
+        scope.launch {
+            if (close && c != null) send(CloseSession(c))
+            dir?.let { send(ListSessions(it)) }
+        }
         convoId.value = null
         chatTitle.value = null
         messages.clear()
