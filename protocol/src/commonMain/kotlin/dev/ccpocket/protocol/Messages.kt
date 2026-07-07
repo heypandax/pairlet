@@ -148,6 +148,21 @@ data class ReadFile(
     val agent: AgentKind = AgentKind.CLAUDE,
 ) : ToDaemon
 
+/**
+ * phone -> daemon: the line-level diff of one file the session touched, rebuilt from the same
+ * transcript that backs [ListSessionFiles] (Claude structuredPatch hunks / Codex patch envelopes)
+ * — NOT from disk, so it needs no read surface beyond [ReadFile]'s. Reply is one [FileDiff].
+ * A daemon that predates this drops it; the client times out to its "update the daemon" state.
+ */
+@Serializable
+@SerialName("pocket/diff.read")
+data class ReadFileDiff(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val agent: AgentKind = AgentKind.CLAUDE,
+) : ToDaemon
+
 /** phone -> daemon: query the daemon-host CLI's login state (`claude auth status`). Reply is one
  *  [AuthState]. A daemon that predates this drops it — the client shows no account info then. */
 @Serializable
@@ -480,6 +495,27 @@ data class FileContent(
     val mediaType: String? = null, // e.g. "image/png" when base64 is set
     val truncated: Boolean = false,
     val totalBytes: Long = 0,
+) : ToPhone
+
+/**
+ * daemon -> phone: reply to [ReadFileDiff]. [diff] is unified-diff text: `@@ -a,b +c,d @@` hunk
+ * headers followed by ` `/`+`/`-`-prefixed lines, one hunk group per tool call in transcript
+ * order (line numbers are as-of-that-edit; hunks are NOT merged across calls). Codex hunks may
+ * carry `@@ -0,0 +0,0 @@` when the patch envelope had no line numbers. Capped server-side like
+ * [FileContent] ([truncated] set when the tail was dropped).
+ */
+@Serializable
+@SerialName("pocket/diff.content")
+data class FileDiff(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val ok: Boolean = true,
+    val error: String? = null,  // not in the session's changed set / no line-level data in transcript
+    val diff: String? = null,
+    val adds: Int = 0,
+    val dels: Int = 0,
+    val truncated: Boolean = false,
 ) : ToPhone
 
 // ===========================================================================

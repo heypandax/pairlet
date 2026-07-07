@@ -183,6 +183,30 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun fileDiff_pair_roundtrips_and_stats_stay_optional() {
+        val req = Envelope(id = "d1", ts = 0, body = ReadFileDiff("/w", "sid", "/w/a.kt"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/diff.read\"" in reqJson, reqJson)
+        assertTrue("\"agent\":\"claude\"" in reqJson, reqJson) // encodeDefaults, like ListSessionFiles
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+
+        val ok = Envelope(id = "d2", ts = 0, body = FileDiff("/w", "sid", "/w/a.kt", diff = "@@ -1,2 +1,3 @@\n ctx\n+new", adds = 1, dels = 0))
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/diff.content\"" in okJson, okJson)
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        val err = FileDiff("/w", "sid", "/w/x", ok = false, error = "not a file this session changed")
+        assertEquals(err, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "d3", ts = 0, body = err))).body)
+
+        // ChangedFile from an OLD daemon (no adds/dels on the wire) must decode with null stats,
+        // and a stats-bearing row must round-trip — the list UI keys "show counts" off null.
+        val legacy = PocketJson.decodeFromString<ChangedFile>("""{"path":"/w/a.md","op":"edit","edits":3}""")
+        assertEquals(ChangedFile("/w/a.md", "edit", 3, adds = null, dels = null), legacy)
+        val statted = ChangedFile("/w/a.md", "edit", 3, adds = 12, dels = 4)
+        assertEquals(statted, PocketJson.decodeFromString<ChangedFile>(PocketJson.encodeToString(statted)))
+    }
+
+    @Test
     fun unknown_frame_discriminator_throws() {
         // The invariant the whole forward-compat story rests on: an unknown "t" must THROW (each decode
         // site wraps in runCatching and drops the frame). A default polymorphic deserializer added later

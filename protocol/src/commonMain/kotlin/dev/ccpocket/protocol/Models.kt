@@ -100,13 +100,25 @@ data class SessionSummary(
  * One file a session created/edited, as recorded in its transcript (see ListSessionFiles).
  * [op] is the LAST operation seen: "write" | "edit" | "delete" | "notebook"; [edits] counts how
  * many tool calls touched the path. Ordered newest-touched first by the daemon.
+ * [adds]/[dels] total the +/− lines across the session's ops on this path (Claude structuredPatch /
+ * Codex patch envelopes); null when the transcript carries no line-level data for it — the client
+ * shows the counts only when present, so frames from an older daemon still decode as "no stats".
  */
 @Serializable
 data class ChangedFile(
     val path: String,
     val op: String = "edit",
     val edits: Int = 1,
+    val adds: Int? = null,
+    val dels: Int? = null,
 )
+
+/** Extensions both peers treat as images: the daemon serves them as base64 [FileContent] (no text
+ *  diff exists), and the clients disable the Diff tab / skip the [ReadFileDiff] request for them.
+ *  One set so the two sides can't drift. */
+val IMAGE_FILE_EXTENSIONS: Set<String> = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+
+fun isImageFile(path: String): Boolean = path.substringAfterLast('.', "").lowercase() in IMAGE_FILE_EXTENSIONS
 
 /** One filesystem entry returned by the daemon's DirectoryService. */
 @Serializable

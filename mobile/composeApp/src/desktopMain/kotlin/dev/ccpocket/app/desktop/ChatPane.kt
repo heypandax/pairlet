@@ -207,6 +207,7 @@ private fun ChatSubHeader(model: DesktopModel) {
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 )
             }
+            ChangesPill(model) // "± N" — the session's changed files, opens the Changes browser
             // the permission-mode switch lives in the ⋯ popover now, mirroring mobile's quick-actions
             // sheet (the old header pill was display-only and read as a broken control)
             Icon(

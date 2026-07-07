@@ -69,6 +69,12 @@ fun DesktopApp(model: DesktopModel) {
                 CommandPalette(model) { model.palette = null }
             }
         }
+        if (model.showChanges) {
+            // the two-pane diff browser (changed-files v2) — same centered-scrim language as settings
+            Overlay(onDismiss = { model.showChanges = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                ChangesOverlay(model) { model.showChanges = false }
+            }
+        }
         if (model.showSettings) {
             Overlay(onDismiss = { model.showSettings = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
                 SettingsModal(model) { model.showSettings = false }

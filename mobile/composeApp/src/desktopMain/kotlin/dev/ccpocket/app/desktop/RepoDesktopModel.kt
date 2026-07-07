@@ -54,7 +54,19 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
+    override var showChanges by mutableStateOf(false)
     override var composer by mutableStateOf("")
+
+    // ── changes (changed-files v2): straight repo pass-throughs — the repo already scopes them
+    // to the open session and re-arms its 8s stale-daemon deadlines on every request
+    override val changedFiles: List<dev.ccpocket.protocol.ChangedFile> get() = repo.changedFiles
+    override val changedFilesLoading: Boolean get() = repo.changedFilesLoading.value
+    override val changedFilesStale: Boolean get() = repo.changedFilesUnavailable.value
+    override fun fetchChangedFiles() = repo.fetchChangedFiles()
+    override val selectedChangedPath: String? get() = repo.viewedFilePath.value
+    override val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = repo.viewedFileDiff.value
+    override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
+    override fun selectChangedFile(path: String) = repo.openChangedFile(path)
 
     override val connected: Boolean get() = repo.sessionActive.value
 

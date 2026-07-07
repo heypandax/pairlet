@@ -248,6 +248,19 @@
     <string name="file_truncated">预览已截断——前 %1$d KB / 共 %2$d KB</string>
     <string name="file_undecodable">无法显示这张图片</string>
 
+    <!-- ── 改动文件 v2：逐行改动 ─────────────────────────────────── -->
+    <string name="files_stale_banner">更新电脑上的 daemon 后可查看逐行改动。</string>
+    <string name="diff_tab">改动</string>
+    <string name="file_tab">文件</string>
+    <string name="diff_truncated">改动已截断——仅显示前 %1$d KB</string>
+    <string name="diff_stale_title">逐行改动需要更新 daemon</string>
+    <string name="diff_stale_hint">在电脑上运行更新命令</string>
+    <string name="diff_none">本会话没有记录这个文件的逐行改动</string>
+    <string name="diff_binary">二进制文件——没有文本改动</string>
+    <string name="file_deleted">文件已被删除</string>
+    <string name="diff_unchanged_lines">⋯ %1$d 行未改动</string>
+    <string name="diff_collapsed_lines">%1$d 行</string>
+
     <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
     <string name="devices_section">已配对设备</string>
     <string name="choose_computer">选择电脑</string>

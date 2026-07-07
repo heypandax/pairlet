@@ -248,6 +248,19 @@
     <string name="file_truncated">Preview truncated — first %1$d KB of %2$d KB</string>
     <string name="file_undecodable">Couldn\'t display this image</string>
 
+    <!-- ── changed files v2: line-level diffs ────────────────────── -->
+    <string name="files_stale_banner">Update the daemon on your computer to see line-level diffs.</string>
+    <string name="diff_tab">Diff</string>
+    <string name="file_tab">File</string>
+    <string name="diff_truncated">Diff truncated — showing the first %1$d KB</string>
+    <string name="diff_stale_title">Line-level diffs need a newer daemon</string>
+    <string name="diff_stale_hint">Run the update command on your computer</string>
+    <string name="diff_none">No line-level diff was recorded for this file</string>
+    <string name="diff_binary">Binary file — no text diff</string>
+    <string name="file_deleted">File was deleted</string>
+    <string name="diff_unchanged_lines">⋯ %1$d unchanged lines</string>
+    <string name="diff_collapsed_lines">%1$d lines</string>
+
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>
     <string name="choose_computer">Choose a computer</string>

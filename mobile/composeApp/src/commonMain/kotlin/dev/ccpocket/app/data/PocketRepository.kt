@@ -42,10 +42,13 @@ import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileDiff
+import dev.ccpocket.protocol.isImageFile
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.ReadFile
+import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.OpenSession
@@ -366,6 +369,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val changedFilesUnavailable = mutableStateOf(false)       // no reply (old daemon silently drops the frame) — distinct from "no files"
     val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
     val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
+    val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -1250,8 +1254,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 replace(changedFiles, f.files); changedFilesLoading.value = false; changedFilesUnavailable.value = false
             }
             // full-identity match: a late reply for the SAME path from a session we've since left must not land
+            // no deadline cancel here: the ONE viewer deadline serves both replies and no-ops per
+            // side once its value landed — canceling on the first arrival would strand the other
             is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
-                viewedFileDeadline?.cancel(); viewedFile.value = f
+                viewedFile.value = f
+            }
+            is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
+                viewedFileDiff.value = f
             }
             else -> {}
         }
@@ -1503,25 +1512,41 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(ListSessionFiles(wd, sid, sessionAgent.value ?: AgentKind.CLAUDE)) }
     }
 
-    /** Open one changed file in the viewer; the daemon replies with a capped [FileContent]. */
+    /** Open one changed file in the viewer; the daemon replies with a capped [FileContent] and,
+     *  when its transcript has line-level data, a [FileDiff] — both requested up front because the
+     *  viewer's default tab is the diff and the flip to full content should be instant. Images get
+     *  no [ReadFileDiff]: there is no text diff, and the request would cost the daemon a full
+     *  transcript re-scan just to say so. */
     fun openChangedFile(path: String) {
         val wd = workdir.value ?: return
         val sid = sessionKey.value ?: currentSessionId ?: return
+        val wantDiff = !isImageFile(path)
         viewedFilePath.value = path
         viewedFile.value = null // show the loading state, not the previous file
+        viewedFileDiff.value = null
+        // ONE deadline arms both replies; each check no-ops once its reply landed, so a daemon that
+        // answers ReadFile but predates ReadFileDiff still gets the honest "needs a newer daemon" state.
         viewedFileDeadline?.cancel()
         viewedFileDeadline = scope.launch {
             delay(8_000)
-            if (viewedFilePath.value == path && viewedFile.value == null) {
+            if (viewedFilePath.value != path) return@launch
+            if (viewedFile.value == null) {
                 viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
             }
+            if (wantDiff && viewedFileDiff.value == null) {
+                viewedFileDiff.value = FileDiff(wd, sid, path, ok = false, error = DIFF_ERROR_STALE_DAEMON)
+            }
         }
-        scope.launch { send(ReadFile(wd, sid, path, sessionAgent.value ?: AgentKind.CLAUDE)) }
+        val agent = sessionAgent.value ?: AgentKind.CLAUDE
+        scope.launch {
+            send(ReadFile(wd, sid, path, agent))
+            if (wantDiff) send(ReadFileDiff(wd, sid, path, agent))
+        }
     }
 
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
-        viewedFilePath.value = null; viewedFile.value = null
+        viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
     }
 
     // ── voice input actions ───────────────────────────────────────────────

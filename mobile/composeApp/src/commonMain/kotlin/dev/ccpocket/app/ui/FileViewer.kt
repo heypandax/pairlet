@@ -2,32 +2,27 @@ package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,11 +34,12 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.ChangedFile
 import org.jetbrains.compose.resources.stringResource
-import kotlin.io.encoding.Base64
-import kotlin.io.encoding.ExperimentalEncodingApi
 
 // ════════════════════════════════════════════════════════════════════
-//  Changed files (issue #36): what did this session touch → view one
+//  Changed files (issue #36 → v2): git-grade list + diff/file viewer,
+//  per the design handoff in claude-design-handoff/changed-files-diff/.
+//  The panes themselves (tab policy, diff body, file body) live in
+//  DiffView.kt, shared with the desktop Changes browser.
 // ════════════════════════════════════════════════════════════════════
 
 /** Bottom sheet listing the files this session created/edited; tapping one opens the full-screen viewer. */
@@ -51,7 +47,11 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismiss: () -> Unit) {
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp, top = 4.dp)) {
-            Text(stringResource(Res.string.files_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(stringResource(Res.string.files_title), color = Tok.tx, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                Box(Modifier.weight(1f))
+                if (repo.changedFiles.isNotEmpty()) FilesSummaryText(repo.changedFiles, fontSize = 12.sp)
+            }
             when {
                 repo.changedFilesLoading.value -> Box(Modifier.fillMaxWidth().padding(vertical = 28.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(Modifier.padding(4.dp), color = Tok.tx2, strokeWidth = 2.dp)
@@ -64,120 +64,125 @@ fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismis
                     stringResource(Res.string.files_empty), color = Tok.muted, fontSize = 13.sp,
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
                 )
-                else -> LazyColumn(
-                    Modifier.padding(top = 10.dp).heightIn(max = 420.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    items(repo.changedFiles, key = { it.path }) { f ->
-                        // Deliberately NOT dismissing: the viewer replaces the whole screen while it's up,
-                        // and keeping the sheet's state alive means the viewer's back lands here again —
-                        // browse the next file without re-digging through ⋯ → changed files (issue #53).
-                        ChangedFileRow(f) { onOpen(f.path) }
+                else -> {
+                    // rows without stats across the board = the daemon predates line-level diffs
+                    val noStats = repo.changedFiles.none { it.adds != null || it.dels != null }
+                    LazyColumn(
+                        Modifier.padding(top = 10.dp).heightIn(max = 420.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        if (noStats) item(key = "__stale") { StaleDaemonBanner() }
+                        items(repo.changedFiles, key = { it.path }) { f ->
+                            // Deliberately NOT dismissing: the viewer replaces the whole screen while it's up,
+                            // and keeping the sheet's state alive means the viewer's back lands here again —
+                            // browse the next file without re-digging through ⋯ → changed files (issue #53).
+                            ChangedFileRow(f) { onOpen(f.path) }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/** Slim info banner: the daemon replied, but its rows carry no line stats (design: .banner.info). */
+@Composable
+private fun StaleDaemonBanner() {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .background(Tok.info.copy(alpha = 0.09f))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("ⓘ", color = Tok.info, fontSize = 13.sp)
+        Text(stringResource(Res.string.files_stale_banner), color = Tok.tx2, fontSize = 12.sp, lineHeight = 17.sp)
     }
 }
 
 @Composable
 private fun ChangedFileRow(f: ChangedFile, onClick: () -> Unit) {
-    val sep = if (f.path.contains('\\') && !f.path.contains('/')) '\\' else '/'
-    val name = f.path.substringAfterLast(sep)
-    val dir = f.path.substringBeforeLast(sep, "")
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp),
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
+        StatusChip(f.op)
         Column(Modifier.weight(1f)) {
-            Text(name, color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (dir.isNotEmpty()) TailPathText(dir, fontSize = 11.sp)
+            Text(fileNameOf(f.path), color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val dir = parentDirOf(f.path)
+            if (dir.isNotEmpty()) TailPathText(dir, fontSize = 11.sp, color = Tok.muted)
         }
-        // op is a stable tool-ish vocabulary ("write"/"edit"/"delete"/"notebook") — shown as-is, mono
-        Text(
-            if (f.edits > 1) "${f.op} ×${f.edits}" else f.op,
-            color = if (f.op == "delete") Tok.danger else Tok.muted,
-            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-        )
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (isImagePath(f.path)) {
+                Text("img", color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+            } else {
+                DiffStatText(f.adds, f.dels, fontSize = 11.sp)
+            }
+            if (f.edits > 1) Text("×${f.edits}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+        }
     }
 }
 
+// ── full-screen viewer: [ Diff | File ] ─────────────────────────────
+
 /**
  * Full-screen viewer for one changed file (replaces the chat screen like [TerminalScreen] does).
- * Markdown renders through [MarkdownText]; images decode from the daemon's base64; everything else
- * shows as selectable monospace text. Content state lives in the repo ([PocketRepository.viewedFile]),
- * so a reply landing after a reconnect still finds its way here.
+ * Default tab is the line-level Diff (design handoff, Screen 2); the File tab keeps the original
+ * full-content view. The panes and the tab policy are the shared pieces in DiffView.kt; content
+ * state lives in the repo ([PocketRepository.viewedFile] + [PocketRepository.viewedFileDiff]), so
+ * a reply landing after a reconnect still finds its way here.
  */
-@OptIn(ExperimentalEncodingApi::class)
 @Composable
 fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBack: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     val path = repo.viewedFilePath.value ?: return
-    val content = repo.viewedFile.value
-    val sep = if (path.contains('\\') && !path.contains('/')) '\\' else '/'
+    val diff = repo.viewedFileDiff.value
+    val ext = path.substringAfterLast('.', "").lowercase()
+
+    val fileInfo = repo.changedFiles.firstOrNull { it.path == path }
+    val isImage = isImagePath(path)
+    val deleted = fileInfo?.op == "delete"
+    var diffTab by rememberDiffTab(path, isImage, deleted, diff)
+
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        Row(
-            Modifier.fillMaxWidth().background(Tok.surface).padding(start = 6.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-            Column(Modifier.weight(1f)) {
-                Text(path.substringAfterLast(sep), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                TailPathText(path.substringBeforeLast(sep, ""), fontSize = 11.sp)
+        Column(Modifier.fillMaxWidth().background(Tok.surface)) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 6.dp, end = 12.dp, top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                Column(Modifier.weight(1f)) {
+                    Text(fileNameOf(path), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TailPathText(parentDirOf(path), fontSize = 11.sp)
+                }
+                // ← goes back UP one level (the changed-files list when that's where we came from);
+                // ✕ skips the list and drops straight to the chat (issue #53's "一键返回").
+                onExit?.let { TextButton(it) { Text("✕", color = Tok.tx2, fontSize = 16.sp) } }
             }
-            // ← goes back UP one level (the changed-files list when that's where we came from);
-            // ✕ skips the list and drops straight to the chat (issue #53's "一键返回").
-            onExit?.let { TextButton(it) { Text("✕", color = Tok.tx2, fontSize = 16.sp) } }
+            Row(
+                Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 2.dp, bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DiffFileToggle(
+                    diffSelected = diffTab,
+                    isImage = isImage,
+                    deleted = deleted,
+                    onPick = { diffTab = it },
+                )
+                Box(Modifier.weight(1f))
+                val (adds, dels) = shownStats(fileInfo, diff)
+                if (!isImage && (adds != null || dels != null)) {
+                    DiffStatText(adds, dels, fontSize = 12.sp)
+                    Box(Modifier.size(9.dp))
+                }
+                fileInfo?.let { StatusChip(it.op) }
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                content == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Tok.tx2, strokeWidth = 2.dp)
-                }
-                !content.ok -> Text(
-                    content.error ?: "?", color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
-                )
-                content.base64 != null -> {
-                    val bmp = remember(content.base64) {
-                        runCatching { Base64.Default.decode(content.base64!!) }.getOrNull()?.let { dev.ccpocket.app.media.decodeImageBitmap(it) }
-                    }
-                    if (bmp != null) {
-                        Image(
-                            bmp, contentDescription = null, contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().padding(12.dp),
-                        )
-                    } else {
-                        Text(
-                            stringResource(Res.string.file_undecodable), color = Tok.muted, fontSize = 13.sp,
-                            modifier = Modifier.align(Alignment.Center),
-                        )
-                    }
-                }
-                else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
-                    if (content.truncated) Text(
-                        stringResource(Res.string.file_truncated, (content.text?.length ?: 0) / 1024, (content.totalBytes / 1024).toInt()),
-                        color = Tok.muted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                    val text = content.text ?: ""
-                    val ext = path.substringAfterLast('.', "").lowercase()
-                    if (ext in setOf("md", "markdown")) {
-                        MarkdownText(text, Tok.tx)
-                    } else {
-                        // tint by file extension (issue #51 — "生成文件的 sql, py"); unknown or oversize
-                        // files come back as the plain single-color string
-                        val body = remember(text, ext) { highlightCode(text, ext) }
-                        SelectionContainer {
-                            Text(
-                                body, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
-                                softWrap = false,
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            )
-                        }
-                    }
-                }
-            }
+            if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false)
+            else FileTabBody(repo.viewedFile.value, ext)
         }
     }
 }

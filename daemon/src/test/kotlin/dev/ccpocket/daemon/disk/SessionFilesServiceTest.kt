@@ -113,4 +113,99 @@ class SessionFilesServiceTest {
         val r = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", gone.toString())
         assertFalse(r.ok)
     }
+
+    // ── line-level diffs (changed-files v2) ──────────────────────────────────
+
+    /** An Edit tool_use line plus its toolUseResult line, the way the CLI records them. */
+    private fun editWithPatch(path: String, hunkJson: String): List<String> = listOf(
+        """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"$path"}}]}}""",
+        """{"type":"user","toolUseResult":{"filePath":"$path","oldString":"a","newString":"b","structuredPatch":[$hunkJson]}}""",
+    )
+
+    @Test
+    fun claude_structured_patch_yields_stats_and_a_unified_diff() {
+        val hunk = """{"oldStart":10,"oldLines":3,"newStart":10,"newLines":4,"lines":[" ctx","-old","+new one","+new two"]}"""
+        val lines = editWithPatch("/w/a.kt", hunk) + editWithPatch("/w/a.kt", hunk)
+        val t = tmp.resolve("s.jsonl").also { Files.write(it, lines) }
+
+        val row = SessionFilesService.changedFilesIn(AgentKind.CLAUDE, t, "/w").single()
+        assertEquals(4, row.adds) // two edits × 2 added lines
+        assertEquals(2, row.dels)
+        assertEquals(2, row.edits)
+
+        val diff = SessionFilesService.fileDiffIn(AgentKind.CLAUDE, t, "/w", "s", "/w/a.kt")
+        assertTrue(diff.ok)
+        assertEquals(4, diff.adds)
+        assertEquals(2, diff.dels)
+        // one hunk group per tool call, in transcript order, headers carrying the CLI's line numbers
+        assertEquals(2, Regex("""@@ -10,3 \+10,4 @@""").findAll(diff.diff!!).count())
+        assertTrue(diff.diff!!.startsWith("@@ -10,3 +10,4 @@\n ctx\n-old\n+new one\n+new two\n"))
+        assertFalse(diff.truncated)
+    }
+
+    @Test
+    fun claude_write_create_synthesizes_an_all_added_hunk() {
+        val lines = listOf(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/w/new.md"}}]}}""",
+            """{"type":"user","toolUseResult":{"type":"create","filePath":"/w/new.md","content":"one\ntwo","structuredPatch":[]}}""",
+        )
+        val t = tmp.resolve("s.jsonl").also { Files.write(it, lines) }
+        val row = SessionFilesService.changedFilesIn(AgentKind.CLAUDE, t, "/w").single()
+        assertEquals(2, row.adds)
+        assertEquals(0, row.dels)
+        val diff = SessionFilesService.fileDiffIn(AgentKind.CLAUDE, t, "/w", "s", "/w/new.md")
+        assertEquals("@@ -0,0 +1,2 @@\n+one\n+two\n", diff.diff)
+    }
+
+    @Test
+    fun claude_without_patch_data_keeps_null_stats_and_refuses_the_diff() {
+        val t = claudeTranscript("Edit" to "/w/b.kt") // tool_use only — no toolUseResult lines
+        val row = SessionFilesService.changedFilesIn(AgentKind.CLAUDE, t, "/w").single()
+        assertNull(row.adds)
+        assertNull(row.dels)
+        val diff = SessionFilesService.fileDiffIn(AgentKind.CLAUDE, t, "/w", "s", "/w/b.kt")
+        assertFalse(diff.ok)
+
+        // and a path outside the changed set is refused outright
+        assertFalse(SessionFilesService.fileDiffIn(AgentKind.CLAUDE, t, "/w", "s", "/w/secret.txt").ok)
+    }
+
+    @Test
+    fun codex_patches_yield_stats_and_hunks_in_both_call_shapes() {
+        // custom_tool_call: raw patch text with real newlines (context line keeps its leading space)
+        val raw = "*** Begin Patch\n*** Update File: src/App.kt\n@@ class App\n ctx\n-gone\n+here\n*** Add File: docs/new.md\n+hi\n+yo\n*** Delete File: old.txt\n*** End Patch"
+        // function_call: the patch rides inside the arguments JSON document, escaped
+        val fnArgs = """{\"command\":[\"apply_patch\",\"*** Begin Patch\\n*** Update File: src/B.kt\\n@@\\n-x\\n+y\\n*** End Patch\"]}"""
+        val lines = listOf(
+            """{"type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"${raw.replace("\n", "\\n")}"}}""",
+            """{"type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"$fnArgs"}}""",
+        )
+        val t = tmp.resolve("rollout.jsonl").also { Files.write(it, lines) }
+
+        val rows = SessionFilesService.changedFilesIn(AgentKind.CODEX, t, "/w").associateBy { it.path }
+        assertEquals(1 to 1, rows.getValue("/w/src/App.kt").let { it.adds to it.dels })
+        assertEquals(2 to 0, rows.getValue("/w/docs/new.md").let { it.adds to it.dels })
+        assertNull(rows.getValue("/w/old.txt").adds) // Delete has no line data — stays honest null
+        assertEquals(1 to 1, rows.getValue("/w/src/B.kt").let { it.adds to it.dels })
+
+        val update = SessionFilesService.fileDiffIn(AgentKind.CODEX, t, "/w", "s", "/w/src/App.kt")
+        assertEquals("@@ -0,0 +0,0 @@\n ctx\n-gone\n+here\n", update.diff) // locator has no numbers → sentinel header
+        val add = SessionFilesService.fileDiffIn(AgentKind.CODEX, t, "/w", "s", "/w/docs/new.md")
+        assertEquals("@@ -0,0 +0,0 @@\n+hi\n+yo\n", add.diff)
+        val escaped = SessionFilesService.fileDiffIn(AgentKind.CODEX, t, "/w", "s", "/w/src/B.kt")
+        assertEquals("@@ -0,0 +0,0 @@\n-x\n+y\n", escaped.diff)
+    }
+
+    @Test
+    fun file_diff_caps_and_flags_truncation() {
+        val bigLine = "x".repeat(1000)
+        val manyLines = (1..300).joinToString(",") { """"+$bigLine"""" }
+        val hunk = """{"oldStart":1,"oldLines":0,"newStart":1,"newLines":300,"lines":[$manyLines]}"""
+        val t = tmp.resolve("s.jsonl").also { Files.write(it, editWithPatch("/w/big.kt", hunk)) }
+        val diff = SessionFilesService.fileDiffIn(AgentKind.CLAUDE, t, "/w", "s", "/w/big.kt")
+        assertTrue(diff.ok)
+        assertTrue(diff.truncated)
+        assertTrue(diff.diff!!.length <= SessionFilesService.DIFF_CAP_BYTES)
+        assertTrue(diff.diff!!.endsWith("\n")) // cut on a whole-line boundary, not mid-line
+    }
 }

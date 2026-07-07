@@ -140,17 +140,18 @@ interface DesktopModel {
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
     var showQuickActions: Boolean // chat-header ⋯ popover: model/effort/mode + compact/clear (mirrors mobile's sheet)
+    var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
 
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -258,6 +259,22 @@ interface DesktopModel {
 
     /** Daemon-pushed "/" commands for the open session — the composer's slash autocomplete reads this. */
     val slashCommands: List<dev.ccpocket.protocol.SlashCommand> get() = emptyList()
+
+    // changes (changed-files v2): the chat header's ± pill count + the two-pane Changes browser.
+    // Defaults are inert so seed/preview models compile untouched; the live model rides the repo.
+    val changedFiles: List<dev.ccpocket.protocol.ChangedFile> get() = emptyList()
+    val changedFilesLoading: Boolean get() = false
+    /** No reply — the daemon predates the messages; the overlay shows its "update the daemon" state. */
+    val changedFilesStale: Boolean get() = false
+    /** Re-pull the changed list for the open session (overlay open / turn end / ⌘R while open). */
+    fun fetchChangedFiles() {}
+    /** The overlay's selected file (drives the right pane); null until the first row is picked. */
+    val selectedChangedPath: String? get() = null
+    val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = null
+    val selectedContent: dev.ccpocket.protocol.FileContent? get() = null
+    fun selectChangedFile(path: String) {}
+    /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
+    fun openChanges() { showChanges = true; fetchChangedFiles() }
 
     // composer image attachments (⌘V paste / attach icon → file picker); ride the next send
     val pendingImages: List<dev.ccpocket.app.data.PendingImage>

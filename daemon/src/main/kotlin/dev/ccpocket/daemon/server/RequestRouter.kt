@@ -26,6 +26,7 @@ import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.ReadFile
+import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
@@ -73,6 +74,9 @@ class RequestRouter(
             }
             is ReadFile -> scope.launch {
                 sink.emit(SessionFilesService.readFile(frame.agent, frame.workdir, frame.sessionId, frame.path))
+            }
+            is ReadFileDiff -> scope.launch {
+                sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
             }
 
             is OpenSession -> {
