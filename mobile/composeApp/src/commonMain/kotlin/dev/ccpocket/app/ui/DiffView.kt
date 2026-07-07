@@ -69,7 +69,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 // ════════════════════════════════════════════════════════════════════
 
 /** Design-handoff diff tints: 12% row fills / 16% gutter fills UNDER readable text. Getters (not cached
- *  vals) so a light/dark switch re-reads the live [Tok] palette; the three literals get a light variant. */
+ *  vals) so a light/dark switch re-reads the live [Tok] palette; the non-token colors get a light variant. */
 object DiffTok {
     val addBg get() = Tok.ok.copy(alpha = 0.12f)
     val addGut get() = Tok.ok.copy(alpha = 0.16f)

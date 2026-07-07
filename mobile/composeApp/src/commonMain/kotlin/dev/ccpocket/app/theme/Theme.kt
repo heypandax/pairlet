@@ -114,23 +114,15 @@ fun PocketTheme(dark: Boolean = true, fontScale: Float = 1f, content: @Composabl
     // the right colors (no dark flash for a light-mode launch). The write is idempotent — DarkPalette /
     // LightPalette are stable singletons, so an unchanged theme is a structural no-op and never loops.
     Tok.current = palette
-    val scheme = if (dark) {
-        darkColorScheme(
-            primary = palette.accent, onPrimary = Color.White,
-            background = palette.base, onBackground = palette.tx,
-            surface = palette.surface, onSurface = palette.tx,
-            surfaceVariant = palette.raised, onSurfaceVariant = palette.tx2,
-            outline = palette.hair, error = palette.danger,
-        )
-    } else {
-        lightColorScheme(
-            primary = palette.accent, onPrimary = Color.White,
-            background = palette.base, onBackground = palette.tx,
-            surface = palette.surface, onSurface = palette.tx,
-            surfaceVariant = palette.raised, onSurfaceVariant = palette.tx2,
-            outline = palette.hair, error = palette.danger,
-        )
-    }
+    // one override list over whichever baseline — the unset M3 fields keep each factory's light/dark
+    // defaults (identical to spelling both schemes out), so a token add/rename stays in a single place
+    val scheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
+        primary = palette.accent, onPrimary = Color.White,
+        background = palette.base, onBackground = palette.tx,
+        surface = palette.surface, onSurface = palette.tx,
+        surfaceVariant = palette.raised, onSurfaceVariant = palette.tx2,
+        outline = palette.hair, error = palette.danger,
+    )
     MaterialTheme(
         colorScheme = scheme,
         content = { CompositionLocalProvider(LocalFontScale provides fontScale, content = content) },
