@@ -1,14 +1,13 @@
-What's new in 1.3.1
+What's new in 1.3.2
 
 New
-• Line-level diffs: changed files show +added / -removed counts, and each opens in a Diff | File viewer with collapsible hunks — on the phone, and in a new two-pane Changes browser on the desktop
-• One row per running session: a project hosting several live sessions shows each one, and tapping resumes with the right backend (Claude or Codex)
-• Default model for new sessions: pick it once in Settings
-• Your computer shows up by its real name instead of an ID hash — a nickname you set still wins
+• Light mode: Settings > Appearance now offers System, Light, or Dark — the app was dark-only before
+• Delivery receipts: a prompt shows "sending", then "delivered" once your computer has it, and a dropped connection resends it safely
+• Failed turns no longer look blank — an API-failure turn shows as an error, and a session near its context limit warns you before your next message
 
 Fixes & improvements
-• Desktop: drag the sidebar divider to resize it, snap it hidden, bring it back from the edge strip; the close button on recent session rows actually works now
-• Lists refresh the moment you come back, and the "running" badge turns off exactly when the turn ends
-• Slash-command autocomplete leaves the cursor ready for arguments
+• AskUserQuestion cards advance to the next question automatically after you pick a single-choice answer
+• Codex sessions list under their real title instead of the first line of your prompt
+• Reliability fixes on the computer side: an optional isolated daemon login (so phone-driven work can't sign your terminal's Claude out mid-task) and crash-safe transcripts
 
-Note: line-level diffs need the computer-side cc-pocket-daemon on 1.3.1 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
+Note: some fixes need the computer-side cc-pocket-daemon on 1.3.2 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
