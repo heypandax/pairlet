@@ -226,21 +226,35 @@ jobs:
 
   macos-desktop:
     # The Compose Desktop APP (.dmg) for macOS — signed + notarized, attached to the release under a stable
-    # version-less name (so releases/latest/download/cc-pocket-desktop-macos-arm64.dmg is a permanent link).
-    # arm64 only for now (most Macs are Apple Silicon); add an x86_64/Rosetta build later if Intel demand shows.
+    # version-less name (so releases/latest/download/cc-pocket-desktop-macos-<arch>.dmg is a permanent link).
+    # BOTH arches build on Apple Silicon (macos-14): an x86_64 Temurin JDK under Rosetta makes packageDmg
+    # bundle the x64 Skiko + JRE, so Intel Macs get a native dmg (issue #68). Same trick as the daemon `macos`
+    # job; we AVOID the retiring macos-13 Intel runner (jobs there queue indefinitely).
     # composeApp applies the Android + googleServices plugins, so the build needs the Android SDK at configure
     # time and a google-services.json to exist — the desktop target never touches Firebase, so a placeholder is fine.
     if: ${{ !inputs.only_android }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            jdk_arch: aarch64   # native on the Apple Silicon runner
+          - arch: x86_64
+            jdk_arch: x64       # cross-build via Rosetta
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up JDK 17 (aarch64, with jpackage)
+      - name: Install Rosetta (for the x86_64 JDK)
+        if: matrix.arch == 'x86_64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up JDK 17 (${{ matrix.jdk_arch }}, with jpackage)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-          architecture: aarch64
+          architecture: ${{ matrix.jdk_arch }}
 
       - name: Set up Android SDK (composeApp applies the Android plugin — needed at configuration time)
         uses: android-actions/setup-android@v3
@@ -283,6 +297,7 @@ jobs:
 
       - name: Build + sign + notarize the DMG
         env:
+          CCP_ARCH: ${{ matrix.arch }}   # names the dmg for the JDK's arch (uname -m still says arm64 under Rosetta)
           DEVELOPER_ID: ${{ secrets.DEVELOPER_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
@@ -296,9 +311,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER="${{ inputs.version }}"
-          VERSIONED="cc-pocket-desktop-${VER}-macos-arm64.dmg"
-          cp "$VERSIONED" cc-pocket-desktop-macos-arm64.dmg   # stable version-less permalink
-          gh release upload "v${VER}" "$VERSIONED" cc-pocket-desktop-macos-arm64.dmg --clobber
+          ARCH="${{ matrix.arch }}"
+          VERSIONED="cc-pocket-desktop-${VER}-macos-${ARCH}.dmg"
+          # per-arch version-less permalink: releases/latest/download/cc-pocket-desktop-macos-{arm64,x86_64}.dmg
+          cp "$VERSIONED" "cc-pocket-desktop-macos-${ARCH}.dmg"
+          gh release upload "v${VER}" "$VERSIONED" "cc-pocket-desktop-macos-${ARCH}.dmg" --clobber
 
   windows-desktop:
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less

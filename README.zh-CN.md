@@ -6,7 +6,7 @@
 
 在手机上操控你电脑里的 Claude Code —— 或者 OpenAI Codex —— 从任何地方，而不只是同一局域网。新建/恢复会话、浏览工作目录、发送提示词，并远程批准或拒绝智能体的工具授权请求。每个会话开始时自己挑后端（Claude 或 Codex）；无论选哪个，流式输出、命令与文件改动的批准、打断都一样好用。流量经过一个**零知识中继（zero-knowledge relay）**转发，中继只搬运端到端加密后的密文。纯净室 Kotlin 实现，MIT 许可。
 
-**🌐 官网：** <https://heypandax.github.io/cc-pocket/> · **📱 下载 App：** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)（iPhone 与 iPad）· [TestFlight Beta](https://testflight.apple.com/join/8z26MWWr)（新版抢先）· [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)（GitHub Releases）· **🖥️ 桌面端 App：** [macOS（.dmg，已签名）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Windows（.msi）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)
+**🌐 官网：** <https://heypandax.github.io/cc-pocket/> · **📱 下载 App：** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)（iPhone 与 iPad）· [TestFlight Beta](https://testflight.apple.com/join/8z26MWWr)（新版抢先）· [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)（GitHub Releases）· **🖥️ 桌面端 App：** macOS（.dmg，已签名）—— [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)· [Windows（.msi）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)
 
 <p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/og-image.png" alt="CC Pocket —— 用手机操控电脑上的 Claude Code" width="720"></a></p>
 
@@ -33,7 +33,7 @@ flowchart LR
 
 语音听写、图片附件、斜杠命令自动补全、模型切换、任务完成推送等一并齐全。**[查看完整功能列表 →](https://heypandax.github.io/cc-pocket/features.html)**
 
-cc-pocket 现在也以原生**桌面 App**（macOS / Linux / Windows）的形式运行，与手机端同一套 Compose Multiplatform 代码——一个两栏式的「任务控制台」，用同样的远程逐步批准去操控**另一台**电脑上的 Claude Code 或 Codex，从此不再只是手机端。下载：[macOS（.dmg，已签名）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Windows（.msi）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)。
+cc-pocket 现在也以原生**桌面 App**（macOS / Linux / Windows）的形式运行，与手机端同一套 Compose Multiplatform 代码——一个两栏式的「任务控制台」，用同样的远程逐步批准去操控**另一台**电脑上的 Claude Code 或 Codex，从此不再只是手机端。下载：macOS（.dmg，已签名）—— [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)· [Windows（.msi）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)。
 
 ## 模块
 
@@ -50,7 +50,7 @@ cc-pocket 现在也以原生**桌面 App**（macOS / Linux / Windows）的形式
 
 **1. 在手机上装 App** —— iPhone 与 iPad 走 [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)，Android 从 GitHub Releases 下 [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)。新版本会先上 [TestFlight Beta](https://testflight.apple.com/join/8z26MWWr)，比 App Store 过审上架更早。（在手机上打开[官网](https://heypandax.github.io/cc-pocket/)会直接跳转商店；在电脑上则显示二维码供扫码。）
 
-**或者用桌面端 App** —— cc-pocket 也能在你电脑上跑（用它去操控**另一台**机器）：[macOS .dmg](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)（Apple Silicon · 已签名 + 公证）· [Windows .msi](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)（未签名 —— SmartScreen 提示点「更多信息 → 仍要运行」）。Linux 桌面端：从源码构建。
+**或者用桌面端 App** —— cc-pocket 也能在你电脑上跑（用它去操控**另一台**机器）：macOS .dmg（已签名 + 公证）—— [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)· [Windows .msi](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)（未签名 —— SmartScreen 提示点「更多信息 → 仍要运行」）。Linux 桌面端：从源码构建。
 
 **2. 在电脑上装 daemon** —— 中继已为你托管。
 

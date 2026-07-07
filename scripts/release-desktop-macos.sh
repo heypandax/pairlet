@@ -30,7 +30,10 @@ cd "$ROOT"
 # Version: arg wins, else the single source of truth in build.gradle.kts (keeps the name in lockstep).
 VERSION="${1:-$(grep -E 'val appVersionName *= *"' mobile/composeApp/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')}"
 [ -n "$VERSION" ] || { echo "ERROR: could not determine version (pass it as the first arg)"; exit 1; }
-ARCH="$(uname -m)" # arm64 — the desktop app is Apple-Silicon-only for now
+# uname -m still reports arm64 under Rosetta, so CCP_ARCH lets CI name the dmg for the JDK's arch: an
+# x86_64 Temurin JDK under Rosetta makes packageDmg bundle the x64 Skiko + JRE → a native Intel dmg (#68).
+# Local builds default to the host arch.
+ARCH="${CCP_ARCH:-$(uname -m)}" # arm64 | x86_64
 NOTARY_PROFILE="${NOTARY_PROFILE:-cc-pocket}"
 
 # Local convenience: gradle.properties pins a Homebrew JDK but the launcher still needs JAVA_HOME.
