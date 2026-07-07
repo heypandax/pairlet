@@ -419,12 +419,6 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         if (repo.sendPrompt(text)) composer = ""
     }
 
-    // brand-new session auto-focus (#72): openSession arms this one-shot for resumeId==null; the composer
-    // consumes it once the session lands. The desktop's split-pane `paneFocused` gate never fires for the
-    // single pane (it runs focused=false), so this flag — not that gate — is what focuses a fresh ⌘N.
-    override fun consumeAutoFocus(): Boolean =
-        repo.autoFocusComposer.value.also { if (it) repo.autoFocusComposer.value = false }
-
     override val sessionDegraded: Boolean get() = repo.sessionDegraded.value
     override val contextUsed: Long? get() = repo.contextUsed.value
     override val contextWindow: Long? get() = repo.contextWindow.value

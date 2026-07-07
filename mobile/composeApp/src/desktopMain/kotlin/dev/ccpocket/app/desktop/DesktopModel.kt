@@ -253,9 +253,6 @@ interface DesktopModel {
     val streaming: Boolean
     var composer: String
     fun send(text: String)
-    /** A brand-new session (⌘N) just landed and wants the composer focused once. Returns true exactly
-     *  once per new session (clears the one-shot); false on resume and for preview/seed models (#72). */
-    fun consumeAutoFocus(): Boolean = false
 
     // session health (issue #65): degraded = recent turns were all API failures (likely past the context
     // window); used/window feed the header's context readout. Defaults keep demo/preview models untouched.

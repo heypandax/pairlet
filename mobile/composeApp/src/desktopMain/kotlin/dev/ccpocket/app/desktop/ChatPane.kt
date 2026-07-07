@@ -162,7 +162,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             }
         }
         SessionHealthStrip(model)
-        if (model.observing) ObserveBar(model) else Composer(model, paneFocused = focused)
+        if (model.observing) ObserveBar(model) else Composer(model)
     }
 }
 
@@ -428,7 +428,7 @@ private fun ObserveBar(model: DesktopModel) {
 }
 
 @Composable
-private fun Composer(model: DesktopModel, paneFocused: Boolean = true) {
+private fun Composer(model: DesktopModel) {
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Column(
@@ -438,19 +438,15 @@ private fun Composer(model: DesktopModel, paneFocused: Boolean = true) {
             Column(Modifier.widthIn(max = Dk.maxStreamWidth).fillMaxWidth()) {
                 val scope = rememberCoroutineScope()
                 val submit = { if (model.composer.isNotBlank() || model.hasReadyImages()) model.send(model.composer) }
-                // ⌘1-9 pin jumps / palette / sidebar switches land ready-to-type (#46). Keyed on the
-                // session identity so mere recompositions don't steal focus from other UI (e.g. a modal).
                 val composerFocus = remember { FocusRequester() }
-                LaunchedEffect(model.selectedSessionId, paneFocused) {
-                    if (paneFocused && model.hasChat) runCatching { composerFocus.requestFocus() }
-                }
-                // a brand-new session (⌘N) opens on an empty composer — grab focus the moment the session
-                // becomes ready, independent of the split-pane keyboard-ownership gate above (the single
-                // pane runs focused=false, so that effect never fires). openSession arms this one-shot only
-                // for resumeId==null; consumed exactly once. Retries briefly since the field just (re)mounted
-                // with the session and its FocusRequester may not be attached on the first tick. (#72)
+                // Land ready-to-type: focus the composer whenever a session becomes current — a brand-new
+                // session (#72) or a pin-jump / palette / sidebar switch (#46). Only the keyboard-owning pane
+                // renders a Composer (the read-only WatchPane has none), so there's no split gate here —
+                // `focused` stays purely the accent-bar cue at the top of ChatPane. openSession clears convoId
+                // before every open, so hasChat cycles false→true on each land and this fires once per session.
+                // Retry briefly: the field may not be attached on the first tick after the fresh mount.
                 LaunchedEffect(model.hasChat) {
-                    if (model.hasChat && model.consumeAutoFocus()) {
+                    if (model.hasChat) {
                         repeat(6) {
                             if (runCatching { composerFocus.requestFocus() }.isSuccess) return@LaunchedEffect
                             delay(40)
