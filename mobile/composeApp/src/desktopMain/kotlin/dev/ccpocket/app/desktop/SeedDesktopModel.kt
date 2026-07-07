@@ -129,7 +129,7 @@ class SeedDesktopModel : DesktopModel {
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
 
-    override val appVersion = "1.3.1"
+    override val appVersion = "1.3.2"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
