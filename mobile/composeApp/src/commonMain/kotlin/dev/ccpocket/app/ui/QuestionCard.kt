@@ -158,7 +158,14 @@ fun QuestionCard(
                             label = opt.label, description = opt.description, multi = q.multiSelect,
                             selected = opt.label in selections[qIndex].orEmpty(),
                         ) {
-                            selections[qIndex] = toggle(selections[qIndex].orEmpty(), opt.label, q.multiSelect)
+                            val next = toggle(selections[qIndex].orEmpty(), opt.label, q.multiSelect)
+                            selections[qIndex] = next
+                            // auto-advance like the Claude Code terminal: picking a single-select answer
+                            // steps to the next question so a multi-question card flows without a manual tab
+                            // tap. Multi-select stays put (the user keeps ticking boxes); a deselect (empty
+                            // set) doesn't advance; the last question holds so the submit button stays in view.
+                            // The chip-tabs above still navigate back to revise an answered question. (#71)
+                            if (!q.multiSelect && opt.label in next && qIndex < questions.lastIndex) qIndex++
                         }
                     }
                     // the host-supplied "Other…" row (claude never offers one) — expands into a text field
