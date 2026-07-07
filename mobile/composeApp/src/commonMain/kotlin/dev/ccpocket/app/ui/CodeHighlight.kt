@@ -45,7 +45,7 @@ fun highlightCodeOrNull(code: String, lang: String?): AnnotatedString? {
         val spans = Highlights.Builder()
             .code(code)
             .language(language)
-            .theme(POCKET_SYNTAX_THEME)
+            .theme(pocketSyntaxTheme())
             .build()
             .getHighlights()
         buildAnnotatedString {
@@ -71,23 +71,23 @@ fun highlightCode(code: String, lang: String?): AnnotatedString =
 
 private fun rgb(c: Color) = c.toArgb() and 0xFFFFFF
 
-/** The library theme derived from [Tok] so tokens sit inside the app palette (single dark theme):
+/** The library theme derived from [Tok] so tokens sit inside the app palette:
  *  keywords = accent (like inline code), strings = ok/green, literals = warn/amber, comments = muted,
- *  annotations = info/blue; punctuation & operators stay body-colored so blocks don't turn confetti. */
-private val POCKET_SYNTAX_THEME by lazy {
-    SyntaxTheme(
-        key = "pocket",
-        code = rgb(Tok.tx2),
-        keyword = rgb(Tok.accent),
-        string = rgb(Tok.ok),
-        literal = rgb(Tok.warn),
-        comment = rgb(Tok.muted),
-        metadata = rgb(Tok.info),
-        multilineComment = rgb(Tok.muted),
-        punctuation = rgb(Tok.tx2),
-        mark = rgb(Tok.tx2),
-    )
-}
+ *  annotations = info/blue; punctuation & operators stay body-colored so blocks don't turn confetti.
+ *  A function (not a cached val) so light/dark switches recolor: callers already remember(code, lang),
+ *  so this is only rebuilt when a block's code/lang changes — cheap. (#63) */
+private fun pocketSyntaxTheme() = SyntaxTheme(
+    key = if (Tok.current.dark) "pocket-dark" else "pocket-light",
+    code = rgb(Tok.tx2),
+    keyword = rgb(Tok.accent),
+    string = rgb(Tok.ok),
+    literal = rgb(Tok.warn),
+    comment = rgb(Tok.muted),
+    metadata = rgb(Tok.info),
+    multilineComment = rgb(Tok.muted),
+    punctuation = rgb(Tok.tx2),
+    mark = rgb(Tok.tx2),
+)
 
 // ── language routing ───────────────────────────────────────────────────────────────────
 

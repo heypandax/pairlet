@@ -36,6 +36,7 @@ import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
@@ -166,6 +167,43 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 }
             }
             Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+
+            SectionLabel(stringResource(Res.string.appearance_section))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+            ) {
+                // System / Light / Dark segmented control — same shape as the text-size one below (#63)
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val modes = listOf(
+                        ThemeMode.SYSTEM to stringResource(Res.string.appearance_system),
+                        ThemeMode.LIGHT to stringResource(Res.string.appearance_light),
+                        ThemeMode.DARK to stringResource(Res.string.appearance_dark),
+                    )
+                    modes.forEach { (mode, label) ->
+                        val sel = repo.themeMode.value == mode
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                                .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                                .clickable { repo.setThemeMode(mode) }.padding(vertical = 9.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label, color = if (sel) Tok.base else Tok.tx2, fontSize = 13.sp,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    stringResource(Res.string.appearance_hint), color = Tok.muted, fontSize = 12.sp,
+                    lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp),
+                )
+            }
 
             SectionLabel(stringResource(Res.string.text_size_section))
             Column(

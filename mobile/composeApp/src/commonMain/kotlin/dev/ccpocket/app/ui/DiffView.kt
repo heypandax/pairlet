@@ -68,16 +68,17 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 //  (docs/design/claude-design-handoff/changed-files-diff/).
 // ════════════════════════════════════════════════════════════════════
 
-/** Design-handoff diff tints: 12% row fills / 16% gutter fills UNDER readable text. */
+/** Design-handoff diff tints: 12% row fills / 16% gutter fills UNDER readable text. Getters (not cached
+ *  vals) so a light/dark switch re-reads the live [Tok] palette; the three literals get a light variant. */
 object DiffTok {
-    val addBg = Tok.ok.copy(alpha = 0.12f)
-    val addGut = Tok.ok.copy(alpha = 0.16f)
-    val delBg = Tok.danger.copy(alpha = 0.12f)
-    val delGut = Tok.danger.copy(alpha = 0.16f)
-    val addGutText = Color(0xFF7CC79A)
-    val delGutText = Color(0xFFD98A7E)
-    val gutBorder = Color.White.copy(alpha = 0.045f)
-    val codeBg = Color(0xFF0B0C0D)
+    val addBg get() = Tok.ok.copy(alpha = 0.12f)
+    val addGut get() = Tok.ok.copy(alpha = 0.16f)
+    val delBg get() = Tok.danger.copy(alpha = 0.12f)
+    val delGut get() = Tok.danger.copy(alpha = 0.16f)
+    val addGutText get() = if (Tok.current.dark) Color(0xFF7CC79A) else Color(0xFF2E7D4F)
+    val delGutText get() = if (Tok.current.dark) Color(0xFFD98A7E) else Color(0xFFB4482F)
+    val gutBorder get() = if (Tok.current.dark) Color.White.copy(alpha = 0.045f) else Color.Black.copy(alpha = 0.06f)
+    val codeBg get() = if (Tok.current.dark) Color(0xFF0B0C0D) else Color(0xFFF7F6F3)
 }
 
 /** op → the git-style status letter the list rows and header chips show. */

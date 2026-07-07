@@ -3,6 +3,7 @@
 package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -125,6 +126,7 @@ import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.openAppSettings
 import dev.ccpocket.protocol.AgentKind
@@ -173,7 +175,14 @@ fun App(scope: CoroutineScope) {
     dev.ccpocket.app.SystemBackHandler(enabled = fleetOpen || inboxOpen) {
         if (inboxOpen) inboxOpen = false else fleetOpen = false
     }
-    PocketTheme(repo.fontScale.value) {
+    // appearance (issue #63): SYSTEM defers to the OS, LIGHT/DARK force it. isSystemInDarkTheme() is
+    // read here (a composable) so a system flip while the app is foregrounded re-themes live.
+    val dark = when (repo.themeMode.value) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    PocketTheme(dark = dark, fontScale = repo.fontScale.value) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)

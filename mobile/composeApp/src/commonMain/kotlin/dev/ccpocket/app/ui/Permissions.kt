@@ -77,7 +77,8 @@ data class ModeInfo(
     val color: Color, val detail: StringResource, val warn: Boolean = false,
 )
 
-private val Indigo = Color(0xFF5B9BD5)
+// same hue as the semantic info token — a getter so it tracks the light/dark palette (#63)
+private val Indigo get() = Tok.info
 
 /** Trims a single line's leading and centers the glyph in it — fixes text riding high when vertically centered. */
 internal val TightCenter = TextStyle(

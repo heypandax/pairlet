@@ -195,6 +195,11 @@
     <string name="context_window_hint">The token budget the usage statusline fills toward. Set this when a custom model\'s real window isn\'t 200K — the CLI can\'t report it.</string>
     <string name="text_size_section">TEXT SIZE</string>
     <string name="text_size_sample">Sample message text — 示例 123</string>
+    <string name="appearance_section">APPEARANCE</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="appearance_hint">Choose the app\'s color theme. System follows your device\'s light/dark setting.</string>
     <string name="new_path_open">New session in a folder</string>
     <string name="new_path_open_row">Open another folder by path…</string>
     <string name="new_path_title">New session in a folder</string>

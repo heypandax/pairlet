@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
 import dev.ccpocket.app.push.PushController
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.telemetry.TelEvent
@@ -285,6 +286,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val fontScale = mutableStateOf(
         SecureStore.getString(K_FONT_SCALE)?.toFloatOrNull()?.coerceIn(FONT_SCALE_MIN, FONT_SCALE_MAX) ?: 1f,
     )
+
+    /** Appearance: follow the system, or force light/dark (issue #63). Persisted; the app root resolves
+     *  SYSTEM against isSystemInDarkTheme() and hands PocketTheme a concrete light/dark. */
+    val themeMode = mutableStateOf(ThemeMode.from(SecureStore.getString(K_THEME_MODE)))
+    fun setThemeMode(mode: ThemeMode) {
+        if (mode == themeMode.value) return
+        themeMode.value = mode
+        SecureStore.putString(K_THEME_MODE, mode.name)
+    }
 
     /** Projects the user pinned to the top, newest pin first. Persisted client-side (paths never contain
      *  '\n', so a newline-joined string is a safe, dependency-free encoding). */
@@ -2042,6 +2052,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<sessionId|convoId|workdir>" → unsent composer text for that conversation
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
+        const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
     }
