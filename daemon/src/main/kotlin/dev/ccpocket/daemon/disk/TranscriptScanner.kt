@@ -131,6 +131,30 @@ object TranscriptScanner {
         return last
     }
 
+    /**
+     * How many MAIN-chain assistant records at the TAIL of [file] are `<synthetic>` API-failure
+     * placeholders in a row (a non-synthetic assistant record resets the run). A dead session — every
+     * API call failing, typically past its context window — ends in [user, synthetic]+ pairs, so a
+     * streak ≥ 2 seeds [dev.ccpocket.protocol.SessionLive.degraded] on resume: the phone warns before
+     * the user pours more prompts into a transcript that can only bloat (issue #65).
+     */
+    fun syntheticTailStreak(file: Path): Int {
+        if (!file.exists()) return 0
+        var streak = 0
+        file.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                if (obj.str("type") != "assistant") continue
+                if (obj.bool("isSidechain") == true) continue // subagent turns share the file but aren't this session's replies
+                val model = (obj["message"] as? JsonObject)?.str("model")
+                streak = if (model == "<synthetic>") streak + 1 else 0
+            }
+        }
+        return streak
+    }
+
     /** `message.model` of a MAIN-chain assistant line — null for Task-subagent turns (isSidechain: they share
      *  the file but ran the SUBAGENT's model) and `<synthetic>` placeholders (API-error/notice records). */
     private fun assistantModel(obj: JsonObject): String? {

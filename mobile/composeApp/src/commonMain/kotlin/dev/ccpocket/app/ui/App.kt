@@ -1194,9 +1194,25 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         val undelivered = m is ChatItem.User && m.pending && repo.phase.value != ConnPhase.Ready
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             MessageItem(m) { imgs, i -> viewer = imgs to i }
-                            if (undelivered) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                PulseDot(Tok.warn, size = 5.dp)
-                                Text(stringResource(Res.string.msg_pending_undelivered), color = Tok.warn, fontSize = 11.sp)
+                            when {
+                                undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    PulseDot(Tok.warn, size = 5.dp)
+                                    Text(stringResource(Res.string.msg_pending_undelivered), color = Tok.warn, fontSize = 11.sp)
+                                }
+                                // link is up but the daemon hasn't receipted yet (issue #66): quiet "sending…"
+                                // after a short grace so a normal instant ack never flashes it
+                                m is ChatItem.User && m.pending -> {
+                                    var slow by remember(m) { mutableStateOf(false) }
+                                    LaunchedEffect(m) { delay(1200); slow = true }
+                                    if (slow) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        PulseDot(Tok.muted, size = 5.dp)
+                                        Text(stringResource(Res.string.msg_sending), color = Tok.muted, fontSize = 11.sp)
+                                    }
+                                }
+                                // receipted (issue #66) — shows until the reply starts streaming (this bubble
+                                // stops being the last item), so a slow agent start still reads as "it got there"
+                                m is ChatItem.User && m.delivered && m == repo.messages.lastOrNull() ->
+                                    Text("✓ " + stringResource(Res.string.msg_delivered), color = Tok.muted, fontSize = 11.sp)
                             }
                         }
                     }
@@ -1229,6 +1245,18 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     onReview = onOpenInbox,
                     modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
                 )
+            }
+            // session health (issue #65): a degraded session (recent turns all API failures) or a nearly
+            // full context window gets a persistent strip right above the composer — warn BEFORE the next
+            // prompt goes in, not after it fails
+            if (repo.sessionDegraded.value) {
+                StatusBanner(Tok.danger, stringResource(Res.string.session_degraded_banner))
+            } else {
+                val used = repo.contextUsed.value
+                val window = repo.contextWindow.value
+                if (used != null && window != null && used.toFloat() / window >= 0.9f) {
+                    StatusBanner(Tok.warn, stringResource(Res.string.context_high_banner, "${(used.toFloat() / window * 100).toInt()}%"))
+                }
             }
             // Claude paused its turn to ask questions — the card docks above the composer; the
             // stream above stays scrollable so the user can re-read context before answering.
@@ -1327,7 +1355,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                                     RoundActionButton(
                                         onClick = {
                                             val t = input.trim()
-                                            if (t.isNotBlank() || hasReady) { repo.sendPrompt(t); input = ""; repo.clearDraft(draftKey) }
+                                            // a gated send (degraded session, issue #65) returns false — keep the text for the retry
+                                            if ((t.isNotBlank() || hasReady) && repo.sendPrompt(t)) { input = ""; repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }

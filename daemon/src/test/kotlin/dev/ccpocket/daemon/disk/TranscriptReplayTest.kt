@@ -37,4 +37,26 @@ class TranscriptReplayTest {
         assertEquals(ChatRole.USER, msgs[2].role)
         assertTrue(msgs[2].text.contains("bump the version"))
     }
+
+    @Test
+    fun synthetic_placeholder_replays_flagged_as_error() {
+        // a context-dead session's tail: the CLI's `<synthetic>` placeholders must replay as errors,
+        // not as normal assistant replies the user mistakes for answers (issue #65)
+        val f = tmpFile("dead.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"hello?"}}""",
+                """{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+                """{"type":"user","message":{"role":"user","content":"still there?"}}""",
+                """{"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"yes"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(4, msgs.size)
+        assertTrue(msgs[1].error) // the placeholder
+        assertEquals("No response requested.", msgs[1].text)
+        assertTrue(!msgs[3].error) // the real reply
+    }
 }

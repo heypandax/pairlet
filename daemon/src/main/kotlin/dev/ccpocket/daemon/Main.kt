@@ -95,12 +95,27 @@ private class RunCmd : CliktCommand(name = "run") {
         // codex is optional: probe for the echo, but resolve lazily per session so a missing codex never
         // blocks startup — a Codex open then fails with a clear PocketError instead.
         val codexExe = runCatching { CodexLauncher.resolveExecutable(codexBin) }.getOrNull()
+        // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
+        // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
+        // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
+        val prefs = DaemonPrefs.load()
+        val wantIsolation = prefs.isolatedClaudeAuth || System.getenv("CC_POCKET_ISOLATED_CLAUDE_AUTH") == "1"
+        val claudeHome = if (wantIsolation) dev.ccpocket.daemon.claude.ClaudeHome.prepare() else null
+        if (wantIsolation && claudeHome == null) {
+            echo("⚠ claude credential isolation requested but claude-home setup failed — running WITHOUT isolation (see daemon log)")
+        }
         val core = DaemonCore(
             mapOf(
-                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(exe) },
+                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(exe, claudeHome) },
                 AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
             ),
+            prefs = prefs,
+            claudeConfigDir = claudeHome,
         )
+        if (claudeHome != null) {
+            echo("claude credential isolation: ON — daemon login store: $claudeHome")
+            echo("(the daemon signs in separately: if sessions report auth errors, sign in from the app's Settings → Account)")
+        }
         if (!local) {
             val identity = Identity.loadOrCreate()
             // What DaemonInfo advertises after each handshake: where paired devices can reach us without
@@ -347,6 +362,31 @@ private class StatusCmd : CliktCommand(name = "status") {
     }
 }
 
+private class ConfigCmd : CliktCommand(name = "config") {
+    private val isolatedClaudeAuth by option(
+        "--isolated-claude-auth",
+        help = "on|off — give the daemon's claude its own login (separate CLAUDE_CONFIG_DIR; history and " +
+            "settings stay shared). Fixes the terminal claude being logged out by token-refresh races " +
+            "while the phone drives sessions (issue #69). Takes effect on daemon restart; sign in once " +
+            "from the app afterwards (macOS — file-based credentials elsewhere migrate automatically).",
+    )
+
+    override fun run() {
+        val prefs = DaemonPrefs.load()
+        when (isolatedClaudeAuth?.lowercase()) {
+            null -> {}
+            "on", "true", "1" -> prefs.setIsolatedClaudeAuth(true)
+            "off", "false", "0" -> prefs.setIsolatedClaudeAuth(false)
+            else -> throw com.github.ajalt.clikt.core.CliktError("--isolated-claude-auth takes on|off")
+        }
+        echo("isolated-claude-auth: ${if (prefs.isolatedClaudeAuth) "on" else "off"}")
+        if (isolatedClaudeAuth != null) {
+            echo("restart the daemon for this to take effect — e.g.:")
+            echo("  ${daemonStartHint().substringAfter("start it:  ")}")
+        }
+    }
+}
+
 private class ServiceInstallCmd : CliktCommand(name = "service-install") {
     private val exec by option("--exec", help = "path to the cc-pocket-daemon launcher (default: auto-detect)")
     private val relay by option("--relay").default(DEFAULT_RELAY)
@@ -386,5 +426,5 @@ fun main(args: Array<String>) {
     // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), UpdateCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
 }

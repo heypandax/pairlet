@@ -148,4 +148,26 @@ class StreamParserTest {
         assertIs<AgentEvent.BackgroundTaskUpdated>(updated)
         assertEquals("completed", updated.status)
     }
+
+    @Test
+    fun synthetic_assistant_becomes_syntheticReply_not_a_normal_chunk() {
+        // model "<synthetic>" = the CLI's API-failure placeholder ("No response requested.") — it must
+        // surface as an error signal, never as AssistantText the phone renders as a real reply (issue #65)
+        val evs = StreamParser.parse(
+            """{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}],"usage":{"input_tokens":0,"output_tokens":0}}}""",
+        )
+        val synthetic = evs.filterIsInstance<AgentEvent.SyntheticReply>().single()
+        assertEquals("No response requested.", synthetic.text)
+        assertTrue(evs.filterIsInstance<AgentEvent.AssistantText>().isEmpty())
+        // its zero usage must not poison the statusline either
+        assertTrue(evs.filterIsInstance<AgentEvent.AssistantUsage>().isEmpty())
+    }
+
+    @Test
+    fun real_model_assistant_is_untouched_by_the_synthetic_guard() {
+        val ev = StreamParser.parse(
+            """{"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"hi"}]}}""",
+        ).single()
+        assertEquals(AgentEvent.AssistantText("hi"), ev)
+    }
 }

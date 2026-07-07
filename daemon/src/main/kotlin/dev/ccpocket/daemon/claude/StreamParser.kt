@@ -64,6 +64,15 @@ object StreamParser {
         val message = root["message"] as? JsonObject
         val content = message?.get("content") as? JsonArray
             ?: return listOf(AgentEvent.Ignored("assistant"))
+        // model == "<synthetic>" = the CLI's own API-failure placeholder ("No response requested."),
+        // written after every call of the turn failed. Its usage is all zeros too — don't emit it as a
+        // normal reply (it would render as a real answer) and don't let its zero usage poison the
+        // statusline; surface it as one SyntheticReply the Conversation turns into an error (issue #65).
+        if (message.str("model") == SYNTHETIC_MODEL) {
+            val text = content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
+                .joinToString("\n").ifBlank { "No response from the API" }
+            return listOf(AgentEvent.SyntheticReply(text))
+        }
         val blocks = content.mapNotNull { el ->
             val block = el as? JsonObject ?: return@mapNotNull null
             when (block.str("type")) {
@@ -144,6 +153,9 @@ object StreamParser {
             )
         } else AgentEvent.Ignored("control_request/${request?.str("subtype")}")
     }
+
+    /** The CLI's placeholder model id on API-failure/notice records (same literal TranscriptScanner skips). */
+    const val SYNTHETIC_MODEL = "<synthetic>"
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject?.long(key: String): Long? {

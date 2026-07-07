@@ -254,6 +254,12 @@ interface DesktopModel {
     var composer: String
     fun send(text: String)
 
+    // session health (issue #65): degraded = recent turns were all API failures (likely past the context
+    // window); used/window feed the header's context readout. Defaults keep demo/preview models untouched.
+    val sessionDegraded: Boolean get() = false
+    val contextUsed: Long? get() = null
+    val contextWindow: Long? get() = null
+
     // live-session switches (the ⋯ quick-actions popover; same repo verbs mobile's sheet drives)
     fun switchMode(m: PermissionMode) {}
     fun switchModel(name: String) {}

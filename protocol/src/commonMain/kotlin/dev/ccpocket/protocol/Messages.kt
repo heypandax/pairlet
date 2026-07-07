@@ -40,10 +40,18 @@ data class OpenSession(
 @SerialName("pocket/session.switchDir")
 data class SwitchDirectory(val convoId: String, val workdir: String) : ToDaemon
 
-/** Send a user turn into a live conversation. */
+/** Send a user turn into a live conversation. [promptId] is a client-minted id the daemon echoes back
+ *  as a [PromptAck] once the turn is handed to the agent — the delivery receipt (issue #66). It also
+ *  dedupes retries: a resend with the same id is acked again but not double-delivered. Null from older
+ *  clients → no ack (an old daemon ignores the unknown field the same way). */
 @Serializable
 @SerialName("pocket/prompt")
-data class SendPrompt(val convoId: String, val text: String, val images: List<ImageData> = emptyList()) : ToDaemon
+data class SendPrompt(
+    val convoId: String,
+    val text: String,
+    val images: List<ImageData> = emptyList(),
+    val promptId: String? = null,
+) : ToDaemon
 
 /** A base64 image attached to a prompt — downscaled on the phone to fit the relay frame cap. */
 @Serializable
@@ -298,6 +306,10 @@ data class SessionLive(
     val contextWindow: Long? = null,
     val contextUsed: Long? = null, // resume-time seed for the usage statusline (null = older daemon / no prior turn)
     val agent: AgentKind? = null, // which backend drives this session (null = older daemon → phone assumes Claude)
+    // ≥2 consecutive turns produced only failures/`<synthetic>` placeholders (live-observed or read from
+    // the resumed transcript's tail) — the session is likely past its context window and every send just
+    // bloats the transcript (issue #65). Clients warn + gate the next send; old clients ignore the field.
+    val degraded: Boolean = false,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -359,14 +371,27 @@ val PermissionAsk.isQuestion: Boolean get() = questions != null
 @SerialName("pocket/ask.withdrawn")
 data class AskWithdrawn(val convoId: String, val askId: String) : ToPhone
 
-/** Turn finished. finalText is the result text (if any); usage is token accounting (if present). */
+/** Turn finished. finalText is the result text (if any); usage is token accounting (if present).
+ *  [error] non-null = the turn FAILED and finalText (if any) is not a real answer: the CLI reported
+ *  is_error, or every API call failed and it wrote a `<synthetic>` placeholder reply (issue #65 —
+ *  previously swallowed, rendering as a normal-looking bubble). Clients show it as an error row;
+ *  old clients ignore the field and keep today's behavior. */
 @Serializable
 @SerialName("pocket/turn.done")
 data class TurnDone(
     val convoId: String,
     val finalText: String? = null,
     val usage: TokenUsage? = null,
+    val error: String? = null,
 ) : ToPhone
+
+/** daemon -> phone: delivery receipt for a [SendPrompt] that carried a promptId — emitted the moment
+ *  the turn is handed to the agent (or handled as a daemon slash command). The client flips its
+ *  "sending…" marker to delivered. Old phones drop the unknown frame; old daemons never send it —
+ *  the client then falls back to first-stream-evidence, exactly today's behavior (issue #66). */
+@Serializable
+@SerialName("pocket/prompt.ack")
+data class PromptAck(val convoId: String, val promptId: String) : ToPhone
 
 /** An error surfaced to the phone. convoId null = connection-level. */
 @Serializable
@@ -417,9 +442,11 @@ enum class ChatRole {
     @SerialName("tool") TOOL,
 }
 
-/** One past message in a resumed session's transcript. */
+/** One past message in a resumed session's transcript. [error] marks an assistant record that was a
+ *  `<synthetic>` API-failure placeholder, not a real reply (issue #65) — clients render it as an error
+ *  row; old clients ignore the flag and show the placeholder text as before. */
 @Serializable
-data class HistoryMessage(val role: ChatRole, val text: String, val tool: String? = null)
+data class HistoryMessage(val role: ChatRole, val text: String, val tool: String? = null, val error: Boolean = false)
 
 /** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
 @Serializable

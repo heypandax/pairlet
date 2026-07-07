@@ -50,6 +50,10 @@
     <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
     <string name="conn_connecting_banner">正在连接电脑…</string>
     <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
+    <string name="msg_sending">发送中…</string>
+    <string name="msg_delivered">已送达电脑</string>
+    <string name="session_degraded_banner">会话疑似已超上下文上限——最近的回复均为 API 失败。建议开新会话或发送 /clear。</string>
+    <string name="context_high_banner">上下文已用 %1$s——建议尽快开新会话或 /clear</string>
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
     <string name="turn_done_marker">已完成</string>
     <string name="conn_pairing_invalid_title">配对已失效</string>

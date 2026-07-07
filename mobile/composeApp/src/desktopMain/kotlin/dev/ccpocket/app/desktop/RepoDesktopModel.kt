@@ -410,14 +410,18 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override fun switchMode(m: PermissionMode) = repo.switchMode(m)
     override fun switchModel(name: String) = repo.switchModel(name)
     override fun switchEffort(level: String) = repo.switchEffort(level)
-    override fun compactConversation() = repo.sendPrompt("/compact")
+    override fun compactConversation() { repo.sendPrompt("/compact") }
     override fun clearConversation() = repo.clearConversation()
 
     override fun send(text: String) {
         if (text.isBlank() && !repo.hasReadyImages()) return // an image-only send is legitimate
-        repo.sendPrompt(text)
-        composer = ""
+        // a gated send (degraded session, issue #65) returns false — keep the composer text for the retry
+        if (repo.sendPrompt(text)) composer = ""
     }
+
+    override val sessionDegraded: Boolean get() = repo.sessionDegraded.value
+    override val contextUsed: Long? get() = repo.contextUsed.value
+    override val contextWindow: Long? get() = repo.contextWindow.value
 
     override val slashCommands: List<dev.ccpocket.protocol.SlashCommand> get() = repo.slashCommands
 

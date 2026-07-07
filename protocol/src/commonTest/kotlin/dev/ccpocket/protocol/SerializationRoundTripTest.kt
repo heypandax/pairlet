@@ -477,4 +477,51 @@ class SerializationRoundTripTest {
         assertEquals(emptyList(), back.activeSessions)
         assertEquals("s1", back.activeSessionId)
     }
+
+    @Test
+    fun promptAck_and_promptId_roundtrip_and_old_peers_default() {
+        // issue #66: new app ↔ new daemon
+        val env = Envelope(id = "9", ts = 0, body = SendPrompt("c1", "hi", promptId = "ab12"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"promptId\":\"ab12\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        val ack = Envelope(id = "10", ts = 0, body = PromptAck("c1", "ab12"))
+        assertEquals(ack, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(ack)))
+
+        // old app → new daemon: no promptId key → null (no ack expected)
+        val legacySend = """{"convoId":"c1","text":"hi"}"""
+        assertEquals(SendPrompt("c1", "hi"), PocketJson.decodeFromString<SendPrompt>(legacySend))
+        // new app (no promptId minted) → frame omits the key entirely (explicitNulls=false)
+        assertFalse("promptId" in PocketJson.encodeToString<SendPrompt>(SendPrompt("c1", "hi")))
+    }
+
+    @Test
+    fun turnDone_error_and_sessionLive_degraded_roundtrip_and_old_frames_default() {
+        // issue #65: a failed turn carries its error; a healthy one omits the key
+        val failed = TurnDone("c1", finalText = "No response requested.", error = "API request failed")
+        val fj = PocketJson.encodeToString<TurnDone>(failed)
+        assertTrue("\"error\":\"API request failed\"" in fj, fj)
+        assertEquals(failed, PocketJson.decodeFromString<TurnDone>(fj))
+        assertFalse("error" in PocketJson.encodeToString<TurnDone>(TurnDone("c1", "ok")))
+
+        // old daemon → new app: no error/degraded keys → null/false, nothing renders differently
+        assertEquals(TurnDone("c1", "ok"), PocketJson.decodeFromString<TurnDone>("""{"convoId":"c1","finalText":"ok"}"""))
+        val legacyLive = """{"convoId":"c3","workdir":"/z","sessionId":"sid3"}"""
+        assertFalse(PocketJson.decodeFromString<SessionLive>(legacyLive).degraded)
+
+        val degraded = SessionLive("c1", "/x", "sid", degraded = true)
+        val dj = PocketJson.encodeToString<SessionLive>(degraded)
+        assertTrue("\"degraded\":true" in dj, dj)
+        assertEquals(degraded, PocketJson.decodeFromString<SessionLive>(dj))
+        // encodeDefaults=true puts "degraded":false on EVERY healthy announce — old apps must (and do,
+        // via ignoreUnknownKeys) skip it; pin that on-wire shape here
+        assertTrue("\"degraded\":false" in PocketJson.encodeToString<SessionLive>(SessionLive("c1", "/x", "sid")))
+
+        // history: a synthetic placeholder carries error=true; old records default to false
+        val hist = HistoryMessage(ChatRole.ASSISTANT, "No response requested.", error = true)
+        assertEquals(hist, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(hist)))
+        val legacyHist = """{"role":"assistant","text":"hi"}"""
+        assertFalse(PocketJson.decodeFromString<HistoryMessage>(legacyHist).error)
+    }
 }

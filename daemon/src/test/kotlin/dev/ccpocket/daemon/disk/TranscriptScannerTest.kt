@@ -117,4 +117,28 @@ class TranscriptScannerTest {
         )
         assertEquals(1510L, TranscriptScanner.lastContextTokens(f)) // input 1000 + output 10 + cache_read 500
     }
+
+    @Test
+    fun syntheticTailStreak_counts_trailing_placeholders_only() {
+        val dir = Files.createTempDirectory("ccp-scan")
+        val f = dir.resolve("sess-dead.jsonl")
+        f.writeText(
+            listOf(
+                // an EARLY placeholder followed by a real reply — the real reply resets the run
+                """{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+                """{"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"real"}]}}""",
+                // a subagent line never counts either way
+                """{"type":"assistant","isSidechain":true,"message":{"model":"<synthetic>","content":[]}}""",
+                // the dead tail: two consecutive placeholders
+                """{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+                """{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"No response requested."}]}}""",
+            ).joinToString("\n"),
+        )
+        assertEquals(2, TranscriptScanner.syntheticTailStreak(f))
+
+        val healthy = dir.resolve("sess-ok.jsonl")
+        healthy.writeText("""{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"hi"}]}}""")
+        assertEquals(0, TranscriptScanner.syntheticTailStreak(healthy))
+        assertEquals(0, TranscriptScanner.syntheticTailStreak(dir.resolve("absent.jsonl")))
+    }
 }

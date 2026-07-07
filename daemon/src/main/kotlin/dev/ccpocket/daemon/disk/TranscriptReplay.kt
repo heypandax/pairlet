@@ -40,13 +40,18 @@ object TranscriptReplay {
     }
 
     private fun assistantBlocks(obj: JsonObject, maxTextLen: Int): List<HistoryMessage> {
-        val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return emptyList()
+        val message = obj["message"] as? JsonObject
+        val content = message?.get("content") as? JsonArray ?: return emptyList()
+        // `<synthetic>` = the CLI's API-failure placeholder, not a real reply — flag it so the phone
+        // replays it as an error row instead of a normal answer (issue #65; live turns get the same
+        // treatment via StreamParser). Old clients ignore the flag and render the text as before.
+        val synthetic = message.str("model") == "<synthetic>"
         val items = ArrayList<HistoryMessage>()
         for (el in content) {
             val block = el as? JsonObject ?: continue
             when (block.str("type")) {
                 "text" -> block.str("text")?.takeIf { it.isNotBlank() }
-                    ?.let { items += HistoryMessage(ChatRole.ASSISTANT, it.take(maxTextLen)) }
+                    ?.let { items += HistoryMessage(ChatRole.ASSISTANT, it.take(maxTextLen), error = synthetic) }
                 "tool_use" -> items += HistoryMessage(
                     ChatRole.TOOL,
                     text = block["input"]?.toString()?.take(1000) ?: "", // full-ish input; the app shows it on tap-to-expand

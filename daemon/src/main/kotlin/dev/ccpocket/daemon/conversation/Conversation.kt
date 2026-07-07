@@ -19,6 +19,7 @@ import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.TokenUsage
@@ -147,6 +148,35 @@ class Conversation(
      *  the TurnResult branch, which prefers it over the result event's across-calls sum. */
     private var lastCallUsage: AgentEvent.AssistantUsage? = null
 
+    // the turn emitted a `<synthetic>` placeholder (every API call failed) — consumed by TurnResult,
+    // which reports the turn as an ERROR instead of letting the placeholder pass for a real reply (issue #65)
+    @Volatile
+    private var sawSyntheticThisTurn = false
+
+    // ■ was pressed for the in-flight turn: its result may report is_error, which must NOT render as a
+    // red failure row — the user cancelled it themselves. Cleared when the result lands.
+    @Volatile
+    private var interruptRequested = false
+
+    // consecutive turns that produced ONLY a synthetic placeholder — ≥ DEGRADED_STREAK flips
+    // SessionLive.degraded so clients warn + gate further sends into a session that can only bloat
+    // (issue #65). Seeded from the resumed transcript's tail in open(); reset by /clear and switchDir.
+    @Volatile
+    private var failedTurnStreak = 0
+
+    // promptIds already delivered — a client RESEND after a lost ack is re-acked, never double-run
+    // (issue #66). Bounded; guarded by its own lock (touched from router + pump scopes).
+    private val seenPromptIds = LinkedHashSet<String>()
+
+    private fun degraded(): Boolean = failedTurnStreak >= DEGRADED_STREAK
+
+    /** True if [promptId] was seen before (recording it when not). Bounded LRU-ish: oldest falls off. */
+    private fun promptSeenBefore(promptId: String): Boolean = synchronized(seenPromptIds) {
+        if (!seenPromptIds.add(promptId)) return true
+        if (seenPromptIds.size > SEEN_PROMPTS_MAX) seenPromptIds.iterator().run { next(); remove() }
+        false
+    }
+
     /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
     private fun displayModel(): String? = model ?: backfilledModel
 
@@ -166,6 +196,7 @@ class Conversation(
             // (issue #20) instead of sniffing the id itself. Phones that predate the field simply ignore it.
             contextWindow = claudeWindow(),
             contextUsed = resumeContextUsed, agent = backend.kind,
+            degraded = degraded(),
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -220,6 +251,11 @@ class Conversation(
                 runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { backfilledModel = it }
             }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
+            // seed the degraded flag from the transcript's tail: a session that died over its context
+            // window stays warned across close/reopen, not just while this daemon watched it fail
+            if (resumeId != null) {
+                failedTurnStreak = runCatching { backend.resumeFailedTurnStreak(workdir.toString(), resumeId) }.getOrDefault(0)
+            }
             sink.emit(live(resumeId))
             if (resumeId != null) {
                 val history = backend.replayHistory(workdir.toString(), resumeId)
@@ -388,6 +424,9 @@ class Conversation(
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode
                             log.info("$convoId session live: $sessionId")
+                            // journal the spawn (Claude) so a crashed daemon can still unhide this
+                            // transcript for the resume pickers at next boot (issue #70)
+                            sessionId?.let { sid -> runCatching { backend.onSessionStarted(sid, workdir.toString()) } }
                             sink.emit(live(sessionId))
                             pendingResumeId?.let { rid ->
                                 pendingResumeId = null
@@ -431,8 +470,18 @@ class Conversation(
                     is AgentEvent.BackgroundTaskUpdated ->
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
                     is AgentEvent.AssistantUsage -> lastCallUsage = ev
+                    // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
+                    // TurnDone error row replaces it) but still arm `executing`: a turn did run (issue #65).
+                    is AgentEvent.SyntheticReply -> {
+                        executing = true
+                        sawSyntheticThisTurn = true
+                    }
                     is AgentEvent.TurnResult -> {
                         executing = false
+                        val synthetic = sawSyntheticThisTurn
+                        sawSyntheticThisTurn = false
+                        val interrupted = interruptRequested
+                        interruptRequested = false
                         // A result WITHOUT usage (interrupted turn, some error exits) surfaces as usage=null,
                         // never zeros — a zero snaps the phone's statusline to 0% and poisons the resume seed.
                         // Context fields prefer the turn's LAST API call: the result event SUMS input/cache
@@ -448,10 +497,27 @@ class Conversation(
                         // keep the resume seed current: a mid-session reconnect then seeds the latest
                         // occupancy, not the stale open-time snapshot (same value the phone shows live).
                         usage?.contextTokens?.takeIf { it > 0 }?.let { resumeContextUsed = it }
-                        sink.emit(TurnDone(convoId, ev.finalText, usage))
+                        // The turn's real outcome (issue #65). A synthetic placeholder means every API call
+                        // failed — say so instead of letting "No response requested." pass for an answer. A
+                        // user-cancelled turn (■) may report is_error too: that one is not a failure to paint red.
+                        val error = when {
+                            synthetic ->
+                                "API request failed — the agent wrote a placeholder, not a real reply. " +
+                                    "If this keeps happening the session has likely outgrown its context window: " +
+                                    "start a new session or send /clear."
+                            ev.isError && !interrupted -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
+                            else -> null
+                        }
+                        sink.emit(TurnDone(convoId, ev.finalText, usage, error = error))
+                        // degraded tracking: consecutive placeholder-only turns mark the session as likely
+                        // context-dead; announce transitions so clients warn + gate the next send (issue #65)
+                        val wasDegraded = degraded()
+                        failedTurnStreak = if (synthetic) failedTurnStreak + 1 else 0
+                        if (degraded() != wasDegraded) sink.emit(live(sessionId))
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
-                        // so a control-plane send never stalls stdout parsing.
-                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText) } }
+                        // so a control-plane send never stalls stdout parsing. A failed turn pushes the error,
+                        // not the placeholder text.
+                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, error ?: ev.finalText) } }
                     }
                     is AgentEvent.ControlRequest -> b.onControlRequest(ev)
                     is AgentEvent.ControlCancel -> b.onCancel(ev)
@@ -498,8 +564,17 @@ class Conversation(
         bridge?.resurfacePending { newSink.emit(it) }
     }
 
-    suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList()) {
-        if (tryIntercept(text)) return
+    suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList(), promptId: String? = null) {
+        // idempotent retry (issue #66): a promptId we already delivered is re-ACKED, never re-run —
+        // the client may resend after a lost ack, and a duplicate turn is worse than a duplicate receipt
+        if (promptId != null && promptSeenBefore(promptId)) {
+            sink.emit(PromptAck(convoId, promptId))
+            return
+        }
+        if (tryIntercept(text)) {
+            promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
+            return
+        }
         // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
         // open() recorded (openedResumeId), reusing its fork decision (openedWithFork — false for a plain open, so
         // this appends in place). Without this, the first message after a lazy open would hit the old `proc == null`
@@ -510,6 +585,8 @@ class Conversation(
                 launchProcess(AgentSpec(workdir, openedResumeId, model, mode, effort = effort, forkSession = openedWithFork))
             }
             if (launched.isFailure) {
+                // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
+                promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
                 return
             }
@@ -517,6 +594,7 @@ class Conversation(
         executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         lastActivityMs = System.currentTimeMillis()
         backend.sendPrompt(text, images)
+        promptId?.let { sink.emit(PromptAck(convoId, it)) } // the turn is in the agent's hands — receipt (issue #66)
     }
 
     /**
@@ -573,6 +651,8 @@ class Conversation(
         openedResumeId = null // brand-new session — no resume lineage left to preserve
         openedWithFork = false
         backfilledModel = null
+        failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
+        sawSyntheticThisTurn = false
         launchProcess(AgentSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
@@ -595,6 +675,7 @@ class Conversation(
     suspend fun cancelTurn() {
         if (proc == null) return
         lastActivityMs = System.currentTimeMillis()
+        interruptRequested = true // the coming result may say is_error — that's the user's ■, not a failure
         backend.interrupt()
     }
 
@@ -606,6 +687,8 @@ class Conversation(
         openedResumeId = null // fresh session in the new cwd — no resume lineage left to preserve
         openedWithFork = false
         backfilledModel = null
+        failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
+        sawSyntheticThisTurn = false
         launchProcess(AgentSpec(workdir, resumeId = null, model = null, mode = mode, effort = effort))
         emitCommands() // project commands differ per workdir
     }
@@ -628,5 +711,11 @@ class Conversation(
 
     private companion object {
         val EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh", "max")
+
+        // consecutive placeholder-only turns before the session is announced degraded (issue #65)
+        const val DEGRADED_STREAK = 2
+
+        // delivered promptIds kept for retry dedupe — well past any realistic resend window
+        const val SEEN_PROMPTS_MAX = 64
     }
 }

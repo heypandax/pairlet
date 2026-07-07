@@ -283,7 +283,7 @@ class SessionRegistry(
      *  the prompt vanishing into silence (the root of "sent a message, nothing happened"). */
     suspend fun sendPrompt(p: SendPrompt): Boolean {
         val convo = get(p.convoId) ?: return false
-        convo.sendPrompt(p.text, p.images)
+        convo.sendPrompt(p.text, p.images, p.promptId)
         return true
     }
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit

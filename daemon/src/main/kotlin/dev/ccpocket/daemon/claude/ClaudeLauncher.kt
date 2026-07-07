@@ -56,7 +56,7 @@ object ClaudeLauncher {
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }
     }
 
-    fun processBuilder(exe: Path, spec: AgentSpec): ProcessBuilder {
+    fun processBuilder(exe: Path, spec: AgentSpec, configDir: Path? = null): ProcessBuilder {
         val exeStr = exe.toString()
         // Windows can't CreateProcess a .cmd/.bat directly — those must run through cmd.exe. A native
         // .exe (the installer's claude.exe) runs directly, same as the Unix binary.
@@ -70,6 +70,9 @@ object ClaudeLauncher {
             directory(spec.workdir.toFile())
             redirectErrorStream(false) // keep stderr off the stdout JSON stream
             environment().remove("CLAUDECODE") // avoid nested-session detection
+            // credential isolation (issue #69): the daemon's claude gets its own login store so its
+            // OAuth refreshes can't rotate the terminal claude's token out from under it
+            configDir?.let { environment()["CLAUDE_CONFIG_DIR"] = it.toString() }
         }
     }
 }

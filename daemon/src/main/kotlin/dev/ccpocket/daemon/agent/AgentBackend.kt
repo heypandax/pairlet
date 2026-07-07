@@ -54,6 +54,10 @@ interface AgentBackend {
      *  transcript is quiet. Claude rewrites the .jsonl so the desktop --resume picker shows it; Codex no-op. */
     suspend fun onProcessEnded(sessionId: String?)
 
+    /** Hook fired once per process when the agent reports its real session id. Claude journals it so a
+     *  crashed daemon's transcripts can be unhidden for the resume pickers at next boot (issue #70). */
+    suspend fun onSessionStarted(sessionId: String, workdir: String) {}
+
     // ---- disk: resume / listing / history (per-backend transcript stores) ----
 
     /** The on-disk transcript directory for [workdir] (Claude: ~/.claude/projects/<key>; Codex: ~/.codex/sessions). */
@@ -74,6 +78,10 @@ interface AgentBackend {
      *  model + context window before the first new turn's init lands. Null when unknown / not on disk (default;
      *  e.g. Codex). Claude reads it from the transcript. */
     fun resumeModel(workdir: String, sessionId: String): String? = null
+
+    /** How many consecutive turns at the transcript's TAIL were API-failure placeholders — seeds the
+     *  degraded-session warning on resume (issue #65). 0 = healthy/unknown (default; e.g. Codex). */
+    fun resumeFailedTurnStreak(workdir: String, sessionId: String): Int = 0
 }
 
 /** Builds a fresh [AgentBackend] per conversation. One factory per [AgentKind], registered in the daemon core. */

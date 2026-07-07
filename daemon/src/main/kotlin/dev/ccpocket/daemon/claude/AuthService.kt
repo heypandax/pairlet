@@ -45,6 +45,9 @@ class AuthService(
     private val closeIdleConversations: suspend () -> Int,
     private val closeBusyConversations: suspend () -> Int = { 0 },
     private val claudeExe: () -> String = { ClaudeLauncher.resolveExecutable().toString() },
+    // credential isolation (issue #69): when set, every `claude auth …` child operates on the daemon's
+    // OWN store — an app-driven switch/logout can no longer log out the terminal's claude
+    private val claudeConfigDir: java.nio.file.Path? = null,
 ) {
     private val log = logger("Auth")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -199,6 +202,8 @@ class AuthService(
         return ProcessBuilder(argv).apply {
             redirectErrorStream(true) // login prompts land on stderr or stdout depending on version — read both as one
             environment().remove("CLAUDECODE")
+            // same store the session launcher uses — status/login/logout must see the daemon's login, not the terminal's
+            claudeConfigDir?.let { environment()["CLAUDE_CONFIG_DIR"] = it.toString() }
         }
     }
 

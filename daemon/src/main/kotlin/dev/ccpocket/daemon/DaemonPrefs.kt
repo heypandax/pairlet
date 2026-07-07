@@ -14,17 +14,32 @@ import java.io.File
  */
 class DaemonPrefs private constructor(private val path: File) {
     @Serializable
-    private data class Stored(val pushEnabled: Boolean = true)
+    private data class Stored(val pushEnabled: Boolean = true, val isolatedClaudeAuth: Boolean = false)
 
     @Volatile
     var pushEnabled: Boolean = true
         private set
 
+    /** Give the daemon's claude its own credential store (CLAUDE_CONFIG_DIR — issue #69) so its OAuth
+     *  refreshes can't log out a terminal claude. Read at daemon startup; toggled via `config`. */
+    @Volatile
+    var isolatedClaudeAuth: Boolean = false
+        private set
+
     fun setPushEnabled(v: Boolean) {
         pushEnabled = v
+        persist()
+    }
+
+    fun setIsolatedClaudeAuth(v: Boolean) {
+        isolatedClaudeAuth = v
+        persist()
+    }
+
+    private fun persist() {
         runCatching {
             path.parentFile?.mkdirs()
-            path.writeText(JSON.encodeToString(Stored(pushEnabled)))
+            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth)))
         }
     }
 
@@ -34,7 +49,11 @@ class DaemonPrefs private constructor(private val path: File) {
         fun defaultPath(): File = File(Identity.defaultPath().parentFile, "prefs.json")
 
         fun load(path: File = defaultPath()): DaemonPrefs = DaemonPrefs(path).apply {
-            if (path.exists()) runCatching { pushEnabled = JSON.decodeFromString<Stored>(path.readText()).pushEnabled }
+            if (path.exists()) runCatching {
+                val s = JSON.decodeFromString<Stored>(path.readText())
+                pushEnabled = s.pushEnabled
+                isolatedClaudeAuth = s.isolatedClaudeAuth
+            }
         }
     }
 }

@@ -17,6 +17,11 @@ sealed interface AgentEvent {
     data class AssistantThinking(val text: String) : AgentEvent
     data class AssistantToolUse(val id: String?, val name: String, val input: JsonObject?) : AgentEvent
 
+    /** An assistant record whose model is the `<synthetic>` placeholder: the CLI wrote it AFTER every
+     *  API call of the turn failed ("No response requested." etc). It is not a real reply — the
+     *  Conversation surfaces it as a turn error instead of a normal chunk (issue #65). */
+    data class SyntheticReply(val text: String) : AgentEvent
+
     /** The context-bearing usage of ONE assistant API call (`message.usage`). The turn's `result` event
      *  SUMS these across every call in the turn — a 2-tool-batch turn reported ~2× the real window
      *  footprint and the phone statusline read 88% on a 44% session — so occupancy must come from the

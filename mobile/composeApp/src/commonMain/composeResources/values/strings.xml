@@ -50,6 +50,10 @@
     <string name="conn_computer_offline_banner">Computer offline — waiting for it to come back…</string>
     <string name="conn_connecting_banner">Connecting to your computer…</string>
     <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
+    <string name="msg_sending">Sending…</string>
+    <string name="msg_delivered">Delivered to your computer</string>
+    <string name="session_degraded_banner">This session looks over its context limit — recent replies were API failures. Start a new session or send /clear.</string>
+    <string name="context_high_banner">Context %1$s full — consider a new session or /clear soon</string>
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
     <string name="turn_done_marker">done</string>
     <string name="conn_pairing_invalid_title">Pairing expired</string>

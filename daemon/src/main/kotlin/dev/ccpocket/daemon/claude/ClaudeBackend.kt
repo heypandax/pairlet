@@ -5,6 +5,7 @@ import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.disk.SpawnedSessions
 import dev.ccpocket.daemon.disk.TranscriptPatcher
 import dev.ccpocket.daemon.disk.TranscriptReplay
 import dev.ccpocket.daemon.disk.TranscriptScanner
@@ -31,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong
  * frame builders below (outbound: user turn / interrupt / control_response). Stateless across relaunches —
  * claude bakes mode/model/effort at launch, so [applySettings] asks for a relaunch.
  */
-class ClaudeBackend(private val exe: Path) : AgentBackend {
+class ClaudeBackend(private val exe: Path, private val configDir: Path? = null) : AgentBackend {
     private val log = logger("ClaudeBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val interruptSeq = AtomicLong(0)
@@ -41,7 +42,7 @@ class ClaudeBackend(private val exe: Path) : AgentBackend {
 
     override val kind: AgentKind = AgentKind.CLAUDE
 
-    override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe, spec)
+    override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe, spec, configDir)
 
     override suspend fun attach(io: AgentIo, spec: AgentSpec) {
         this.io = io
@@ -140,6 +141,12 @@ class ClaudeBackend(private val exe: Path) : AgentBackend {
         if (TranscriptPatcher.unhide(file)) log.info("transcript unhidden for desktop resume: $sid")
     }
 
+    // journal the spawn so a daemon that dies before onProcessEnded can still unhide this transcript
+    // at its next boot (issue #70 — crash-stranded sessions were invisible to the pickers forever)
+    override suspend fun onSessionStarted(sessionId: String, workdir: String) {
+        SpawnedSessions.note(workdir, sessionId)
+    }
+
     override fun transcriptDir(workdir: String): Path = ProjectPaths.dirFor(workdir)
 
     override fun listSessions(workdir: String): List<SessionSummary> =
@@ -153,4 +160,7 @@ class ClaudeBackend(private val exe: Path) : AgentBackend {
 
     override fun resumeModel(workdir: String, sessionId: String): String? =
         TranscriptScanner.lastModel(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
+
+    override fun resumeFailedTurnStreak(workdir: String, sessionId: String): Int =
+        TranscriptScanner.syntheticTailStreak(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 }

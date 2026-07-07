@@ -57,6 +57,7 @@ import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.SendPrompt
@@ -132,8 +133,16 @@ import kotlinx.coroutines.withContext
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
-     *  frames queue in the transport outbox indefinitely and would otherwise look "sent" (issue #41). */
-    data class User(val text: String, val images: List<ByteArray> = emptyList(), val pending: Boolean = false) : ChatItem
+     *  frames queue in the transport outbox indefinitely and would otherwise look "sent" (issue #41).
+     *  [promptId] ties the bubble to its [dev.ccpocket.protocol.PromptAck] receipt; [delivered] flips
+     *  when that ack lands — the explicit "the computer has it" marker (issue #66). */
+    data class User(
+        val text: String,
+        val images: List<ByteArray> = emptyList(),
+        val pending: Boolean = false,
+        val promptId: String? = null,
+        val delivered: Boolean = false,
+    ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
     /** Extended reasoning, rendered as a collapsible row. [seconds] lands when thinking finishes (null while streaming). */
@@ -400,11 +409,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** The last prompt sent that the daemon hasn't visibly started processing (no chunk/tool/done yet).
      *  If the daemon answers [SessionGone] (convo idle-reaped while the link was down), we auto-reopen the
      *  session and resend this once — the fix for "sent a message into a ghost session, nothing happened".
-     *  Cleared on the first sign of processing; consumed (single retry, no loops) by the resend. */
-    private class PromptRetry(val text: String, val images: List<ImageData>, val workdir: String)
+     *  Cleared on the first sign of processing; consumed (single retry, no loops) by the resend.
+     *  [promptId] rides along so the resend reuses it — the daemon dedupes if the original landed (#66). */
+    private class PromptRetry(val text: String, val images: List<ImageData>, val workdir: String, val promptId: String?)
     private var promptRetry: PromptRetry? = null
     private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
     private var promptPending = false // a User bubble is marked pending until the daemon shows signs of life
+
+    /** The daemon flagged this session degraded (recent turns were all API-failure placeholders — issue #65). */
+    val sessionDegraded = mutableStateOf(false)
+    // first send into a degraded session is blocked with an explanation; the next one goes through
+    private var degradedSendArmed = false
     private var turnStartMark: kotlin.time.TimeSource.Monotonic.ValueTimeMark? = null // stamps TurnEnded's duration
 
     /** Desktop notifier seam: fires when the active conversation's turn completes (after the TurnEnded
@@ -1177,12 +1192,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // SessionGone recovery: the reopen landed — resend the prompt that hit the dead convo. Single
                 // shot: a second SessionGone for the resent prompt takes the honest-error branch, never a loop.
                 // Workdir-matched so a user who navigated elsewhere mid-recovery doesn't get it misdelivered.
+                // degraded flag (issue #65): daemon truth on every announce; a healthy re-announce
+                // (e.g. after /clear) also disarms the send gate
+                sessionDegraded.value = f.degraded
+                if (!f.degraded) degradedSendArmed = false
                 val retry = promptRetry
                 if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
                     promptRetry = null; promptResendArmed = false
                     streaming.value = true
-                    scope.launch { send(SendPrompt(f.convoId, retry.text, retry.images)) }
+                    // same promptId as the original: if the first send actually landed, the daemon
+                    // dedupes and just re-acks instead of running the turn twice (issue #66)
+                    scope.launch { send(SendPrompt(f.convoId, retry.text, retry.images, promptId = retry.promptId)) }
                 }
+            }
+            // delivery receipt (issue #66): the daemon handed the turn to the agent — flip the bubble's
+            // marker. Also first evidence: the retry copy is obsolete (the prompt cannot be lost anymore).
+            is PromptAck -> if (f.convoId == convoId.value) {
+                promptEvidence()
+                val i = messages.indexOfLast { it is ChatItem.User && it.promptId == f.promptId }
+                (messages.getOrNull(i) as? ChatItem.User)?.let { messages[i] = it.copy(pending = false, delivered = true) }
             }
             // Stream/turn frames carry their source convoId; this single-active-view model has one `messages`
             // list, so a frame from a just-left conversation (its tail still in flight when we switched) must
@@ -1200,10 +1228,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 promptEvidence()
                 val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
+                // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where
+                // the reply would be; no green ✓ marker for a turn that produced nothing
+                f.error?.let { messages.add(ChatItem.Sys(it)) }
                 if (turnWasLive) {
-                    messages.add(ChatItem.TurnEnded(turnStartMark?.elapsedNow()?.inWholeSeconds?.toInt()))
+                    if (f.error == null) messages.add(ChatItem.TurnEnded(turnStartMark?.elapsedNow()?.inWholeSeconds?.toInt()))
                     turnStartMark = null
-                    val preview = (messages.lastOrNull { it is ChatItem.Assistant } as? ChatItem.Assistant)
+                    val preview = f.error ?: (messages.lastOrNull { it is ChatItem.Assistant } as? ChatItem.Assistant)
                         ?.text?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140)
                     onTurnFinished?.invoke(chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket", preview)
                 }
@@ -1280,7 +1311,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         ChatRole.USER -> ChatItem.User(h.text)
-        ChatRole.ASSISTANT -> ChatItem.Assistant(h.text)
+        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
+        ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
         ChatRole.TOOL -> ChatItem.Tool(h.tool ?: "tool", h.text)
     }
 
@@ -1401,6 +1433,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
         promptPending = false // the pending marker belongs to the previous conversation's transcript
+        sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
         // alive in the background — same rule as backToBrowse. Desktop switches sessions directly
@@ -1481,23 +1514,46 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    /** Send [text] as a user turn. Returns false when nothing was sent — blank input, no conversation,
+     *  or the degraded-session gate (issue #65): the first send into a session whose recent turns were
+     *  all API failures is intercepted with an explanation (each such send just bloats the transcript);
+     *  sending again goes through. Callers keep the composer text on false. */
     @OptIn(ExperimentalEncodingApi::class)
-    fun sendPrompt(text: String) {
-        val c = convoId.value ?: return
+    fun sendPrompt(text: String): Boolean {
+        val c = convoId.value ?: return false
         val ready = pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes }
-        if (text.isBlank() && ready.isEmpty()) return
+        if (text.isBlank() && ready.isEmpty()) return false
+        // slash commands bypass the gate — /clear and /compact are exactly how a dead session heals
+        if (sessionDegraded.value && !degradedSendArmed && !text.trimStart().startsWith("/")) {
+            degradedSendArmed = true
+            messages.add(
+                ChatItem.Sys(
+                    "this session looks stuck past its context limit — recent replies were API-failure placeholders. " +
+                        "Send again to try anyway, or start a new session / send /clear.",
+                ),
+            )
+            return false
+        }
+        degradedSendArmed = false // consumed — the next prompt into a still-degraded session gates again
         if (voice.value is VoiceState.Failed) clearVoice() // sending dismisses the error chip
         val images = ready.map { ImageData("image/jpeg", Base64.Default.encode(it)) }
-        messages.add(ChatItem.User(text, ready, pending = true))
+        val promptId = newPromptId()
+        messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId))
         promptPending = true
         turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
         if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
         pendingImages.clear()
         streaming.value = true
-        workdir.value?.let { promptRetry = PromptRetry(text, images, it); promptResendArmed = false }
+        workdir.value?.let { promptRetry = PromptRetry(text, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
-        scope.launch { send(SendPrompt(c, text, images)) }
+        scope.launch { send(SendPrompt(c, text, images, promptId = promptId)) }
+        return true
     }
+
+    /** Client-minted id a [dev.ccpocket.protocol.PromptAck] echoes back (issue #66) — random hex is
+     *  plenty: uniqueness only matters within one conversation's recent sends. */
+    private fun newPromptId(): String =
+        Random.nextBytes(8).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     /** Quick-terminal (issue #3): run one shell command in the session's cwd. The daemon gates approval and
      *  replies with a single [ShellResult]; one command is in flight at a time. */

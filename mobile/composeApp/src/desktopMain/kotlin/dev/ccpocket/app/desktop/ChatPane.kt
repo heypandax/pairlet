@@ -134,7 +134,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
-                    items(model.messages) { m -> CenteredStreamRow { MessageRow(m) } }
+                    itemsIndexed(model.messages) { i, m -> CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex) } }
                     item(key = "tail") {
                         CenteredStreamRow {
                             val ask = model.ask
@@ -161,7 +161,30 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                 }
             }
         }
+        SessionHealthStrip(model)
         if (model.observing) ObserveBar(model) else Composer(model, paneFocused = focused)
+    }
+}
+
+/** Session health (issue #65): a degraded session (recent turns all API failures) or a ≥90% context
+ *  window gets a slim strip above the composer — the warning lands BEFORE the next prompt goes in. */
+@Composable
+private fun SessionHealthStrip(model: DesktopModel) {
+    val degraded = model.sessionDegraded
+    val used = model.contextUsed
+    val window = model.contextWindow
+    val (color, text) = when {
+        degraded -> Tok.danger to
+            "Session looks over its context limit — recent replies were API failures. Start a new session or send /clear."
+        used != null && window != null && used.toFloat() / window >= 0.9f ->
+            Tok.warn to "Context ${(used * 100 / window)}% full — consider a new session or /compact soon"
+        else -> return
+    }
+    Row(
+        Modifier.fillMaxWidth().background(color.copy(alpha = 0.12f)).padding(horizontal = 18.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(text, color = color, fontFamily = Dk.ui, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -220,8 +243,12 @@ private fun ChatSubHeader(model: DesktopModel) {
         val branch = model.chatBranch?.let { "  ·  ⑂ $it" } ?: ""
         // machine-first line: which computer this session lives on leads the mono meta (fleet language)
         val machine = model.activeComputer?.name?.let { "$it  ·  " } ?: ""
+        // context occupancy readout (issue #65/#73): % when the window is known, raw tokens otherwise
+        val ctx = model.contextUsed?.let { u ->
+            model.contextWindow?.let { w -> "  ·  ctx ${(u * 100 / w)}%" } ?: "  ·  ctx ~${u / 1000}k"
+        } ?: ""
         Text(
-            pathLinked("$machine${model.chatWorkdir}$branch  ·  ${model.chatModel}"),
+            pathLinked("$machine${model.chatWorkdir}$branch  ·  ${model.chatModel}$ctx"),
             color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),
@@ -231,13 +258,22 @@ private fun ChatSubHeader(model: DesktopModel) {
 }
 
 @Composable
-private fun MessageRow(item: ChatItem) {
+private fun MessageRow(item: ChatItem, isLast: Boolean = false) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
             Column {
                 Text("You", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
                 Spacer(Modifier.height(7.dp))
                 Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                // delivery state (issue #66): "sending…" after a short grace while the daemon hasn't
+                // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last)
+                if (item.pending) {
+                    var slow by remember(item) { mutableStateOf(false) }
+                    LaunchedEffect(item) { kotlinx.coroutines.delay(1200); slow = true }
+                    if (slow) Text("sending…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+                } else if (item.delivered && isLast) {
+                    Text("✓ delivered", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+                }
             }
         }
         is ChatItem.Assistant -> CopyableBlock(item.text) { MarkdownText(item.text, Tok.tx) }
