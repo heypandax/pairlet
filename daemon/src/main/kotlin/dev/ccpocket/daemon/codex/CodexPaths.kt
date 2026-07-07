@@ -18,6 +18,10 @@ object CodexPaths {
 
     fun sessionsRoot(): Path = codexHome().resolve("sessions")
 
+    /** Codex's session index (`$CODEX_HOME/session_index.jsonl`): one `{id, thread_name, updated_at}` line
+     *  per thread, carrying the human/AI title Codex Desktop shows. Rollouts themselves store no title (#64). */
+    fun sessionIndex(): Path = codexHome().resolve("session_index.jsonl")
+
     /** Every rollout file under sessions/ (recursively), newest-mtime first, capped to bound a global scan. */
     fun sessionFiles(limit: Int = 800): List<Path> {
         val root = sessionsRoot()

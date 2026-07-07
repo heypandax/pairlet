@@ -42,6 +42,41 @@ class CodexTranscriptTest {
     }
 
     @Test
+    fun summarize_prefers_codex_thread_title_over_first_prompt() {
+        // Codex records the session's title in session_index.jsonl (not the rollout) — the scanner must
+        // surface it instead of the prompt's first line (issue #64)
+        val titled = CodexTranscriptScanner.summarize(tempRollout(), "/repo", mapOf("thr-xyz" to "Build the widget"))!!
+        assertEquals("Build the widget", titled.title)
+        // no index entry (older/untitled session) → unchanged first-prompt fallback, never worse than before
+        val fallback = CodexTranscriptScanner.summarize(tempRollout(), "/repo", emptyMap())!!
+        assertEquals("build the thing", fallback.title)
+        // a blank thread_name is ignored, not shown as an empty title
+        val blank = CodexTranscriptScanner.summarize(tempRollout(), "/repo", mapOf("thr-xyz" to "  "))!!
+        assertEquals("build the thing", blank.title)
+    }
+
+    @Test
+    fun readThreadNames_parses_index_last_wins_and_skips_blanks() {
+        val index = Files.createTempFile("session_index", ".jsonl").also {
+            it.writeText(
+                """{"id":"thr-a","thread_name":"First title","updated_at":"t0"}""" + "\n" +
+                    """{"id":"thr-b","thread_name":"","updated_at":"t0"}""" + "\n" +   // blank → skipped
+                    """not json""" + "\n" +                                              // junk line → skipped
+                    """{"id":"thr-a","thread_name":"Renamed title","updated_at":"t1"}""", // rename → last wins
+            )
+        }
+        val names = CodexTranscriptScanner.readThreadNames(index)
+        assertEquals("Renamed title", names["thr-a"])
+        assertNull(names["thr-b"])
+        assertEquals(1, names.size)
+    }
+
+    @Test
+    fun readThreadNames_absent_index_is_empty() {
+        assertTrue(CodexTranscriptScanner.readThreadNames(Files.createTempDirectory("x").resolve("nope.jsonl")).isEmpty())
+    }
+
+    @Test
     fun summarize_matches_cwd_os_normalized() {
         // slash direction / trailing separator must not hide a session (issue #19's Codex sibling —
         // an exact compare silently dropped Windows sessions whose recorded cwd differed in form)

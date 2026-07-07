@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.nio.file.Path
 import kotlin.io.path.bufferedReader
+import kotlin.io.path.exists
 import kotlin.io.path.getLastModifiedTime
 
 /**
@@ -20,9 +21,42 @@ object CodexTranscriptScanner {
     const val LIVE_WINDOW_MS = 20_000L
 
     /** All Codex sessions whose recorded cwd is [workdir], newest-first. */
-    fun scan(workdir: String): List<SessionSummary> =
-        CodexPaths.sessionFiles().mapNotNull { runCatching { summarize(it, workdir) }.getOrNull() }
+    fun scan(workdir: String): List<SessionSummary> {
+        val titles = threadNames() // one index read per listing, shared across every rollout summarized below
+        return CodexPaths.sessionFiles().mapNotNull { runCatching { summarize(it, workdir, titles) }.getOrNull() }
             .sortedByDescending { it.lastModified }
+    }
+
+    // Codex's session_index.jsonl (id → thread title) — memoized by the index's mtime so a directory list
+    // that summarizes dozens of rollouts reads and parses it once, not per file. Append-style, last wins.
+    private val titleCache = java.util.concurrent.atomic.AtomicReference<Pair<Long, Map<String, String>>?>(null)
+
+    /** id → Codex thread title, from `$CODEX_HOME/session_index.jsonl`. Empty when the index is absent. */
+    fun threadNames(): Map<String, String> {
+        val file = CodexPaths.sessionIndex()
+        val mtime = runCatching { file.getLastModifiedTime().toMillis() }.getOrDefault(-1L)
+        titleCache.get()?.let { if (it.first == mtime) return it.second }
+        val map = runCatching { readThreadNames(file) }.getOrDefault(emptyMap())
+        titleCache.set(mtime to map)
+        return map
+    }
+
+    /** Parse an index file into id → thread_name (last non-blank name wins); blank/absent → empty map. */
+    fun readThreadNames(index: Path): Map<String, String> {
+        if (!index.exists()) return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        index.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
+                val id = obj.str("id") ?: continue
+                val name = obj.str("thread_name")?.takeIf { it.isNotBlank() } ?: continue
+                out[id] = name // a rename rewrites the index; keep the latest
+            }
+        }
+        return out
+    }
 
     // rollout files are append-only, so a first-line cwd read is stable once cached (keyed by mtime
     // anyway in case a file is replaced)
@@ -53,8 +87,9 @@ object CodexTranscriptScanner {
             ?.takeIf { it.str("type") == "session_meta" }?.obj("payload")
     }
 
-    /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn. */
-    fun summarize(file: Path, workdir: String?): SessionSummary? {
+    /** Returns null if [file] isn't a rollout for [workdir] (cheap first-line cwd filter) or has no real turn.
+     *  [titles] (id → Codex thread title) supplies the session name; a listing passes one shared map. */
+    fun summarize(file: Path, workdir: String?, titles: Map<String, String> = threadNames()): SessionSummary? {
         var id: String? = null
         var cwd: String? = null
         var version: String? = null
@@ -86,7 +121,12 @@ object CodexTranscriptScanner {
         val mtime = file.getLastModifiedTime().toMillis()
         return SessionSummary(
             sessionId = sid,
-            title = fp.lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() } ?: sid,
+            // Codex's own thread title (session_index.jsonl) beats the first-prompt fallback — the same
+            // precedence Claude's custom-title/ai-title gets. Untitled/older sessions have no index entry,
+            // so they land on the first line of the first prompt exactly as before (#64).
+            title = titles[sid]?.takeIf { it.isNotBlank() }
+                ?: fp.lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
+                ?: sid,
             firstPrompt = fp,
             messageCount = userCount,
             cwd = cwd ?: "",
