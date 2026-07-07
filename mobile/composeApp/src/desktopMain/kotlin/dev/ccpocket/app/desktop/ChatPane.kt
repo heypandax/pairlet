@@ -444,6 +444,19 @@ private fun Composer(model: DesktopModel, paneFocused: Boolean = true) {
                 LaunchedEffect(model.selectedSessionId, paneFocused) {
                     if (paneFocused && model.hasChat) runCatching { composerFocus.requestFocus() }
                 }
+                // a brand-new session (⌘N) opens on an empty composer — grab focus the moment the session
+                // becomes ready, independent of the split-pane keyboard-ownership gate above (the single
+                // pane runs focused=false, so that effect never fires). openSession arms this one-shot only
+                // for resumeId==null; consumed exactly once. Retries briefly since the field just (re)mounted
+                // with the session and its FocusRequester may not be attached on the first tick. (#72)
+                LaunchedEffect(model.hasChat) {
+                    if (model.hasChat && model.consumeAutoFocus()) {
+                        repeat(6) {
+                            if (runCatching { composerFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+                            delay(40)
+                        }
+                    }
+                }
                 // "/" autocomplete — query/filter/rank shared with the mobile composer (one ranking to tune)
                 val slashQuery = slashQueryOf(model.composer)
                 val slashCmds = remember(slashQuery, model.slashCommands) {
