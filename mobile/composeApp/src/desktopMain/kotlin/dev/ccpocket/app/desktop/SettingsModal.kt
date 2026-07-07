@@ -391,7 +391,45 @@ private fun AccountPane(model: DesktopModel) {
                     Row { TextBtn("Sign in…", Tok.accent) { model.switchAccount() } }
                 }
             }
-            s?.error?.let {
+            // mid-task refusal with structure: name each blocker and offer to stop it — per row or all at
+            // once — instead of the dead-end string (which stays as the fallback for pre-blockers daemons)
+            if (s?.blockers?.isNotEmpty() == true) Column(
+                Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
+                    Text("These sessions are still working and block the switch:", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                }
+                s.blockers.forEach { b ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                b.cwd.substringAfterLast('/').substringAfterLast('\\').ifBlank { b.cwd },
+                                color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                when (b.reason) {
+                                    dev.ccpocket.protocol.AuthBlockReason.EXECUTING -> "Mid-turn right now"
+                                    dev.ccpocket.protocol.AuthBlockReason.BACKGROUND_JOBS ->
+                                        "${b.jobLabels.size.coerceAtLeast(1)} background task${if (b.jobLabels.size == 1) "" else "s"}" +
+                                            (b.jobLabels.firstOrNull()?.let { ": $it" } ?: "")
+                                    dev.ccpocket.protocol.AuthBlockReason.UNKNOWN -> "Still working" // newer daemon's reason
+                                },
+                                color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        // stops this one (background shells die with it; transcript persists) and retries the switch
+                        TextBtn("Stop", Tok.danger) { model.stopAuthBlocker(b.convoId) }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextBtn("Stop all & switch", Tok.danger) { model.switchAccount(force = true) }
+                    Text("Sessions can be resumed afterwards; their background tasks end.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                }
+            }
+            else s?.error?.let {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 10.dp)) {
                     Icon(Icons.Rounded.Warning, null, tint = Tok.danger, modifier = Modifier.size(13.dp))
                     Text(it, color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)

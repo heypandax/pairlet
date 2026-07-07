@@ -1,7 +1,13 @@
 package dev.ccpocket.protocol
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /**
  * The autonomy ladder — the four permission modes claude's `--permission-mode` actually accepts,
@@ -201,6 +207,42 @@ data class BackgroundJob(
     val status: JobStatus,
     val startedAt: Long,
     val lastUpdate: Long,
+)
+
+/** Why an [AuthBlocker] conversation refuses a credential swap. Decoded tolerantly: a value only a
+ *  NEWER daemon knows degrades to [UNKNOWN] instead of failing the whole AuthState decode (which the
+ *  runCatching at every decode site would silently drop — a login button that just goes dead). */
+@Serializable(with = AuthBlockReasonSerializer::class)
+enum class AuthBlockReason(internal val wire: String) {
+    /** A user turn is streaming right now. */
+    EXECUTING("executing"),
+
+    /** Idle between turns, but background work (bg shells / sub-agents / monitors) is still running —
+     *  the agent process holding the old credential must stay alive for it. */
+    BACKGROUND_JOBS("background_jobs"),
+
+    /** Decode fallback for a newer peer's value — render a generic "still working" row. Never encoded. */
+    UNKNOWN("unknown"),
+}
+
+private object AuthBlockReasonSerializer : KSerializer<AuthBlockReason> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("AuthBlockReason", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: AuthBlockReason) = encoder.encodeString(value.wire)
+    override fun deserialize(decoder: Decoder): AuthBlockReason {
+        val s = decoder.decodeString()
+        return AuthBlockReason.entries.firstOrNull { it.wire == s } ?: AuthBlockReason.UNKNOWN
+    }
+}
+
+/** One conversation blocking an account switch/logout (AuthState.blockers) — enough for the client
+ *  to name it, explain why, and offer to stop it (CloseSession force / AuthLogin force). */
+@Serializable
+data class AuthBlocker(
+    val convoId: String,
+    val sessionId: String? = null,      // null pre-first-turn (no transcript yet)
+    val cwd: String,
+    val reason: AuthBlockReason,
+    val jobLabels: List<String> = emptyList(), // running background-job labels (BACKGROUND_JOBS only)
 )
 
 /** One option of an [AskQuestion]: a short label (what gets sent back as the answer) + a one-line description. */

@@ -1,6 +1,8 @@
 package dev.ccpocket.daemon.claude
 
 import dev.ccpocket.daemon.util.logger
+import dev.ccpocket.protocol.AuthBlockReason
+import dev.ccpocket.protocol.AuthBlocker
 import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.Frame
 import kotlinx.coroutines.CoroutineScope
@@ -39,8 +41,9 @@ import java.util.concurrent.TimeUnit
  */
 class AuthService(
     private val scope: CoroutineScope,
-    private val busyConversations: suspend () -> Int,
+    private val busyConversations: suspend () -> List<AuthBlocker>,
     private val closeIdleConversations: suspend () -> Int,
+    private val closeBusyConversations: suspend () -> Int = { 0 },
     private val claudeExe: () -> String = { ClaudeLauncher.resolveExecutable().toString() },
 ) {
     private val log = logger("Auth")
@@ -54,14 +57,17 @@ class AuthService(
     /** Answer one [dev.ccpocket.protocol.FetchAuthStatus]. */
     suspend fun sendStatus(emit: suspend (Frame) -> Unit) = emit(currentState())
 
-    /** Start a login (= account switch when already logged in). Replies via [emit]; completion is pushed later. */
-    suspend fun login(console: Boolean, emit: suspend (Frame) -> Unit) {
+    /** Start a login (= account switch when already logged in). Replies via [emit]; completion is pushed later.
+     *  [force] = the user saw the blocker list and chose "stop them & switch": close mid-task conversations
+     *  too instead of refusing (then re-check — a turn that started in the gap still refuses). */
+    suspend fun login(console: Boolean, emit: suspend (Frame) -> Unit, force: Boolean = false) {
         mutex.withLock {
             if (login?.isAlive == true) { // idempotent: re-announce the pending URL instead of spawning a twin
                 emit(AuthState(loginPending = true, loginUrl = loginUrl))
                 return
             }
         }
+        if (force) closeBusyConversations().takeIf { it > 0 }?.let { log.info("force-closed $it busy conversation(s) for account switch") }
         guardBusy()?.let { emit(it); return }
         val exe = resolveOrNull() ?: run { emit(AuthState(error = "claude CLI not found")); return }
         // merely-open idle conversations would otherwise hold a stale token (and the desktop's own chat
@@ -111,12 +117,24 @@ class AuthService(
     // ── internals ─────────────────────────────────────────────────────────
 
     /** The refusal state when mid-work conversations forbid credential swapping, else null.
-     *  Idle-but-open conversations don't refuse — the caller closes those (resumable from disk). */
+     *  Idle-but-open conversations don't refuse — the caller closes those (resumable from disk).
+     *  Carries the blocker list (and names them in [AuthState.error] for clients that predate it)
+     *  so the user sees WHAT is busy and can stop it, not just a dead-end count. */
     private suspend fun guardBusy(): AuthState? {
-        val busy = busyConversations()
-        if (busy == 0) return null
+        val blockers = busyConversations()
+        if (blockers.isEmpty()) return null
+        val detail = blockers.joinToString("; ") { b ->
+            val name = b.cwd.substringAfterLast('/').substringAfterLast('\\').ifBlank { b.cwd }
+            when (b.reason) {
+                AuthBlockReason.EXECUTING -> "$name is mid-turn"
+                AuthBlockReason.BACKGROUND_JOBS ->
+                    "$name has ${b.jobLabels.size.coerceAtLeast(1)} background task${if (b.jobLabels.size == 1) "" else "s"} running"
+                AuthBlockReason.UNKNOWN -> "$name is still working" // decode fallback — this daemon never emits it
+            }
+        }
         return currentState().copy(
-            error = "$busy session${if (busy == 1) " is" else "s are"} mid-task on this computer — wait for them to finish (or stop them) first",
+            error = "Sessions on this computer are still working: $detail — stop them (or wait) first",
+            blockers = blockers,
         )
     }
 

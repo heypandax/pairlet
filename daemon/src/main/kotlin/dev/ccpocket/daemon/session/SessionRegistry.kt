@@ -9,6 +9,8 @@ import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AuthBlockReason
+import dev.ccpocket.protocol.AuthBlocker
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.OpenSession
@@ -208,9 +210,41 @@ class SessionRegistry(
      *  swapping credentials under an agent that is actively talking to the API breaks it mid-turn.
      *  Merely-open idle conversations don't count — [closeIdleForAuth] reaps those instead (otherwise
      *  the desktop could never switch: its own open chat would always hold the guard). Observe
-     *  sessions never count (they spawn no agent and hold no token). */
-    suspend fun busyForAuthCount(): Int =
-        mutex.withLock { convos.values.count { it.isExecuting() || it.hasBackgroundWork() } }
+     *  sessions never count (they spawn no agent and hold no token).
+     *
+     *  Settles stale jobs FIRST: a bg shell killed outside the daemon leaves its job RUNNING forever
+     *  (completion only arrives via the agent stream), and without this reap a ghost job blocks every
+     *  switch until [reapIdle] happens to run. Returns one [AuthBlocker] per offender so the client
+     *  can show WHAT is busy and offer to stop it, not just a count. */
+    suspend fun busyForAuth(): List<AuthBlocker> {
+        mutex.withLock { convos.values.toList() }.forEach { runCatching { it.reapStaleJobs(STALE_JOB_MS) } }
+        return mutex.withLock {
+            convos.values.mapNotNull { c ->
+                val executing = c.isExecuting()
+                if (!executing && !c.hasBackgroundWork()) return@mapNotNull null
+                AuthBlocker(
+                    convoId = c.convoId,
+                    sessionId = c.sessionId,
+                    cwd = c.workdir.toString(),
+                    reason = if (executing) AuthBlockReason.EXECUTING else AuthBlockReason.BACKGROUND_JOBS,
+                    jobLabels = if (executing) emptyList() else c.runningJobLabels(),
+                )
+            }
+        }
+    }
+
+    /** Close every mid-work conversation ahead of a FORCED credential swap — the user saw the blocker
+     *  list and chose "stop them & switch". Same lifecycle as [closeIdleForAuth] (transcripts persist,
+     *  resumable); the killed process trees take their background shells with them. */
+    suspend fun closeBusyForAuth(): Int {
+        val busy = mutex.withLock {
+            val s = convos.filterValues { it.isExecuting() || it.hasBackgroundWork() }
+            convos.keys.removeAll(s.keys)
+            s.values.toList()
+        }
+        busy.forEach { it.close(); noteSelfClosed(it) }
+        return busy.size
+    }
 
     /** Close every idle conversation ahead of a credential swap. Transcripts persist on disk, so the
      *  client resumes them like any cold session afterwards — new turns just bill the new account. */
@@ -272,9 +306,12 @@ class SessionRegistry(
      *  session the user taps away from is often still researching and about to ask a question. Killing it here
      *  would abort the turn and drop the question; instead it survives (the idle reaper reclaims it once it
      *  really goes idle and the phone stays away — the same spare set as reapIdle/scheduleClose). Returns true
-     *  when the conversation was actually closed. */
-    suspend fun close(convoId: String, requester: OutboundSink? = null): Boolean {
-        if (requester != null) {
+     *  when the conversation was actually closed.
+     *
+     *  [force] = the user explicitly asked to STOP the session (an account-switch blocker row), not to
+     *  leave it: skip the keep-alive shield and kill it busy or not (transcript persists, resumable). */
+    suspend fun close(convoId: String, requester: OutboundSink? = null, force: Boolean = false): Boolean {
+        if (requester != null && !force) {
             val keepAlive = mutex.withLock {
                 val c = convos[convoId] ?: return@withLock false // gone, or an observe session — fall through to close
                 val emptied = c.detach(requester) // drop THIS view; true if no sinks remain

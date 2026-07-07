@@ -326,8 +326,11 @@ interface DesktopModel {
     // Null = not fetched yet, or the daemon predates the messages (it silently drops the request).
     val authState: dev.ccpocket.protocol.AuthState? get() = null
     fun refreshAuth() {}
-    /** Switch account: daemon logs out (when needed) + starts `claude auth login`; state updates stream in. */
-    fun switchAccount() {}
+    /** Switch account: daemon logs out (when needed) + starts `claude auth login`; state updates stream in.
+     *  [force] = the user saw the blocker list and chose "stop them & switch". */
+    fun switchAccount(force: Boolean = false) {}
+    /** Stop one AuthState.blockers session (hard close) and re-attempt the switch. */
+    fun stopAuthBlocker(convoId: String) {}
     fun submitAuthCode(code: String) {}
     fun cancelAuthLogin() {}
     fun logoutAccount() {}

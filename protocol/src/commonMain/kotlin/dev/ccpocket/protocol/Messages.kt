@@ -82,10 +82,13 @@ data class ClearAllowRule(val convoId: String, val rule: String? = null) : ToDae
 @SerialName("pocket/turn.cancel")
 data class CancelTurn(val convoId: String) : ToDaemon
 
-/** Tear down a live conversation (clean kill of the process group). */
+/** Tear down a live conversation (clean kill of the process group). Without [force] a busy
+ *  conversation (turn in flight / background jobs / unanswered ask) survives — the sender only
+ *  detaches its own view (issue #55). [force] = the user explicitly chose to stop it (e.g. an
+ *  account-switch blocker row): kill it busy or not. An old daemon ignores the flag — detach-only. */
 @Serializable
 @SerialName("pocket/session.close")
-data class CloseSession(val convoId: String) : ToDaemon
+data class CloseSession(val convoId: String, val force: Boolean = false) : ToDaemon
 
 /** One chunk of a voice capture. Chunks of a recording share [captureId]; daemon reassembles by [idx]. */
 @Serializable
@@ -172,15 +175,21 @@ data object FetchAuthStatus : ToDaemon
 /**
  * phone -> daemon: start a login / account switch (`claude auth login`). If already logged in the
  * daemon logs out first — this is the "switch account" gesture, and `auth login` over a live
- * credential is not a verified path. Refused (AuthState.error) while any conversation is mid-task
- * (executing turn / background jobs): swapping credentials under an agent actively talking to the
- * API breaks it. Idle-but-open conversations are closed automatically instead (they resume from
- * disk under the new account). The daemon replies with [AuthState] (loginPending + loginUrl), the
- * browser opens on the daemon host, and the user pastes the code back via [AuthLoginCode].
+ * credential is not a verified path. Refused (AuthState.error + [AuthState.blockers]) while any
+ * conversation is mid-task (executing turn / background jobs): swapping credentials under an agent
+ * actively talking to the API breaks it. Idle-but-open conversations are closed automatically
+ * instead (they resume from disk under the new account). The daemon replies with [AuthState]
+ * (loginPending + loginUrl), the browser opens on the daemon host, and the user pastes the code
+ * back via [AuthLoginCode].
+ *
+ * [force] = the user saw the blocker list and chose "stop them & switch": the daemon also closes
+ * the mid-task conversations (their process trees — background shells included — die; transcripts
+ * persist and resume like any cold session) before starting the login. An old daemon ignores the
+ * unknown flag and just refuses again — never destructive on downgrade.
  */
 @Serializable
 @SerialName("pocket/auth.login")
-data class AuthLogin(val console: Boolean = false) : ToDaemon
+data class AuthLogin(val console: Boolean = false, val force: Boolean = false) : ToDaemon
 
 /** phone -> daemon: the OAuth authorization code the user copied from the browser. */
 @Serializable
@@ -221,7 +230,9 @@ data class PushPrefs(val enabled: Boolean) : ToPhone
  * again when a pending login resolves. The client renders the LATEST one; it never builds its own
  * login state machine. [loginPending]+[loginUrl] mean a login child is waiting for the browser
  * dance / pasted code. [error] is a user-facing refusal (live sessions, spawn failure); the other
- * fields still carry the actual current state alongside it.
+ * fields still carry the actual current state alongside it. When the refusal is the mid-task guard,
+ * [blockers] itemizes the offending conversations so the client can render them actionably (stop /
+ * force-switch) instead of a dead-end string; an old daemon just leaves it empty.
  */
 @Serializable
 @SerialName("pocket/auth.state")
@@ -234,6 +245,7 @@ data class AuthState(
     val loginPending: Boolean = false,
     val loginUrl: String? = null,
     val error: String? = null,
+    val blockers: List<AuthBlocker> = emptyList(),
 ) : ToPhone
 
 @Serializable

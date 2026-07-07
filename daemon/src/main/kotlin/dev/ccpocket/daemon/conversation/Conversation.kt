@@ -243,6 +243,10 @@ class Conversation(
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
     fun hasBackgroundWork(): Boolean = jobs.hasRunning()
 
+    /** Labels of the still-RUNNING background jobs — names the work an auth-switch blocker row shows. */
+    fun runningJobLabels(): List<String> =
+        jobs.snapshot().filter { it.status == dev.ccpocket.protocol.JobStatus.RUNNING }.map { it.label }
+
     /** True while a permission ask / AskUserQuestion is still awaiting the phone's verdict. Like
      *  [hasBackgroundWork] this keeps the idle reaper off the conversation: a turn blocked on an unanswered
      *  question is not idle, and reaping it would discard a card the user is expected to answer — the plan-mode

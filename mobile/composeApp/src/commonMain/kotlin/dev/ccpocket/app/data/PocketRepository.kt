@@ -1354,8 +1354,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun setPushEnabled(enabled: Boolean) = scope.launch { runCatching { send(SetPushPrefs(enabled)) } }
 
     /** Switch account: the daemon logs the CLI out (when needed) and starts `claude auth login` —
-     *  the browser opens on the daemon host; [authState] turns loginPending with the OAuth URL. */
-    fun authLogin() = scope.launch { runCatching { send(AuthLogin()) } }
+     *  the browser opens on the daemon host; [authState] turns loginPending with the OAuth URL.
+     *  [force] = the user saw [AuthState.blockers] and chose "stop them & switch": the daemon closes
+     *  mid-task sessions too (resumable from disk) instead of refusing again. */
+    fun authLogin(force: Boolean = false) = scope.launch { runCatching { send(AuthLogin(force = force)) } }
+
+    /** Stop ONE blocker session (hard close, busy or not), then re-attempt the switch — the daemon
+     *  either proceeds (that was the last blocker) or replies with the remaining list. */
+    fun authStopBlocker(convoId: String) = scope.launch {
+        runCatching {
+            send(CloseSession(convoId, force = true))
+            send(AuthLogin())
+        }
+    }
 
     /** The authorization code the user copied from the browser — completion arrives as a fresh [AuthState]. */
     fun authSubmitCode(code: String) = scope.launch { runCatching { send(AuthLoginCode(code)) } }

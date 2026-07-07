@@ -476,7 +476,8 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     override val authState: dev.ccpocket.protocol.AuthState? get() = repo.authState.value
     override fun refreshAuth() { repo.fetchAuthStatus() }
-    override fun switchAccount() { repo.authLogin() }
+    override fun switchAccount(force: Boolean) { repo.authLogin(force) }
+    override fun stopAuthBlocker(convoId: String) { repo.authStopBlocker(convoId) }
     override fun submitAuthCode(code: String) { repo.authSubmitCode(code) }
     override fun cancelAuthLogin() { repo.authCancelLogin() }
     override fun logoutAccount() { repo.authLogout() }

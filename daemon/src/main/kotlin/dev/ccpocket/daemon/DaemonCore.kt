@@ -20,7 +20,7 @@ class DaemonCore(backends: Map<AgentKind, AgentBackendFactory>) {
     val dirs = DirectoryService()
     val transcribe = TranscribeService(scope, registry::workdirOf)
     val shell = ShellService(scope)
-    val auth = AuthService(scope, registry::busyForAuthCount, registry::closeIdleForAuth)
+    val auth = AuthService(scope, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth)
     val prefs = DaemonPrefs.load()
     val router = RequestRouter(registry, dirs, transcribe, shell, scope, auth, prefs)
 

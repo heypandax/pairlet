@@ -385,6 +385,61 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun authLogin_and_closeSession_force_roundtrip_and_old_frames_default_false() {
+        // new client → new daemon: the flag rides along
+        val forced = Envelope(id = "a3", ts = 0, body = AuthLogin(force = true))
+        val forcedJson = PocketJson.encodeToString(forced)
+        assertTrue("\"force\":true" in forcedJson, forcedJson)
+        assertEquals(forced, PocketJson.decodeFromString<Envelope>(forcedJson))
+        // an OLD client's frame (no force key) decodes with force=false — the refusal semantics stand
+        val oldLogin = """{"id":"a4","ts":0,"to":"PEER","body":{"t":"pocket/auth.login","console":false}}"""
+        assertEquals(AuthLogin(), PocketJson.decodeFromString<Envelope>(oldLogin).body)
+
+        val close = Envelope(id = "a5", ts = 0, body = CloseSession("c1", force = true))
+        val closeJson = PocketJson.encodeToString(close)
+        assertTrue("\"force\":true" in closeJson, closeJson)
+        assertEquals(close, PocketJson.decodeFromString<Envelope>(closeJson))
+        // an OLD client's close (no force key) keeps the busy keep-alive shield (force=false)
+        val oldClose = """{"id":"a6","ts":0,"to":"PEER","body":{"t":"pocket/session.close","convoId":"c1"}}"""
+        assertEquals(CloseSession("c1"), PocketJson.decodeFromString<Envelope>(oldClose).body)
+    }
+
+    @Test
+    fun authState_blockers_roundtrip_old_frames_default_and_future_reason_degrades() {
+        // new daemon → new app: the structured blocker list rides along and round-trips
+        val state = Envelope(
+            id = "b1", ts = 0,
+            body = AuthState(
+                loggedIn = true, error = "busy",
+                blockers = listOf(
+                    AuthBlocker("c1", "s1", cwd = "/w/api-server", reason = AuthBlockReason.EXECUTING),
+                    AuthBlocker("c2", cwd = "/w/web", reason = AuthBlockReason.BACKGROUND_JOBS, jobLabels = listOf("npm run dev")),
+                ),
+            ),
+        )
+        val json = PocketJson.encodeToString(state)
+        assertTrue("\"reason\":\"executing\"" in json, json)
+        assertTrue("\"reason\":\"background_jobs\"" in json, json)
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(json))
+
+        // an OLD daemon's state (no blockers key) decodes to an empty list — the error string stands alone
+        val old = """{"id":"b2","ts":0,"to":"PEER","body":{"t":"pocket/auth.state","loggedIn":true,"error":"busy"}}"""
+        assertEquals(emptyList(), (PocketJson.decodeFromString<Envelope>(old).body as AuthState).blockers)
+
+        // an OLD app's skip path over the new array-of-objects field: a same-shaped unknown key must not throw
+        val skipped = """{"id":"b3","ts":0,"to":"PEER","body":{"t":"pocket/auth.state","loggedIn":true,
+            "futureBlockers":[{"convoId":"c","cwd":"/x","reason":"executing","jobLabels":["a"]}]}}"""
+        assertTrue((PocketJson.decodeFromString<Envelope>(skipped).body as AuthState).loggedIn)
+
+        // a reason value only a NEWER daemon knows degrades to UNKNOWN instead of failing the whole frame
+        // (which runCatching at the decode sites would silently drop — a login button that goes dead)
+        val future = """{"id":"b4","ts":0,"to":"PEER","body":{"t":"pocket/auth.state","loggedIn":true,
+            "blockers":[{"convoId":"c","cwd":"/x","reason":"pending_ask"}]}}"""
+        val degraded = PocketJson.decodeFromString<Envelope>(future).body as AuthState
+        assertEquals(AuthBlockReason.UNKNOWN, degraded.blockers.single().reason)
+    }
+
+    @Test
     fun pushPrefs_set_and_state_roundtrip() {
         // query form: enabled stays null and is omitted on the wire (explicitNulls=false)
         val query = Envelope(id = "p1", ts = 0, body = SetPushPrefs())

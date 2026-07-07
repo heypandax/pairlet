@@ -122,7 +122,7 @@ class RequestRouter(
             }
 
             // fan-out: only a REAL close (last attached client) drops the quick-terminal state with it
-            is CloseSession -> { if (registry.close(frame.convoId, sink)) shell.forget(frame.convoId) }
+            is CloseSession -> { if (registry.close(frame.convoId, sink, frame.force)) shell.forget(frame.convoId) }
             is CancelTurn -> registry.cancelTurn(frame)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
@@ -131,7 +131,7 @@ class RequestRouter(
 
             // account switching: each spawns a `claude auth …` child — off the inbound pump, like FetchUsage
             is FetchAuthStatus -> scope.launch { auth.sendStatus(sink::emit) }
-            is AuthLogin -> scope.launch { auth.login(frame.console, sink::emit) }
+            is AuthLogin -> scope.launch { auth.login(frame.console, sink::emit, frame.force) }
             is AuthLoginCode -> scope.launch { auth.submitCode(frame.code, sink::emit) }
             is AuthLoginCancel -> scope.launch { auth.cancelLogin(sink::emit) }
             is AuthLogout -> scope.launch { auth.logout(sink::emit) }
