@@ -990,6 +990,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         paired.value?.takeIf { it.accountId == accountId }?.let { paired.value = it.copy(directUrl = url) }
     }
 
+    /** Write-through for a binding's daemon-reported computer name (issue #62): persist, refresh the list,
+     *  patch the active copy — same seam as [rememberDirectUrl]. */
+    private fun rememberHostName(accountId: String, name: String?) {
+        replace(pairedList, Pairing.setHostName(accountId, name))
+        paired.value?.takeIf { it.accountId == accountId }?.let { paired.value = it.copy(hostName = name) }
+    }
+
     /** Give a binding a local nickname (blank clears it). */
     fun renameDaemon(target: PairedDaemon, label: String?) {
         val list = Pairing.rename(target.accountId, label)
@@ -1128,8 +1135,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
             // re-advertises the same value on every handshake, which must not resurrect a dead probe.
-            is DaemonInfo -> paired.value?.takeIf { it.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[it.accountId]) }?.let { p ->
-                rememberDirectUrl(p.accountId, f.lanUrl)
+            is DaemonInfo -> paired.value?.let { p ->
+                if (p.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[p.accountId])) {
+                    rememberDirectUrl(p.accountId, f.lanUrl)
+                }
+                // adopt the daemon's real computer name as this binding's default display name (issue #62);
+                // a user-set nickname still wins in displayName(). Independent of the directUrl guard above.
+                if (!f.hostname.isNullOrBlank() && f.hostname != p.hostName) rememberHostName(p.accountId, f.hostname)
             }
             is SessionLive -> {
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain

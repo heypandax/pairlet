@@ -68,6 +68,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -94,8 +95,8 @@ internal fun osIcon(os: DkOs): ImageVector = when (os) {
  * problem: it lives in the ⌘K palette, reachable via "All projects…" docked above Settings.
  */
 @Composable
-fun Sidebar(model: DesktopModel, modifier: Modifier = Modifier) {
-    Column(modifier.width(Dk.sidebarWidth).fillMaxHeight().background(Tok.surface)) {
+fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier = Modifier) {
+    Column(modifier.width(width).fillMaxHeight().background(Tok.surface)) {
         SwitcherHeader(model)
         NewSessionRow { model.openNewSession() }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -492,7 +493,12 @@ private fun SessionRow(model: DesktopModel, s: DkSession, selected: Boolean, onC
                         else model.pin(s)
                     },
                 )
-                Icon(Icons.Rounded.Close, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
+                // ✕ removes the row from RECENT (issue #62) — non-destructive: the transcript stays on the
+                // host, and reopening this project resurfaces it. (Previously a dead, unclickable glyph.)
+                Icon(
+                    Icons.Rounded.Close, null, tint = Tok.muted,
+                    modifier = Modifier.size(13.dp).clip(RoundedCornerShape(4.dp)).clickable { model.hideSession(s) },
+                )
             }
         }
     }

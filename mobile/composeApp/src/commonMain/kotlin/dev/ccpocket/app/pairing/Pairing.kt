@@ -25,15 +25,20 @@ data class PairedDaemon(
     val daemonPub: String,   // base64url P-256, learned out-of-band from the QR (authenticates the daemon)
     val deviceId: String,
     val credential: String,  // relay bearer credential
-    val label: String? = null, // user-assigned local nickname; null -> displayName() falls back to accountId
+    val label: String? = null, // user-assigned local nickname; wins over hostName/accountId in displayName()
     // daemon-advertised direct (LAN/loopback) ws URL, learned from DaemonInfo after each handshake and
     // tried BEFORE the relay on later connects. Same Noise-authenticated channel, zero relay/proxy legs;
     // a failed attempt falls back to the relay silently. Null = daemon has no direct listener (or predates it).
     val directUrl: String? = null,
+    // daemon-reported OS computer name, learned from DaemonInfo — the DEFAULT display name until the user
+    // sets a nickname, so a binding reads as "Pandas-MacBook-Pro" not an account-id hash (issue #62).
+    val hostName: String? = null,
 )
 
-/** What this binding shows in the device list: the user's nickname, else the truncated account id. */
-fun PairedDaemon.displayName(): String = label?.takeIf { it.isNotBlank() } ?: "${accountId.take(12)}…"
+/** What this binding shows in the device list: the user's nickname, else the daemon's reported computer
+ *  name, else the truncated account id (issue #62 — the hostName default replaces the bare hash). */
+fun PairedDaemon.displayName(): String =
+    label?.takeIf { it.isNotBlank() } ?: hostName?.takeIf { it.isNotBlank() } ?: "${accountId.take(12)}…"
 
 object Pairing {
     private val json = Json { ignoreUnknownKeys = true }
@@ -113,6 +118,10 @@ object Pairing {
     /** Persist the daemon-advertised direct (LAN) URL for a binding — tried before the relay on reconnects. */
     fun setDirectUrl(accountId: String, url: String?): List<PairedDaemon> =
         loadAll().map { if (it.accountId == accountId) it.copy(directUrl = url) else it }.also(::saveAll)
+
+    /** Persist the daemon-reported computer name for a binding — the default display name (issue #62). */
+    fun setHostName(accountId: String, name: String?): List<PairedDaemon> =
+        loadAll().map { if (it.accountId == accountId) it.copy(hostName = name?.ifBlank { null }) else it }.also(::saveAll)
 
     fun activeAccount(): String? = SecureStore.getString(K_ACTIVE)
     fun setActive(accountId: String?) { if (accountId == null) SecureStore.remove(K_ACTIVE) else SecureStore.putString(K_ACTIVE, accountId) }

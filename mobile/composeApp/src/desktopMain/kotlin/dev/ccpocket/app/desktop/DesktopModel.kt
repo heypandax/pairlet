@@ -206,6 +206,10 @@ interface DesktopModel {
     fun openProject(p: DkProject)
     fun selectSession(s: DkSession)
 
+    /** Remove a session row from the RECENT list — the row's hover ✕ (issue #62). Non-destructive: the
+     *  transcript stays on the host and reopening its project resurfaces it. No-op for seed/preview models. */
+    fun hideSession(s: DkSession) {}
+
     /** RECENT — session groups for the projects visited this run, most recently visited first. */
     val sessionGroups: List<DkSessionGroup>
 

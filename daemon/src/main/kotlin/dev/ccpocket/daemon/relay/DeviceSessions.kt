@@ -33,6 +33,7 @@ class DeviceSessions(
     private val identity: Identity,
     private val store: File = PairedDevices.file(),
     private val lanUrl: () -> String? = { null }, // advertised in DaemonInfo after each handshake (null = direct listener off)
+    private val hostname: () -> String? = { null }, // OS computer name advertised in DaemonInfo (client's default binding name)
     private val send: suspend (deviceId: String, payload: ByteArray) -> Unit,
 ) {
     private val log = logger("DeviceSessions")
@@ -134,7 +135,7 @@ class DeviceSessions(
         send(deviceId, Wire.payload(Wire.HANDSHAKE, responderEph))
         // teach the device where this daemon lives on the LAN so its next connect can skip the relay;
         // null actively clears a stale stored address (listener since disabled / no usable interface)
-        sealAndSend(deviceId, DaemonInfo(lanUrl()))
+        sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname()))
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {

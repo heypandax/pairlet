@@ -37,6 +37,11 @@ private data class PinRec(
     val agent: AgentKind = AgentKind.CLAUDE,
 )
 
+/** A session the user removed from RECENT (issue #62). [cwd] scopes the "reopen the project resurfaces it"
+ *  recovery — opening that directory clears its hidden entries. Persisted so the ✕ survives refresh/restart. */
+@Serializable
+private data class HiddenRec(val accountId: String, val sessionId: String, val cwd: String)
+
 /**
  * Live [DesktopModel] backed by [PocketRepository] — the real app path. Getters read the repo's snapshot
  * state so reads recompose. Note the repo is single-session: the sidebar's SESSIONS group is the *current
@@ -244,6 +249,8 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         focusDir(p.path) // the New-session target follows the project the user just opened
         val acct = repo.paired.value?.accountId
         if (acct != null) {
+            // deliberately reopening a project resurfaces any of its sessions removed from RECENT (#62 — the ✕ is non-destructive)
+            if (hiddenState.removeAll { it.accountId == acct && sameDir(it.cwd, p.path) }) saveHidden()
             snapshotCurrent()
             // normCwd dedup so a tilde-reseeded new session (~/P) reuses the absolute directory-list visit
             // (/Users/x/P) instead of adding a twin group; the surviving visit keeps its absolute path (#58)
@@ -263,13 +270,16 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         // a list opened outside openProject shows before its first snapshotCurrent lands it in visits.
         // normCwd match so a live tilde dir (~/P) folds into its absolute visit (/Users/x/P) — no twin (#58)
         if (liveDir != null && keys.none { normCwd(it.path) == normLive }) keys.add(0, Visit(acct, liveDir))
+        // sessions the user removed from RECENT via the row ✕ (issue #62) — filtered out of every group
+        val hidden = hiddenState.filter { it.accountId == acct }.mapTo(HashSet()) { it.sessionId }
         keys.map { v ->
             val current = normLive != null && normCwd(v.path) == normLive
+            val rows = (if (current) sessions else v.snapshot)
             DkSessionGroup(
                 path = v.path,
                 name = folderName(v.path),
                 current = current,
-                sessions = if (current) sessions else v.snapshot,
+                sessions = if (hidden.isEmpty()) rows else rows.filterNot { it.sessionId in hidden },
             )
         }
     }
@@ -319,6 +329,25 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         if (from !in pinsState.indices || to !in pinsState.indices || from == to) return
         pinsState.add(to, pinsState.removeAt(from))
         savePins()
+    }
+
+    // ── hidden sessions: the RECENT row's ✕ (issue #62) — a persisted, account-scoped remove-from-list ──
+    private val hiddenState = mutableStateListOf<HiddenRec>().apply {
+        runCatching {
+            SecureStore.getString(K_HIDDEN)?.takeIf { it.isNotBlank() }?.let {
+                addAll(pinJson.decodeFromString<List<HiddenRec>>(it))
+            }
+        }
+    }
+
+    private fun saveHidden() = SecureStore.putString(K_HIDDEN, pinJson.encodeToString(hiddenState.toList()))
+
+    override fun hideSession(s: DkSession) {
+        val acct = repo.paired.value?.accountId ?: return
+        if (hiddenState.none { it.accountId == acct && it.sessionId == s.sessionId }) {
+            hiddenState += HiddenRec(acct, s.sessionId, s.cwd)
+            saveHidden()
+        }
     }
 
     override fun openPin(p: DkPin) {
@@ -458,6 +487,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     private companion object {
         const val K_PINS = "desktop_pins"
+        const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)
         const val K_TERMINAL_APP = "desktop_terminal_app"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
     }

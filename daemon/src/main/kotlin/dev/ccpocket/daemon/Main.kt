@@ -59,6 +59,17 @@ fun lanIp(): String? {
         .firstOrNull()
 }
 
+/** The host's OS computer name, advertised in [dev.ccpocket.protocol.DaemonInfo] so a paired client can
+ *  show it as the binding's default name (issue #62). COMPUTERNAME on Windows; the resolved local host
+ *  name elsewhere; HOSTNAME as a last resort. The domain suffix (.local / FQDN) is stripped for a clean
+ *  short name, and "localhost" is treated as no-name (fall through to the account-id fallback). */
+fun daemonHostName(): String? {
+    val raw = System.getenv("COMPUTERNAME")?.takeIf { it.isNotBlank() }
+        ?: runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()?.takeIf { it.isNotBlank() }
+        ?: System.getenv("HOSTNAME")?.takeIf { it.isNotBlank() }
+    return raw?.substringBefore('.')?.takeIf { it.isNotBlank() && !it.equals("localhost", ignoreCase = true) }
+}
+
 private class Root : CliktCommand(name = "cc-pocket-daemon") {
     override fun run() = Unit
 }
@@ -103,7 +114,14 @@ private class RunCmd : CliktCommand(name = "run") {
                     else -> "ws://$directBind:$port/v1/ws"
                 }
             }
-            val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl)
+            // the OS computer name — advertised in DaemonInfo so a paired client shows "Pandas-MacBook-Pro"
+            // as the default binding name instead of a truncated account-id hash (issue #62). A provider
+            // like [directUrl], resolved lazily at the first handshake: getLocalHost() can stall seconds
+            // behind fake-IP/TUN DNS setups, which must not delay startup. A user-set nickname still wins
+            // client-side.
+            val hostNameLazy = lazy { daemonHostName() }
+            val hostName: () -> String? = { hostNameLazy.value }
+            val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName)
             echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
@@ -112,7 +130,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // plaintext --local path this REQUIRES the Noise handshake, so a wide bind stays safe. A bind
             // failure (port taken) degrades to relay-only instead of killing the daemon.
             if (directBind != "none") {
-                val gate = LanE2E(identity, directUrl, firstContactPending = relayClient::deviceFirstContactPending)
+                val gate = LanE2E(identity, directUrl, hostName, firstContactPending = relayClient::deviceFirstContactPending)
                 runCatching { DaemonServer(core, directBind, port, gate).run(wait = false) }
                     .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
                     .onFailure { echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }

@@ -390,10 +390,13 @@ data class LanHello(val deviceId: String) : ToDaemon
  * can also be reached directly. [lanUrl] is a `ws://` URL on the daemon's LAN interface (loopback
  * when bound conservatively), null when the direct listener is disabled — the phone then clears any
  * stored address. The phone persists it per binding and tries it before the relay on later connects.
+ * [hostname] is the daemon host's OS computer name — the client adopts it as the binding's default
+ * display name until the user sets a nickname (so a computer reads as "Pandas-MacBook-Pro", not a
+ * truncated account-id hash — issue #62). Null when unresolved or from a daemon that predates it.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
-data class DaemonInfo(val lanUrl: String? = null) : ToPhone
+data class DaemonInfo(val lanUrl: String? = null, val hostname: String? = null) : ToPhone
 
 @Serializable
 enum class ChatRole {

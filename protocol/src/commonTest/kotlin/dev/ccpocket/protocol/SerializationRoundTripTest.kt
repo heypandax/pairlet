@@ -228,6 +228,22 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun daemonInfo_hostname_is_optional_and_back_compatible() {
+        // hostname (issue #62) is a trailing optional field: round-trips when set, omitted when null, and an
+        // old daemon's frame that predates it decodes to a null hostname (no throw). The four-direction
+        // wire-compat contract for adding a field to a daemon -> phone frame.
+        val named = Envelope(id = "7", ts = 0, body = DaemonInfo("ws://192.168.1.2:8765/v1/ws", "Pandas-MacBook-Pro"))
+        val json = PocketJson.encodeToString(named)
+        assertTrue("\"hostname\":\"Pandas-MacBook-Pro\"" in json, json)
+        assertEquals(named, PocketJson.decodeFromString<Envelope>(json))
+        // null hostname is omitted on the wire (explicitNulls=false) — byte-identical to the pre-#62 shape
+        assertFalse("hostname" in PocketJson.encodeToString(Envelope(id = "8", ts = 0, body = DaemonInfo("ws://x/v1/ws"))))
+        // an old daemon's frame (no hostname key) decodes to a null hostname — the accountId-hash name stands
+        val legacy = """{"id":"9","ts":0,"to":"PEER","body":{"t":"pocket/daemon.info","lanUrl":"ws://x/v1/ws"}}"""
+        assertEquals(DaemonInfo("ws://x/v1/ws", null), PocketJson.decodeFromString<Envelope>(legacy).body)
+    }
+
+    @Test
     fun sessionSummary_omits_null_gitBranch() {
         val s = SessionSummary(
             sessionId = "s", title = "t", firstPrompt = "p",
