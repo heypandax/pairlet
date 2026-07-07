@@ -1,0 +1,54 @@
+name: testflight-public-link
+
+# Puts a version's build behind a TestFlight PUBLIC LINK, fully unattended — the thin CI shell
+# around scripts/testflight-public-link.py (find build → fill TestFlight test information →
+# What to Test from fastlane/metadata → external group with the link → Beta App Review).
+# The link lands in the job summary; installs start once Apple clears the beta review.
+#
+# Same App Store Connect API key secrets as ios-release.yml / asc-maintenance.yml. Dispatch this
+# AFTER an ios-release run has uploaded the version's build (it fails fast when none is processed).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Marketing version whose build to distribute. LEAVE EMPTY to use the repo's lockstepped version (Info.plist CFBundleShortVersionString)."
+        required: false
+        default: ""
+      group_name:
+        description: "External beta group to (re)use. Any existing public-link group is preferred regardless of name, so a link that's already been shared never changes."
+        required: false
+        default: "Public Beta"
+
+permissions:
+  contents: read
+
+jobs:
+  public-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4  # fastlane/metadata (What to Test) + Info.plist (version fallback)
+
+      - name: Resolve version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          V="${INPUT_VERSION:-$(python3 -c "import plistlib; print(plistlib.load(open('iosApp/iosApp/Info.plist','rb'))['CFBundleShortVersionString'])")}"
+          [ -n "$V" ] || { echo "::error::could not resolve a version"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "distributing $V"
+
+      - name: Create / refresh the public link
+        env:
+          ASC_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          GROUP_NAME: ${{ inputs.group_name }}
+        run: |
+          if [ -z "$ASC_KEY_P8" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ]; then
+            echo "::error::APPSTORE_API_KEY_* secrets are not set."; exit 1
+          fi
+          pip install --quiet PyJWT cryptography
+          python3 scripts/testflight-public-link.py
