@@ -22,8 +22,11 @@ export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
 DIST=relay/build/install/cc-pocket-relay
 [ -d "$DIST/lib" ] || { echo "build first: JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist"; exit 1; }
 
-SSH=(sshpass -e ssh -o StrictHostKeyChecking=accept-new "root@$RELAY_HOST")
-SCP=(sshpass -e scp -o StrictHostKeyChecking=accept-new)
+# HK box runs SSH anti-bruteforce: an offered-then-rejected pubkey counts as a failed auth and,
+# after a couple in quick succession, locks out even the correct password for ~30s. Force
+# password-only auth so the multi-step deploy (ssh + scp × several) never trips it.
+SSH=(sshpass -e ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new "root@$RELAY_HOST")
+SCP=(sshpass -e scp -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new)
 
 echo "── 1/5 stop relay + clear old dist ──"
 "${SSH[@]}" 'systemctl stop cc-pocket-relay && rm -rf /opt/cc-pocket-relay/bin /opt/cc-pocket-relay/lib'
