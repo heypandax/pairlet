@@ -60,8 +60,15 @@ interface PathOpener {
 
 val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 
-// unix `/a/b` (≥2 segments so prose like "/help" rarely trips it) or `~/a`, plus windows drive
-// paths; the lookbehind keeps URL tails ("https://host/a/b") and word/word compounds from matching.
+// Four path shapes, all with the lookbehind that keeps URL tails ("https://host/a/b") and word/word
+// compounds from matching:
+//   • unix `/a/b`  (≥2 segments so prose like "/help" rarely trips it)
+//   • home `~/a`
+//   • windows drive `C:\a\b`
+//   • RELATIVE `dir/…/file.ext` (issue #74): a session's cwd-relative path, e.g.
+//     "10_Notes/会议/2026-07-09_对齐材料.md". Anchorless, so it's deliberately conservative — it must
+//     have ≥1 slash AND end in a short extension. That keeps "and/or", "TCP/IP", "src/main" prose from
+//     linkifying, while the exists() gate (resolved against cwd) drops anything not real on this disk.
 // Segments use \p{L} + 0-9, not [A-Za-z0-9] — CJK filenames are routine here ("~/…/设计提示词.md")
 // and an ASCII-only class truncated them mid-path, so exists() failed and the link never formed.
 //
@@ -71,7 +78,7 @@ val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 // FileFailedToInitializeException. Null here just disables path links; the transcript must render.
 private val pathRx: Regex? by lazy {
     runCatching {
-        Regex("""(?<![\w:/])(?:~(?:/[\p{L}0-9._+@%-]+)+|/[\p{L}0-9._+@%-]+(?:/[\p{L}0-9._+@%-]+)+|[A-Za-z]:[\\/][\p{L}0-9._+@%\\/-]+)/?""")
+        Regex("""(?<![\w:/])(?:~(?:/[\p{L}0-9._+@%-]+)+|/[\p{L}0-9._+@%-]+(?:/[\p{L}0-9._+@%-]+)+|[A-Za-z]:[\\/][\p{L}0-9._+@%\\/-]+|(?:[\p{L}0-9._+@%-]+/)+[\p{L}0-9._+@%-]*\.[\p{L}0-9]{1,8})/?""")
     }.getOrNull()
 }
 
