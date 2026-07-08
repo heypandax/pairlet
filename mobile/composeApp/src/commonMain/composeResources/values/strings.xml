@@ -259,6 +259,13 @@
     <string name="file_truncated">Preview truncated — first %1$d KB of %2$d KB</string>
     <string name="file_undecodable">Couldn\'t display this image</string>
 
+    <!-- ── file export / native preview (issues #67/#79) ────────── -->
+    <string name="file_share">Share</string>
+    <string name="file_save_as">Save As…</string>
+    <string name="file_open">Open</string>
+    <string name="file_preview">Preview</string>
+    <string name="file_no_inline_preview">No inline preview for this file type</string>
+
     <!-- ── changed files v2: line-level diffs ────────────────────── -->
     <string name="files_stale_banner">Update the daemon on your computer to see line-level diffs.</string>
     <string name="diff_tab">Diff</string>

@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
 import dev.ccpocket.app.push.CcPocketMessagingService
 import dev.ccpocket.app.secure.initSecureStore
+import dev.ccpocket.app.share.initFileExport
 import dev.ccpocket.app.telemetry.initTelemetry
 import dev.ccpocket.app.ui.App
 import dev.ccpocket.app.voice.initVoice
@@ -36,6 +37,7 @@ class MainActivity : ComponentActivity() {
         initTelemetry(this)
         initVoice(this)
         initUrlOpener(this)
+        initFileExport(this)
         setupNotifications()
         setContent {
             val scope = rememberCoroutineScope()

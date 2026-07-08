@@ -53,6 +53,9 @@ import dev.ccpocket.app.data.DiffLineKind
 import dev.ccpocket.app.data.parseUnifiedDiff
 import dev.ccpocket.app.data.staleDaemon
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.share.exportIsSaveDialog
+import dev.ccpocket.app.share.previewFile
+import dev.ccpocket.app.share.shareFile
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.FileContent
@@ -454,13 +457,15 @@ fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false) {
             content.base64 != null -> {
                 val bytes = remember(content.base64) { runCatching { Base64.Default.decode(content.base64!!) }.getOrNull() }
                 val bmp = bytes?.let { rememberImageBitmap(it) }
-                if (bmp != null) {
-                    Image(
+                when {
+                    bmp != null -> Image(
                         bmp, contentDescription = null, contentScale = ContentScale.Fit,
                         modifier = Modifier.fillMaxSize().padding(12.dp),
                     )
-                } else {
-                    Text(
+                    // documents & other binaries (issues #67/#79): no inline rendering — hand the
+                    // bytes to the platform's native preview / share-save gesture instead
+                    bytes != null -> DocumentCard(content.path, bytes, content.mediaType, content.totalBytes)
+                    else -> Text(
                         stringResource(Res.string.file_undecodable), color = Tok.muted, fontSize = 13.sp,
                         modifier = Modifier.align(Alignment.Center),
                     )
@@ -490,4 +495,73 @@ fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false) {
             }
         }
     }
+}
+
+// ── document export card (issues #67/#79) ───────────────────────────
+
+/** "12.3 KB" / "1.2 MB" — the one place export sizes are formatted. */
+fun formatFileSize(bytes: Long): String = when {
+    bytes >= 1_048_576 -> "${(bytes * 10 / 1_048_576).toDouble() / 10} MB"
+    else -> "${(bytes + 1023) / 1024} KB"
+}
+
+/**
+ * Centered card for a file with no inline rendering (xlsx/docx/pptx/pdf, arbitrary binaries):
+ * type glyph, name, size, and the two platform gestures — native preview (QuickLook / default
+ * app) and share/save. No home-grown office viewer, deliberately.
+ */
+@Composable
+private fun DocumentCard(path: String, bytes: ByteArray, mediaType: String?, totalBytes: Long) {
+    val name = fileNameOf(path)
+    val ext = path.substringAfterLast('.', "").lowercase()
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 34.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(Tok.surface),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                ext.take(4).uppercase().ifEmpty { "BIN" },
+                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            )
+        }
+        Text(
+            name, color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp),
+        )
+        Text(
+            "${formatFileSize(totalBytes)} · ${stringResource(Res.string.file_no_inline_preview)}",
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ExportActionChip(
+                stringResource(if (exportIsSaveDialog) Res.string.file_open else Res.string.file_preview),
+                primary = true,
+            ) {
+                // no native previewer for this type -> the share sheet still gets it somewhere useful
+                if (!previewFile(name, bytes, mediaType)) shareFile(name, bytes, mediaType)
+            }
+            ExportActionChip(
+                stringResource(if (exportIsSaveDialog) Res.string.file_save_as else Res.string.file_share),
+                primary = false,
+            ) { shareFile(name, bytes, mediaType) }
+        }
+    }
+}
+
+@Composable
+private fun ExportActionChip(label: String, primary: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        color = if (primary) Tok.base else Tok.tx,
+        fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(9.dp))
+            .background(if (primary) Tok.accent else Tok.raised)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
 }

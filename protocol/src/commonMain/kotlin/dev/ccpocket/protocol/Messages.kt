@@ -525,8 +525,11 @@ data class SessionFiles(
 
 /**
  * daemon -> phone: reply to [ReadFile]. Exactly one of [text]/[base64] is set on success: text for
- * anything decodable as UTF-8, base64 for images. Both are capped server-side ([truncated] +
- * [totalBytes] tell the phone it's looking at a prefix) so one file can't blow the 4 MiB relay frame.
+ * anything decodable as UTF-8, base64 for images and other binaries (office documents ride this
+ * channel to the client's native viewer / share sheet — issues #67/#79, [mediaType] says what it
+ * is). Text is capped server-side ([truncated] + [totalBytes] tell the phone it's looking at a
+ * prefix); base64 payloads arrive whole or fail with [error] — a truncated docx is corrupt — so
+ * one file still can't blow the 4 MiB relay frame.
  */
 @Serializable
 @SerialName("pocket/file.content")

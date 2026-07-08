@@ -38,12 +38,26 @@ object SessionFilesService {
 
     /** Keep one FileContent/FileDiff frame well under the 4 MiB relay cap (base64 + JSON + E2E headroom). */
     const val TEXT_CAP_BYTES = 256_000
-    const val IMAGE_CAP_BYTES = 1_800_000
+    const val BINARY_CAP_BYTES = 1_800_000
     const val DIFF_CAP_BYTES = 256_000
 
     private val imageTypes = mapOf(
         "png" to "image/png", "jpg" to "image/jpeg", "jpeg" to "image/jpeg",
         "gif" to "image/gif", "webp" to "image/webp", "bmp" to "image/bmp",
+    )
+
+    /** Documents the clients hand to a native viewer (QuickLook / system app) instead of rendering
+     *  (issues #67/#79). Served as base64 like images; NEVER truncated — a capped docx is corrupt,
+     *  so oversized ones fail with an explicit size message instead. */
+    private val documentTypes = mapOf(
+        "pdf" to "application/pdf",
+        "doc" to "application/msword",
+        "docx" to "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" to "application/vnd.ms-excel",
+        "xlsx" to "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" to "application/vnd.ms-powerpoint",
+        "pptx" to "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "zip" to "application/zip",
     )
 
     /** Newest-touched first. Empty when the transcript is missing/unreadable. */
@@ -76,9 +90,11 @@ object SessionFilesService {
         if (!file.isRegularFile()) return fail("file no longer exists")
         val total = runCatching { file.fileSize() }.getOrDefault(0L)
 
-        val mediaType = imageTypes[abs.substringAfterLast('.', "").lowercase()]
-        if (mediaType != null) {
-            if (total > IMAGE_CAP_BYTES) return fail("image too large to send (${total / 1024} KB)")
+        // whole-or-nothing base64 for anything the client hands off to a native viewer
+        fun binary(mediaType: String): FileContent {
+            if (total > BINARY_CAP_BYTES) {
+                return fail("file too large to send (${total / 1024} KB — the link caps transfers at ${BINARY_CAP_BYTES / 1024} KB)")
+            }
             val bytes = runCatching { java.nio.file.Files.readAllBytes(file) }.getOrElse { return fail("unreadable: ${it.message}") }
             return FileContent(
                 workdir, sessionId, path,
@@ -86,10 +102,15 @@ object SessionFilesService {
             )
         }
 
+        val ext = abs.substringAfterLast('.', "").lowercase()
+        imageTypes[ext]?.let { return binary(it) }
+        documentTypes[ext]?.let { return binary(it) }
+
         val bytes = runCatching {
             java.nio.file.Files.newInputStream(file).use { it.readNBytes(TEXT_CAP_BYTES) }
         }.getOrElse { return fail("unreadable: ${it.message}") }
-        if (bytes.take(8192).any { it == 0.toByte() }) return fail("binary file — can't preview")
+        // unknown-extension binary (NUL sniff): still exportable — share/save beats "can't preview"
+        if (bytes.take(8192).any { it == 0.toByte() }) return binary("application/octet-stream")
         return FileContent(
             workdir, sessionId, path,
             text = String(bytes, Charsets.UTF_8), truncated = total > bytes.size, totalBytes = total,

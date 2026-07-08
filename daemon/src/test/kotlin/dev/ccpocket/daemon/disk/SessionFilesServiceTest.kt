@@ -92,7 +92,7 @@ class SessionFilesServiceTest {
     }
 
     @Test
-    fun read_rejects_binary_and_returns_images_as_base64() {
+    fun read_returns_images_and_binaries_as_base64() {
         val png = tmp.resolve("shot.png").also { Files.write(it, byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0, 1, 2)) }
         val bin = tmp.resolve("blob.dat").also { Files.write(it, byteArrayOf(1, 0, 2, 0)) }
         val t = claudeTranscript("Write" to png.toString(), "Write" to bin.toString())
@@ -102,8 +102,30 @@ class SessionFilesServiceTest {
         assertEquals("image/png", img.mediaType)
         assertNull(img.text)
 
+        // unknown-extension binary: exportable via base64 (issue #67), never a dead "can't preview"
         val blob = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", bin.toString())
-        assertFalse(blob.ok)
+        assertTrue(blob.ok)
+        assertEquals("application/octet-stream", blob.mediaType)
+        assertNull(blob.text)
+        assertFalse(blob.truncated)
+    }
+
+    @Test
+    fun read_serves_documents_whole_and_fails_oversized_ones_with_a_clear_error() {
+        // xlsx is a zip container — starts with PK and full of NULs; must arrive intact, never truncated
+        val xlsx = tmp.resolve("report.xlsx").also { Files.write(it, byteArrayOf(0x50, 0x4B, 3, 4, 0, 0, 9)) }
+        val huge = tmp.resolve("big.pdf").also { Files.write(it, ByteArray(SessionFilesService.BINARY_CAP_BYTES + 1)) }
+        val t = claudeTranscript("Write" to xlsx.toString(), "Write" to huge.toString())
+
+        val doc = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", xlsx.toString())
+        assertTrue(doc.ok)
+        assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", doc.mediaType)
+        assertFalse(doc.truncated)
+        assertEquals(7L, doc.totalBytes)
+
+        val over = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", huge.toString())
+        assertFalse(over.ok)
+        assertTrue(over.error!!.contains("too large"))
     }
 
     @Test
