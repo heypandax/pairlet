@@ -29,6 +29,9 @@ class BackgroundJobRegistry {
         var status: JobStatus,
         val startedAt: Long,
         var lastUpdate: Long,
+        // launched with run_in_background (bg Bash always; a sub-agent can be too): its tool_result is
+        // only the launch ack — completion arrives via the system task_* events instead
+        val background: Boolean = false,
     )
 
     private val jobs = LinkedHashMap<String, Job>()    // keyed by tool_use id (insertion-ordered)
@@ -38,11 +41,13 @@ class BackgroundJobRegistry {
     fun onToolUse(id: String?, name: String, input: JsonObject?, now: Long): Boolean {
         when (name) {
             "Bash" -> if (input.flag("run_in_background") && id != null) {
-                putNew(id, JobKind.BASH_BACKGROUND, input.str("command")?.summary() ?: "background shell", now); return true
+                putNew(id, JobKind.BASH_BACKGROUND, input.str("command")?.summary() ?: "background shell", now, background = true); return true
             }
-            "Task" -> if (id != null) {
+            // "Task" through CLI 2.1.x; renamed "Agent" on current CLIs (probed 07-08). A sub-agent can
+            // itself be backgrounded (run_in_background) — then its tool_result is only the launch ack.
+            "Task", "Agent" -> if (id != null) {
                 val label = listOfNotNull(input.str("subagent_type"), input.str("description")).joinToString(": ").ifBlank { "sub-agent" }
-                putNew(id, JobKind.SUBAGENT, label.summary(), now); return true
+                putNew(id, JobKind.SUBAGENT, label.summary(), now, background = input.flag("run_in_background")); return true
             }
             "Monitor" -> if (id != null) {
                 putNew(id, JobKind.MONITOR, (input.str("description") ?: input.str("command") ?: "monitor").summary(), now); return true
@@ -56,12 +61,13 @@ class BackgroundJobRegistry {
         return false
     }
 
-    /** A tool_result crossed the stream. Completes a synchronous Task/Monitor; a bg-Bash result only marks "started". */
+    /** A tool_result crossed the stream. Completes a synchronous Task/Monitor; a backgrounded job's
+     *  result only marks "started" (bg Bash always, a run_in_background sub-agent too). */
     fun onToolResult(toolUseId: String?, content: String?, isError: Boolean, now: Long): Boolean {
         val job = jobs[toolUseId] ?: return false
         job.lastUpdate = now
-        if (job.kind == JobKind.BASH_BACKGROUND) {
-            // a normal bg-Bash reports "started" here and finishes later via a system task_* event — so a
+        if (job.background) {
+            // a backgrounded job reports "started" here and finishes later via a system task_* event — so a
             // success result is NOT terminal. But an ERROR result means the launch never backgrounded: that
             // later task_* event will never come, so settle it now instead of leaking a forever-RUNNING job.
             if (isError && job.status == JobStatus.RUNNING) { job.status = JobStatus.FAILED; return true }
@@ -78,7 +84,8 @@ class BackgroundJobRegistry {
         taskToKey[taskId] = key
         val existing = jobs[key]
         if (existing != null) { existing.lastUpdate = now; return false } // the tool_use already created it
-        putNew(key, kindOf(taskType), description?.summary() ?: "background task", now)
+        // a task_started-born job by definition completes via later task_* events, never a tool_result
+        putNew(key, kindOf(taskType), description?.summary() ?: "background task", now, background = true)
         return true
     }
 
@@ -98,16 +105,17 @@ class BackgroundJobRegistry {
     }
 
     /**
-     * Backstop for the case onToolResult can't see: a backgrounded shell whose completion `task_*` event
-     * never arrives (turn ended, the phone was away, the event was dropped). A bg-Bash that has been RUNNING
-     * with NO update for [staleMs] is almost certainly long dead — settle it as KILLED so the count clears
-     * and the session becomes idle-reapable. Sub-agents / monitors complete synchronously from the turn and
-     * are never reaped here. Returns true if anything changed (caller re-emits the snapshot).
+     * Backstop for the case onToolResult can't see: a backgrounded job whose completion `task_*` event
+     * never arrives (turn ended, the phone was away, the event was dropped). A backgrounded job (bg Bash /
+     * bg sub-agent) that has been RUNNING with NO update for [staleMs] is almost certainly long dead —
+     * settle it as KILLED so the count clears and the session becomes idle-reapable. Foreground sub-agents /
+     * monitors complete synchronously from the turn and are never reaped here. Returns true if anything
+     * changed (caller re-emits the snapshot).
      */
     fun reapStale(now: Long, staleMs: Long): Boolean {
         var changed = false
         for (job in jobs.values) {
-            if (job.kind == JobKind.BASH_BACKGROUND && job.status == JobStatus.RUNNING && now - job.lastUpdate > staleMs) {
+            if (job.background && job.status == JobStatus.RUNNING && now - job.lastUpdate > staleMs) {
                 job.status = JobStatus.KILLED
                 job.lastUpdate = now
                 changed = true
@@ -129,8 +137,8 @@ class BackgroundJobRegistry {
         return had
     }
 
-    private fun putNew(key: String, kind: JobKind, label: String, now: Long) {
-        jobs[key] = Job(key, kind, label, JobStatus.RUNNING, now, now)
+    private fun putNew(key: String, kind: JobKind, label: String, now: Long, background: Boolean = false) {
+        jobs[key] = Job(key, kind, label, JobStatus.RUNNING, now, now, background = background)
         // keep memory bounded on long sessions: evict the oldest terminal job once over the cap
         while (jobs.size > MAX_JOBS) {
             val victim = jobs.values.firstOrNull { it.status != JobStatus.RUNNING } ?: break

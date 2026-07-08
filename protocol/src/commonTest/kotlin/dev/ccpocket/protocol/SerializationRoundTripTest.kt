@@ -583,4 +583,44 @@ class SerializationRoundTripTest {
         assertFalse("\"error\"" in json, json)
         assertEquals(ok, PocketJson.decodeFromString<Envelope>(json))
     }
+
+    @Test
+    fun subagent_tool_fields_roundtrip_and_old_frames_default() {
+        // issue #77: the sub-agent extras are OPTIONAL on ToolEvent/HistoryMessage — a new daemon and
+        // an old app (or the reverse) keep talking
+        val start = ToolEvent("c1", 1, ToolPhase.START, "Agent", "general-purpose: add", toolUseId = "t1", parentToolUseId = null)
+        assertEquals(start, PocketJson.decodeFromString<ToolEvent>(PocketJson.encodeToString(start)))
+        val child = ToolEvent("c1", 2, ToolPhase.START, "Bash", "expr 2 + 3", toolUseId = "t2", parentToolUseId = "t1")
+        assertEquals(child, PocketJson.decodeFromString<ToolEvent>(PocketJson.encodeToString(child)))
+        val result = ToolEvent("c1", 3, ToolPhase.RESULT, "Agent", ok = true, toolUseId = "t1", output = "5")
+        val rj = PocketJson.encodeToString(result)
+        assertTrue("\"output\":\"5\"" in rj, rj)
+        assertEquals(result, PocketJson.decodeFromString<ToolEvent>(rj))
+
+        // a plain (non-subagent) tool frame stays byte-identical to the pre-#77 wire: the new keys
+        // are null and explicitNulls=false omits them
+        val plainJson = PocketJson.encodeToString(ToolEvent("c1", 4, ToolPhase.START, "Bash", "ls"))
+        assertFalse("toolUseId" in plainJson, plainJson)
+        assertFalse("parentToolUseId" in plainJson, plainJson)
+        assertFalse("output" in plainJson, plainJson)
+
+        // old daemon → new app: no ids/output → nulls, the flat card of today
+        val legacyTool = """{"convoId":"c1","seq":4,"phase":"start","tool":"Bash","inputPreview":"ls"}"""
+        val decoded = PocketJson.decodeFromString<ToolEvent>(legacyTool)
+        assertEquals(null, decoded.toolUseId)
+        assertEquals(null, decoded.parentToolUseId)
+        assertEquals(null, decoded.output)
+
+        // history: a completed sub-agent card keeps ok/output; old records default to null
+        val card = HistoryMessage(ChatRole.TOOL, "general-purpose: add", tool = "Agent", ok = true, output = "5")
+        assertEquals(card, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(card)))
+        val legacyCard = PocketJson.decodeFromString<HistoryMessage>("""{"role":"tool","text":"x","tool":"Task"}""")
+        assertEquals(null, legacyCard.ok)
+        assertEquals(null, legacyCard.output)
+
+        // the shared alias predicate both sides key card rendering/tracking on
+        assertTrue(isSubagentTool("Task"))
+        assertTrue(isSubagentTool("Agent"))
+        assertFalse(isSubagentTool("Bash"))
+    }
 }

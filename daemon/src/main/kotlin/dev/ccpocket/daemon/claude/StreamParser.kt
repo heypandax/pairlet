@@ -46,8 +46,10 @@ object StreamParser {
             "task_updated" -> root.str("task_id")?.let {
                 return AgentEvent.BackgroundTaskUpdated(it, (root["patch"] as? JsonObject)?.let { p -> p.str("status") })
             }
+            // task_notification also carries tool_use_id + summary — for a backgrounded sub-agent this
+            // pair is the authoritative completion (its tool_result was only the launch ack) — issue #77
             "task_notification" -> root.str("task_id")?.let {
-                return AgentEvent.BackgroundTaskUpdated(it, root.str("status"))
+                return AgentEvent.BackgroundTaskUpdated(it, root.str("status"), toolUseId = root.str("tool_use_id"), summary = root.str("summary"))
             }
         }
         // session_id appears on hook_started/hook_response as well as init — take the first one we see
@@ -73,15 +75,20 @@ object StreamParser {
                 .joinToString("\n").ifBlank { "No response from the API" }
             return listOf(AgentEvent.SyntheticReply(text))
         }
+        // sub-agent (Task/Agent) events stream in the SAME stdout with parent_tool_use_id set at the
+        // root — carry it so the Conversation can fold them into the parent's card instead of the
+        // main chat (issue #77)
+        val parentId = root.str("parent_tool_use_id")
         val blocks = content.mapNotNull { el ->
             val block = el as? JsonObject ?: return@mapNotNull null
             when (block.str("type")) {
-                "text" -> block.str("text")?.let { AgentEvent.AssistantText(it) }
-                "thinking" -> block.str("thinking")?.let { AgentEvent.AssistantThinking(it) }
+                "text" -> block.str("text")?.let { AgentEvent.AssistantText(it, parentId) }
+                "thinking" -> block.str("thinking")?.let { AgentEvent.AssistantThinking(it, parentId) }
                 "tool_use" -> AgentEvent.AssistantToolUse(
                     id = block.str("id"),
                     name = block.str("name") ?: "tool",
                     input = block["input"] as? JsonObject,
+                    parentId = parentId,
                 )
                 else -> null
             }
@@ -111,6 +118,7 @@ object StreamParser {
                 toolUseId = block.str("tool_use_id"),
                 content = toolResultText(block["content"]),
                 isError = (block["is_error"] as? JsonPrimitive)?.booleanOrNull == true,
+                parentId = root.str("parent_tool_use_id"), // set = a result INSIDE a sub-agent, not the main chain
             )
         }
         return results.ifEmpty { listOf(AgentEvent.UserReplay) }

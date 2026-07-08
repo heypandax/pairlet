@@ -39,6 +39,37 @@ class TranscriptReplayTest {
     }
 
     @Test
+    fun subagent_run_replays_as_one_card_with_outcome_and_report() {
+        // issue #77: sidechain (sub-agent internal) records collapse into the Task/Agent card, which
+        // carries the run's label, ok and final report (the CLI's agentId continuation tail stripped)
+        val f = tmpFile("agent.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"sum 2 and 3"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"subagent_type":"general-purpose","description":"add two numbers","prompt":"add them"}}]}}""",
+                // the sub-agent's own records share the file with isSidechain:true — never main-chain rows
+                """{"type":"user","isSidechain":true,"parent_tool_use_id":"a1","message":{"role":"user","content":"add them"}}""",
+                """{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"expr 2 + 3"}}]}}""",
+                """{"type":"user","isSidechain":true,"message":{"content":[{"type":"tool_result","tool_use_id":"b1","content":"5"}]}}""",
+                // the main-chain tool_result IS the sub-agent's report (+ the agentId plumbing tail)
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":[{"type":"text","text":"5"},{"type":"text","text":"agentId: a05 (use SendMessage)"}]}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"the answer is 5"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(3, msgs.size) // user, the Agent card, the final answer — no sidechain leakage
+        val card = msgs[1]
+        assertEquals(ChatRole.TOOL, card.role)
+        assertEquals("Agent", card.tool)
+        assertEquals("general-purpose: add two numbers", card.text)
+        assertEquals(true, card.ok)
+        assertEquals("5", card.output)
+        assertEquals("the answer is 5", msgs[2].text)
+    }
+
+    @Test
     fun synthetic_placeholder_replays_flagged_as_error() {
         // a context-dead session's tail: the CLI's `<synthetic>` placeholders must replay as errors,
         // not as normal assistant replies the user mistakes for answers (issue #65)

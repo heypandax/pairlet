@@ -13,9 +13,11 @@ sealed interface AgentEvent {
     /** The authoritative session_id carrier (Claude system/init; Codex thread/started → thread.id). */
     data class SessionInit(val sessionId: String?, val cwd: String?, val model: String?) : AgentEvent
 
-    data class AssistantText(val text: String) : AgentEvent
-    data class AssistantThinking(val text: String) : AgentEvent
-    data class AssistantToolUse(val id: String?, val name: String, val input: JsonObject?) : AgentEvent
+    /** [parentId] on the assistant/tool events = the enclosing sub-agent's Task/Agent tool_use id
+     *  (Claude stream-json `parent_tool_use_id`); null for main-chain events and for Codex. */
+    data class AssistantText(val text: String, val parentId: String? = null) : AgentEvent
+    data class AssistantThinking(val text: String, val parentId: String? = null) : AgentEvent
+    data class AssistantToolUse(val id: String?, val name: String, val input: JsonObject?, val parentId: String? = null) : AgentEvent
 
     /** An assistant record whose model is the `<synthetic>` placeholder: the CLI wrote it AFTER every
      *  API call of the turn failed ("No response requested." etc). It is not a real reply — the
@@ -32,14 +34,17 @@ sealed interface AgentEvent {
         val cacheReadInputTokens: Long?,
     ) : AgentEvent
 
-    /** a tool/command result — carries the originating tool_use id + (text) content. */
-    data class ToolResult(val toolUseId: String?, val content: String?, val isError: Boolean) : AgentEvent
+    /** a tool/command result — carries the originating tool_use id + (text) content.
+     *  [parentId] set = this result belongs to a tool INSIDE a sub-agent, not the main chain. */
+    data class ToolResult(val toolUseId: String?, val content: String?, val isError: Boolean, val parentId: String? = null) : AgentEvent
 
     /** a background task (e.g. a backgrounded shell) began; links task_id to its tool_use. */
     data class BackgroundTaskStarted(val taskId: String, val toolUseId: String?, val description: String?, val taskType: String?) : AgentEvent
 
-    /** a background task changed state (status: completed/failed/…). */
-    data class BackgroundTaskUpdated(val taskId: String, val status: String?) : AgentEvent
+    /** a background task changed state (status: completed/failed/…). `task_notification` also carries
+     *  [toolUseId] + [summary] — for a backgrounded sub-agent that pair is the authoritative completion
+     *  (its tool_result was only the launch ack), so the Task card's outcome comes from here. */
+    data class BackgroundTaskUpdated(val taskId: String, val status: String?, val toolUseId: String? = null, val summary: String? = null) : AgentEvent
 
     /** replayed user turn (Claude --replay-user-messages). */
     data object UserReplay : AgentEvent

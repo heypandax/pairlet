@@ -150,6 +150,47 @@ class StreamParserTest {
     }
 
     @Test
+    fun subagent_events_carry_the_parent_tool_use_id() {
+        // sub-agent (Task/Agent) internals stream in the same stdout, tagged with parent_tool_use_id
+        // at the ROOT — the Conversation folds them into the parent's card (issue #77; probed 07-08)
+        val toolUse = StreamParser.parse(
+            """{"type":"assistant","parent_tool_use_id":"p1","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"expr 2 + 3"}}]}}""",
+        ).single()
+        assertIs<AgentEvent.AssistantToolUse>(toolUse)
+        assertEquals("p1", toolUse.parentId)
+
+        val text = StreamParser.parse(
+            """{"type":"assistant","parent_tool_use_id":"p1","message":{"content":[{"type":"text","text":"sub says"}]}}""",
+        ).single()
+        assertIs<AgentEvent.AssistantText>(text)
+        assertEquals("p1", text.parentId)
+
+        val result = StreamParser.parse(
+            """{"type":"user","parent_tool_use_id":"p1","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"5"}]}}""",
+        ).single()
+        assertIs<AgentEvent.ToolResult>(result)
+        assertEquals("p1", result.parentId)
+
+        // main-chain events stay untagged
+        val main = StreamParser.parse(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}""",
+        ).single()
+        assertIs<AgentEvent.AssistantToolUse>(main)
+        assertEquals(null, main.parentId)
+    }
+
+    @Test
+    fun task_notification_carries_tool_use_id_and_summary() {
+        // for a backgrounded sub-agent this pair is the authoritative completion (issue #77)
+        val ev = StreamParser.parse(
+            """{"type":"system","subtype":"task_notification","task_id":"T1","tool_use_id":"u1","status":"completed","summary":"5","session_id":"s"}""",
+        ).single()
+        assertIs<AgentEvent.BackgroundTaskUpdated>(ev)
+        assertEquals("u1", ev.toolUseId)
+        assertEquals("5", ev.summary)
+    }
+
+    @Test
     fun synthetic_assistant_becomes_syntheticReply_not_a_normal_chunk() {
         // model "<synthetic>" = the CLI's API-failure placeholder ("No response requested.") — it must
         // surface as an error signal, never as AssistantText the phone renders as a real reply (issue #65)

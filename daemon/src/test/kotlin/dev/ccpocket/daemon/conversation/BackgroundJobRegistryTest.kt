@@ -117,6 +117,42 @@ class BackgroundJobRegistryTest {
     }
 
     @Test
+    fun agent_tool_name_is_tracked_like_task() {
+        // current CLIs renamed the sub-agent tool "Task" -> "Agent" (probed 07-08, issue #77)
+        val r = BackgroundJobRegistry()
+        val input = buildJsonObject { put("subagent_type", "general-purpose"); put("description", "add two numbers") }
+        assertTrue(r.onToolUse("a1", "Agent", input, now = 1))
+        val job = r.snapshot().single()
+        assertEquals(JobKind.SUBAGENT, job.kind)
+        assertTrue(job.label.startsWith("general-purpose"))
+        assertTrue(r.onToolResult("a1", "5", isError = false, now = 2))
+        assertEquals(JobStatus.DONE, r.snapshot().single().status)
+    }
+
+    @Test
+    fun backgrounded_subagent_completes_via_task_events_not_its_result() {
+        // Agent with run_in_background: the tool_result is only the launch ack — completion is task_notification
+        val r = BackgroundJobRegistry()
+        val input = buildJsonObject { put("subagent_type", "worker"); put("description", "long job"); put("run_in_background", true) }
+        assertTrue(r.onToolUse("a1", "Agent", input, now = 1))
+        assertFalse(r.onToolResult("a1", "Async agent launched", isError = false, now = 2))
+        assertTrue(r.hasRunning())
+        r.onTaskStarted(taskId = "T9", toolUseId = "a1", description = "long job", taskType = "local_agent", now = 3)
+        assertTrue(r.onTaskUpdated(taskId = "T9", status = "completed", now = 4))
+        assertFalse(r.hasRunning())
+        assertEquals(JobStatus.DONE, r.snapshot().single().status)
+    }
+
+    @Test
+    fun reap_stale_settles_a_silent_backgrounded_subagent() {
+        val r = BackgroundJobRegistry()
+        val input = buildJsonObject { put("description", "x"); put("run_in_background", true) }
+        r.onToolUse("a1", "Agent", input, now = 1)
+        assertTrue(r.reapStale(now = 10_000, staleMs = 1000))
+        assertEquals(JobStatus.KILLED, r.snapshot().single().status)
+    }
+
+    @Test
     fun clear_empties_and_reports_change() {
         val r = BackgroundJobRegistry()
         r.onToolUse("t1", "Bash", bgBash("x"), now = 1)

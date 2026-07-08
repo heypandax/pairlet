@@ -151,7 +151,19 @@ sealed interface ChatItem {
 
     /** Extended reasoning, rendered as a collapsible row. [seconds] lands when thinking finishes (null while streaming). */
     data class Thinking(val text: String, val seconds: Int? = null) : ChatItem
-    data class Tool(val tool: String, val preview: String) : ChatItem
+    /** A tool card. The sub-agent (Task/Agent) fields (issue #77) light up only with a new daemon:
+     *  [taskId] correlates the card with its later RESULT/progress events; [ok] is the run's outcome
+     *  (null = running or unknown); [output] the sub-agent's final report (expandable);
+     *  [childCount]/[lastChild] summarize the inner tool calls folded into this card. */
+    data class Tool(
+        val tool: String,
+        val preview: String,
+        val taskId: String? = null,
+        val ok: Boolean? = null,
+        val output: String? = null,
+        val childCount: Int = 0,
+        val lastChild: String? = null,
+    ) : ChatItem
     data class Sys(val text: String) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
 
@@ -1257,7 +1269,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // be dropped — else it renders into whatever convo is now open. Reopening the source replays its
             // full transcript via ConvoHistory, so nothing is actually lost. (Matches the BackgroundJobs guard.)
             is AssistantChunk -> if (f.convoId == convoId.value) { promptEvidence(); appendChunk(f) }
-            is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); finishThinking(); messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "")) }
+            is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); finishThinking(); onToolEvent(f) }
             is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
             is AskWithdrawn -> if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
@@ -1353,11 +1365,40 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    /**
+     * Fold a live tool event into the transcript (issue #77). Plain tools append a card, exactly as
+     * before. Sub-agent extras — all keyed on the optional ids an old daemon never sends:
+     *  - RESULT patches the matching Task/Agent card in place with the outcome + expandable report;
+     *  - an event tagged with a parent folds into that parent's card as "N tool uses · latest" progress
+     *    (falling back to today's inline card when the parent isn't on screen, e.g. attached mid-run).
+     */
+    private fun onToolEvent(f: ToolEvent) {
+        val parent = f.parentToolUseId
+        fun cardIndex(taskId: String?) =
+            if (taskId == null) -1 else messages.indexOfLast { it is ChatItem.Tool && it.taskId == taskId }
+        when {
+            f.phase == ToolPhase.RESULT -> {
+                val i = cardIndex(f.toolUseId)
+                // no card on screen (opened mid-run): the reattach history replay carries the outcome instead
+                if (i >= 0) messages[i] = (messages[i] as ChatItem.Tool).copy(ok = f.ok, output = f.output)
+            }
+            parent != null -> {
+                val i = cardIndex(parent)
+                if (i >= 0) {
+                    val card = messages[i] as ChatItem.Tool
+                    messages[i] = card.copy(childCount = card.childCount + 1, lastChild = f.tool)
+                } else messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: ""))
+            }
+            else -> messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
+        }
+    }
+
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         ChatRole.USER -> ChatItem.User(h.text)
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
         ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
-        ChatRole.TOOL -> ChatItem.Tool(h.tool ?: "tool", h.text)
+        // ok/output: a completed sub-agent card keeps its outcome + expandable report across replays (issue #77)
+        ChatRole.TOOL -> ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output)
     }
 
     private fun <T> replace(list: MutableList<T>, items: List<T>) {

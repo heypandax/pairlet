@@ -109,6 +109,7 @@ import dev.ccpocket.app.ui.turnDurLabel
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.isQuestion
+import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.SlashCommand
 
 @Composable
@@ -320,7 +321,19 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp,
             )
         }
-        is ChatItem.Tool -> ToolRow(item.tool, item.preview, ToolStatus.OK)
+        // sub-agent (Task/Agent) cards carry a live status + folded inner-tool progress + the final
+        // report (issue #77); plain tools keep the flat ✓ row. Old daemons send no ids → OK as before.
+        is ChatItem.Tool -> {
+            val agent = isSubagentTool(item.tool)
+            val status = when {
+                agent && item.taskId != null && item.ok == null -> ToolStatus.RUN
+                item.ok == false -> ToolStatus.FAIL
+                else -> ToolStatus.OK
+            }
+            val meta = if (agent && item.childCount > 0) "  ·  ⚒ ${item.childCount}${item.lastChild?.let { " · $it" } ?: ""}" else ""
+            val body = item.preview + meta + (item.output?.let { "\n\n$it" } ?: "")
+            ToolRow(item.tool, body, status)
+        }
         is ChatItem.Sys -> Text(
             pathLinked(item.text), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.surface)

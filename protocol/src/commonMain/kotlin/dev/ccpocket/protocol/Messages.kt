@@ -338,7 +338,16 @@ data class SessionLive(
 @SerialName("pocket/chunk")
 data class AssistantChunk(val convoId: String, val seq: Long, val piece: StreamPiece) : ToPhone
 
-/** A tool invocation surfaced to the UI (original; no Anthropic schema crosses the wire). */
+/** A tool invocation surfaced to the UI (original; no Anthropic schema crosses the wire).
+ *
+ *  Sub-agent visibility (issue #77) rides three OPTIONAL fields — an old daemon omits them (the
+ *  client renders today's flat card) and an old client ignores them:
+ *  [toolUseId] is the originating tool_use id, so a client can correlate a Task/Agent card's START
+ *  with its later RESULT. [parentToolUseId] is set when this tool ran INSIDE a sub-agent — clients
+ *  fold such events into the parent's card as progress instead of a top-level row. [output] rides
+ *  the RESULT phase only: the tool's final text (for a sub-agent, its report), capped daemon-side.
+ *  The daemon emits RESULT only for sub-agent (Task/Agent) calls today — every other tool stays
+ *  START-only, exactly the pre-#77 stream. */
 @Serializable
 @SerialName("pocket/tool")
 data class ToolEvent(
@@ -348,7 +357,15 @@ data class ToolEvent(
     val tool: String,
     val inputPreview: String? = null,
     val ok: Boolean? = null,
+    val toolUseId: String? = null,
+    val parentToolUseId: String? = null,
+    val output: String? = null,
 ) : ToPhone
+
+/** The tool names the Claude CLI uses for a sub-agent call — "Task" through 2.1.x, "Agent" on
+ *  current CLIs. One predicate shared by daemon (tracking) and clients (card rendering) so the
+ *  two sides can't drift on the alias list. */
+fun isSubagentTool(tool: String): Boolean = tool == "Task" || tool == "Agent"
 
 /** A permission prompt the phone must resolve. askId == Anthropic request_id. */
 @Serializable
@@ -465,9 +482,19 @@ enum class ChatRole {
 
 /** One past message in a resumed session's transcript. [error] marks an assistant record that was a
  *  `<synthetic>` API-failure placeholder, not a real reply (issue #65) — clients render it as an error
- *  row; old clients ignore the flag and show the placeholder text as before. */
+ *  row; old clients ignore the flag and show the placeholder text as before.
+ *  [ok]/[output] land on a sub-agent (Task/Agent) TOOL row only (issue #77): the completed run's
+ *  outcome + capped final report, so a replayed transcript keeps the expandable card. Optional both
+ *  ways — an old daemon omits them, an old client ignores them. */
 @Serializable
-data class HistoryMessage(val role: ChatRole, val text: String, val tool: String? = null, val error: Boolean = false)
+data class HistoryMessage(
+    val role: ChatRole,
+    val text: String,
+    val tool: String? = null,
+    val error: Boolean = false,
+    val ok: Boolean? = null,
+    val output: String? = null,
+)
 
 /** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
 @Serializable
