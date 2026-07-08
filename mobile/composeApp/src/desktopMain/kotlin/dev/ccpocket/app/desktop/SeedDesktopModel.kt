@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -136,6 +137,7 @@ class SeedDesktopModel : DesktopModel {
     override var defaultModel: String? by mutableStateOf(null)
     override var contextWindowOverride: Long? by mutableStateOf(null)
     override var terminalApp by mutableStateOf(TerminalApp.SYSTEM)
+    override var themeMode by mutableStateOf(ThemeMode.DARK)
     private var phonePushState by mutableStateOf(true)
     override val phonePush: Boolean? get() = phonePushState
     override fun setPhonePush(enabled: Boolean) { phonePushState = enabled }

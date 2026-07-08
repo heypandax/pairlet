@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
@@ -325,6 +326,9 @@ interface DesktopModel {
     // context-window override (tokens) for the usage statusline's 100% mark; null = follow the derived window (#60)
     var contextWindowOverride: Long?
     var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
+    // appearance (issue #63): force light/dark or follow the OS. The window root reads this into PocketTheme;
+    // RepoDesktopModel persists it through the shared repo, seed/preview models just hold it in memory.
+    var themeMode: ThemeMode
 
     // phone-push switch (pocket/push.prefs.*): daemon truth; null = daemon predates it (toggle hidden)
     val phonePush: Boolean? get() = null

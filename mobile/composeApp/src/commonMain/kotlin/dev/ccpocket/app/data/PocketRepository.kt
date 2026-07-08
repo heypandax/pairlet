@@ -302,8 +302,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_FONT_SCALE)?.toFloatOrNull()?.coerceIn(FONT_SCALE_MIN, FONT_SCALE_MAX) ?: 1f,
     )
 
-    /** Appearance: follow the system, or force light/dark (issue #63). Persisted; the app root resolves
-     *  SYSTEM against isSystemInDarkTheme() and hands PocketTheme a concrete light/dark. */
+    /** Appearance: follow the system, or force light/dark (issue #63). Persisted; passed straight to
+     *  PocketTheme(mode = …), which resolves SYSTEM against isSystemInDarkTheme() at the app root. */
     val themeMode = mutableStateOf(ThemeMode.from(SecureStore.getString(K_THEME_MODE)))
     fun setThemeMode(mode: ThemeMode) {
         if (mode == themeMode.value) return

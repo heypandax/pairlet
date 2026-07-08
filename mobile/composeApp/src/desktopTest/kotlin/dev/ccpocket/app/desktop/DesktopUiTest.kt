@@ -14,6 +14,7 @@ import androidx.compose.ui.test.runComposeUiTest
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import kotlin.test.Test
@@ -284,6 +285,21 @@ class DesktopUiTest {
         assertPresent("Paired computers")
         assertPresent("Rename")                   // per-computer actions (also fixes the accountId-label gap)
         assertPresent("Revoke")
+    }
+
+    @Test
+    fun appearanceControlSwitchesThemeMode() = runComposeUiTest {
+        // desktop Appearance control (issue #63): a pick must reach model.themeMode — the live RepoDesktopModel
+        // persists it and Main.kt feeds it to PocketTheme, so wiring the click through is the whole feature
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { SettingsModal(model) {} } } // opens on the General tab; Appearance sits at its top
+        assertPresent("Appearance")
+        onAllNodes(hasText("Light")).onFirst().performClick()
+        waitForIdle()
+        assertEquals(ThemeMode.LIGHT, model.themeMode)
+        onAllNodes(hasText("Dark")).onFirst().performClick()
+        waitForIdle()
+        assertEquals(ThemeMode.DARK, model.themeMode)
     }
 
     @Test

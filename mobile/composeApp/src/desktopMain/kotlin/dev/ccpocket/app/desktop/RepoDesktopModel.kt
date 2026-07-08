@@ -13,6 +13,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.secure.SecureStore
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.fleet.MachineOs
 import dev.ccpocket.app.ui.fleet.osFromName
 import dev.ccpocket.app.ui.folderName
@@ -463,6 +464,9 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var contextWindowOverride: Long?
         get() = repo.contextWindowOverride.value
         set(v) { repo.setContextWindowOverride(v) }
+    override var themeMode: ThemeMode
+        get() = repo.themeMode.value
+        set(v) { repo.setThemeMode(v) }
     // desktop-only pref (the daemon/mobile never open local terminals) — persisted beside the pins
     private var terminalAppState by mutableStateOf(TerminalApp.fromId(SecureStore.getString(K_TERMINAL_APP)))
     override var terminalApp: TerminalApp

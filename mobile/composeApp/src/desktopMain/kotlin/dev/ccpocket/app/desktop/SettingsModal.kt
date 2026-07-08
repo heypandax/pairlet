@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import kotlinx.coroutines.delay
@@ -125,6 +126,9 @@ private fun Group(title: String, sub: String? = null, content: @Composable () ->
 @Composable
 private fun GeneralPane(model: DesktopModel) {
     Column {
+        Group("Appearance", "Light or dark theme for this app.") {
+            AppearanceRow(model)
+        }
         Group("Default agent", "Which backend new sessions start with.") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
@@ -159,6 +163,37 @@ private fun GeneralPane(model: DesktopModel) {
                     color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
                 )
                 else -> ToggleRow("Notify my phone when a turn finishes", on) { model.setPhonePush(!on) }
+            }
+        }
+    }
+}
+
+// System / Light / Dark segmented control (issue #63) — a three-way toggle mirroring the mobile Appearance
+// picker. Wired to the shared repo via model.themeMode, so a pick persists and the window root re-themes live.
+@Composable
+private fun AppearanceRow(model: DesktopModel) {
+    val modes = listOf(
+        ThemeMode.SYSTEM to "System",
+        ThemeMode.LIGHT to "Light",
+        ThemeMode.DARK to "Dark",
+    )
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        modes.forEach { (mode, label) ->
+            val sel = model.themeMode == mode
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .background(if (sel) Tok.accent else Color.Transparent)
+                    .clickable { model.themeMode = mode }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
             }
         }
     }

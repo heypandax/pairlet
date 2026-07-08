@@ -1,5 +1,6 @@
 package dev.ccpocket.app.theme
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -106,6 +107,19 @@ object Tok {
 
 /** Chat text scale (issue #8), provided once at the app root from PocketRepository.fontScale; 1.0 = design default. */
 val LocalFontScale = staticCompositionLocalOf { 1f }
+
+/** Appearance-aware entry point (issue #63): resolves [mode] against the OS so both app roots just pass their
+ *  persisted [ThemeMode] — a live system light/dark flip re-themes, LIGHT/DARK force it. Delegates to the
+ *  boolean overload, still the default for the ~dozen test/preview `PocketTheme { }` callers. */
+@Composable
+fun PocketTheme(mode: ThemeMode, fontScale: Float = 1f, content: @Composable () -> Unit) {
+    val dark = when (mode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    PocketTheme(dark = dark, fontScale = fontScale, content = content)
+}
 
 @Composable
 fun PocketTheme(dark: Boolean = true, fontScale: Float = 1f, content: @Composable () -> Unit) {

@@ -169,7 +169,9 @@ fun main() = application {
                 window.bounds = usableScreenBounds(window)
             }
         }
-        PocketTheme {
+        // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick
+        // tracks a live OS light/dark flip and Settings' setThemeMode() re-themes the whole shell.
+        PocketTheme(mode = repo.themeMode.value) {
             androidx.compose.runtime.CompositionLocalProvider(
                 dev.ccpocket.app.ui.LocalPathOpener provides dev.ccpocket.app.desktop.DesktopPathOpener(),
             ) {
