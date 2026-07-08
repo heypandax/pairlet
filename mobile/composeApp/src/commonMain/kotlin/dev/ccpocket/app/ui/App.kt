@@ -753,7 +753,7 @@ private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boo
         // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
         LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
     }
-    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, e.hasSessions, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
+    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
 }
 
 /** Long-press a project → pin it to the top, or unpin it. Small sheet, mirrors the app's other actions. */
@@ -897,7 +897,7 @@ private fun LeafRow(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit
 }
 
 @Composable
-private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: Boolean, pinned: Boolean = false, onLongPress: (() -> Unit)? = null, onClick: () -> Unit) {
+private fun DirCell(name: String, path: String?, indent: Boolean, pinned: Boolean = false, onLongPress: (() -> Unit)? = null, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(start = if (indent) 16.dp else 0.dp)
             .clip(RoundedCornerShape(10.dp)).background(Tok.surface).combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(12.dp),
@@ -907,8 +907,7 @@ private fun DirCell(name: String, path: String?, hasSessions: Boolean, indent: B
             Text(name, color = Tok.tx, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1)
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
         }
-        if (pinned) { PinGlyph(); Spacer(Modifier.width(8.dp)) }
-        if (hasSessions) HistoryBadge()
+        if (pinned) PinGlyph()
     }
 }
 
