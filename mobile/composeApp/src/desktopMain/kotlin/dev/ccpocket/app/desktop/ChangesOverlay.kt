@@ -271,16 +271,20 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         Box(Modifier.weight(1f)) { TailPathText(file.path, fontSize = 12.sp, color = Tok.tx2) }
-        CopyPathButton(file.path)
-        // export what the viewer holds (issue #67): open with the system app / save a copy
-        val content = model.selectedContent
-        val exportable = remember(content) { exportBytesOf(content) }
-        if (exportable != null) {
-            HeaderIconButton(Icons.Rounded.OpenInNew, stringResource(Res.string.file_open)) {
-                previewFile(fileNameOf(file.path), exportable, content?.mediaType)
-            }
-            HeaderIconButton(Icons.Rounded.Download, stringResource(Res.string.file_save_as)) {
-                shareFile(fileNameOf(file.path), exportable, content?.mediaType)
+        // copy · open · save-as as ONE tight right-aligned group (chat-cards handoff, §2.5):
+        // muted at rest, each lifts to a raised chip on hover
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+            CopyPathButton(file.path)
+            // export what the viewer holds (issue #67): open with the system app / save a copy
+            val content = model.selectedContent
+            val exportable = remember(content) { exportBytesOf(content) }
+            if (exportable != null) {
+                HeaderIconButton(Icons.Rounded.OpenInNew, stringResource(Res.string.file_open)) {
+                    previewFile(fileNameOf(file.path), exportable, content?.mediaType)
+                }
+                HeaderIconButton(Icons.Rounded.Download, stringResource(Res.string.file_save_as)) {
+                    shareFile(fileNameOf(file.path), exportable, content?.mediaType)
+                }
             }
         }
         StatusChip(file.op)
@@ -297,25 +301,36 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
 
     Box(Modifier.fillMaxSize()) {
         if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = true)
-        else FileTabBody(model.selectedContent, ext, dense = true)
+        else FileTabBody(model.selectedContent, ext, dense = true, path = file.path)
     }
 }
 
 @Composable
 private fun CopyPathButton(path: String) {
     val (copied, copy) = rememberCopied()
-    Box(
-        Modifier.clip(RoundedCornerShape(6.dp)).clickable { copy(path) }.padding(3.dp),
-    ) {
-        if (copied) Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(13.dp))
-        else Icon(Icons.Rounded.ContentCopy, "copy path", tint = Tok.muted, modifier = Modifier.size(13.dp))
+    HeaderIconBox("copy path", onClick = { copy(path) }) { hovered ->
+        if (copied) Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(14.dp))
+        else Icon(Icons.Rounded.ContentCopy, "copy path", tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(14.dp))
     }
 }
 
-/** Quiet 13dp header action, matching [CopyPathButton]'s footprint. */
+/** Quiet header action sharing [CopyPathButton]'s footprint and hover treatment. */
 @Composable
 private fun HeaderIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(3.dp)) {
-        Icon(icon, label, tint = Tok.muted, modifier = Modifier.size(13.dp))
+    HeaderIconBox(label, onClick) { hovered ->
+        Icon(icon, label, tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(14.dp))
     }
+}
+
+/** The handoff's .hicon hit target: 26dp rounded square, transparent at rest, raised on hover. */
+@Composable
+private fun HeaderIconBox(label: String, onClick: () -> Unit, content: @Composable (hovered: Boolean) -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    Box(
+        Modifier.size(26.dp).clip(RoundedCornerShape(7.dp))
+            .background(if (hovered) Tok.raised else Color.Transparent)
+            .hoverable(src).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content(hovered) }
 }

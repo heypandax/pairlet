@@ -194,7 +194,7 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false)
-            else FileTabBody(repo.viewedFile.value, ext)
+            else FileTabBody(repo.viewedFile.value, ext, path = path)
         }
     }
 }

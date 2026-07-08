@@ -1,13 +1,24 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -23,7 +34,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +56,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -444,16 +463,26 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
  *  images, everything else as selectable highlighted monospace. [dense] = desktop metrics. */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false) {
+fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null) {
     Box(Modifier.fillMaxSize()) {
         when {
-            content == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Tok.tx2, strokeWidth = 2.dp)
+            // documents ride the binary channel whole-or-nothing — while the bytes are in flight the
+            // card skeleton stands in (chat-cards handoff, loading); other types keep the spinner
+            content == null ->
+                if (path != null && ext in documentExts) DocumentLoadingCard(path, dense)
+                else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Tok.tx2, strokeWidth = 2.dp)
+                }
+            !content.ok -> {
+                // the daemon's binary size cap is the one refusal worth a card that explains the
+                // limit in place (its error text is the only wire signal — no structured kind)
+                val err = content.error ?: "?"
+                if ("too large" in err) DocumentTooLargeCard(content.path, err, dense)
+                else Text(
+                    err, color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                )
             }
-            !content.ok -> Text(
-                content.error ?: "?", color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
-            )
             content.base64 != null -> {
                 val bytes = remember(content.base64) { runCatching { Base64.Default.decode(content.base64!!) }.getOrNull() }
                 val bmp = bytes?.let { rememberImageBitmap(it) }
@@ -464,7 +493,7 @@ fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false) {
                     )
                     // documents & other binaries (issues #67/#79): no inline rendering — hand the
                     // bytes to the platform's native preview / share-save gesture instead
-                    bytes != null -> DocumentCard(content.path, bytes, content.mediaType, content.totalBytes)
+                    bytes != null -> DocumentCard(content.path, bytes, content.mediaType, content.totalBytes, dense)
                     else -> Text(
                         stringResource(Res.string.file_undecodable), color = Tok.muted, fontSize = 13.sp,
                         modifier = Modifier.align(Alignment.Center),
@@ -505,63 +534,198 @@ fun formatFileSize(bytes: Long): String = when {
     else -> "${(bytes + 1023) / 1024} KB"
 }
 
+/** The six handoff document families (chat-cards, §2.4). Colours reference the live [Tok] palette
+ *  (getters, like [DiffTok] — no new hex constants): spreadsheet→ok green, document→info blue,
+ *  slides→accent terracotta, pdf→danger red at a LOWER tint so red never reads as an error,
+ *  archive→warn amber, binary→neutral grey. Tint alphas are the handoff's exact values. */
+private enum class DocFamily {
+    SHEET, DOC, SLIDE, PDF, ZIP, BIN;
+
+    val fg get() = when (this) {
+        SHEET -> Tok.ok; DOC -> Tok.info; SLIDE -> Tok.accent
+        PDF -> Tok.danger; ZIP -> Tok.warn; BIN -> Tok.tx2
+    }
+    val bg get() = when (this) {
+        PDF, ZIP -> fg.copy(alpha = 0.12f)
+        BIN -> Tok.muted.copy(alpha = 0.16f)
+        else -> fg.copy(alpha = 0.13f)
+    }
+    val bd get() = when (this) {
+        SLIDE -> fg.copy(alpha = 0.36f)
+        BIN -> Tok.muted.copy(alpha = 0.42f)
+        else -> fg.copy(alpha = 0.34f)
+    }
+}
+
+private fun docFamilyOf(ext: String) = when (ext) {
+    "xlsx", "xls", "csv", "tsv", "numbers" -> DocFamily.SHEET
+    "docx", "doc", "pages", "rtf", "odt" -> DocFamily.DOC
+    "pptx", "ppt", "key" -> DocFamily.SLIDE
+    "pdf" -> DocFamily.PDF
+    "zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar" -> DocFamily.ZIP
+    else -> DocFamily.BIN
+}
+
+/** Extensions the daemon serves as whole-or-nothing binary documents (SessionFilesService.documentTypes)
+ *  — the set whose in-flight bytes earn the loading-card treatment instead of a bare spinner. */
+private val documentExts = setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip")
+
+/** Family-tinted type tile with a mono extension and a folded top-right corner — the paper cue that
+ *  reads "document object" rather than "sorry, can't show this". */
+@Composable
+private fun DocTypeBadge(ext: String, dense: Boolean) {
+    val fam = docFamilyOf(ext)
+    val shape = RoundedCornerShape(if (dense) 10.dp else 11.dp)
+    Box(
+        Modifier.size(if (dense) 44.dp else 52.dp).clip(shape).background(fam.bg).border(1.dp, fam.bd, shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            ext.take(4).uppercase().ifEmpty { "BIN" },
+            color = fam.fg, fontFamily = FontFamily.Monospace,
+            fontSize = if (dense) 11.sp else 12.5.sp, fontWeight = FontWeight.Bold,
+        )
+        // folded corner: base-coloured cut over a faint family-tint square (handoff ::before/::after)
+        Canvas(Modifier.size(11.dp).align(Alignment.TopEnd)) {
+            drawPath(
+                Path().apply { moveTo(0f, 0f); lineTo(size.width, 0f); lineTo(size.width, size.height); close() },
+                Tok.base, alpha = 0.55f,
+            )
+            drawRect(fam.fg, alpha = 0.14f)
+        }
+    }
+}
+
+/** The document card's shared chrome — badge + single-line name over a state-specific body — centered
+ *  in the viewer pane at the handoff's 352dp column width. */
+@Composable
+private fun DocCardFrame(path: String, dense: Boolean, body: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(if (dense) 11.dp else 13.dp)
+    Box(Modifier.fillMaxSize().padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.widthIn(max = 352.dp).clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
+                .padding(if (dense) 11.dp else 13.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (dense) 11.dp else 13.dp),
+        ) {
+            DocTypeBadge(path.substringAfterLast('.', "").lowercase(), dense)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    fileNameOf(path), color = Tok.tx, fontSize = if (dense) 13.5.sp else 14.5.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                body()
+            }
+        }
+    }
+}
+
 /**
- * Centered card for a file with no inline rendering (xlsx/docx/pptx/pdf, arbitrary binaries):
- * type glyph, name, size, and the two platform gestures — native preview (QuickLook / default
- * app) and share/save. No home-grown office viewer, deliberately.
+ * Card for a file with no inline rendering (xlsx/docx/pptx/pdf, arbitrary binaries): family-coded
+ * badge, name, size, and the two platform gestures — native preview (QuickLook / default app) and
+ * share/save. No home-grown office viewer, deliberately.
  */
 @Composable
-private fun DocumentCard(path: String, bytes: ByteArray, mediaType: String?, totalBytes: Long) {
+private fun DocumentCard(path: String, bytes: ByteArray, mediaType: String?, totalBytes: Long, dense: Boolean = false) {
     val name = fileNameOf(path)
-    val ext = path.substringAfterLast('.', "").lowercase()
-    Column(
-        Modifier.fillMaxSize().padding(horizontal = 34.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(Tok.surface),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                ext.take(4).uppercase().ifEmpty { "BIN" },
-                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-            )
-        }
-        Text(
-            name, color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
-            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp),
-        )
+    DocCardFrame(path, dense) {
         Text(
             "${formatFileSize(totalBytes)} · ${stringResource(Res.string.file_no_inline_preview)}",
-            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 6.dp),
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp),
         )
-        Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            Modifier.padding(top = if (dense) 9.dp else 11.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             ExportActionChip(
                 stringResource(if (exportIsSaveDialog) Res.string.file_open else Res.string.file_preview),
-                primary = true,
+                if (exportIsSaveDialog) Icons.Rounded.OpenInNew else Icons.Rounded.Visibility,
+                primary = true, dense = dense,
             ) {
                 // no native previewer for this type -> the share sheet still gets it somewhere useful
                 if (!previewFile(name, bytes, mediaType)) shareFile(name, bytes, mediaType)
             }
             ExportActionChip(
                 stringResource(if (exportIsSaveDialog) Res.string.file_save_as else Res.string.file_share),
-                primary = false,
+                if (exportIsSaveDialog) Icons.Rounded.Download else Icons.Rounded.IosShare,
+                primary = false, dense = dense,
             ) { shareFile(name, bytes, mediaType) }
         }
     }
 }
 
+/** The daemon refused the transfer over its binary cap: actions give way to a plain-language cap
+ *  explanation that names the exact limit. Both sizes are parsed out of the error text — the only
+ *  wire signal — so the note stays true to whatever cap THAT daemon runs (fallback: today's 1800 KB). */
 @Composable
-private fun ExportActionChip(label: String, primary: Boolean, onClick: () -> Unit) {
-    Text(
-        label,
-        color = if (primary) Tok.base else Tok.tx,
-        fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.clip(RoundedCornerShape(9.dp))
-            .background(if (primary) Tok.accent else Tok.raised)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    )
+private fun DocumentTooLargeCard(path: String, error: String, dense: Boolean) {
+    val sizes = remember(error) { Regex("(\\d+) KB").findAll(error).map { it.groupValues[1].toLong() }.toList() }
+    DocCardFrame(path, dense) {
+        Text(
+            listOfNotNull(sizes.firstOrNull()?.let { formatFileSize(it * 1024) }, stringResource(Res.string.file_exceeds_cap))
+                .joinToString(" · "),
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp),
+        )
+        val noteShape = RoundedCornerShape(9.dp)
+        Row(
+            Modifier.padding(top = if (dense) 9.dp else 11.dp).fillMaxWidth().clip(noteShape)
+                .background(Tok.warn.copy(alpha = 0.07f)).border(1.dp, Tok.warn.copy(alpha = 0.28f), noteShape)
+                .padding(horizontal = 11.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("⚠", color = Tok.warn, fontSize = 12.sp)
+            Text(
+                stringResource(Res.string.file_too_large_note, "${sizes.getOrNull(1) ?: 1800L} KB"),
+                color = Tok.tx2, fontSize = 12.sp, lineHeight = 17.sp,
+            )
+        }
+    }
+}
+
+/** Bytes in flight. The transfer is a single relay frame — no true progress crosses the wire — so
+ *  the bar sweeps instead of pretending to a byte count. */
+@Composable
+private fun DocumentLoadingCard(path: String, dense: Boolean) {
+    DocCardFrame(path, dense) {
+        Text(
+            stringResource(Res.string.file_transferring),
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        val sweep by rememberInfiniteTransition().animateFloat(
+            initialValue = 0.18f, targetValue = 0.82f,
+            animationSpec = infiniteRepeatable(tween(850), RepeatMode.Reverse),
+        )
+        Box(
+            Modifier.padding(top = 12.dp).fillMaxWidth().height(5.dp)
+                .clip(RoundedCornerShape(999.dp)).background(Tok.raised),
+        ) {
+            Box(Modifier.fillMaxWidth(sweep).fillMaxHeight().clip(RoundedCornerShape(999.dp)).background(Tok.accent))
+        }
+    }
+}
+
+/** Preview/Open (accent-filled) and Save As/Share (hairline ghost) — 34dp chips, icon + label, with
+ *  a desktop hover lift (pressed accent / raised border+ink). */
+@Composable
+private fun ExportActionChip(label: String, icon: ImageVector, primary: Boolean, dense: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(9.dp)
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    val fg = if (primary) Tok.base else if (hovered) Tok.tx else Tok.tx2
+    Row(
+        Modifier.height(if (dense) 30.dp else 34.dp).clip(shape)
+            .then(
+                if (primary) Modifier.background(if (hovered) Tok.accentPressed else Tok.accent)
+                else Modifier.border(1.dp, if (hovered) Tok.muted else Tok.hair, shape),
+            )
+            .hoverable(src).clickable(onClick = onClick)
+            .padding(horizontal = if (dense) 12.dp else 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(icon, null, tint = fg, modifier = Modifier.size(if (dense) 13.dp else 14.dp))
+        Text(label, color = fg, fontSize = if (dense) 12.sp else 12.5.sp, fontWeight = FontWeight.SemiBold)
+    }
 }
