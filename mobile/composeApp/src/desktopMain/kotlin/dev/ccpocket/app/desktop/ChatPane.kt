@@ -57,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -488,18 +489,23 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 val scope = rememberCoroutineScope()
                 val submit = { if (model.composer.isNotBlank() || model.hasReadyImages()) model.send(model.composer) }
                 val composerFocus = remember { FocusRequester() }
+                var composerFocused by remember { mutableStateOf(false) }
                 // Land ready-to-type: focus the composer whenever a session becomes current — a brand-new
                 // session (#72) or a pin-jump / palette / sidebar switch (#46). Only the keyboard-owning pane
                 // renders a Composer (the read-only WatchPane has none), so there's no split gate here —
                 // `focused` stays purely the accent-bar cue at the top of ChatPane. openSession clears convoId
                 // before every open, so hasChat cycles false→true on each land and this fires once per session.
-                // Retry briefly: the field may not be attached on the first tick after the fresh mount.
+                // Retry until the field REPORTS focus (onFocusChanged), not merely until requestFocus() stops
+                // throwing: right after the fresh mount the node is attached (no throw) but not yet placed, so
+                // the request silently no-ops — the old `isSuccess` check bailed on that first no-op and focus
+                // never actually landed (#72 still broken). Keep re-requesting across a short window instead.
                 // suppressAutoFocus holds the loop off while a QuestionCard field owns the keyboard (#76) —
                 // otherwise this land-ready grab races the card's "Other…"/freeform box for focus.
                 LaunchedEffect(model.hasChat, suppressAutoFocus) {
                     if (model.hasChat && !suppressAutoFocus) {
-                        repeat(6) {
-                            if (runCatching { composerFocus.requestFocus() }.isSuccess) return@LaunchedEffect
+                        repeat(20) {
+                            if (composerFocused) return@LaunchedEffect
+                            runCatching { composerFocus.requestFocus() }
                             delay(40)
                         }
                     }
@@ -582,7 +588,8 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             onValueChange = { field = it; model.composer = it.text },
                             textStyle = fieldStyle,
                             cursorBrush = SolidColor(Tok.accent),
-                            modifier = Modifier.fillMaxWidth().focusRequester(composerFocus).onPreviewKeyEvent { e ->
+                            modifier = Modifier.fillMaxWidth().focusRequester(composerFocus)
+                                .onFocusChanged { composerFocused = it.isFocused }.onPreviewKeyEvent { e ->
                                 when {
                                     // ⌘V/Ctrl+V with an image on the clipboard attaches it; plain text
                                     // falls through (return false) to the field's normal paste
