@@ -176,9 +176,14 @@ data class ActiveSession(
     val agent: AgentKind = AgentKind.CLAUDE,
 )
 
-/** One day in the usage trend (issue #26): a short [label] (e.g. "Mon") and its total tokens. */
+/**
+ * One bucket in the usage trend (issue #26): a short [label] (e.g. "Mon", or "14:00" for an hourly
+ * bucket) and its total tokens. [date] is the bucket's ISO yyyy-MM-dd — a newer daemon fills it so the
+ * 30d heatmap can place the day on a weekday grid; null from an older daemon, the client falls back to
+ * parsing [label]. A trailing optional field, so old↔new frames still round-trip.
+ */
 @Serializable
-data class UsageDay(val label: String, val tokens: Long)
+data class UsageDay(val label: String, val tokens: Long, val date: String? = null)
 
 /** One model's slice of usage: the [model] id, its [tokens], and which [agent] it belongs to (for the color). */
 @Serializable

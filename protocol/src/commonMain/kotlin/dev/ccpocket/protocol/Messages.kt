@@ -289,6 +289,8 @@ data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPh
  * Aggregated token usage (issue #26). [tokensToday]/[requestsToday]/[cacheHitPct]/[costUsdToday] are for the
  * current local day; [days] is the per-day trend (oldest→newest, last element = today); [models] is the by-model
  * breakdown (desc by tokens). Cost comes from the transcript's own costUSD (null when none is recorded).
+ * [hours] is the 24 hourly buckets (00:00→23:00) of TODAY, filled only for the Today range by a newer daemon;
+ * null from an older daemon (the phone then hides the Today trend area) and null for the 7d/30d ranges.
  */
 @Serializable
 @SerialName("pocket/usage")
@@ -299,6 +301,7 @@ data class Usage(
     val requestsToday: Long = 0,
     val cacheHitPct: Int? = null,
     val costUsdToday: Double? = null,
+    val hours: List<UsageDay>? = null,
 ) : ToPhone
 
 /**

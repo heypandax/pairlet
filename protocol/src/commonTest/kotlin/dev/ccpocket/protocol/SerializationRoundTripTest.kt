@@ -129,6 +129,34 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun usage_hours_and_date_roundtrip_and_old_frames_default() {
+        // new daemon → new app: the Today range carries 24 hourly buckets (no date — today is implied)
+        // and every day bucket an ISO date
+        val u = Usage(
+            days = listOf(UsageDay("Mon", 100, date = "2026-07-06"), UsageDay("Tue", 200, date = "2026-07-07")),
+            hours = listOf(UsageDay("00:00", 0), UsageDay("14:00", 500)),
+            tokensToday = 500,
+        )
+        val env = Envelope(id = "u1", ts = 0, body = u)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"hours\"" in json, json)
+        assertTrue("\"date\":\"2026-07-06\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // a 7d/30d usage omits hours (explicitNulls=false) — byte-identical to a peer that never sets it
+        val ranged = PocketJson.encodeToString(Envelope(id = "u2", ts = 0, body = Usage(days = listOf(UsageDay("Mon", 1, date = "2026-07-06")))))
+        assertFalse("hours" in ranged, ranged)
+
+        // an OLD daemon's usage (no hours key, day buckets carry no date) decodes with null defaults
+        val old = """{"id":"u3","ts":0,"to":"PEER","body":{"t":"pocket/usage","days":[{"label":"Mon","tokens":100}],
+            "models":[],"tokensToday":100,"requestsToday":2}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as Usage
+        assertEquals(null, back.hours)
+        assertEquals(null, back.days.single().date)
+        assertEquals(100, back.days.single().tokens)
+    }
+
+    @Test
     fun sessionGone_roundtrips() {
         val env = Envelope(id = "3", ts = 0, body = SessionGone("c9"))
         val json = PocketJson.encodeToString(env)

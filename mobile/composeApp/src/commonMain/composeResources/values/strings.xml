@@ -237,8 +237,11 @@
     <string name="usage_cache">Cache hit</string>
     <string name="usage_trend">Trend</string>
     <string name="usage_per_day">tokens / day</string>
+    <string name="usage_per_hour">tokens / hr</string>
     <string name="usage_by_model">By model</string>
     <string name="usage_peak">Peak %1$s · %2$s tokens</string>
+    <string name="usage_less">Less</string>
+    <string name="usage_more">More</string>
     <string name="usage_empty">No usage yet today</string>
     <string name="usage_empty_hint">Start a session and your token usage will show up here — nothing to worry about.</string>
     <string name="usage_offline">Can\'t reach your computer</string>

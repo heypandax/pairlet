@@ -10,9 +10,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.io.path.bufferedReader
@@ -32,12 +34,18 @@ object UsageService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val zone: ZoneId = ZoneId.systemDefault()
 
-    fun aggregate(days: Int): Usage {
+    /** [projectsRoot]/[codexFiles] default to the real on-disk roots; tests inject temp ones. */
+    fun aggregate(
+        days: Int,
+        projectsRoot: Path = ProjectPaths.projectsRoot(),
+        codexFiles: List<Path> = runCatching { dev.ccpocket.daemon.codex.CodexPaths.sessionFiles() }.getOrDefault(emptyList()),
+    ): Usage {
         val span = days.coerceIn(1, 90)
         val today = LocalDate.now(zone)
         val start = today.minusDays((span - 1).toLong())
         val seen = HashSet<String>()
         val perDay = HashMap<LocalDate, Long>()
+        val perHour = LongArray(24) // today's tokens by local hour — only surfaced for the Today range
         val perModel = HashMap<String, Long>()
         var tokensToday = 0L
         var requestsToday = 0L
@@ -46,8 +54,7 @@ object UsageService {
         var costToday = 0.0
         var costSeen = false
 
-        val root = ProjectPaths.projectsRoot()
-        if (root.isDirectory()) Files.newDirectoryStream(root).use { dirs ->
+        if (projectsRoot.isDirectory()) Files.newDirectoryStream(projectsRoot).use { dirs ->
             for (dir in dirs) {
                 if (!dir.isDirectory()) continue
                 val files = runCatching { Files.newDirectoryStream(dir, "*.jsonl").use { it.toList() } }.getOrNull() ?: continue
@@ -59,7 +66,8 @@ object UsageService {
                             val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
                             if (obj.str("type") != "assistant") continue
                             val msg = obj["message"] as? JsonObject ?: continue
-                            val date = obj.str("timestamp")?.let { runCatching { Instant.parse(it).atZone(zone).toLocalDate() }.getOrNull() } ?: continue
+                            val when_ = obj.str("timestamp")?.let(::parseWhen) ?: continue
+                            val date = when_.toLocalDate()
                             if (date.isBefore(start)) continue
                             // dedupe: the same turn reappears in multiple .jsonl after a resume/fork
                             val key = (msg.str("id") ?: "") + ":" + (obj.str("requestId") ?: "")
@@ -71,6 +79,7 @@ object UsageService {
                             perDay[date] = (perDay[date] ?: 0) + total
                             perModel[msg.str("model") ?: "unknown"] = (perModel[msg.str("model") ?: "unknown"] ?: 0) + total
                             if (date == today) {
+                                perHour[when_.hour] += total
                                 tokensToday += total
                                 requestsToday++
                                 inputToday += input
@@ -87,7 +96,7 @@ object UsageService {
         // dead path before this). Dedup by timestamp+total — a resumed thread's rollout can carry
         // copied history. OpenAI counts cached ⊂ input, Claude splits them; normalize to Claude's
         // split so the shared cache-hit formula (cacheRead / (input + cacheRead)) stays correct.
-        for (file in runCatching { dev.ccpocket.daemon.codex.CodexPaths.sessionFiles() }.getOrDefault(emptyList())) runCatching {
+        for (file in codexFiles) runCatching {
             val mtime = runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrNull() ?: return@runCatching
             if (Instant.ofEpochMilli(mtime).atZone(zone).toLocalDate().isBefore(start)) return@runCatching // whole file predates the window
             var model = "codex"
@@ -109,12 +118,14 @@ object UsageService {
                     val total = last.long("total_tokens").takeIf { it > 0 }
                         ?: (last.long("input_tokens") + last.long("output_tokens")).takeIf { it > 0 } ?: continue
                     val ts = obj.str("timestamp") ?: continue
-                    val date = runCatching { Instant.parse(ts).atZone(zone).toLocalDate() }.getOrNull() ?: continue
+                    val when_ = parseWhen(ts) ?: continue
+                    val date = when_.toLocalDate()
                     if (date.isBefore(start)) continue
                     if (!seen.add("cx:$ts:$total")) continue
                     perDay[date] = (perDay[date] ?: 0) + total
                     perModel[model] = (perModel[model] ?: 0) + total
                     if (date == today) {
+                        perHour[when_.hour] += total
                         tokensToday += total
                         requestsToday++
                         val cached = last.long("cached_input_tokens")
@@ -127,9 +138,13 @@ object UsageService {
 
         val trend = (0 until span).map { i ->
             val d = start.plusDays(i.toLong())
-            UsageDay(d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH), perDay[d] ?: 0)
+            UsageDay(d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH), perDay[d] ?: 0, date = d.toString())
         }
-        val models = perModel.entries.sortedByDescending { it.value }.take(6).map {
+        // 24 hourly buckets only when the window IS today (span == 1); larger windows leave hours null.
+        // Hour buckets carry no date — "today" is their definition and no client reads it.
+        val hours = if (span == 1) (0..23).map { UsageDay(label = "%02d:00".format(it), tokens = perHour[it]) } else null
+        // drop zero-token models so a `<synthetic> 0` placeholder turn never shows a bar
+        val models = perModel.entries.filter { it.value > 0 }.sortedByDescending { it.value }.take(6).map {
             val codex = "codex" in it.key.lowercase() || "gpt" in it.key.lowercase()
             UsageModel(it.key, it.value, if (codex) AgentKind.CODEX else AgentKind.CLAUDE)
         }
@@ -142,8 +157,11 @@ object UsageService {
             requestsToday = requestsToday,
             cacheHitPct = cacheHit,
             costUsdToday = if (costSeen) costToday else null,
+            hours = hours,
         )
     }
+
+    private fun parseWhen(ts: String): ZonedDateTime? = runCatching { Instant.parse(ts).atZone(zone) }.getOrNull()
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject?.long(key: String): Long = (this?.get(key) as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0
