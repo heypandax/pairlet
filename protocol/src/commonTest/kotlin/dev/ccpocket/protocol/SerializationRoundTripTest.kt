@@ -544,4 +544,43 @@ class SerializationRoundTripTest {
         val legacyHist = """{"role":"assistant","text":"hi"}"""
         assertFalse(PocketJson.decodeFromString<HistoryMessage>(legacyHist).error)
     }
+
+    @Test
+    fun pathEntries_pair_roundtrips() {
+        // composer @-file completion (issue #75): request + a populated reply survive the wire
+        val req = Envelope(id = "pe1", ts = 0, body = ListPathEntries("/w", subPath = "src/app"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/path.list\"" in reqJson, reqJson)
+        assertTrue("\"limit\":500" in reqJson, reqJson) // encodeDefaults — a differently-defaulting peer reads intent
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+
+        val resp = Envelope(
+            id = "pe2", ts = 0,
+            body = PathEntries("/w", "src/app", entries = listOf(PathEntry("main", true), PathEntry("Main.kt", false)), truncated = true),
+        )
+        val respJson = PocketJson.encodeToString(resp)
+        assertTrue("\"t\":\"pocket/path.entries\"" in respJson, respJson)
+        assertEquals(resp, PocketJson.decodeFromString<Envelope>(respJson))
+    }
+
+    @Test
+    fun pathEntries_minimal_frame_decodes_with_default_semantics() {
+        // a minimal frame (only t/workdir/subPath) must read as a SUCCESSFUL EMPTY listing — pins the
+        // default semantics a hand-rolled or field-dropping peer relies on
+        val minimal = """{"id":"pe3","ts":0,"to":"PEER","body":{"t":"pocket/path.entries","workdir":"/w","subPath":""}}"""
+        val back = PocketJson.decodeFromString<Envelope>(minimal).body as PathEntries
+        assertEquals(emptyList(), back.entries)
+        assertTrue(back.ok)
+        assertFalse(back.truncated)
+        assertEquals(null, back.error)
+    }
+
+    @Test
+    fun pathEntries_success_frame_omits_null_error() {
+        // explicitNulls=false: a successful reply never carries an "error" key on the wire
+        val ok = Envelope(id = "pe4", ts = 0, body = PathEntries("/w", "", entries = listOf(PathEntry("src", true))))
+        val json = PocketJson.encodeToString(ok)
+        assertFalse("\"error\"" in json, json)
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(json))
+    }
 }

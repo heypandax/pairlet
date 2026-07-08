@@ -1097,7 +1097,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // @-file completion (issue #75): a small on-device tree so the demo composer's @ menu works
             is ListPathEntries -> handle(
                 PathEntries(
-                    frame.workdir, frame.subPath,
+                    workdir = frame.workdir,
+                    subPath = frame.subPath,
                     entries = when (frame.subPath) {
                         "" -> listOf(PathEntry("src", true), PathEntry("README.md", false), PathEntry("build.gradle.kts", false))
                         "src" -> listOf(PathEntry("main", true), PathEntry("App.kt", false))
