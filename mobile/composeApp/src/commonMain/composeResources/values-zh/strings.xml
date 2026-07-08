@@ -265,6 +265,13 @@
     <string name="file_open">打开</string>
     <string name="file_preview">预览</string>
     <string name="file_no_inline_preview">此文件类型无法内嵌预览</string>
+    <string name="file_exceeds_cap">超出传输上限</string>
+    <string name="file_too_large_note">文件太大，无法在这里打开——链路传输上限为 %1$s，请到运行 daemon 的电脑上获取。</string>
+    <string name="file_transferring">正在通过中转传输…</string>
+
+    <!-- ── 子代理卡片（issue #77，chat-cards handoff）──────────── -->
+    <string name="subagent_report">报告</string>
+    <string name="subagent_tools">%1$d 个工具</string>
 
     <!-- ── 改动文件 v2：逐行改动 ─────────────────────────────────── -->
     <string name="files_stale_banner">更新电脑上的 daemon 后可查看逐行改动。</string>

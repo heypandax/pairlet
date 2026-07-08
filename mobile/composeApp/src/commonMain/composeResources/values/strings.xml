@@ -265,6 +265,13 @@
     <string name="file_open">Open</string>
     <string name="file_preview">Preview</string>
     <string name="file_no_inline_preview">No inline preview for this file type</string>
+    <string name="file_exceeds_cap">exceeds transfer cap</string>
+    <string name="file_too_large_note">Too large to open here — the link caps transfers at %1$s. Grab it from the computer running the daemon.</string>
+    <string name="file_transferring">transferring over relay…</string>
+
+    <!-- ── sub-agent card (issue #77, chat-cards handoff) ────────── -->
+    <string name="subagent_report">Report</string>
+    <string name="subagent_tools">%1$d tools</string>
 
     <!-- ── changed files v2: line-level diffs ────────────────────── -->
     <string name="files_stale_banner">Update the daemon on your computer to see line-level diffs.</string>

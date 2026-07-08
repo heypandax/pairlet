@@ -1573,46 +1573,6 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
     }
 }
 
-/**
- * A sub-agent (Task/Agent) run as one grouped card (issue #77): type + description in the header,
- * a live status (pulse while running, ✓/✗ once settled), the inner tool calls folded into a
- * "⚒ N · <latest>" progress line, and — once the run completes — the final report behind a tap.
- * With an old daemon the extras never arrive (taskId/ok stay null) and this renders like the plain
- * tool card it replaced.
- */
-@Composable
-private fun SubagentCard(m: ChatItem.Tool) {
-    val running = m.taskId != null && m.ok == null
-    // keyed on the run, not the item: progress copies() must not reset the disclosure
-    var expanded by remember(m.taskId ?: m.preview) { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
-            .clickable { expanded = !expanded }.padding(8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            when {
-                running -> PulseDot(Tok.accent)
-                m.ok == false -> Text("✗", color = Tok.danger, fontSize = 12.sp)
-                m.ok == true -> Text("✓", color = Tok.ok, fontSize = 12.sp)
-                else -> Text("⚙", color = Tok.accent, fontSize = 12.sp)
-            }
-            Text(m.tool, color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-            if (m.output != null) Text(if (expanded) "▾" else "▸", color = Tok.muted, fontSize = 11.sp)
-        }
-        if (m.preview.isNotBlank()) Text(
-            m.preview, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-            maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-        if (m.childCount > 0) Text(
-            "⚒ ${m.childCount}" + (m.lastChild?.let { " · $it" } ?: ""),
-            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-        if (expanded && m.output != null) Box(Modifier.padding(top = 4.dp)) { MarkdownText(m.output, Tok.tx2) }
-    }
-}
-
 /** A turn's wall-clock as "42s" / "1m 3s". `internal` so the desktop ChatPane renderer shares it. */
 internal fun turnDurLabel(s: Int) = if (s >= 60) "${s / 60}m ${s % 60}s" else "${s}s"
 
