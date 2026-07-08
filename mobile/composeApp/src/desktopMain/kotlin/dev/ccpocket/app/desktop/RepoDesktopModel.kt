@@ -427,6 +427,12 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     override val slashCommands: List<dev.ccpocket.protocol.SlashCommand> get() = repo.slashCommands
 
+    // @-file completion (issue #75): browse the open session's cwd via the daemon; separator sniffed off
+    // the raw (untilded) workdir so a Windows daemon's "\" paths compose natively (issue #19/#22).
+    override val pathListing: dev.ccpocket.protocol.PathEntries? get() = repo.pathListing.value
+    override val pathSep: Char get() = repo.workdir.value?.let { if (it.contains('\\')) '\\' else '/' } ?: '/'
+    override fun browsePath(sub: String) = repo.browseFiles(sub)
+
     override val pendingImages: List<dev.ccpocket.app.data.PendingImage> get() = repo.pendingImages
     override fun attachImages(raw: List<ByteArray>) = repo.attachImages(raw)
     override fun removePendingImage(id: Long) = repo.removePendingImage(id)

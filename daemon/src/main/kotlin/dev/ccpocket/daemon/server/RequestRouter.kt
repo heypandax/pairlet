@@ -23,8 +23,10 @@ import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.SessionFiles
@@ -77,6 +79,20 @@ class RequestRouter(
             }
             is ReadFileDiff -> scope.launch {
                 sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
+            }
+            // composer @-file completion (issue #75): a directory scan → off the inbound pump like the others
+            is ListPathEntries -> scope.launch {
+                val res = dirs.listPathEntries(frame.workdir, frame.subPath, frame.limit)
+                sink.emit(
+                    PathEntries(
+                        workdir = frame.workdir,
+                        subPath = frame.subPath,
+                        entries = res?.first ?: emptyList(),
+                        truncated = res?.second ?: false,
+                        ok = res != null,
+                        error = if (res == null) "not a readable directory" else null,
+                    ),
+                )
             }
 
             is OpenSession -> {

@@ -160,6 +160,23 @@ data class ReadFile(
 ) : ToDaemon
 
 /**
+ * phone -> daemon: list the immediate children (files + subdirs) of [subPath] under [workdir], for the
+ * composer's `@`-file completion (issue #75). [subPath] is a path RELATIVE to the session's cwd
+ * ([workdir]) using the daemon host's separator (empty = the cwd itself); the daemon resolves it inside
+ * [workdir] and refuses anything that escapes the tree. Names only — no contents — so it is a strictly
+ * smaller read surface than [ReadFile], scoped to the session's own project directory. The reply is one
+ * [PathEntries], capped at [limit] entries. A daemon that predates this drops it (the completer just
+ * shows nothing).
+ */
+@Serializable
+@SerialName("pocket/path.list")
+data class ListPathEntries(
+    val workdir: String,
+    val subPath: String = "",
+    val limit: Int = 500,
+) : ToDaemon
+
+/**
  * phone -> daemon: the line-level diff of one file the session touched, rebuilt from the same
  * transcript that backs [ListSessionFiles] (Claude structuredPatch hunks / Codex patch envelopes)
  * — NOT from disk, so it needs no read surface beyond [ReadFile]'s. Reply is one [FileDiff].
@@ -521,6 +538,21 @@ data class SessionFiles(
     val sessionId: String,
     val files: List<ChangedFile> = emptyList(),
     val error: String? = null, // transcript not found / unreadable — files is empty then
+) : ToPhone
+
+/** daemon -> phone: reply to [ListPathEntries] — the children under (workdir, subPath). Matched
+ *  client-side on (workdir, subPath). [truncated] = more children than [ListPathEntries.limit] existed
+ *  and the tail was dropped. On failure (subPath escaped the workdir / not a readable dir) [ok] is
+ *  false, [error] carries why, and [entries] is empty. */
+@Serializable
+@SerialName("pocket/path.entries")
+data class PathEntries(
+    val workdir: String,
+    val subPath: String,
+    val entries: List<PathEntry> = emptyList(),
+    val truncated: Boolean = false,
+    val ok: Boolean = true,
+    val error: String? = null,
 ) : ToPhone
 
 /**

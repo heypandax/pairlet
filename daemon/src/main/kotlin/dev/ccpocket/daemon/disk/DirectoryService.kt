@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.disk
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.PathEntry
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -163,6 +164,29 @@ class DirectoryService {
     fun validateWorkdir(path: String): Path? {
         val p = runCatching { Path.of(expandTilde(path)).toRealPath() }.getOrNull() ?: return null
         return if (p.isDirectory() && p.isReadable()) p else null
+    }
+
+    /**
+     * List the immediate children of [subPath] (relative to [workdir]) for the composer's `@`-file
+     * completion (issue #75). Directories first, then case-insensitive by name; names only, capped at
+     * [limit] with a truncated flag. The target is `toRealPath()`-canonicalized and MUST stay inside the
+     * (also canonical) workdir — a `..` or symlink escape returns null — so the feature can reference the
+     * session's own project files and nothing wider. Returns null when the workdir isn't a readable dir
+     * or the resolved child dir escapes / doesn't exist / isn't readable.
+     */
+    fun listPathEntries(workdir: String, subPath: String, limit: Int): Pair<List<PathEntry>, Boolean>? {
+        val root = validateWorkdir(workdir) ?: return null
+        // resolve against the canonical root, then re-canonicalize: toRealPath() collapses `..` and follows
+        // symlinks, and startsWith(root) rejects anything that lands outside the project subtree.
+        val target = runCatching { root.resolve(subPath).normalize().toRealPath() }.getOrNull() ?: return null
+        if (!target.startsWith(root)) return null
+        if (!target.isDirectory() || !target.isReadable()) return null
+        val children = runCatching { Files.newDirectoryStream(target).use { it.toList() } }.getOrNull() ?: return null
+        val sorted = children
+            .mapNotNull { p -> p.fileName?.toString()?.let { name -> PathEntry(name, p.isDirectory()) } }
+            .sortedWith(compareByDescending<PathEntry> { it.isDir }.thenBy { it.name.lowercase() })
+        val cap = limit.coerceIn(1, 2_000)
+        return sorted.take(cap) to (sorted.size > cap)
     }
 
     /**

@@ -46,8 +46,11 @@ import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.isImageFile
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.PathEntries
+import dev.ccpocket.protocol.PathEntry
 import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.SessionFiles
@@ -389,6 +392,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
     val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
+    val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -1103,6 +1107,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private suspend fun demoRespond(frame: Frame) {
         when (frame) {
             is ListDirectories -> handle(Directories(DemoData.dirs()))
+            // @-file completion (issue #75): a small on-device tree so the demo composer's @ menu works
+            is ListPathEntries -> handle(
+                PathEntries(
+                    workdir = frame.workdir,
+                    subPath = frame.subPath,
+                    entries = when (frame.subPath) {
+                        "" -> listOf(PathEntry("src", true), PathEntry("README.md", false), PathEntry("build.gradle.kts", false))
+                        "src" -> listOf(PathEntry("main", true), PathEntry("App.kt", false))
+                        else -> listOf(PathEntry("Main.kt", false))
+                    },
+                ),
+            )
             is ListSessions -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
             is OpenSession -> {
                 val cid = "demo-convo-${frame.resumeId ?: "new"}"
@@ -1329,6 +1345,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFileDiff.value = f
             }
+            // @-file completion (issue #75): keyed on workdir, not a session id — it browses the cwd, not a
+            // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
+            // the visible listing on its own requested subPath anyway).
+            is PathEntries -> if (f.workdir == workdir.value) pathListing.value = f
             else -> {}
         }
     }
@@ -1670,6 +1690,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
         viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
+    }
+
+    /** Ask the daemon for the children under the open session's cwd + [subPath] (relative, daemon-native
+     *  separators) for the composer's @-file completion (issue #75). The reply lands in [pathListing];
+     *  the completer only uses it once its subPath matches what it asked for. No-op with no open workdir. */
+    fun browseFiles(subPath: String) {
+        val wd = workdir.value ?: return
+        scope.launch { send(ListPathEntries(wd, subPath)) }
     }
 
     // ── voice input actions ───────────────────────────────────────────────

@@ -98,6 +98,11 @@ import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
 import dev.ccpocket.app.ui.completion
+import dev.ccpocket.app.ui.atTokenAt
+import dev.ccpocket.app.ui.atDirOf
+import dev.ccpocket.app.ui.atLeafOf
+import dev.ccpocket.app.ui.atMatches
+import dev.ccpocket.app.ui.atInsertText
 import dev.ccpocket.app.ui.slashQueryOf
 import dev.ccpocket.app.ui.slashSuggestions
 import dev.ccpocket.app.ui.turnDurLabel
@@ -496,8 +501,42 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 val slashOpen = slashCmds.isNotEmpty() && !slashDismissed
                 // the field mirror below moves the cursor to the end of the completed text
                 val completeSlash = { cmd: SlashCommand -> model.composer = cmd.completion() }
+                // The editable value, HOISTED here so the "@file" menu can read the caret position.
+                // TextFieldValue (not the model's plain String) because shift+Enter inserts the newline at
+                // the cursor ourselves (Compose desktop has no shift+Enter binding) and @-completion needs
+                // the caret too. Reconcile external writes: send() clears it, palette/slash completion seed it.
+                var field by remember { mutableStateOf(TextFieldValue(model.composer)) }
+                if (field.text != model.composer) field = TextFieldValue(model.composer, TextRange(model.composer.length))
+                // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
+                // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).
+                val sep = model.pathSep
+                val atToken = remember(field.text, field.selection) { atTokenAt(field.text, field.selection.min) }
+                val atDir = atToken?.let { atDirOf(it.query, sep) } ?: ""
+                val atLeaf = atToken?.let { atLeafOf(it.query, sep) } ?: ""
+                // re-list only when the directory part changes — typing the leaf just filters client-side
+                LaunchedEffect(atToken != null, atDir) { if (atToken != null) model.browsePath(atDir) }
+                val atListing = model.pathListing
+                val atEntries = remember(atListing, atToken, atDir, atLeaf) {
+                    if (atToken == null || atListing?.subPath != atDir) emptyList()
+                    else atMatches(atListing.entries, atLeaf)
+                }
+                var atSel by remember(atDir, atLeaf) { mutableStateOf(0) } // keyed: a new dir/filter resets to the top hit
+                var atClosedAt by remember { mutableStateOf<String?>(null) } // Esc / file-pick hides until the query changes
+                val atOpen = atToken != null && atEntries.isNotEmpty() && atToken.query != atClosedAt && !slashOpen
+                // pick: a folder appends the separator and keeps the menu open (drill-in); a file inserts its
+                // path and closes the menu until the query changes again.
+                val applyEntry = fun(entry: dev.ccpocket.protocol.PathEntry) {
+                    val token = atToken ?: return
+                    val insert = atInsertText(atDir, entry, sep)
+                    val from = token.at + 1
+                    val newText = field.text.replaceRange(from, token.end, insert)
+                    field = TextFieldValue(newText, TextRange(from + insert.length))
+                    model.composer = newText
+                    if (!entry.isDir) atClosedAt = insert // the just-completed query — don't reopen on this exact value
+                }
                 if (model.pendingImages.isNotEmpty()) PendingImagesRow(model)
                 if (slashOpen) SlashMenu(slashCmds, slashSel, onPick = completeSlash)
+                if (atOpen) FileMenu(atEntries, atSel, atDir, sep, atListing?.truncated == true, onPick = applyEntry)
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                         .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
@@ -523,13 +562,8 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         if (model.composer.isEmpty()) {
                             Text("Message ${if (model.chatAgent == AgentKind.CODEX) "Codex" else "Claude"}…", style = fieldStyle.copy(color = Tok.muted))
                         }
-                        // TextFieldValue (not the model's plain String) because shift+Enter must insert the
-                        // newline AT THE CURSOR ourselves: Compose desktop's key mapping has no shift+Enter
-                        // binding at all (bare Enter is its only newline key, and we've claimed that for send),
-                        // so the field never inserts one — and a String state carries no selection to do it with.
-                        var field by remember { mutableStateOf(TextFieldValue(model.composer)) }
-                        // reconcile external writes (send() clears the composer; palette/model seeding)
-                        if (field.text != model.composer) field = TextFieldValue(model.composer, TextRange(model.composer.length))
+                        // `field` is hoisted above (the @-file menu reads its caret); onValueChange keeps it +
+                        // model.composer in sync, and the reconcile up there absorbs external writes.
                         BasicTextField(
                             value = field,
                             onValueChange = { field = it; model.composer = it.text },
@@ -552,6 +586,20 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                     }
                                     slashOpen && e.type == KeyEventType.KeyDown && e.key == Key.Escape -> {
                                         slashDismissed = true; true
+                                    }
+                                    // the @-file menu claims ↑↓/Esc/Tab/⏎ while open (shift+Enter stays a newline)
+                                    atOpen && e.type == KeyEventType.KeyDown && e.key == Key.DirectionDown -> {
+                                        atSel = (atSel + 1) % atEntries.size; true
+                                    }
+                                    atOpen && e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp -> {
+                                        atSel = (atSel - 1 + atEntries.size) % atEntries.size; true
+                                    }
+                                    atOpen && e.type == KeyEventType.KeyDown && e.key == Key.Escape -> {
+                                        atClosedAt = atToken?.query; true
+                                    }
+                                    atOpen && e.type == KeyEventType.KeyDown && !e.isShiftPressed &&
+                                        (e.key == Key.Tab || e.key == Key.Enter) -> {
+                                        applyEntry(atEntries[atSel.coerceIn(0, atEntries.lastIndex)]); true
                                     }
                                     // CLI muscle memory: Esc interrupts the running turn (slash menu already handled above)
                                     e.type == KeyEventType.KeyDown && e.key == Key.Escape && model.streaming -> {
@@ -643,6 +691,61 @@ private fun SlashMenu(commands: List<SlashCommand>, selected: Int, onPick: (Slas
                     },
                     color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
                 )
+            }
+        }
+    }
+}
+
+/** The composer's "@file" completion (issue #75): ↑↓ navigate, ⏎/Tab pick, Esc dismiss — a folder pick
+ *  drills in (menu stays), a file pick inserts its relative path. Mirrors [SlashMenu]'s anchoring/keys. */
+@Composable
+private fun FileMenu(
+    entries: List<dev.ccpocket.protocol.PathEntry>,
+    selected: Int,
+    dir: String,
+    sep: Char,
+    truncated: Boolean,
+    onPick: (dev.ccpocket.protocol.PathEntry) -> Unit,
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(selected, entries.size) {
+        if (entries.isNotEmpty()) listState.scrollToItem(selected.coerceIn(0, entries.lastIndex))
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(10.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
+    ) {
+        // which directory (relative to the cwd) these entries live in — "@ ." at the project root
+        Text(
+            "@ " + (dir.ifEmpty { "." }) + if (truncated) "   · more…" else "",
+            color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 3.dp),
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 212.dp),
+            contentPadding = PaddingValues(bottom = 4.dp),
+        ) {
+            itemsIndexed(entries) { i, entry ->
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(if (i == selected) Tok.surface else Color.Transparent)
+                        .clickable { onPick(entry) }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // folders lead with a caret + trailing separator, so "drill in" reads before the tap
+                    Text(if (entry.isDir) "▸" else " ", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
+                    Text(
+                        entry.name + if (entry.isDir) sep.toString() else "",
+                        color = if (entry.isDir) Tok.tx else Tok.tx2,
+                        fontFamily = Dk.mono, fontSize = 12.5.sp,
+                        fontWeight = if (entry.isDir) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
