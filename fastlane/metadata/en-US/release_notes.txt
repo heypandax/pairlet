@@ -1,13 +1,15 @@
-What's new in 1.3.2
+What's new in 1.3.3
 
 New
-• Light mode: Settings > Appearance now offers System, Light, or Dark — the app was dark-only before
-• Delivery receipts: a prompt shows "sending", then "delivered" once your computer has it, and a dropped connection resends it safely
-• Failed turns no longer look blank — an API-failure turn shows as an error, and a session near its context limit warns you before your next message
+• Usage redesigned: Today now breaks down hour by hour, and the 30-day view is a calendar heatmap
+• Type @ in the message box to quickly insert a file from your project
+• Sub-agent runs appear as cards with live status and an expandable report
+• Preview and export session files — diffs and documents — straight from the Changes view
 
 Fixes & improvements
-• AskUserQuestion cards advance to the next question automatically after you pick a single-choice answer
-• Codex sessions list under their real title instead of the first line of your prompt
-• Reliability fixes on the computer side: an optional isolated daemon login (so phone-driven work can't sign your terminal's Claude out mid-task) and crash-safe transcripts
+• AskUserQuestion: free-text answers are now typable
+• "Sending…" no longer gets stuck — a delivery times out cleanly, shows an undelivered state, and can be resent
+• Tap a file path in a transcript to open it
+• Codex session titles no longer show setup blocks or raw IDs
 
-Note: some fixes need the computer-side cc-pocket-daemon on 1.3.2 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
+Note: some fixes need the computer-side cc-pocket-daemon on 1.3.3 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
