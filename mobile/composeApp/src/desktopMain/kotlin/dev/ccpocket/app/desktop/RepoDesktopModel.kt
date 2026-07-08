@@ -406,6 +406,8 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override val chatEffort: String? get() = repo.effort.value
     override val messages: List<ChatItem> get() = repo.messages
     override val streaming: Boolean get() = repo.streaming.value
+    // mirrors mobile's under-bubble cue: link not Ready, or receipts stalled on a Ready-looking link (#78)
+    override val sendUndelivered: Boolean get() = repo.phase.value != ConnPhase.Ready || repo.sendStalled.value
 
     override fun switchMode(m: PermissionMode) = repo.switchMode(m)
     override fun switchModel(name: String) = repo.switchModel(name)

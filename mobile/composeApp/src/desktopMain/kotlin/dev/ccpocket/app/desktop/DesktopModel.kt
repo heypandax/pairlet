@@ -251,6 +251,10 @@ interface DesktopModel {
     val chatEffort: String? get() = null
     val messages: List<ChatItem>
     val streaming: Boolean
+    /** True when a sent prompt can't be confirmed delivered — the link is down, or it claims healthy but
+     *  the delivery receipt stalled past its deadline (issue #78, common with several computers connected).
+     *  ChatPane turns the pending cue from a benign "sending…" into an honest warning on it. */
+    val sendUndelivered: Boolean get() = false
     var composer: String
     fun send(text: String)
 

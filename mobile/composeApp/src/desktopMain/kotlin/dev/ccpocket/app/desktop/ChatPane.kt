@@ -148,7 +148,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
-                    itemsIndexed(model.messages) { i, m -> CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex) } }
+                    itemsIndexed(model.messages) { i, m ->
+                        CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered) }
+                    }
                     item(key = "tail") {
                         CenteredStreamRow {
                             val ask = model.ask
@@ -280,7 +282,7 @@ private fun ChatSubHeader(model: DesktopModel) {
 }
 
 @Composable
-private fun MessageRow(item: ChatItem, isLast: Boolean = false) {
+private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boolean = false) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
             Column {
@@ -288,8 +290,15 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false) {
                 Spacer(Modifier.height(7.dp))
                 Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
                 // delivery state (issue #66): "sending…" after a short grace while the daemon hasn't
-                // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last)
-                if (item.pending) {
+                // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last).
+                // A pending bubble whose delivery can't be confirmed (link down / receipts stalled — issue #78)
+                // warns honestly instead of pulsing "sending…" forever.
+                if (item.pending && undelivered) {
+                    Text(
+                        "not delivered yet — reconnecting…", color = Tok.warn,
+                        fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp),
+                    )
+                } else if (item.pending) {
                     var slow by remember(item) { mutableStateOf(false) }
                     LaunchedEffect(item) { kotlinx.coroutines.delay(1200); slow = true }
                     if (slow) Text("sending…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))

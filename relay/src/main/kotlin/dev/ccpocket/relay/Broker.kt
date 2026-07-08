@@ -32,9 +32,11 @@ class Broker {
     /** Register a daemon; returns the superseded previous daemon (caller closes it — newest wins). */
     suspend fun attachDaemon(conn: Conn): Conn? = mutex.withLock { daemons.put(conn.account, conn) }
 
-    suspend fun detachDaemon(conn: Conn): Unit = mutex.withLock {
-        if (daemons[conn.account] === conn) daemons.remove(conn.account)
-        Unit
+    /** Unregister a daemon socket. False when [conn] was already superseded by a newer attach — the account
+     *  still has a live daemon, so the caller must NOT broadcast "offline" (a false offline right after the
+     *  successor's "online" strands devices: they key their E2E re-handshake on an offline→online edge). */
+    suspend fun detachDaemon(conn: Conn): Boolean = mutex.withLock {
+        (daemons[conn.account] === conn).also { if (it) daemons.remove(conn.account) }
     }
 
     /** Register a device socket; returns the superseded previous socket with the same deviceId, if any

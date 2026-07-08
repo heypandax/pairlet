@@ -426,6 +426,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptResendArmed = false // set by SessionGone: the next matching SessionLive resends promptRetry
     private var promptPending = false // a User bubble is marked pending until the daemon shows signs of life
 
+    /** The in-flight prompt got neither a [dev.ccpocket.protocol.PromptAck] nor any stream evidence within
+     *  [promptReceiptTimeoutMs] (issue #78). The link can CLAIM healthy while nothing comes back — outboxes
+     *  buffer across reconnects by design, and an E2E-deaf link (the daemon dropped this device's session
+     *  while the socket stayed up — routine when a fleet of machines keeps cycling links) never errors — so
+     *  without a deadline the bubble reads "sending…" forever. Drives the honest "not delivered" cue on
+     *  both UIs; cleared by the first daemon evidence, a session change, or teardown. */
+    val sendStalled = mutableStateOf(false)
+    private var promptWatchdog: Job? = null
+    internal var promptReceiptTimeoutMs = 10_000L // > relay RTT + a lazy agent spawn; a test seam shrinks it
+
     /** The daemon flagged this session degraded (recent turns were all API-failure placeholders — issue #65). */
     val sessionDegraded = mutableStateOf(false)
     // first send into a degraded session is blocked with an explanation; the next one goes through
@@ -440,6 +450,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  and flip the pending User bubble to delivered (issue #41). */
     private fun promptEvidence() {
         promptRetry = null
+        promptWatchdog?.cancel(); promptWatchdog = null // the daemon is talking — the receipt deadline is moot
+        sendStalled.value = false
         if (!promptPending) return
         promptPending = false
         val i = messages.indexOfLast { it is ChatItem.User }
@@ -934,6 +946,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionActive.value = false
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
+        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
@@ -1213,6 +1226,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     // same promptId as the original: if the first send actually landed, the daemon
                     // dedupes and just re-acks instead of running the turn twice (issue #66)
                     scope.launch { send(SendPrompt(f.convoId, retry.text, retry.images, promptId = retry.promptId)) }
+                    armPromptWatchdog() // the resent copy gets its own receipt deadline
                 }
             }
             // delivery receipt (issue #66): the daemon handed the turn to the agent — flip the bubble's
@@ -1443,6 +1457,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
         promptPending = false // the pending marker belongs to the previous conversation's transcript
+        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
@@ -1557,7 +1572,26 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workdir.value?.let { promptRetry = PromptRetry(text, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
         scope.launch { send(SendPrompt(c, text, images, promptId = promptId)) }
+        armPromptWatchdog()
         return true
+    }
+
+    /** Bound the wait for a delivery receipt (issue #78): outboxes deliberately buffer across reconnects,
+     *  so a prompt sent into a link that stopped answering would otherwise stay "sending…" forever — the
+     *  failure mode multi-computer fleets hit constantly, because machine switches and daemon socket cycles
+     *  leave links that look connected but whose E2E session the daemon no longer holds. On the deadline:
+     *  surface the stall under the bubble, and — only when the phase still CLAIMS Ready, i.e. no other
+     *  recovery is running — force one re-handshake. The queued frames re-flush on the fresh session, and
+     *  the daemon dedupes the promptId if the original actually landed, so this can't double-run the turn. */
+    private fun armPromptWatchdog() {
+        promptWatchdog?.cancel()
+        promptWatchdog = scope.launch {
+            delay(promptReceiptTimeoutMs)
+            if (!promptPending) return@launch
+            sendStalled.value = true
+            // non-Ready phases already have the retry/backoff machinery (and the UI banner) on the case
+            if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) launchTransport(reconnect = true)
+        }
     }
 
     /** Client-minted id a [dev.ccpocket.protocol.PromptAck] echoes back (issue #66) — random hex is

@@ -189,8 +189,11 @@ class RelayServer(
                 else -> {}
             }
         } finally {
-            broker.detachDaemon(conn)
-            broker.controlToDevices(account, controlText(PeerPresence(false)))
+            // "daemon offline" only when THIS socket was still the account's daemon — a superseded socket's
+            // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
+            // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
+            // device to "computer offline" with no later true to recover on (mirrors the device-side guard)
+            if (broker.detachDaemon(conn)) broker.controlToDevices(account, controlText(PeerPresence(false)))
         }
     }
 
