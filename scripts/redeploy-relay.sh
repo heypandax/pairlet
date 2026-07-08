@@ -4,17 +4,21 @@
 # HTTP/3 in Caddy (forces TCP h1/h2). Old daemons/devices keep working.
 #
 # Secrets are read from the environment (never committed):
-#   RELAY_HOST=<origin IP>  SSHPASS='<root password>'  bash scripts/redeploy-relay.sh
+#   RELAY_HOST_HK=<origin IP>  SSHPASS_HK='<root password>'  bash scripts/redeploy-relay.sh
 #
 # Prereqs: `sshpass` installed; relay dist built (./gradlew :relay:installDist).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# auto-load secrets from .env if present (RELAY_HOST / SSHPASS). .env is gitignored.
+# auto-load secrets from .env if present (RELAY_HOST_HK / SSHPASS_HK). .env is gitignored.
+# Production relay moved to the HK box on 07-08 — the legacy RELAY_HOST/SSHPASS pair points at
+# the decommissioned US-East machine, so this script deliberately reads only the *_HK variables.
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
-: "${RELAY_HOST:?set RELAY_HOST in .env (origin IP, behind Cloudflare)}"
-: "${SSHPASS:?set SSHPASS in .env (server root password)}"
+: "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP, behind Cloudflare)}"
+: "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password)}"
+RELAY_HOST="$RELAY_HOST_HK"
+export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
 DIST=relay/build/install/cc-pocket-relay
 [ -d "$DIST/lib" ] || { echo "build first: JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :relay:installDist"; exit 1; }
 
