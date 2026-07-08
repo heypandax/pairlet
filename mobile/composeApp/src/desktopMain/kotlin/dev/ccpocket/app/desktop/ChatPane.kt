@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
@@ -112,6 +113,10 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         }
         // split view marks the pane that owns the keyboard with a 2px terracotta top hairline (Fleet ⑥)
         if (focused) Box(Modifier.fillMaxWidth().height(2.dp).background(Tok.accent))
+        // While a QuestionCard text field (its "Other…" / freeform box) owns the keyboard, the composer
+        // must not yank focus back with its land-ready requestFocus loop, or the box goes unresponsive (#76).
+        // Reset per question so a fresh ask doesn't inherit the last card's ownership.
+        var questionOwnsInput by remember(model.ask?.askId) { mutableStateOf(false) }
         ChatSubHeader(model)
         Box(Modifier.weight(1f).fillMaxWidth()) {
             // VIRTUALIZED, like the phone: a long live transcript (hundreds of markdown messages,
@@ -141,12 +146,19 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                             if (ask?.isQuestion == true) {
                                 // AskUserQuestion is conversation, not a safety gate — render the shared
                                 // multiple-choice card (answers ride an ALLOW verdict) instead of a bare
-                                // Allow/Deny, which would tell the CLI the user "did not answer" (#57)
-                                QuestionCard(
-                                    ask,
-                                    onAnswer = { answers, response -> model.answerQuestions(answers, response) },
-                                    onSkip = { model.skipQuestions("User skipped the questions") },
-                                )
+                                // Allow/Deny, which would tell the CLI the user "did not answer" (#57).
+                                // DisableSelection: the card's editable "Other…"/freeform BasicTextFields
+                                // live INSIDE the stream-wide SelectionContainer, whose drag-select gesture
+                                // swallows their click-to-focus/cursor pointer input — the box looked dead to
+                                // typing (#76). Carving the card out of selection hands the fields their taps.
+                                DisableSelection {
+                                    QuestionCard(
+                                        ask,
+                                        onAnswer = { answers, response -> model.answerQuestions(answers, response) },
+                                        onSkip = { model.skipQuestions("User skipped the questions") },
+                                        onOwnsInput = { questionOwnsInput = it },
+                                    )
+                                }
                             } else if (ask != null) {
                                 InlinePermCard(
                                     ask, model.chatAgent, model.chatWorkdir, model.chatBranch,
@@ -162,7 +174,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             }
         }
         SessionHealthStrip(model)
-        if (model.observing) ObserveBar(model) else Composer(model)
+        if (model.observing) ObserveBar(model) else Composer(model, suppressAutoFocus = questionOwnsInput)
     }
 }
 
@@ -428,7 +440,7 @@ private fun ObserveBar(model: DesktopModel) {
 }
 
 @Composable
-private fun Composer(model: DesktopModel) {
+private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Column(
@@ -445,8 +457,10 @@ private fun Composer(model: DesktopModel) {
                 // `focused` stays purely the accent-bar cue at the top of ChatPane. openSession clears convoId
                 // before every open, so hasChat cycles false→true on each land and this fires once per session.
                 // Retry briefly: the field may not be attached on the first tick after the fresh mount.
-                LaunchedEffect(model.hasChat) {
-                    if (model.hasChat) {
+                // suppressAutoFocus holds the loop off while a QuestionCard field owns the keyboard (#76) —
+                // otherwise this land-ready grab races the card's "Other…"/freeform box for focus.
+                LaunchedEffect(model.hasChat, suppressAutoFocus) {
+                    if (model.hasChat && !suppressAutoFocus) {
                         repeat(6) {
                             if (runCatching { composerFocus.requestFocus() }.isSuccess) return@LaunchedEffect
                             delay(40)
