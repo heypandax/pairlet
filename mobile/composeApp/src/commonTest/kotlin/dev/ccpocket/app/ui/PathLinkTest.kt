@@ -27,6 +27,24 @@ class PathLinkTest {
     }
 
     @Test
+    fun relativePathWithExtensionLinks() {
+        // issue #74: a cwd-relative path (no leading / or ~) with a CJK filename and an extension is
+        // the shape the CLI prints for edited files; it must linkify (the opener resolves it under cwd)
+        val text = "写到 10_Notes/会议/2026-07-09_对齐材料.md 完成"
+        val linked = AnnotatedString(text).withPathLinks(openAll)
+        val links = linked.getLinkAnnotations(0, text.length)
+        assertEquals(1, links.size)
+        assertEquals("10_Notes/会议/2026-07-09_对齐材料.md", text.substring(links[0].start, links[0].end))
+    }
+
+    @Test
+    fun relativeProseWithoutExtensionDoesNotLink() {
+        // extension-less relative compounds ("and/or", "src/main") stay prose — the conservative gate
+        val text = "flip the and/or switch in src/main today"
+        assertEquals(0, AnnotatedString(text).withPathLinks(openAll).getLinkAnnotations(0, text.length).size)
+    }
+
+    @Test
     fun nullOpenerIsInert() {
         val text = "plain /a/b/c prose"
         val out = AnnotatedString(text).withPathLinks(null)

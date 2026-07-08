@@ -171,7 +171,7 @@ fun main() = application {
         }
         PocketTheme {
             androidx.compose.runtime.CompositionLocalProvider(
-                dev.ccpocket.app.ui.LocalPathOpener provides dev.ccpocket.app.desktop.DesktopPathOpener,
+                dev.ccpocket.app.ui.LocalPathOpener provides dev.ccpocket.app.desktop.DesktopPathOpener(),
             ) {
             Column(Modifier.fillMaxSize().background(Tok.base)) {
                 DkTitleBar(

@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -90,6 +91,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.AttachImageIcon
+import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
 import dev.ccpocket.app.ui.pathLinked
@@ -106,11 +108,18 @@ import dev.ccpocket.protocol.SlashCommand
 
 @Composable
 fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolean = false) {
+    if (!model.hasChat) {
+        Column(modifier.fillMaxSize().background(Tok.base)) { EmptyChat() }
+        return
+    }
+    // Linkify transcript file paths against THIS session's cwd (issue #74): a relative path like
+    // "10_Notes/会议/材料.md" resolves under chatWorkdir, so clicking it opens the same file the CLI
+    // wrote about. remember(chatWorkdir) keeps one opener per cwd so pathLinked()'s per-text memo (and
+    // the opener's own exists() cache) survive recomposition. A remote session's cwd isn't local, so
+    // those relative paths fail exists() and stay plain — no dead links.
+    val pathOpener = remember(model.chatWorkdir) { DesktopPathOpener(model.chatWorkdir) }
+    CompositionLocalProvider(LocalPathOpener provides pathOpener) {
     Column(modifier.fillMaxSize().background(Tok.base)) {
-        if (!model.hasChat) {
-            EmptyChat()
-            return@Column
-        }
         // split view marks the pane that owns the keyboard with a 2px terracotta top hairline (Fleet ⑥)
         if (focused) Box(Modifier.fillMaxWidth().height(2.dp).background(Tok.accent))
         // While a QuestionCard text field (its "Other…" / freeform box) owns the keyboard, the composer
@@ -175,6 +184,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         }
         SessionHealthStrip(model)
         if (model.observing) ObserveBar(model) else Composer(model, suppressAutoFocus = questionOwnsInput)
+    }
     }
 }
 
