@@ -5,8 +5,10 @@ name: testflight-public-link
 # What to Test from fastlane/metadata → external group with the link → Beta App Review).
 # The link lands in the job summary; installs start once Apple clears the beta review.
 #
-# Same App Store Connect API key secrets as ios-release.yml / asc-maintenance.yml. Dispatch this
-# AFTER an ios-release run has uploaded the version's build (it fails fast when none is processed).
+# Same App Store Connect API key secrets as ios-release.yml / asc-maintenance.yml. Runs two ways:
+#   - workflow_dispatch — by hand, AFTER an ios-release run uploaded the build (fails fast if none is processed)
+#   - workflow_call — folded into ios-release.yml's release flow (its `testflight` job calls this once the
+#     build is processed), so every release refreshes the public link without a second manual dispatch.
 
 on:
   workflow_dispatch:
@@ -17,6 +19,16 @@ on:
         default: ""
       group_name:
         description: "External beta group to (re)use. Any existing public-link group is preferred regardless of name, so a link that's already been shared never changes."
+        required: false
+        default: "Public Beta"
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: ""
+      group_name:
+        type: string
         required: false
         default: "Public Beta"
 

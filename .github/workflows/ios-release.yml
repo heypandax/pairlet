@@ -31,6 +31,10 @@ on:
         description: "Release automatically once App Review approves (false = you press Release in ASC)."
         type: boolean
         default: true
+      distribute_testflight:
+        description: "After the build is processed, also put it behind the TestFlight public link (external Beta App Review) — folds in what used to be a separate testflight-public-link.yml dispatch."
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -248,3 +252,15 @@ jobs:
             --build_number "$BUILD_NUMBER" \
             --submit_for_review "$SUBMIT" \
             --automatic_release "$AUTO_RELEASE"
+
+  # TestFlight public link (external Beta App Review), folded into the release so it no longer needs a
+  # separate testflight-public-link.yml dispatch. Runs after `submit` (which polls the build to VALID), so
+  # the build is processed by the time the reused workflow looks for it. The public-link group is reused, so
+  # the shared link (testflight.apple.com/join/…) never changes. Skip with distribute_testflight=false.
+  testflight:
+    if: ${{ inputs.distribute_testflight }}
+    needs: [ios, submit]
+    uses: ./.github/workflows/testflight-public-link.yml
+    with:
+      version: ${{ needs.ios.outputs.version }}
+    secrets: inherit
