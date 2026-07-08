@@ -10,8 +10,8 @@ import kotlin.io.path.exists
 
 /**
  * Flattens a Codex rollout `.jsonl` into [HistoryMessage]s for replaying a resumed chat. Mirrors the Claude
- * [dev.ccpocket.daemon.disk.TranscriptReplay]: user + assistant text + tool calls, skipping the synthetic
- * `<environment_context>` / `<permissions …>` user blocks codex injects. Schema: `response_item` payloads —
+ * [dev.ccpocket.daemon.disk.TranscriptReplay]: user + assistant text + tool calls, skipping the Codex-injected
+ * context blocks (env/permission wrappers, AGENTS.md dump, @-file expansion — see [isSyntheticUserText]). Schema: `response_item` payloads —
  * `message` (role user `input_text` / assistant `output_text`), `function_call`, `web_search_call`, `custom_tool_call`.
  */
 object CodexTranscriptReplay {
@@ -32,7 +32,7 @@ object CodexTranscriptReplay {
                         "message" -> {
                             val text = codexMessageText(p)?.takeIf { it.isNotBlank() } ?: continue
                             when (p.str("role")) {
-                                "user" -> if (!text.startsWith("<")) out += HistoryMessage(ChatRole.USER, text.take(maxTextLen))
+                                "user" -> if (!isSyntheticUserText(text)) out += HistoryMessage(ChatRole.USER, text.take(maxTextLen))
                                 "assistant" -> out += HistoryMessage(ChatRole.ASSISTANT, text.take(maxTextLen))
                                 else -> {}
                             }

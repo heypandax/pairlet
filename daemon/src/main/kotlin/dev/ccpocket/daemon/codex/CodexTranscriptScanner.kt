@@ -14,7 +14,7 @@ import kotlin.io.path.getLastModifiedTime
  * Reads Codex rollout `.jsonl` headers into [SessionSummary] (no codex launch). Each line is
  * `{timestamp, type, payload}` (verified against codex 0.124): the first line is `session_meta`
  * (carrying the thread id + cwd), and real user turns are `response_item` messages with role `user`
- * whose text isn't a synthetic `<environment_context>` / `<permissions …>` block.
+ * whose text isn't a Codex-injected context block (see [isSyntheticUserText]).
  */
 object CodexTranscriptScanner {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -108,7 +108,9 @@ object CodexTranscriptScanner {
                 val p = obj?.takeIf { it.str("type") == "response_item" }?.obj("payload")
                 if (p != null && p.str("type") == "message" && p.str("role") == "user") {
                     val t = codexMessageText(p)
-                    if (t != null && !t.startsWith("<")) { // skip synthetic environment/permission blocks
+                    // skip Codex-injected context turns (env/permission wrappers, AGENTS.md dump, @-file
+                    // expansion) — they aren't real user turns and were poisoning the title/preview
+                    if (t != null && !isSyntheticUserText(t)) {
                         userCount++
                         if (firstPrompt == null) firstPrompt = t
                     }
@@ -125,7 +127,7 @@ object CodexTranscriptScanner {
             // precedence Claude's custom-title/ai-title gets. Untitled/older sessions have no index entry,
             // so they land on the first line of the first prompt exactly as before (#64).
             title = titles[sid]?.takeIf { it.isNotBlank() }
-                ?: fp.lineSequence().firstOrNull()?.take(60)?.takeIf { it.isNotBlank() }
+                ?: fp.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(60)
                 ?: sid,
             firstPrompt = fp,
             messageCount = userCount,

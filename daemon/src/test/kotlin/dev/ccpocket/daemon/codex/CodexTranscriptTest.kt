@@ -6,6 +6,7 @@ import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -53,6 +54,69 @@ class CodexTranscriptTest {
         // a blank thread_name is ignored, not shown as an empty title
         val blank = CodexTranscriptScanner.summarize(tempRollout(), "/repo", mapOf("thr-xyz" to "  "))!!
         assertEquals("build the thing", blank.title)
+    }
+
+    @Test
+    fun summarize_skips_injected_agents_md_block() {
+        // Codex auto-prepends the repo's AGENTS.md as a `user` turn (`# AGENTS.md instructions for <path>`);
+        // it must not seed the title/preview the way `<environment_context>` already didn't (real bug: rows
+        // titled "# AGENTS.md instructions for /Users/…").
+        val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-am", ".jsonl").also {
+            it.writeText(
+                """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-am","cwd":"/repo","cli_version":"0.124.0"}}""" + "\n" +
+                    """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nuse chinese\n"}]}}""" + "\n" +
+                    """{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"生成设计稿"}]}}""",
+            )
+        }
+        val s = CodexTranscriptScanner.summarize(f, "/repo", emptyMap())!!
+        assertEquals("生成设计稿", s.firstPrompt)
+        assertEquals("生成设计稿", s.title)
+        assertEquals(1, s.messageCount) // the AGENTS.md turn isn't a real user turn
+    }
+
+    @Test
+    fun summarize_skips_files_mentioned_block_and_never_titles_with_uuid() {
+        // The `# Files mentioned by the user:` @-mention expansion leads with a newline, so its first line is
+        // blank — untreated it was skipping the title straight to the raw session UUID (the reported bug).
+        val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-fm", ".jsonl").also {
+            it.writeText(
+                """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-fm","cwd":"/repo","cli_version":"0.124.0"}}""" + "\n" +
+                    """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\n# Files mentioned by the user:\n\n## foo.png"}]}}""" + "\n" +
+                    """{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"研究这个项目"}]}}""",
+            )
+        }
+        val s = CodexTranscriptScanner.summarize(f, "/repo", emptyMap())!!
+        assertEquals("研究这个项目", s.firstPrompt)
+        assertEquals("研究这个项目", s.title)
+        assertNotEquals("thr-fm", s.title) // must never fall back to the session UUID
+    }
+
+    @Test
+    fun summarize_title_uses_first_non_blank_line() {
+        // a real prompt that opens with a blank line must title on its first non-blank line, not collapse to UUID
+        val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-bl", ".jsonl").also {
+            it.writeText(
+                """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-bl","cwd":"/repo","cli_version":"0.124.0"}}""" + "\n" +
+                    """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"\n\n  hello there  \nmore"}]}}""",
+            )
+        }
+        assertEquals("hello there", CodexTranscriptScanner.summarize(f, "/repo", emptyMap())!!.title)
+    }
+
+    @Test
+    fun replay_skips_injected_agents_md_block() {
+        val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-ar", ".jsonl").also {
+            it.writeText(
+                """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-ar","cwd":"/repo","cli_version":"0.124.0"}}""" + "\n" +
+                    """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /repo\n\nblah"}]}}""" + "\n" +
+                    """{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"real question"}]}}""" + "\n" +
+                    """{"timestamp":"t3","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}}""",
+            )
+        }
+        val msgs = CodexTranscriptReplay.read(f)
+        assertEquals(2, msgs.size) // AGENTS.md user block dropped; real user + assistant remain
+        assertEquals("real question", msgs[0].text)
+        assertEquals("answer", msgs[1].text)
     }
 
     @Test
