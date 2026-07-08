@@ -32,6 +32,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import dev.ccpocket.protocol.ImageData
+import dev.ccpocket.protocol.isSubagentTool
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
 
@@ -103,6 +108,14 @@ class Conversation(
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
     // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running
     private val jobs = BackgroundJobRegistry()
+
+    // in-flight top-level sub-agent (Task/Agent) calls, keyed by tool_use id (issue #77). Drives the
+    // phone's Task card: START on the tool_use, RESULT with the report on completion. `background`
+    // (run_in_background) flips the completion source: a foreground run's tool_result IS the report;
+    // a background run's tool_result is only the launch ack — task_notification carries the outcome.
+    // Only touched from the single stdout pump (like `jobs`), so no locking. Bounded by MAX_SUBAGENTS.
+    private data class SubagentRun(val tool: String, val background: Boolean)
+    private val subagentRuns = LinkedHashMap<String, SubagentRun>()
 
     // a user turn is in flight (prompt written, TurnDone not yet seen) — SessionLive carries it so
     // a (re)attaching phone can reset its ■/streaming state instead of trusting a stale local value
@@ -442,33 +455,49 @@ class Conversation(
                     // may start its own follow-up turn after the current result — that turn has no sendPrompt
                     // to arm the flag, and without it the grace-close reaper could kill the in-flight work
                     // (mirrors the phone, whose appendChunk sets `streaming` on the same evidence).
+                    // a sub-agent's inner monologue (parentId set) must not render as the MAIN agent
+                    // speaking — its activity reaches the phone as parent-tagged tool events the client
+                    // folds into the Task card instead (issue #77)
                     is AgentEvent.AssistantText -> {
                         executing = true
-                        sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
+                        if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
                     }
                     is AgentEvent.AssistantThinking -> {
                         executing = true
-                        sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
+                        if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
                     }
                     is AgentEvent.AssistantToolUse -> {
                         executing = true
+                        val subagent = ev.parentId == null && isSubagentTool(ev.name)
                         // ExitPlanMode's input IS the proposed plan (input["plan"]) — surface it in full via the
                         // shared ToolMetadata extractor so the plan is readable in the phone's chat, not truncated
-                        // to 280 chars of raw JSON (issue #10). Other tools keep the compact JSON preview.
-                        val preview =
-                            if (ev.name == "ExitPlanMode" || ev.name == "exit_plan_mode") ToolMetadata.of(ev.name, ev.input).preview
-                            else ev.input?.toString()?.take(280)
+                        // to 280 chars of raw JSON (issue #10). A sub-agent call reads as its type + description
+                        // (issue #77, same label as the jobs sheet). Other tools keep the compact JSON preview.
+                        val preview = when {
+                            ev.name == "ExitPlanMode" || ev.name == "exit_plan_mode" -> ToolMetadata.of(ev.name, ev.input).preview
+                            subagent -> listOfNotNull(ev.input.strField("subagent_type"), ev.input.strField("description"))
+                                .joinToString(": ").ifBlank { "sub-agent" }
+                            else -> ev.input?.toString()?.take(280)
+                        }
+                        if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))
                         sink.emit(
-                            ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, preview),
+                            ToolEvent(
+                                convoId, seq.getAndIncrement(), ToolPhase.START, ev.name, preview,
+                                toolUseId = ev.id, parentToolUseId = ev.parentId,
+                            ),
                         )
                         if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
                     }
-                    is AgentEvent.ToolResult ->
+                    is AgentEvent.ToolResult -> {
+                        if (ev.parentId == null) finishSubagentFromResult(ev)
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
+                    }
                     is AgentEvent.BackgroundTaskStarted ->
                         if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, System.currentTimeMillis())) emitJobs()
-                    is AgentEvent.BackgroundTaskUpdated ->
+                    is AgentEvent.BackgroundTaskUpdated -> {
+                        finishSubagentFromTask(ev)
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
+                    }
                     is AgentEvent.AssistantUsage -> lastCallUsage = ev
                     // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
                     // TurnDone error row replaces it) but still arm `executing`: a turn did run (issue #65).
@@ -478,6 +507,10 @@ class Conversation(
                     }
                     is AgentEvent.TurnResult -> {
                         executing = false
+                        // a FOREGROUND sub-agent still tracked at turn end never delivered its result
+                        // (interrupted / died) — settle its card so it can't spin forever. Background
+                        // runs live across turns; task_notification (or stopProcess) settles those.
+                        settleSubagents(includeBackground = false)
                         val synthetic = sawSyntheticThisTurn
                         sawSyntheticThisTurn = false
                         val interrupted = interruptRequested
@@ -700,8 +733,74 @@ class Conversation(
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this
         proc = null
         bridge = null
+        settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
         if (jobs.clear()) sink.emit(BackgroundJobs(convoId, emptyList())) // the killed process tree took its bg shells with it
         backend.onProcessEnded(sessionId)
+    }
+
+    // ---- sub-agent (Task/Agent) card lifecycle (issue #77) — pump-thread only, like `jobs` ----
+
+    private fun rememberSubagent(id: String, tool: String, background: Boolean) {
+        subagentRuns[id] = SubagentRun(tool, background)
+        // bounded like the jobs registry: a leaked entry (completion never seen) must not grow forever
+        while (subagentRuns.size > MAX_SUBAGENTS) subagentRuns.remove(subagentRuns.keys.first())
+    }
+
+    /** Main-chain tool_result for a tracked sub-agent: a foreground run's result IS its report — emit the
+     *  card's RESULT. A background run's success result is only the launch ack (task_notification finishes
+     *  it); its ERROR result means the launch itself failed, so settle now. */
+    private suspend fun finishSubagentFromResult(ev: AgentEvent.ToolResult) {
+        val id = ev.toolUseId ?: return
+        val run = subagentRuns[id] ?: return
+        if (run.background && !ev.isError) return
+        subagentRuns.remove(id)
+        emitSubagentResult(id, run.tool, ok = !ev.isError, output = subagentReport(ev.content))
+    }
+
+    /** `task_notification` completion for a tracked BACKGROUND sub-agent — the authoritative outcome
+     *  (its tool_result was only the launch ack). Foreground runs wait for the tool_result instead:
+     *  it carries the full report, where the notification only has a summary. */
+    private suspend fun finishSubagentFromTask(ev: AgentEvent.BackgroundTaskUpdated) {
+        val id = ev.toolUseId ?: return
+        val run = subagentRuns[id]?.takeIf { it.background } ?: return
+        val ok = when (ev.status?.lowercase()) {
+            "completed", "complete", "done", "success" -> true
+            "failed", "error", "killed", "cancelled", "canceled", "interrupted" -> false
+            else -> return // not terminal — keep the card running
+        }
+        subagentRuns.remove(id)
+        emitSubagentResult(id, run.tool, ok, output = subagentReport(ev.summary))
+    }
+
+    /** Settle every still-tracked sub-agent as not-ok (its completion can no longer arrive). */
+    private suspend fun settleSubagents(includeBackground: Boolean) {
+        val iter = subagentRuns.entries.iterator()
+        while (iter.hasNext()) {
+            val (id, run) = iter.next()
+            if (!includeBackground && run.background) continue
+            iter.remove()
+            emitSubagentResult(id, run.tool, ok = false, output = null)
+        }
+    }
+
+    private suspend fun emitSubagentResult(id: String, tool: String, ok: Boolean, output: String?) {
+        sink.emit(ToolEvent(convoId, seq.getAndIncrement(), ToolPhase.RESULT, tool, ok = ok, toolUseId = id, output = output))
+    }
+
+    /** The sub-agent's final report, minus the CLI's trailing "agentId: … <usage>…" continuation
+     *  plumbing, capped so one Task card can't threaten the relay frame budget. */
+    private fun subagentReport(content: String?): String? {
+        content ?: return null
+        val cut = content.indexOf("\nagentId: ")
+        val body = if (cut >= 0) content.substring(0, cut) else content
+        return body.trim().take(SUBAGENT_OUTPUT_MAX).ifBlank { null }
+    }
+
+    private fun JsonObject?.strField(key: String): String? = (this?.get(key) as? JsonPrimitive)?.contentOrNull
+
+    private fun JsonObject?.boolField(key: String): Boolean {
+        val p = this?.get(key) as? JsonPrimitive ?: return false
+        return p.booleanOrNull ?: (p.contentOrNull == "true")
     }
 
     suspend fun close() {
@@ -717,5 +816,11 @@ class Conversation(
 
         // delivered promptIds kept for retry dedupe — well past any realistic resend window
         const val SEEN_PROMPTS_MAX = 64
+
+        // in-flight sub-agent cards tracked at once (issue #77) — parallel fan-outs stay well under this
+        const val MAX_SUBAGENTS = 16
+
+        // cap on a sub-agent report crossing the wire in a ToolEvent/HistoryMessage (4 MiB frame budget)
+        const val SUBAGENT_OUTPUT_MAX = 4000
     }
 }
