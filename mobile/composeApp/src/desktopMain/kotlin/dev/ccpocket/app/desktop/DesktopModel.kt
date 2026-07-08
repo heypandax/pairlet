@@ -270,6 +270,15 @@ interface DesktopModel {
     /** Daemon-pushed "/" commands for the open session — the composer's slash autocomplete reads this. */
     val slashCommands: List<dev.ccpocket.protocol.SlashCommand> get() = emptyList()
 
+    // composer @-file completion (issue #75): the completer browses the open session's cwd through the
+    // daemon. [pathListing] is the latest reply (the completer matches its subPath before using it);
+    // [browsePath] requests a directory's children. Default no-ops keep seed/preview models inert.
+    val pathListing: dev.ccpocket.protocol.PathEntries? get() = null
+    /** The daemon host's path separator ('\\' on a Windows daemon, '/' elsewhere) — the completer splits
+     *  the typed query and composes inserted paths with it (the repo's one separator discipline, #19/#22). */
+    val pathSep: Char get() = '/'
+    fun browsePath(sub: String) {}
+
     // changes (changed-files v2): the chat header's ± pill count + the two-pane Changes browser.
     // Defaults are inert so seed/preview models compile untouched; the live model rides the repo.
     val changedFiles: List<dev.ccpocket.protocol.ChangedFile> get() = emptyList()

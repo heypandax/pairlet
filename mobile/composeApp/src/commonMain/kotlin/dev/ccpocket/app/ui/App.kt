@@ -1298,11 +1298,27 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 val suggestions = remember(slashQuery, repo.slashCommands.toList()) {
                     slashSuggestions(slashQuery, repo.slashCommands)
                 }
+                // "@file" completion (issue #75): tap-only and cursor-at-end (the common mobile case) — the
+                // daemon browses the session cwd, a folder tap drills in, a file tap inserts its path. Yields
+                // to the slash menu when that's showing. sep is the daemon host's separator (Windows-safe).
+                val atSep = repo.workdir.value?.let { if (it.contains('\\')) '\\' else '/' } ?: '/'
+                val atToken = if (suggestions.isEmpty()) atTokenAt(input, input.length) else null
+                val atDir = atToken?.let { atDirOf(it.query, atSep) } ?: ""
+                val atLeaf = atToken?.let { atLeafOf(it.query, atSep) } ?: ""
+                LaunchedEffect(atToken != null, atDir) { if (atToken != null) repo.browseFiles(atDir) }
+                val atListing = repo.pathListing.value
+                val atFileMatches = remember(atListing, atToken, atDir, atLeaf) {
+                    if (atToken == null || atListing?.subPath != atDir) emptyList() else atMatches(atListing.entries, atLeaf)
+                }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd -> input = cmd.completion() }
+                    } else if (atFileMatches.isNotEmpty() && !capturing) {
+                        FileCompletionMenu(atFileMatches, atDir, atSep) { entry ->
+                            atToken?.let { input = input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end) }
+                        }
                     }
                     AttachTray(repo.pendingImages, repo::removePendingImage)
                     repo.voiceNotice.value?.let { n ->
@@ -1444,6 +1460,45 @@ private fun SlashCommandMenu(commands: List<SlashCommand>, onPick: (SlashCommand
                 }
                 if (cmd.description.isNotBlank()) {
                     Text(cmd.description, color = Tok.tx2, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** The composer's "@file" completion panel (issue #75): tap a row to insert its relative path — a folder
+ *  drills in (trailing separator, the daemon re-lists it), a file completes the reference. */
+@Composable
+private fun FileCompletionMenu(
+    entries: List<dev.ccpocket.protocol.PathEntry>,
+    dir: String,
+    sep: Char,
+    onPick: (dev.ccpocket.protocol.PathEntry) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().background(Tok.raised)) {
+        Text(
+            "@ " + dir.ifEmpty { "." },
+            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 2.dp),
+        )
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp).padding(bottom = 4.dp)) {
+            items(entries) { entry ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(horizontal = 16.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (entry.isDir) "▸" else " ", color = Tok.muted,
+                        fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.width(16.dp),
+                    )
+                    Text(
+                        entry.name + if (entry.isDir) sep.toString() else "",
+                        color = if (entry.isDir) Tok.tx else Tok.tx2,
+                        fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+                        fontWeight = if (entry.isDir) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

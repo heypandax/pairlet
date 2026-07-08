@@ -154,6 +154,12 @@ data class DirectoryEntry(
     val activeSessions: List<ActiveSession> = emptyList(),
 )
 
+/** One filesystem child under a session's cwd, for the composer's `@`-file completion ([PathEntries],
+ *  issue #75). Name + a directory flag only — the client composes the relative path itself using the
+ *  daemon host's separator, so this carries no path and no contents. */
+@Serializable
+data class PathEntry(val name: String, val isDir: Boolean)
+
 /** One live session in a project dir — [DirectoryEntry.activeSessions]. The daemon knows its own
  *  conversations' turn state exactly; [executing] for a terminal-launched claude falls back to the
  *  wrote-recently heuristic. */
