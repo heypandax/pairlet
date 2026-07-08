@@ -1198,9 +1198,11 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     contentPadding = PaddingValues(bottom = 30.dp),
                 ) {
                     items(repo.messages) { m ->
-                        // a prompt the daemon hasn't acknowledged while the link is down: say so under the
-                        // bubble instead of letting it look sent (issue #41 — frames queue silently offline)
-                        val undelivered = m is ChatItem.User && m.pending && repo.phase.value != ConnPhase.Ready
+                        // a prompt the daemon hasn't acknowledged while the link is down — or while the link
+                        // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):
+                        // say so under the bubble instead of letting it look sent (issue #41 — frames queue
+                        // silently offline)
+                        val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             MessageItem(m) { imgs, i -> viewer = imgs to i }
                             when {
