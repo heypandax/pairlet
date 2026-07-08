@@ -31,6 +31,17 @@
             </intent-filter>
         </activity>
 
+        <!-- session-file export (issue #67): mints read-only uris for the share sheet / viewers -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- FCM: receives token refreshes + foreground notification messages -->
         <service
             android:name=".push.CcPocketMessagingService"

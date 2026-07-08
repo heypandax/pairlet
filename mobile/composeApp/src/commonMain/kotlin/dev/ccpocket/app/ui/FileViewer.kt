@@ -14,11 +14,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.share.exportBytesOf
+import dev.ccpocket.app.share.shareFile
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.ChangedFile
 import org.jetbrains.compose.resources.stringResource
@@ -156,6 +162,12 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                 Column(Modifier.weight(1f)) {
                     Text(fileNameOf(path), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     TailPathText(parentDirOf(path), fontSize = 11.sp)
+                }
+                // share/save whatever the viewer holds (issue #67) — text files ride the sheet too
+                val content = repo.viewedFile.value
+                val exportable = remember(content) { exportBytesOf(content) }
+                if (exportable != null) TextButton({ shareFile(fileNameOf(path), exportable, content?.mediaType) }) {
+                    Icon(Icons.Rounded.IosShare, stringResource(Res.string.file_share), tint = Tok.tx2, modifier = Modifier.size(18.dp))
                 }
                 // ← goes back UP one level (the changed-files list when that's where we came from);
                 // ✕ skips the list and drops straight to the chat (issue #53's "一键返回").

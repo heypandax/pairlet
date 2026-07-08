@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -55,8 +57,13 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.diff_stale_hint
 import dev.ccpocket.app.resources.diff_stale_title
+import dev.ccpocket.app.resources.file_open
+import dev.ccpocket.app.resources.file_save_as
 import dev.ccpocket.app.resources.files_empty
 import dev.ccpocket.app.resources.files_title
+import dev.ccpocket.app.share.exportBytesOf
+import dev.ccpocket.app.share.previewFile
+import dev.ccpocket.app.share.shareFile
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.DiffEmptyState
 import dev.ccpocket.app.ui.DiffFileToggle
@@ -265,6 +272,17 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
     ) {
         Box(Modifier.weight(1f)) { TailPathText(file.path, fontSize = 12.sp, color = Tok.tx2) }
         CopyPathButton(file.path)
+        // export what the viewer holds (issue #67): open with the system app / save a copy
+        val content = model.selectedContent
+        val exportable = remember(content) { exportBytesOf(content) }
+        if (exportable != null) {
+            HeaderIconButton(Icons.Rounded.OpenInNew, stringResource(Res.string.file_open)) {
+                previewFile(fileNameOf(file.path), exportable, content?.mediaType)
+            }
+            HeaderIconButton(Icons.Rounded.Download, stringResource(Res.string.file_save_as)) {
+                shareFile(fileNameOf(file.path), exportable, content?.mediaType)
+            }
+        }
         StatusChip(file.op)
         val (adds, dels) = shownStats(file, diff)
         if (!isImage && (adds != null || dels != null)) DiffStatText(adds, dels, fontSize = 12.sp)
@@ -291,5 +309,13 @@ private fun CopyPathButton(path: String) {
     ) {
         if (copied) Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(13.dp))
         else Icon(Icons.Rounded.ContentCopy, "copy path", tint = Tok.muted, modifier = Modifier.size(13.dp))
+    }
+}
+
+/** Quiet 13dp header action, matching [CopyPathButton]'s footprint. */
+@Composable
+private fun HeaderIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Box(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(3.dp)) {
+        Icon(icon, label, tint = Tok.muted, modifier = Modifier.size(13.dp))
     }
 }

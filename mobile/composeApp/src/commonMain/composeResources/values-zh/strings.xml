@@ -259,6 +259,13 @@
     <string name="file_truncated">预览已截断——前 %1$d KB / 共 %2$d KB</string>
     <string name="file_undecodable">无法显示这张图片</string>
 
+    <!-- ── 文件导出 / 原生预览（issues #67/#79）──────── -->
+    <string name="file_share">分享</string>
+    <string name="file_save_as">另存为…</string>
+    <string name="file_open">打开</string>
+    <string name="file_preview">预览</string>
+    <string name="file_no_inline_preview">此文件类型无法内嵌预览</string>
+
     <!-- ── 改动文件 v2：逐行改动 ─────────────────────────────────── -->
     <string name="files_stale_banner">更新电脑上的 daemon 后可查看逐行改动。</string>
     <string name="diff_tab">改动</string>
