@@ -142,9 +142,11 @@ class Conversation(
     @Volatile
     private var openedWithFork = false
 
-    // model read back from the resumed transcript, for DISPLAY only (header + context window before the
-    // first init lands). Never baked into an AgentSpec: pinning a historical — possibly retired — model
-    // onto a relaunch or /clear would silently override the user's configured default (issue #27 residual).
+    // best-guess model for DISPLAY only (header + context window before the first init lands): read back from
+    // the resumed transcript, or — for a brand-new session with no --model — the backend's configured default
+    // (issue #96). Never baked into an AgentSpec: pinning a historical — possibly retired — model onto a
+    // relaunch or /clear would silently override the user's configured default (issue #27 residual). The first
+    // turn's init clears it and becomes the source of truth.
     @Volatile
     private var backfilledModel: String? = null
 
@@ -262,6 +264,15 @@ class Conversation(
             // until then, issue #27). Done off the relay inbound loop; the transcript read can be a multi-MB parse.
             if (model == null && resumeId != null) {
                 runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { backfilledModel = it }
+            }
+            // issue #96: no explicit --model AND nothing recovered from a transcript (a brand-new session, or a
+            // resume whose transcript named no model) — eagerly resolve the backend's CONFIGURED default so the
+            // header shows the real model before the first turn instead of a blank segment. Best-effort +
+            // DEFENSIVE: any failure here must never crash or block the open (claude ≥1.3.1 crash-loops on
+            // eager-resolve failures) — the runCatching leaves backfilledModel null and the phone renders its
+            // "account default" placeholder. The first turn's init still wins (it clears backfilledModel).
+            if (model == null && backfilledModel == null) {
+                runCatching { backend.defaultModel(workdir.toString()) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { backfilledModel = it }
             }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             // seed the degraded flag from the transcript's tail: a session that died over its context
