@@ -85,6 +85,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.layout.ContentScale
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ImgState
+import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.theme.Tok
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -95,6 +96,7 @@ import dev.ccpocket.app.ui.AttachImageIcon
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
+import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
@@ -296,7 +298,21 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
             Column {
                 Text("You", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
                 Spacer(Modifier.height(7.dp))
-                Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                // sent attachments (issue #85): the compressed JPEG bytes ride ChatItem.User.images from
+                // send (sendPrompt), so an image-only prompt no longer renders as a blank turn. Reuses the
+                // shared SentImages tile (phone parity, Calm-Terminal tokens; widthIn caps keep it bounded
+                // on desktop). DisableSelection lets a click reach the tile through the stream-wide
+                // SelectionContainer — same carve-out as the QuestionCard fields (#76); previewFile drops
+                // the bytes to a temp file and opens the OS default viewer (the desktop preview gesture, #79).
+                if (item.images.isNotEmpty()) {
+                    DisableSelection {
+                        SentImages(item.images) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
+                    }
+                    if (item.text.isNotBlank()) Spacer(Modifier.height(8.dp))
+                }
+                if (item.text.isNotBlank()) {
+                    Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                }
                 // delivery state (issue #66): "sending…" after a short grace while the daemon hasn't
                 // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last).
                 // A pending bubble whose delivery can't be confirmed (link down / receipts stalled — issue #78)
