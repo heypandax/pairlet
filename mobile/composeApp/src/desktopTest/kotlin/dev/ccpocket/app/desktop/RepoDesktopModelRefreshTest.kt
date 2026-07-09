@@ -18,13 +18,14 @@ import kotlin.test.assertTrue
 class RepoDesktopModelRefreshTest {
 
     private fun demoModel(): Pair<PocketRepository, RepoDesktopModel> {
-        val repo = PocketRepository(CoroutineScope(Dispatchers.Unconfined))
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val repo = PocketRepository(scope)
         // demo mode never sets a binding, but RECENT visits are keyed per account — fake one
         repo.paired.value = PairedDaemon(
             relay = "wss://test", accountId = "acct-test", daemonPub = "pk", deviceId = "dev", credential = "cred",
         )
         repo.enterDemo()
-        return repo to RepoDesktopModel(repo)
+        return repo to RepoDesktopModel(repo, scope)
     }
 
     @Test
