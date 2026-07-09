@@ -15,6 +15,12 @@ import java.lang.reflect.Proxy
  * The AWT window behind a Compose `Window` is a `ComposeWindow` (a `JFrame`, hence a [java.awt.Window]),
  * which is what these APIs expect. Native fullscreen is more reliable for undecorated windows than
  * `WindowPlacement.Fullscreen` — the same pitfall class as the abandoned `WindowPlacement.Maximized`.
+ *
+ * IMPORTANT: `java.desktop` does NOT export `com.apple.eawt` to the unnamed (classpath) module, so a bare
+ * reflective `invoke` throws `IllegalAccessException`. The macOS build/run therefore passes
+ * `--add-exports java.desktop/com.apple.eawt=ALL-UNNAMED` (see composeApp/build.gradle.kts, gated to macOS
+ * hosts). Without that flag every call here fails its try/catch and fullscreen silently won't engage —
+ * everything else still works, so it degrades gracefully rather than crashing.
  */
 object MacWindow {
     val isMac = System.getProperty("os.name").lowercase().contains("mac")
@@ -46,11 +52,12 @@ object MacWindow {
                 }
             }
             val listener = Proxy.newProxyInstance(listenerClass.classLoader, arrayOf(listenerClass), handler)
-            util.getMethod("addFullScreenListener", Window::class.java, listenerClass).invoke(null, window, listener)
+            // NB: the real method names are ...ListenerTo / ...ListenerFrom (not add/removeFullScreenListener)
+            util.getMethod("addFullScreenListenerTo", Window::class.java, listenerClass).invoke(null, window, listener)
 
             AutoCloseable {
                 runCatching {
-                    util.getMethod("removeFullScreenListener", Window::class.java, listenerClass)
+                    util.getMethod("removeFullScreenListenerFrom", Window::class.java, listenerClass)
                         .invoke(null, window, listener)
                 }
             }
