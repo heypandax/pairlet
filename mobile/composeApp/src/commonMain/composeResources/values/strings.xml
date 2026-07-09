@@ -336,6 +336,10 @@
     <string name="job_kind_bash">shell</string>
     <string name="job_kind_subagent">agent</string>
     <string name="job_kind_monitor">monitor</string>
+    <string name="job_stop_hint">Long-press a running task to stop it.</string>
+    <string name="job_stop_title">Stop task?</string>
+    <string name="job_stop_confirm">This interrupts “%1$s” on the computer. A real build or long-running job won\'t resume on its own.</string>
+    <string name="job_stop_action">Stop task</string>
 
     <!-- ── multi-agent (Claude / Codex) ──────────────────────────── -->
     <string name="label_agent">Agent</string>

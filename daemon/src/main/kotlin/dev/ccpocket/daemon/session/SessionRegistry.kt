@@ -19,6 +19,7 @@ import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionSummary
+import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
@@ -291,6 +292,7 @@ class SessionRegistry(
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode) ?: Unit
     suspend fun clearRule(c: ClearAllowRule) = get(c.convoId)?.clearAllowRule(c.rule) ?: Unit
     suspend fun cancelTurn(c: CancelTurn) = get(c.convoId)?.cancelTurn() ?: Unit
+    suspend fun stopBackgroundJob(s: StopBackgroundJob) = get(s.convoId)?.stopBackgroundJob(s.jobId) ?: Unit
 
     /** Workdir of a live conversation — used by voice transcription for term injection. */
     suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir

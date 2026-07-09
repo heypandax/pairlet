@@ -80,6 +80,7 @@ import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
+import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.ToolEvent
@@ -2065,6 +2066,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun cancelTurn() {
         val c = convoId.value ?: return
         scope.launch { send(CancelTurn(c)) }
+    }
+
+    /** Stop one background job from the task panel (issue #80): the daemon interrupts the agent's work for
+     *  this session and settles the job's row killed. UI-guarded by a confirm — a real build is costly to lose. */
+    fun stopBackgroundJob(jobId: String) {
+        val c = convoId.value ?: return
+        scope.launch { send(StopBackgroundJob(c, jobId)) }
     }
 
     fun backToBrowse() {
