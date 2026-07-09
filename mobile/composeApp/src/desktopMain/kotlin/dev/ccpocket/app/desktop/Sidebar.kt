@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
@@ -339,13 +340,16 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
             )
             return@Column
         }
+        // collapse set + scroll position hoisted out of the LazyColumn so the reveal effect below can
+        // drive them (expand a folded group, scroll it in) without collapsing the others (#83)
         val collapsed = remember { mutableStateListOf<String>() }
+        val listState = rememberLazyListState()
         // which header's refresh icon spins: the clicked group's; ⌘R has no click, so the current one's
         var refreshTarget by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(model.sessionsRefreshing) { if (!model.sessionsRefreshing) refreshTarget = null }
         val spinningPath = if (model.sessionsRefreshing) refreshTarget ?: groups.firstOrNull { it.current }?.path else null
         val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
-        LazyColumn(Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
             groups.forEach { g ->
                 val closed = g.path in collapsed
                 item(key = "h:${g.path}") {
