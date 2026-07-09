@@ -334,6 +334,10 @@
     <string name="job_kind_bash">脚本</string>
     <string name="job_kind_subagent">子代理</string>
     <string name="job_kind_monitor">监视</string>
+    <string name="job_stop_hint">长按运行中的任务可停止。</string>
+    <string name="job_stop_title">停止任务？</string>
+    <string name="job_stop_confirm">这会在电脑上中断“%1$s”。真实构建或长耗时任务不会自动恢复。</string>
+    <string name="job_stop_action">停止任务</string>
 
     <!-- ── 多智能体（Claude / Codex） ────────────────────────────── -->
     <string name="label_agent">智能体</string>

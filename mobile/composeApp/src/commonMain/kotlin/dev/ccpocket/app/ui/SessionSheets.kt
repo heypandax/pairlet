@@ -3,6 +3,7 @@ package dev.ccpocket.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,9 +17,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
@@ -369,7 +373,7 @@ fun BackgroundJobsStrip(jobs: List<BackgroundJob>, onClick: () -> Unit) {
 }
 
 @Composable
-fun BackgroundJobsSheet(jobs: List<BackgroundJob>, onDismiss: () -> Unit) {
+fun BackgroundJobsSheet(jobs: List<BackgroundJob>, onStop: (BackgroundJob) -> Unit, onDismiss: () -> Unit) {
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp, top = 4.dp)) {
             Text(stringResource(Res.string.bg_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -378,28 +382,98 @@ fun BackgroundJobsSheet(jobs: List<BackgroundJob>, onDismiss: () -> Unit) {
                 jobs.sortedWith(compareByDescending<BackgroundJob> { it.status == JobStatus.RUNNING }.thenByDescending { it.lastUpdate })
             }
             Column(Modifier.padding(top = 12.dp).heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                sorted.forEach { JobRow(it) }
+                sorted.forEach { JobRow(it, onStop) }
+            }
+            // discoverability for the long-press stop (issue #80): a quiet hint, only while something can be
+            // stopped — keeps the affordance off an always-visible per-row button as the issue asks
+            if (jobs.any { it.status == JobStatus.RUNNING }) {
+                Text(
+                    stringResource(Res.string.job_stop_hint), color = Tok.muted, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
             }
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class) // combinedClickable (long-press)
 @Composable
-private fun JobRow(job: BackgroundJob) {
+private fun JobRow(job: BackgroundJob, onStop: (BackgroundJob) -> Unit) {
+    val running = job.status == JobStatus.RUNNING
+    var confirmStop by remember(job.id) { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+            // stop lives in a long-press (not an always-visible button, per issue #80) and only on a RUNNING
+            // row — a settled job has nothing to stop. The confirm guards a costly real build.
+            .then(if (running) Modifier.combinedClickable(onClick = {}, onLongClick = { confirmStop = true }) else Modifier)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (job.status == JobStatus.RUNNING) CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 1.5.dp)
+        if (running) CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 1.5.dp)
         else Box(Modifier.size(8.dp).clip(CircleShape).background(jobStatusColor(job.status)))
         Column(Modifier.weight(1f)) {
             Text(job.label, color = Tok.tx, fontSize = 13.sp, maxLines = 2)
             Text(jobKindLabel(job.kind), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, modifier = Modifier.padding(top = 1.dp))
         }
-        Text(jobStatusLabel(job.status), color = jobStatusColor(job.status), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        // Option (a): a RUNNING job's right-side label is its ticking elapsed time (a moving "3h12m" already
+        // implies running), so the status word never fights the truncated command for width; past ~1h it
+        // turns warn-coloured to flag a possibly-stuck task. A settled job keeps its status word.
+        if (running) {
+            val (elapsed, warn) = rememberJobElapsed(job.startedAt)
+            Text(elapsed, color = if (warn) Tok.warn else Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        } else {
+            Text(jobStatusLabel(job.status), color = jobStatusColor(job.status), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+    if (confirmStop) {
+        JobStopConfirm(job, onConfirm = { confirmStop = false; onStop(job) }, onDismiss = { confirmStop = false })
     }
 }
+
+/** Confirm stopping a running task — costly to lose a real build, so guard it (issue #80). */
+@Composable
+private fun JobStopConfirm(job: BackgroundJob, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Tok.raised,
+        titleContentColor = Tok.tx,
+        textContentColor = Tok.tx2,
+        title = { Text(stringResource(Res.string.job_stop_title)) },
+        text = { Text(stringResource(Res.string.job_stop_confirm, job.label), color = Tok.tx2, fontSize = 14.sp, lineHeight = 21.sp) },
+        confirmButton = { TextButton(onConfirm) { Text(stringResource(Res.string.job_stop_action), color = Tok.danger) } },
+        dismissButton = { TextButton(onDismiss) { Text(stringResource(Res.string.cancel), color = Tok.muted) } },
+    )
+}
+
+/** Compact elapsed since [startedAt] ("42s" / "12m" / "3h12m"), ticking each second while composed, plus
+ *  whether it has crossed the ~1h warn threshold. Reads the daemon's wall-clock [BackgroundJob.startedAt]
+ *  (matches [epochMillis] on every platform), so it stays accurate even when the phone attaches mid-run. */
+@Composable
+private fun rememberJobElapsed(startedAt: Long): Pair<String, Boolean> {
+    var now by remember(startedAt) { mutableStateOf(epochMillis()) }
+    LaunchedEffect(startedAt) {
+        while (true) { delay(1000); now = epochMillis() }
+    }
+    val elapsedMs = (now - startedAt).coerceAtLeast(0)
+    return fmtJobDuration(elapsedMs) to (elapsedMs >= JOB_WARN_MS)
+}
+
+/** "42s" under a minute, "12m" under an hour, "3h12m" beyond — a compact "is it stuck?" readout. */
+internal fun fmtJobDuration(ms: Long): String {
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return when {
+        h > 0 -> "${h}h${m}m"
+        m > 0 -> "${m}m"
+        else -> "${s}s"
+    }
+}
+
+/** Past ~1h a still-running task is likely stuck (the issue #80 gcloud-auth case) — its duration turns warn. */
+private const val JOB_WARN_MS = 60 * 60 * 1000L
 
 @Composable
 private fun jobKindLabel(kind: JobKind): String = stringResource(
