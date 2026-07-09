@@ -74,12 +74,15 @@ import dev.ccpocket.app.ui.FileTabBody
 import dev.ccpocket.app.ui.FilesSummaryText
 import dev.ccpocket.app.ui.StatusChip
 import dev.ccpocket.app.ui.TailPathText
+import dev.ccpocket.app.ui.WrapToggle
 import dev.ccpocket.app.ui.fileNameOf
 import dev.ccpocket.app.ui.isImagePath
 import dev.ccpocket.app.ui.parentDirOf
 import dev.ccpocket.app.ui.rememberCopied
 import dev.ccpocket.app.ui.rememberDiffTab
+import dev.ccpocket.app.ui.rememberWrapState
 import dev.ccpocket.app.ui.shownStats
+import dev.ccpocket.app.ui.wrapApplies
 import dev.ccpocket.protocol.ChangedFile
 import org.jetbrains.compose.resources.stringResource
 
@@ -264,6 +267,7 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
     val deleted = file.op == "delete"
     val ext = file.path.substringAfterLast('.', "").lowercase()
     var diffTab by rememberDiffTab(file.path, isImage, deleted, diff)
+    val wrap = rememberWrapState()
 
     Row(
         Modifier.fillMaxWidth().background(Tok.surface).padding(horizontal = 14.dp, vertical = 10.dp),
@@ -290,6 +294,10 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
         StatusChip(file.op)
         val (adds, dels) = shownStats(file, diff)
         if (!isImage && (adds != null || dels != null)) DiffStatText(adds, dels, fontSize = 12.sp)
+        if (wrapApplies(diffTab, diff, model.selectedContent, ext, isImage)) {
+            val active = if (diffTab) wrap.diff else wrap.file
+            WrapToggle(on = active.value) { active.value = !active.value }
+        }
         DiffFileToggle(
             diffSelected = diffTab,
             isImage = isImage,
@@ -300,8 +308,8 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
     Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
 
     Box(Modifier.fillMaxSize()) {
-        if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = true)
-        else FileTabBody(model.selectedContent, ext, dense = true, path = file.path)
+        if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = true, wrap = wrap.diff.value)
+        else FileTabBody(model.selectedContent, ext, dense = true, path = file.path, wrap = wrap.file.value)
     }
 }
 
