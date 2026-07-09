@@ -1994,7 +1994,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Timeout: the daemon already auto-denied at 30s; just clear the prompt without re-sending. */
     fun dismissAsk() { pendingAsk.value = null }
 
-    /** Switch the execution/permission mode — relaunches the session on the daemon. */
+    /** Switch the execution/permission mode — applied on the next turn (issue #84), never interrupting a
+     *  running turn (the daemon relaunches Claude before the next send; Codex carries it in-turn). */
     fun switchMode(m: PermissionMode) {
         val c = convoId.value ?: return
         if (m == mode.value) return
@@ -2006,7 +2007,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** Switch the model — routed through the daemon's `/model` interception (relaunch under --model). */
+    /** Switch the model — routed through the daemon's `/model` interception; applied on the next turn
+     *  (issue #84), never interrupting a running one. */
     fun switchModel(name: String) {
         val target = name.trim()
         if (convoId.value == null || target.isEmpty() || target == model.value) return
@@ -2014,7 +2016,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         switchViaCommand("/model $target")
     }
 
-    /** Switch reasoning effort — routed through the daemon's `/effort` interception (relaunch under --effort). */
+    /** Switch reasoning effort — routed through the daemon's `/effort` interception; applied on the next
+     *  turn (issue #84), never interrupting a running one. */
     fun switchEffort(level: String) {
         val target = level.trim().lowercase()
         if (convoId.value == null || target.isEmpty() || target == effort.value) return
