@@ -53,6 +53,12 @@ private const val K_WIN_BOUNDS = "desktop_window_bounds" // "x,y,w,h[,zoomed]" �
  * command palette (Esc closes it) — handled at the window level so it works regardless of focus.
  */
 fun main() = application {
+    // GA4 Measurement Protocol backend for desktop analytics — resolves credentials (env / ga4.properties)
+    // up front so a missing config logs at launch. No-op when unconfigured. Every PocketRepository event
+    // (pair / connect / conn_failed / session / prompt / approval) fires automatically since desktop drives
+    // the same repo; AppLaunch is the one exception — the shared App() composable that fires it on mobile
+    // isn't used here, so we track it explicitly below.
+    remember { dev.ccpocket.app.telemetry.initDesktopTelemetry() }
     val mac = System.getProperty("os.name").lowercase().contains("mac")
     // restore last window bounds (the off-screen guard below re-centers if displays changed since);
     // a 5th field marks "was zoomed" — the first four stay the PRE-zoom bounds so un-zoom has a target
@@ -70,7 +76,10 @@ fun main() = application {
     // attention popover, and palette badges read across all of them
     remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
     val model = remember { RepoDesktopModel(repo) }
-    LaunchedEffect(Unit) { if (repo.paired.value != null) repo.startRelay() } // paired → connect straight away
+    LaunchedEffect(Unit) {
+        dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
+        if (repo.paired.value != null) repo.startRelay() // paired → connect straight away
+    }
     val connected by repo.sessionActive
 
     Window(

@@ -1,0 +1,12 @@
+# GA4 Measurement Protocol credentials for the DESKTOP app's telemetry.
+#
+# Copy this file to `ga4.properties` (same dir — the real one is gitignored, like google-services.json)
+# and fill in the two values from the GA4 console for the property behind Firebase project cc-pocket-1b3ea:
+#
+#   1. Admin ▸ Data streams ▸ add a "Web" stream (any placeholder URL) → copy its Measurement ID (G-XXXXXXXX)
+#   2. That same stream ▸ Measurement Protocol API secrets ▸ Create → copy the secret value
+#
+# Env vars CCPOCKET_GA4_MEASUREMENT_ID / CCPOCKET_GA4_API_SECRET override this file (useful for CI).
+# With neither present, desktop telemetry is a safe no-op (nothing is sent).
+measurement_id=REPLACE_WITH_G-XXXXXXXX
+api_secret=REPLACE_WITH_MP_API_SECRET

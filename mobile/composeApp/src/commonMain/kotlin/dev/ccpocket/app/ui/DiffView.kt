@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -236,10 +237,12 @@ private sealed interface DiffRow {
  * The unified diff, rendered per the shared grammar: collapsible hunk-header bands, +/− rows on
  * 12% tints, a quiet line-number gutter (single new-side column on mobile, old|new pair when
  * [dense]), and "⋯ N unchanged lines" separators where consecutive numbered hunks leave a gap.
- * The gutter stays put; code pans on one shared horizontal scroll (no soft wrap).
+ * The gutter stays put; code pans on one shared horizontal scroll, or soft-wraps when [wrap]
+ * (issue #95 — wrapping is a toggle, not the default, because it breaks column alignment).
+ * Code text is selectable (#95); gutters/chrome are not, so a copied selection is only code.
  */
 @Composable
-fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, modifier: Modifier = Modifier) {
+fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: Boolean = false, modifier: Modifier = Modifier) {
     val collapsed = remember(hunks) { mutableStateMapOf<Int, Boolean>() }
     val hScroll = rememberScrollState()
     // derivedStateOf: rebuilt only when hunks/collapse actually change, not on every parent recomposition
@@ -267,16 +270,20 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, modifi
         val fn: (String) -> AnnotatedString = { text -> cache.getOrPut(text) { highlightCodeOrNull(text, ext) ?: AnnotatedString(text) } }
         fn
     }
-    LazyColumn(modifier.background(DiffTok.codeBg)) {
-        items(rows.size, key = { rows[it].key }) { i ->
-            when (val row = rows[i]) {
-                is DiffRow.Header -> HunkHeader(
-                    row.hunk, dense,
-                    isCollapsed = collapsed[row.idx] == true,
-                    firstHunk = row.idx == 0,
-                ) { collapsed[row.idx] = collapsed[row.idx] != true }
-                is DiffRow.Line -> DiffLineRow(row.line, dense, hScroll, highlight)
-                is DiffRow.Gap -> GapRow(row.lines)
+    SelectionContainer(modifier.background(DiffTok.codeBg)) {
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(rows.size, key = { rows[it].key }) { i ->
+                when (val row = rows[i]) {
+                    is DiffRow.Header -> DisableSelection {
+                        HunkHeader(
+                            row.hunk, dense,
+                            isCollapsed = collapsed[row.idx] == true,
+                            firstHunk = row.idx == 0,
+                        ) { collapsed[row.idx] = collapsed[row.idx] != true }
+                    }
+                    is DiffRow.Line -> DiffLineRow(row.line, dense, wrap, hScroll, highlight)
+                    is DiffRow.Gap -> DisableSelection { GapRow(row.lines) }
+                }
             }
         }
     }
@@ -323,7 +330,7 @@ private fun GapRow(lines: Int) {
 }
 
 @Composable
-private fun DiffLineRow(line: DiffLine, dense: Boolean, hScroll: ScrollState, highlight: (String) -> AnnotatedString) {
+private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: ScrollState, highlight: (String) -> AnnotatedString) {
     val rowBg = when (line.kind) {
         DiffLineKind.ADD -> DiffTok.addBg
         DiffLineKind.DEL -> DiffTok.delBg
@@ -356,20 +363,24 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, hScroll: ScrollState, hi
         ) {
             Text(no?.toString() ?: "", color = gutText, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = lineHeight, maxLines = 1)
         }
-        if (dense) Gutter(line.oldNo) // desktop: old | new pair; mobile keeps the single new-side gutter
-        Gutter(line.newNo)
-        Box(Modifier.width(1.dp).fillMaxHeight().background(DiffTok.gutBorder))
-        Text(
-            when (line.kind) { DiffLineKind.ADD -> "+"; DiffLineKind.DEL -> "−"; DiffLineKind.CTX -> "" },
-            color = when (line.kind) { DiffLineKind.ADD -> Tok.ok; DiffLineKind.DEL -> Tok.danger; else -> Color.Transparent },
-            fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight, textAlign = TextAlign.Center,
-            modifier = Modifier.width(16.dp),
-        )
+        DisableSelection { // line numbers + the +/− marker never ride along into a copied selection
+            Row(Modifier.fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+                if (dense) Gutter(line.oldNo) // desktop: old | new pair; mobile keeps the single new-side gutter
+                Gutter(line.newNo)
+                Box(Modifier.width(1.dp).fillMaxHeight().background(DiffTok.gutBorder))
+                Text(
+                    when (line.kind) { DiffLineKind.ADD -> "+"; DiffLineKind.DEL -> "−"; DiffLineKind.CTX -> "" },
+                    color = when (line.kind) { DiffLineKind.ADD -> Tok.ok; DiffLineKind.DEL -> Tok.danger; else -> Color.Transparent },
+                    fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight, textAlign = TextAlign.Center,
+                    modifier = Modifier.width(16.dp),
+                )
+            }
+        }
         val body = remember(line.text, highlight) { highlight(line.text) }
         Text(
             body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
-            softWrap = false, maxLines = 1, overflow = TextOverflow.Clip,
-            modifier = Modifier.weight(1f).horizontalScroll(hScroll)
+            softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,
+            modifier = Modifier.weight(1f).let { if (wrap) it else it.horizontalScroll(hScroll) }
                 .padding(start = if (dense) 9.dp else 8.dp, end = if (dense) 20.dp else 16.dp),
         )
     }

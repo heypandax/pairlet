@@ -45,6 +45,7 @@ captures/
 # they don't build the mobile app from source)
 mobile/composeApp/google-services.json
 iosApp/iosApp/GoogleService-Info.plist
+mobile/composeApp/src/desktopMain/resources/ga4.properties
 
 # fir.im token (local only, never commit)
 scripts/.fir-token

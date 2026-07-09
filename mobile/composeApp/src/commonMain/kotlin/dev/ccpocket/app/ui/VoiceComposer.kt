@@ -80,8 +80,12 @@ fun ComposerField(
         // TextFieldValue mirror (same pattern as the desktop ChatPane): a String-backed BasicTextField
         // keeps its own selection, which stays stranded mid-text when the value is replaced from outside
         // (slash-command completion) — reconciling here lands the cursor at the end of any external write.
+        // Never rebuild while the IME is composing (composition != null): the parent's String lags the
+        // field by a frame, so an unrelated recomposition mid-composition would clear the marked text and
+        // commit half-typed pinyin as raw letters (#93). External writes only happen outside composition;
+        // if one ever races it, this reconcile still applies on the first post-composition recomposition.
         var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
-        if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
+        if (field.text != value && field.composition == null) field = TextFieldValue(value, TextRange(value.length))
         BasicTextField(
             field, { field = it; onValueChange(it.text) },
             textStyle = TextStyle(color = Tok.tx, fontSize = 14.5.sp, lineHeight = 21.sp),

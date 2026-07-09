@@ -518,7 +518,10 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 // the cursor ourselves (Compose desktop has no shift+Enter binding) and @-completion needs
                 // the caret too. Reconcile external writes: send() clears it, palette/slash completion seed it.
                 var field by remember { mutableStateOf(TextFieldValue(model.composer)) }
-                if (field.text != model.composer) field = TextFieldValue(model.composer, TextRange(model.composer.length))
+                // composition == null guard: rebuilding mid-IME-composition clears the marked text — CJK
+                // input then commits raw letters / eats the char before the caret (#93/#86). External
+                // writes happen outside composition, and a raced one still lands right after it ends.
+                if (field.text != model.composer && field.composition == null) field = TextFieldValue(model.composer, TextRange(model.composer.length))
                 // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
                 // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).
                 val sep = model.pathSep
