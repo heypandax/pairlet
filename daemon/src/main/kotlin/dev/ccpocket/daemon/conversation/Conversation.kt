@@ -712,6 +712,22 @@ class Conversation(
         backend.interrupt()
     }
 
+    /**
+     * Stop ONE background job from the phone's task panel (issue #80). The daemon's only lever over the
+     * agent's work is the interrupt control (same primitive as [cancelTurn] / the composer ■) — it can't
+     * reach into the agent's process tree to signal one detached OS shell (that is the model's own
+     * KillShell). So we settle the targeted job KILLED for immediate panel feedback and fire an interrupt,
+     * which genuinely aborts the turn-bound work a RUNNING job usually is: a stuck foreground command
+     * (the gcloud-auth-waiting-on-a-callback case), a monitor, or a sub-agent. A lingering turn's is_error
+     * is suppressed like a user cancel. No-op if the job is unknown or already finished.
+     */
+    suspend fun stopBackgroundJob(jobId: String) {
+        if (!jobs.markKilled(jobId, System.currentTimeMillis())) return
+        interruptRequested = true // an interrupted turn's is_error is the user's stop, not a failure to paint red
+        backend.interrupt()       // io-null-safe: a job can only exist while a process does, but this no-ops regardless
+        emitJobs()                // reflect KILLED in the panel now (also stamps lastActivityMs)
+    }
+
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */
     suspend fun switchDirectory(newWorkdir: Path) {
         stopProcess()

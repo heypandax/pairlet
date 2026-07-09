@@ -153,6 +153,20 @@ class BackgroundJobRegistryTest {
     }
 
     @Test
+    fun mark_killed_settles_a_running_job_by_id() {
+        // issue #80: the phone's panel "stop" force-settles a RUNNING job by its snapshot id
+        val r = BackgroundJobRegistry()
+        r.onToolUse("toolu_1", "Bash", bgBash("gcloud auth login"), now = 1)
+        assertTrue(r.hasRunning())
+        assertTrue(r.markKilled("toolu_1", now = 5))
+        assertEquals(JobStatus.KILLED, r.snapshot().single().status)
+        assertFalse(r.hasRunning())
+        // idempotent: an already-settled job (and an unknown id) never re-flips
+        assertFalse(r.markKilled("toolu_1", now = 6))
+        assertFalse(r.markKilled("nope", now = 7))
+    }
+
+    @Test
     fun clear_empties_and_reports_change() {
         val r = BackgroundJobRegistry()
         r.onToolUse("t1", "Bash", bgBash("x"), now = 1)

@@ -40,6 +40,7 @@ import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.SetPushPrefs
 import dev.ccpocket.protocol.ShellResult
+import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
@@ -140,6 +141,8 @@ class RequestRouter(
             // fan-out: only a REAL close (last attached client) drops the quick-terminal state with it
             is CloseSession -> { if (registry.close(frame.convoId, sink, frame.force)) shell.forget(frame.convoId) }
             is CancelTurn -> registry.cancelTurn(frame)
+            // task panel "stop" (issue #80): interrupt the agent's work for this job + settle its row killed
+            is StopBackgroundJob -> registry.stopBackgroundJob(frame)
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
