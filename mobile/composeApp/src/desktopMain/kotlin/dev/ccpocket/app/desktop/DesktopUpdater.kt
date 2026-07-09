@@ -43,15 +43,16 @@ object DesktopUpdater {
         }
     }
 
-    /** This platform's desktop release asset for [version], or null when none is published for it (Linux,
-     *  or an arch we don't build) — the caller falls back to opening the releases page. Names match the
-     *  release scripts (`cc-pocket-desktop-<v>-macos-<arch>.dmg` / `-windows-x86_64.msi`). */
+    /** This platform's desktop release asset name, or null when none is published for it (Linux, or an arch
+     *  we don't build) — the caller falls back to opening the releases page. The version-less names are the
+     *  ones published on EVERY release (the release uploads a per-arch `cc-pocket-desktop-macos-<arch>.dmg`
+     *  and `cc-pocket-desktop-windows-x86_64.msi`; the versioned dmg exists too but Windows has no versioned
+     *  MSI, so version-less is the one shape both platforms share). The actual bytes come from the release's
+     *  own asset URL, so this resolves to the checked release regardless of the missing version in the name. */
     fun desktopAssetFor(
-        version: String,
         os: String = osName,
         arch: String = System.getProperty("os.arch"),
     ): String? {
-        val v = version.removePrefix("v")
         val a = when (arch.lowercase()) {
             "aarch64", "arm64" -> "arm64"
             "x86_64", "amd64" -> "x86_64"
@@ -59,8 +60,8 @@ object DesktopUpdater {
         }
         val o = os.lowercase()
         return when {
-            o.contains("mac") -> "cc-pocket-desktop-$v-macos-$a.dmg"
-            o.contains("win") -> if (a == "x86_64") "cc-pocket-desktop-$v-windows-x86_64.msi" else null
+            o.contains("mac") -> "cc-pocket-desktop-macos-$a.dmg"
+            o.contains("win") -> if (a == "x86_64") "cc-pocket-desktop-windows-x86_64.msi" else null
             else -> null // no Linux desktop artifact is published
         }
     }
@@ -109,7 +110,7 @@ object DesktopUpdater {
      * located — the caller surfaces that and stays on the current version.
      */
     fun applyStandalone(release: ReleaseClient.Release) {
-        val asset = desktopAssetFor(release.version) ?: error("no desktop build is published for this platform")
+        val asset = desktopAssetFor() ?: error("no desktop build is published for this platform")
         val url = release.assetUrls[asset] ?: error("release v${release.version} has no asset $asset")
         val tmp = Files.createTempDirectory("cc-pocket-desktop-update")
         val file = tmp.resolve(asset)

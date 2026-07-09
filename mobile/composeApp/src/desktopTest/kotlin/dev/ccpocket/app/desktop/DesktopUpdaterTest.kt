@@ -26,13 +26,14 @@ class DesktopUpdaterTest {
 
     @Test
     fun desktop_asset_names_map_platforms() {
-        assertEquals("cc-pocket-desktop-1.3.3-macos-arm64.dmg", DesktopUpdater.desktopAssetFor("1.3.3", "Mac OS X", "aarch64"))
-        assertEquals("cc-pocket-desktop-1.3.3-macos-x86_64.dmg", DesktopUpdater.desktopAssetFor("v1.3.3", "Mac OS X", "x86_64"))
-        assertEquals("cc-pocket-desktop-1.3.3-windows-x86_64.msi", DesktopUpdater.desktopAssetFor("1.3.3", "Windows 11", "amd64"))
+        // version-less names — the shape published on every release (see release.yml desktop upload steps)
+        assertEquals("cc-pocket-desktop-macos-arm64.dmg", DesktopUpdater.desktopAssetFor("Mac OS X", "aarch64"))
+        assertEquals("cc-pocket-desktop-macos-x86_64.dmg", DesktopUpdater.desktopAssetFor("Mac OS X", "x86_64"))
+        assertEquals("cc-pocket-desktop-windows-x86_64.msi", DesktopUpdater.desktopAssetFor("Windows 11", "amd64"))
         // no artifacts published for these: Windows-on-arm, Linux, or an arch we don't build
-        assertNull(DesktopUpdater.desktopAssetFor("1.3.3", "Windows 11", "aarch64"))
-        assertNull(DesktopUpdater.desktopAssetFor("1.3.3", "Linux", "amd64"))
-        assertNull(DesktopUpdater.desktopAssetFor("1.3.3", "Mac OS X", "riscv64"))
+        assertNull(DesktopUpdater.desktopAssetFor("Windows 11", "aarch64"))
+        assertNull(DesktopUpdater.desktopAssetFor("Linux", "amd64"))
+        assertNull(DesktopUpdater.desktopAssetFor("Mac OS X", "riscv64"))
     }
 
     @Test
