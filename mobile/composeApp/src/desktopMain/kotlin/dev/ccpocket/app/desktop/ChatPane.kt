@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -117,7 +118,14 @@ import dev.ccpocket.protocol.SlashCommand
 @Composable
 fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolean = false) {
     if (!model.hasChat) {
-        Column(modifier.fillMaxSize().background(Tok.base)) { EmptyChat() }
+        // During an open (messages already cleared, convoId nulled, awaiting SessionLive) show a loading
+        // transition for the TARGET session instead of the blank "No session open" state: that empty state
+        // read as "the newly-opened session didn't respond" when ⌘K-switching (issue #82). `opening` clears
+        // atomically with convoId on SessionLive, so this hands straight off to the live transcript — no
+        // EmptyChat flash in between.
+        Column(modifier.fillMaxSize().background(Tok.base)) {
+            if (model.opening) OpeningChat(model.chatTitle) else EmptyChat()
+        }
         return
     }
     // Linkify transcript file paths against THIS session's cwd (issue #74): a relative path like
@@ -234,6 +242,23 @@ private fun EmptyChat() {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("No session open", color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text("Pick a project on the left, then open or start a session.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/** Shown in the main pane while an OpenSession is in flight (issue #82): a spinner + the target session's
+ *  title, so ⌘K-switching reads as "opening this session…" instead of the blank empty state. chatTitle is
+ *  set on the target the instant openSession runs (resumed sessions carry their list title). */
+@Composable
+private fun OpeningChat(title: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            CircularProgressIndicator(color = Tok.accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+            Text(
+                if (title.isBlank()) "Opening session…" else "Opening $title…",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
