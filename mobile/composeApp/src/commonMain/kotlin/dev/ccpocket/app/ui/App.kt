@@ -96,6 +96,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1182,13 +1183,21 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 }
             }
             Box(Modifier.weight(1f)) {
+                // reserve a gutter below the last message so the floating context pill sits in empty
+                // space (with a gap) instead of covering the last line + its copy button (issue #15).
+                // The pill's MEASURED height drives the reserve (issue #81): a fixed 30.dp only cleared
+                // it at font-scale 1 — the pill grows with the system/app text size while a hardcoded
+                // gutter doesn't, so a long reply's tail slid under the pill on larger text. Measuring
+                // keeps the pill floating (no layout footprint → never pushes the composer) yet always
+                // leaves the last line above it. Falls back to the old gutter until the pill measures.
+                val density = LocalDensity.current
+                var pillHeightPx by remember { mutableStateOf(0) }
+                val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
                 LazyColumn(
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
-                    // reserve a gutter below the last message so the floating context pill sits in
-                    // empty space (with a gap) instead of covering the last copy button (issue #15)
-                    contentPadding = PaddingValues(bottom = 30.dp),
+                    contentPadding = PaddingValues(bottom = bottomGutter),
                 ) {
                     items(repo.messages) { m ->
                         // a prompt the daemon hasn't acknowledged while the link is down — or while the link
@@ -1237,10 +1246,13 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         }
                     }
                 }
-                // context usage floats over the message tail's bottom-right — no layout footprint (issue #15)
+                // context usage floats over the message tail's bottom-right — no layout footprint (issue #15).
+                // Its measured height feeds the list's bottom gutter above (issue #81) so the pill never
+                // covers the last line; onSizeChanged only fires once it renders (skipped while hidden).
                 ContextStatusline(
                     repo.contextUsed.value, repo.contextWindow.value,
-                    Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp),
+                    Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp)
+                        .onSizeChanged { pillHeightPx = it.height },
                 )
                 // approvals waiting on OTHER machines pull you over without reflowing this stream —
                 // floats under the connection bar; this machine's own ask keeps its sheet (Fleet ⑤)
