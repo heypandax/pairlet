@@ -244,7 +244,13 @@
     <string name="usage_more">More</string>
     <string name="usage_empty">No usage yet today</string>
     <string name="usage_empty_hint">Start a session and your token usage will show up here — nothing to worry about.</string>
+    <string name="usage_empty_range">No usage in the last %1$d days</string>
     <string name="usage_offline">Can\'t reach your computer</string>
+    <string name="usage_tokens">Tokens</string>
+    <string name="usage_period_today">Today · %1$s</string>
+    <string name="usage_period_range">%1$s – %2$s · %3$d days</string>
+    <string name="usage_vs_yesterday">vs yesterday</string>
+    <string name="usage_na">not available yet</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_hint">git status</string>

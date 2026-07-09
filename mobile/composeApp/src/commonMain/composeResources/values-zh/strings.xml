@@ -244,7 +244,13 @@
     <string name="usage_more">多</string>
     <string name="usage_empty">今天还没有用量</string>
     <string name="usage_empty_hint">开一个会话，用量就会出现在这里——不用焦虑。</string>
+    <string name="usage_empty_range">最近 %1$d 天没有用量</string>
     <string name="usage_offline">连不上你的电脑</string>
+    <string name="usage_tokens">Tokens</string>
+    <string name="usage_period_today">今日 · %1$s</string>
+    <string name="usage_period_range">%1$s – %2$s · %3$d 天</string>
+    <string name="usage_vs_yesterday">对比昨天</string>
+    <string name="usage_na">暂无数据</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>

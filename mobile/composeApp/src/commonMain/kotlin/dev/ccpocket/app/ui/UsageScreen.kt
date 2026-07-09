@@ -48,16 +48,21 @@ import dev.ccpocket.app.resources.usage_cache
 import dev.ccpocket.app.resources.usage_cost
 import dev.ccpocket.app.resources.usage_empty
 import dev.ccpocket.app.resources.usage_empty_hint
+import dev.ccpocket.app.resources.usage_empty_range
 import dev.ccpocket.app.resources.usage_less
 import dev.ccpocket.app.resources.usage_more
+import dev.ccpocket.app.resources.usage_na
 import dev.ccpocket.app.resources.usage_offline
 import dev.ccpocket.app.resources.usage_peak
 import dev.ccpocket.app.resources.usage_per_day
 import dev.ccpocket.app.resources.usage_per_hour
+import dev.ccpocket.app.resources.usage_period_range
+import dev.ccpocket.app.resources.usage_period_today
 import dev.ccpocket.app.resources.usage_requests
 import dev.ccpocket.app.resources.usage_title
-import dev.ccpocket.app.resources.usage_tokens_today
+import dev.ccpocket.app.resources.usage_tokens
 import dev.ccpocket.app.resources.usage_trend
+import dev.ccpocket.app.resources.usage_vs_yesterday
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Usage
@@ -73,9 +78,13 @@ private fun money(v: Double): String {
 }
 
 /**
- * Usage — a calm token dashboard (design cc-pocket/Usage.html, issue #26). Reached from Settings. Four states:
- * loading / offline / empty / populated. The range switch (Today/7d/30d) re-fetches; the stat cards are always
- * for today, the trend + by-model cover the window. Data is aggregated by the daemon from Claude transcripts.
+ * Usage — a calm token dashboard (design issue #26, redesigned #89). Reached from Settings. Four states:
+ * loading / offline / empty / populated. The range switch (Today/7d/30d) re-fetches and re-scopes the whole
+ * summary: the Tokens hero is the WINDOW total (sum of the trend), with its range baked into the label and a
+ * period sub-caption, so the headline and the trend tell one story. The three sub-metrics the daemon only
+ * knows for today (requests / est. cost / cache hit) stay explicitly "· today"-labeled — never ambiguous.
+ * All views branch on the reply's own shape (u.days.size), so a stale reply keeps rendering coherently while
+ * the next fetch is in flight. Data is aggregated by the daemon from Claude/Codex transcripts.
  */
 @Composable
 fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
@@ -115,7 +124,7 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
 
         when {
             u != null && (u.tokensToday > 0 || u.models.isNotEmpty() || u.days.any { it.tokens > 0 }) -> Populated(u)
-            u != null -> Empty()
+            u != null -> Empty(u.days.size)
             !connected || timedOut -> Offline()
             else -> Loading()
         }
@@ -125,18 +134,37 @@ fun UsageScreen(repo: PocketRepository, onBack: () -> Unit) {
 @Composable
 private fun Populated(u: Usage) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        val today = u.days.lastOrNull()?.tokens ?: u.tokensToday
-        val yesterday = u.days.getOrNull(u.days.size - 2)?.tokens
-        val delta = yesterday?.takeIf { it > 0 }?.let { ((today - it) * 100 / it).toInt() }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard(Modifier.weight(1f), formatTokens(u.tokensToday), stringResource(Res.string.usage_tokens_today), delta)
-            StatCard(Modifier.weight(1f), u.requestsToday.toString(), stringResource(Res.string.usage_requests), null)
-        }
+        // Range-scoped headline: the Tokens hero is the WINDOW total (== the sum of the trend it sits above),
+        // so the top number and the chart never contradict, and switching Today/7d/30d visibly changes it.
+        // Derive the scope tag from the reply's own span (u.days.size), mirroring the header toggle's tokens —
+        // this keeps a stale reply coherent mid-fetch. Today's reply is span 1; 7d/30d fill the whole window.
+        val n = u.days.size
+        val windowTokens = u.days.sumOf { it.tokens }
+        val scope = if (n <= 1) "today" else "${n}d"
+
+        // Neutral day-over-day momentum, only when both days are real activity: guarding today>0 && yesterday>0
+        // avoids the old "quiet/partial today → ↓100%" trap (which the previous card mis-colored green). A
+        // window-over-window delta ("vs prev 7d") would need the daemon to also send the prior window — not
+        // available today, so we show the honest day-over-day note and flag the aggregate as a follow-up.
+        val today = u.days.lastOrNull()?.tokens ?: 0L
+        val yesterday = u.days.getOrNull(n - 2)?.tokens
+        val deltaPct = if (n >= 2 && today > 0 && yesterday != null && yesterday > 0)
+            (((today - yesterday) * 100) / yesterday).toInt() else null
+        // Window has history but nothing today yet — say so calmly instead of a scary ↓ delta.
+        val zeroToday = n >= 2 && today == 0L
+
+        HeroCard(windowTokens, scope, periodCaption(u), deltaPct, zeroToday)
+
+        // The three metrics the daemon only knows for TODAY. Kept, but each carries "· today" so its baseline
+        // is unmistakable even while the hero above reads a wider window. A missing sub-metric shows a labeled
+        // "not available yet" placeholder — never a bare "—".
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard(Modifier.weight(1f), u.costUsdToday?.let { money(it) } ?: "—", stringResource(Res.string.usage_cost), null)
-            StatCard(Modifier.weight(1f), u.cacheHitPct?.let { "$it%" } ?: "—", stringResource(Res.string.usage_cache), null, arcPct = u.cacheHitPct)
+            StatCard(Modifier.weight(1f), todayLabel(stringResource(Res.string.usage_requests)), u.requestsToday.toString())
+            StatCard(Modifier.weight(1f), todayLabel(stringResource(Res.string.usage_cost)), u.costUsdToday?.let { money(it) })
         }
+        Spacer(Modifier.height(10.dp))
+        StatCard(Modifier.fillMaxWidth(), todayLabel(stringResource(Res.string.usage_cache)), u.cacheHitPct?.let { "$it%" }, arcPct = u.cacheHitPct)
 
         // Each range answers its own question: Today → hourly bars, 7d → daily bars, 30d → a calendar heatmap.
         // Branch on the reply's own shape (span == days.size), not the selected tab — while a fetch is in flight
@@ -161,28 +189,87 @@ private fun Populated(u: Usage) {
     }
 }
 
+/**
+ * The primary card: the selected range's total tokens, big and mono. The [scope] tag ("today"/"7d"/"30d")
+ * bakes the range into the label; [period] is the muted-mono date sub-caption. The bottom line is either a
+ * calm "no usage today yet" note ([zeroToday]) or a NEUTRAL day-over-day delta with its baseline inline —
+ * never the old good/bad color inversion.
+ */
 @Composable
-private fun StatCard(modifier: Modifier, value: String, label: String, deltaPct: Int?, arcPct: Int? = null) {
+private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?, zeroToday: Boolean) {
     Column(
-        modifier.clip(RoundedCornerShape(14.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
-            .padding(horizontal = 15.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text(label, color = Tok.tx2, fontSize = 12.sp)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(value, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
-            if (arcPct != null) Arc(arcPct)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(Res.string.usage_tokens), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text("· $scope", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
         }
-        if (deltaPct != null) {
-            val up = deltaPct >= 0
-            val c = if (up) Tok.warn else Tok.ok
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (up) "↑" else "↓", color = c, fontSize = 11.sp)
-                Spacer(Modifier.width(3.dp))
-                Text("${if (up) deltaPct else -deltaPct}%", color = c, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        Text(formatTokens(tokens), color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 36.sp, fontWeight = FontWeight.SemiBold)
+        Text(period, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+        when {
+            zeroToday -> Text(stringResource(Res.string.usage_empty), color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 1.dp))
+            deltaPct != null -> {
+                val down = deltaPct < 0
+                Row(Modifier.padding(top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (down) "▼" else "▲", color = Tok.muted, fontSize = 9.sp)
+                    Spacer(Modifier.width(4.dp))
+                    Text("${if (down) -deltaPct else deltaPct}% ${stringResource(Res.string.usage_vs_yesterday)}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+                }
             }
         }
     }
+}
+
+/**
+ * A secondary "· today"-scoped metric. [value] null → a labeled "not available yet" placeholder (never a bare
+ * dash), so a missing cost / cache-hit reads as calm-not-broken. Optional [arcPct] draws the cache-hit gauge.
+ */
+@Composable
+private fun StatCard(modifier: Modifier, label: String, value: String?, arcPct: Int? = null) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+            .padding(horizontal = 15.dp, vertical = 13.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(label, color = Tok.tx2, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
+            if (value != null) Text(value, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
+            else Text(stringResource(Res.string.usage_na), color = Tok.muted, fontSize = 12.5.sp, modifier = Modifier.weight(1f, fill = false).padding(bottom = 3.dp))
+            if (arcPct != null) Arc(arcPct)
+        }
+    }
+}
+
+/** "Requests" -> "Requests · today": pins a today-only sub-metric's baseline right in its label. */
+private fun todayLabel(metric: String) = "$metric · today"
+
+private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+/** ISO "2026-07-09" -> (2026, 7, 9); null if absent/garbage (older daemon may not fill [UsageDay.date]). */
+private fun isoParts(iso: String?): Triple<Int, Int, Int>? =
+    iso?.split('-')?.mapNotNull(String::toIntOrNull)?.takeIf { it.size == 3 && it[1] in 1..12 }?.let { Triple(it[0], it[1], it[2]) }
+
+/** ISO date -> "Jul 9" (English months, matching the daemon's English weekday labels); null when unparseable. */
+private fun monthDay(iso: String?): String? = isoParts(iso)?.let { (_, m, d) -> "${MONTHS[m - 1]} $d" }
+
+/** The hero's period sub-caption: "Today · Jul 9" for a span-1 reply, else "Jul 3 – 9 · 7 days" (the trailing
+ *  month is dropped when both ends share it). Falls back to weekday labels if a daemon left [UsageDay.date] null. */
+@Composable
+private fun periodCaption(u: Usage): String {
+    val ds = u.days
+    if (ds.size <= 1) {
+        val d = ds.firstOrNull()
+        return stringResource(Res.string.usage_period_today, monthDay(d?.date) ?: d?.label ?: "")
+    }
+    val first = ds.first()
+    val last = ds.last()
+    val fp = isoParts(first.date)
+    val lp = isoParts(last.date)
+    val left = monthDay(first.date) ?: first.label
+    val right = if (fp != null && lp != null && fp.second == lp.second) lp.third.toString() else (monthDay(last.date) ?: last.label)
+    return stringResource(Res.string.usage_period_range, left, right, ds.size)
 }
 
 /** Terracotta progress arc for cache-hit. */
@@ -354,10 +441,13 @@ private fun Loading() {
     }
 }
 
+/** Whole window is empty. Range-aware headline ("No usage yet today" vs "No usage in the last 7 days") so a
+ *  quiet 7d/30d reads as calmly explained, not broken — no bare dashes anywhere. */
 @Composable
-private fun Empty() {
+private fun Empty(span: Int) {
     Column(Modifier.fillMaxSize().padding(horizontal = 44.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text(stringResource(Res.string.usage_empty), color = Tok.tx2, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        val title = if (span <= 1) stringResource(Res.string.usage_empty) else stringResource(Res.string.usage_empty_range, span)
+        Text(title, color = Tok.tx2, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(12.dp))
         Text(stringResource(Res.string.usage_empty_hint), color = Tok.muted, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 2.dp))
     }
