@@ -211,7 +211,19 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         )
     }
 
-    override val selectedSessionId: String? get() = openSummary()?.sessionId ?: openChatUnlisted()?.sessionId
+    // Optimistic selection (issue #82): the sessionId the user just asked to open, highlighted the instant
+    // selectSession/openPin fires so the sidebar row/group moves off the previous session immediately —
+    // instead of lagging (or showing nothing) through the async opening window while workdir still points at
+    // the old session and neither openSummary nor openChatUnlisted resolves the new one yet. Gated on
+    // repo.opening so it only wins WHILE an open is in flight: once SessionLive lands (opening→false,
+    // convoId+workdir updated together) the real resolution takes over; a failed/timed-out open clears
+    // opening too, so a stale value can never keep a phantom row lit. Cleared on new/cross-machine opens
+    // (no listed row to point at yet).
+    private var optimisticSelectedId by mutableStateOf<String?>(null)
+
+    override val selectedSessionId: String? get() =
+        optimisticSelectedId?.takeIf { repo.opening.value }
+            ?: openSummary()?.sessionId ?: openChatUnlisted()?.sessionId
 
     // ── RECENT groups: session lists cached per visited project (per account) ─────────────────────
     // The protocol only lists sessions per directory (ListSessions), so cross-project RECENT is built
@@ -296,6 +308,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     override fun selectSession(s: DkSession) {
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
+        optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
 
@@ -354,9 +367,11 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override fun openPin(p: DkPin) {
         if (p.accountId == repo.paired.value?.accountId) {
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
+            optimisticSelectedId = p.sessionId // same as selectSession: light the target row through the open (#82)
             repo.openSession(wd = p.cwd, resumeId = p.sessionId, title = p.title, agent = p.agent)
             return
         }
+        optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
         val target = repo.pairedList.firstOrNull { it.accountId == p.accountId } ?: return
         repo.switchDaemon(target)
         // open once the switched link lands — the repo's push-tap seam (pendingOpen) owns "open when
@@ -390,6 +405,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         val typed = trimTrailingSep(dir.trim())
         if (typed.isEmpty()) return
         showNewSession = false
+        optimisticSelectedId = null // a brand-new session has no listed row yet — don't re-light a stale one (#82)
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
         openProject(DkProject(path = typed, name = folderName(typed)))
@@ -397,6 +413,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override val hasChat: Boolean get() = repo.convoId.value != null
+    override val opening: Boolean get() = repo.opening.value // OpenSession in flight — ChatPane shows a loading transition (#82)
     override val chatTitle: String get() = repo.chatTitle.value ?: "Chat"
     override val chatAgent: AgentKind get() = repo.sessionAgent.value ?: AgentKind.CLAUDE
     override val chatWorkdir: String get() = repo.workdir.value?.let { tilde(it) } ?: ""

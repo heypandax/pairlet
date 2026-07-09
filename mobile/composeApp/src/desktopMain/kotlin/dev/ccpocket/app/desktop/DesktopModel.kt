@@ -241,6 +241,10 @@ interface DesktopModel {
 
     // main pane: the open chat
     val hasChat: Boolean
+    /** True while an OpenSession is in flight — messages are already cleared and convoId nulled, but the
+     *  daemon hasn't answered with SessionLive yet (issue #82). ChatPane shows a loading transition for the
+     *  target session instead of the blank "No session open" empty state, which read as "didn't respond". */
+    val opening: Boolean get() = false
     val chatTitle: String
     val chatAgent: AgentKind
     val chatWorkdir: String
