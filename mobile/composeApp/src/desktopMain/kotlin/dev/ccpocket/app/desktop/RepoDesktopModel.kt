@@ -26,7 +26,10 @@ import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.update.ReleaseClient
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -489,6 +492,46 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
 
     override val appVersion: String get() = APP_VERSION
     override val relayUrl: String get() = repo.paired.value?.relay ?: ""
+
+    // ── self-update (Settings ▸ About, issue #87) ─────────────────────────────────────────────────
+    // Its own IO scope: the check is a GitHub round-trip and applyUpdate() runs a download that ends by
+    // exiting the process, neither of which should ride a UI/composition scope. Snapshot-state writes from a
+    // background thread are safe — Compose observes them on the next frame.
+    private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var updateStateInternal by mutableStateOf<DkUpdateState>(DkUpdateState.Idle)
+    private var pendingRelease: ReleaseClient.Release? = null
+
+    override val updateState: DkUpdateState get() = updateStateInternal
+    override val updateCommand: String?
+        get() = (updateStateInternal as? DkUpdateState.Available)?.let { DesktopUpdater.upgradeCommandFor(it.source) }
+
+    override fun checkForUpdates() {
+        if (updateStateInternal is DkUpdateState.Checking || updateStateInternal is DkUpdateState.Downloading) return
+        updateStateInternal = DkUpdateState.Checking
+        updateScope.launch {
+            val rel = DesktopUpdater.latest()
+            updateStateInternal = when {
+                rel == null -> DkUpdateState.Failed("Couldn't reach GitHub releases — check your network.")
+                DesktopUpdater.isNewer(rel.version, APP_VERSION) -> {
+                    pendingRelease = rel
+                    DkUpdateState.Available(rel.version, DesktopUpdater.currentSource())
+                }
+                else -> DkUpdateState.UpToDate(APP_VERSION)
+            }
+        }
+    }
+
+    override fun applyUpdate() {
+        val rel = pendingRelease ?: return
+        // only a standalone install self-overwrites; brew/scoop show a command and unknown opens the page (UI-side)
+        if ((updateStateInternal as? DkUpdateState.Available)?.source != DkInstallSource.STANDALONE) return
+        updateStateInternal = DkUpdateState.Downloading(rel.version)
+        updateScope.launch {
+            // applyStandalone() does not return on success — it exits so the swap helper / installer can proceed
+            runCatching { DesktopUpdater.applyStandalone(rel) }
+                .onFailure { updateStateInternal = DkUpdateState.Failed(it.message ?: "Update failed.") }
+        }
+    }
     override var defaultAgent: AgentKind
         get() = repo.defaultAgent.value
         set(v) { repo.setDefaultAgent(v) }

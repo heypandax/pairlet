@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -599,6 +600,97 @@ private fun AboutPane(model: DesktopModel) {
             InfoRow(row.first, row.second)
             if (i < info.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         }
+        UpdatesSection(model)
+    }
+}
+
+// "Check for updates" (issue #87): reads model.updateState and offers the right action per install source —
+// a standalone dmg/msi self-updates in place, a brew/scoop copy shows its upgrade command to run, and an
+// unrecognized/dev build opens the releases page. Button-triggered (never on open) so the pane renders offline.
+@Composable
+private fun UpdatesSection(model: DesktopModel) {
+    val uriHandler = LocalUriHandler.current
+    val clipboard = LocalClipboardManager.current
+    Column(Modifier.padding(top = 18.dp)) {
+        when (val s = model.updateState) {
+            DkUpdateState.Idle ->
+                UpdateActionRow("Check for updates", "Check", Tok.accent) { model.checkForUpdates() }
+
+            DkUpdateState.Checking -> UpdateBusy("Checking for updates…")
+
+            is DkUpdateState.UpToDate ->
+                UpdateActionRow("You're on the latest version (v${s.current})", "Check again", Tok.tx2) { model.checkForUpdates() }
+
+            is DkUpdateState.Available -> {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Dot(Tok.accent, 8.dp)
+                    Text("Update available", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.weight(1f))
+                    Text("v${model.appVersion} → v${s.latest}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(10.dp))
+                when (s.source) {
+                    // standalone: one click downloads, verifies, replaces this app and relaunches
+                    DkInstallSource.STANDALONE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextBtn("Download & restart", Tok.accent) { model.applyUpdate() }
+                        Text("Replaces this app and relaunches it.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                    }
+                    // package-manager copies never self-overwrite (two updaters, one tree) — show the command
+                    DkInstallSource.BREW, DkInstallSource.SCOOP -> Column {
+                        Text(
+                            "Installed with ${if (s.source == DkInstallSource.BREW) "Homebrew" else "Scoop"} — update it from a terminal:",
+                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        CommandBox(model.updateCommand.orEmpty(), clipboard)
+                    }
+                    // can't tell how this was installed (dev run / unusual layout) — hand off to the web
+                    DkInstallSource.UNKNOWN -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextBtn("View release", Tok.accent) { runCatching { uriHandler.openUri(model.updateReleasesUrl) } }
+                        Text("Open the releases page to update.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                    }
+                }
+            }
+
+            is DkUpdateState.Downloading -> UpdateBusy("Downloading v${s.latest}… the app restarts when it's ready.")
+
+            is DkUpdateState.Failed -> Column {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Rounded.Warning, null, tint = Tok.danger, modifier = Modifier.size(13.dp))
+                    Text(s.message, color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(6.dp))
+                Row { TextBtn("Retry", Tok.accent) { model.checkForUpdates() } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdateActionRow(label: String, action: String, actionColor: Color, onAction: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        TextBtn(action, actionColor, onAction)
+    }
+}
+
+@Composable
+private fun UpdateBusy(label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.5.dp)
+        Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp)
+    }
+}
+
+// mono command + Copy — the brew/scoop upgrade line the user runs in a terminal
+@Composable
+private fun CommandBox(cmd: String, clipboard: androidx.compose.ui.platform.ClipboardManager) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(start = 10.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(cmd, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        TextBtn("Copy", Tok.accent) { clipboard.setText(AnnotatedString(cmd)) }
     }
 }
 
