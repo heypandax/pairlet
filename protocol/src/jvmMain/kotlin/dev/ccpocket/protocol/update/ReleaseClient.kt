@@ -81,22 +81,24 @@ object ReleaseClient {
     /**
      * Verify [file] (published as [asset]) against the release's SHA256SUMS asset. A missing sums entry (old
      * releases, or an asset the manifest doesn't list) warns via [onSkip] and passes — a PRESENT mismatch is
-     * fatal (corrupted download or tampered artifact).
+     * fatal (corrupted download or tampered artifact). Returns true when the checksum was actually verified,
+     * false when verification was skipped.
      */
-    fun verifyAgainstSums(release: Release, asset: String, file: Path, onSkip: (String) -> Unit = {}) {
+    fun verifyAgainstSums(release: Release, asset: String, file: Path, onSkip: (String) -> Unit = {}): Boolean {
         val sumsUrl = release.assetUrls["SHA256SUMS"] ?: run {
-            onSkip("release has no SHA256SUMS — skipping checksum verification"); return
+            onSkip("release has no SHA256SUMS — skipping checksum verification"); return false
         }
         val req = HttpRequest.newBuilder(URI(sumsUrl)).header("User-Agent", "cc-pocket")
             .timeout(Duration.ofSeconds(30)).build()
         val body = http.send(req, HttpResponse.BodyHandlers.ofString()).takeIf { it.statusCode() == 200 }?.body()
-            ?: run { onSkip("could not fetch SHA256SUMS — skipping checksum verification"); return }
+            ?: run { onSkip("could not fetch SHA256SUMS — skipping checksum verification"); return false }
         val expected = ReleaseVersions.parseSums(body)[asset] ?: run {
-            onSkip("SHA256SUMS has no entry for $asset — skipping checksum verification"); return
+            onSkip("SHA256SUMS has no entry for $asset — skipping checksum verification"); return false
         }
         val actual = sha256(file)
         check(actual.equals(expected, ignoreCase = true)) {
             "checksum mismatch for $asset\n  expected $expected\n  actual   $actual\n(corrupted download or tampered artifact — aborting)"
         }
+        return true
     }
 }
