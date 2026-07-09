@@ -69,7 +69,7 @@ fun main() = application {
     // fleet: one live link per paired computer (primary + pinned satellites) — the grouped sidebar,
     // attention popover, and palette badges read across all of them
     remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
-    val model = remember { RepoDesktopModel(repo) }
+    val model = remember { RepoDesktopModel(repo, scope) }
     LaunchedEffect(Unit) { if (repo.paired.value != null) repo.startRelay() } // paired → connect straight away
     val connected by repo.sessionActive
 

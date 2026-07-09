@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
@@ -25,6 +26,10 @@ import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -49,7 +54,7 @@ private data class HiddenRec(val accountId: String, val sessionId: String, val c
  * project's* sessions (set by [openProject]); a global all-computers multi-session view needs a repo change
  * and is deliberately out of scope here. The tray is likewise still seed-only.
  */
-class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
+class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope) : DesktopModel {
 
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
@@ -62,6 +67,35 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var composer by mutableStateOf("")
+
+    // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
+    // The composer is a single field, but its TEXT is per-session — keyed most-durable-first like the
+    // mobile composer (#29): the real sessionId (survives daemon reopens AND app restarts) → convoId
+    // (daemon-run scoped) → workdir (pre-open). The repo's own composerKey() is private, so replicate
+    // the chain here — the same one [openSession] re-keys via sessionKey = resumeId.
+    private fun composerKey(): String? = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
+    // the key the in-memory [composer] currently belongs to — drives restore-new when the open session changes
+    private var composerDraftKey: String? = composerKey()
+
+    init {
+        // restore-new: when the open session (composer key) changes, load that session's saved draft. The
+        // save-old is flushed synchronously at each switch entry point ([flushComposerDraft]) so a draft
+        // typed inside the debounce window survives this reload; the repo's migrateDraft (SessionLive)
+        // carries a brand-new session's draft onto its freshly minted sessionId before this fires.
+        scope.launch {
+            snapshotFlow { composerKey() }.collect { key ->
+                if (key != composerDraftKey) { composerDraftKey = key; composer = repo.draftFor(key) }
+            }
+        }
+        // debounced persist of composer edits under the current session's key (mirrors the mobile composer)
+        scope.launch {
+            snapshotFlow { composer }.collectLatest { text -> delay(DRAFT_DEBOUNCE_MS); repo.saveDraft(composerKey(), text) }
+        }
+    }
+
+    /** Persist the current draft under its session key right now — called before an open/switch re-keys the
+     *  composer, so a draft typed within the debounce window isn't lost when restore-new reloads it. */
+    private fun flushComposerDraft() = repo.saveDraft(composerKey(), composer)
 
     // ── changes (changed-files v2): straight repo pass-throughs — the repo already scopes them
     // to the open session and re-arms its 8s stale-daemon deadlines on every request
@@ -295,6 +329,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override fun selectSession(s: DkSession) {
+        flushComposerDraft() // save-old before the open re-keys the composer (issue #88)
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
@@ -352,6 +387,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override fun openPin(p: DkPin) {
+        flushComposerDraft() // save-old before the open/switch re-keys the composer (issue #88)
         if (p.accountId == repo.paired.value?.accountId) {
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
             repo.openSession(wd = p.cwd, resumeId = p.sessionId, title = p.title, agent = p.agent)
@@ -389,6 +425,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
         if (typed.isEmpty()) return
+        flushComposerDraft() // save-old before opening the new session re-keys the composer (issue #88)
         showNewSession = false
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
@@ -419,7 +456,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override fun send(text: String) {
         if (text.isBlank() && !repo.hasReadyImages()) return // an image-only send is legitimate
         // a gated send (degraded session, issue #65) returns false — keep the composer text for the retry
-        if (repo.sendPrompt(text)) composer = ""
+        if (repo.sendPrompt(text)) { composer = ""; repo.clearDraft(composerKey()) } // clear the persisted draft too (#88)
     }
 
     override val sessionDegraded: Boolean get() = repo.sessionDegraded.value
@@ -507,5 +544,6 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)
         const val K_TERMINAL_APP = "desktop_terminal_app"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
+        const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
     }
 }
