@@ -29,6 +29,22 @@ import dev.ccpocket.protocol.PermissionMode
 
 enum class DkOs { MAC, LINUX, WIN }
 
+/** How the desktop app itself was installed — decides the "Check for updates" action (issue #87). */
+enum class DkInstallSource { STANDALONE, BREW, SCOOP, UNKNOWN }
+
+/**
+ * The Settings ▸ About update-check state machine (issue #87). Always starts [Idle] and only advances on an
+ * explicit [DesktopModel.checkForUpdates] — no auto-fire, so seed/preview models and UI tests stay offline.
+ */
+sealed interface DkUpdateState {
+    data object Idle : DkUpdateState
+    data object Checking : DkUpdateState
+    data class UpToDate(val current: String) : DkUpdateState
+    data class Available(val latest: String, val source: DkInstallSource) : DkUpdateState
+    data class Downloading(val latest: String) : DkUpdateState // standalone self-update in progress
+    data class Failed(val message: String) : DkUpdateState
+}
+
 data class DkComputer(
     val accountId: String,
     val name: String,
@@ -319,6 +335,21 @@ interface DesktopModel {
     // settings (general prefs + paired-computer management)
     val appVersion: String
     val relayUrl: String
+
+    // self-update (Settings ▸ About "Check for updates", issue #87). Reuses the daemon's shared release-check
+    // (version compare + SHA256 verify). Button-triggered so seed/preview + UI tests never hit the network;
+    // the defaults keep those models inert. The live model branches on install source: a standalone dmg/msi
+    // self-updates (download → verify → replace → relaunch), a brew/scoop copy exposes its upgrade command
+    // instead of self-overwriting, and an unrecognized/dev build opens the releases page.
+    val updateState: DkUpdateState get() = DkUpdateState.Idle
+    /** Check GitHub releases for a newer app version, then classify how this install can take it. */
+    fun checkForUpdates() {}
+    /** STANDALONE installs only: download the new dmg/msi, verify its SHA256, replace this app and relaunch. */
+    fun applyUpdate() {}
+    /** The upgrade command to copy for a package-manager install (brew/scoop), else null. */
+    val updateCommand: String? get() = null
+    /** Releases page for the "can't self-update from here" fallback (brew/scoop/unknown). */
+    val updateReleasesUrl: String get() = DesktopUpdater.RELEASES_URL
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
     // default model new Claude sessions start under (null = the CLI's own default). Codex sessions ignore it.
