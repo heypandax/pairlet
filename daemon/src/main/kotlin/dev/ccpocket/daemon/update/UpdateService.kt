@@ -3,20 +3,11 @@ package dev.ccpocket.daemon.update
 import dev.ccpocket.daemon.service.ServiceInstaller
 import dev.ccpocket.daemon.util.DaemonVersion
 import dev.ccpocket.daemon.util.logger
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
+import dev.ccpocket.protocol.update.ReleaseClient
+import dev.ccpocket.protocol.update.ReleaseVersions
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.security.MessageDigest
-import java.time.Duration
 import java.util.zip.ZipInputStream
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -24,6 +15,9 @@ import kotlin.io.path.isExecutable
 import kotlin.io.path.name
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
+
+/** The daemon's alias for the shared release type — kept so existing call sites read unchanged. */
+private typealias Release = ReleaseClient.Release
 
 /**
  * Self-update for curl/irm-managed installs — the Claude Code distribution model: each version in
@@ -36,13 +30,6 @@ import kotlin.io.path.writeText
 object UpdateService {
     private const val REPO = "heypandax/cc-pocket"
     private val log = logger("Update")
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val http: HttpClient = HttpClient.newBuilder()
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .connectTimeout(Duration.ofSeconds(15))
-        .build()
-
-    data class Release(val version: String, val assetUrls: Map<String, String>)
 
     /** A curl/irm-managed install: the versions dir, the stable launcher path the service runs, and
      *  whether the registered service actually points at that stable path (safe to hot-swap). */
@@ -53,17 +40,7 @@ object UpdateService {
     // ── pure decision logic (unit-tested) ────────────────────────────────────────────────────────
 
     /** Dotted-numeric compare, `v` prefix and non-digit suffixes ignored; true = strictly newer. */
-    fun isNewer(candidate: String, current: String): Boolean {
-        fun parts(v: String) = v.removePrefix("v").split('.').map { seg -> seg.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
-        val a = parts(candidate)
-        val b = parts(current)
-        for (i in 0 until maxOf(a.size, b.size)) {
-            val x = a.getOrElse(i) { 0 }
-            val y = b.getOrElse(i) { 0 }
-            if (x != y) return x > y
-        }
-        return false
-    }
+    fun isNewer(candidate: String, current: String): Boolean = ReleaseVersions.isNewer(candidate, current)
 
     /** This platform's release asset name, or null when we don't publish one for it. */
     fun assetNameFor(
@@ -111,11 +88,7 @@ object UpdateService {
     }
 
     /** SHA256SUMS format: `<hex>  <filename>` per line. Returns filename → sha256. */
-    fun parseSums(text: String): Map<String, String> =
-        text.lineSequence().mapNotNull { line ->
-            val t = line.trim().split(Regex("\\s+"), limit = 2)
-            if (t.size == 2 && t[0].matches(Regex("[0-9a-fA-F]{64}"))) t[1].removePrefix("*") to t[0].lowercase() else null
-        }.toMap()
+    fun parseSums(text: String): Map<String, String> = ReleaseVersions.parseSums(text)
 
     // ── effectful ────────────────────────────────────────────────────────────────────────────────
 
@@ -135,29 +108,7 @@ object UpdateService {
         "this daemon wasn't installed by the cc-pocket installer — re-install with the one-liner " +
             "(https://github.com/$REPO#quick-start) to enable self-update"
 
-    fun latestRelease(): Release? = try {
-        val req = HttpRequest.newBuilder(URI("https://api.github.com/repos/$REPO/releases/latest"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "cc-pocket-daemon")
-            .timeout(Duration.ofSeconds(20))
-            .build()
-        val res = http.send(req, HttpResponse.BodyHandlers.ofString())
-        if (res.statusCode() != 200) null else {
-            val obj = json.parseToJsonElement(res.body()) as? JsonObject
-            val tag = (obj?.get("tag_name") as? JsonPrimitive)?.contentOrNull
-            if (obj == null || tag == null) null else {
-                val assets = (obj["assets"] as? JsonArray).orEmpty().mapNotNull { el ->
-                    val a = el as? JsonObject ?: return@mapNotNull null
-                    val name = (a["name"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
-                    val url = (a["browser_download_url"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
-                    name to url
-                }.toMap()
-                Release(tag.removePrefix("v"), assets)
-            }
-        }
-    } catch (e: Exception) {
-        log.warn("release check failed: ${e.message}"); null
-    }
+    fun latestRelease(): Release? = ReleaseClient.latest(REPO)
 
     /**
      * Download + verify + extract [release] into `versions/<ver>` and switch the stable launcher to it.
@@ -173,8 +124,8 @@ object UpdateService {
         try {
             val file = tmp.resolve(asset)
             log.info("downloading $asset")
-            download(url, file)
-            verifyAgainstSums(release, asset, file)
+            ReleaseClient.download(url, file)
+            if (ReleaseClient.verifyAgainstSums(release, asset, file, onSkip = { log.warn(it) })) log.info("checksum OK ($asset)")
 
             val extracted = tmp.resolve("x").also { Files.createDirectories(it) }
             extract(file, extracted)
@@ -257,45 +208,6 @@ object UpdateService {
         // Windows is never "anchored" (no symlink): update always re-registers the task instead
         !os.contains("win") && text.contains(launcher.toString())
     }.getOrDefault(false)
-
-    private fun download(url: String, dest: Path) {
-        val req = HttpRequest.newBuilder(URI(url)).header("User-Agent", "cc-pocket-daemon")
-            .timeout(Duration.ofMinutes(10)).build()
-        val res = http.send(req, HttpResponse.BodyHandlers.ofFile(dest))
-        check(res.statusCode() in 200..299) { "download failed (HTTP ${res.statusCode()}): $url" }
-    }
-
-    /** Verify [file] against the release's SHA256SUMS asset. Missing sums (old releases) → warn + skip;
-     *  a PRESENT mismatch is fatal. */
-    private fun verifyAgainstSums(release: Release, asset: String, file: Path) {
-        val sumsUrl = release.assetUrls["SHA256SUMS"] ?: run {
-            log.warn("release has no SHA256SUMS — skipping checksum verification"); return
-        }
-        val req = HttpRequest.newBuilder(URI(sumsUrl)).header("User-Agent", "cc-pocket-daemon")
-            .timeout(Duration.ofSeconds(30)).build()
-        val body = http.send(req, HttpResponse.BodyHandlers.ofString()).takeIf { it.statusCode() == 200 }?.body()
-            ?: run { log.warn("could not fetch SHA256SUMS — skipping checksum verification"); return }
-        val expected = parseSums(body)[asset] ?: run {
-            log.warn("SHA256SUMS has no entry for $asset — skipping checksum verification"); return
-        }
-        val actual = sha256(file)
-        check(actual.equals(expected, ignoreCase = true)) {
-            "checksum mismatch for $asset\n  expected $expected\n  actual   $actual\n(corrupted download or tampered artifact — aborting)"
-        }
-        log.info("checksum OK ($asset)")
-    }
-
-    private fun sha256(file: Path): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        Files.newInputStream(file).use { s ->
-            val buf = ByteArray(1 shl 16)
-            while (true) {
-                val n = s.read(buf); if (n < 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
-    }
 
     private fun extract(archive: Path, dest: Path) {
         if (archive.name.endsWith(".zip")) {

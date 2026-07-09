@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -85,6 +86,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.layout.ContentScale
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ImgState
+import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.theme.Tok
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -95,6 +97,7 @@ import dev.ccpocket.app.ui.AttachImageIcon
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
+import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
@@ -117,7 +120,14 @@ import dev.ccpocket.protocol.SlashCommand
 @Composable
 fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolean = false) {
     if (!model.hasChat) {
-        Column(modifier.fillMaxSize().background(Tok.base)) { EmptyChat() }
+        // During an open (messages already cleared, convoId nulled, awaiting SessionLive) show a loading
+        // transition for the TARGET session instead of the blank "No session open" state: that empty state
+        // read as "the newly-opened session didn't respond" when ⌘K-switching (issue #82). `opening` clears
+        // atomically with convoId on SessionLive, so this hands straight off to the live transcript — no
+        // EmptyChat flash in between.
+        Column(modifier.fillMaxSize().background(Tok.base)) {
+            if (model.opening) OpeningChat(model.chatTitle) else EmptyChat()
+        }
         return
     }
     // Linkify transcript file paths against THIS session's cwd (issue #74): a relative path like
@@ -238,6 +248,23 @@ private fun EmptyChat() {
     }
 }
 
+/** Shown in the main pane while an OpenSession is in flight (issue #82): a spinner + the target session's
+ *  title, so ⌘K-switching reads as "opening this session…" instead of the blank empty state. chatTitle is
+ *  set on the target the instant openSession runs (resumed sessions carry their list title). */
+@Composable
+private fun OpeningChat(title: String) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            CircularProgressIndicator(color = Tok.accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+            Text(
+                if (title.isBlank()) "Opening session…" else "Opening $title…",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 private fun ChatSubHeader(model: DesktopModel) {
     Column(Modifier.fillMaxWidth()) {
@@ -279,8 +306,11 @@ private fun ChatSubHeader(model: DesktopModel) {
         val ctx = model.contextUsed?.let { u ->
             model.contextWindow?.let { w -> "  ·  ctx ${(u * 100 / w)}%" } ?: "  ·  ctx ~${u / 1000}k"
         } ?: ""
+        // model segment falls back to "default" (never a dangling " · ") for a pre-first-turn session the
+        // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96)
+        val modelLabel = model.chatModel.ifBlank { "default" }
         Text(
-            pathLinked("$machine${model.chatWorkdir}$branch  ·  ${model.chatModel}$ctx"),
+            pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel$ctx"),
             color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),
@@ -296,7 +326,21 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
             Column {
                 Text("You", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
                 Spacer(Modifier.height(7.dp))
-                Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                // sent attachments (issue #85): the compressed JPEG bytes ride ChatItem.User.images from
+                // send (sendPrompt), so an image-only prompt no longer renders as a blank turn. Reuses the
+                // shared SentImages tile (phone parity, Calm-Terminal tokens; widthIn caps keep it bounded
+                // on desktop). DisableSelection lets a click reach the tile through the stream-wide
+                // SelectionContainer — same carve-out as the QuestionCard fields (#76); previewFile drops
+                // the bytes to a temp file and opens the OS default viewer (the desktop preview gesture, #79).
+                if (item.images.isNotEmpty()) {
+                    DisableSelection {
+                        SentImages(item.images) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
+                    }
+                    if (item.text.isNotBlank()) Spacer(Modifier.height(8.dp))
+                }
+                if (item.text.isNotBlank()) {
+                    Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                }
                 // delivery state (issue #66): "sending…" after a short grace while the daemon hasn't
                 // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last).
                 // A pending bubble whose delivery can't be confirmed (link down / receipts stalled — issue #78)
@@ -517,10 +561,10 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 // TextFieldValue (not the model's plain String) because shift+Enter inserts the newline at
                 // the cursor ourselves (Compose desktop has no shift+Enter binding) and @-completion needs
                 // the caret too. Reconcile external writes: send() clears it, palette/slash completion seed it.
+                // Never reconcile MID-IME-COMPOSITION (#86, same root as mobile #93): rebuilding the value
+                // drops the composition (marked text) and desyncs the IME — committing 、/， as a line's 2nd
+                // char then ate the 1st. External writes land while not composing, so they still apply.
                 var field by remember { mutableStateOf(TextFieldValue(model.composer)) }
-                // composition == null guard: rebuilding mid-IME-composition clears the marked text — CJK
-                // input then commits raw letters / eats the char before the caret (#93/#86). External
-                // writes happen outside composition, and a raced one still lands right after it ends.
                 if (field.text != model.composer && field.composition == null) field = TextFieldValue(model.composer, TextRange(model.composer.length))
                 // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
                 // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).

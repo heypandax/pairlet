@@ -244,7 +244,13 @@
     <string name="usage_more">多</string>
     <string name="usage_empty">今天还没有用量</string>
     <string name="usage_empty_hint">开一个会话，用量就会出现在这里——不用焦虑。</string>
+    <string name="usage_empty_range">最近 %1$d 天没有用量</string>
     <string name="usage_offline">连不上你的电脑</string>
+    <string name="usage_tokens">Tokens</string>
+    <string name="usage_period_today">今日 · %1$s</string>
+    <string name="usage_period_range">%1$s – %2$s · %3$d 天</string>
+    <string name="usage_vs_yesterday">对比昨天</string>
+    <string name="usage_na">暂无数据</string>
     <string name="terminal_open">终端</string>
     <string name="terminal_title">终端</string>
     <string name="terminal_hint">git status</string>
@@ -288,6 +294,7 @@
     <string name="file_deleted">文件已被删除</string>
     <string name="diff_unchanged_lines">⋯ %1$d 行未改动</string>
     <string name="diff_collapsed_lines">%1$d 行</string>
+    <string name="diff_soft_wrap">自动换行</string>
 
     <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
     <string name="devices_section">已配对设备</string>
@@ -316,6 +323,7 @@
     <string name="label_workdir">目录</string>
     <string name="label_context">上下文</string>
     <string name="value_default">默认</string>
+    <string name="value_model_default">账号默认</string>
     <string name="session_actions_open">会话操作</string>
     <string name="quick_actions_title">快捷操作</string>
     <string name="qa_model">切换模型</string>
@@ -334,6 +342,10 @@
     <string name="job_kind_bash">脚本</string>
     <string name="job_kind_subagent">子代理</string>
     <string name="job_kind_monitor">监视</string>
+    <string name="job_stop_hint">长按运行中的任务可停止。</string>
+    <string name="job_stop_title">停止任务？</string>
+    <string name="job_stop_confirm">这会在电脑上中断“%1$s”。真实构建或长耗时任务不会自动恢复。</string>
+    <string name="job_stop_action">停止任务</string>
 
     <!-- ── 多智能体（Claude / Codex） ────────────────────────────── -->
     <string name="label_agent">智能体</string>

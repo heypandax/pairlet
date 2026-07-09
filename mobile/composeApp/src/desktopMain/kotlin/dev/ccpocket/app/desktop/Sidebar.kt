@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
@@ -51,6 +52,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -79,6 +81,8 @@ import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.modelAlias
 import dev.ccpocket.protocol.AgentKind
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 
 internal fun osIcon(os: DkOs): ImageVector = when (os) {
     DkOs.MAC -> Icons.Rounded.LaptopMac
@@ -339,13 +343,36 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
             )
             return@Column
         }
+        // collapse set + scroll position hoisted out of the LazyColumn so the reveal effect below can
+        // drive them (expand a folded group, scroll it in) without collapsing the others (#83)
         val collapsed = remember { mutableStateListOf<String>() }
+        val listState = rememberLazyListState()
         // which header's refresh icon spins: the clicked group's; ⌘R has no click, so the current one's
         var refreshTarget by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(model.sessionsRefreshing) { if (!model.sessionsRefreshing) refreshTarget = null }
         val spinningPath = if (model.sessionsRefreshing) refreshTarget ?: groups.firstOrNull { it.current }?.path else null
         val selectedId = model.selectedSessionId // resolved by scanning the session list — once, not per row
-        LazyColumn(Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
+        // Reveal the selected session's group when the selection changes — e.g. clicking a RUNNING project
+        // resumes its live session (#83). Expand that group if the user had folded it and scroll it into
+        // view, but only the TARGET group is touched (multi-expand is intentional) and only when the row
+        // isn't already on screen, so we never refold others or yank a session the user can already see.
+        LaunchedEffect(selectedId) {
+            if (selectedId == null) return@LaunchedEffect
+            // openRunning lists then resumes asynchronously, so the target group can land a beat after the
+            // id resolves — observe the groups until the selected session surfaces, then act exactly once
+            val targetPath = snapshotFlow {
+                model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
+                    .firstOrNull { g -> g.sessions.any { it.sessionId == selectedId } }?.path
+            }.filterNotNull().first()
+            collapsed.remove(targetPath) // expand a folded target; a no-op otherwise — others left as-is
+            val rowKey = "s:$targetPath:$selectedId"
+            if (listState.layoutInfo.visibleItemsInfo.none { it.key == rowKey }) {
+                val rendered = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
+                val index = recentRowIndex(rendered, collapsed, targetPath, selectedId)
+                if (index >= 0) listState.animateScrollToItem(index)
+            }
+        }
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
             groups.forEach { g ->
                 val closed = g.path in collapsed
                 item(key = "h:${g.path}") {
@@ -373,6 +400,31 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+/** Flat LazyColumn index of a RECENT session row, honoring which groups are collapsed — so the reveal
+ *  effect (#83) can scroll a just-selected session into view. Mirrors the LazyColumn's own layout: one
+ *  header per group, then (when open) either the empty placeholder or one item per session. Falls back
+ *  to the group's header index when the row itself isn't laid out (collapsed / empty group); -1 = absent. */
+private fun recentRowIndex(
+    groups: List<DkSessionGroup>,
+    collapsed: List<String>,
+    path: String,
+    sessionId: String,
+): Int {
+    var idx = 0
+    for (g in groups) {
+        val header = idx
+        idx++ // the group header is always emitted
+        val closed = g.path in collapsed
+        if (g.path == path) {
+            if (closed || g.sessions.isEmpty()) return header
+            val pos = g.sessions.indexOfFirst { it.sessionId == sessionId }
+            return if (pos >= 0) header + 1 + pos else header
+        }
+        if (!closed) idx += if (g.sessions.isEmpty()) 1 else g.sessions.size
+    }
+    return -1
 }
 
 /** A RECENT group header: folder + project name (mono, muted) · hover refresh · running pulse · collapse chevron. */

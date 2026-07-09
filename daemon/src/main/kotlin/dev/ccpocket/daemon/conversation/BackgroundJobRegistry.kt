@@ -124,6 +124,20 @@ class BackgroundJobRegistry {
         return changed
     }
 
+    /**
+     * Force one RUNNING job to KILLED — the phone's panel "stop" (issue #80), keyed by its snapshot id
+     * ([BackgroundJob.id] == the originating tool_use key). Same terminal state the model's own KillShell
+     * lands here; returns true when it actually flipped (RUNNING → KILLED) so the caller re-emits. No-op
+     * for an unknown id or an already-settled job.
+     */
+    fun markKilled(jobId: String, now: Long): Boolean {
+        val job = jobs[jobId] ?: return false
+        if (job.status != JobStatus.RUNNING) return false
+        job.status = JobStatus.KILLED
+        job.lastUpdate = now
+        return true
+    }
+
     fun hasRunning(): Boolean = jobs.values.any { it.status == JobStatus.RUNNING }
 
     fun snapshot(): List<BackgroundJob> =

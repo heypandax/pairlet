@@ -165,6 +165,17 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun stopBackgroundJob_roundtrips() {
+        // issue #80: the phone's panel "stop" — a brand-new message type. It round-trips new↔new; an old
+        // daemon can't decode the unknown "t" and drops it (see unknown_frame_discriminator_throws), so
+        // the stop no-ops there instead of breaking the socket.
+        val env = Envelope(id = "j1", ts = 0, body = StopBackgroundJob("c1", "toolu_7"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/job.stop\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
     fun deviceRevoked_roundtrips() {
         val env = Envelope(id = "7", ts = 0, to = Route.RELAY, body = DeviceRevoked("devX"))
         val json = PocketJson.encodeToString(env)

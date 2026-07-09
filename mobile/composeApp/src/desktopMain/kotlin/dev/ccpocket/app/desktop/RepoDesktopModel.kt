@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
@@ -25,6 +26,13 @@ import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.update.ReleaseClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -49,7 +57,7 @@ private data class HiddenRec(val accountId: String, val sessionId: String, val c
  * project's* sessions (set by [openProject]); a global all-computers multi-session view needs a repo change
  * and is deliberately out of scope here. The tray is likewise still seed-only.
  */
-class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
+class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope) : DesktopModel {
 
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
@@ -62,6 +70,35 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var composer by mutableStateOf("")
+
+    // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
+    // The composer is a single field, but its TEXT is per-session — keyed most-durable-first like the
+    // mobile composer (#29): the real sessionId (survives daemon reopens AND app restarts) → convoId
+    // (daemon-run scoped) → workdir (pre-open). The repo's own composerKey() is private, so replicate
+    // the chain here — the same one [openSession] re-keys via sessionKey = resumeId.
+    private fun composerKey(): String? = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
+    // the key the in-memory [composer] currently belongs to — drives restore-new when the open session changes
+    private var composerDraftKey: String? = composerKey()
+
+    init {
+        // restore-new: when the open session (composer key) changes, load that session's saved draft. The
+        // save-old is flushed synchronously at each switch entry point ([flushComposerDraft]) so a draft
+        // typed inside the debounce window survives this reload; the repo's migrateDraft (SessionLive)
+        // carries a brand-new session's draft onto its freshly minted sessionId before this fires.
+        scope.launch {
+            snapshotFlow { composerKey() }.collect { key ->
+                if (key != composerDraftKey) { composerDraftKey = key; composer = repo.draftFor(key) }
+            }
+        }
+        // debounced persist of composer edits under the current session's key (mirrors the mobile composer)
+        scope.launch {
+            snapshotFlow { composer }.collectLatest { text -> delay(DRAFT_DEBOUNCE_MS); repo.saveDraft(composerKey(), text) }
+        }
+    }
+
+    /** Persist the current draft under its session key right now — called before an open/switch re-keys the
+     *  composer, so a draft typed within the debounce window isn't lost when restore-new reloads it. */
+    private fun flushComposerDraft() = repo.saveDraft(composerKey(), composer)
 
     // ── changes (changed-files v2): straight repo pass-throughs — the repo already scopes them
     // to the open session and re-arms its 8s stale-daemon deadlines on every request
@@ -211,7 +248,19 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         )
     }
 
-    override val selectedSessionId: String? get() = openSummary()?.sessionId ?: openChatUnlisted()?.sessionId
+    // Optimistic selection (issue #82): the sessionId the user just asked to open, highlighted the instant
+    // selectSession/openPin fires so the sidebar row/group moves off the previous session immediately —
+    // instead of lagging (or showing nothing) through the async opening window while workdir still points at
+    // the old session and neither openSummary nor openChatUnlisted resolves the new one yet. Gated on
+    // repo.opening so it only wins WHILE an open is in flight: once SessionLive lands (opening→false,
+    // convoId+workdir updated together) the real resolution takes over; a failed/timed-out open clears
+    // opening too, so a stale value can never keep a phantom row lit. Cleared on new/cross-machine opens
+    // (no listed row to point at yet).
+    private var optimisticSelectedId by mutableStateOf<String?>(null)
+
+    override val selectedSessionId: String? get() =
+        optimisticSelectedId?.takeIf { repo.opening.value }
+            ?: openSummary()?.sessionId ?: openChatUnlisted()?.sessionId
 
     // ── RECENT groups: session lists cached per visited project (per account) ─────────────────────
     // The protocol only lists sessions per directory (ListSessions), so cross-project RECENT is built
@@ -295,7 +344,9 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override fun selectSession(s: DkSession) {
+        flushComposerDraft() // save-old before the open re-keys the composer (issue #88)
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
+        optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
 
@@ -352,11 +403,14 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override fun openPin(p: DkPin) {
+        flushComposerDraft() // save-old before the open/switch re-keys the composer (issue #88)
         if (p.accountId == repo.paired.value?.accountId) {
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
+            optimisticSelectedId = p.sessionId // same as selectSession: light the target row through the open (#82)
             repo.openSession(wd = p.cwd, resumeId = p.sessionId, title = p.title, agent = p.agent)
             return
         }
+        optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
         val target = repo.pairedList.firstOrNull { it.accountId == p.accountId } ?: return
         repo.switchDaemon(target)
         // open once the switched link lands — the repo's push-tap seam (pendingOpen) owns "open when
@@ -389,7 +443,9 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
         if (typed.isEmpty()) return
+        flushComposerDraft() // save-old before opening the new session re-keys the composer (issue #88)
         showNewSession = false
+        optimisticSelectedId = null // a brand-new session has no listed row yet — don't re-light a stale one (#82)
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
         openProject(DkProject(path = typed, name = folderName(typed)))
@@ -397,6 +453,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     }
 
     override val hasChat: Boolean get() = repo.convoId.value != null
+    override val opening: Boolean get() = repo.opening.value // OpenSession in flight — ChatPane shows a loading transition (#82)
     override val chatTitle: String get() = repo.chatTitle.value ?: "Chat"
     override val chatAgent: AgentKind get() = repo.sessionAgent.value ?: AgentKind.CLAUDE
     override val chatWorkdir: String get() = repo.workdir.value?.let { tilde(it) } ?: ""
@@ -419,7 +476,7 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
     override fun send(text: String) {
         if (text.isBlank() && !repo.hasReadyImages()) return // an image-only send is legitimate
         // a gated send (degraded session, issue #65) returns false — keep the composer text for the retry
-        if (repo.sendPrompt(text)) composer = ""
+        if (repo.sendPrompt(text)) { composer = ""; repo.clearDraft(composerKey()) } // clear the persisted draft too (#88)
     }
 
     override val sessionDegraded: Boolean get() = repo.sessionDegraded.value
@@ -452,6 +509,46 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
 
     override val appVersion: String get() = APP_VERSION
     override val relayUrl: String get() = repo.paired.value?.relay ?: ""
+
+    // ── self-update (Settings ▸ About, issue #87) ─────────────────────────────────────────────────
+    // Its own IO scope: the check is a GitHub round-trip and applyUpdate() runs a download that ends by
+    // exiting the process, neither of which should ride a UI/composition scope. Snapshot-state writes from a
+    // background thread are safe — Compose observes them on the next frame.
+    private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var updateStateInternal by mutableStateOf<DkUpdateState>(DkUpdateState.Idle)
+    private var pendingRelease: ReleaseClient.Release? = null
+
+    override val updateState: DkUpdateState get() = updateStateInternal
+    override val updateCommand: String?
+        get() = (updateStateInternal as? DkUpdateState.Available)?.let { DesktopUpdater.upgradeCommandFor(it.source) }
+
+    override fun checkForUpdates() {
+        if (updateStateInternal is DkUpdateState.Checking || updateStateInternal is DkUpdateState.Downloading) return
+        updateStateInternal = DkUpdateState.Checking
+        updateScope.launch {
+            val rel = DesktopUpdater.latest()
+            updateStateInternal = when {
+                rel == null -> DkUpdateState.Failed("Couldn't reach GitHub releases — check your network.")
+                DesktopUpdater.isNewer(rel.version, APP_VERSION) -> {
+                    pendingRelease = rel
+                    DkUpdateState.Available(rel.version, DesktopUpdater.currentSource())
+                }
+                else -> DkUpdateState.UpToDate(APP_VERSION)
+            }
+        }
+    }
+
+    override fun applyUpdate() {
+        val rel = pendingRelease ?: return
+        // only a standalone install self-overwrites; brew/scoop show a command and unknown opens the page (UI-side)
+        if ((updateStateInternal as? DkUpdateState.Available)?.source != DkInstallSource.STANDALONE) return
+        updateStateInternal = DkUpdateState.Downloading(rel.version)
+        updateScope.launch {
+            // applyStandalone() does not return on success — it exits so the swap helper / installer can proceed
+            runCatching { DesktopUpdater.applyStandalone(rel) }
+                .onFailure { updateStateInternal = DkUpdateState.Failed(it.message ?: "Update failed.") }
+        }
+    }
     override var defaultAgent: AgentKind
         get() = repo.defaultAgent.value
         set(v) { repo.setDefaultAgent(v) }
@@ -507,5 +604,6 @@ class RepoDesktopModel(private val repo: PocketRepository) : DesktopModel {
         const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)
         const val K_TERMINAL_APP = "desktop_terminal_app"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
+        const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
     }
 }

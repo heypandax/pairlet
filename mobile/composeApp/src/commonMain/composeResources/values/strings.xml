@@ -244,7 +244,13 @@
     <string name="usage_more">More</string>
     <string name="usage_empty">No usage yet today</string>
     <string name="usage_empty_hint">Start a session and your token usage will show up here — nothing to worry about.</string>
+    <string name="usage_empty_range">No usage in the last %1$d days</string>
     <string name="usage_offline">Can\'t reach your computer</string>
+    <string name="usage_tokens">Tokens</string>
+    <string name="usage_period_today">Today · %1$s</string>
+    <string name="usage_period_range">%1$s – %2$s · %3$d days</string>
+    <string name="usage_vs_yesterday">vs yesterday</string>
+    <string name="usage_na">not available yet</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>
     <string name="terminal_hint">git status</string>
@@ -288,6 +294,7 @@
     <string name="file_deleted">File was deleted</string>
     <string name="diff_unchanged_lines">⋯ %1$d unchanged lines</string>
     <string name="diff_collapsed_lines">%1$d lines</string>
+    <string name="diff_soft_wrap">Soft wrap</string>
 
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>
@@ -316,6 +323,7 @@
     <string name="label_workdir">Directory</string>
     <string name="label_context">Context</string>
     <string name="value_default">default</string>
+    <string name="value_model_default">Default</string>
     <string name="session_actions_open">Session actions</string>
     <string name="quick_actions_title">Quick actions</string>
     <string name="qa_model">Switch model</string>
@@ -334,6 +342,10 @@
     <string name="job_kind_bash">shell</string>
     <string name="job_kind_subagent">agent</string>
     <string name="job_kind_monitor">monitor</string>
+    <string name="job_stop_hint">Long-press a running task to stop it.</string>
+    <string name="job_stop_title">Stop task?</string>
+    <string name="job_stop_confirm">This interrupts “%1$s” on the computer. A real build or long-running job won\'t resume on its own.</string>
+    <string name="job_stop_action">Stop task</string>
 
     <!-- ── multi-agent (Claude / Codex) ──────────────────────────── -->
     <string name="label_agent">Agent</string>

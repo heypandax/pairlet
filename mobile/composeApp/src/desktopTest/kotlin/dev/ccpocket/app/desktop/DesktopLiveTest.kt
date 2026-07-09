@@ -76,7 +76,7 @@ class DesktopLiveTest {
             println("[live] SKIP — connected=${repo.sessionActive.value} phase=${repo.phase.value} but no projects within 25s")
             scope.cancel(); return@runBlocking
         }
-        val model = RepoDesktopModel(repo)
+        val model = RepoDesktopModel(repo, scope)
         shot("01-live-projects.png", model)
         println("[live] projects=${repo.directories.size} computer=${model.activeComputer?.name}")
 

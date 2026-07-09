@@ -58,7 +58,8 @@ class Conversation(
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
 
-    // mutable: a phone can switch the permission mode mid-session (Claude relaunches; Codex applies next turn)
+    // mutable: a phone can switch the permission mode mid-session — applied on the NEXT turn, never mid-turn
+    // (issue #84): Claude defers its relaunch to the next sendPrompt, Codex carries it in the next turn's params
     @Volatile
     private var mode: PermissionMode = initialMode
 
@@ -142,15 +143,26 @@ class Conversation(
     @Volatile
     private var openedWithFork = false
 
-    // model read back from the resumed transcript, for DISPLAY only (header + context window before the
-    // first init lands). Never baked into an AgentSpec: pinning a historical — possibly retired — model
-    // onto a relaunch or /clear would silently override the user's configured default (issue #27 residual).
+    // best-guess model for DISPLAY only (header + context window before the first init lands): read back from
+    // the resumed transcript, or — for a brand-new session with no --model — the backend's configured default
+    // (issue #96). Never baked into an AgentSpec: pinning a historical — possibly retired — model onto a
+    // relaunch or /clear would silently override the user's configured default (issue #27 residual). The first
+    // turn's init clears it and becomes the source of truth.
     @Volatile
     private var backfilledModel: String? = null
 
     // set when a mode switch relaunches the process: re-announce SessionLive on the next init so the phone clears "switching"
     @Volatile
     private var reemitLive = false
+
+    // NEXT-TURN SWITCH (issue #84): a mid-session model/mode/effort switch on a bake-at-launch backend (Claude)
+    // used to relaunch immediately — killing the in-flight turn. Now the switch only records the desired field +
+    // optimistically updates the badge; this arms to mark that the RUNNING process's launch flags are now stale.
+    // The next sendPrompt relaunches under the new flags BEFORE it sends that turn (relaunch-then-send), so the
+    // change lands on the very next turn without interrupting a running one. Codex applies settings per turn
+    // (applySettings == false) and never arms this. Cleared by any (re)launch (it bakes the current flags).
+    @Volatile
+    private var pendingRelaunch = false
 
     // context tokens the resumed transcript's last turn left in the window — seeds the phone's usage
     // statusline before the first new turn lands. Null for a brand-new session (nothing used yet).
@@ -263,6 +275,15 @@ class Conversation(
             if (model == null && resumeId != null) {
                 runCatching { backend.resumeModel(workdir.toString(), resumeId) }.getOrNull()?.let { backfilledModel = it }
             }
+            // issue #96: no explicit --model AND nothing recovered from a transcript (a brand-new session, or a
+            // resume whose transcript named no model) — eagerly resolve the backend's CONFIGURED default so the
+            // header shows the real model before the first turn instead of a blank segment. Best-effort +
+            // DEFENSIVE: any failure here must never crash or block the open (claude ≥1.3.1 crash-loops on
+            // eager-resolve failures) — the runCatching leaves backfilledModel null and the phone renders its
+            // "account default" placeholder. The first turn's init still wins (it clears backfilledModel).
+            if (model == null && backfilledModel == null) {
+                runCatching { backend.defaultModel(workdir.toString()) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { backfilledModel = it }
+            }
             resumeContextUsed = resumeId?.let { runCatching { backend.resumeContextTokens(workdir.toString(), it) }.getOrNull() }
             // seed the degraded flag from the transcript's tail: a session that died over its context
             // window stays warned across close/reopen, not just while this daemon watched it fail
@@ -336,8 +357,9 @@ class Conversation(
 
     /**
      * The relaunch primitive: stop the agent and re-spawn it resuming [resumeId], rebuilding the spec from the
-     * live `model`/`mode`/`effort` fields. Used by the Claude path (which bakes flags at launch); Codex applies
-     * settings to the next turn and skips relaunch. No pendingResumeId: a resume relaunch must not re-replay history.
+     * live `model`/`mode`/`effort` fields. Driven by sendPrompt's relaunch-then-send (issue #84): a Claude
+     * model/mode/effort switch defers its relaunch to here — right before the next turn — so a running turn is
+     * never interrupted. No pendingResumeId: a resume relaunch must not re-replay history.
      *
      * Fork decision: pre-first-turn ([sessionId] still null) reuse open()'s call — the desktop's liveness
      * hasn't changed just because the phone flipped a setting; the old `resumeId != sessionId` heuristic
@@ -351,7 +373,8 @@ class Conversation(
         )
     }
 
-    /** Switch the permission mode. Claude relaunches under --resume + the new mode; Codex applies it next turn. */
+    /** Switch the permission mode — next-turn semantics (issue #84): a running turn is never interrupted.
+     *  Claude defers its relaunch to the next sendPrompt; Codex carries the new approval policy next turn. */
     suspend fun switchMode(newMode: PermissionMode) {
         if (newMode == mode) {
             // no-op, but still announce: an out-of-sync phone badge corrects itself from this
@@ -359,47 +382,39 @@ class Conversation(
             return
         }
         mode = newMode
-        if (recordedPreFirstTurn()) return // issue #61: no process yet → record the mode, don't relaunch
-        if (!backend.applySettings(mode = newMode, model = null, effort = null)) {
-            // Codex: no relaunch; the next turn/start carries the new approval policy
-            sink.emit(live(sessionId))
-            return
-        }
-        reemitLive = true // the next init re-announces too — it carries the post-resume sessionId
-        // pre-first-turn the agent has reported no sessionId yet: fall back to the id this conversation
-        // was opened with, so a resumed/taken-over terminal session keeps its history (null = brand
-        // new session — nothing happened yet, a fresh start loses nothing)
-        val sid = sessionId ?: openedResumeId
-        relaunch(sid)
-        // the relaunch killed any in-flight turn — executing is false again, the phone's ■ resets
-        sink.emit(live(sid)) // confirm now — init won't arrive until the next turn
+        recordPendingSettings(mode = newMode, model = null, effort = null)
     }
 
-    /** Switch the model. Claude relaunches under --model; Codex applies it to the next turn. */
+    /** Switch the model — next-turn semantics (issue #84): the running turn is untouched; the change takes
+     *  effect on the next turn (Claude relaunches then, Codex applies it in that turn's params). */
     suspend fun switchModel(newModel: String?) {
         model = newModel
         backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
-        if (recordedPreFirstTurn()) return // issue #61: no process yet → record the model, don't relaunch
-        if (backend.applySettings(mode = null, model = newModel, effort = null)) {
-            reemitLive = true // the next init re-announces too — it carries the post-resume sessionId
-            // pre-first-turn fall back to the opened resumeId, like switchMode — relaunch(sessionId=null)
-            // would drop --resume entirely and orphan the resumed session's history
-            val sid = sessionId ?: openedResumeId
-            relaunch(sid)
-            sink.emit(live(sid)) // confirm now (new model + window) — init won't arrive until the next turn
-        } else sink.emit(live(sessionId))
+        recordPendingSettings(mode = null, model = newModel, effort = null)
     }
 
-    /** Switch reasoning effort. Claude relaunches under --effort; Codex applies it to the next turn. */
+    /** Switch reasoning effort — next-turn semantics (issue #84), same deferral as switchModel. */
     suspend fun switchEffort(newEffort: String?) {
         effort = newEffort
-        if (recordedPreFirstTurn()) return // issue #61: no process yet → record the effort, don't relaunch
-        if (backend.applySettings(mode = null, model = null, effort = newEffort)) {
-            reemitLive = true
-            val sid = sessionId ?: openedResumeId // same pre-first-turn anchor as switchModel/switchMode
-            relaunch(sid)
-            sink.emit(live(sid))
-        } else sink.emit(live(sessionId))
+        recordPendingSettings(mode = null, model = null, effort = newEffort)
+    }
+
+    /**
+     * Record a mid-session mode/model/effort switch under NEXT-TURN semantics (issue #84) — a running turn is
+     * NEVER interrupted. The caller has already updated the desired `mode`/`model`/`effort` field; this decides
+     * how the change reaches the agent:
+     *  - Pre-first-turn (no process yet, issue #61): record only — the deferred first-prompt launch bakes the
+     *    fields into its AgentSpec, so nothing to relaunch.
+     *  - Codex ([applySettings] returns false): the value is stashed for the next turn/start; no relaunch.
+     *  - Claude ([applySettings] returns true): the flags are baked at launch, so applying the change needs a
+     *    relaunch — but NOT now (it would kill the in-flight turn). Arm [pendingRelaunch]; the next sendPrompt
+     *    relaunches under the new flags FIRST, then sends that turn to the fresh process (relaunch-then-send).
+     * Either way the badge is optimistically re-announced; the resolved value confirms on the next init.
+     */
+    private suspend fun recordPendingSettings(mode: PermissionMode?, model: String?, effort: String?) {
+        if (recordedPreFirstTurn()) return
+        if (backend.applySettings(mode = mode, model = model, effort = effort)) pendingRelaunch = true
+        sink.emit(live(sessionId))
     }
 
     fun clearAllowRule(rule: String?) {
@@ -408,6 +423,7 @@ class Conversation(
 
     private suspend fun launchProcess(spec: AgentSpec) {
         intentionalStop = false
+        pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
         val b = PermissionBridge(convoId, mode, scope, { sink.emit(it) }, allowRules, respond = backend::respondPermission)
@@ -608,6 +624,24 @@ class Conversation(
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
+        // RELAUNCH-THEN-SEND (issue #84): a mid-session model/mode/effort switch only recorded the desired value
+        // + armed pendingRelaunch — relaunching then would have killed the in-flight turn. Now, before this next
+        // turn goes out, reconcile a stale process: stop it and re-spawn under the new flags FIRST, then let the
+        // send below hand this prompt to the FRESH process — so the switch takes effect on THIS turn (the very
+        // next trigger), not the one after. Guarded by `!executing`: a mid-turn queued send can't relaunch
+        // without killing the very turn we're protecting, so it rides the current process and the flag survives
+        // for the next idle turn. `proc == null` needs no relaunch (the lazy launch below already bakes the
+        // current fields); Codex never arms this (it applies settings per turn). A relaunch failure surfaces as a
+        // PocketError (forgetting the id so the client can retry), mirroring the lazy-launch failure just below.
+        if (proc != null && !executing && pendingRelaunch) {
+            reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
+            val relaunched = runCatching { relaunch(sessionId ?: openedResumeId) }
+            if (relaunched.isFailure) {
+                promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
+                sink.emit(PocketError("agent_unavailable", "agent failed to relaunch for the new settings (${relaunched.exceptionOrNull()?.message})", convoId))
+                return
+            }
+        }
         // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
         // open() recorded (openedResumeId), reusing its fork decision (openedWithFork — false for a plain open, so
         // this appends in place). Without this, the first message after a lazy open would hit the old `proc == null`
@@ -654,8 +688,12 @@ class Conversation(
             reply("Current model: ${displayModel() ?: "default"}.\nUsage: /model <name> — e.g. /model opus, /model sonnet, /model haiku (or a full model id).")
             return
         }
+        val wasExecuting = executing // switchModel doesn't touch it, but read before any await to be safe
         switchModel(arg)
-        reply("✓ Model switched to \"$arg\" for this session. Your next message will use it.")
+        // issue #84: don't splice a confirmation + TurnDone into a running turn's stream (it would prematurely
+        // clear the phone's ■ and inject the notice mid-reply). Mid-turn the optimistic SessionLive badge is the
+        // feedback; confirm in chat only when idle. Either way the switch lands on the next turn.
+        if (!wasExecuting) reply("✓ Model switched to \"$arg\" for this session. Your next message will use it.")
     }
 
     /** Handle the phone's `/effort [level]` — the agent `-p` ignores it, so the daemon honors it. */
@@ -669,8 +707,11 @@ class Conversation(
             reply("Unknown effort \"$arg\". Choose one of: ${EFFORT_LEVELS.joinToString(", ")}.")
             return
         }
+        val wasExecuting = executing
         switchEffort(arg)
-        reply("✓ Reasoning effort set to \"$arg\" for this session. Your next message will use it.")
+        // issue #84: as in handleModelCommand — no mid-stream confirmation; the badge is the feedback when a
+        // turn is in flight, and the switch still takes effect on the next turn.
+        if (!wasExecuting) reply("✓ Reasoning effort set to \"$arg\" for this session. Your next message will use it.")
     }
 
     /**
@@ -710,6 +751,22 @@ class Conversation(
         lastActivityMs = System.currentTimeMillis()
         interruptRequested = true // the coming result may say is_error — that's the user's ■, not a failure
         backend.interrupt()
+    }
+
+    /**
+     * Stop ONE background job from the phone's task panel (issue #80). The daemon's only lever over the
+     * agent's work is the interrupt control (same primitive as [cancelTurn] / the composer ■) — it can't
+     * reach into the agent's process tree to signal one detached OS shell (that is the model's own
+     * KillShell). So we settle the targeted job KILLED for immediate panel feedback and fire an interrupt,
+     * which genuinely aborts the turn-bound work a RUNNING job usually is: a stuck foreground command
+     * (the gcloud-auth-waiting-on-a-callback case), a monitor, or a sub-agent. A lingering turn's is_error
+     * is suppressed like a user cancel. No-op if the job is unknown or already finished.
+     */
+    suspend fun stopBackgroundJob(jobId: String) {
+        if (!jobs.markKilled(jobId, System.currentTimeMillis())) return
+        interruptRequested = true // an interrupted turn's is_error is the user's stop, not a failure to paint red
+        backend.interrupt()       // io-null-safe: a job can only exist while a process does, but this no-ops regardless
+        emitJobs()                // reflect KILLED in the panel now (also stamps lastActivityMs)
     }
 
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */

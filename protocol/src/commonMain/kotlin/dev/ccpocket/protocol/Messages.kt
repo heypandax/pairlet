@@ -90,6 +90,15 @@ data class ClearAllowRule(val convoId: String, val rule: String? = null) : ToDae
 @SerialName("pocket/turn.cancel")
 data class CancelTurn(val convoId: String) : ToDaemon
 
+/** Stop one background job (a backgrounded shell / sub-agent / monitor) from the phone's task panel
+ *  (issue #80). [jobId] is the job's originating tool_use id — the [BackgroundJob.id] the daemon put on
+ *  the wire. The daemon interrupts the agent's in-flight work for this conversation and marks that job
+ *  killed. A brand-new message type: an old daemon can't decode it and drops the frame (the same
+ *  runCatching-at-decode path every other newer message relies on), so the stop just no-ops there. */
+@Serializable
+@SerialName("pocket/job.stop")
+data class StopBackgroundJob(val convoId: String, val jobId: String) : ToDaemon
+
 /** Tear down a live conversation (clean kill of the process group). Without [force] a busy
  *  conversation (turn in flight / background jobs / unanswered ask) survives — the sender only
  *  detaches its own view (issue #55). [force] = the user explicitly chose to stop it (e.g. an

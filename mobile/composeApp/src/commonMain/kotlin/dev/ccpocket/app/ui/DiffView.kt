@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.WrapText
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.OpenInNew
@@ -123,6 +124,10 @@ private fun statusBg(op: String): Color = when (op) {
 /** The daemon-shared contract ([dev.ccpocket.protocol.IMAGE_FILE_EXTENSIONS]): what it serves as
  *  base64 is exactly what gets no Diff tab — one set, no drift. */
 fun isImagePath(path: String): Boolean = isImageFile(path)
+
+/** Extensions [FileTabBody] renders as reflowing markdown (via [MarkdownText]) rather than monospace
+ *  source — one set so the File body and the wrap-toggle policy ([wrapApplies]) can't disagree. */
+val markdownExts = setOf("md", "markdown")
 
 // Windows-aware path splitting, on DirList's [sepOf] — the one separator heuristic (this repo has
 // a documented Windows-path bug class; per-file copies of this split are how it recurs).
@@ -215,6 +220,48 @@ fun DiffFileToggle(
     }
 }
 
+// ── soft-wrap toggle (issue #95) ─────────────────────────────────────
+
+/** The header soft-wrap toggle's per-view state. Two independent flags, not one, so flipping between
+ *  the Diff and File tabs restores each view's own choice instead of one bleeding into the other. The
+ *  defaults ARE the shared policy: the diff keeps its horizontal pan (OFF) so the +/− gutter and column
+ *  alignment survive; a plain file reflows (ON) so long lines and prose read without side-scrolling. */
+class WrapState(val diff: MutableState<Boolean>, val file: MutableState<Boolean>)
+
+@Composable
+fun rememberWrapState(): WrapState = remember { WrapState(mutableStateOf(false), mutableStateOf(true)) }
+
+/** Whether a soft-wrap toggle is meaningful for what's on screen — derived here so both surfaces agree.
+ *  The diff's code lines pan whenever there's a real diff; on the File tab only a plain-text body has
+ *  lines to wrap (markdown already reflows, images/binaries have none). */
+fun wrapApplies(diffTab: Boolean, diff: FileDiff?, content: FileContent?, ext: String, isImage: Boolean): Boolean =
+    if (diffTab) diff?.ok == true
+    else content?.ok == true && content.base64 == null && !isImage && ext !in markdownExts
+
+/** The header's quiet soft-wrap toggle: a wrap-text glyph in a 30dp square, filled with a faint accent
+ *  when ON. Shares the export chips' hover lift so it reads as a control on desktop; the glyph stays
+ *  visible when OFF (muted) so it's discoverable on touch, where there is no hover. */
+@Composable
+fun WrapToggle(on: Boolean, onToggle: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    val shape = RoundedCornerShape(9.dp)
+    Box(
+        Modifier.size(30.dp).clip(shape)
+            .background(if (on) Tok.accent.copy(alpha = 0.14f) else if (hovered) Tok.raised else Color.Transparent)
+            .then(if (on) Modifier.border(1.dp, Tok.accent.copy(alpha = 0.4f), shape) else Modifier)
+            .hoverable(src).clickable(onClick = onToggle),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.AutoMirrored.Rounded.WrapText,
+            stringResource(Res.string.diff_soft_wrap),
+            tint = if (on) Tok.accent else if (hovered) Tok.tx2 else Tok.muted,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
 // ── the diff body ───────────────────────────────────────────────────
 
 private sealed interface DiffRow {
@@ -270,6 +317,9 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
         val fn: (String) -> AnnotatedString = { text -> cache.getOrPut(text) { highlightCodeOrNull(text, ext) ?: AnnotatedString(text) } }
         fn
     }
+    // SelectionContainer makes diff text selectable/copyable; headers & gaps are wrapped in DisableSelection
+    // so a copied selection is only code. When wrap is OFF the code still pans on [hScroll]; on touch,
+    // selection is a long-press (then drag), so panning and selecting coexist — verify on device (issue #95).
     SelectionContainer(modifier.background(DiffTok.codeBg)) {
         LazyColumn(Modifier.fillMaxSize()) {
             items(rows.size, key = { rows[it].key }) { i ->
@@ -407,7 +457,7 @@ fun shownStats(file: ChangedFile?, diff: FileDiff?): Pair<Int?, Int?> =
 
 /** The Diff tab's whole body: spinner → stale-daemon state → no-diff state → banner + [DiffView]. */
 @Composable
-fun DiffPaneBody(diff: FileDiff?, ext: String?, dense: Boolean, modifier: Modifier = Modifier) {
+fun DiffPaneBody(diff: FileDiff?, ext: String?, dense: Boolean, wrap: Boolean = false, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize()) {
         when {
             diff == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -422,7 +472,7 @@ fun DiffPaneBody(diff: FileDiff?, ext: String?, dense: Boolean, modifier: Modifi
             else -> Column(Modifier.fillMaxSize()) {
                 if (diff.truncated) TruncatedBanner(shownKb = (diff.diff?.length ?: 0) / 1024)
                 val hunks = remember(diff.diff) { parseUnifiedDiff(diff.diff ?: "") }
-                DiffView(hunks, ext = ext, dense = dense, modifier = Modifier.weight(1f).fillMaxWidth())
+                DiffView(hunks, ext = ext, dense = dense, wrap = wrap, modifier = Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
@@ -470,11 +520,12 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
     }
 }
 
-/** The File tab's whole body — the original full-content view: markdown via [MarkdownText], base64
- *  images, everything else as selectable highlighted monospace. [dense] = desktop metrics. */
+/** The File tab's whole body — the original full-content view: markdown via [MarkdownText] (selectable,
+ *  issue #95), base64 images, everything else as selectable highlighted monospace that reflows when
+ *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null) {
+fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null, wrap: Boolean = true) {
     Box(Modifier.fillMaxSize()) {
         when {
             // documents ride the binary channel whole-or-nothing — while the bytes are in flight the
@@ -517,18 +568,21 @@ fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path
                     color = Tok.muted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
                 )
                 val text = content.text ?: ""
-                if (ext in setOf("md", "markdown")) {
-                    MarkdownText(text, Tok.tx)
+                if (ext in markdownExts) {
+                    // SelectionContainer so rendered markdown selects/copies (issue #95); it already reflows
+                    SelectionContainer { MarkdownText(text, Tok.tx) }
                 } else {
                     // tint by file extension (issue #51); unknown or oversize files come back as
                     // the plain single-color string
                     val body = remember(text, ext) { highlightCode(text, ext) }
+                    val hScroll = rememberScrollState()
                     SelectionContainer {
                         Text(
                             body, color = Tok.tx2, fontFamily = FontFamily.Monospace,
                             fontSize = if (dense) 12.sp else 12.5.sp, lineHeight = if (dense) 19.sp else 21.sp,
-                            softWrap = false,
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            softWrap = wrap,
+                            modifier = Modifier.fillMaxWidth()
+                                .then(if (wrap) Modifier else Modifier.horizontalScroll(hScroll)),
                         )
                     }
                 }
