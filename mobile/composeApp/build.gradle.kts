@@ -131,6 +131,16 @@ compose.resources {
 compose.desktop {
     application {
         mainClass = "dev.ccpocket.app.MainKt"
+        // TRUE native macOS fullscreen (issue #94) drives com.apple.eawt via reflection, but java.desktop
+        // doesn't export that package to the classpath (unnamed) module — so a reflective invoke throws
+        // IllegalAccessException without this flag. Gated to macOS build/run hosts: on Windows/Linux the
+        // package doesn't exist and the flag would only emit a startup warning (and MacWindow no-ops there
+        // anyway). macOS DMGs are built on macOS hosts, so the packaged app launcher inherits it too.
+        // single-token "--add-exports=…" form on purpose: jpackage maps each jvmArgs entry to one
+        // --java-options value, so a split "--add-exports" + value would break the packaged launcher.
+        if (System.getProperty("os.name").lowercase().contains("mac")) {
+            jvmArgs += "--add-exports=java.desktop/com.apple.eawt=ALL-UNNAMED"
+        }
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi) // Dmg built on macOS, Msi on Windows (jpackage picks per host)
             // User-visible app name (Finder / Dock / taskbar). Release artifacts keep the cc-pocket-desktop-* names —

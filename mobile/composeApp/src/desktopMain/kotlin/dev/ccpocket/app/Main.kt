@@ -33,6 +33,8 @@ import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
 import dev.ccpocket.app.desktop.DesktopNotify
 import dev.ccpocket.app.desktop.DkTitleBar
+import dev.ccpocket.app.desktop.FullscreenExitStrip
+import dev.ccpocket.app.desktop.MacWindow
 import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
 import dev.ccpocket.app.secure.SecureStore
@@ -73,6 +75,28 @@ fun main() = application {
     LaunchedEffect(Unit) { if (repo.paired.value != null) repo.startRelay() } // paired → connect straight away
     val connected by repo.sessionActive
 
+    // TRUE native fullscreen (issue #94): the GREEN traffic light and ⌃⌘F toggle it, Esc leaves it. Declared
+    // here (not inside the Window content) so the pre-content onPreviewKeyEvent below can reach the toggle.
+    // The AWT window is only handed to us inside the content, so we stash it once it's alive; the actual
+    // fullscreen state is tracked by a FullScreenListener (installed in the content) so OS-driven exits
+    // (menu-bar green button, Mission Control, ⌃⌘F) stay in sync. This is DISTINCT from double-click "zoom"
+    // (maximize), which keeps its own onToggleMax path.
+    var fullscreen by remember { mutableStateOf(false) }
+    var awtWindow by remember { mutableStateOf<java.awt.Window?>(null) }
+    var fsRestore by remember { mutableStateOf<Rectangle?>(null) } // Win/Linux borderless-FS restore bounds
+    val toggleFullscreen: () -> Unit = tf@{
+        val w = awtWindow ?: return@tf
+        if (mac) {
+            MacWindow.toggleFullScreen(w) // async — `fullscreen` flips when the listener fires
+        } else {
+            // Win/Linux best-effort: undecorated borderless fullscreen (fill the whole device, menu-less).
+            // TODO(win/linux): GraphicsDevice.setFullScreenWindow for exclusive FS if a mode switch is wanted.
+            val r = fsRestore
+            if (r != null) { w.bounds = r; fsRestore = null; fullscreen = false }
+            else { fsRestore = w.bounds; w.bounds = w.graphicsConfiguration.bounds; fullscreen = true }
+        }
+    }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "CC Pocket",
@@ -101,14 +125,20 @@ fun main() = application {
                 }
                 e.type == KeyEventType.KeyDown && mod && digit >= 0 && connected -> { model.jumpPin(digit); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Comma && connected -> { model.showSettings = true; true }
+                // fullscreen (issue #94): ⌃⌘F toggles anywhere; F11 is the Win/Linux convention. Esc leaves
+                // fullscreen, but only after overlays get first dibs on Esc (below).
+                e.type == KeyEventType.KeyDown && e.isCtrlPressed && e.isMetaPressed && e.key == Key.F -> { toggleFullscreen(); true }
+                e.type == KeyEventType.KeyDown && !mac && e.key == Key.F11 -> { toggleFullscreen(); true }
                 e.type == KeyEventType.KeyDown && e.key == Key.Escape && model.anyOverlayOpen -> { model.dismissOverlays(); true }
+                e.type == KeyEventType.KeyDown && e.key == Key.Escape && fullscreen -> { toggleFullscreen(); true }
                 else -> false
             }
         },
     ) {
-        // zoom (green traffic light): fill the CURRENT screen's usable bounds (menu bar / Dock excluded),
-        // second click restores. Manual, because WindowPlacement.Maximized is unreliable for undecorated
-        // windows on macOS. Non-null == currently zoomed, holding the bounds to restore.
+        // zoom (double-click the title bar): fill the CURRENT screen's usable bounds (menu bar / Dock
+        // excluded), second click restores. Manual, because WindowPlacement.Maximized is unreliable for
+        // undecorated windows on macOS. Non-null == currently zoomed, holding the bounds to restore.
+        // (The green traffic light no longer zooms — it toggles native fullscreen, issue #94.)
         var zoomRestore by remember { mutableStateOf<Rectangle?>(null) }
         LaunchedEffect(Unit) {
             // record the window bounds (debounced) so the next launch reopens exactly here. While zoomed,
@@ -118,6 +148,7 @@ fun main() = application {
                 delay(400)
                 val z = zoomRestore
                 when {
+                    fullscreen -> {} // don't persist the fullscreen frame — keep the last windowed bounds
                     z != null -> SecureStore.putString(K_WIN_BOUNDS, "${z.x},${z.y},${z.width},${z.height},1")
                     p is WindowPosition.Absolute -> SecureStore.putString(
                         K_WIN_BOUNDS,
@@ -148,6 +179,14 @@ fun main() = application {
                 repo.onTurnFinished = null
             }
         }
+        // native fullscreen wiring (issue #94): stash the AWT window so the toggle above can drive it, mark
+        // it fullscreen-capable, and subscribe to OS-driven fullscreen transitions so `fullscreen` mirrors
+        // reality even when the user exits via ⌃⌘F / Esc / the auto-revealed menu bar's green button.
+        DisposableEffect(Unit) {
+            awtWindow = window
+            val closer = MacWindow.installFullScreen(window) { entered -> fullscreen = entered }
+            onDispose { closer?.close() }
+        }
         LaunchedEffect(windowFocused) {
             if (windowFocused && unseenDone > 0) { unseenDone = 0; DesktopNotify.badge(0) }
         }
@@ -176,23 +215,31 @@ fun main() = application {
                 dev.ccpocket.app.ui.LocalPathOpener provides dev.ccpocket.app.desktop.DesktopPathOpener(),
             ) {
             Column(Modifier.fillMaxSize().background(Tok.base)) {
-                DkTitleBar(
-                    mac = mac,
-                    onClose = ::exitApplication,
-                    onMinimize = { windowState.isMinimized = true },
-                    onToggleMax = {
-                        val restore = zoomRestore
-                        if (restore != null) {
-                            window.bounds = restore
-                            zoomRestore = null
-                        } else {
-                            zoomRestore = window.bounds
-                            window.bounds = usableScreenBounds(window)
-                        }
-                    },
-                    onTray = { model.showTray = !model.showTray },
-                    onSearch = { model.palette = PaletteScope.ALL },
-                )
+                // In fullscreen the self-drawn title bar collapses (issue #94): macOS already provides its
+                // own auto-hiding menu on top-hover, so drawing our bar too would double up. Win/Linux
+                // borderless fullscreen has no such menu, so they get a slim hover-reveal exit strip instead.
+                if (!fullscreen) {
+                    DkTitleBar(
+                        mac = mac,
+                        onClose = ::exitApplication,
+                        onMinimize = { windowState.isMinimized = true },
+                        onToggleMax = {
+                            val restore = zoomRestore
+                            if (restore != null) {
+                                window.bounds = restore
+                                zoomRestore = null
+                            } else {
+                                zoomRestore = window.bounds
+                                window.bounds = usableScreenBounds(window)
+                            }
+                        },
+                        onToggleFullscreen = toggleFullscreen,
+                        onTray = { model.showTray = !model.showTray },
+                        onSearch = { model.palette = PaletteScope.ALL },
+                    )
+                } else if (!mac) {
+                    FullscreenExitStrip(onExit = toggleFullscreen)
+                }
                 Box(Modifier.fillMaxWidth().weight(1f)) {
                     if (connected) DesktopApp(model) else ConnectPanel(repo)
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
@@ -204,8 +251,8 @@ fun main() = application {
     }
 }
 
-/** The window's CURRENT screen minus menu bar / Dock — what the zoom (green light) fills. Manual, because
- *  WindowPlacement.Maximized is unreliable for undecorated windows on macOS. */
+/** The window's CURRENT screen minus menu bar / Dock — what the zoom (double-click title bar) fills. Manual,
+ *  because WindowPlacement.Maximized is unreliable for undecorated windows on macOS. */
 private fun usableScreenBounds(window: java.awt.Window): Rectangle {
     val gc = window.graphicsConfiguration
     val b = gc.bounds

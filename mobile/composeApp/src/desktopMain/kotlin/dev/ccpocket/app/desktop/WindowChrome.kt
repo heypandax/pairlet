@@ -5,6 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,11 +23,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CropSquare
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,9 +45,10 @@ import dev.ccpocket.app.theme.Tok
 
 /**
  * The custom (undecorated) title bar — draggable, with platform-appropriate window controls: macOS traffic
- * lights on the left, Windows/Linux min/max/close on the right. The label region is the drag handle and
- * ALSO the zoom handle (double-click toggles fill-screen, the macOS title-bar convention); the search chip
- * and status dot sit outside it so they stay clickable. The dot opens the tray popover.
+ * lights on the left, Windows/Linux min/max/close on the right. The GREEN traffic light toggles TRUE native
+ * macOS fullscreen ([onToggleFullscreen], issue #94); double-clicking the label region still "zooms"
+ * (maximize, [onToggleMax]) — two separate gestures on purpose. The search chip and status dot sit outside
+ * the drag handle so they stay clickable. The dot opens the tray popover.
  */
 @Composable
 fun FrameWindowScope.DkTitleBar(
@@ -49,6 +56,7 @@ fun FrameWindowScope.DkTitleBar(
     onClose: () -> Unit,
     onMinimize: () -> Unit,
     onToggleMax: () -> Unit,
+    onToggleFullscreen: () -> Unit,
     onTray: () -> Unit,
     onSearch: () -> Unit = {},
 ) {
@@ -58,7 +66,7 @@ fun FrameWindowScope.DkTitleBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (mac) TrafficLights(onClose, onMinimize, onToggleMax)
+            if (mac) TrafficLights(onClose, onMinimize, onToggleFullscreen)
             // the label region is the drag handle. Anchor to the GLOBAL mouse position (AWT points), not the
             // compose drag delta: deltas are physical px (2× on Retina → the window outruns the cursor) and
             // are measured relative to the moving window itself (feedback loop → jitter). Grab the
@@ -107,11 +115,11 @@ fun FrameWindowScope.DkTitleBar(
 }
 
 @Composable
-private fun TrafficLights(onClose: () -> Unit, onMinimize: () -> Unit, onMax: () -> Unit) {
+private fun TrafficLights(onClose: () -> Unit, onMinimize: () -> Unit, onFullscreen: () -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Light(Color(0xFFED6A5E), onClose)
         Light(Color(0xFFF4BE4F), onMinimize)
-        Light(Color(0xFF61C554), onMax)
+        Light(Color(0xFF61C554), onFullscreen) // green = native fullscreen (not zoom — that's double-click)
     }
 }
 
@@ -133,5 +141,33 @@ private fun WinControls(onMinimize: () -> Unit, onMax: () -> Unit, onClose: () -
 private fun WinCell(icon: ImageVector, onClick: () -> Unit) {
     Box(Modifier.size(width = 30.dp, height = 38.dp).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, null, tint = Tok.tx2, modifier = Modifier.size(13.dp))
+    }
+}
+
+/**
+ * Fullscreen exit affordance for Windows/Linux borderless fullscreen, which — unlike macOS — has no
+ * auto-revealing system menu bar to reach for (issue #94). A hairline strip pinned to the top edge that
+ * expands on hover into a clickable "Exit Full Screen" pill; Esc / ⌃⌘F / F11 exit too. macOS deliberately
+ * doesn't draw this (its native menu bar reveals on the same top hover — no double-up).
+ */
+@Composable
+fun FullscreenExitStrip(onExit: () -> Unit) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    Box(
+        Modifier.fillMaxWidth().height(if (hovered) 34.dp else 5.dp).hoverable(src)
+            .background(if (hovered) Tok.base else Color.Transparent),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (hovered) {
+            Row(
+                Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
+                    .clickable(onClick = onExit).padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Rounded.FullscreenExit, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
+                Text("Exit Full Screen", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+            }
+        }
     }
 }
