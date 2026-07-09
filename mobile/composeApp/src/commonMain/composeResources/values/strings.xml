@@ -288,6 +288,7 @@
     <string name="file_deleted">File was deleted</string>
     <string name="diff_unchanged_lines">⋯ %1$d unchanged lines</string>
     <string name="diff_collapsed_lines">%1$d lines</string>
+    <string name="diff_soft_wrap">Soft wrap</string>
 
     <!-- ── paired devices (multi-device) ─────────────────────────── -->
     <string name="devices_section">PAIRED DEVICES</string>

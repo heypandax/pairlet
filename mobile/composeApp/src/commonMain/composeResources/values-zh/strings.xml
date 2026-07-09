@@ -288,6 +288,7 @@
     <string name="file_deleted">文件已被删除</string>
     <string name="diff_unchanged_lines">⋯ %1$d 行未改动</string>
     <string name="diff_collapsed_lines">%1$d 行</string>
+    <string name="diff_soft_wrap">自动换行</string>
 
     <!-- ── 已配对设备（多设备）───────────────────────────────────── -->
     <string name="devices_section">已配对设备</string>
