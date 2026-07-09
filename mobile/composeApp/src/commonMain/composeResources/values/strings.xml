@@ -317,6 +317,7 @@
     <string name="label_workdir">Directory</string>
     <string name="label_context">Context</string>
     <string name="value_default">default</string>
+    <string name="value_model_default">Default</string>
     <string name="session_actions_open">Session actions</string>
     <string name="quick_actions_title">Quick actions</string>
     <string name="qa_model">Switch model</string>

@@ -281,8 +281,11 @@ private fun ChatSubHeader(model: DesktopModel) {
         val ctx = model.contextUsed?.let { u ->
             model.contextWindow?.let { w -> "  ·  ctx ${(u * 100 / w)}%" } ?: "  ·  ctx ~${u / 1000}k"
         } ?: ""
+        // model segment falls back to "default" (never a dangling " · ") for a pre-first-turn session the
+        // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96)
+        val modelLabel = model.chatModel.ifBlank { "default" }
         Text(
-            pathLinked("$machine${model.chatWorkdir}$branch  ·  ${model.chatModel}$ctx"),
+            pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel$ctx"),
             color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),

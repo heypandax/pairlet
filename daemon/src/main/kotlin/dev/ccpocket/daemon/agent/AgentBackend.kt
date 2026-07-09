@@ -79,6 +79,16 @@ interface AgentBackend {
      *  e.g. Codex). Claude reads it from the transcript. */
     fun resumeModel(workdir: String, sessionId: String): String? = null
 
+    /** The model this backend WOULD use for a session started with NO explicit `--model` — read from config so
+     *  a brand-new session's header shows the real model BEFORE the first turn (issue #96; lazy start #61 spawns
+     *  no process pre-first-prompt, so there's no init to name it). Best-effort: null when nothing is configured
+     *  (the account default then decides, which only the first turn's init can name — the phone shows a
+     *  placeholder). MUST be cheap and DEFENSIVE — reads config only, never launches the agent, never throws: a
+     *  failed eager resolve degrades to null, it never crashes or blocks the open (claude ≥1.3.1 crash-loops on
+     *  eager-resolve failures). [workdir] lets a backend honor project-scoped config. Default null = other/older
+     *  backends. */
+    fun defaultModel(workdir: String): String? = null
+
     /** How many consecutive turns at the transcript's TAIL were API-failure placeholders — seeds the
      *  degraded-session warning on resume (issue #65). 0 = healthy/unknown (default; e.g. Codex). */
     fun resumeFailedTurnStreak(workdir: String, sessionId: String): Int = 0

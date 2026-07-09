@@ -361,6 +361,10 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     // record to read back, so there's nothing to seed the statusline with on resume.
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
+    // issue #96: read the configured default (top-level `model` in $CODEX_HOME/config.toml) so a brand-new
+    // Codex session's header shows the real model before the first turn instead of a blank segment.
+    override fun defaultModel(workdir: String): String? = CodexDefaultModel.resolve()
+
     // ---- mode mapping (Claude's single mode → Codex's approvalPolicy × sandbox axes) ----
 
     // The 4 PermissionMode values are the phone's Codex presets (Cautious/Balanced/Autonomous/Full auto).

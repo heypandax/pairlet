@@ -317,6 +317,7 @@
     <string name="label_workdir">目录</string>
     <string name="label_context">上下文</string>
     <string name="value_default">默认</string>
+    <string name="value_model_default">账号默认</string>
     <string name="session_actions_open">会话操作</string>
     <string name="quick_actions_title">快捷操作</string>
     <string name="qa_model">切换模型</string>
