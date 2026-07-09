@@ -151,6 +151,7 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
     val isImage = isImagePath(path)
     val deleted = fileInfo?.op == "delete"
     var diffTab by rememberDiffTab(path, isImage, deleted, diff)
+    val wrap = rememberWrapState()
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Column(Modifier.fillMaxWidth().background(Tok.surface)) {
@@ -183,6 +184,11 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                     deleted = deleted,
                     onPick = { diffTab = it },
                 )
+                if (wrapApplies(diffTab, diff, repo.viewedFile.value, ext, isImage)) {
+                    val active = if (diffTab) wrap.diff else wrap.file
+                    Box(Modifier.size(8.dp))
+                    WrapToggle(on = active.value) { active.value = !active.value }
+                }
                 Box(Modifier.weight(1f))
                 val (adds, dels) = shownStats(fileInfo, diff)
                 if (!isImage && (adds != null || dels != null)) {
@@ -193,8 +199,8 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false)
-            else FileTabBody(repo.viewedFile.value, ext, path = path)
+            if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false, wrap = wrap.diff.value)
+            else FileTabBody(repo.viewedFile.value, ext, path = path, wrap = wrap.file.value)
         }
     }
 }
