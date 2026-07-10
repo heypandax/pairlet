@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -288,11 +289,16 @@ private fun Arc(pct: Int) {
 private fun Bars(days: List<UsageDay>) {
     val max = days.maxOfOrNull { it.tokens }?.coerceAtLeast(1) ?: 1
     val peakIdx = days.indexOfFirst { it.tokens == days.maxOfOrNull { d -> d.tokens } }
-    Row(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+    Row(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         days.forEachIndexed { i, d ->
             val frac = (d.tokens.toFloat() / max).coerceIn(0.03f, 1f)
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                Box(Modifier.fillMaxWidth().height((frac * 100).dp).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(if (i == peakIdx) Tok.accent else Tok.accent.copy(alpha = 0.42f)))
+            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                // label row measured first, bar scales inside the REMAINING band (weight) — a fixed
+                // frac*100dp bar overflowed the row at the peak, squeezing the peak's own weekday label
+                // to nothing and sinking its bar ~7dp below every other bar's baseline
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
+                    Box(Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(if (i == peakIdx) Tok.accent else Tok.accent.copy(alpha = 0.42f)))
+                }
                 if (days.size <= 10) {
                     Spacer(Modifier.height(6.dp))
                     Text(d.label, color = if (i == peakIdx) Tok.tx2 else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, maxLines = 1)
@@ -310,11 +316,14 @@ private fun HourlyBars(hours: List<UsageDay>) {
     val maxTok = hours.maxOfOrNull { it.tokens } ?: 0L
     val max = maxTok.coerceAtLeast(1L)
     val peakIdx = hours.indexOfFirst { it.tokens == maxTok }
-    Row(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
+    Row(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         hours.forEachIndexed { i, h ->
             val frac = (h.tokens.toFloat() / max).coerceIn(0.03f, 1f)
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
-                Box(Modifier.fillMaxWidth().height((frac * 100).dp).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)).background(if (i == peakIdx) Tok.accent else Tok.accent.copy(alpha = 0.42f)))
+            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                // same weighted bar band as [Bars]: the peak's fixed-height bar used to squeeze its label
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
+                    Box(Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)).background(if (i == peakIdx) Tok.accent else Tok.accent.copy(alpha = 0.42f)))
+                }
                 Spacer(Modifier.height(6.dp))
                 // sparse axis: label 0/6/12/18 only; the rest keep an empty placeholder so bars stay aligned
                 Text(if (i % 6 == 0) i.toString() else "", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, maxLines = 1)
@@ -383,8 +392,7 @@ private val COL_LETTERS = WEEKDAY_LABELS.map { it.take(1) }
 /** Monday=0 … Sunday=6 for a trend bucket. Prefer the ISO [UsageDay.date] (Sakamoto's algorithm — commonMain
  *  has no date library); fall back to the daemon's English short label ("Mon".."Sun") when date is null. */
 internal fun weekdayMon0(day: UsageDay): Int {
-    day.date?.split('-')?.mapNotNull(String::toIntOrNull)?.takeIf { it.size == 3 && it[1] in 1..12 }
-        ?.let { (y, m, d) -> return sakamotoMon0(y, m, d) }
+    isoParts(day.date)?.let { (y, m, d) -> return sakamotoMon0(y, m, d) }
     return WEEKDAY_LABELS.indexOfFirst { day.label.startsWith(it, ignoreCase = true) }.coerceAtLeast(0)
 }
 

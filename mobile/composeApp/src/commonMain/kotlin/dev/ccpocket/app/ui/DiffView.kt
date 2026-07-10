@@ -457,7 +457,7 @@ fun shownStats(file: ChangedFile?, diff: FileDiff?): Pair<Int?, Int?> =
 
 /** The Diff tab's whole body: spinner → stale-daemon state → no-diff state → banner + [DiffView]. */
 @Composable
-fun DiffPaneBody(diff: FileDiff?, ext: String?, dense: Boolean, wrap: Boolean = false, modifier: Modifier = Modifier) {
+fun DiffPaneBody(diff: FileDiff?, ext: String?, dense: Boolean, wrap: Boolean, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize()) {
         when {
             diff == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -525,7 +525,7 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
  *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null, wrap: Boolean = true) {
+fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null, wrap: Boolean) {
     Box(Modifier.fillMaxSize()) {
         when {
             // documents ride the binary channel whole-or-nothing — while the bytes are in flight the

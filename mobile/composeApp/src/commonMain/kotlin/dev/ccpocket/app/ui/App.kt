@@ -1067,9 +1067,7 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
 @Composable
 private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
     // restore the composer draft (keyed per conversation, workdir for a brand-new session); re-inits on switch (#29)
-    // most-durable-first: sessionId survives daemon reopens AND app restarts; convoId covers a
-    // brand-new not-yet-materialized session; workdir covers pre-open (repo migrates drafts on re-key)
-    val draftKey = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
+    val draftKey = repo.composerKey()
     var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer

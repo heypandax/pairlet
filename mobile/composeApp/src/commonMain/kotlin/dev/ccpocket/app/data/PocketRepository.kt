@@ -343,7 +343,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  resumeId on open; corrected by SessionLive. Null for a not-yet-materialized brand-new session. */
     val sessionKey = mutableStateOf<String?>(null)
 
-    private fun composerKey(): String? = sessionKey.value ?: convoId.value ?: workdir.value
+    /** THE draft-key derivation — mobile App and the desktop model both key their composers off this;
+     *  a private copy at either call site would silently fork draft storage when a key tier is added. */
+    fun composerKey(): String? = sessionKey.value ?: convoId.value ?: workdir.value
 
     /** Carry a mid-typing draft onto [to] BEFORE the composer re-keys (a brand-new session's first init
      *  flips the key from convoId to the freshly-minted sessionId while the user may be typing). */
