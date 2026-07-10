@@ -83,6 +83,7 @@ import dev.ccpocket.protocol.AgentKind
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 
 internal fun osIcon(os: DkOs): ImageVector = when (os) {
     DkOs.MAC -> Icons.Rounded.LaptopMac
@@ -330,11 +331,15 @@ private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick
 
 // ── zone 4: RECENT — the visited projects' sessions, grouped, one scroll ────────────────────────
 
+// THE render predicate for RECENT groups — the reveal effect's recentRowIndex mirrors the LazyColumn
+// layout exactly, so every consumer must filter through this one definition or the scroll index drifts
+private fun renderedGroups(model: DesktopModel) = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
+
 @Composable
 private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
         SectionLabel("Recent", trailing = { Key("⌘R") })
-        val groups = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
+        val groups = renderedGroups(model)
         if (groups.isEmpty()) {
             Text(
                 "No sessions yet — open a project from All projects below, or start a new session.",
@@ -359,16 +364,19 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
         LaunchedEffect(selectedId) {
             if (selectedId == null) return@LaunchedEffect
             // openRunning lists then resumes asynchronously, so the target group can land a beat after the
-            // id resolves — observe the groups until the selected session surfaces, then act exactly once
-            val targetPath = snapshotFlow {
-                model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
-                    .firstOrNull { g -> g.sessions.any { it.sessionId == selectedId } }?.path
-            }.filterNotNull().first()
+            // id resolves — observe the groups until the selected session surfaces, then act exactly once.
+            // Time-boxed: an unlisted session (cross-machine resume, hidden row) never surfaces, and an
+            // unbounded collector would keep re-scanning every group on each snapshot change until the
+            // NEXT selection.
+            val targetPath = withTimeoutOrNull(5_000) {
+                snapshotFlow {
+                    renderedGroups(model).firstOrNull { g -> g.sessions.any { it.sessionId == selectedId } }?.path
+                }.filterNotNull().first()
+            } ?: return@LaunchedEffect
             collapsed.remove(targetPath) // expand a folded target; a no-op otherwise — others left as-is
             val rowKey = "s:$targetPath:$selectedId"
             if (listState.layoutInfo.visibleItemsInfo.none { it.key == rowKey }) {
-                val rendered = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
-                val index = recentRowIndex(rendered, collapsed, targetPath, selectedId)
+                val index = recentRowIndex(renderedGroups(model), collapsed, targetPath, selectedId)
                 if (index >= 0) listState.animateScrollToItem(index)
             }
         }

@@ -102,6 +102,7 @@ import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
+import dev.ccpocket.app.ui.rememberImeSafeMirror
 import dev.ccpocket.app.ui.completion
 import dev.ccpocket.app.ui.atTokenAt
 import dev.ccpocket.app.ui.atDirOf
@@ -560,12 +561,10 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 // The editable value, HOISTED here so the "@file" menu can read the caret position.
                 // TextFieldValue (not the model's plain String) because shift+Enter inserts the newline at
                 // the cursor ourselves (Compose desktop has no shift+Enter binding) and @-completion needs
-                // the caret too. Reconcile external writes: send() clears it, palette/slash completion seed it.
-                // Never reconcile MID-IME-COMPOSITION (#86, same root as mobile #93): rebuilding the value
-                // drops the composition (marked text) and desyncs the IME — committing 、/， as a line's 2nd
-                // char then ate the 1st. External writes land while not composing, so they still apply.
-                var field by remember { mutableStateOf(TextFieldValue(model.composer)) }
-                if (field.text != model.composer && field.composition == null) field = TextFieldValue(model.composer, TextRange(model.composer.length))
+                // the caret too. External-write reconcile + IME-composition safety (#86, same root as
+                // mobile #93) live in the shared ImeSafeMirror.
+                val mirror = rememberImeSafeMirror(model.composer) { model.composer = it }
+                var field by mirror::field
                 // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
                 // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).
                 val sep = model.pathSep
@@ -625,7 +624,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         // model.composer in sync, and the reconcile up there absorbs external writes.
                         BasicTextField(
                             value = field,
-                            onValueChange = { field = it; model.composer = it.text },
+                            onValueChange = mirror::onValueChange,
                             textStyle = fieldStyle,
                             cursorBrush = SolidColor(Tok.accent),
                             modifier = Modifier.fillMaxWidth().focusRequester(composerFocus)

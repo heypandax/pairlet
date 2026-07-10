@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -35,7 +36,8 @@ import java.util.UUID
  */
 private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-private val http: HttpClient by lazy { HttpClient(CIO) }
+// bounded request time so a black-holed network can't stack up fire-and-forget coroutines indefinitely
+private val http: HttpClient by lazy { HttpClient(CIO) { engine { requestTimeout = 10_000 } } }
 
 /** Stable per-install pseudonymous id (a random UUID) — GA4 keys sessions/users off this, not off anything
  *  identifying. Persisted next to the app's other desktop prefs. */
@@ -83,69 +85,53 @@ actual object Telemetry {
 
     actual fun isEnabled(): Boolean = collectionEnabled
 
-    actual fun track(event: TelEvent, params: Map<TelKey, Any>) {
-        if (!collectionEnabled) return
-        val cfg = config ?: return
-        val body = buildJsonObject {
-            put("client_id", clientId)
-            put("non_personalized_ads", true)
-            putJsonArray("events") {
-                addJsonObject {
-                    put("name", event.id)
-                    put("params", buildJsonObject {
-                        params.forEach { (k, v) ->
-                            when (v) {
-                                is Int -> put(k.id, v)
-                                is Long -> put(k.id, v)
-                                is Double -> put(k.id, v)
-                                is Boolean -> put(k.id, if (v) 1 else 0)
-                                else -> put(k.id, v.toString())
-                            }
-                        }
-                        // fixed dimensions on every event: edition splits desktop vs mobile; the two GA4
-                        // required params below make events count toward sessions/engagement.
-                        put("edition", "desktop")
-                        put("app_version", APP_VERSION)
-                        put("session_id", sessionId)
-                        put("engagement_time_msec", "100")
-                    })
-                }
+    actual fun track(event: TelEvent, params: Map<TelKey, Any>) = send(event.id) {
+        params.forEach { (k, v) ->
+            when (v) {
+                is Int -> put(k.id, v)
+                is Long -> put(k.id, v)
+                is Double -> put(k.id, v)
+                is Boolean -> put(k.id, if (v) 1 else 0)
+                else -> put(k.id, v.toString())
             }
         }
-        post(cfg, body.toString())
     }
 
-    actual fun recordError(message: String, phase: String?) {
+    // No Crashlytics on the JVM — surface errors as an `app_error` GA4 event carrying the same phase key.
+    actual fun recordError(message: String, phase: String?) = send("app_error") {
+        put("message", message.take(100))
+        if (phase != null) put(TelKey.Phase.id, phase)
+    }
+
+    /** The ONE MP envelope for every event. Fire-and-forget: telemetry must never block or crash the app —
+     *  all failures are swallowed, and both the JSON build and the POST run on the IO scope (track() is
+     *  called from interactive paths). */
+    private fun send(name: String, eventParams: JsonObjectBuilder.() -> Unit) {
         if (!collectionEnabled) return
         val cfg = config ?: return
-        // No Crashlytics on the JVM — surface errors as an `app_error` GA4 event carrying the same phase key.
-        val body = buildJsonObject {
-            put("client_id", clientId)
-            put("non_personalized_ads", true)
-            putJsonArray("events") {
-                addJsonObject {
-                    put("name", "app_error")
-                    put("params", buildJsonObject {
-                        put("message", message.take(100))
-                        if (phase != null) put(TelKey.Phase.id, phase)
-                        put("edition", "desktop")
-                        put("app_version", APP_VERSION)
-                        put("session_id", sessionId)
-                        put("engagement_time_msec", "100")
-                    })
-                }
-            }
-        }
-        post(cfg, body.toString())
-    }
-
-    private fun post(cfg: Ga4Config, json: String) {
-        // fire-and-forget: telemetry must never block or crash the app; all failures are swallowed
         io.launch {
             runCatching {
+                val body = buildJsonObject {
+                    put("client_id", clientId)
+                    put("non_personalized_ads", true)
+                    putJsonArray("events") {
+                        addJsonObject {
+                            put("name", name)
+                            put("params", buildJsonObject {
+                                eventParams()
+                                // fixed dimensions on every event: edition splits desktop vs mobile; the two GA4
+                                // required params below make events count toward sessions/engagement.
+                                put("edition", "desktop")
+                                put("app_version", APP_VERSION)
+                                put("session_id", sessionId)
+                                put("engagement_time_msec", "100")
+                            })
+                        }
+                    }
+                }
                 http.post("https://www.google-analytics.com/mp/collect?measurement_id=${cfg.measurementId}&api_secret=${cfg.apiSecret}") {
                     contentType(ContentType.Application.Json)
-                    setBody(json)
+                    setBody(body.toString())
                 }
             }
         }

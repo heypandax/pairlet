@@ -73,8 +73,6 @@ object DesktopUpdater {
         else -> null
     }
 
-    fun isNewer(candidate: String, current: String): Boolean = ReleaseVersions.isNewer(candidate, current)
-
     // ── effectful ─────────────────────────────────────────────────────────────────────────────────
 
     /** The packaged app root — the macOS `.app` bundle or the Windows install dir — verified to be OUR

@@ -54,7 +54,7 @@ object ReleaseClient {
                 Release(tag.removePrefix("v"), assets)
             }
         }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 

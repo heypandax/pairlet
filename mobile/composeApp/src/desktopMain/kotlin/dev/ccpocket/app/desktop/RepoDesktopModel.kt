@@ -27,6 +27,7 @@ import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.update.ReleaseClient
+import dev.ccpocket.protocol.update.ReleaseVersions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -72,33 +73,46 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     override var composer by mutableStateOf("")
 
     // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
-    // The composer is a single field, but its TEXT is per-session — keyed most-durable-first like the
-    // mobile composer (#29): the real sessionId (survives daemon reopens AND app restarts) → convoId
-    // (daemon-run scoped) → workdir (pre-open). The repo's own composerKey() is private, so replicate
-    // the chain here — the same one [openSession] re-keys via sessionKey = resumeId.
-    private fun composerKey(): String? = repo.sessionKey.value ?: repo.convoId.value ?: repo.workdir.value
-    // the key the in-memory [composer] currently belongs to — drives restore-new when the open session changes
+    // The composer is a single field, but its TEXT is per-session — keyed by the repo's composerKey()
+    // (most-durable-first like the mobile composer, #29), the same chain [openSession] re-keys via
+    // sessionKey = resumeId.
+    private fun composerKey(): String? = repo.composerKey()
+    // the key the in-memory [composer] currently belongs to — drives save-old/restore-new on key change
     private var composerDraftKey: String? = composerKey()
 
     init {
-        // restore-new: when the open session (composer key) changes, load that session's saved draft. The
-        // save-old is flushed synchronously at each switch entry point ([flushComposerDraft]) so a draft
-        // typed inside the debounce window survives this reload; the repo's migrateDraft (SessionLive)
+        // save-old + restore-new as ONE invariant of the key transition (not a flush contract every open
+        // entry point must remember): when the composer key changes, the outgoing text is still in
+        // [composer] and its key in [composerDraftKey] — persist it (covers a draft typed inside the
+        // debounce window), then load the new session's saved draft. The repo's migrateDraft (SessionLive)
         // carries a brand-new session's draft onto its freshly minted sessionId before this fires.
         scope.launch {
             snapshotFlow { composerKey() }.collect { key ->
-                if (key != composerDraftKey) { composerDraftKey = key; composer = repo.draftFor(key) }
+                if (key != composerDraftKey) {
+                    repo.saveDraft(composerDraftKey, composer)
+                    composerDraftKey = key
+                    composer = repo.draftFor(key)
+                }
             }
         }
         // debounced persist of composer edits under the current session's key (mirrors the mobile composer)
         scope.launch {
             snapshotFlow { composer }.collectLatest { text -> delay(DRAFT_DEBOUNCE_MS); repo.saveDraft(composerKey(), text) }
         }
+        // A freshly-minted sessionId (brand-new session, /clear, a forked resume) is never in the group
+        // listing — the list was pulled BEFORE the daemon created the session, and the desktop has no
+        // "back to the list" moment to re-pull on (mobile's backToBrowse). When an id materializes that
+        // the live rows don't carry, silently re-pull so RECENT shows the new row without a manual ⌘R.
+        // Keyed on the id, so no loop: a list fetch never changes sessionKey, and a known id is a no-op.
+        scope.launch {
+            snapshotFlow { repo.sessionKey.value }.collect { id ->
+                if (id == null || sessions.any { it.sessionId == id }) return@collect
+                val dir = repo.workdir.value ?: return@collect
+                delay(500) // let the agent flush the transcript the daemon's listing reads
+                repo.listSessions(dir)
+            }
+        }
     }
-
-    /** Persist the current draft under its session key right now — called before an open/switch re-keys the
-     *  composer, so a draft typed within the debounce window isn't lost when restore-new reloads it. */
-    private fun flushComposerDraft() = repo.saveDraft(composerKey(), composer)
 
     // ── changes (changed-files v2): straight repo pass-throughs — the repo already scopes them
     // to the open session and re-arms its 8s stale-daemon deadlines on every request
@@ -167,6 +181,7 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
         }
 
     override fun openRunning(m: DkMachine, p: DkProject) {
+        optimisticSelectedId = null // this path bypasses selectSession — don't let a stale pick re-light mid-open (#82)
         FleetRuntime.forPrimary(repo)?.focusProject(m.computer.accountId, p.path) ?: super.openRunning(m, p)
     }
 
@@ -344,7 +359,6 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     }
 
     override fun selectSession(s: DkSession) {
-        flushComposerDraft() // save-old before the open re-keys the composer (issue #88)
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
         optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
@@ -403,7 +417,6 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     }
 
     override fun openPin(p: DkPin) {
-        flushComposerDraft() // save-old before the open/switch re-keys the composer (issue #88)
         if (p.accountId == repo.paired.value?.accountId) {
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
             optimisticSelectedId = p.sessionId // same as selectSession: light the target row through the open (#82)
@@ -443,7 +456,6 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
         if (typed.isEmpty()) return
-        flushComposerDraft() // save-old before opening the new session re-keys the composer (issue #88)
         showNewSession = false
         optimisticSelectedId = null // a brand-new session has no listed row yet — don't re-light a stale one (#82)
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
@@ -529,7 +541,7 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
             val rel = DesktopUpdater.latest()
             updateStateInternal = when {
                 rel == null -> DkUpdateState.Failed("Couldn't reach GitHub releases — check your network.")
-                DesktopUpdater.isNewer(rel.version, APP_VERSION) -> {
+                ReleaseVersions.isNewer(rel.version, APP_VERSION) -> {
                     pendingRelease = rel
                     DkUpdateState.Available(rel.version, DesktopUpdater.currentSource())
                 }

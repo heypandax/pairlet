@@ -25,14 +25,18 @@ import java.lang.reflect.Proxy
 object MacWindow {
     val isMac = System.getProperty("os.name").lowercase().contains("mac")
 
+    /** Fullscreen transition phases, in AppKit callback order: the *ING pair fires at animation START —
+     *  the moment to set the window's target frame so AppKit's own animation carries it there. */
+    enum class FsPhase { ENTERING, ENTERED, EXITING, EXITED }
+
     /**
      * Marks [window] as fullscreen-capable (idempotent) and subscribes to the OS-driven transitions so our
      * state tracks reality — the user can leave fullscreen by ⌃⌘F, Esc, Mission Control, or the green button
-     * in the auto-revealed menu bar, none of which route through our own toggle. [onChanged] is invoked with
-     * `true` once fully entered and `false` once fully exited. Returns an [AutoCloseable] that unsubscribes,
-     * or `null` off macOS / when the APIs are unavailable (the caller then simply gets no callbacks).
+     * in the auto-revealed menu bar, none of which route through our own toggle. [onPhase] receives all four
+     * [FsPhase]s. Returns an [AutoCloseable] that unsubscribes, or `null` off macOS / when the APIs are
+     * unavailable (the caller then simply gets no callbacks).
      */
-    fun installFullScreen(window: Window, onChanged: (Boolean) -> Unit): AutoCloseable? {
+    fun installFullScreen(window: Window, onPhase: (FsPhase) -> Unit): AutoCloseable? {
         if (!isMac) return null
         return try {
             val util = Class.forName("com.apple.eawt.FullScreenUtilities")
@@ -42,9 +46,10 @@ object MacWindow {
             val listenerClass = Class.forName("com.apple.eawt.FullScreenListener")
             val handler = InvocationHandler { proxy, method, args ->
                 when (method.name) {
-                    "windowEnteredFullScreen" -> { onChanged(true); null }
-                    "windowExitedFullScreen" -> { onChanged(false); null }
-                    "windowEnteringFullScreen", "windowExitingFullScreen" -> null // mid-animation; ignore
+                    "windowEnteringFullScreen" -> { onPhase(FsPhase.ENTERING); null }
+                    "windowEnteredFullScreen" -> { onPhase(FsPhase.ENTERED); null }
+                    "windowExitingFullScreen" -> { onPhase(FsPhase.EXITING); null }
+                    "windowExitedFullScreen" -> { onPhase(FsPhase.EXITED); null }
                     "equals" -> proxy === args?.getOrNull(0)
                     "hashCode" -> System.identityHashCode(proxy)
                     "toString" -> "MacFullScreenListener"

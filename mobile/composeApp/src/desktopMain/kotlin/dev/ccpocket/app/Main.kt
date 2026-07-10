@@ -95,10 +95,11 @@ fun main() = application {
     var fsRestore by remember { mutableStateOf<Rectangle?>(null) } // Win/Linux borderless-FS restore bounds
     val toggleFullscreen: () -> Unit = tf@{
         val w = awtWindow ?: return@tf
-        if (mac) {
-            MacWindow.toggleFullScreen(w) // async — `fullscreen` flips when the listener fires
-        } else {
-            // Win/Linux best-effort: undecorated borderless fullscreen (fill the whole device, menu-less).
+        // Native macOS fullscreen first (async — `fullscreen` flips when the listener fires). false means
+        // it can't (non-mac, or the reflective AppKit call failed: missing --add-exports, exotic JDK) —
+        // then the borderless fallback keeps the control alive instead of leaving a dead green light.
+        if (!MacWindow.toggleFullScreen(w)) {
+            // best-effort: undecorated borderless fullscreen (fill the whole device, menu-less).
             // TODO(win/linux): GraphicsDevice.setFullScreenWindow for exclusive FS if a mode switch is wanted.
             val r = fsRestore
             if (r != null) { w.bounds = r; fsRestore = null; fullscreen = false }
@@ -135,13 +136,18 @@ fun main() = application {
                 e.type == KeyEventType.KeyDown && mod && digit >= 0 && connected -> { model.jumpPin(digit); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Comma && connected -> { model.showSettings = true; true }
                 // fullscreen (issue #94): ⌃⌘F toggles anywhere; F11 is the Win/Linux convention. Esc leaves
-                // fullscreen, but only after overlays get first dibs on Esc (below).
+                // fullscreen too, but from the BUBBLING pass (onKeyEvent below) — in this preview pass the
+                // window would steal Esc from the composer, whose own preview handler needs it to dismiss
+                // the slash/@ menus and to interrupt a streaming turn (CLI muscle memory).
                 e.type == KeyEventType.KeyDown && e.isCtrlPressed && e.isMetaPressed && e.key == Key.F -> { toggleFullscreen(); true }
                 e.type == KeyEventType.KeyDown && !mac && e.key == Key.F11 -> { toggleFullscreen(); true }
                 e.type == KeyEventType.KeyDown && e.key == Key.Escape && model.anyOverlayOpen -> { model.dismissOverlays(); true }
-                e.type == KeyEventType.KeyDown && e.key == Key.Escape && fullscreen -> { toggleFullscreen(); true }
                 else -> false
             }
+        },
+        onKeyEvent = { e ->
+            // Esc → leave fullscreen, only once nothing closer to the focus consumed it (see preview above)
+            if (e.type == KeyEventType.KeyDown && e.key == Key.Escape && fullscreen) { toggleFullscreen(); true } else false
         },
     ) {
         // zoom (double-click the title bar): fill the CURRENT screen's usable bounds (menu bar / Dock
@@ -193,7 +199,25 @@ fun main() = application {
         // reality even when the user exits via ⌃⌘F / Esc / the auto-revealed menu bar's green button.
         DisposableEffect(Unit) {
             awtWindow = window
-            val closer = MacWindow.installFullScreen(window) { entered -> fullscreen = entered }
+            // An undecorated window's NSWindow is borderless (no resizable styleMask), so AppKit moves it
+            // into the fullscreen Space WITHOUT resizing it — content would sit at its windowed size on
+            // black. Stretch/restore OURSELVES, at the START of each transition (the *ING phases), so
+            // AppKit's own animation carries the window to its final frame: resizing at the end popped the
+            // content after a black gap (enter) and let the exit animation land the screen-sized frame
+            // off-position before we snapped it home (the "drifts up-right then jumps back" artifact).
+            // fsRestore doubles as the Win/Linux borderless restore; the two paths never overlap.
+            val closer = MacWindow.installFullScreen(window) { phase ->
+                when (phase) {
+                    MacWindow.FsPhase.ENTERING -> {
+                        fullscreen = true // before the resize, so the bounds persister skips the fullscreen frame
+                        fsRestore = window.bounds
+                        window.bounds = window.graphicsConfiguration.bounds
+                    }
+                    MacWindow.FsPhase.EXITING -> { fsRestore?.let { window.bounds = it }; fsRestore = null }
+                    MacWindow.FsPhase.ENTERED -> fullscreen = true // defensive: keep state true if ENTERING was missed
+                    MacWindow.FsPhase.EXITED -> fullscreen = false
+                }
+            }
             onDispose { closer?.close() }
         }
         LaunchedEffect(windowFocused) {
