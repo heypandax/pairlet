@@ -49,3 +49,4 @@ mobile/composeApp/src/desktopMain/resources/ga4.properties
 
 # fir.im token (local only, never commit)
 scripts/.fir-token
+scripts/__pycache__/
