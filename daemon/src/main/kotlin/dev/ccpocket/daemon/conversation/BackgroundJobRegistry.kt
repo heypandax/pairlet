@@ -54,8 +54,7 @@ class BackgroundJobRegistry {
             }
             "KillShell", "KillBash" -> {
                 val sid = input.str("shell_id") ?: input.str("bash_id") ?: input.str("task_id") ?: return false
-                val job = jobs[taskToKey[sid] ?: sid] ?: return false
-                if (job.status == JobStatus.RUNNING) { job.status = JobStatus.KILLED; job.lastUpdate = now; return true }
+                return markKilled(taskToKey[sid] ?: sid, now)
             }
         }
         return false

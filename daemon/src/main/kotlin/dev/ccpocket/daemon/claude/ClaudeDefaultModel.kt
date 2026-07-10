@@ -31,20 +31,22 @@ object ClaudeDefaultModel {
         userConfigDir: Path?,
         env: (String) -> String? = System::getenv,
         home: File = File(System.getProperty("user.home")),
-    ): String? = runCatching {
+    ): String? {
         val projectDir = File(workdir, ".claude")
         val userRoot = userConfigDir?.toFile()
             ?: env("CLAUDE_CONFIG_DIR")?.takeIf { it.isNotBlank() }?.let(::File)
             ?: File(home, ".claude")
-        // first non-blank hit wins; each supplier is independently guarded so one bad file can't hide the rest
+        // first non-blank hit wins. The "never throws" contract lives where code can actually throw: the
+        // per-field guards inside modelFromSettings (one bad file can't hide the rest) — plus the caller's
+        // own runCatching for any backend.
         val candidates: List<() -> String?> = listOf(
             { env("ANTHROPIC_MODEL")?.takeIf { it.isNotBlank() } },
             { modelFromSettings(File(projectDir, "settings.local.json")) },
             { modelFromSettings(File(projectDir, "settings.json")) },
             { modelFromSettings(File(userRoot, "settings.json")) },
         )
-        candidates.firstNotNullOfOrNull { runCatching(it).getOrNull() }
-    }.getOrNull()
+        return candidates.firstNotNullOfOrNull { it() }
+    }
 
     /** A settings file's effective model: `env.ANTHROPIC_MODEL` (a settings-scoped override) then the
      *  top-level `model` field. Null when the file is absent / unreadable / has neither. */

@@ -183,6 +183,16 @@ class Conversation(
     @Volatile
     private var interruptRequested = false
 
+    // the last prompt handed to the agent — the resend source when a launch is refused by the CLI's
+    // session lock and healSessionLock relaunches forked (the refused process took the prompt with it)
+    @Volatile
+    private var lastPrompt: Pair<String, List<ImageData>>? = null
+
+    // healSessionLock already fired for the current prompt — one heal per user action, so a fork that
+    // somehow gets refused too can't relaunch-loop. Re-armed by the next sendPrompt.
+    @Volatile
+    private var lockForkRetried = false
+
     // consecutive turns that produced ONLY a synthetic placeholder — ≥ DEGRADED_STREAK flips
     // SessionLive.degraded so clients warn + gate further sends into a session that can only bloat
     // (issue #65). Seeded from the resumed transcript's tail in open(); reset by /clear and switchDir.
@@ -523,6 +533,9 @@ class Conversation(
                     }
                     is AgentEvent.TurnResult -> {
                         executing = false
+                        // the turn consumed the prompt — no refused launch can need a resend now, and the
+                        // pair pins the prompt's full base64 image payloads for as long as it's held
+                        lastPrompt = null
                         // a FOREGROUND sub-agent still tracked at turn end never delivered its result
                         // (interrupted / died) — settle its card so it can't spin forever. Background
                         // runs live across turns; task_notification (or stopProcess) settles those.
@@ -583,11 +596,53 @@ class Conversation(
             executing = false // a dead process never delivers TurnResult
             p.awaitExit()
             backend.onProcessEnded(sessionId)
+            if (healSessionLock(p)) return
             // carry the exit code + the agent's last stderr line: a --resume that dies before its first
             // init (bad session id, context overflow) used to surface as a bare "agent process ended"
             val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
             sink.emit(PocketError("process_exited", "agent process ended (exit ${p.exitCode() ?: "?"})$why", convoId))
         }
+    }
+
+    /**
+     * claude ≥2.1 refuses a bare `--resume <id>` when ANY live process has that session registered
+     * (~/.claude/sessions/<pid>.json — an interactive window, a `--bg` background agent, a leaked
+     * zombie): it exits 1 at startup, before any stdout, with only a stderr hint to add
+     * --fork-session. The daemon's writer-liveness heuristics can't see an idle holder (a held
+     * session between turns never touches its transcript), so the refusal is only observable here,
+     * at process death. Heal it: relaunch ONCE with --fork-session (branching a fresh id is the only
+     * control path the CLI leaves for a held session) and re-hand the fresh process the prompt the
+     * refused one took with it. Returns true when the death was handled (heal attempted); a failed
+     * heal surfaces its own PocketError.
+     */
+    private suspend fun healSessionLock(p: AgentProcess): Boolean {
+        if (lockForkRetried || p.lastStderr?.contains(SESSION_LOCK_MARKER) != true) return false
+        val anchor = sessionId ?: openedResumeId ?: return false // nothing to fork off
+        lockForkRetried = true
+        openedWithFork = true // pre-init relaunches (mode/model switch) must keep the fork decision
+        reemitLive = true // a mid-session heal mints a NEW sessionId — the next init must re-announce it
+        log.info("$convoId resume ${anchor.take(8)}… refused (session held by a live agent) → retrying with --fork-session")
+        proc = null // already dead — don't shutdown/clear jobs like stopProcess, just replace it
+        bridge?.cancelAll()
+        bridge = null
+        val healed = runCatching {
+            launchProcess(AgentSpec(workdir, resumeId = anchor, model = model, mode = mode, effort = effort, forkSession = true))
+            lastPrompt?.let { (text, images) ->
+                executing = true
+                sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
+                backend.sendPrompt(text, images)
+            }
+        }
+        if (healed.isFailure) {
+            sink.emit(
+                PocketError(
+                    "agent_unavailable",
+                    "session is held by another running claude and the forked retry failed (${healed.exceptionOrNull()?.message})",
+                    convoId,
+                ),
+            )
+        }
+        return true
     }
 
     /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
@@ -660,6 +715,8 @@ class Conversation(
         }
         executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         lastActivityMs = System.currentTimeMillis()
+        lastPrompt = text to images // healSessionLock's resend source — the refused launch loses this turn
+        lockForkRetried = false // each user prompt re-arms one heal
         backend.sendPrompt(text, images)
         promptId?.let { sink.emit(PromptAck(convoId, it)) } // the turn is in the agent's hands — receipt (issue #66)
     }
@@ -743,14 +800,23 @@ class Conversation(
     }
 
     /**
-     * Interrupt the in-flight turn (phone composer ■). Claude uses the stream-json control protocol; Codex
-     * sends turn/interrupt. Either way the agent aborts the turn and the session/process stay alive.
+     * Arm the user-cancel interrupt (Claude: stream-json control, Codex: turn/interrupt — either way the
+     * turn aborts and the session/process stay alive). Only WHILE a turn is executing: arming
+     * [interruptRequested] with no turn to consume it (a ■ racing TurnDone, stopping a job that lingered
+     * past its turn) leaves the flag set until the NEXT turn and repaints that turn's genuine failure as
+     * a clean user cancel.
      */
+    private suspend fun requestInterrupt() {
+        if (!executing) return
+        interruptRequested = true // the coming result's is_error is the user's stop, not a failure to paint red
+        backend.interrupt()
+    }
+
+    /** Interrupt the in-flight turn (phone composer ■). */
     suspend fun cancelTurn() {
         if (proc == null) return
         lastActivityMs = System.currentTimeMillis()
-        interruptRequested = true // the coming result may say is_error — that's the user's ■, not a failure
-        backend.interrupt()
+        requestInterrupt()
     }
 
     /**
@@ -764,9 +830,8 @@ class Conversation(
      */
     suspend fun stopBackgroundJob(jobId: String) {
         if (!jobs.markKilled(jobId, System.currentTimeMillis())) return
-        interruptRequested = true // an interrupted turn's is_error is the user's stop, not a failure to paint red
-        backend.interrupt()       // io-null-safe: a job can only exist while a process does, but this no-ops regardless
-        emitJobs()                // reflect KILLED in the panel now (also stamps lastActivityMs)
+        requestInterrupt()
+        emitJobs() // reflect KILLED in the panel now (also stamps lastActivityMs)
     }
 
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */
@@ -867,6 +932,17 @@ class Conversation(
 
     private companion object {
         val EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh", "max")
+
+        // claude's session-lock refusal on stderr: "Error: Session <id> is currently running as a
+        // background agent (<kind>). … add --fork-session to branch off a copy." The kind varies
+        // (bg / interactive / …); this prefix doesn't. Probed on 2.1.204 — scripts/probe-claude-wire.py
+        // `lock` scenario guards the wording against CLI drift.
+        const val SESSION_LOCK_MARKER = "is currently running as a background agent"
+
+        // prepended to the healed turn so the fork isn't silent — the user sees why a new session
+        // id appears in their list instead of suspecting the "duplicate sessions" bug class
+        const val FORK_NOTICE = "⑂ This session is held by another running claude (`claude agents`), " +
+            "so your message continues in a forked copy.\n\n"
 
         // consecutive placeholder-only turns before the session is announced degraded (issue #65)
         const val DEGRADED_STREAK = 2

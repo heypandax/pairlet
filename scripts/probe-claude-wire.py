@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """claude CLI stream-json 行为回归探针 —— 升级 claude 后跑一次，防依赖漂移。
 
-daemon 依赖四条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 上实证；task 为 07-08 增）：
+daemon 依赖五条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 上实证；task 为 07-08 增，lock 为 07-10 增）：
   steer  中途写入的 user 消息在下一个工具边界注入当前轮（单 result 收尾）
   queue  当前轮无工具边界时，排队消息在本轮结束后自动作为下一轮处理（两个 result）
   ask    AskUserQuestion 以 control_request/can_use_tool 浮现（requires_user_interaction=true），
@@ -9,10 +9,13 @@ daemon 依赖四条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 
          default 与 plan 两种 permission-mode 下这条 wire 完全一致（issue #55 排查所得，两模式都测）
   task   子 agent（Task/Agent 工具）：内部事件以根级 parent_tool_use_id 标注混入同一 stdout，
          主链 tool_result 携带最终报告（issue #77 的 Task 卡片分组/展开全依赖这三点）
+  lock   被活进程注册（~/.claude/sessions/<pid>.json）的 session，裸 --resume 启动即 exit 1、
+         stdout 全空、stderr 一行含 "is currently running as a background agent"；--fork-session
+         逃生成功并铸新 id（Conversation.healSessionLock 的自动分叉自愈全靠这行文案匹配）
 
-任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵 / Task 卡片永远转圈）。
+任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵 / Task 卡片永远转圈 / 占用会话裸报错）。
 
-用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|all]（默认 all）
+用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|lock|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default），会消耗少量用量。
 """
@@ -223,6 +226,77 @@ def scenario_task() -> bool:
         p.kill()
 
 
+def scenario_lock() -> bool:
+    print("── lock：被活进程持有的 session 裸 resume 被拒，--fork-session 逃生（issue: zhou 07-10）──")
+    # claude ≥2.1 给 --resume 加了硬锁：每个活进程把自己的 session 写进 ~/.claude/sessions/<pid>.json，
+    # 裸 resume 启动时查表，被任何活进程（interactive / bg / 僵尸）持有即 exit 1 + stdout 全空 +
+    # stderr 一行提示。daemon 的 Conversation.healSessionLock 靠匹配这行 stderr 的 marker 自动改
+    # --fork-session 重试 —— 文案或退出行为漂移，自愈就静默失效、手机重新看到裸 process_exited。
+    marker = "is currently running as a background agent"  # 与 Conversation.SESSION_LOCK_MARKER 保持一致
+    env = dict(os.environ)
+    env.pop("CLAUDECODE", None)
+    env.pop("CLAUDE_CODE_ENTRYPOINT", None)
+    os.makedirs(WORKDIR, exist_ok=True)
+    workdir_real = os.path.realpath(WORKDIR)
+
+    # 持锁者：一个卡在 Bash 审批上的 --bg agent（blocked 状态会一直持有 session，直到被 stop）
+    bg = subprocess.run(
+        [CLAUDE, "--bg", "Use the Bash tool to run exactly: sleep 300. Do not reply until it finishes."],
+        capture_output=True, text=True, cwd=WORKDIR, env=env, timeout=120,
+    )
+    if not check("bg agent started", bg.returncode == 0, (bg.stderr or bg.stdout).strip()[:80]):
+        return False
+    held = short_id = None
+    end = time.time() + 60
+    while time.time() < end and not held:
+        try:
+            agents = json.loads(subprocess.run(
+                [CLAUDE, "agents", "--json"], capture_output=True, text=True, env=env, timeout=30,
+            ).stdout or "[]")
+        except ValueError:
+            agents = []
+        for a in agents:
+            if a.get("kind") in ("background", "bg") and os.path.realpath(a.get("cwd") or "") == workdir_real:
+                held, short_id = a.get("sessionId"), a.get("id")
+        if not held:
+            time.sleep(2)
+    if not check("bg agent registered (claude agents --json)", bool(held), f"sessionId={held}"):
+        return False
+
+    try:
+        # ① 裸 resume（daemon 同款旗子）：应当启动即拒，stdout 一字不吐
+        bare = subprocess.run(
+            [CLAUDE, *BASE_ARGS, "--resume", held],
+            input="", capture_output=True, text=True, cwd=WORKDIR, env=env, timeout=60,
+        )
+        ok = check("bare resume refused (exit 1)", bare.returncode == 1, f"exit={bare.returncode}")
+        ok &= check("stderr carries the daemon's marker", marker in bare.stderr, repr(bare.stderr.strip())[:120])
+        ok &= check("stdout empty (refusal precedes any stream)", not bare.stdout.strip(), f"{len(bare.stdout)} byte(s)")
+        # ② --fork-session 逃生：正常 init（全新 id）+ turn 正常收尾
+        fork = subprocess.run(
+            [CLAUDE, *BASE_ARGS, "--resume", held, "--fork-session"],
+            input=user_frame("Do not use any tools. Reply with exactly: ok") + "\n",
+            capture_output=True, text=True, cwd=WORKDIR, env=env, timeout=120,
+        )
+        init_id, result_ok = None, False
+        for line in fork.stdout.splitlines():
+            try:
+                j = json.loads(line)
+            except ValueError:
+                continue
+            if j.get("type") == "system" and j.get("subtype") == "init":
+                init_id = j.get("session_id")
+            if j.get("type") == "result":
+                result_ok = not j.get("is_error")
+        ok &= check("--fork-session escapes the lock", fork.returncode == 0 and result_ok,
+                    f"exit={fork.returncode}, stderr={repr(fork.stderr.strip())[:80]}")
+        ok &= check("fork minted a fresh session id", bool(init_id) and init_id != held, f"{init_id}")
+        return ok
+    finally:
+        if short_id:  # 释放持锁者，别把 blocked 的 bg agent 留在用户机器上
+            subprocess.run([CLAUDE, "stop", short_id], capture_output=True, text=True, env=env, timeout=30)
+
+
 def scenario_ask_plan() -> bool:
     # issue #55: users reported the phone couldn't pick an AskUserQuestion option in PLAN mode. Root cause
     # was NOT the wire — plan-mode's control_request is identical to default's (proven), so StreamParser and
@@ -236,12 +310,12 @@ def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     version = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
     print(f"claude: {CLAUDE} ({version})\n")
-    scenarios = {"steer": scenario_steer, "queue": scenario_queue, "ask": scenario_ask, "ask_plan": scenario_ask_plan, "task": scenario_task}
+    scenarios = {"steer": scenario_steer, "queue": scenario_queue, "ask": scenario_ask, "ask_plan": scenario_ask_plan, "task": scenario_task, "lock": scenario_lock}
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
     print()
     if all(results):
-        print("✅ wire behavior unchanged — App 依赖的四条 CLI 行为全部成立")
+        print("✅ wire behavior unchanged — App 依赖的五条 CLI 行为全部成立")
         sys.exit(0)
     print("❌ CLI 行为漂移！排查 daemon 的 StreamParser/PermissionBridge/AskQuestions 是否需要适配")
     sys.exit(1)
