@@ -126,55 +126,55 @@ private fun strokedIcon(name: String, viewport: Float, block: ImageVector.Builde
     ImageVector.Builder(name = name, defaultWidth = viewport.dp, defaultHeight = viewport.dp, viewportWidth = viewport, viewportHeight = viewport)
         .apply(block).build()
 
-private fun ImageVector.Builder.stroked(width: Float = 1.5f, block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit) =
+private fun ImageVector.Builder.strokedLine(width: Float = 1.5f, block: androidx.compose.ui.graphics.vector.PathBuilder.() -> Unit) =
     path(stroke = SolidColor(Color.White), strokeLineWidth = width, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, pathBuilder = block)
 
 /** Generic document: page with folded corner + two text lines. */
 val DocFileGlyph: ImageVector by lazy {
     strokedIcon("DocFile", 24f) {
-        stroked {
+        strokedLine {
             moveTo(14f, 3f); horizontalLineTo(7f)
             arcTo(2f, 2f, 0f, false, false, 5f, 5f); verticalLineTo(19f)
             arcTo(2f, 2f, 0f, false, false, 7f, 21f); horizontalLineTo(17f)
             arcTo(2f, 2f, 0f, false, false, 19f, 19f); verticalLineTo(8f); close()
         }
-        stroked { moveTo(14f, 3f); verticalLineTo(8f); horizontalLineTo(19f) }
-        stroked { moveTo(8.5f, 13f); horizontalLineTo(15.5f); moveTo(8.5f, 16.5f); horizontalLineTo(13.5f) }
+        strokedLine { moveTo(14f, 3f); verticalLineTo(8f); horizontalLineTo(19f) }
+        strokedLine { moveTo(8.5f, 13f); horizontalLineTo(15.5f); moveTo(8.5f, 16.5f); horizontalLineTo(13.5f) }
     }
 }
 
 /** Spreadsheet: rounded table with a header row + first column. */
 val TableFileGlyph: ImageVector by lazy {
     strokedIcon("TableFile", 24f) {
-        stroked {
+        strokedLine {
             moveTo(6f, 5f); horizontalLineTo(18f)
             arcTo(2f, 2f, 0f, false, true, 20f, 7f); verticalLineTo(17f)
             arcTo(2f, 2f, 0f, false, true, 18f, 19f); horizontalLineTo(6f)
             arcTo(2f, 2f, 0f, false, true, 4f, 17f); verticalLineTo(7f)
             arcTo(2f, 2f, 0f, false, true, 6f, 5f); close()
         }
-        stroked { moveTo(4f, 9.5f); horizontalLineTo(20f); moveTo(4f, 14f); horizontalLineTo(20f); moveTo(9.5f, 5f); verticalLineTo(19f) }
+        strokedLine { moveTo(4f, 9.5f); horizontalLineTo(20f); moveTo(4f, 14f); horizontalLineTo(20f); moveTo(9.5f, 5f); verticalLineTo(19f) }
     }
 }
 
 /** Code: chevrons. */
 val CodeFileGlyph: ImageVector by lazy {
     strokedIcon("CodeFile", 24f) {
-        stroked { moveTo(9f, 8f); lineTo(5f, 12f); lineTo(9f, 16f); moveTo(15f, 8f); lineTo(19f, 12f); lineTo(15f, 16f) }
+        strokedLine { moveTo(9f, 8f); lineTo(5f, 12f); lineTo(9f, 16f); moveTo(15f, 8f); lineTo(19f, 12f); lineTo(15f, 16f) }
     }
 }
 
 /** Video: film strip with sprocket rows (design: sent-attach.jsx FilmGlyph). */
 val FilmFileGlyph: ImageVector by lazy {
     strokedIcon("FilmFile", 24f) {
-        stroked {
+        strokedLine {
             moveTo(6f, 5f); horizontalLineTo(18f)
             arcTo(2.5f, 2.5f, 0f, false, true, 20.5f, 7.5f); verticalLineTo(16.5f)
             arcTo(2.5f, 2.5f, 0f, false, true, 18f, 19f); horizontalLineTo(6f)
             arcTo(2.5f, 2.5f, 0f, false, true, 3.5f, 16.5f); verticalLineTo(7.5f)
             arcTo(2.5f, 2.5f, 0f, false, true, 6f, 5f); close()
         }
-        stroked {
+        strokedLine {
             moveTo(8f, 5f); verticalLineTo(19f); moveTo(16f, 5f); verticalLineTo(19f)
             moveTo(3.5f, 9.5f); horizontalLineTo(8f); moveTo(16f, 9.5f); horizontalLineTo(20.5f)
             moveTo(3.5f, 14.5f); horizontalLineTo(8f); moveTo(16f, 14.5f); horizontalLineTo(20.5f)
@@ -203,7 +203,7 @@ val PauseBarsGlyph: ImageVector by lazy {
 /** Attach-sheet "Video" option: framed landscape with a center play triangle (26-grid, issue #98). */
 val VideoOptGlyph: ImageVector by lazy {
     strokedIcon("VideoOpt", 26f) {
-        stroked {
+        strokedLine {
             moveTo(6.5f, 5f); horizontalLineTo(19.5f)
             arcTo(3f, 3f, 0f, false, true, 22.5f, 8f); verticalLineTo(18f)
             arcTo(3f, 3f, 0f, false, true, 19.5f, 21f); horizontalLineTo(6.5f)
@@ -217,40 +217,40 @@ val VideoOptGlyph: ImageVector by lazy {
 /** Attach-sheet "File" option: page with folded corner (26-grid like the photo option). */
 val FileOptGlyph: ImageVector by lazy {
     strokedIcon("FileOpt", 26f) {
-        stroked {
+        strokedLine {
             moveTo(15f, 3.5f); horizontalLineTo(8f)
             arcTo(2.5f, 2.5f, 0f, false, false, 5.5f, 6f); verticalLineTo(20f)
             arcTo(2.5f, 2.5f, 0f, false, false, 8f, 22.5f); horizontalLineTo(18f)
             arcTo(2.5f, 2.5f, 0f, false, false, 20.5f, 20f); verticalLineTo(9f); close()
         }
-        stroked { moveTo(15f, 3.5f); verticalLineTo(9f); horizontalLineTo(20.5f) }
+        strokedLine { moveTo(15f, 3.5f); verticalLineTo(9f); horizontalLineTo(20.5f) }
     }
 }
 
 /** Attach-sheet "Photo" option (26-grid framed landscape). */
 val PhotoOptGlyph: ImageVector by lazy {
     strokedIcon("PhotoOpt", 26f) {
-        stroked {
+        strokedLine {
             moveTo(6.5f, 4.5f); horizontalLineTo(19.5f)
             arcTo(3f, 3f, 0f, false, true, 22.5f, 7.5f); verticalLineTo(18.5f)
             arcTo(3f, 3f, 0f, false, true, 19.5f, 21.5f); horizontalLineTo(6.5f)
             arcTo(3f, 3f, 0f, false, true, 3.5f, 18.5f); verticalLineTo(7.5f)
             arcTo(3f, 3f, 0f, false, true, 6.5f, 4.5f); close()
         }
-        stroked {
+        strokedLine {
             moveTo(7.5f, 10f)
             arcTo(1.7f, 1.7f, 0f, false, true, 10.9f, 10f)
             arcTo(1.7f, 1.7f, 0f, false, true, 7.5f, 10f); close()
         }
-        stroked { moveTo(4f, 18.5f); lineTo(9f, 13.5f); lineTo(12.3f, 16.8f); lineTo(15.8f, 13f); lineTo(21.5f, 19f) }
+        strokedLine { moveTo(4f, 18.5f); lineTo(9f, 13.5f); lineTo(12.3f, 16.8f); lineTo(15.8f, 13f); lineTo(21.5f, 19f) }
     }
 }
 
 /** Small inbox/tray glyph for the sheet caption. */
 val InboxGlyph: ImageVector by lazy {
     strokedIcon("Inbox", 16f) {
-        stroked(1.4f) { moveTo(2.5f, 9.5f); lineTo(4f, 3.5f); horizontalLineTo(12f); lineTo(13.5f, 9.5f) }
-        stroked(1.4f) {
+        strokedLine(1.4f) { moveTo(2.5f, 9.5f); lineTo(4f, 3.5f); horizontalLineTo(12f); lineTo(13.5f, 9.5f) }
+        strokedLine(1.4f) {
             moveTo(2.5f, 9.5f); verticalLineTo(12.5f); horizontalLineTo(13.5f); verticalLineTo(9.5f)
             horizontalLineTo(10.5f)
             arcTo(2f, 2f, 0f, false, true, 6.5f, 9.5f); close()
@@ -261,18 +261,18 @@ val InboxGlyph: ImageVector by lazy {
 /** Retry arrow (design's ↻, 16-grid). */
 val RetryGlyph: ImageVector by lazy {
     strokedIcon("Retry", 16f) {
-        stroked(1.6f) {
+        strokedLine(1.6f) {
             moveTo(13f, 8f)
             arcTo(5f, 5f, 0f, true, true, 11.4f, 4.3f)
         }
-        stroked(1.6f) { moveTo(13f, 2.4f); verticalLineTo(5.2f); horizontalLineTo(10.2f) }
+        strokedLine(1.6f) { moveTo(13f, 2.4f); verticalLineTo(5.2f); horizontalLineTo(10.2f) }
     }
 }
 
 /** ✓ (11-grid mini check for the delivered caption). */
 val CheckMiniGlyph: ImageVector by lazy {
     strokedIcon("CheckMini", 12f) {
-        stroked(1.6f) { moveTo(2.5f, 6.3f); lineTo(4.9f, 8.7f); lineTo(9.6f, 3.5f) }
+        strokedLine(1.6f) { moveTo(2.5f, 6.3f); lineTo(4.9f, 8.7f); lineTo(9.6f, 3.5f) }
     }
 }
 
