@@ -1,14 +1,19 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
+import dev.ccpocket.protocol.PocketError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -166,6 +171,85 @@ class PermissionBridgeTest {
         b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -s") }))
         assertEquals(1, emitted.size) // only the first asked
         assertTrue(responses.last().allow)
+        scope.cancel()
+    }
+
+    // ── issue #100: timeout is no longer a silent 30s auto-deny ──────────────────────────────────
+
+    @Test
+    fun ask_carries_the_configured_timeout_window() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { _, _, _, _, _, _ -> }, verdictTimeoutMs = 45_000, questionTimeoutMs = 600_000)
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+        assertEquals(45, (emitted.single() as PermissionAsk).timeoutSec) // ms → sec: the phone counts against THIS
+        scope.cancel()
+    }
+
+    @Test
+    fun timeout_withdraws_the_card_and_denies_with_an_honest_message() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        // the timeout fires on a background delay thread — thread-safe collectors
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val responses = CopyOnWriteArrayList<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            verdictTimeoutMs = 50)
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+        delay(500) // let the 50ms timeout fire
+
+        // the phone is told the card died (the ONE path it can't observe on its own) — with a TIMED_OUT reason
+        val withdrawn = emitted.filterIsInstance<AskWithdrawn>().single()
+        assertEquals("r1", withdrawn.askId)
+        assertEquals(AskWithdrawnReason.TIMED_OUT, withdrawn.reason)
+        // the CLI gets a deny, but NOT a bare "denied"/"timed out": an honest, distinguishable message
+        val r = responses.single()
+        assertFalse(r.allow)
+        assertTrue(r.deny!!.contains("NOT a denial"), r.deny!!)
+        assertFalse(b.hasPending())
+        scope.cancel()
+    }
+
+    @Test
+    fun late_verdict_after_timeout_is_surfaced_not_silently_dropped() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val responses = CopyOnWriteArrayList<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            verdictTimeoutMs = 50)
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+        delay(500) // ask times out first
+        responses.clear() // ignore the timeout's own deny; focus on the LATE verdict
+        b.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW)) // user tapped Allow a moment too late
+
+        // the orphaned allow must NOT reach the CLI (nothing auto-runs), and the phone is told it expired
+        assertTrue(responses.isEmpty(), responses.toString())
+        val err = emitted.filterIsInstance<PocketError>().single()
+        assertEquals("ask_expired", err.code)
+        scope.cancel()
+    }
+
+    @Test
+    fun cancelAll_withdraws_every_open_card() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { _, _, _, _, _, _ -> })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", null))
+        emitted.clear() // drop the two PermissionAsk frames
+        b.cancelAll() // e.g. session close / relaunch
+
+        val withdrawn = emitted.filterIsInstance<AskWithdrawn>()
+        assertEquals(setOf("r1", "r2"), withdrawn.map { it.askId }.toSet())
+        assertTrue(withdrawn.all { it.reason == AskWithdrawnReason.WITHDRAWN })
+        assertFalse(b.hasPending())
         scope.cancel()
     }
 }

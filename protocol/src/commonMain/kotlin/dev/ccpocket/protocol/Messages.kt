@@ -401,6 +401,12 @@ data class PermissionAsk(
     // Mirrors the daemon's ToolMeta.neverRemember, which stays enforced server-side; this flag only
     // drives client UI. Old daemons omit it — clients fall back through [oneOff].
     val neverRemember: Boolean = false,
+    // How many seconds the daemon will wait for the verdict before it auto-denies and withdraws this card
+    // (issue #100). The phone counts its local "no response" fallback against THIS, so a long daemon-side
+    // window (the product's whole premise is "you're away from the computer") no longer collides with a
+    // hardcoded 30s client countdown. Null from a pre-#100 daemon → the phone keeps its legacy 30s; old
+    // phones ignore the field.
+    val timeoutSec: Int? = null,
 ) : ToPhone
 
 /** Whether this ask is a one-off decision the UI must not offer to remember. The daemon's flag is the
@@ -414,12 +420,19 @@ val PermissionAsk.oneOff: Boolean
  *  predicate instead of re-testing `questions != null` across both clients. */
 val PermissionAsk.isQuestion: Boolean get() = questions != null
 
-/** The agent withdrew a pending ask (claude's control_cancel_request) — dismiss the card/sheet.
- *  Old phones drop the unknown frame type (every decode path is runCatching) and keep their
- *  timeout fallback; that degradation is intentional. */
+/** The daemon retired a pending ask — dismiss / finalize the card. Sent when the agent withdrew it
+ *  (claude's control_cancel_request), when the approval window timed out (issue #100 — the ONE path the
+ *  phone otherwise can't observe, since from the CLI's view a timed-out request is already answered and no
+ *  cancel ever comes), or when the session closes. [reason] tells the phone which terminal state to render;
+ *  it is a trailing optional so a pre-#100 daemon omits it (decodes to [AskWithdrawnReason.WITHDRAWN]) and
+ *  an old phone ignores it (ignoreUnknownKeys) and keeps just dismissing the card. */
 @Serializable
 @SerialName("pocket/ask.withdrawn")
-data class AskWithdrawn(val convoId: String, val askId: String) : ToPhone
+data class AskWithdrawn(
+    val convoId: String,
+    val askId: String,
+    val reason: AskWithdrawnReason = AskWithdrawnReason.WITHDRAWN,
+) : ToPhone
 
 /** Turn finished. finalText is the result text (if any); usage is token accounting (if present).
  *  [error] non-null = the turn FAILED and finalText (if any) is not a real answer: the CLI reported

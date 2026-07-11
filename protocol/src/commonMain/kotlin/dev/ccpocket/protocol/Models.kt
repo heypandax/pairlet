@@ -245,6 +245,35 @@ private object AuthBlockReasonSerializer : KSerializer<AuthBlockReason> {
     }
 }
 
+/** Why a pending ask was retired ([AskWithdrawn.reason], issue #100). Decoded tolerantly like
+ *  [AuthBlockReason]: a value only a newer daemon knows degrades to [UNKNOWN] (the phone then just
+ *  dismisses the card, the pre-#100 behavior) instead of the runCatching at every decode site dropping
+ *  the whole frame and stranding the card. */
+@Serializable(with = AskWithdrawnReasonSerializer::class)
+enum class AskWithdrawnReason(internal val wire: String) {
+    /** The agent moved on / interrupted (claude's control_cancel_request) or the session closed — dismiss
+     *  the card with no drama. The DEFAULT, so a pre-#100 daemon's frame (no reason key) reads as this and
+     *  every phone keeps today's "just vanish" behavior. */
+    WITHDRAWN("withdrawn"),
+
+    /** The approval window elapsed before the user answered — the phone flips the card to its terminal
+     *  "timed out / auto-denied" state instead of silently vanishing, so a returning user sees what happened
+     *  rather than a card that looks like it went through. */
+    TIMED_OUT("timed_out"),
+
+    /** Decode fallback for a newer peer's value — treat like [WITHDRAWN] (dismiss). Never encoded. */
+    UNKNOWN("unknown"),
+}
+
+private object AskWithdrawnReasonSerializer : KSerializer<AskWithdrawnReason> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("AskWithdrawnReason", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: AskWithdrawnReason) = encoder.encodeString(value.wire)
+    override fun deserialize(decoder: Decoder): AskWithdrawnReason {
+        val s = decoder.decodeString()
+        return AskWithdrawnReason.entries.firstOrNull { it.wire == s } ?: AskWithdrawnReason.UNKNOWN
+    }
+}
+
 /** One conversation blocking an account switch/logout (AuthState.blockers) — enough for the client
  *  to name it, explain why, and offer to stop it (CloseSession force / AuthLogin force). */
 @Serializable

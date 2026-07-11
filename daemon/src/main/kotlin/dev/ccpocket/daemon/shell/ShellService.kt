@@ -1,7 +1,10 @@
 package dev.ccpocket.daemon.shell
 
+import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.util.logger
+import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
@@ -32,7 +35,10 @@ import java.util.concurrent.TimeUnit
  * are flagged, and time out to "denied"). Approval routing is by [PermissionAsk.askId] (the "sh-" prefix keeps
  * it distinct from agent asks, but [onVerdict] matches purely by pending-map membership).
  */
-class ShellService(private val scope: CoroutineScope) {
+class ShellService(
+    private val scope: CoroutineScope,
+    private val verdictTimeoutMs: Long = ApprovalTimeout.ms, // issue #100: injectable so a test drives a short timeout
+) {
     private val log = logger("Shell")
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
 
@@ -75,15 +81,24 @@ class ShellService(private val scope: CoroutineScope) {
         val askId = "sh-" + UUID.randomUUID()
         val gate = CompletableDeferred<Boolean>()
         pending[askId] = Pending(gate, cmd.convoId, rule)
-        emit(PermissionAsk(cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null))
+        emit(PermissionAsk(cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null, timeoutSec = (verdictTimeoutMs / 1000).toInt()))
         val timeout = scope.launch {
-            delay(VERDICT_TIMEOUT_MS)
-            if (pending.remove(askId) != null) gate.complete(false) // no answer -> deny, never run
+            delay(verdictTimeoutMs)
+            if (pending.remove(askId) != null) {
+                // issue #100: retire the phone's card too — the ShellResult(denied) below dismisses the terminal
+                // spinner but not the separate PermissionAsk card, so without this it'd linger (worse now that
+                // the window is minute-scale). Then deny → the command never runs ("no answer -> deny").
+                emit(AskWithdrawn(cmd.convoId, askId, AskWithdrawnReason.TIMED_OUT))
+                gate.complete(false)
+            }
         }
         return try { gate.await() } finally { timeout.cancel() }
     }
 
-    /** Route a [PermissionVerdict]; returns true iff it resolved a pending SHELL ask (so the caller stops here). */
+    /** Route a [PermissionVerdict]; returns true iff it resolved a pending SHELL ask (so the caller stops here).
+     *  A verdict we don't own (unknown askId — e.g. a late one whose shell ask already timed out) returns false
+     *  so RequestRouter forwards it to the conversation bridge, where an orphaned verdict is surfaced to the user
+     *  (issue #100). So `return false` here is a hand-off, not a silent drop. */
     fun onVerdict(v: PermissionVerdict): Boolean {
         val p = pending.remove(v.askId) ?: return false
         val allow = v.decision == Decision.ALLOW
@@ -137,7 +152,6 @@ class ShellService(private val scope: CoroutineScope) {
     }
 
     private companion object {
-        const val VERDICT_TIMEOUT_MS = 30_000L
         const val MAX_TIMEOUT_MS = 120_000L
         const val MAX_OUT = 16_000 // cap each stream so a chatty command can't blow the relay frame
         const val READ_DRAIN_MS = 3_000L // max wait for output readers after the process ends/was killed
