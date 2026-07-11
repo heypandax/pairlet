@@ -9,6 +9,7 @@ import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
+import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
 import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.PairedDaemon
@@ -226,7 +227,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private val direct = RelayConnection()
     private val relay = RelayE2EConnection()
     private val directE2E = DirectE2EConnection()
-    private var useRelay = false
+    internal var useRelay = false // internal for tests (mirrors promptReceiptTimeoutMs)
     // direct-first routing: a failed direct attempt silently falls back to the relay and cools down,
     // so a dead stored address costs one 3s probe per minute, not one per reconnect tick. Both maps are
     // per ACCOUNT — this repo switches bindings, and machine A's failed probe must not gate machine B's.
@@ -260,6 +261,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var pushToken: PushToken? = null
     private var pushStarted = false
     private var pushRegistered: Pair<String, String>? = null // last (platform, token) sent; skip redundant re-sends
+    private var pushDialJob: Job? = null // in-flight one-shot relay dial (direct-LAN registration compensation)
+    // direct-LAN registration seams (internal for tests, mirroring promptReceiptTimeoutMs). directLinkUp
+    // includes the in-flight direct attempt: a RegisterPush buffered into the relay control outbox during
+    // that ≤3s window would otherwise sit undrained for as long as the phone stays on the LAN, then flush
+    // a STALE token over a newer one at the next real relay attach.
+    internal var directLinkUp: () -> Boolean = { directE2E.connected || directAttemptInFlight }
+    internal var pushDial: suspend (PairedDaemon, RegisterPush) -> Unit = { p, f -> RelayControlDial.deposit(p, f) }
+    internal var pushDialRetryMs = 30_000L
     /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
     val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
 
@@ -661,19 +670,41 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (pinnedTo != null) return // satellites leave the platform push singleton to the primary link
         if (pushStarted || !notificationsOn.value) return
         pushStarted = true
-        PushController.start { token -> pushToken = token; registerPush() }
+        PushController.start { onPushToken(it) }
     }
 
-    /** (Re)send the push token to the relay over the control plane — or an empty token to de-register when
-     *  notifications are off. Skips when unchanged since the last send (the relay persists it), so the
-     *  foreground-triggered reconnect storm doesn't rewrite the same row. Relay transport only. */
+    /** Platform token callback (and the test seam for it): remember the token, then (re)register. */
+    internal fun onPushToken(token: PushToken) { pushToken = token; registerPush() }
+
+    /** (Re)send the push token — or an empty token to de-register when notifications are off — to the
+     *  relay, whose store is the single push-routing truth. On the relay transport it rides the live
+     *  control plane. The direct-LAN transport has NO relay control plane, and a phone that always finds
+     *  its daemon on the LAN never relay-attaches — "register on the next real relay attach" never comes,
+     *  so its token (and every APNs/FCM rotation) would rot server-side forever (#114 follow-up): instead
+     *  the direct path deposits the token through a one-shot [RelayControlDial]. Skips when unchanged
+     *  since the last send (the relay persists it), so the foreground-triggered reconnect storm doesn't
+     *  rewrite the same row; a failed dial rolls that guard back (+ one timed retry that self-arms while
+     *  the direct link stays up) so the token still converges. */
     private fun registerPush() {
-        if (!useRelay || directE2E.connected) return // direct transport has no relay control plane; register on the next real relay attach
+        if (!useRelay) return // unpaired dev-direct transport: no relay account to deposit to
         val tok = pushToken ?: return
         val sent = tok.platform to (if (notificationsOn.value) tok.token else "")
         if (sent == pushRegistered) return
         pushRegistered = sent
-        scope.launch { runCatching { relay.sendControl(RegisterPush(sent.first, sent.second)) } }
+        if (directLinkUp()) {
+            val p = paired.value ?: return
+            pushDialJob?.cancel() // a newer (platform, token) supersedes an in-flight dial/retry
+            pushDialJob = scope.launch {
+                val err = runCatching { pushDial(p, RegisterPush(sent.first, sent.second)) }.exceptionOrNull() ?: return@launch
+                if (err is CancellationException) throw err // superseded — the newer dial owns the dedup state
+                if (pushRegistered == sent) pushRegistered = null // roll back the dedup: this send never landed
+                if (err is RelayAuthException) return@launch // a revoked credential won't fix itself on a timer
+                delay(pushDialRetryMs)
+                if (directLinkUp() && pushRegistered == null) registerPush()
+            }
+        } else {
+            scope.launch { runCatching { relay.sendControl(RegisterPush(sent.first, sent.second)) } }
+        }
     }
 
     /** Settings toggle: persist the choice, then register (on) or clear (off) the token on the relay. */
@@ -975,6 +1006,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
+        pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         convoId.value = null
         sessionsDir.value = null
