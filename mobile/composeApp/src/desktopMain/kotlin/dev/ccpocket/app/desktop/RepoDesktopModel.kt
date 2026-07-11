@@ -9,6 +9,7 @@ import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
+import dev.ccpocket.app.data.FleetCoordinator
 import dev.ccpocket.app.data.FleetRuntime
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
@@ -78,12 +79,27 @@ private val storeJson = Json { ignoreUnknownKeys = true }
  * state so reads recompose. Note the repo is single-session: the sidebar's SESSIONS group is the *current
  * project's* sessions (set by [openProject]); a global all-computers multi-session view needs a repo change
  * and is deliberately out of scope here. The tray is likewise still seed-only.
+ *
+ * With a [fleet], [repo] FOLLOWS the coordinator's observable primary (issue #103): switching machines
+ * promotes the target's hot satellite to primary, and every getter here re-reads through the swap — the
+ * sidebar, chat and settings re-derive against the new machine's already-loaded state instead of waiting
+ * out a cold handshake. Model-local state (pins, RECENT visits, hidden rows, composer, focus) is keyed by
+ * accountId, not by repo instance, so it survives the swap by construction. Without a fleet (tests), the
+ * model drives the one fixed repo exactly as before.
  */
 class RepoDesktopModel(
-    private val repo: PocketRepository,
+    private val fixedRepo: PocketRepository,
     scope: CoroutineScope,
+    private val fleet: FleetCoordinator? = null,
     private val store: DesktopStore = SecureDesktopStore,
 ) : DesktopModel {
+
+    private val repo: PocketRepository get() = fleet?.primary ?: fixedRepo
+
+    /** Machine switch — the fleet promotes a hot satellite when it can; standalone falls back cold. */
+    private fun switchMachine(target: PairedDaemon) {
+        fleet?.switchTo(target) ?: repo.switchDaemon(target)
+    }
 
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
@@ -177,7 +193,7 @@ class RepoDesktopModel(
 
     override fun selectComputer(c: DkComputer) {
         switcherOpen = false
-        repo.pairedList.firstOrNull { it.accountId == c.accountId }?.let { if (it.accountId != repo.paired.value?.accountId) repo.switchDaemon(it) }
+        repo.pairedList.firstOrNull { it.accountId == c.accountId }?.let { if (it.accountId != repo.paired.value?.accountId) switchMachine(it) }
     }
 
     // pair a new computer in a modal over the live shell (no disconnect); the overlay lives in Main with the repo
@@ -547,9 +563,10 @@ class RepoDesktopModel(
         }
         optimisticSelectedId = null // another machine's session — nothing in the current list to pre-light
         val target = repo.pairedList.firstOrNull { it.accountId == p.accountId } ?: return
-        repo.switchDaemon(target)
+        switchMachine(target)
         // open once the switched link lands — the repo's push-tap seam (pendingOpen) owns "open when
-        // Ready", including abandonment when the user disconnects or switches again meanwhile
+        // Ready", including abandonment when the user disconnects or switches again meanwhile. After a
+        // promote, [repo] already reads the NEW primary and it's already Ready — the open fires at once.
         repo.requestOpenSession(p.cwd, p.sessionId, title = p.title, agent = p.agent)
     }
 

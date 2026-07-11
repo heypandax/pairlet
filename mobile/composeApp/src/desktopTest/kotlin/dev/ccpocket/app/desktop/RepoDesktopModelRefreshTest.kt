@@ -26,7 +26,7 @@ class RepoDesktopModelRefreshTest {
         )
         repo.enterDemo()
         // FakeDesktopStore: never read or write the developer's real store file from tests (issue #102)
-        return repo to RepoDesktopModel(repo, scope, FakeDesktopStore())
+        return repo to RepoDesktopModel(repo, scope, store = FakeDesktopStore())
     }
 
     @Test

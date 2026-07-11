@@ -33,7 +33,7 @@ class RepoDesktopModelRecentTest {
             relay = "wss://test", accountId = "acct-test", daemonPub = "pk", deviceId = "dev", credential = "cred",
         )
         repo.enterDemo()
-        return repo to RepoDesktopModel(repo, scope, store)
+        return repo to RepoDesktopModel(repo, scope, store = store)
     }
 
     // the persisted store keys — literal on purpose: these tests pin the on-disk format
