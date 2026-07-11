@@ -37,11 +37,26 @@ class BackgroundJobRegistry {
     private val jobs = LinkedHashMap<String, Job>()    // keyed by tool_use id (insertion-ordered)
     private val taskToKey = HashMap<String, String>()  // system task_id -> job key
 
+    // tool_use ids of FOREGROUND Bash calls (no run_in_background). Current CLIs (probed on 2.1.206)
+    // run plain foreground commands through the SAME task machinery as real background shells: a
+    // system task_started + task_notification pair — task_type "local_bash", carrying this very
+    // tool_use_id — fires at command COMPLETION. Those are not background work, but task_started is
+    // field-identical between fore- and background (only timing and task_notification's output_file
+    // differ, both too weak to key on), so the tool_use we already saw is the only reliable ground
+    // truth. Without this memory, onTaskStarted minted a phantom "background job" for EVERY foreground
+    // command — one dead row flashing through the phone's task panel per command (issue #105 residual).
+    // Bounded LRU: a long session must not accumulate ids forever; an evicted id merely falls back to
+    // the old create-on-task_started behavior. Guarded by scripts/probe-claude-wire.py `fgtask`.
+    private val foregroundBash = LinkedHashSet<String>()
+
     /** A tool_use crossed the stream. Returns true if the visible job set/status changed (caller re-emits). */
     fun onToolUse(id: String?, name: String, input: JsonObject?, now: Long): Boolean {
         when (name) {
-            "Bash" -> if (input.flag("run_in_background") && id != null) {
-                putNew(id, JobKind.BASH_BACKGROUND, input.str("command")?.summary() ?: "background shell", now, background = true); return true
+            "Bash" -> if (id != null) {
+                if (input.flag("run_in_background")) {
+                    putNew(id, JobKind.BASH_BACKGROUND, input.str("command")?.summary() ?: "background shell", now, background = true); return true
+                }
+                rememberForeground(id) // fg run — its completion-time task_* events must not mint a job
             }
             // "Task" through CLI 2.1.x; renamed "Agent" on current CLIs (probed 07-08). A sub-agent can
             // itself be backgrounded (run_in_background) — then its tool_result is only the launch ack.
@@ -79,6 +94,10 @@ class BackgroundJobRegistry {
 
     /** `system/task_started` — links the background task_id to its job (created earlier by the tool_use). */
     fun onTaskStarted(taskId: String, toolUseId: String?, description: String?, taskType: String?, now: Long): Boolean {
+        // a remembered FOREGROUND call's completion-time task event (see [foregroundBash]) — not
+        // background work, and not worth a taskToKey entry either (its later task_notification has
+        // nothing to update; unbounded fg traffic must not grow the map)
+        if (toolUseId != null && toolUseId in foregroundBash) return false
         val key = toolUseId ?: taskId
         taskToKey[taskId] = key
         val existing = jobs[key]
@@ -147,7 +166,15 @@ class BackgroundJobRegistry {
         val had = jobs.isNotEmpty()
         jobs.clear()
         taskToKey.clear()
+        foregroundBash.clear() // the dead process's pending task events are never coming
         return had
+    }
+
+    private fun rememberForeground(id: String) {
+        foregroundBash.add(id)
+        // a foreground command's task_started lands when the command COMPLETES — a long build's id must
+        // survive the sub-agent tool traffic that can interleave meanwhile, hence a roomy cap
+        while (foregroundBash.size > MAX_FOREGROUND_IDS) foregroundBash.iterator().run { next(); remove() }
     }
 
     private fun putNew(key: String, kind: JobKind, label: String, now: Long, background: Boolean = false) {
@@ -181,6 +208,7 @@ class BackgroundJobRegistry {
 
     private companion object {
         const val MAX_JOBS = 12
+        const val MAX_FOREGROUND_IDS = 64
         val WHITESPACE = Regex("\\s+")
     }
 }

@@ -54,6 +54,9 @@ class Conversation(
     private val backend: AgentBackend,
     // read dynamically: the relay client installs the hook after this conversation may already exist
     private val pushHookProvider: () -> PushHook? = { null },
+    // how long [isBusy] holds the conversation after a "continuation expected" trigger (see
+    // [continuationGraceUntil]); a knob only so tests can expire it without waiting minutes
+    private val continuationGraceMs: Long = CONTINUATION_GRACE_MS,
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -122,6 +125,20 @@ class Conversation(
     // a (re)attaching phone can reset its ■/streaming state instead of trusting a stale local value
     @Volatile
     private var executing = false
+
+    // UNPROMPTED-CONTINUATION grace (issue #105 residual). Two probed CLI behaviors (2.1.206) start a
+    // new turn with no sendPrompt to arm `executing`: plan mode keeps working after its premature
+    // `result` (the research → AskUserQuestion flow of issue #55, reproduced organically: a fresh
+    // system/init follows the result within 0.1s), and a completed background task starts a follow-up
+    // turn. Between the shield-clearing line (that result / the task's terminal event) and the
+    // continuation's first assistant line, `executing` is false, no ask is pending and no job runs —
+    // only the activity clock keeps the reaper away, and the continuation's first API call can be
+    // stdout-silent past the 90s idle window (pre-first-token latency under retry backoff; the
+    // thinking_tokens system lines only flow once the API responds). This stamp keeps [isBusy] true
+    // for a bounded grace after those triggers; the continuation's own stream then re-arms
+    // `executing`. Gated on a LIVE process, so a dead conversation can never ride the grace.
+    @Volatile
+    private var continuationGraceUntil: Long = 0L
 
     @Volatile
     private var intentionalStop = false
@@ -338,11 +355,21 @@ class Conversation(
      *  (in-flight work must survive its owner app quitting; see SessionRegistry.scheduleClose). */
     fun isExecuting(): Boolean = executing
 
+    private fun armContinuationGrace() {
+        continuationGraceUntil = System.currentTimeMillis() + continuationGraceMs
+    }
+
+    /** True while an unprompted continuation turn may still be coming (see [continuationGraceUntil]):
+     *  the grace is armed and the agent process is alive to deliver it. */
+    private fun continuationExpected(): Boolean =
+        System.currentTimeMillis() < continuationGraceUntil && proc?.isAlive() == true
+
     /** True while the conversation is doing or awaiting anything that must outlive its owner leaving: a
-     *  streaming turn, running background jobs, or an unanswered permission/question card. The shared
-     *  keep-alive predicate for SessionRegistry.close/scheduleClose (reapIdle keeps its own idle-time
-     *  variant, where lastActivityMs already covers the streaming case). */
-    fun isBusy(): Boolean = isExecuting() || hasBackgroundWork() || hasPendingAsk()
+     *  streaming turn, running background jobs, an unanswered permission/question card, or the bounded
+     *  window in which the CLI is expected to start an unprompted continuation turn (plan mode's
+     *  premature result / a just-completed background task — issue #105 residual). The shared
+     *  keep-alive predicate for SessionRegistry.close/scheduleClose/reapIdle. */
+    fun isBusy(): Boolean = isExecuting() || hasBackgroundWork() || hasPendingAsk() || continuationExpected()
 
     /** Pre-first-turn (issue #61 lazy start): with no agent process yet, a mode/model/effort switch only
      *  records the field and re-announces — relaunching would spawn the very process the lazy open avoided,
@@ -357,9 +384,18 @@ class Conversation(
      * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
      * pushing the refreshed snapshot to the phone. Driven by the daemon's periodic reaper so a forever-RUNNING
      * count clears even with no stream activity. Returns true if anything was reaped.
+     *
+     * Only while the agent process is DEAD (or never started): a LIVE agent is the authoritative tracker of
+     * its own background tasks — its completion `task_*` event WILL arrive on stdout (turns don't gate system
+     * events), however long the task runs. Settling by clock under a live agent declared quiet long-running
+     * work (a 20-min backgrounded build) dead at STALE_JOB_MS, dropped the conversation's reaper shield, and
+     * the idle reaper then killed the process tree — the still-running build with it (issue #105's second
+     * casualty path). The clock heuristic exists for the case the event source itself died and can no longer
+     * report (agent killed outside the daemon / event lost to a crash), so gate it on exactly that.
      */
     suspend fun reapStaleJobs(staleMs: Long): Boolean {
         if (!jobs.hasRunning()) return false // idle conversation: nothing RUNNING to settle, skip the clock+scan
+        if (proc?.isAlive() == true) return false // live agent: trust its eventual task_* completion, never the clock
         val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
         if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
         return changed
@@ -522,7 +558,13 @@ class Conversation(
                         if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, System.currentTimeMillis())) emitJobs()
                     is AgentEvent.BackgroundTaskUpdated -> {
                         finishSubagentFromTask(ev)
-                        if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
+                        if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) {
+                            // a settled background task triggers the CLI's unprompted follow-up turn
+                            // (probed on 2.1.206) — hold the conversation until that continuation's
+                            // own stream re-arms `executing`
+                            armContinuationGrace()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.AssistantUsage -> lastCallUsage = ev
                     // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
@@ -544,6 +586,11 @@ class Conversation(
                         sawSyntheticThisTurn = false
                         val interrupted = interruptRequested
                         interruptRequested = false
+                        // plan mode's `result` is routinely PREMATURE (issue #55): the CLI continues
+                        // unprompted toward its AskUserQuestion/ExitPlanMode (a fresh init follows the
+                        // result within 0.1s — probed on 2.1.206). Hold the conversation for that
+                        // continuation; a user-interrupted turn genuinely ends, so no grace then.
+                        if (mode == PermissionMode.PLAN && !interrupted) armContinuationGrace()
                         // A result WITHOUT usage (interrupted turn, some error exits) surfaces as usage=null,
                         // never zeros — a zero snaps the phone's statusline to 0% and poisons the resume seed.
                         // Context fields prefer the turn's LAST API call: the result event SUMS input/cache
@@ -964,5 +1011,12 @@ class Conversation(
 
         // cap on a sub-agent report crossing the wire in a ToolEvent/HistoryMessage (4 MiB frame budget)
         const val SUBAGENT_OUTPUT_MAX = 4000
+
+        // how long after a "continuation expected" trigger the conversation stays [isBusy]. Covers the
+        // continuation's pre-first-token silence in the worst case the grace exists for (API retry
+        // backoff) — the happy path re-arms `executing` within seconds (probed: plan continuation's
+        // init follows the premature result by 0.1s, bg-completion's by 0.1s), so this only ever
+        // DELAYS a reap when the continuation never comes at all.
+        const val CONTINUATION_GRACE_MS = 5 * 60 * 1000L
     }
 }
