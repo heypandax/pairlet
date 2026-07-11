@@ -16,9 +16,10 @@ import kotlin.io.path.exists
 /** Reads a session `.jsonl` into a flat list of [HistoryMessage]s for replaying a resumed chat. */
 object TranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private const val MAX_TOOL_TEXT = 1000 // tool label / input preview cap (display-on-tap, not the reply body)
 
-    /** Bounded so one ConvoHistory frame stays well under the relay's 256 KiB cap. */
-    fun read(file: Path, maxMessages: Int = 100, maxTextLen: Int = 2000): List<HistoryMessage> {
+    /** Count-capped, then byte-budgeted (issue #81) so one ConvoHistory frame stays under the relay's 4 MiB cap. */
+    fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
         if (!file.exists()) return emptyList()
         val out = ArrayList<HistoryMessage>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
@@ -38,9 +39,9 @@ object TranscriptReplay {
                             attachSubagentResults(obj, out, taskIdx)
                             if (isRealUserTurn(obj)) userText(obj)
                                 .takeIf { it.isNotBlank() && !TranscriptNoise.isNoiseUserText(it) }
-                                ?.let { out += HistoryMessage(ChatRole.USER, it.take(maxTextLen)) }
+                                ?.let { out += HistoryMessage(ChatRole.USER, it) }
                         }
-                        "assistant" -> assistantBlocks(obj, maxTextLen).forEach { (msg, taskId) ->
+                        "assistant" -> assistantBlocks(obj).forEach { (msg, taskId) ->
                             taskId?.let { taskIdx[it] = out.size }
                             out += msg
                         }
@@ -48,11 +49,12 @@ object TranscriptReplay {
                 }
             }
         }
-        return if (out.size > maxMessages) out.takeLast(maxMessages) else out
+        val capped = if (out.size > maxMessages) out.takeLast(maxMessages) else out
+        return ReplayBudget.fit(capped, maxFrameTextBytes)
     }
 
     /** One history row + (for a sub-agent tool_use) its tool_use id, so the reader can key the card. */
-    private fun assistantBlocks(obj: JsonObject, maxTextLen: Int): List<Pair<HistoryMessage, String?>> {
+    private fun assistantBlocks(obj: JsonObject): List<Pair<HistoryMessage, String?>> {
         val message = obj["message"] as? JsonObject
         val content = message?.get("content") as? JsonArray ?: return emptyList()
         // `<synthetic>` = the CLI's API-failure placeholder, not a real reply — flag it so the phone
@@ -64,7 +66,7 @@ object TranscriptReplay {
             val block = el as? JsonObject ?: continue
             when (block.str("type")) {
                 "text" -> block.str("text")?.takeIf { it.isNotBlank() }
-                    ?.let { items += HistoryMessage(ChatRole.ASSISTANT, it.take(maxTextLen), error = synthetic) to null }
+                    ?.let { items += HistoryMessage(ChatRole.ASSISTANT, it, error = synthetic) to null }
                 "tool_use" -> {
                     val name = block.str("name") ?: "tool"
                     val input = block["input"] as? JsonObject
@@ -73,11 +75,11 @@ object TranscriptReplay {
                         // its ok/output are patched in when the matching tool_result scrolls past
                         val label = listOfNotNull(input.str("subagent_type"), input.str("description"))
                             .joinToString(": ").ifBlank { "sub-agent" }
-                        items += HistoryMessage(ChatRole.TOOL, label.take(maxTextLen), tool = name) to block.str("id")
+                        items += HistoryMessage(ChatRole.TOOL, label.take(MAX_TOOL_TEXT), tool = name) to block.str("id")
                     } else {
                         items += HistoryMessage(
                             ChatRole.TOOL,
-                            text = input?.toString()?.take(1000) ?: "", // full-ish input; the app shows it on tap-to-expand
+                            text = input?.toString()?.take(MAX_TOOL_TEXT) ?: "", // full-ish input; the app shows it on tap-to-expand
                             tool = name,
                         ) to null
                     }
