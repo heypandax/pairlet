@@ -4,6 +4,7 @@ import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.agent.ExecutableResolver
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.protocol.PresetEnv
 import kotlinx.serialization.encodeToString
 import java.io.File
 import java.nio.file.Path
@@ -56,7 +57,7 @@ object ClaudeLauncher {
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }
     }
 
-    fun processBuilder(exe: Path, spec: AgentSpec, configDir: Path? = null): ProcessBuilder {
+    fun processBuilder(exe: Path, spec: AgentSpec, configDir: Path? = null, presetEnv: Map<String, String>? = null): ProcessBuilder {
         val exeStr = exe.toString()
         // Windows can't CreateProcess a .cmd/.bat directly — those must run through cmd.exe. A native
         // .exe (the installer's claude.exe) runs directly, same as the Unix binary.
@@ -73,7 +74,21 @@ object ClaudeLauncher {
             // credential isolation (issue #69): the daemon's claude gets its own login store so its
             // OAuth refreshes can't rotate the terminal claude's token out from under it
             configDir?.let { environment()["CLAUDE_CONFIG_DIR"] = it.toString() }
+            // API preset (issue #113): the active preset's endpoint/token/model routing for THIS launch —
+            // read per launch, so a switch applies to new sessions while running ones keep their env
+            presetEnv?.let { applyPresetEnv(environment(), it) }
         }
+    }
+
+    /**
+     * Inject the active preset's env: scrub EVERY var a preset may own first, then apply. Scrubbing
+     * matters — the daemon's own environment may carry e.g. a stale ANTHROPIC_API_KEY, and with the
+     * preset setting ANTHROPIC_AUTH_TOKEN both would reach the CLI and fight over precedence. With
+     * no preset active the environment passes through untouched (existing API-key users unaffected).
+     */
+    internal fun applyPresetEnv(env: MutableMap<String, String>, preset: Map<String, String>) {
+        PresetEnv.SCRUBBED.forEach(env::remove)
+        env.putAll(preset)
     }
 }
 

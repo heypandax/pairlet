@@ -104,13 +104,17 @@ private class RunCmd : CliktCommand(name = "run") {
         if (wantIsolation && claudeHome == null) {
             echo("⚠ claude credential isolation requested but claude-home setup failed — running WITHOUT isolation (see daemon log)")
         }
+        // API presets (issue #113): ONE store shared by the service (CRUD/activate over the wire) and
+        // every claude backend (per-launch env injection) — two instances would let them diverge
+        val presetStore = dev.ccpocket.daemon.presets.PresetStore.load()
         val core = DaemonCore(
             mapOf(
-                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(exe, claudeHome) },
+                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(exe, claudeHome, presetStore::activeEnv) },
                 AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,
+            presetStore = presetStore,
         )
         if (claudeHome != null) {
             echo("claude credential isolation: ON — daemon login store: $claudeHome")

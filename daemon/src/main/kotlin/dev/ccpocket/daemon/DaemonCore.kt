@@ -4,6 +4,8 @@ import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.SpawnedSessions
+import dev.ccpocket.daemon.presets.PresetService
+import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
@@ -17,11 +19,14 @@ import kotlinx.coroutines.launch
 /** The transport-agnostic core: registry + services + router. Shared by the local server and the relay client.
  *  [backends] maps each agent kind to a factory that builds a fresh per-conversation driver.
  *  [claudeConfigDir] non-null = credential isolation (issue #69): auth commands (and the claude
- *  backends, wired by the caller) operate on the daemon's own CLAUDE_CONFIG_DIR. */
+ *  backends, wired by the caller) operate on the daemon's own CLAUDE_CONFIG_DIR.
+ *  [presetStore] holds the API presets (issue #113); the caller shares the SAME instance with its
+ *  claude backend factory so activation and session-launch injection can't diverge. */
 class DaemonCore(
     backends: Map<AgentKind, AgentBackendFactory>,
     val prefs: DaemonPrefs = DaemonPrefs.load(),
     claudeConfigDir: java.nio.file.Path? = null,
+    presetStore: PresetStore = PresetStore.load(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val registry = SessionRegistry(scope, backends)
@@ -39,7 +44,10 @@ class DaemonCore(
         scope, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth,
         claudeConfigDir = claudeConfigDir,
     )
-    val router = RequestRouter(registry, dirs, transcribe, shell, scope, auth, prefs)
+    // same switch suppliers as auth: activating a preset swaps what new sessions run on, so the same
+    // mid-task guard + idle auto-close semantics apply (issue #113)
+    val presets = PresetService(presetStore, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth)
+    val router = RequestRouter(registry, dirs, transcribe, shell, scope, auth, prefs, presets)
 
     suspend fun shutdown() = registry.closeAll()
 }

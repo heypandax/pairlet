@@ -145,6 +145,66 @@ class SeedDesktopModel : DesktopModel {
     override fun revokeComputer(c: DkComputer) {}
     override var composer by mutableStateOf("")
 
+    // account + API presets (issue #113): canned masked state, exactly the shape a daemon replies with —
+    // demos the whole Account pane (design 1a/1c) and lets the UI tests drive activate/save/delete for real
+    override val authState = dev.ccpocket.protocol.AuthState(
+        loggedIn = true, email = "jordan@example.com", orgName = "Acme Robotics",
+        subscriptionType = "max", authMethod = "claude.ai",
+    )
+    private var presetsSeed by mutableStateOf<dev.ccpocket.protocol.PresetsState?>(
+        dev.ccpocket.protocol.PresetsState(
+            presets = listOf(
+                dev.ccpocket.protocol.PresetSummary(
+                    "pr-1", "Work proxy", "https://api.example-proxy.com/v1",
+                    dev.ccpocket.protocol.PresetEnv.AUTH_TOKEN, "sk-…••••3f9a", model = "gpt-4o", smallFastModel = "gpt-4o-mini",
+                ),
+                dev.ccpocket.protocol.PresetSummary(
+                    "pr-2", "Personal key", "https://api.anthropic.com",
+                    dev.ccpocket.protocol.PresetEnv.API_KEY, "sk-…••••a71c",
+                ),
+                dev.ccpocket.protocol.PresetSummary(
+                    "pr-3", "Local llama", "http://localhost:11434",
+                    dev.ccpocket.protocol.PresetEnv.API_KEY, "••••",
+                ),
+            ),
+            activeId = "pr-1",
+        ),
+    )
+    override val presetsState: dev.ccpocket.protocol.PresetsState? get() = presetsSeed
+    private var presetsRevSeed by mutableStateOf(0)
+    override val presetsRev: Int get() = presetsRevSeed
+
+    /** Test hook: null = simulate a daemon that predates pocket/presets.* (request silently dropped). */
+    fun seedPresets(v: dev.ccpocket.protocol.PresetsState?) { presetsSeed = v }
+
+    override fun activatePreset(id: String?, force: Boolean) {
+        presetsSeed = presetsSeed?.copy(activeId = id, error = null, blockers = emptyList())
+        presetsRevSeed++
+    }
+
+    override fun deletePreset(id: String, force: Boolean) {
+        presetsSeed = presetsSeed?.let { s ->
+            s.copy(presets = s.presets.filterNot { it.id == id }, activeId = s.activeId.takeIf { it != id })
+        }
+        presetsRevSeed++
+    }
+
+    override fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) {
+        val mask = token?.let { if (it.length >= 16) "${it.take(3)}…••••${it.takeLast(4)}" else "••••" }
+        presetsSeed = presetsSeed?.let { s ->
+            if (id == null) {
+                val p = dev.ccpocket.protocol.PresetSummary("pr-${s.presets.size + 1}", name, baseUrl, tokenVar, mask ?: "••••", model, smallFastModel)
+                s.copy(presets = s.presets + p, error = null)
+            } else s.copy(
+                presets = s.presets.map {
+                    if (it.id == id) it.copy(name = name, baseUrl = baseUrl, tokenVar = tokenVar, tokenMask = mask ?: it.tokenMask, model = model, smallFastModel = smallFastModel) else it
+                },
+                error = null,
+            )
+        }
+        presetsRevSeed++
+    }
+
     // same canned set the mobile demo uses — keeps the slash menu renderable without a daemon
     override val slashCommands: List<dev.ccpocket.protocol.SlashCommand> = dev.ccpocket.app.data.DemoData.commands()
 

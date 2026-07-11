@@ -6,9 +6,11 @@ import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.UsageService
+import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
+import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.AuthLogin
@@ -16,6 +18,9 @@ import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.CancelTurn
+import dev.ccpocket.protocol.DeletePreset
+import dev.ccpocket.protocol.FetchPresets
+import dev.ccpocket.protocol.SavePreset
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Directories
@@ -55,6 +60,7 @@ class RequestRouter(
     private val scope: CoroutineScope,
     private val auth: AuthService,
     private val prefs: DaemonPrefs,
+    private val presets: PresetService,
 ) {
     suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
@@ -154,6 +160,13 @@ class RequestRouter(
             is AuthLoginCode -> scope.launch { auth.submitCode(frame.code, sink::emit) }
             is AuthLoginCancel -> scope.launch { auth.cancelLogin(sink::emit) }
             is AuthLogout -> scope.launch { auth.logout(sink::emit) }
+
+            // API presets (issue #113): activate/delete may close conversations (suspending) — off the
+            // inbound pump like auth, so the socket stays free while the registry settles
+            is FetchPresets -> scope.launch { presets.sendState(sink::emit) }
+            is SavePreset -> scope.launch { presets.save(frame, sink::emit) }
+            is DeletePreset -> scope.launch { presets.delete(frame, sink::emit) }
+            is ActivatePreset -> scope.launch { presets.activate(frame.id, frame.force, sink::emit) }
 
             // phone-push switch: null enabled = query only; either way the daemon's truth is the reply
             is SetPushPrefs -> {
