@@ -238,10 +238,29 @@ data class PendingFile(
     val path: String? = null,
     val landedName: String? = null,
     val error: String? = null,
+    // A local playback handle for a picked video (issue #98) — survives the byte-eviction on land so a
+    // just-sent video's card can play it back on this device; null for non-video / where the platform
+    // picker had no stable URI. Never uploaded — client-side only.
+    val localUri: String? = null,
 )
 
-/** A file that already landed in the workspace inbox, as referenced by a sent turn ([ChatItem.User.files]). */
-data class SentFile(val name: String, val size: Long, val path: String)
+/**
+ * A file that already landed in the workspace inbox, as referenced by a sent turn
+ * ([ChatItem.User.files]). [mediaType] routes the render — a `video/` MIME draws the video card instead
+ * of the file chip (issue #98); it defaults to "" so older call sites keep the chip. [durationSecs] fills
+ * the duration pill when known (null → the pill is omitted; v1 never probes it client-side).
+ * [localUri] is a platform playback handle for the freshly-picked video on THIS device (the card is
+ * client-side + ephemeral, so it only ever exists in the session that picked it) — null after the
+ * bytes are gone / on any other viewer, which the player degrades to "open it on the computer".
+ */
+data class SentFile(
+    val name: String,
+    val size: Long,
+    val path: String,
+    val mediaType: String = "",
+    val durationSecs: Int? = null,
+    val localUri: String? = null,
+)
 
 /** A connect that never reached Attached within the deadline (silent pre-attach hang). Surfaced as a
  *  normal failure so the backoff reconnect kicks in — NOT a CancellationException (which would read as
@@ -1653,7 +1672,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 when {
                     tooBig -> PendingFile(id, p.name, p.size, ByteArray(0), p.mediaType, FileUpState.Failed, error = "larger than 200 MB")
                     unreadable -> PendingFile(id, p.name, p.size, ByteArray(0), p.mediaType, FileUpState.Failed, error = "couldn't read the file")
-                    else -> PendingFile(id, p.name, p.bytes.size.toLong(), p.bytes, p.mediaType, FileUpState.Queued)
+                    else -> PendingFile(id, p.name, p.bytes.size.toLong(), p.bytes, p.mediaType, FileUpState.Queued, localUri = p.localUri)
                 },
             )
         }
@@ -1703,7 +1722,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingFiles[i] = f.copy(state = FileUpState.Uploading, captureId = capId, progress = 0f)
         fileUploadJob = scope.launch {
             val total = f.bytes.size
-            val parts = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
+            val parts = fileChunkParts(total)
             try {
                 for (idx in 0 until parts) {
                     val from = idx * FILE_CHUNK_RAW
@@ -1819,7 +1838,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             text.isBlank() -> refs
             else -> text + "\n\n" + refs
         }
-        val sentFiles = landed.map { SentFile(it.landedName ?: it.name, it.size, it.path!!) }
+        val sentFiles = landed.map { SentFile(it.landedName ?: it.name, it.size, it.path!!, mediaType = it.mediaType, localUri = it.localUri) }
         val promptId = newPromptId()
         messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId, files = sentFiles))
         promptPending = true
@@ -2334,7 +2353,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessions.clear()
     }
 
-    private companion object {
+    internal companion object {
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
@@ -2361,6 +2380,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // frames, small enough that asks/heartbeats interleave between chunks on the shared socket.
         const val FILE_CHUNK_RAW = 768_000
         const val UPLOAD_ACK_TIMEOUT_MS = 20_000L    // last chunk → FileUploaded receipt guard ("update the daemon" state)
+
+        /** Chunks a raw file of [total] bytes into ceil(total / [FILE_CHUNK_RAW]) frames, floored at 1 (an
+         *  empty file still sends one terminal chunk carrying `last=true`). Extracted so the large-file
+         *  boundary — a 200 MB video is 274 frames, and an exact multiple must NOT emit a trailing empty
+         *  chunk — stays unit-testable (issues #90/#98). */
+        fun fileChunkParts(total: Int): Int = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)

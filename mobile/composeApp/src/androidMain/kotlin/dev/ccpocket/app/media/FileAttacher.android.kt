@@ -34,7 +34,7 @@ actual fun rememberFileAttacher(onPicked: (List<PickedFile>) -> Unit): () -> Uni
     return remember(launcher) { { launcher.launch(arrayOf("*/*")) } }
 }
 
-private fun readPicked(context: android.content.Context, uri: Uri): PickedFile? = runCatching {
+internal fun readPicked(context: android.content.Context, uri: Uri): PickedFile? = runCatching {
     val resolver = context.contentResolver
     var name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
     var size = -1L
@@ -45,9 +45,11 @@ private fun readPicked(context: android.content.Context, uri: Uri): PickedFile? 
         }
     }
     val mediaType = resolver.getType(uri) ?: mediaTypeFor(name)
+    // keep the content-URI so a just-sent video can be replayed via ACTION_VIEW on this device (#98)
+    val localUri = uri.toString()
     // over-cap pick: don't even load it — hand back an empty-bytes PickedFile whose size the
     // repository turns into an immediate "larger than 200 MB" failed chip
-    if (size > MAX_UPLOAD_BYTES) return PickedFile(name, size, ByteArray(0), mediaType)
+    if (size > MAX_UPLOAD_BYTES) return PickedFile(name, size, ByteArray(0), mediaType, localUri)
     val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
-    PickedFile(name, if (size >= 0) size else bytes.size.toLong(), bytes, mediaType)
+    PickedFile(name, if (size >= 0) size else bytes.size.toLong(), bytes, mediaType, localUri)
 }.getOrNull()

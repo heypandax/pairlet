@@ -22,7 +22,7 @@ import platform.darwin.NSObject
 import platform.posix.memcpy
 
 /** The topmost presentable VC (same walk as FileExport.ios.kt — an open sheet must not swallow ours). */
-private fun topViewController(): UIViewController? {
+internal fun topViewController(): UIViewController? {
     var top = (UIApplication.sharedApplication.keyWindow ?: UIApplication.sharedApplication.windows.firstOrNull() as? UIWindow)
         ?.rootViewController ?: return null
     while (top.presentedViewController != null) top = top.presentedViewController!!
@@ -38,35 +38,37 @@ private fun NSData.toByteArray(): ByteArray {
     return out
 }
 
+/** asCopy=true → the URL is a sandbox temp copy; read it directly (no security scope dance). Shared by
+ *  the file + video pickers (issue #98). */
+@OptIn(ExperimentalForeignApi::class)
+internal fun readPickedUrl(url: NSURL): PickedFile? {
+    val path = url.path ?: return null
+    val name = url.lastPathComponent ?: "file"
+    val mediaType = mediaTypeFor(name)
+    // the asCopy temp file URL survives the session → replay a just-sent video via AVPlayer (#98)
+    val localUri = url.absoluteString
+    val size = (NSFileManager.defaultManager.attributesOfItemAtPath(path, null)
+        ?.get(NSFileSize) as? NSNumber)?.longLongValue ?: -1L
+    if (size > MAX_UPLOAD_BYTES) return PickedFile(name, size, ByteArray(0), mediaType, localUri)
+    val data = NSData.dataWithContentsOfURL(url) ?: return null
+    val bytes = data.toByteArray()
+    return PickedFile(name, if (size >= 0) size else bytes.size.toLong(), bytes, mediaType, localUri)
+}
+
 // UIDocumentPickerViewController.delegate is WEAK — this global keeps ours alive while the picker
 // is up (replaced on the next launch; the same pattern as FileExport's activeQlSource).
-private var activePickerDelegate: PickerDelegate? = null
+internal var activePickerDelegate: PickerDelegate? = null
 
 @OptIn(ExperimentalForeignApi::class)
-private class PickerDelegate(val onPicked: (List<PickedFile>) -> Unit) : NSObject(), UIDocumentPickerDelegateProtocol {
+internal class PickerDelegate(val onPicked: (List<PickedFile>) -> Unit) : NSObject(), UIDocumentPickerDelegateProtocol {
     override fun documentPicker(controller: UIDocumentPickerViewController, didPickDocumentsAtURLs: List<*>) {
-        val files = didPickDocumentsAtURLs.filterIsInstance<NSURL>().mapNotNull { url -> read(url) }
+        val files = didPickDocumentsAtURLs.filterIsInstance<NSURL>().mapNotNull { url -> readPickedUrl(url) }
         if (files.isNotEmpty()) onPicked(files)
         activePickerDelegate = null
     }
 
     override fun documentPickerWasCancelled(controller: UIDocumentPickerViewController) {
         activePickerDelegate = null
-    }
-
-    /** asCopy=true → the URL is a sandbox temp copy; read it directly (no security scope dance). */
-    private fun read(url: NSURL): PickedFile? {
-        val path = url.path ?: return null
-        val name = url.lastPathComponent ?: "file"
-        val mediaType = mediaTypeFor(name)
-        val size = (NSFileManager.defaultManager.attributesOfItemAtPath(path, null)
-            ?.get(NSFileSize) as? NSNumber)?.longLongValue ?: -1L
-        // over-cap pick: don't load it — the repository turns the empty-bytes PickedFile + size
-        // into an immediate "larger than 200 MB" failed chip
-        if (size > MAX_UPLOAD_BYTES) return PickedFile(name, size, ByteArray(0), mediaType)
-        val data = NSData.dataWithContentsOfURL(url) ?: return null
-        val bytes = data.toByteArray()
-        return PickedFile(name, if (size >= 0) size else bytes.size.toLong(), bytes, mediaType)
     }
 }
 

@@ -87,6 +87,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
+import dev.ccpocket.app.media.rememberVideoAttacher
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -1071,6 +1072,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     val draftKey = repo.composerKey()
     var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
+    var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
@@ -1086,7 +1088,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val launchFilePicker = rememberFileAttacher { picked -> repo.attachFiles(picked) } // issue #90
-    var attachSheet by remember { mutableStateOf(false) } // Photo/File chooser anchored above the composer
+    val launchVideoPicker = rememberVideoAttacher { picked -> repo.attachFiles(picked) } // issue #98 — same upload path, movie-filtered
+    var attachSheet by remember { mutableStateOf(false) } // Photo/File/Video chooser anchored above the composer
     val listState = rememberLazyListState()
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
@@ -1210,7 +1213,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            MessageItem(m) { imgs, i -> viewer = imgs to i }
+                            MessageItem(m, onOpenImages = { imgs, i -> viewer = imgs to i }, onOpenVideo = { videoViewer = it })
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                     PulseDot(Tok.warn, size = 5.dp)
@@ -1334,11 +1337,13 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                             atToken?.let { input = input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end) }
                         }
                     }
-                    // attach sheet (issue #90): Photo keeps the image flow, File opens the document picker
+                    // attach sheet (issue #90/#98): Photo keeps the image flow, File opens the document
+                    // picker, Video opens the movie-filtered picker (same chunk-upload into the workspace)
                     if (attachSheet && !capturing) {
                         AttachSheet(
                             onPhoto = { attachSheet = false; launchPicker() },
                             onFile = { attachSheet = false; launchFilePicker() },
+                            onVideo = { attachSheet = false; launchVideoPicker() },
                         )
                     }
                     PendingFilesStrip(repo.pendingFiles, onCancel = repo::removePendingFile, onRetry = repo::retryPendingFile)
@@ -1436,6 +1441,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
             }
         }
         viewer?.let { (imgs, idx) -> ImageViewer(imgs, idx) { viewer = null } }
+        videoViewer?.let { VideoPlayerOverlay(it) { videoViewer = null } } // issue #98
         if (repo.micPermissionSheet.value) {
             MicPermissionSheet(
                 onOpenSettings = { openAppSettings(); repo.dismissMicSheet() },
@@ -1540,7 +1546,11 @@ private fun FileCompletionMenu(
 }
 
 @Composable
-private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> }) {
+private fun MessageItem(
+    m: ChatItem,
+    onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
+    onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
+) {
     when (m) {
         // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
         // rail + warm tint mark "what I said" as a quote; no label, assistant flow untouched
@@ -1555,8 +1565,11 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
-                // uploaded files (issue #90): chip per file with its @inbox landing path
-                m.files.forEach { f -> SentFileChip(f) }
+                // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
+                // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
+                m.files.forEach { f ->
+                    if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
+                }
                 if (m.text.isNotBlank()) {
                     SelectionContainer { Text(m.text, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

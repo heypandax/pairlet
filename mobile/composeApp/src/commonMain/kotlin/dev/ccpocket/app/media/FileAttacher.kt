@@ -8,7 +8,16 @@ import androidx.compose.runtime.Composable
  * workspace inbox, so [bytes] are the exact original file. [size] is the picker-reported size
  * (bytes.size once loaded; kept separate so an over-cap pick can be refused without loading).
  */
-class PickedFile(val name: String, val size: Long, val bytes: ByteArray, val mediaType: String)
+class PickedFile(
+    val name: String,
+    val size: Long,
+    val bytes: ByteArray,
+    val mediaType: String,
+    // A platform playback/open handle kept for a picked VIDEO (issue #98): Android content-URI string,
+    // iOS/desktop file URL. Lets a just-sent video play back on this device without re-fetching from the
+    // computer; null for files with no stable local URI. Never uploaded.
+    val localUri: String? = null,
+)
 
 /**
  * Platform document picker for generic files (PDF/CSV/code/Office…): returns a launcher.

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -100,9 +101,11 @@ import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.ui.CheckMiniGlyph
 import dev.ccpocket.app.ui.RetryGlyph
 import dev.ccpocket.app.ui.SpinnerRing
+import dev.ccpocket.app.ui.VideoPoster
 import dev.ccpocket.app.ui.fileGlyphKind
 import dev.ccpocket.app.ui.fmtSize
 import dev.ccpocket.app.ui.glyphFor
+import dev.ccpocket.app.ui.isVideoAttachment
 import java.awt.datatransfer.DataFlavor
 import java.io.File
 import dev.ccpocket.app.theme.Tok
@@ -218,7 +221,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     itemsIndexed(model.messages) { i, m ->
-                        CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered) }
+                        CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered, onOpenVideo = { model.openWorkspaceFile(it.path) }) }
                     }
                     item(key = "tail") {
                         CenteredStreamRow {
@@ -373,7 +376,12 @@ private fun ChatSubHeader(model: DesktopModel) {
 }
 
 @Composable
-private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boolean = false) {
+private fun MessageRow(
+    item: ChatItem,
+    isLast: Boolean = false,
+    undelivered: Boolean = false,
+    onOpenVideo: (SentFile) -> Unit = {},
+) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
             Column {
@@ -391,10 +399,14 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
                     }
                     if (item.text.isNotBlank() || item.files.isNotEmpty()) Spacer(Modifier.height(8.dp))
                 }
-                // uploaded files (issue #90): dense single-line chip with the @inbox landing path
+                // uploaded files (issue #90): dense single-line chip with the @inbox landing path; videos
+                // (issue #98) render as a 16:9 thumb that opens the landed clip in the OS player
                 if (item.files.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        item.files.forEach { f -> DesktopSentFileChip(f) }
+                        item.files.forEach { f ->
+                            if (isVideoAttachment(f.mediaType, f.name)) DesktopSentVideoThumb(f) { onOpenVideo(f) }
+                            else DesktopSentFileChip(f)
+                        }
                     }
                     if (item.text.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
@@ -1003,6 +1015,30 @@ private fun DesktopSentFileChip(f: SentFile) {
     }
 }
 
+/** Delivered VIDEO in the stream (design: desktop-attach.jsx SentVideoThumb): a 220px 16:9 poster
+ *  (placeholder + play glyph + optional duration), then mono name · size · terracotta @inbox path.
+ *  Clicking plays the landed clip in the OS default player — the desktop app is co-located with the
+ *  daemon, so the inbox path is a real local file. */
+@Composable
+private fun DesktopSentVideoThumb(f: SentFile, onOpen: () -> Unit) {
+    Column(Modifier.width(220.dp)) {
+        Box(Modifier.width(220.dp).clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp)).clickable { onOpen() }) {
+            VideoPoster(durationSecs = f.durationSecs, buttonSize = 40.dp, glyphSize = 17.dp, cornerRadius = 9.dp)
+        }
+        Row(
+            Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1)
+            Text(
+                "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+    }
+}
+
 /** Full-pane drop overlay (design: desktop-attach-app.jsx DropOverlay): dimmed scrim, dashed
  *  terracotta boundary inset 12dp, upload glyph tile + the workspace-framed prompt. */
 @Composable
@@ -1028,7 +1064,7 @@ private fun DropOverlay() {
                 color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "images · files — up to 200 MB",
+                "images · files · videos — up to 200 MB",
                 color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
             )
         }

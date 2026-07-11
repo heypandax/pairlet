@@ -110,7 +110,12 @@
     <string name="attach_menu">添加附件</string>
     <string name="attach_sheet_photo">照片</string>
     <string name="attach_sheet_file">文件</string>
+    <string name="attach_sheet_video">视频</string>
     <string name="attach_sheet_caption">文件将复制到该会话的工作区 · 上限 200 MB</string>
+    <!-- 视频附件播放器（issue #98） -->
+    <string name="video_play">播放</string>
+    <string name="video_workspace_note">该视频保存在电脑上这个会话的工作区里 — 在电脑上打开即可播放。</string>
+    <string name="video_workspace_hint">已存入工作区供 agent 读取 · 不会发给模型</string>
     <string name="file_queued">排队中</string>
     <string name="file_retry">重试</string>
     <string name="file_upload_failed">上传失败</string>

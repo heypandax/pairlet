@@ -6,14 +6,19 @@ import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.PendingFile
+import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.ui.FileGlyphKind
 import dev.ccpocket.app.ui.fileGlyphKind
 import dev.ccpocket.app.ui.fmtSize
+import dev.ccpocket.app.ui.isVideoAttachment
 import dev.ccpocket.app.ui.middleTrunc
+import dev.ccpocket.app.ui.mmss
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * File-upload UI (issue #90): the pure display helpers, the composer's pending-chip strip with its
@@ -48,6 +53,50 @@ class FileAttachmentTest {
         assertEquals(FileGlyphKind.Doc, fileGlyphKind("noextension"))
     }
 
+    // ---- video derivation (issue #98) -------------------------------------------------------
+
+    @Test
+    fun glyphKindRoutesVideos() {
+        assertEquals(FileGlyphKind.Video, fileGlyphKind("clip.mov"))
+        assertEquals(FileGlyphKind.Video, fileGlyphKind("screen-recording.mp4"))
+        assertEquals(FileGlyphKind.Video, fileGlyphKind("demo.webm"))
+        assertEquals(FileGlyphKind.Video, fileGlyphKind("OLD.AVI")) // case-insensitive
+        assertEquals(FileGlyphKind.Doc, fileGlyphKind("movie.txt")) // not by name-contains, by extension
+    }
+
+    @Test
+    fun isVideoAttachmentPrefersMimeThenFallsBackToExtension() {
+        assertTrue(isVideoAttachment("video/mp4", "clip.mp4"))
+        assertTrue(isVideoAttachment("video/quicktime", "clip.mov"))
+        // blank / octet-stream mediaType (e.g. a desktop pick) still routes by extension
+        assertTrue(isVideoAttachment("", "capture.mov"))
+        assertTrue(isVideoAttachment("application/octet-stream", "capture.mp4"))
+        // a real document never becomes a video card
+        assertFalse(isVideoAttachment("application/pdf", "report.pdf"))
+        assertFalse(isVideoAttachment("", "report.pdf"))
+    }
+
+    @Test
+    fun mmssFormatsDurationPill() {
+        assertEquals("0:42", mmss(42))
+        assertEquals("1:05", mmss(65))
+        assertEquals("0:00", mmss(0))
+        assertEquals("1:01:07", mmss(3667)) // rolls to hh:mm:ss past an hour
+    }
+
+    @Test
+    fun fileChunkPartsCoversTheLargeFileBoundary() {
+        val chunk = PocketRepository.FILE_CHUNK_RAW
+        assertEquals(1, PocketRepository.fileChunkParts(0))        // empty still sends one terminal chunk
+        assertEquals(1, PocketRepository.fileChunkParts(1))
+        assertEquals(1, PocketRepository.fileChunkParts(chunk))    // exact multiple: NO trailing empty chunk
+        assertEquals(2, PocketRepository.fileChunkParts(chunk + 1))
+        assertEquals(2, PocketRepository.fileChunkParts(2 * chunk))
+        assertEquals(3, PocketRepository.fileChunkParts(2 * chunk + 1))
+        // a 200 MB video: 209_715_200 / 768_000 = 274 frames (under the daemon's 4096 chunk cap)
+        assertEquals(274, PocketRepository.fileChunkParts(200 * 1024 * 1024))
+    }
+
     // ---- composer strip: uploading + failed chips, send waits --------------------------------
 
     @Test
@@ -80,5 +129,45 @@ class FileAttachmentTest {
         setContent { PocketTheme { DesktopApp(model) } }
         assertPresent("report.pdf", substring = true)
         assertPresent("@.ccpocket/inbox/ab12cd34/report.pdf")
+    }
+
+    // ---- delivered VIDEO turn: 16:9 thumb with the duration pill + @inbox path (issue #98) ----
+
+    @Test
+    fun sentTurnRendersVideoThumbWithDuration() = runComposeUiTest {
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val messages = listOf<ChatItem>(
+                ChatItem.User(
+                    "here's the screen recording",
+                    files = listOf(
+                        SentFile(
+                            "clip.mov", 12_800_000, ".ccpocket/inbox/ab12cd34/clip.mov",
+                            mediaType = "video/quicktime", durationSecs = 42,
+                        ),
+                    ),
+                ),
+            )
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        assertPresent("clip.mov", substring = true)
+        assertPresent("@.ccpocket/inbox/ab12cd34/clip.mov")
+        assertPresent("0:42") // the duration pill only the video thumb draws — proves the video branch rendered
+    }
+
+    @Test
+    fun videoThumbDegradesWhenDurationUnknown() = runComposeUiTest {
+        // duration is null on v1 (no client-side probing) — the card must still render, just no pill
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val messages = listOf<ChatItem>(
+                ChatItem.User(
+                    "recording",
+                    files = listOf(SentFile("capture.mp4", 8_400_000, ".ccpocket/inbox/ef56/capture.mp4", mediaType = "video/mp4")),
+                ),
+            )
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        // the card still renders (name + @inbox path) with no duration pill — no crash, graceful degrade
+        assertPresent("capture.mp4", substring = true)
+        assertPresent("@.ccpocket/inbox/ef56/capture.mp4")
     }
 }

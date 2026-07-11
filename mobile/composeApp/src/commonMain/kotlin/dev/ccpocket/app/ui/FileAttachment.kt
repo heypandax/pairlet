@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -37,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
@@ -78,10 +80,15 @@ fun fmtSize(bytes: Long): String {
     }
 }
 
-/** Which glyph a file gets: table (csv/sheets), code, or the generic document. */
-enum class FileGlyphKind { Doc, Table, Code }
+/** Which glyph a file gets: video (film strip), table (csv/sheets), code, or the generic document. */
+enum class FileGlyphKind { Doc, Table, Code, Video }
+
+/** Video extensions that render as the film glyph / video card (issue #98). Kept beside [fileGlyphKind]
+ *  so the sent-card branch and the glyph pick can't drift on the list. */
+private val VIDEO_EXTS = setOf("mp4", "mov", "m4v", "webm", "mkv", "avi", "hevc", "3gp", "3g2", "mpg", "mpeg", "wmv", "flv", "ogv")
 
 fun fileGlyphKind(name: String): FileGlyphKind = when (name.substringAfterLast('.', "").lowercase()) {
+    in VIDEO_EXTS -> FileGlyphKind.Video
     "csv", "tsv", "xls", "xlsx", "numbers", "parquet" -> FileGlyphKind.Table
     "kt", "kts", "java", "py", "js", "ts", "jsx", "tsx", "c", "h", "cpp", "hpp", "rs", "go", "rb",
     "sh", "zsh", "swift", "json", "yaml", "yml", "toml", "xml", "html", "css", "sql", "gradle", "log",
@@ -89,11 +96,28 @@ fun fileGlyphKind(name: String): FileGlyphKind = when (name.substringAfterLast('
     else -> FileGlyphKind.Doc
 }
 
+/** Whether a delivered file should render as a video card (issue #98): the daemon-reported MIME wins,
+ *  falling back to the extension so a blank/`application/octet-stream` mediaType still routes `.mov`
+ *  correctly. One predicate for every render site (mobile card, desktop thumb) so they can't diverge. */
+fun isVideoAttachment(mediaType: String, name: String): Boolean =
+    mediaType.startsWith("video/") || fileGlyphKind(name) == FileGlyphKind.Video
+
+/** "0:42" / "1:05:07" — mm:ss (hh:mm:ss past an hour) for the duration pill (design: sent-attach.jsx mmss). */
+fun mmss(totalSecs: Int): String {
+    val s = totalSecs.coerceAtLeast(0)
+    val hh = s / 3600
+    val mm = (s % 3600) / 60
+    val ss = s % 60
+    return if (hh > 0) "$hh:${mm.toString().padStart(2, '0')}:${ss.toString().padStart(2, '0')}"
+    else "$mm:${ss.toString().padStart(2, '0')}"
+}
+
 @Composable
 fun glyphFor(kind: FileGlyphKind): ImageVector = when (kind) {
     FileGlyphKind.Doc -> DocFileGlyph
     FileGlyphKind.Table -> TableFileGlyph
     FileGlyphKind.Code -> CodeFileGlyph
+    FileGlyphKind.Video -> FilmFileGlyph
 }
 
 // ---- glyphs (1.5pt line, verbatim from the design SVGs) --------------------------------------
@@ -137,6 +161,56 @@ val TableFileGlyph: ImageVector by lazy {
 val CodeFileGlyph: ImageVector by lazy {
     strokedIcon("CodeFile", 24f) {
         stroked { moveTo(9f, 8f); lineTo(5f, 12f); lineTo(9f, 16f); moveTo(15f, 8f); lineTo(19f, 12f); lineTo(15f, 16f) }
+    }
+}
+
+/** Video: film strip with sprocket rows (design: sent-attach.jsx FilmGlyph). */
+val FilmFileGlyph: ImageVector by lazy {
+    strokedIcon("FilmFile", 24f) {
+        stroked {
+            moveTo(6f, 5f); horizontalLineTo(18f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 20.5f, 7.5f); verticalLineTo(16.5f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 18f, 19f); horizontalLineTo(6f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 3.5f, 16.5f); verticalLineTo(7.5f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 6f, 5f); close()
+        }
+        stroked {
+            moveTo(8f, 5f); verticalLineTo(19f); moveTo(16f, 5f); verticalLineTo(19f)
+            moveTo(3.5f, 9.5f); horizontalLineTo(8f); moveTo(16f, 9.5f); horizontalLineTo(20.5f)
+            moveTo(3.5f, 14.5f); horizontalLineTo(8f); moveTo(16f, 14.5f); horizontalLineTo(20.5f)
+        }
+    }
+}
+
+/** Solid play triangle for the video card's center glyph + the player controls (design: PlayTri). */
+val PlayTriangleGlyph: ImageVector by lazy {
+    ImageVector.Builder(name = "PlayTri", defaultWidth = 20.dp, defaultHeight = 20.dp, viewportWidth = 20f, viewportHeight = 20f)
+        .apply { path(fill = SolidColor(Color.White)) { moveTo(6f, 3.5f); lineTo(17f, 10f); lineTo(6f, 16.5f); close() } }
+        .build()
+}
+
+/** Two bars — pause, for the full-screen player's toggle (design: PauseGlyph). */
+val PauseBarsGlyph: ImageVector by lazy {
+    ImageVector.Builder(name = "PauseBars", defaultWidth = 20.dp, defaultHeight = 20.dp, viewportWidth = 20f, viewportHeight = 20f)
+        .apply {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(4.5f, 3.5f); horizontalLineTo(8.7f); verticalLineTo(16.5f); horizontalLineTo(4.5f); close()
+                moveTo(11.3f, 3.5f); horizontalLineTo(15.5f); verticalLineTo(16.5f); horizontalLineTo(11.3f); close()
+            }
+        }.build()
+}
+
+/** Attach-sheet "Video" option: framed landscape with a center play triangle (26-grid, issue #98). */
+val VideoOptGlyph: ImageVector by lazy {
+    strokedIcon("VideoOpt", 26f) {
+        stroked {
+            moveTo(6.5f, 5f); horizontalLineTo(19.5f)
+            arcTo(3f, 3f, 0f, false, true, 22.5f, 8f); verticalLineTo(18f)
+            arcTo(3f, 3f, 0f, false, true, 19.5f, 21f); horizontalLineTo(6.5f)
+            arcTo(3f, 3f, 0f, false, true, 3.5f, 18f); verticalLineTo(8f)
+            arcTo(3f, 3f, 0f, false, true, 6.5f, 5f); close()
+        }
+        path(fill = SolidColor(Color.White)) { moveTo(11f, 9.5f); lineTo(16.5f, 13f); lineTo(11f, 16.5f); close() }
     }
 }
 
@@ -358,10 +432,11 @@ fun PendingFilesStrip(files: List<PendingFile>, onCancel: (Long) -> Unit, onRetr
 
 // ---- attach sheet (anchored above the composer) ----------------------------------------------
 
-/** The composer's attach sheet: Photo / File options + the workspace caption. The Video option
- *  (issue #98) slots in as a third entry when that lands — the row is data-driven. */
+/** The composer's attach sheet: Photo / File / Video options + the workspace caption. Video (issue
+ *  #98) picks movie files that ride the SAME chunk-upload as any file — they land in the workspace
+ *  inbox, not the model message; the row is data-driven so the three sit evenly. */
 @Composable
-fun AttachSheet(onPhoto: () -> Unit, onFile: () -> Unit) {
+fun AttachSheet(onPhoto: () -> Unit, onFile: () -> Unit, onVideo: () -> Unit) {
     val shape = RoundedCornerShape(18.dp)
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 10.dp)
@@ -371,6 +446,7 @@ fun AttachSheet(onPhoto: () -> Unit, onFile: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             AttachOption(PhotoOptGlyph, stringResource(Res.string.attach_sheet_photo), Modifier.weight(1f), onPhoto)
             AttachOption(FileOptGlyph, stringResource(Res.string.attach_sheet_file), Modifier.weight(1f), onFile)
+            AttachOption(VideoOptGlyph, stringResource(Res.string.attach_sheet_video), Modifier.weight(1f), onVideo)
         }
         Row(
             Modifier.padding(top = 12.dp, start = 2.dp),
@@ -454,6 +530,71 @@ fun SentFileChip(file: SentFile) {
             Text(stringResource(Res.string.file_agent_reads), color = Tok.muted, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace)
             PathRefText(file.path)
         }
+    }
+}
+
+// ---- sent-message video card + poster frame (issue #98) --------------------------------------
+
+/** The warm 16:9 poster gradient the design uses in place of a real thumbnail. v1 ships this
+ *  placeholder (no client-side frame extraction) — see the video card doc for the rationale. */
+val videoPosterBrush: Brush
+    get() = Brush.linearGradient(listOf(Color(0xFF1B1410), Color(0xFF3A2A20), Color(0xFF7A5238)))
+
+/** 16:9 poster frame: gradient placeholder + a centered translucent play button + an optional
+ *  duration pill. Shared by the sent card and the full-screen player. [glyphSize]/[buttonSize] scale
+ *  it up for the player. */
+@Composable
+fun VideoPoster(
+    modifier: Modifier = Modifier,
+    durationSecs: Int? = null,
+    buttonSize: androidx.compose.ui.unit.Dp = 52.dp,
+    glyphSize: androidx.compose.ui.unit.Dp = 22.dp,
+    cornerRadius: androidx.compose.ui.unit.Dp = 12.dp,
+) {
+    Box(modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(cornerRadius)).background(videoPosterBrush)) {
+        Box(
+            Modifier.align(Alignment.Center).size(buttonSize).clip(CircleShape)
+                .background(Color(0xFF0C0A09).copy(alpha = 0.5f)).border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) { Icon(PlayTriangleGlyph, null, tint = Color.White, modifier = Modifier.size(glyphSize)) }
+        if (durationSecs != null) {
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF0C0A09).copy(alpha = 0.66f)).padding(horizontal = 7.dp, vertical = 3.dp),
+            ) {
+                Text(mmss(durationSecs), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+}
+
+/** A delivered VIDEO inside a sent user turn (design: sent-attach.jsx VideoCardSent): a tappable 16:9
+ *  poster (placeholder thumbnail + play glyph + optional duration), then the mono filename +
+ *  "✓ size · in workspace", then the `@inbox` path the agent reads it by. Tap opens the player. The
+ *  video never enters the model message — like every upload it lands in the session workspace, so the
+ *  caption grammar and `@inbox` footer match the file chip exactly. */
+@Composable
+fun SentVideoCard(file: SentFile, onOpen: () -> Unit) {
+    Column(Modifier.widthIn(max = 280.dp)) {
+        VideoPoster(
+            Modifier.clip(RoundedCornerShape(12.dp)).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).clickable { onOpen() },
+            durationSecs = file.durationSecs,
+        )
+        Row(
+            Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                file.name, color = Tok.tx, fontSize = 12.5.sp, fontFamily = FontFamily.Monospace,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
+            Icon(CheckMiniGlyph, null, tint = Tok.ok, modifier = Modifier.size(11.dp))
+            Text(
+                "${fmtSize(file.size)} · ${stringResource(Res.string.file_in_workspace)}",
+                color = Tok.muted, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1,
+            )
+        }
+        Box(Modifier.padding(top = 4.dp)) { PathRefText(file.path) }
     }
 }
 

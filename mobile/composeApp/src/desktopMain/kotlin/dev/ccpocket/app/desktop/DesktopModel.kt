@@ -336,6 +336,10 @@ interface DesktopModel {
     /** Uploads still moving → the send button waits (spinner) until they settle. */
     fun uploadsBusy(): Boolean = false
     fun hasLandedFiles(): Boolean = false
+    /** Play/open a landed workspace file in the OS default app (issue #98). The desktop app runs on the
+     *  SAME machine as the daemon, so a landed video's inbox path resolves to a real local file — no
+     *  re-fetch needed. Default no-op keeps seed/preview models inert. */
+    fun openWorkspaceFile(path: String) {}
 
     // permission (live: inline card in the stream; seed: also drives the focused modal)
     val ask: PermissionAsk?

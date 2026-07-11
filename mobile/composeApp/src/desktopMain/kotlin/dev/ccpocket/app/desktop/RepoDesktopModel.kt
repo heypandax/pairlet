@@ -515,6 +515,19 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     override fun retryPendingFile(id: Long) = repo.retryPendingFile(id)
     override fun uploadsBusy(): Boolean = repo.uploadsBusy()
     override fun hasLandedFiles(): Boolean = repo.hasLandedFiles()
+    // issue #98: a landed video's inbox path is relative to the session cwd; on desktop the daemon is
+    // local, so resolve it against the workdir and hand it to the OS default player (mac `open` plays it
+    // in QuickTime; elsewhere Desktop.open). A remote/absent workdir or a not-yet-synced file just no-ops.
+    override fun openWorkspaceFile(path: String) {
+        val base = repo.workdir.value ?: return
+        runCatching {
+            val raw = java.io.File(path)
+            val f = if (raw.isAbsolute) raw else java.io.File(base, path)
+            if (!f.isFile) return@runCatching
+            if (System.getProperty("os.name").lowercase().contains("mac")) ProcessBuilder("open", f.absolutePath).start()
+            else java.awt.Desktop.getDesktop().open(f)
+        }
+    }
 
     override val ask: PermissionAsk? get() = repo.pendingAsk.value
     override fun resolve(allow: Boolean, remember: Boolean) {

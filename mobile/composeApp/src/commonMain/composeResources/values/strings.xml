@@ -110,7 +110,12 @@
     <string name="attach_menu">Attach</string>
     <string name="attach_sheet_photo">Photo</string>
     <string name="attach_sheet_file">File</string>
+    <string name="attach_sheet_video">Video</string>
     <string name="attach_sheet_caption">Files are copied into this session\'s workspace · up to 200 MB</string>
+    <!-- video attachment player (issue #98) -->
+    <string name="video_play">Play</string>
+    <string name="video_workspace_note">This clip lives in this session\'s workspace on your computer — open it there to play.</string>
+    <string name="video_workspace_hint">Saved to the workspace for the agent · not sent to the model</string>
     <string name="file_queued">queued</string>
     <string name="file_retry">retry</string>
     <string name="file_upload_failed">upload failed</string>
