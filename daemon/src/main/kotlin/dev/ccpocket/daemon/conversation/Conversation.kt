@@ -357,9 +357,18 @@ class Conversation(
      * Settle background jobs stuck RUNNING with no update for [staleMs] (a completion event that never came),
      * pushing the refreshed snapshot to the phone. Driven by the daemon's periodic reaper so a forever-RUNNING
      * count clears even with no stream activity. Returns true if anything was reaped.
+     *
+     * Only while the agent process is DEAD (or never started): a LIVE agent is the authoritative tracker of
+     * its own background tasks — its completion `task_*` event WILL arrive on stdout (turns don't gate system
+     * events), however long the task runs. Settling by clock under a live agent declared quiet long-running
+     * work (a 20-min backgrounded build) dead at STALE_JOB_MS, dropped the conversation's reaper shield, and
+     * the idle reaper then killed the process tree — the still-running build with it (issue #105's second
+     * casualty path). The clock heuristic exists for the case the event source itself died and can no longer
+     * report (agent killed outside the daemon / event lost to a crash), so gate it on exactly that.
      */
     suspend fun reapStaleJobs(staleMs: Long): Boolean {
         if (!jobs.hasRunning()) return false // idle conversation: nothing RUNNING to settle, skip the clock+scan
+        if (proc?.isAlive() == true) return false // live agent: trust its eventual task_* completion, never the clock
         val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
         if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
         return changed

@@ -186,11 +186,18 @@ class SessionRegistry(
 
     /**
      * Close conversations with no agent activity for longer than [idleMs]. Returns the reap count.
-     * A conversation with running background work is NEVER reaped — killing it would take its still-running
-     * background shells / sub-agents with it (the "I left it running" case this is meant to preserve). Nor is
-     * one with an unanswered permission ask / question (issue #55): it's blocked on the user, not idle, and
-     * reaping it would silently discard a card the phone is expected to answer (plan mode surfaces the question
-     * long after a premature `result`, past this idle window, while the phone is backgrounded).
+     * A BUSY conversation ([Conversation.isBusy]) is NEVER reaped, however stale its activity clock:
+     *  - a streaming turn (executing): `lastActivityMs` only moves when a stream-json line arrives, and the
+     *    CLI is routinely silent for minutes MID-TURN — a quiet long-running tool (build/test/install), a
+     *    single long generation (no --include-partial-messages), an API-retry backoff. Reaping on the stale
+     *    clock alone killed the process tree mid-task once the phone went offline >90s — the "submitted a
+     *    task, quit the app, came back to find only step 1 done" failure (issue #105). No leak in return:
+     *    a dead process clears `executing` in the pump, so only a LIVE process can hold its conversation.
+     *  - running background work: killing the conversation would take its still-running background shells /
+     *    sub-agents with it (the "I left it running" case this is meant to preserve).
+     *  - an unanswered permission ask / question (issue #55): blocked on the user, not idle — reaping would
+     *    silently discard a card the phone is expected to answer (plan mode surfaces the question long after
+     *    a premature `result`, past this idle window, while the phone is backgrounded).
      */
     suspend fun reapIdle(idleMs: Long): Int {
         // first settle background jobs whose completion event never arrived — otherwise their forever-RUNNING
@@ -199,11 +206,17 @@ class SessionRegistry(
         mutex.withLock { convos.values.toList() }.forEach { runCatching { it.reapStaleJobs(STALE_JOB_MS) } }
         val now = System.currentTimeMillis()
         val stale = mutex.withLock {
-            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.hasBackgroundWork() && !it.hasPendingAsk() }
+            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.isBusy() }
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
-        stale.forEach { it.close(); noteSelfClosed(it) }
+        stale.forEach {
+            // name each casualty: "which session died, when, how stale" is exactly what a field report
+            // of a vanished background task needs from the daemon log (issue #105 was undiagnosable
+            // from the RelayClient's bare reap count)
+            log.info("reapIdle: closing ${it.convoId.take(8)}… (sid=${it.sessionId?.take(8) ?: "-"}, idle ${now - it.lastActivityMs}ms)")
+            it.close(); noteSelfClosed(it)
+        }
         return stale.size
     }
 

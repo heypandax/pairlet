@@ -34,6 +34,10 @@ class AgentProcess private constructor(
     /** Exit code once the process has terminated, else null (also null if it can't be read). */
     fun exitCode(): Int? = runCatching { process.exitValue() }.getOrNull()
 
+    /** True while the OS process is still running — the "is the event source still alive?" gate for
+     *  heuristics that would otherwise guess at outcomes the live agent will eventually report itself. */
+    fun isAlive(): Boolean = process.isAlive
+
     /** Raw stdout lines; closed when the process exits. Bounded -> backpressure to the agent. */
     val stdout: Channel<String> = Channel(capacity = 256)
 
