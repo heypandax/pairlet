@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -1194,6 +1195,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 val density = LocalDensity.current
                 var pillHeightPx by remember { mutableStateOf(0) }
                 val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
+                CompositionLocalProvider(LocalPathCwd provides repo.workdir.value) {
                 LazyColumn(
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
@@ -1237,6 +1239,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     val last = repo.messages.lastOrNull()
                     val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
                     if (repo.streaming.value) item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
+                }
                 }
                 if (!pinned) {
                     val pillScope = rememberCoroutineScope()

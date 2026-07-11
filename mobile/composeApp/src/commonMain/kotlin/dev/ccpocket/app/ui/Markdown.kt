@@ -227,8 +227,8 @@ private fun MdLine(raw: String, color: Color) {
         line.isBlank() -> Spacer(Modifier.height(3.dp))
         line.startsWith("#") -> {
             val level = line.takeWhile { it == '#' }.length
-            Text(
-                pathLinked(inline(line.drop(level).trim())),
+            LinkifiedText(
+                inline(line.drop(level).trim()),
                 color = color,
                 fontWeight = FontWeight.Bold,
                 fontSize = (when (level) { 1 -> 19.sp; 2 -> 17.sp; else -> 15.sp }) * scale,
@@ -238,10 +238,10 @@ private fun MdLine(raw: String, color: Color) {
             val indent = (line.length - trimmed.length).coerceAtMost(8)
             Row(Modifier.padding(start = (indent * 3).dp)) {
                 Text("•  ", color = color, fontSize = body)
-                Text(pathLinked(inline(trimmed.drop(2))), color = color, fontSize = body)
+                LinkifiedText(inline(trimmed.drop(2)), color = color, fontSize = body)
             }
         }
-        else -> Text(pathLinked(inline(line)), color = color, fontSize = body)
+        else -> LinkifiedText(inline(line), color = color, fontSize = body)
     }
 }
 

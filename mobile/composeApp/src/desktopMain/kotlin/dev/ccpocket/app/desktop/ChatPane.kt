@@ -94,6 +94,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.AttachImageIcon
+import dev.ccpocket.app.ui.LocalPathCwd
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
@@ -137,7 +138,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     // the opener's own exists() cache) survive recomposition. A remote session's cwd isn't local, so
     // those relative paths fail exists() and stay plain — no dead links.
     val pathOpener = remember(model.chatWorkdir) { DesktopPathOpener(model.chatWorkdir) }
-    CompositionLocalProvider(LocalPathOpener provides pathOpener) {
+    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalPathCwd provides model.chatWorkdir) {
     Column(modifier.fillMaxSize().background(Tok.base)) {
         // split view marks the pane that owns the keyboard with a 2px terracotta top hairline (Fleet ⑥)
         if (focused) Box(Modifier.fillMaxWidth().height(2.dp).background(Tok.accent))
