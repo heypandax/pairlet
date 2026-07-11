@@ -86,6 +86,39 @@ class BackgroundJobRegistryTest {
     }
 
     @Test
+    fun foreground_bash_task_events_do_not_mint_a_phantom_job() {
+        // 2.1.206+ runs FOREGROUND Bash through the same task machinery: task_started + task_notification
+        // (task_type local_bash, the fg tool_use's id) fire at command completion. Registering them made a
+        // phantom "background job" flash through the phone's panel for EVERY foreground command (#105 residual).
+        val r = BackgroundJobRegistry()
+        assertFalse(r.onToolUse("toolu_fg", "Bash", buildJsonObject { put("command", "echo hi"); put("run_in_background", false) }, now = 1))
+        assertFalse(r.onTaskStarted(taskId = "bfg1", toolUseId = "toolu_fg", description = "echo hi", taskType = "local_bash", now = 2))
+        assertFalse(r.onTaskUpdated(taskId = "bfg1", status = "completed", now = 3))
+        assertTrue(r.snapshot().isEmpty())
+        assertFalse(r.hasRunning())
+    }
+
+    @Test
+    fun foreground_bash_with_omitted_flag_is_suppressed_too() {
+        // the model usually OMITS run_in_background entirely on foreground runs
+        val r = BackgroundJobRegistry()
+        assertFalse(r.onToolUse("toolu_fg", "Bash", buildJsonObject { put("command", "ls") }, now = 1))
+        assertFalse(r.onTaskStarted(taskId = "t1", toolUseId = "toolu_fg", description = "ls", taskType = "local_bash", now = 2))
+        assertTrue(r.snapshot().isEmpty())
+    }
+
+    @Test
+    fun foreground_memory_is_bounded_and_keeps_recent_ids() {
+        val r = BackgroundJobRegistry()
+        for (i in 0 until 100) r.onToolUse("fg$i", "Bash", buildJsonObject { put("command", "x") }, now = i.toLong())
+        // evicted oldest id falls back to the old create-on-task_started behavior (harmless, bounded)…
+        assertTrue(r.onTaskStarted(taskId = "T", toolUseId = "fg0", description = "evicted", taskType = "local_bash", now = 200))
+        // …while a recent foreground id is still recognized and suppressed
+        assertFalse(r.onTaskStarted(taskId = "T2", toolUseId = "fg99", description = "fresh", taskType = "local_bash", now = 201))
+        assertEquals(1, r.snapshot().size)
+    }
+
+    @Test
     fun background_bash_error_result_settles_as_failed() {
         // a bg-bash whose LAUNCH errors gets no later system task_* event, so the error result must settle it
         val r = BackgroundJobRegistry()

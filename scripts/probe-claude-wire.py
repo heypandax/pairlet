@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """claude CLI stream-json 行为回归探针 —— 升级 claude 后跑一次，防依赖漂移。
 
-daemon 依赖五条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 上实证；task 为 07-08 增，lock 为 07-10 增）：
+daemon 依赖七条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 上实证；task 为 07-08 增，
+lock 为 07-10 增，fgtask/bgcontinue 为 07-11 增、在 2.1.206 上实证）：
   steer  中途写入的 user 消息在下一个工具边界注入当前轮（单 result 收尾）
   queue  当前轮无工具边界时，排队消息在本轮结束后自动作为下一轮处理（两个 result）
   ask    AskUserQuestion 以 control_request/can_use_tool 浮现（requires_user_interaction=true），
@@ -12,10 +13,19 @@ daemon 依赖五条未写进正式契约的 CLI 行为（2026-07-06 在 2.1.201 
   lock   被活进程注册（~/.claude/sessions/<pid>.json）的 session，裸 --resume 启动即 exit 1、
          stdout 全空、stderr 一行含 "is currently running as a background agent"；--fork-session
          逃生成功并铸新 id（Conversation.healSessionLock 的自动分叉自愈全靠这行文案匹配）
+  fgtask     前台（非 run_in_background）Bash 也走 task 机制：task_started/task_notification
+             （task_type=local_bash）在命令完成时到达、带着前台 tool_use 的 id。daemon 靠这个
+             tool_use_id 相关性识破它们不入册（BackgroundJobRegistry.foregroundBash，#105 残留）
+             —— id 相关性一断，每条前台命令都会在手机任务面板闪出幻影 job
+  bgcontinue 后台任务完成（task_notification/task_updated 报 completed）后，CLI 不需要任何输入
+             就自动开下一轮完成剩余步骤（新 init + 第二个 result）。#105 的 reaper 让位
+             （reapStaleJobs 对活进程弃用时钟、reapIdle 只看 isBusy）安全性全押在这条上：
+             它一漂移，「无人值守的多步计划」就会死在后台步骤后面，需要重估整个让位策略
 
-任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵 / Task 卡片永远转圈 / 占用会话裸报错）。
+任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵 / Task 卡片永远转圈 / 占用会话裸报错 /
+任务面板幻影 job / 无人值守任务只做半截）。
 
-用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|lock|all]（默认 all）
+用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|lock|fgtask|bgcontinue|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default），会消耗少量用量。
 """
@@ -306,16 +316,97 @@ def scenario_ask_plan() -> bool:
     return scenario_ask("plan")
 
 
+def scenario_fgtask() -> bool:
+    print("── fgtask：前台 Bash 的 task 事件带前台 tool_use_id（#105 残留的幻影 job 抑制前提）──")
+    # 2.1.206 实证：前台（非 run_in_background）Bash 与后台共用 task 机制，task_started 字段级一致
+    # （task_id/tool_use_id/description/task_type=local_bash），只是它在命令完成时才到、且没有
+    # background_tasks_changed/task_updated 相伴。daemon 无法凭形状区分前后台 —— 唯一可靠判据是
+    # tool_use_id 指回一次 daemon 见过的、未带 run_in_background 的 tool_use
+    # （BackgroundJobRegistry.foregroundBash）。这条相关性一断，抑制失效、幻影 job 回归。
+    # 注意：秒回的命令（裸 echo）不走 task 机制 —— 必须带几秒执行时间才会触发（实证：sleep 3 触发、
+    # 裸 echo 不触发），所以探针命令里有 sleep。
+    p = Probe(["--permission-mode", "bypassPermissions"])
+    try:
+        p.send("Use the Bash tool to run exactly: echo fg_probe_marker && sleep 4 && echo fg_probe_end . "
+               "Run it in the FOREGROUND (do not set run_in_background; no timeout tricks). "
+               "Then reply with exactly DONE.")
+        if not p.wait_for("result", timeout=120):
+            return check("turn finished", False, "no result within 120s")
+        time.sleep(2)  # 收尾事件
+        bash_uses = [c for j in p.raw if j.get("type") == "assistant"
+                     for c in j.get("message", {}).get("content", [])
+                     if c.get("type") == "tool_use" and c.get("name") == "Bash"]
+        fg = [c for c in bash_uses if not (c.get("input") or {}).get("run_in_background")]
+        ok = check("foreground Bash tool_use present", bool(fg),
+                   json.dumps((bash_uses[0].get("input") if bash_uses else {}) or {})[:80])
+        if not fg:
+            return False
+        tid = fg[0].get("id")
+        started = [j for j in p.raw if j.get("type") == "system" and j.get("subtype") == "task_started"]
+        if not started:
+            # 前台不再发 task 事件 = 回到老行为：抑制无事可抑、也不会误伤 —— 良性漂移，PASS 并留痕
+            return check("fg emits no task events anymore (benign drift — suppression idles)", True, "0 task_started")
+        ok &= check("fg task_started carries the fg tool_use_id",
+                    any(j.get("tool_use_id") == tid for j in started),
+                    f"ids={[j.get('tool_use_id') for j in started]} want={tid}")
+        ok &= check("fg task_type is local_bash", all(j.get("task_type") == "local_bash" for j in started),
+                    f"{[j.get('task_type') for j in started]}")
+        return ok
+    finally:
+        p.kill()
+
+
+def scenario_bgcontinue() -> bool:
+    print("── bgcontinue：bg 任务完成后 CLI 无输入自动续 turn（#105 reaper 让位的安全性前提）──")
+    # #105 的修复让 reaper 对活着的 agent 全面让位（活进程的 task 事件为准、忙会话不看时钟），赌的是
+    # CLI 自己会把无人值守的计划走完：后台任务一完成（task_notification/task_updated 报 completed），
+    # CLI 不需要任何新输入就开一个续命 turn（2.1.206 实证：新 init 在完成事件后 0.1s 内出现）执行
+    # 剩余步骤。这条一漂移，让位就变成放任 —— 多步计划死在后台步骤后面，必须重估策略。
+    artifact = os.path.join(WORKDIR, "bgcontinue_ok.txt")
+    try:
+        os.remove(artifact)  # 上次运行的残留会让本次误判
+    except OSError:
+        pass
+    p = Probe(["--permission-mode", "bypassPermissions"])
+    try:
+        p.send("Step 1: use the Bash tool with run_in_background set to true to start exactly: "
+               "sleep 15 && echo probe_bg_done . Step 2: AFTER that background command completes, "
+               "create a file named bgcontinue_ok.txt containing the word ok. Do both steps.")
+        if not p.wait_for("result", timeout=120):
+            return check("first result", False, "no result within 120s")
+        ok = True
+        # 此后不再发送任何输入：第二个 result 只能来自 CLI 的自动续 turn
+        ok &= check("unprompted follow-up turn (2nd result)", p.wait_for("result", count=2, timeout=150),
+                    f"{len(p.of('result'))} result(s)")
+        time.sleep(1)
+        done = [j for j in p.raw if j.get("type") == "system" and (
+            (j.get("subtype") == "task_notification" and j.get("status") == "completed") or
+            (j.get("subtype") == "task_updated" and (j.get("patch") or {}).get("status") == "completed"))]
+        ok &= check("completion task_* event arrived", bool(done),
+                    f"{len(done)} completed event(s)")
+        ok &= check("follow-up side effect landed", os.path.exists(artifact), artifact)
+        return ok
+    finally:
+        p.kill()
+        try:
+            os.remove(artifact)
+        except OSError:
+            pass
+
+
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     version = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
     print(f"claude: {CLAUDE} ({version})\n")
-    scenarios = {"steer": scenario_steer, "queue": scenario_queue, "ask": scenario_ask, "ask_plan": scenario_ask_plan, "task": scenario_task, "lock": scenario_lock}
+    scenarios = {
+        "steer": scenario_steer, "queue": scenario_queue, "ask": scenario_ask, "ask_plan": scenario_ask_plan,
+        "task": scenario_task, "lock": scenario_lock, "fgtask": scenario_fgtask, "bgcontinue": scenario_bgcontinue,
+    }
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
     print()
     if all(results):
-        print("✅ wire behavior unchanged — App 依赖的五条 CLI 行为全部成立")
+        print("✅ wire behavior unchanged — App 依赖的七条 CLI 行为全部成立")
         sys.exit(0)
     print("❌ CLI 行为漂移！排查 daemon 的 StreamParser/PermissionBridge/AskQuestions 是否需要适配")
     sys.exit(1)

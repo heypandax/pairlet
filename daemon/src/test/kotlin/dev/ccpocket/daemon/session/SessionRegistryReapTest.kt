@@ -78,6 +78,7 @@ class SessionRegistryReapTest {
     private fun harness(
         backend: ScriptedBackend,
         until: (List<Frame>) -> Boolean,
+        mode: PermissionMode = PermissionMode.DEFAULT,
         body: suspend (SessionRegistry, convoId: String) -> Unit,
     ) = runBlocking {
         val dir = Files.createTempDirectory("ccp-reap")
@@ -85,7 +86,7 @@ class SessionRegistryReapTest {
         val scope = CoroutineScope(Dispatchers.Default)
         val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }))
         try {
-            val convoId = registry.open(OpenSession(workdir = dir.toString()), { f -> synchronized(frames) { frames.add(f) } })
+            val convoId = registry.open(OpenSession(workdir = dir.toString(), mode = mode), { f -> synchronized(frames) { frames.add(f) } })
             assertTrue(registry.sendPrompt(SendPrompt(convoId = convoId, text = "run the task")))
             withTimeout(10_000) {
                 while (!until(synchronized(frames) { frames.toList() })) delay(20)
@@ -118,6 +119,23 @@ class SessionRegistryReapTest {
             delay(600)
             assertEquals(1, registry.reapIdle(idleMs = 200), "a genuinely idle conversation must still be reclaimed")
             assertFalse(registry.sendPrompt(SendPrompt(convoId = convoId, text = "gone?")), "reaped conversation must be gone")
+        }
+    }
+
+    @Test
+    fun plan_mode_turn_end_survives_the_reaper_for_the_continuation() {
+        if (isWindows()) return
+        // plan mode's `result` is routinely PREMATURE (issue #55): the CLI continues unprompted toward
+        // its AskUserQuestion (probed on 2.1.206 — a fresh init follows the result within 0.1s). Right
+        // after that result nothing else shields the conversation (executing false, no jobs, no ask
+        // yet); the continuation grace must hold the reaper off where a default-mode turn end (test
+        // above) is reclaimed.
+        val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") }
+        harness(ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } }, mode = PermissionMode.PLAN) { registry, convoId ->
+            delay(600)
+            assertEquals(0, registry.reapIdle(idleMs = 200), "a plan-mode turn end must be spared for the continuation")
+            assertTrue(registry.sendPrompt(SendPrompt(convoId = convoId, text = "still there?")), "conversation must still be alive")
         }
     }
 
