@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -127,6 +128,10 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
 import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.ui.share.ShareFolderScreen
+import dev.ccpocket.app.ui.share.SharedPill
+import dev.ccpocket.app.ui.share.expiryLeft
+import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
@@ -456,6 +461,9 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     var query by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
+    var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
+    shareTarget?.let { ShareFolderScreen(repo, it, onBack = { shareTarget = null }); return }
     // pull-only list: refresh NOW — entering (and RE-entering, back from a session) shows fresh state
     // instead of the pre-session snapshot — then keep re-pulling quietly
     LaunchedEffect(Unit) { while (true) { repo.refreshDirectoriesSilently(); delay(10_000) } }
@@ -619,7 +627,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             }
         }
     }
-        actionTarget?.let { ProjectActionsSheet(repo, it) { actionTarget = null } }
+        actionTarget?.let { t -> ProjectActionsSheet(repo, t, onShare = { shareTarget = t }) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
             parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
@@ -761,16 +769,44 @@ private fun PocketRepository.openProject(e: DirectoryEntry) {
 private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean, onLongPress: (() -> Unit)? = null) {
     val sid = e.activeSessionId
     val pinned = repo.isPinned(e.path)
-    if (direct && e.open && sid != null) {
-        // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
-        LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
+    when {
+        // a guest's shared folder (issue #115) — neutral "Shared" pill + origin + "6d left"
+        e.sharedBy != null -> SharedProjectCell(repo, e, onLongPress)
+        direct && e.open && sid != null ->
+            // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
+            LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
+        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
     }
-    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
 }
 
-/** Long-press a project → pin it to the top, or unpin it. Small sheet, mirrors the app's other actions. */
+/** A guest's shared-folder row (issue #115): folder (mono) + the neutral hairline "Shared" pill,
+ *  the "shared by <owner>" origin, and the remaining validity ("6d left"). Tap opens its sessions. */
 @Composable
-private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onDismiss: () -> Unit) {
+private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongPress: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .combinedClickable(onClick = { repo.openProject(e) }, onLongClick = onLongPress).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                SharedPill()
+            }
+            e.sharedBy?.let {
+                Text(stringResource(Res.string.shared_by_caption, it), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            }
+        }
+        e.shareExpiresAt?.let { exp ->
+            Spacer(Modifier.width(8.dp))
+            Text(expiryLeftText(expiryLeft(exp, dev.ccpocket.app.epochMillis())), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, maxLines = 1)
+        }
+    }
+}
+
+/** Long-press a project → pin it to the top, or unpin it, or share it. Small sheet, mirrors the app's other actions. */
+@Composable
+private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onShare: () -> Unit, onDismiss: () -> Unit) {
     val pinned = repo.isPinned(e.path)
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
@@ -786,6 +822,17 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onDis
                     stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
                     color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
                 )
+            }
+            // Share this folder… — owners only; a guest's shared row (sharedBy set) can't re-share the owner's machine.
+            if (e.sharedBy == null) {
+                Row(
+                    Modifier.padding(top = 9.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                        .clickable { onShare(); onDismiss() }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.Rounded.Share, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
+                    Text(stringResource(Res.string.share_this_folder), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                }
             }
         }
     }
@@ -951,7 +998,13 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
             )
         }
         Text(
-            buildString { append(e.name); e.gitBranch?.let { append(" · ⑂ ").append(it) } },
+            buildString {
+                append(e.name)
+                e.gitBranch?.let { append(" · ⑂ ").append(it) }
+                // a bridge-opened session says so in the list (issue #91): the owner sees at a glance
+                // that an IM bot, not a person, is driving it
+                liveOrigin(e)?.let { append(" · via ").append(it) }
+            },
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
             modifier = Modifier.padding(top = 4.dp),
         )
@@ -1186,6 +1239,12 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
                         Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1)
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
+                        // external trigger source (issue #91): a bridge-opened session says so — the owner
+                        // should know an IM bot, not a person, is driving this conversation
+                        repo.sessionOrigin.value?.let { origin ->
+                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
+                            Text("via $origin", color = Tok.warn, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 if (!repo.observing.value) {

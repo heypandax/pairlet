@@ -431,6 +431,19 @@ interface DesktopModel {
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
     fun revokeComputer(c: DkComputer)
 
+    // ── folder-share (issue #115): owner management + guest redeem. All default to inert so the
+    //    seed/preview model needs no changes; the live [RepoDesktopModel] wires them to the repo. ──
+    val shares: List<dev.ccpocket.protocol.ShareInfo> get() = emptyList()
+    val sharesLoaded: Boolean get() = false
+    /** The invite minted by the last [createShare] — the owner shows its QR/code, then [clearLastShare]. */
+    val lastShareInvite: dev.ccpocket.protocol.ShareInvite? get() = null
+    fun refreshShares() {}
+    fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) {}
+    fun revokeShare(deviceId: String) {}
+    fun clearLastShare() {}
+    /** Guest: decode + redeem a pasted invite blob; false if it isn't a valid invite. */
+    fun redeemShareInvite(blob: String): Boolean = false
+
     // account (Settings ▸ Account): the ACTIVE computer's Claude CLI login, driven over pocket/auth.*.
     // Null = not fetched yet, or the daemon predates the messages (it silently drops the request).
     val authState: dev.ccpocket.protocol.AuthState? get() = null

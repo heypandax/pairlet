@@ -42,15 +42,16 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
         Unit
     }
 
-    override suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long) = tx { c ->
-        c.prepareStatement("INSERT INTO pairing_tickets(ticket_hash, account_id, created_at, expires_at, used) VALUES(?,?,?,?,0)").use { ps ->
+    override suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long, headless: Boolean) = tx { c ->
+        c.prepareStatement("INSERT INTO pairing_tickets(ticket_hash, account_id, created_at, expires_at, used, headless) VALUES(?,?,?,?,0,?)").use { ps ->
             ps.setBytes(1, ticketHash); ps.setString(2, accountId); ps.setLong(3, createdAt); ps.setLong(4, expiresAt)
+            ps.setInt(5, if (headless) 1 else 0)
             ps.executeUpdate()
         }
         Unit
     }
 
-    override suspend fun claimTicket(ticketHash: ByteArray, now: Long): String? = tx { c ->
+    override suspend fun claimTicket(ticketHash: ByteArray, now: Long): ClaimedTicket? = tx { c ->
         val claimed = c.prepareStatement(
             "UPDATE pairing_tickets SET used=1, used_at=? WHERE ticket_hash=? AND used=0 AND expires_at>?"
         ).use { ps ->
@@ -58,9 +59,9 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
             ps.executeUpdate()
         }
         if (claimed != 1) return@tx null
-        c.prepareStatement("SELECT account_id FROM pairing_tickets WHERE ticket_hash=?").use { ps ->
+        c.prepareStatement("SELECT account_id, headless FROM pairing_tickets WHERE ticket_hash=?").use { ps ->
             ps.setBytes(1, ticketHash)
-            ps.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+            ps.executeQuery().use { rs -> if (rs.next()) ClaimedTicket(rs.getString(1), rs.getInt(2) != 0) else null }
         }
     }
 
@@ -73,11 +74,12 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun insertDevice(device: Device) = tx { c ->
         c.prepareStatement(
-            "INSERT INTO devices(device_id, account_id, device_pubkey, credential_hash, created_at, last_seen, revoked) VALUES(?,?,?,?,?,?,0)"
+            "INSERT INTO devices(device_id, account_id, device_pubkey, credential_hash, created_at, last_seen, revoked, headless) VALUES(?,?,?,?,?,?,0,?)"
         ).use { ps ->
             ps.setString(1, device.deviceId); ps.setString(2, device.accountId)
             ps.setBytes(3, device.devicePubkey); ps.setBytes(4, device.credentialHash)
             ps.setLong(5, device.createdAt); ps.setLong(6, device.createdAt)
+            ps.setInt(7, if (device.headless) 1 else 0)
             ps.executeUpdate()
         }
         Unit
@@ -85,7 +87,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun getDevice(deviceId: String): Device? = tx { c ->
         c.prepareStatement(
-            "SELECT account_id, device_pubkey, credential_hash, created_at, last_seen, revoked FROM devices WHERE device_id=?"
+            "SELECT account_id, device_pubkey, credential_hash, created_at, last_seen, revoked, headless FROM devices WHERE device_id=?"
         ).use { ps ->
             ps.setString(1, deviceId)
             ps.executeQuery().use { rs ->
@@ -98,6 +100,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
                     createdAt = rs.getLong(4),
                     lastSeen = rs.getLong(5).takeUnless { rs.wasNull() },
                     revoked = rs.getInt(6) != 0,
+                    headless = rs.getInt(7) != 0,
                 )
             }
         }
@@ -105,7 +108,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun devicesForAccount(accountId: String): List<Device> = tx { c ->
         c.prepareStatement(
-            "SELECT device_id, device_pubkey, credential_hash, created_at, last_seen FROM devices WHERE account_id=? AND revoked=0"
+            "SELECT device_id, device_pubkey, credential_hash, created_at, last_seen, headless FROM devices WHERE account_id=? AND revoked=0"
         ).use { ps ->
             ps.setString(1, accountId)
             ps.executeQuery().use { rs ->
@@ -119,6 +122,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
                             createdAt = rs.getLong(4),
                             lastSeen = rs.getLong(5).takeUnless { rs.wasNull() },
                             revoked = false,
+                            headless = rs.getInt(6) != 0,
                         )
                     )
                 }
@@ -172,8 +176,9 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun pushTargets(accountId: String): List<PushTarget> = tx { c ->
         c.prepareStatement(
+            // headless=0: never route the owner's session pushes to a bridge (issue #91)
             "SELECT device_id, push_platform, push_token FROM devices " +
-                "WHERE account_id=? AND revoked=0 AND push_token IS NOT NULL AND push_token<>''"
+                "WHERE account_id=? AND revoked=0 AND headless=0 AND push_token IS NOT NULL AND push_token<>''"
         ).use { ps ->
             ps.setString(1, accountId)
             ps.executeQuery().use { rs ->

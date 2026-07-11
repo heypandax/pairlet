@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AskWithdrawnReason
@@ -14,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -38,6 +40,17 @@ class PermissionBridge(
     // retired via [AskWithdrawn]; onCancel (control_cancel_request) and cancelAll clean up the rest.
     private val verdictTimeoutMs: Long = ApprovalTimeout.ms,
     private val questionTimeoutMs: Long = ApprovalTimeout.ms,
+    // issue #91: force EVERY ask on this conversation to be a one-off decision (never remembered). Set for
+    // bridge-origin sessions so a single owner "always allow" can't be replayed by later attacker-supplied
+    // prompts — the whole session is externally driven, so a remembered rule is a standing blank cheque.
+    private val forceNeverRemember: Boolean = false,
+    // issue #115: a GUEST folder-share's canonical shared roots. Non-null → a file tool (Read/Write/Edit/…)
+    // whose target lands OUTSIDE the roots is HARD-DENIED here, before any ask and regardless of mode — so
+    // the guest can't reach the owner's other files even under acceptEdits, and can't be tricked into
+    // approving an out-of-scope read (it never sees the ask). [workdir] resolves relative tool paths (the
+    // agent runs with the session cwd, which is itself inside the scope).
+    private val pathScope: List<String>? = null,
+    private val workdir: String? = null,
 ) {
     private val log = logger("Perms")
     // [ask] is the exact PermissionAsk frame we emitted for this request — kept so a phone that reattaches
@@ -49,6 +62,14 @@ class PermissionBridge(
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
+        // GUEST folder-share path guard (issue #115): a built-in file tool whose target escapes the shared
+        // root is denied HERE — before the auto-allow / remembered-rule / ask paths below — so it is refused
+        // under EVERY mode (even acceptEdits/bypass) and the guest is never shown an ask for it. Bash is not
+        // guarded (its targets aren't statically knowable), which the owner's boundary card states plainly.
+        outOfScopeTarget(ev.toolName, ev.input)?.let { escaped ->
+            respond(ev.requestId, false, false, ev.input, null, "denied — $escaped is outside the shared folder")
+            return
+        }
         // AskUserQuestion carries its ANSWERS in the verdict — an auto-allow would answer nothing
         // ("the user did not answer"), so questions reach the phone even under bypassPermissions.
         val isQuestion = ev.toolName == AskQuestions.TOOL
@@ -58,8 +79,10 @@ class PermissionBridge(
         }
         val meta = ToolMetadata.of(ev.toolName, ev.input)
         // neverRemember tools (ExitPlanMode, AskUserQuestion) are a human-decision gate: never satisfy them
-        // from a remembered rule — every plan/question must be answered explicitly (issue #10).
-        if (!meta.neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
+        // from a remembered rule. [forceNeverRemember] extends that to EVERY ask on a bridge-origin session
+        // (issue #91), so an owner's earlier "always allow" can't auto-clear a new attacker-supplied prompt.
+        val neverRemember = meta.neverRemember || forceNeverRemember
+        if (!neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -79,10 +102,10 @@ class PermissionBridge(
         val ask = PermissionAsk(
             convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff,
             questions = if (isQuestion) AskQuestions.parse(ev.input) else null,
-            neverRemember = meta.neverRemember,
+            neverRemember = neverRemember,
             timeoutSec = (timeoutMs / 1000).toInt(), // phone counts its local no-response fallback against the REAL window
         )
-        pending[askId] = Pending(ask, ev.input, meta.rule, meta.neverRemember, isQuestion, timeout)
+        pending[askId] = Pending(ask, ev.input, meta.rule, neverRemember, isQuestion, timeout)
         emit(ask)
     }
 
@@ -145,6 +168,21 @@ class PermissionBridge(
             emit(AskWithdrawn(convoId, it.ask.askId, AskWithdrawnReason.WITHDRAWN))
         }
         pending.clear()
+    }
+
+    /**
+     * For a GUEST session, the first tool target that escapes the shared [pathScope] (or null when the tool
+     * is in-scope / not a guarded file tool / this is an unrestricted owner session). A relative target is
+     * resolved against the session [workdir] (itself inside the scope); [PathScope.contains] then
+     * canonicalizes — collapsing `..` and following symlinks — so a `../../etc/passwd` or a symlink pointing
+     * out of the tree is caught, mirroring the DirList/@-completion containment (#90/#67).
+     */
+    private fun outOfScopeTarget(tool: String, input: JsonObject?): String? {
+        val roots = pathScope ?: return null
+        return ToolMetadata.pathTargets(tool, input).firstOrNull { target ->
+            val abs = if (File(target).isAbsolute || workdir == null) target else File(workdir, target).path
+            !PathScope.contains(roots, abs)
+        }
     }
 
     private companion object {

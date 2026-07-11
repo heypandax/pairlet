@@ -428,4 +428,106 @@
     <string name="path_open">Open in browser</string>
     <string name="path_copied">Copied</string>
     <string name="path_cwd_hint">resolved from session cwd</string>
+
+    <!-- ── folder-share (issue #115) ─────────────────────────────── -->
+    <string name="share_this_folder">Share this folder…</string>
+    <string name="settings_shared_folders">Shared folders</string>
+
+    <!-- owner: invite composer -->
+    <string name="share_composer_title">Share folder</string>
+    <string name="share_access_level">Access level</string>
+    <string name="share_tier_review">Review</string>
+    <string name="share_tier_review_desc">Approve every action</string>
+    <string name="share_tier_collaborate">Collaborate</string>
+    <string name="share_tier_collaborate_desc">Edits here apply; shell still asks</string>
+    <string name="share_tier_autonomous">Autonomous</string>
+    <string name="share_tier_autonomous_desc">Fewest prompts — shell still asks</string>
+    <string name="share_expires_label">Expires</string>
+    <string name="share_boundary_get">They get</string>
+    <string name="share_boundary_get_agents">Run agents in this folder</string>
+    <string name="share_boundary_get_files">Read and edit files here</string>
+    <string name="share_boundary_get_env">Its git, dependencies, environment</string>
+    <string name="share_boundary_not">They don\'t get</string>
+    <string name="share_boundary_not_folders">Your other folders</string>
+    <string name="share_boundary_not_memory">Your global CLAUDE.md and memory</string>
+    <string name="share_boundary_not_mcp">Your MCP integrations and accounts</string>
+    <string name="share_boundary_not_switch">Account switching</string>
+    <string name="share_boundary_shell_warn">Shell commands are not sandboxed — they run as your user.</string>
+    <string name="share_create">Create invite</string>
+    <string name="share_creating">Creating invite…</string>
+    <string name="share_create_failed">Couldn\'t create the invite. Update the computer\'s daemon, then try again.</string>
+
+    <!-- owner: invite ready -->
+    <string name="share_invite_ready">Invite ready</string>
+    <string name="share_invite_hint">Paste this code into CC Pocket ▸ Connect to join. It works once.</string>
+    <string name="share_invite_code">Invite code</string>
+    <string name="share_invite_copy">Copy code</string>
+    <string name="share_invite_copied">Copied</string>
+    <string name="share_invite_share">Share…</string>
+    <string name="share_invite_expires_in">Expires in %1$s</string>
+    <string name="share_invite_expired_note">This code has expired. Create a new invite.</string>
+    <string name="share_done">Done</string>
+
+    <!-- owner: management -->
+    <string name="shared_folders_title">Shared folders</string>
+    <string name="shared_folders_empty">You haven\'t shared any folders</string>
+    <string name="shared_folders_empty_hint">Long-press a project, then “Share this folder”.</string>
+    <string name="share_guest_someone">someone</string>
+    <string name="share_active_now">active now</string>
+    <string name="share_sessions_live">%1$d live</string>
+    <string name="share_revoke">Revoke</string>
+    <string name="share_revoked_label">Revoked</string>
+    <string name="share_revoke_title">Revoke access?</string>
+    <string name="share_revoke_c1">Their live sessions end immediately.</string>
+    <string name="share_revoke_c2">They lose access to this folder.</string>
+    <string name="share_revoke_c3">This invite can\'t be reused.</string>
+    <string name="share_revoke_confirm">Revoke access</string>
+
+    <!-- guest: accept preview -->
+    <string name="join_title">Join folder</string>
+    <string name="join_get_title">You\'ll be able to</string>
+    <string name="join_note">Scoped access for a trusted collaborator.</string>
+    <string name="join_cta">Join folder</string>
+    <string name="join_decline">Decline</string>
+
+    <!-- guest: shared row badge -->
+    <string name="shared_badge">Shared</string>
+    <string name="shared_by_caption">shared by %1$s</string>
+    <string name="share_info_strip">Permission requests for agents here come to you.</string>
+
+    <!-- expiry captions -->
+    <string name="share_left_days">%1$dd left</string>
+    <string name="share_left_hours">%1$dh left</string>
+    <string name="share_left_minutes">%1$dm left</string>
+    <string name="share_expired">expired</string>
+
+    <!-- folder-share: UI copy added with the four screens -->
+    <string name="share_tier_recommended">RECOMMENDED</string>
+    <string name="share_revoke_hint_anytime">You can revoke access at any time.</string>
+    <string name="share_recap_access">Access</string>
+    <string name="share_recap_expires">Expires</string>
+    <string name="share_recap_folder">Folder</string>
+    <string name="share_invite_new_code">New code</string>
+    <string name="share_manage_hint">Manage or revoke anytime in Settings ▸ Shared folders.</string>
+    <string name="share_active_label">Active</string>
+    <string name="share_history_label">History</string>
+    <string name="share_owner_footer">Guest sessions run on your computer and your Claude plan.</string>
+    <string name="share_expires_in">expires in %1$s</string>
+    <string name="share_status_idle">Idle</string>
+    <string name="share_share_again">Share again</string>
+    <string name="share_expired_label">Expired</string>
+    <string name="share_access_ended">Access ended</string>
+    <string name="share_ended_body">%1$s ended this share. Sessions in this folder are no longer reachable from this device.</string>
+    <string name="share_the_owner">The owner</string>
+    <string name="share_remove_from_list">Remove from list</string>
+    <string name="share_ask_new_invite">Ask for a new invite</string>
+    <string name="share_revoked_disconnected">This share was revoked · session disconnected</string>
+    <string name="join_scan_title">Join a shared folder</string>
+    <string name="join_scan_hint">Scan the invite from the folder\'s owner</string>
+    <string name="join_or_paste">or paste an invite code</string>
+    <string name="join_paste_placeholder">Paste invite code</string>
+    <string name="join_single_use">Invites are single-use and expire quickly.</string>
+    <string name="join_invalid">This invite is invalid or has expired. Ask for a new one.</string>
+    <string name="join_review_title">Review invite</string>
+    <string name="settings_sharing_section">Sharing</string>
 </resources>

@@ -40,6 +40,8 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.share.JoinFolderScreen
+import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import org.jetbrains.compose.resources.stringResource
@@ -69,6 +71,11 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) { UsageScreen(repo, onBack = { showUsage = false }); return } // full-screen usage dashboard (#26)
+    // folder-share (issue #115): owner management + guest redeem, each full-screen like usage
+    var showShares by remember { mutableStateOf(false) }
+    if (showShares) { SharedFoldersScreen(repo, onBack = { showShares = false }); return }
+    var showJoin by remember { mutableStateOf(false) }
+    if (showJoin) { JoinFolderScreen(repo, onBack = { showJoin = false }, onJoined = { showJoin = false; onBack() }); return }
     // back closes Settings — register a handler so it doesn't fall through to the app-level navigation
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
@@ -94,6 +101,25 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
             ) {
                 Text(stringResource(Res.string.settings_usage), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 Text("›", color = Tok.muted, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            SectionLabel(stringResource(Res.string.settings_sharing_section))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { showShares = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.settings_shared_folders), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("›", color = Tok.muted, fontSize = 16.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+                Row(
+                    Modifier.fillMaxWidth().clickable { showJoin = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.join_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("›", color = Tok.muted, fontSize = 16.sp)
+                }
             }
             Spacer(Modifier.height(8.dp))
             SectionLabel(stringResource(Res.string.notifications_section))

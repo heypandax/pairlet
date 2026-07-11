@@ -520,6 +520,18 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun pairBegin_headless_roundtrips_and_old_frames_default_false() {
+        // issue #91: the authoritative bridge marker rides PairBegin from the minting daemon
+        val bridge = Envelope(id = "pb1", ts = 0, to = Route.RELAY, body = PairBegin("pub", headless = true))
+        val json = PocketJson.encodeToString(bridge)
+        assertTrue("\"headless\":true" in json, json)
+        assertEquals(bridge, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's PairBegin (no headless key) decodes to false — the relay mints a phone ticket
+        val old = """{"id":"pb2","ts":0,"to":"RELAY","body":{"t":"pocket/pair.begin","e2ePub":"pub"}}"""
+        assertEquals(PairBegin("pub"), PocketJson.decodeFromString<Envelope>(old).body as PairBegin)
+    }
+
+    @Test
     fun auth_objects_and_state_roundtrip() {
         // argless requests are data objects — encode as bare {"t": …} and decode back to the singleton
         for ((body, tag) in listOf<Pair<Frame, String>>(
@@ -966,5 +978,208 @@ class SerializationRoundTripTest {
         assertEquals(emptyList(), minimal.presets)
         assertEquals(null, minimal.activeId)
         assertEquals(null, minimal.fieldError)
+    }
+
+    @Test
+    fun bridge_origin_fields_roundtrip_and_old_frames_default_null() {
+        // issue #91: SessionLive.origin — a bridge-opened conversation names its trigger source
+        val bridged = SessionLive("c1", "/x", "sid", origin = "feishu-bot")
+        val bj = PocketJson.encodeToString<SessionLive>(bridged)
+        assertTrue("\"origin\":\"feishu-bot\"" in bj, bj)
+        assertEquals(bridged, PocketJson.decodeFromString<SessionLive>(bj))
+        // an interactive session's frame stays byte-identical to the pre-#91 wire (explicitNulls=false)
+        assertFalse("origin" in PocketJson.encodeToString<SessionLive>(SessionLive("c1", "/x", "sid")))
+        // an OLD daemon's frame (no origin key) decodes to null — no label rendered
+        val legacy = """{"convoId":"c3","workdir":"/z","sessionId":"sid3"}"""
+        assertEquals(null, PocketJson.decodeFromString<SessionLive>(legacy).origin)
+
+        // ActiveSession.origin — the project list's live row label, same four-direction contract
+        val row = ActiveSession("s1", "review MR", executing = true, origin = "feishu-bot")
+        assertEquals(row, PocketJson.decodeFromString<ActiveSession>(PocketJson.encodeToString(row)))
+        assertFalse("origin" in PocketJson.encodeToString(ActiveSession("s1")))
+        assertEquals(null, PocketJson.decodeFromString<ActiveSession>("""{"sessionId":"s1"}""").origin)
+    }
+
+    @Test
+    fun pairRedeem_headless_roundtrips_and_old_shapes_default_false() {
+        // issue #91: the REST redeem body — a bridge declares itself headless
+        val headless = PairRedeem("tkt", "pub", headless = true)
+        val hj = PocketJson.encodeToString(headless)
+        assertTrue("\"headless\":true" in hj, hj)
+        assertEquals(headless, PocketJson.decodeFromString<PairRedeem>(hj))
+        // an OLD app's redeem (no headless key) decodes as an interactive device on a NEW relay
+        assertEquals(PairRedeem("tkt", "pub"), PocketJson.decodeFromString<PairRedeem>("""{"ticket":"tkt","devicePubKey":"pub"}"""))
+        // an OLD relay skips the unknown key the usual ignoreUnknownKeys way — pin the skip shape
+        // (kotlin has no "old decoder" here; the unknown-key tolerance test above covers the mechanism)
+        assertTrue("\"headless\":false" in PocketJson.encodeToString(PairRedeem("tkt", "pub")), "encodeDefaults keeps the flag explicit")
+
+        // DaemonHello.protoV: a NEW daemon announces PROTO_V_HEADLESS; an old relay ignores the value
+        val hello = DaemonHello("acct", "edpub", protoV = PROTO_V_HEADLESS)
+        val hjson = PocketJson.encodeToString(Envelope(id = "h1", ts = 0, to = Route.RELAY, body = hello))
+        assertTrue("\"protoV\":2" in hjson, hjson)
+        assertEquals(hello, PocketJson.decodeFromString<Envelope>(hjson).body)
+        // an OLD daemon's hello (no protoV key) decodes as 1 — the relay must treat it as pre-headless
+        val oldHello = """{"id":"h2","ts":0,"to":"RELAY","body":{"t":"pocket/daemon.hello","accountId":"a","ed25519Pub":"p"}}"""
+        assertEquals(1, (PocketJson.decodeFromString<Envelope>(oldHello).body as DaemonHello).protoV)
+    }
+
+    @Test
+    fun notifyPush_urgent_roundtrips_and_old_frames_default_false() {
+        // issue #91: a bridge-approval push rides the urgent flag so the relay delivers it even with a
+        // phone attached elsewhere
+        val urgent = Envelope(id = "n1", ts = 0, to = Route.RELAY, body = NotifyPush("Approval needed", "Run command waiting", workdir = "/w", sessionId = "s", urgent = true))
+        val json = PocketJson.encodeToString(urgent)
+        assertTrue("\"urgent\":true" in json, json)
+        assertEquals(urgent, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's push (no urgent key) decodes to false — the ordinary deviceCount==0 gate applies
+        val old = """{"id":"n2","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b"}}"""
+        assertEquals(NotifyPush("t", "b"), PocketJson.decodeFromString<Envelope>(old).body as NotifyPush)
+    }
+
+    // ---- folder-share (issue #115) ----
+
+    @Test
+    fun accessTier_roundtrips_and_future_tier_degrades_to_safest() {
+        // every known tier round-trips by its wire name
+        val expected = mapOf(
+            AccessTier.REVIEW to "review",
+            AccessTier.COLLABORATE to "collaborate",
+            AccessTier.AUTONOMOUS to "autonomous",
+        )
+        for ((tier, name) in expected) {
+            assertEquals("\"$name\"", PocketJson.encodeToString(tier))
+            assertEquals(tier, PocketJson.decodeFromString<AccessTier>("\"$name\""))
+        }
+        // a tier only a NEWER peer knows must NOT fail the frame — it degrades to the SAFEST (REVIEW-like)
+        // so a scoped credential never falls open on a version skew
+        assertEquals(AccessTier.UNKNOWN, PocketJson.decodeFromString<AccessTier>("\"read_only_v2\""))
+        // and the ceiling of an unknown tier is the most cautious mode (never bypass)
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(AccessTier.UNKNOWN))
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(AccessTier.REVIEW))
+        assertEquals(PermissionMode.ACCEPT_EDITS, AccessTier.ceiling(AccessTier.COLLABORATE))
+        assertEquals(PermissionMode.ACCEPT_EDITS, AccessTier.ceiling(AccessTier.AUTONOMOUS))
+    }
+
+    @Test
+    fun createShare_roundtrips_with_defaults_and_old_frames_default() {
+        val env = Envelope(id = "sh1", ts = 0, body = CreateShare("/Users/panda/repo"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.create\"" in json, json)
+        assertTrue("\"tier\":\"collaborate\"" in json, json)          // encodeDefaults
+        assertTrue("\"expiresInSec\":604800" in json, json)           // 7d default, encodeDefaults
+        assertFalse("label" in json, json)                            // explicitNulls=false
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        // a minimal owner frame (only path) reads with the collaborate/7d defaults
+        val minimal = """{"id":"sh2","ts":0,"to":"PEER","body":{"t":"pocket/share.create","path":"/x"}}"""
+        assertEquals(CreateShare("/x"), PocketJson.decodeFromString<Envelope>(minimal).body)
+    }
+
+    @Test
+    fun listShares_and_revokeShare_roundtrip() {
+        val list = Envelope(id = "sh3", ts = 0, body = ListShares)
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"t\":\"pocket/share.list\"" in listJson, listJson)
+        assertEquals(ListShares, PocketJson.decodeFromString<Envelope>(listJson).body)
+
+        val rev = Envelope(id = "sh4", ts = 0, body = RevokeShare("dev-guest-1"))
+        val revJson = PocketJson.encodeToString(rev)
+        assertTrue("\"t\":\"pocket/share.revoke\"" in revJson, revJson)
+        assertEquals(rev, PocketJson.decodeFromString<Envelope>(revJson))
+    }
+
+    @Test
+    fun shareInvite_and_shareCreated_roundtrip_and_omit_null_error() {
+        val invite = ShareInvite(
+            relay = "wss://pocket.ark-nexus.cc", accountId = "acct", daemonPub = "pub", ticket = "tkt",
+            folderName = "repo", tier = AccessTier.COLLABORATE, expiresAt = 1_800_000_000_000, ttlSec = 120,
+            ownerLabel = "Pandas-MacBook-Pro",
+        )
+        val ok = Envelope(id = "sc1", ts = 0, body = ShareCreated(ok = true, invite = invite))
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/share.created\"" in okJson, okJson)
+        assertTrue("\"folderName\":\"repo\"" in okJson, okJson)
+        assertFalse("\"error\"" in okJson, okJson) // explicitNulls=false — a success carries no error
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        val err = ShareCreated(ok = false, error = "a phone pairing is in progress — retry shortly")
+        val errJson = PocketJson.encodeToString(Envelope(id = "sc2", ts = 0, body = err))
+        assertFalse("invite" in errJson, errJson) // null invite omitted
+        assertEquals(err, PocketJson.decodeFromString<Envelope>(errJson).body)
+    }
+
+    @Test
+    fun shareListing_and_shareRevoked_roundtrip() {
+        val listing = ShareListing(
+            items = listOf(
+                ShareInfo("dev1", "/Users/panda/repo", AccessTier.COLLABORATE, createdAt = 1, expiresAt = 2, online = true, activeSessions = 1),
+                ShareInfo("dev2", "/Users/panda/web", AccessTier.REVIEW, createdAt = 3, expiresAt = 4, guestLabel = "alex", lastActiveAt = 5, revoked = true),
+            ),
+        )
+        val env = Envelope(id = "sl1", ts = 0, body = listing)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.listing\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        val revoked = Envelope(id = "sr1", ts = 0, body = ShareRevoked("dev1", ok = true))
+        val rJson = PocketJson.encodeToString(revoked)
+        assertTrue("\"t\":\"pocket/share.revoked\"" in rJson, rJson)
+        assertFalse("error" in rJson, rJson) // explicitNulls=false
+        assertEquals(revoked, PocketJson.decodeFromString<Envelope>(rJson))
+    }
+
+    @Test
+    fun directoryEntry_share_fields_roundtrip_and_old_frames_default_null() {
+        // a GUEST's shared row carries the origin label + expiry + tier; an ordinary local row omits them
+        val shared = DirectoryEntry(
+            path = "/Users/panda/repo", name = "repo", isDir = true, hasSessions = true,
+            sharedBy = "Pandas-MacBook-Pro", shareExpiresAt = 1_800_000_000_000, shareTier = AccessTier.COLLABORATE,
+        )
+        val json = PocketJson.encodeToString(shared)
+        assertTrue("\"sharedBy\":\"Pandas-MacBook-Pro\"" in json, json)
+        assertTrue("\"shareTier\":\"collaborate\"" in json, json)
+        assertEquals(shared, PocketJson.decodeFromString<DirectoryEntry>(json))
+        // a plain local dir stays byte-identical to the pre-#115 wire (explicitNulls=false)
+        val local = PocketJson.encodeToString(DirectoryEntry(path = "/p", name = "p", isDir = true))
+        assertFalse("sharedBy" in local, local)
+        assertFalse("shareExpiresAt" in local, local)
+        assertFalse("shareTier" in local, local)
+        // an old daemon's entry (no share keys) decodes with null share fields — a plain row
+        val old = """{"path":"/p","name":"p","isDir":true}"""
+        val back = PocketJson.decodeFromString<DirectoryEntry>(old)
+        assertEquals(null, back.sharedBy)
+        assertEquals(null, back.shareExpiresAt)
+        assertEquals(null, back.shareTier)
+        // a FUTURE peer's unknown shareTier degrades to UNKNOWN in-frame and the whole entry still decodes
+        // (not dropped) — the fail-closed contract in structured context, not just a bare string
+        val future = """{"path":"/p","name":"p","isDir":true,"sharedBy":"panda","shareTier":"read_only_v2"}"""
+        val futureBack = PocketJson.decodeFromString<DirectoryEntry>(future)
+        assertEquals(AccessTier.UNKNOWN, futureBack.shareTier)
+        assertEquals("panda", futureBack.sharedBy)
+    }
+
+    @Test
+    fun share_shapes_tolerate_an_unknown_future_key() {
+        // the new-daemon → OLD-phone direction for the share shapes: a NEWER daemon adds a field the old
+        // phone's schema lacks, and the old phone must SKIP it (ignoreUnknownKeys) rather than drop the whole
+        // frame. Pin it directly on the #115 shapes (the mechanism is shared, but the four-direction contract
+        // is per-shape) — the known fields must survive the skip.
+        val entry = PocketJson.decodeFromString<DirectoryEntry>(
+            """{"path":"/p","name":"p","isDir":true,"sharedBy":"panda","shareTier":"collaborate","futureFlag":true,"futureObj":{"x":1}}""",
+        )
+        assertEquals("panda", entry.sharedBy)
+        assertEquals(AccessTier.COLLABORATE, entry.shareTier)
+
+        val info = PocketJson.decodeFromString<ShareInfo>(
+            """{"deviceId":"d1","path":"/p","tier":"review","createdAt":1,"expiresAt":2,"futureField":[{"k":"v"}]}""",
+        )
+        assertEquals("d1", info.deviceId)
+        assertEquals(AccessTier.REVIEW, info.tier)
+
+        // and the enclosing ShareListing frame still decodes with the unknown key nested in an item
+        val listing = PocketJson.decodeFromString<Envelope>(
+            """{"id":"z1","ts":0,"to":"PEER","body":{"t":"pocket/share.listing","items":[
+               {"deviceId":"d2","path":"/q","tier":"collaborate","createdAt":3,"expiresAt":4,"unknownFuture":9}]}}""",
+        )
+        assertEquals("d2", (listing.body as ShareListing).items.single().deviceId)
     }
 }

@@ -790,6 +790,19 @@ class RepoDesktopModel(
     override fun renameComputer(c: DkComputer, label: String?) { paired(c)?.let { repo.renameDaemon(it, label) } }
     override fun revokeComputer(c: DkComputer) { paired(c)?.let { repo.unpair(it) } }
 
+    // ── folder-share (issue #115) ──
+    override val shares get() = repo.shares.toList()
+    override val sharesLoaded get() = repo.sharesLoaded.value
+    override val lastShareInvite get() = repo.lastShareCreated.value?.takeUnless { it.ok == false }?.invite
+    override fun refreshShares() { repo.listShares() }
+    override fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) { repo.createShare(path, tier, expiresInSec) }
+    override fun revokeShare(deviceId: String) { repo.revokeShare(deviceId) }
+    override fun clearLastShare() { repo.lastShareCreated.value = null }
+    override fun redeemShareInvite(blob: String): Boolean {
+        val inv = dev.ccpocket.app.pairing.decodeShareInvite(blob) ?: return false
+        repo.redeemShareInvite(inv); return true
+    }
+
     private companion object {
         const val K_PINS = "desktop_pins"
         const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)

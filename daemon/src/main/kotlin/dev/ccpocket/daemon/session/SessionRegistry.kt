@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.session
 
 import dev.ccpocket.daemon.agent.AgentBackendFactory
+import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
@@ -116,8 +117,16 @@ class SessionRegistry(
     @Volatile
     var pushHook: PushHook? = null
 
-    /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is emitted). */
-    suspend fun open(open: OpenSession, sink: OutboundSink): String {
+    /** Installed by the relay client (issue #91): how a BRIDGE conversation's permission ask reaches
+     *  the owner — the ask frame itself never goes to the bridge. Null in local-server mode. */
+    @Volatile
+    var askPushHook: AskPushHook? = null
+
+    /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
+     *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
+     *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
+     *  PermissionBridge denies any Read/Write/Edit whose target escapes them; null = unrestricted (owner). */
+    suspend fun open(open: OpenSession, sink: OutboundSink, origin: String? = null, pathScope: List<String>? = null): String {
         val resume = open.resumeId
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
@@ -138,6 +147,12 @@ class SessionRegistry(
                 val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
                 val recent = externallyActive(resume, open.workdir, file)
                 if (recent) {
+                    // a bridge gets a clean refusal instead of a read-only ObserveSession: observes have
+                    // no prompt path, and a headless adapter can't render "someone else is driving this"
+                    if (origin != null) {
+                        sink.emit(PocketError("bridge_busy", "session is live in another client — try again later"))
+                        return ""
+                    }
                     // a reconnecting client re-opens its observe with a FRESH sink (same key, new
                     // instance). Reap this client's previous observer(s) of the same transcript first —
                     // they survive the reconnect (the device's sink key revives with it) and would keep
@@ -170,7 +185,11 @@ class SessionRegistry(
         // create() is cheap + never throws (the binary resolves lazily on first launch); the real "CLI not
         // installed" failure surfaces synchronously from c.open() below, so one guard there covers it.
         val convoId = UUID.randomUUID().toString()
-        val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(), pushHookProvider = { pushHook })
+        val c = Conversation(
+            convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
+            pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
+            pathScope = pathScope,
+        )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
@@ -293,6 +312,21 @@ class SessionRegistry(
         return idle.size
     }
 
+    /** Force-close every conversation opened by [origin] (a restricted credential's label). Used on
+     *  revoke/expiry so a guest's sessions END the instant the owner revokes — including convos it opened on
+     *  an EARLIER connection, which DeviceSessions' per-connection `owned` list no longer holds (issue #115
+     *  crypto review L1). Same lifecycle as [closeBusyForAuth]: the killed process trees take their
+     *  background shells with them; transcripts persist. */
+    suspend fun closeByOrigin(origin: String): Int {
+        val hits = mutex.withLock {
+            val s = convos.filterValues { it.origin == origin }
+            convos.keys.removeAll(s.keys)
+            s.values.toList()
+        }
+        hits.forEach { it.close(); noteSelfClosed(it) }
+        return hits.size
+    }
+
     /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
     suspend fun busyCwds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }
@@ -309,9 +343,16 @@ class SessionRegistry(
         mutex.withLock {
             convos.values.mapNotNull { c ->
                 val sid = c.sessionId ?: return@mapNotNull null
-                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind)
+                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(
+                    sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind, origin = c.origin,
+                )
             }
         }.groupBy({ it.first }, { it.second })
+
+    /** How many of [ids] are still LIVE conversations — the bridge concurrency budget counts these,
+     *  not the historical ledger (issue #91): an idle-reaped session must not eat a slot forever. */
+    suspend fun liveCountOf(ids: Collection<String>): Int =
+        mutex.withLock { ids.count { it in convos } }
 
     /** Routes a prompt into its conversation. False = the convo is gone (idle-reaped / daemon restarted):
      *  the router answers [dev.ccpocket.protocol.SessionGone] so the phone can re-open + resend instead of

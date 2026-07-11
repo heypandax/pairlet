@@ -5,6 +5,7 @@ import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.int
 import dev.ccpocket.daemon.agent.AgentBackendFactory
@@ -14,6 +15,9 @@ import dev.ccpocket.daemon.codex.CodexBackend
 import dev.ccpocket.daemon.codex.CodexLauncher
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.daemon.relay.LoopbackBridge
+import dev.ccpocket.daemon.relay.LoopbackHeadlessCred
+import dev.ccpocket.daemon.relay.LoopbackHeadlessReq
 import dev.ccpocket.daemon.relay.LoopbackPair
 import dev.ccpocket.daemon.relay.LoopbackStatus
 import dev.ccpocket.daemon.relay.PairLoopback
@@ -27,9 +31,11 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.get
 import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -248,9 +254,21 @@ private fun daemonStartHint(): String {
 private class PairCmd : CliktCommand(name = "pair") {
     private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
 
+    // ---- headless bridge issuance (issue #91) ----
+    private val headless by option("--headless", help = "mint a RESTRICTED bridge credential for an external automation (IM bot, webhook) instead of a phone pairing QR").flag()
+    private val name by option("--name", help = "headless only: a unique name for this bridge, e.g. feishu-bot — shown as \"via <name>\" in the app")
+    private val workdir by option("--workdir", help = "headless only (repeatable, required): absolute directory the bridge may open sessions under").multiple()
+    private val maxSessions by option("--max-sessions", help = "headless only: concurrent live sessions cap (default ${dev.ccpocket.daemon.bridge.BridgeSpec.DEFAULT_MAX_SESSIONS}, max 8)").int()
+    private val opensPerMin by option("--open-per-min", help = "headless only: session.open rate cap (default ${dev.ccpocket.daemon.bridge.BridgeSpec.DEFAULT_OPENS_PER_MIN}/min)").int()
+    private val promptsPerMin by option("--prompt-per-min", help = "headless only: prompt rate cap (default ${dev.ccpocket.daemon.bridge.BridgeSpec.DEFAULT_PROMPTS_PER_MIN}/min)").int()
+
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         try {
+            if (headless) {
+                pairHeadless(client)
+                return@runBlocking
+            }
             // The daemon's relay link may legitimately be mid-reconnect (backoff reaches 30s) while the mint
             // window is only 10s — a one-shot pair failed spuriously on a HEALTHY daemon. Ride it out: retry
             // until the link comes back or the window closes, and only then diagnose.
@@ -288,7 +306,81 @@ private class PairCmd : CliktCommand(name = "pair") {
         }
     }
 
+    /** Mint a headless bridge credential and print it as ONE JSON blob for the adapter. */
+    private suspend fun pairHeadless(client: HttpClient) {
+        val n = name?.trim().orEmpty()
+        if (n.isEmpty()) { echo("✗ --headless requires --name <bridge-name> (e.g. --name feishu-bot)"); return }
+        if (workdir.isEmpty()) {
+            echo("✗ --headless requires at least one --workdir <absolute dir> — the ONLY directories this bridge may open sessions in.")
+            echo("  (This is the blast-radius limiter: prompts arriving from the IM side can read whatever the agent")
+            echo("  can read under these roots in its default mode. Point it at a dedicated, low-sensitivity checkout.)")
+            return
+        }
+        val req = LoopbackHeadlessReq(n, workdir.toList(), maxSessions, opensPerMin, promptsPerMin)
+        val body = runCatching {
+            client.post("http://127.0.0.1:$pairPort/pair/headless") { setBody(PocketJson.encodeToString(req)) }.bodyAsText()
+        }.getOrElse {
+            echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
+            return
+        }
+        val cred = runCatching { PocketJson.decodeFromString<LoopbackHeadlessCred>(body) }.getOrNull()
+        if (cred == null) {
+            echo("✗ headless pairing failed: $body")
+            return
+        }
+        echo("")
+        echo("  Bridge credential for \"${cred.name}\" — single-use, expires in ${cred.ttlSec}s.")
+        echo("  Hand this JSON to the bridge adapter NOW (it redeems the ticket on first start, e.g.")
+        echo("  save it as bridge-credential.json for examples/feishu-bridge):")
+        echo("")
+        echo(PocketJson.encodeToString(cred))
+        echo("")
+        echo("  The bridge can ONLY: open sessions under ${cred.workdirs} / send prompts / read its own")
+        echo("  sessions' replies. Permission prompts still go to YOUR phone; it cannot approve anything.")
+        echo("  Manage it later:  cc-pocket-daemon bridges   |   cc-pocket-daemon bridges --revoke ${cred.name}")
+    }
+
     private companion object { const val PAIR_RETRY_WINDOW_MS = 60_000L }
+}
+
+/** List / revoke headless bridge credentials (issue #91). */
+private class BridgesCmd : CliktCommand(name = "bridges") {
+    private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
+    private val revoke by option("--revoke", help = "revoke a bridge by name or deviceId (cuts its live link and deletes its key)")
+
+    override fun run() = runBlocking {
+        val client = HttpClient(CIO)
+        try {
+            val toRevoke = revoke
+            if (toRevoke != null) {
+                val body = runCatching {
+                    client.post("http://127.0.0.1:$pairPort/bridge/revoke") { setBody("""{"idOrName":"$toRevoke"}""") }.bodyAsText()
+                }.getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return@runBlocking }
+                if ("\"revoked\"" in body) echo("✓ revoked: $body") else echo("✗ revoke failed: $body")
+                return@runBlocking
+            }
+            val body = runCatching { client.get("http://127.0.0.1:$pairPort/bridges").bodyAsText() }
+                .getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return@runBlocking }
+            val rows = runCatching { PocketJson.decodeFromString<List<LoopbackBridge>>(body) }.getOrNull()
+            when {
+                rows == null -> echo("✗ unexpected reply: $body")
+                rows.isEmpty() -> echo("no bridge credentials — mint one with: cc-pocket-daemon pair --headless --name <n> --workdir <dir>")
+                else -> {
+                    echo("")
+                    rows.forEach { b ->
+                        echo("  ${b.name}")
+                        echo("    deviceId:  ${b.deviceId}")
+                        echo("    workdirs:  ${b.workdirs.joinToString(", ")}")
+                        echo("    limits:    ${b.maxSessions} concurrent · ${b.opensPerMin} opens/min · ${b.promptsPerMin} prompts/min")
+                    }
+                    echo("")
+                    echo("  revoke one:  cc-pocket-daemon bridges --revoke <name|deviceId>")
+                }
+            }
+        } finally {
+            client.close()
+        }
+    }
 }
 
 private class UpdateCmd : CliktCommand(name = "update") {
@@ -430,5 +522,5 @@ fun main(args: Array<String>) {
     // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), StatusCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), StatusCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
 }

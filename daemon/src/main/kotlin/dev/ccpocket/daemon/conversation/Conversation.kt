@@ -63,6 +63,16 @@ class Conversation(
     // how long [isBusy] holds the conversation after a "continuation expected" trigger (see
     // [continuationGraceUntil]); a knob only so tests can expire it without waiting minutes
     private val continuationGraceMs: Long = CONTINUATION_GRACE_MS,
+    /** The restricted credential that opened this conversation (issue #91 bridge / #115 guest) — null for
+     *  every interactive owner client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens
+     *  the ask timeout (nobody is watching the sheet live), and arms the ask push below. */
+    val origin: String? = null,
+    // how a bridge conversation's permission ask reaches the OWNER (the bridge never gets the frame)
+    private val askPushHookProvider: () -> AskPushHook? = { null },
+    /** GUEST folder-share scope (issue #115): the canonical shared roots this conversation is confined to.
+     *  Non-null → the PermissionBridge hard-denies any Read/Write/Edit whose target escapes them, BEFORE
+     *  the guest is even asked. Null = an unrestricted owner conversation (no path guard). */
+    private val pathScope: List<String>? = null,
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -152,6 +162,11 @@ class Conversation(
 
     @Volatile
     private var intentionalStop = false
+
+    // last time an urgent bridge-approval push fired for this conversation — coalesces a burst of asks
+    // into one owner alert (issue #91). Touched only from the single permission-bridge emit path.
+    @Volatile
+    private var lastAskPushMs = 0L
 
     @Volatile
     private var pendingResumeId: String? = null
@@ -259,6 +274,7 @@ class Conversation(
             contextWindow = claudeWindow(),
             contextUsed = resumeContextUsed, agent = backend.kind,
             degraded = degraded(),
+            origin = origin, // "via <bridge>" label (issue #91); null for interactive sessions
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -542,12 +558,58 @@ class Conversation(
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
     }
 
-    private suspend fun launchProcess(spec: AgentSpec) {
+    // GUEST folder-share (issue #115): a scoped guest conversation launches its agent clean-room — no MCP
+    // servers — so it can't reach the owner's authenticated integrations. One place to stamp it: every
+    // AgentSpec built above flows through here, so the launch flags carry it without touching each site.
+    private val cleanRoom: Boolean = pathScope != null
+
+    private suspend fun launchProcess(rawSpec: AgentSpec) {
+        val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
-        val b = PermissionBridge(convoId, mode, scope, { sink.emit(it) }, allowRules, respond = backend::respondPermission)
+        // Bridge-origin conversations (issue #91): the ask frame fans out normally (the bridge's egress
+        // filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
+        // the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
+        // is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
+        // A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally, and the
+        // owner must NOT be push-nudged for it (that inbox is the guest's, per the design's "requests go to
+        // <guest>"). Only a headless BRIDGE (origin set, no pathScope) — which can neither see nor answer the
+        // ask — nudges the owner (issue #115 crypto review L2).
+        val bridgeAskPush = origin != null && pathScope == null
+        val emitWithAskPush: suspend (dev.ccpocket.protocol.Frame) -> Unit =
+            if (!bridgeAskPush) { f -> sink.emit(f) }
+            else { f ->
+                sink.emit(f)
+                if (f is dev.ccpocket.protocol.PermissionAsk) {
+                    askPushHookProvider()?.let { hook ->
+                        // COALESCE (issue #91 LOW): a turn can raise several asks in quick succession; at
+                        // most one urgent approval push per conversation per window so a burst can't spam
+                        // the owner's lock screen. The push is a "come look" nudge — reattach + resurface
+                        // shows every pending card, so one alert covers the batch.
+                        val now = System.currentTimeMillis()
+                        if (now - lastAskPushMs >= ASK_PUSH_COALESCE_MS) {
+                            lastAskPushMs = now
+                            val label = f.title.ifBlank { f.tool }
+                            // off the pump: a control-plane push must never stall stdout parsing
+                            scope.launch { runCatching { hook.onAskPending(workdir, sessionId, origin, label) } }
+                        }
+                    }
+                }
+            }
+        val b = PermissionBridge(
+            convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            // verdict + question windows both default to the generous, env-configurable ApprovalTimeout.ms
+            // (issue #100 unified them). 600s comfortably covers a bridge owner arriving via
+            // push → tap → reattach, superseding issue #91's shorter interactive/bridge split.
+            // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
+            // allow", so one owner approval can't be replayed by later attacker-supplied prompts
+            forceNeverRemember = origin != null,
+            // GUEST folder-share (issue #115): confine every file tool to the shared roots
+            pathScope = pathScope,
+            workdir = workdir.toString(),
+        )
         proc = p
         bridge = b
         // Bind IO + kick off any handshake (Codex initialize → thread/start) SYNCHRONOUSLY, before returning. The
@@ -1123,5 +1185,9 @@ class Conversation(
         // init follows the premature result by 0.1s, bg-completion's by 0.1s), so this only ever
         // DELAYS a reap when the continuation never comes at all.
         const val CONTINUATION_GRACE_MS = 5 * 60 * 1000L
+
+        // at most one urgent bridge-approval push per conversation per this window (issue #91). The verdict
+        // windows themselves are unified under agent.ApprovalTimeout.ms (issue #100) — see PermissionBridge.
+        const val ASK_PUSH_COALESCE_MS = 60_000L
     }
 }
