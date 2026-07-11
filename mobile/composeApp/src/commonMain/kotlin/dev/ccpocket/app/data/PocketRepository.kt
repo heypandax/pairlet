@@ -1446,8 +1446,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         ChatRole.USER -> ChatItem.User(h.text)
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
         ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
-        // ok/output: a completed sub-agent card keeps its outcome + expandable report across replays (issue #77)
-        ChatRole.TOOL -> ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output)
+        // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
+        // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77)
+        ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
+            ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output)
     }
 
     private fun <T> replace(list: MutableList<T>, items: List<T>) {

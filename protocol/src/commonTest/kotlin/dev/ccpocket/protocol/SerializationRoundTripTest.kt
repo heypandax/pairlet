@@ -662,4 +662,26 @@ class SerializationRoundTripTest {
         assertTrue(isSubagentTool("Agent"))
         assertFalse(isSubagentTool("Bash"))
     }
+
+    @Test
+    fun history_question_answers_roundtrip_and_old_frames_default() {
+        // issue #110: `answers` is OPTIONAL on HistoryMessage — a new daemon and an old app (or the
+        // reverse) keep talking; only an AskUserQuestion row a replay resolved ever carries it
+        val answered = HistoryMessage(
+            ChatRole.TOOL, "Which color do you prefer?", tool = "AskUserQuestion",
+            answers = listOf(QuestionAnswer("Which color do you prefer?", "Red"), QuestionAnswer("", "surprise me")),
+        )
+        val aj = PocketJson.encodeToString(answered)
+        assertTrue("\"answers\"" in aj, aj)
+        assertEquals(answered, PocketJson.decodeFromString<HistoryMessage>(aj))
+
+        // old daemon → new app: no answers key → null, the plain tool card of today
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"tool","text":"{\"questions\":[…]}","tool":"AskUserQuestion"}""")
+        assertEquals(null, legacy.answers)
+
+        // any plain TOOL row stays byte-identical to the pre-#110 wire: answers is null and
+        // explicitNulls=false omits the key
+        val plainJson = PocketJson.encodeToString(HistoryMessage(ChatRole.TOOL, "ls", tool = "Bash"))
+        assertFalse("answers" in plainJson, plainJson)
+    }
 }

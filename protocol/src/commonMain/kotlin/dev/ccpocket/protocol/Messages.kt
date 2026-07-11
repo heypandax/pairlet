@@ -492,12 +492,22 @@ enum class ChatRole {
     @SerialName("tool") TOOL,
 }
 
+/** One (question → answer) an AskUserQuestion resolved, reconstructed from a replayed transcript so a
+ *  resumed/observed session shows the compact "answered" row instead of the raw tool JSON (issue #110).
+ *  [question] is blank for a freeform reply. */
+@Serializable
+data class QuestionAnswer(val question: String, val answer: String)
+
 /** One past message in a resumed session's transcript. [error] marks an assistant record that was a
  *  `<synthetic>` API-failure placeholder, not a real reply (issue #65) — clients render it as an error
  *  row; old clients ignore the flag and show the placeholder text as before.
  *  [ok]/[output] land on a sub-agent (Task/Agent) TOOL row only (issue #77): the completed run's
  *  outcome + capped final report, so a replayed transcript keeps the expandable card. Optional both
- *  ways — an old daemon omits them, an old client ignores them. */
+ *  ways — an old daemon omits them, an old client ignores them.
+ *  [answers] lands on an AskUserQuestion TOOL row only (issue #110): the (question → answer) pairs the
+ *  user picked, so a replayed transcript shows the same compact answered row the live path leaves
+ *  behind instead of the raw questions JSON. Optional both ways — an old daemon omits it (the row falls
+ *  back to a plain tool card), an old client ignores it. */
 @Serializable
 data class HistoryMessage(
     val role: ChatRole,
@@ -506,6 +516,7 @@ data class HistoryMessage(
     val error: Boolean = false,
     val ok: Boolean? = null,
     val output: String? = null,
+    val answers: List<QuestionAnswer>? = null,
 )
 
 /** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
