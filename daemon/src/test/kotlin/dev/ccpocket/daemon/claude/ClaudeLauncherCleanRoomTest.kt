@@ -21,9 +21,12 @@ class ClaudeLauncherCleanRoomTest {
         // the empty MCP config immediately follows --mcp-config
         val mcpIdx = a.indexOf("--mcp-config")
         assertTrue(mcpIdx >= 0 && a[mcpIdx + 1] == """{"mcpServers":{}}""", a.toString())
-        // only project + local setting sources — the user source (~/.claude global CLAUDE.md/skills) is dropped
+        // NO setting sources at all (empty) — not the owner's `user` config, and NOT the shared root's own
+        // guest-writable/repo-committed project/local .claude/settings.json whose allow-rules/hooks would let
+        // the CLI auto-approve tools past the daemon guard (issue #115 crypto review H2). The daemon stays the
+        // permission authority via --permission-prompt-tool + --permission-mode.
         val srcIdx = a.indexOf("--setting-sources")
-        assertTrue(srcIdx >= 0 && a[srcIdx + 1] == "project,local", a.toString())
+        assertTrue(srcIdx >= 0 && a[srcIdx + 1] == "", a.toString())
         assertTrue("--exclude-dynamic-system-prompt-sections" in a, a.toString())
     }
 

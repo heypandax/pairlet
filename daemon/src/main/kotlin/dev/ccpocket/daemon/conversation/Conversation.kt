@@ -462,8 +462,13 @@ class Conversation(
         // filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
         // the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
         // is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
+        // A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally, and the
+        // owner must NOT be push-nudged for it (that inbox is the guest's, per the design's "requests go to
+        // <guest>"). Only a headless BRIDGE (origin set, no pathScope) — which can neither see nor answer the
+        // ask — nudges the owner (issue #115 crypto review L2).
+        val bridgeAskPush = origin != null && pathScope == null
         val emitWithAskPush: suspend (dev.ccpocket.protocol.Frame) -> Unit =
-            if (origin == null) { f -> sink.emit(f) }
+            if (!bridgeAskPush) { f -> sink.emit(f) }
             else { f ->
                 sink.emit(f)
                 if (f is dev.ccpocket.protocol.PermissionAsk) {

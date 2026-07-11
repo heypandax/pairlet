@@ -6,8 +6,10 @@ import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.relay.DeviceSessions
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.Decision
+import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
@@ -130,5 +132,24 @@ class DeviceSessionsGuestTest {
         // session's ask. This proves the verdict reaches the guard (unlike a bridge, whose caps deny it outright).
         send(h, "devGuest", session, PermissionVerdict("not-mine", "a", Decision.ALLOW))
         assertEquals("share_not_own_session", decode<PocketError>(session, h.outbound.receive().second).code)
+    }
+
+    @Test
+    fun guest_project_list_returns_only_the_shared_root_stamped_never_other_folders() = runBlocking {
+        // VISIBILITY (issue #115 §1): a guest's ListDirectories must return ONLY its shared root — never any
+        // of the owner's other project folders — stamped with the origin label + tier so the app renders the
+        // "shared by …" row. scopedDirectories filters the daemon's full dir list to the scope and adds the
+        // bare root, so even though the host machine has its own ~/.claude projects, a fresh temp root yields
+        // exactly one stamped entry: the confidentiality boundary, proven over the wire.
+        val root = File(dir, "shared-vis").apply { mkdirs() }.canonicalFile
+        val h = Harness(dir)
+        val keys = bindGuest(h, "guest-ticket-vis", root)
+        val session = handshake(h, "devGuest", keys, "guest-ticket-vis")
+        send(h, "devGuest", session, ListDirectories(root = "/"))
+        val listing = decode<Directories>(session, h.outbound.receive().second)
+        val entry = listing.entries.single() // ONLY the shared root — no other project folder leaks
+        assertEquals(root.path, File(entry.path).canonicalFile.path)
+        assertEquals("alex", entry.sharedBy)           // origin label stamped
+        assertEquals(AccessTier.COLLABORATE, entry.shareTier) // tier badge stamped
     }
 }

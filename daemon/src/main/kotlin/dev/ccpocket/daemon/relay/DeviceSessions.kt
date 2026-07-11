@@ -162,6 +162,7 @@ class DeviceSessions(
      *  sessions end", not merely "their link drops". */
     suspend fun onDeviceRevoked(deviceId: String) {
         val wasGuest = bridges.isGuest(deviceId)
+        val guestOrigin = if (wasGuest) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
         val guestConvos = mutex.withLock {
             devicePubs.remove(deviceId); sessions.remove(deviceId); pskFor.remove(deviceId)
             seenThisAttach.remove(deviceId)
@@ -169,10 +170,14 @@ class DeviceSessions(
         }
         bridges.remove(deviceId) // a revoked credential loses its entry (and live guard) the same instant
         persist()
-        // force-close the guest's convos (kills their process trees). Convos it opened on an EARLIER
-        // connection aren't in `owned` (cleared on disconnect) but, with the guest now cut, wind down via
-        // the idle reaper once they stop being driven.
-        if (wasGuest) guestConvos.forEach { runCatching { core.registry.close(it, force = true) } }
+        // force-close the guest's convos NOW (kills their process trees) — the owner's revoke promise is
+        // "their sessions end", not "their link drops". The per-connection `owned` list covers this
+        // connection; closeByOrigin ALSO reaps convos the guest opened on an EARLIER connection (which
+        // `owned` cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
+        if (wasGuest) {
+            guestConvos.forEach { runCatching { core.registry.close(it, force = true) } }
+            guestOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
+        }
         log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasGuest) " (guest sessions ended)" else ""}")
     }
 

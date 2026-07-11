@@ -104,4 +104,23 @@ class ShareServiceTest {
         val row = service().list().items.single { it.deviceId == "g2" }
         assertTrue(row.expired)
     }
+
+    @Test
+    fun create_clamps_the_share_lifetime_to_sane_bounds() = runBlocking {
+        // a sub-floor lifetime (typo, or an attacker minimizing the audit window) is raised to the 5-min
+        // floor; an absurd one is capped at the 90-day ceiling — a share can neither be effectively
+        // instant nor "never expires"
+        val floored = service().create(CreateShare(shared.path, expiresInSec = 1)).invite!!
+        assertEquals(1_000_000 + 5 * 60 * 1000L, floored.expiresAt) // 5-min floor, not 1 second
+        val capped = service().create(CreateShare(shared.path, expiresInSec = 100L * 365 * 24 * 3600)).invite!!
+        assertEquals(1_000_000 + 90L * 24 * 3600 * 1000, capped.expiresAt) // 90-day ceiling, not 100 years
+    }
+
+    @Test
+    fun create_rejects_sharing_a_file_rather_than_a_folder() = runBlocking {
+        val file = File(dir, "notes.txt").apply { writeText("secret") }
+        val res = service().create(CreateShare(file.path))
+        assertFalse(res.ok) // only a directory can be a share root — a lone file is refused
+        assertNull(res.invite)
+    }
 }

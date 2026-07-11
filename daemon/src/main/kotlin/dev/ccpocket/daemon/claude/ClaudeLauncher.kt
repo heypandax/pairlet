@@ -61,10 +61,15 @@ object ClaudeLauncher {
             // guest can't act through the owner's authenticated integrations (the biggest hole)
             add("--strict-mcp-config")
             add("--mcp-config"); add("""{"mcpServers":{}}""")
-            // load only the shared folder's own project/local config — NOT the `user` source (~/.claude
-            // global CLAUDE.md, user skills / commands / settings). Credentials are not a setting source,
-            // so the daemon's login (billing) is untouched.
-            add("--setting-sources"); add("project,local")
+            // load NO settings sources (empty = none; verified accepted by the installed CLI). NOT the `user`
+            // source (~/.claude global CLAUDE.md, user skills / commands / settings) AND — crucially — NOT the
+            // shared folder's own `project`/`local` .claude/settings.json either: those files live INSIDE the
+            // shared root, so they are guest-writable and often repo-committed, and their permissions.allow
+            // rules / hooks would let the CLI AUTO-APPROVE tools WITHOUT routing them through the daemon's
+            // --permission-prompt-tool — silently bypassing the path guard + tier clamp (issue #115 crypto
+            // review H2). The daemon stays the sole permission authority via --permission-prompt-tool +
+            // --permission-mode; credentials are not a setting source, so the daemon's login (billing) is intact.
+            add("--setting-sources"); add("")
             // keep the owner's auto-memory paths, env vars, git status out of the guest's system prompt
             add("--exclude-dynamic-system-prompt-sections")
         }

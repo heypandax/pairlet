@@ -123,4 +123,81 @@ class PermissionBridgeGuestPathTest {
         assertNull(responses.firstOrNull()?.deny)
         scope.cancel()
     }
+
+    @Test
+    fun every_guarded_file_tool_denies_an_out_of_scope_target() = runBlocking {
+        // pin the FULL guarded set (ToolMetadata.PATH_TOOLS), not just Read/Write/Edit/Glob — a new file
+        // tool added to the set without a test would otherwise silently escape coverage. NotebookEdit is the
+        // only carrier of the `notebook_path` key; MultiEdit/Grep exercise the other two key names.
+        for ((tool, key) in listOf("MultiEdit" to "file_path", "NotebookEdit" to "notebook_path", "Grep" to "path")) {
+            val scope = CoroutineScope(Dispatchers.Unconfined)
+            val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+            val b = bridge(emitted = emitted, responses = responses, scope = scope)
+            b.onControlRequest(req(tool, key, "/etc/hosts"))
+            assertTrue(emitted.isEmpty(), "$tool must not surface an ask for an out-of-scope target")
+            val r = responses.single()
+            assertFalse(r.allow, "$tool out of scope must be denied")
+            assertTrue(r.deny!!.contains("outside the shared folder"))
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun an_unlisted_future_file_tool_carrying_a_path_is_still_confined() = runBlocking {
+        // M1 (crypto review): confinement is by path-KEY, not a hard-coded tool-name whitelist, so a file
+        // tool the CLI adds/renames later (here a hypothetical "ReadMany" carrying file_path) is denied when
+        // out of scope instead of slipping the guard and falling through to an ask the guest self-approves.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("ReadMany", "file_path", "/etc/shadow"))
+        assertTrue(emitted.isEmpty(), "an unlisted file tool must not surface an ask for an out-of-scope target")
+        assertFalse(responses.single().allow)
+        assertTrue(responses.single().deny!!.contains("outside the shared folder"))
+        scope.cancel()
+    }
+
+    @Test
+    fun a_symlink_pointing_out_of_the_root_is_denied() = runBlocking {
+        // the ../-escape test only proves lexical `..` collapse; this proves the canonicalFile symlink
+        // FOLLOWING the whole guard rests on. A regression from canonicalFile to absoluteFile (which does
+        // NOT resolve symlinks) would pass every other test but leak here — this is the one that catches it.
+        val link = File(root, "out")
+        java.nio.file.Files.createSymbolicLink(link.toPath(), File("/etc").toPath())
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("Read", "file_path", File(link, "hosts").path)) // root/out/hosts → /etc/hosts
+        assertTrue(emitted.isEmpty())
+        assertFalse(responses.single().allow)
+        assertTrue(responses.single().deny!!.contains("outside the shared folder"))
+        scope.cancel()
+    }
+
+    @Test
+    fun a_prefix_sibling_directory_is_out_of_scope() = runBlocking {
+        // path-SEGMENT containment: "<root>-secret" shares a string prefix with "<root>" but is NOT under it.
+        // A raw startsWith(root) (no separator) would wrongly admit it — this pins the separator boundary.
+        val sibling = File(root.path + "-secret").apply { mkdirs() }
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("Read", "file_path", File(sibling, "secrets.txt").path))
+        assertTrue(emitted.isEmpty())
+        assertFalse(responses.single().allow)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_write_to_a_new_file_inside_the_root_is_allowed() = runBlocking {
+        // a not-yet-existing leaf under the root (canonicalizes via the existing prefix) must NOT be
+        // false-denied — a guest creating a file in the shared folder is the common case
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("Write", "file_path", File(root, "sub/brand-new.txt").path))
+        assertTrue(emitted.single() is PermissionAsk) // falls through to a normal ask, not path-denied
+        assertNull(responses.firstOrNull()?.deny)
+        scope.cancel()
+    }
 }

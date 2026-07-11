@@ -851,4 +851,30 @@ class SerializationRoundTripTest {
         assertEquals(AccessTier.UNKNOWN, futureBack.shareTier)
         assertEquals("panda", futureBack.sharedBy)
     }
+
+    @Test
+    fun share_shapes_tolerate_an_unknown_future_key() {
+        // the new-daemon → OLD-phone direction for the share shapes: a NEWER daemon adds a field the old
+        // phone's schema lacks, and the old phone must SKIP it (ignoreUnknownKeys) rather than drop the whole
+        // frame. Pin it directly on the #115 shapes (the mechanism is shared, but the four-direction contract
+        // is per-shape) — the known fields must survive the skip.
+        val entry = PocketJson.decodeFromString<DirectoryEntry>(
+            """{"path":"/p","name":"p","isDir":true,"sharedBy":"panda","shareTier":"collaborate","futureFlag":true,"futureObj":{"x":1}}""",
+        )
+        assertEquals("panda", entry.sharedBy)
+        assertEquals(AccessTier.COLLABORATE, entry.shareTier)
+
+        val info = PocketJson.decodeFromString<ShareInfo>(
+            """{"deviceId":"d1","path":"/p","tier":"review","createdAt":1,"expiresAt":2,"futureField":[{"k":"v"}]}""",
+        )
+        assertEquals("d1", info.deviceId)
+        assertEquals(AccessTier.REVIEW, info.tier)
+
+        // and the enclosing ShareListing frame still decodes with the unknown key nested in an item
+        val listing = PocketJson.decodeFromString<Envelope>(
+            """{"id":"z1","ts":0,"to":"PEER","body":{"t":"pocket/share.listing","items":[
+               {"deviceId":"d2","path":"/q","tier":"collaborate","createdAt":3,"expiresAt":4,"unknownFuture":9}]}}""",
+        )
+        assertEquals("d2", (listing.body as ShareListing).items.single().deviceId)
+    }
 }

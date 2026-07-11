@@ -85,20 +85,24 @@ object ToolMetadata {
         return if (p.startsWith(home)) "~" + p.removePrefix(home) else p
     }
 
-    /** The built-in file tools whose target path the GUEST folder-share guard can STATICALLY confine to
-     *  the shared root (issue #115 §4). Bash is deliberately absent — a shell command's real targets can't
-     *  be parsed from its text, so v1 does not claim to sandbox it (the boundary card says as much). */
-    private val PATH_TOOLS = setOf("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep")
+    /** The filesystem-path keys the built-in file tools carry — `file_path` (Read/Write/Edit/MultiEdit),
+     *  `path` (Glob/Grep), `notebook_path` (NotebookEdit). The GUEST guard reads these by KEY, independent of
+     *  tool NAME, so a file tool the CLI adds or renames is still confined (deny-by-default containment)
+     *  instead of silently escaping a hard-coded tool whitelist and falling through to an ask the guest
+     *  self-approves (issue #115 crypto review M1). A non-file tool carries none of these keys (Bash →
+     *  `command`, WebFetch → `url`, …) → empty → correctly unguarded (Bash is the acknowledged v1 gap). */
+    private val PATH_KEYS = listOf("file_path", "path", "notebook_path")
 
     /**
-     * The filesystem path(s) a tool call targets, for the guest path guard — empty for a non-file tool (so
-     * it is never falsely denied) and for a file tool that named no path (it then operates on the session
-     * cwd, which is already inside the scope). Paths may be relative (resolved against the session workdir
-     * by the caller) or absolute.
+     * The filesystem path(s) a tool call targets, for the guest path guard — empty for a tool that carries
+     * none of the [PATH_KEYS] (so a non-file tool is never falsely denied) and for a file tool that named no
+     * path (it then operates on the session cwd, already inside the scope). Paths may be relative (resolved
+     * against the session workdir by the caller) or absolute. [tool] is kept for call-site clarity/telemetry;
+     * confinement is by key so an unlisted file tool can't slip the guard.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun pathTargets(tool: String, input: JsonObject?): List<String> {
-        if (tool !in PATH_TOOLS) return emptyList()
         fun str(k: String) = (input?.get(k) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-        return listOfNotNull(str("file_path"), str("path"), str("notebook_path"))
+        return PATH_KEYS.mapNotNull { str(it) }
     }
 }

@@ -278,6 +278,21 @@ class SessionRegistry(
         return idle.size
     }
 
+    /** Force-close every conversation opened by [origin] (a restricted credential's label). Used on
+     *  revoke/expiry so a guest's sessions END the instant the owner revokes — including convos it opened on
+     *  an EARLIER connection, which DeviceSessions' per-connection `owned` list no longer holds (issue #115
+     *  crypto review L1). Same lifecycle as [closeBusyForAuth]: the killed process trees take their
+     *  background shells with them; transcripts persist. */
+    suspend fun closeByOrigin(origin: String): Int {
+        val hits = mutex.withLock {
+            val s = convos.filterValues { it.origin == origin }
+            convos.keys.removeAll(s.keys)
+            s.values.toList()
+        }
+        hits.forEach { it.close(); noteSelfClosed(it) }
+        return hits.size
+    }
+
     /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
     suspend fun busyCwds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }
