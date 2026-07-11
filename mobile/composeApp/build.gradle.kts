@@ -74,6 +74,7 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cryptography.provider.jdk)
+            implementation(libs.jna) // objc bridge: bundle-identity macOS notifications (issue #99); inert off-mac
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

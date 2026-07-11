@@ -182,16 +182,30 @@ fun main() = application {
                 override fun windowLostFocus(e: java.awt.event.WindowEvent?) { windowFocused = false }
             }
             window.addWindowFocusListener(l)
-            repo.onTurnFinished = { title, preview ->
+            repo.onTurnFinished = { title, preview, sessionId ->
                 if (!windowFocused) {
                     unseenDone++
                     DesktopNotify.badge(unseenDone)
-                    DesktopNotify.notify(title, preview ?: "Turn complete")
+                    DesktopNotify.notify(title, preview ?: "Turn complete", sessionId)
+                }
+            }
+            // banner clicked (issue #99): the OS already activated the app (bundle identity); surface the
+            // window and jump back to the finished session when we still know it. The callback arrives on
+            // the AppKit main thread — hop to the EDT before touching the window or Compose state.
+            DesktopNotify.onActivate = { sessionId ->
+                java.awt.EventQueue.invokeLater {
+                    windowState.isMinimized = false
+                    window.toFront()
+                    window.requestFocus()
+                    if (sessionId != null && repo.sessionActive.value && repo.sessionKey.value != sessionId) {
+                        model.liveSession(sessionId)?.let(model::selectSession)
+                    }
                 }
             }
             onDispose {
                 window.removeWindowFocusListener(l)
                 repo.onTurnFinished = null
+                DesktopNotify.onActivate = null
             }
         }
         // native fullscreen wiring (issue #94): stash the AWT window so the toggle above can drive it, mark
