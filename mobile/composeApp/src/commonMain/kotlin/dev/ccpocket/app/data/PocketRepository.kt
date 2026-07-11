@@ -1,6 +1,7 @@
 package dev.ccpocket.app.data
 
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.app.ensureLocalNetworkAccess
@@ -29,6 +30,7 @@ import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.BackgroundJob
+import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.ChatRole
@@ -89,6 +91,9 @@ import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.ToolEvent
+import dev.ccpocket.protocol.WorkflowAgentDetail
+import dev.ccpocket.protocol.WorkflowRun
+import dev.ccpocket.protocol.WorkflowUpdate
 import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.Transcript
 import dev.ccpocket.protocol.AudioCancel
@@ -169,6 +174,9 @@ sealed interface ChatItem {
         val output: String? = null,
         val childCount: Int = 0,
         val lastChild: String? = null,
+        /** A replayed Workflow card's run id (issue #106) — binds it to [PocketRepository.workflowRuns].
+         *  Live cards bind via [taskId] == the run's originating tool_use id instead. */
+        val workflowRunId: String? = null,
     ) : ChatItem
     data class Sys(val text: String) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
@@ -452,6 +460,35 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         contextWindow.value = dev.ccpocket.protocol.provenWindow(win, contextUsed.value)
     }
     val backgroundJobs = mutableStateListOf<BackgroundJob>() // bg shells / sub-agents / monitors the daemon is tracking
+
+    // ── Workflow orchestration (issue #106) ──────────────────────────────────────────────────────
+    /** Workflow runs for the ACTIVE conversation, keyed by runId — live pushes and replayed finished
+     *  manifests both land here; the chat card + progress tree render from this one map. */
+    val workflowRuns = mutableStateMapOf<String, WorkflowRun>()
+
+    /** On-demand full prompt/return per agent, keyed "runId#index" ([fetchWorkflowAgentDetail]). */
+    val workflowAgentDetails = mutableStateMapOf<String, WorkflowAgentDetail>()
+
+    /** Non-null = the full-screen workflow run view is open on this run. */
+    val viewedWorkflowRunId = mutableStateOf<String?>(null)
+
+    /** The run a chat Tool card binds to: live cards match the run's originating tool_use id;
+     *  replayed cards carry the run id itself ([ChatItem.Tool.workflowRunId]). */
+    fun workflowFor(item: ChatItem.Tool): WorkflowRun? =
+        item.workflowRunId?.let { workflowRuns[it] }
+            ?: item.taskId?.let { tid -> workflowRuns.values.firstOrNull { it.toolUseId == tid } }
+
+    fun openWorkflow(runId: String) { viewedWorkflowRunId.value = runId }
+    fun closeWorkflow() { viewedWorkflowRunId.value = null }
+
+    /** Ask the daemon for one agent's full prompt/return (detail sheet). Cached per (run, index);
+     *  an old daemon drops the frame silently — the sheet keeps showing the snapshot previews. */
+    fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {
+        val key = "$runId#$agentIndex"
+        if (workflowAgentDetails.containsKey(key)) return
+        val convo = convoId.value ?: return
+        scope.launch { send(GetWorkflowAgentDetail(convo, runId, agentIndex, agentId)) }
+    }
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val opening = mutableStateOf(false)                      // an OpenSession is in flight — one-tap entries disable on it (a double-tap would open two fresh sessions)
@@ -1421,6 +1458,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 upgradeWindowIfProven()
             }
             is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
+            // Workflow orchestration (issue #106): whole-run snapshots keyed by runId; a re-push of the
+            // same run reconciles in place. finalResult arrives only on the explicit terminal patch —
+            // never let a later plain snapshot blank an already-received final return.
+            is WorkflowUpdate -> if (f.convoId == convoId.value) {
+                val prev = workflowRuns[f.run.runId]
+                workflowRuns[f.run.runId] = if (f.run.finalResult == null && prev?.finalResult != null) {
+                    f.run.copy(finalResult = prev.finalResult)
+                } else f.run
+            }
+            is WorkflowAgentDetail -> if (f.convoId == convoId.value) {
+                workflowAgentDetails["${f.runId}#${f.agentIndex}"] = f
+            }
             is PocketError -> {
                 opening.value = false // a failed open re-enables the one-tap entries right away
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
@@ -1539,16 +1588,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
         ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
         // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
-        // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77)
+        // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77);
+        // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
         ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
-            ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output)
+            ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
     }
 
     private fun <T> replace(list: MutableList<T>, items: List<T>) {
         list.clear(); list.addAll(items)
     }
 
-    private fun clearBackgroundJobs() = replace(backgroundJobs, emptyList())
+    private fun clearBackgroundJobs() {
+        replace(backgroundJobs, emptyList())
+        // workflow state is per-conversation, cleared at the same session boundaries (#106)
+        workflowRuns.clear()
+        workflowAgentDetails.clear()
+        viewedWorkflowRunId.value = null
+    }
 
     private fun appendChunk(c: AssistantChunk) {
         streaming.value = true

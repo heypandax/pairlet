@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    html, body { margin:0; padding:0; background:#0E0F11; }
+    * { -webkit-font-smoothing:antialiased; }
+    a { color:#D97757; text-decoration:none; }
+    a:hover { color:#E08A6E; }
+
+    @keyframes wfPulse { 0%,100%{ transform:scale(1); opacity:1 } 50%{ transform:scale(0.6); opacity:0.5 } }
+    .wf-pulse { animation:wfPulse 1.6s ease-in-out infinite; }
+    @keyframes wfBreathe { 0%,100%{ opacity:0.28 } 50%{ opacity:0.72 } }
+    .wf-breathe { animation:wfBreathe 2.1s ease-in-out infinite; }
+    .wf-press { transition:transform .12s ease, background .15s ease; }
+    .wf-press:active { transform:scale(0.988); }
+    @keyframes wfBlink { 0%,49%{ opacity:1 } 50%,100%{ opacity:0 } }
+    .wf-caret { animation:wfBlink 1.05s steps(1) infinite; }
+
+    @media (prefers-reduced-motion:reduce) {
+      .wf-pulse, .wf-breathe, .wf-caret { animation:none; }
+      .wf-breathe { opacity:0.55; }
+    }
+  </style>
+  </helmet>
+  <div style="min-height:100vh; background:#0E0F11;">
+    <x-import component-from-global-scope="WorkflowJournalScene" from="./workflow-scene.jsx" hint-size="100%,100%"></x-import>
+  </div>
+</x-dc>
+</body>
+</html>
