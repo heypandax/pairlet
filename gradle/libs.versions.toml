@@ -45,6 +45,9 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "lo
 
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+# desktop-only objc bridge for bundle-identity macOS notifications (issue #99); tiny next to the
+# bundled JRE, and its jnidispatch loads under the hardened runtime (disable-library-validation).
+jna = { module = "net.java.dev.jna:jna", version = "5.14.0" }
 nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version = "1.8.0" }
 qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
 # KMP syntax highlighting for chat code blocks (issue #51). Built with Kotlin 2.0.20 — its klibs are

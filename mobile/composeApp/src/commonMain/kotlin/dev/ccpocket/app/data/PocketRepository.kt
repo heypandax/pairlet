@@ -478,8 +478,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var turnStartMark: kotlin.time.TimeSource.Monotonic.ValueTimeMark? = null // stamps TurnEnded's duration
 
     /** Desktop notifier seam: fires when the active conversation's turn completes (after the TurnEnded
-     *  marker lands). The UI layer decides whether that deserves a system notification / dock badge. */
-    var onTurnFinished: ((title: String, preview: String?) -> Unit)? = null
+     *  marker lands). The UI layer decides whether that deserves a system notification / dock badge.
+     *  [sessionId] identifies the finished session (null before the daemon named it) so a clicked
+     *  notification can jump back to it (issue #99). */
+    var onTurnFinished: ((title: String, preview: String?, sessionId: String?) -> Unit)? = null
 
     /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
      *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
@@ -1331,7 +1333,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     turnStartMark = null
                     val preview = f.error ?: (messages.lastOrNull { it is ChatItem.Assistant } as? ChatItem.Assistant)
                         ?.text?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140)
-                    onTurnFinished?.invoke(chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket", preview)
+                    onTurnFinished?.invoke(
+                        chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket",
+                        preview,
+                        sessionKey.value, // click→jump target for the desktop banner (issue #99)
+                    )
                 }
                 // the listed snapshot said `live` at listing time — correct it locally so sidebar/list
                 // dots stop pulsing the moment the turn ends instead of waiting for a manual re-list
