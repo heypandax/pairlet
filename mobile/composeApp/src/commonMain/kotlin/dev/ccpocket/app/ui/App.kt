@@ -1236,7 +1236,12 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     // session) doesn't move on its own, so without this the screen looks dead.
                     val last = repo.messages.lastOrNull()
                     val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
-                    if (repo.streaming.value) item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
+                    when {
+                        // delivered, but the agent produced no turn within the deadline (issue #104): the prompt
+                        // was swallowed (wedged / mid-relaunch). Offer a resend instead of an endless spinner.
+                        repo.turnStalled.value -> item { NoResponseRow { repo.resendStalledPrompt() } }
+                        repo.streaming.value -> item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
+                    }
                 }
                 if (!pinned) {
                     val pillScope = rememberCoroutineScope()
@@ -1607,6 +1612,20 @@ private fun WorkingRow() {
     ) {
         PulseDot(Tok.muted)
         Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
+
+/** Delivered-but-no-turn cue (issue #104): a restrained, tappable row that replaces the "thinking" tail
+ *  when a prompt was acked but produced nothing. Warn-toned (not an alarming error), one tap re-runs it. */
+@Composable
+private fun NoResponseRow(onResend: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onResend).padding(vertical = 3.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PulseDot(Tok.warn, size = 5.dp)
+        Text(stringResource(Res.string.msg_no_response), color = Tok.warn, fontSize = 12.5.sp)
     }
 }
 

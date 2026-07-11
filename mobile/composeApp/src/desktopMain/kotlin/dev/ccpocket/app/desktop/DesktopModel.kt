@@ -276,6 +276,9 @@ interface DesktopModel {
      *  the delivery receipt stalled past its deadline (issue #78, common with several computers connected).
      *  ChatPane turns the pending cue from a benign "sending…" into an honest warning on it. */
     val sendUndelivered: Boolean get() = false
+    /** Delivered but no turn started within the deadline (issue #104): the agent swallowed the prompt
+     *  (wedged / mid-relaunch). ChatPane replaces the streaming caret with a tappable "resend" cue. */
+    val turnStalled: Boolean get() = false
     var composer: String
     fun send(text: String)
 
@@ -377,6 +380,8 @@ interface DesktopModel {
 
     // interrupt the running turn (■ beside send / Esc); the interrupted prompt returns to the composer (#48)
     fun stopTurn() {}
+    // re-run a delivered-but-no-turn prompt (issue #104) under a fresh id; no-op unless turnStalled
+    fun resendStalled() {}
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
     fun revokeComputer(c: DkComputer)
 

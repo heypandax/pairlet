@@ -455,6 +455,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptWatchdog: Job? = null
     internal var promptReceiptTimeoutMs = 10_000L // > relay RTT + a lazy agent spawn; a test seam shrinks it
 
+    /** Second-stage deadline (issue #104): a [dev.ccpocket.protocol.PromptAck] only means the daemon WROTE
+     *  the prompt to the agent's stdin — not that a turn started. A wedged or mid-relaunch agent can swallow
+     *  that write and emit nothing, leaving [streaming] stuck true and the UI silently "thinking" forever
+     *  (issue #78's receipt watchdog is already cancelled by the ack, so nothing catches this). Once delivered
+     *  we hand off to [armTurnWatchdog]: no chunk/tool/turn-end within [promptTurnTimeoutMs] flips [turnStalled],
+     *  which surfaces an inline "resend" cue instead of an endless spinner. This is deliberately NOT an
+     *  auto-resend: the live daemon Conversation already recorded this promptId (the #66 dedup that makes a
+     *  SessionGone same-id resend safe would here turn a same-id resend into a bare re-ack — no turn), and a
+     *  fresh-id auto-resend would double-run a turn that was merely slow to start. The recovery is user-driven
+     *  ([resendStalledPrompt], fresh id). [turnStalled] retracts on the first real turn frame or a session change. */
+    val turnStalled = mutableStateOf(false)
+    private var turnWatchdog: Job? = null
+    private var awaitingTurn = false // between a PromptAck (delivered) and the first turn frame
+    internal var promptTurnTimeoutMs = 45_000L // ack→first-frame budget: a cold model / big context still streams
+        // *some* frame (thinking token, tool start) well inside this; a test seam shrinks it
+
     /** The daemon flagged this session degraded (recent turns were all API-failure placeholders — issue #65). */
     val sessionDegraded = mutableStateOf(false)
     // first send into a degraded session is blocked with an explanation; the next one goes through
@@ -465,16 +481,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  marker lands). The UI layer decides whether that deserves a system notification / dock badge. */
     var onTurnFinished: ((title: String, preview: String?) -> Unit)? = null
 
-    /** First daemon evidence for the in-flight prompt (chunk/tool/turn-end/error): drop the retry copy
-     *  and flip the pending User bubble to delivered (issue #41). */
+    /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
+     *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
+     *  receipt watchdog (issue #78) and the turn-start watchdog (issue #104), clears both stall cues, drops
+     *  the retry copy, and flips the pending User bubble to delivered (issue #41). */
     private fun promptEvidence() {
         promptRetry = null
         promptWatchdog?.cancel(); promptWatchdog = null // the daemon is talking — the receipt deadline is moot
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false // …and a real turn frame moots the turn deadline
         sendStalled.value = false
+        turnStalled.value = false
         if (!promptPending) return
         promptPending = false
         val i = messages.indexOfLast { it is ChatItem.User }
         (messages.getOrNull(i) as? ChatItem.User)?.takeIf { it.pending }?.let { messages[i] = it.copy(pending = false) }
+    }
+
+    /** Delivery receipt ONLY (PromptAck, issue #104): the daemon wrote the prompt to the agent's stdin, but an
+     *  ack is not a started turn. Clear the delivery-stage machinery (the receipt deadline is met) and, if a turn
+     *  is still expected, hand off to the turn-start watchdog. Deliberately keeps [promptRetry] — the resend cue
+     *  (and a late SessionGone in this window) still needs the text/images. The PromptAck handler flips the
+     *  specific bubble to delivered right after this; here we only clear the delivery FLAG. */
+    private fun promptDelivered() {
+        promptWatchdog?.cancel(); promptWatchdog = null // receipt arrived — the delivery deadline is moot
+        sendStalled.value = false
+        promptPending = false
+        if (streaming.value) { awaitingTurn = true; armTurnWatchdog() } // a TurnDone/error already in wouldn't re-arm
     }
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
@@ -966,6 +998,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false // (issue #104) drop the ack→turn deadline too
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
@@ -1072,8 +1105,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Remove the currently active binding (the "re-pair" escape hatch when a pairing goes invalid). */
     fun unpairActive() { paired.value?.let { unpair(it) } }
 
+    internal var onSendForTest: ((Frame) -> Unit)? = null // test seam: observe outbound frames (issue #104 resend)
+
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
+        onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
             when {
@@ -1182,6 +1218,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         handle(TurnDone(convoId))
     }
 
+    // test seam (issue #104): feed an inbound frame exactly as a transport would, to exercise the
+    // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
+    internal fun receiveForTest(f: Frame) = handle(f)
+
     private fun handle(f: Frame) {
         when (f) {
             is Directories -> {
@@ -1263,7 +1303,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // delivery receipt (issue #66): the daemon handed the turn to the agent — flip the bubble's
             // marker. Also first evidence: the retry copy is obsolete (the prompt cannot be lost anymore).
             is PromptAck -> if (f.convoId == convoId.value) {
-                promptEvidence()
+                promptDelivered() // delivered ≠ turn started (issue #104): hand off to the turn-start watchdog
                 val i = messages.indexOfLast { it is ChatItem.User && it.promptId == f.promptId }
                 (messages.getOrNull(i) as? ChatItem.User)?.let { messages[i] = it.copy(pending = false, delivered = true) }
             }
@@ -1522,6 +1562,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         openTimedOut.value = false
         promptPending = false // the pending marker belongs to the previous conversation's transcript
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false // (issue #104) new session clears any ack→turn stall
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
@@ -1656,6 +1697,45 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // non-Ready phases already have the retry/backoff machinery (and the UI banner) on the case
             if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) launchTransport(reconnect = true)
         }
+    }
+
+    /** Second-stage watchdog (issue #104): a delivered prompt that produces no turn frame within the deadline
+     *  was swallowed by a wedged / mid-relaunch agent. Surface an inline resend cue instead of spinning forever.
+     *  Self-guarded at fire time — a turn frame ([awaitingTurn] cleared), a session change ([convoId] moved off
+     *  the one captured here), or a turn that already ended ([streaming] false) all no-op it, so it never fires
+     *  into a stale conversation and no teardown path has to reach in and cancel it. */
+    private fun armTurnWatchdog() {
+        val c = convoId.value
+        turnWatchdog?.cancel()
+        turnWatchdog = scope.launch {
+            delay(promptTurnTimeoutMs)
+            if (!awaitingTurn || convoId.value != c || !streaming.value) return@launch
+            turnStalled.value = true
+            // this fires ONLY after a PromptAck, so it inherently means "daemon delivered, agent produced
+            // nothing" (candidate 3) — distinct from the no-ack stall (issue #78). Phase tags the link state.
+            Telemetry.track(TelEvent.PromptTurnStalled, mapOf(TelKey.Phase to phase.value.name))
+        }
+    }
+
+    /** User tapped the "no response — resend" cue (issue #104). Re-drive the stalled turn under a FRESH
+     *  promptId: the live daemon Conversation already recorded the original id, so a same-id resend would be
+     *  deduped (#66) into a bare re-ack and never run. Single-shot — guarded on [turnStalled], which a real
+     *  turn frame retracts first, so a resend can't land on top of a turn that actually started. No second
+     *  User bubble is added (that duplicate "You" is the very symptom #104 is about); we just re-run the turn. */
+    fun resendStalledPrompt() {
+        if (!turnStalled.value) return
+        val c = convoId.value ?: run { turnStalled.value = false; return }
+        val retry = promptRetry ?: run { turnStalled.value = false; return }
+        turnStalled.value = false
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false
+        val freshId = newPromptId()
+        promptRetry = PromptRetry(retry.text, retry.images, retry.workdir, freshId)
+        promptResendArmed = false
+        promptPending = true // pending until the re-driven turn shows life
+        streaming.value = true
+        Telemetry.track(TelEvent.PromptResent)
+        scope.launch { send(SendPrompt(c, retry.text, retry.images, promptId = freshId)) }
+        armPromptWatchdog() // the resent copy gets its own receipt deadline; its ack re-arms the turn watchdog
     }
 
     /** Client-minted id a [dev.ccpocket.protocol.PromptAck] echoes back (issue #66) — random hex is

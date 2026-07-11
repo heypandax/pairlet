@@ -195,6 +195,15 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     onAllow = { rem -> model.resolve(allow = true, remember = rem) },
                                     onDeny = { model.resolve(allow = false, remember = false) },
                                 )
+                            } else if (model.turnStalled) {
+                                // delivered but the agent started no turn within the deadline (issue #104) —
+                                // replace the blinking caret with a restrained, clickable resend cue.
+                                Text(
+                                    "no response yet — click to resend", color = Tok.warn,
+                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.resendStalled() }
+                                        .padding(vertical = 3.dp, horizontal = 6.dp),
+                                )
                             } else if (model.streaming) {
                                 Box(Modifier.size(width = 7.dp, height = 15.dp).clip(RoundedCornerShape(1.dp)).blinkAccent())
                             }
