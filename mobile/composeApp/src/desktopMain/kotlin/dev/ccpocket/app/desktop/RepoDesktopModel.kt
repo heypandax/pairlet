@@ -197,7 +197,10 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
             // aggregated across every live link; satellites carry asks once the daemon broadcasts them
             val links = FleetRuntime.forPrimary(repo)?.repos() ?: listOf(repo)
             return links.mapNotNull { r ->
-                val ask = r.pendingAsk.value ?: return@mapNotNull null
+                // a timed-out ask (issue #100) is terminal — dismiss-only on its inline card — so it's no
+                // longer "waiting": drop it from the bell/palette/badge instead of offering a Deny/Allow that
+                // would only hit the daemon's ask_expired. Matched by id (askIds are unique per request).
+                val ask = r.pendingAsk.value?.takeIf { it.askId != r.timedOutAskId.value } ?: return@mapNotNull null
                 val d = r.paired.value ?: return@mapNotNull null
                 DkAttention(
                     id = ask.askId, accountId = d.accountId, machine = d.displayName(), os = d.dkOs(),
@@ -509,6 +512,11 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     override fun hasReadyImages(): Boolean = repo.hasReadyImages()
 
     override val ask: PermissionAsk? get() = repo.pendingAsk.value
+    // issue #100: forward the daemon's TIMED_OUT verdict to the inline card. The repo keeps the pendingAsk and
+    // stamps timedOutAskId on AskWithdrawn(TIMED_OUT); matched by id, so a stale id can never bleed onto the
+    // next ask (askIds are unique per request) — mirrors the phone's `timedOutAskId == ask.askId` check.
+    override val askTimedOut: Boolean
+        get() = repo.pendingAsk.value?.askId?.let { it == repo.timedOutAskId.value } ?: false
     override fun resolve(allow: Boolean, remember: Boolean) {
         showPermissionModal = false
         repo.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember)

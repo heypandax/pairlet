@@ -328,6 +328,11 @@ interface DesktopModel {
 
     // permission (live: inline card in the stream; seed: also drives the focused modal)
     val ask: PermissionAsk?
+    /** The current [ask] is the one the daemon reported TIMED_OUT (issue #100): the inline card flips to its
+     *  terminal "auto-denied" state (greyed + danger note + Dismiss) instead of staying actionable, and a late
+     *  click can't send a verdict the CLI already stopped waiting for. Default false so seed/preview models
+     *  render the ordinary actionable card. */
+    val askTimedOut: Boolean get() = false
     fun resolve(allow: Boolean, remember: Boolean)
     fun dismissAsk()
     // AskUserQuestion (ask.questions != null): the picks/free-text ride an ALLOW verdict; skip DENIES with a
