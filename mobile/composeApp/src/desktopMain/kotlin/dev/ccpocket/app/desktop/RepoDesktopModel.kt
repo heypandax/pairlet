@@ -486,7 +486,8 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     override fun clearConversation() = repo.clearConversation()
 
     override fun send(text: String) {
-        if (text.isBlank() && !repo.hasReadyImages()) return // an image-only send is legitimate
+        if (repo.uploadsBusy()) return // send waits for uploads to settle (composer shows the spinner)
+        if (text.isBlank() && !repo.hasReadyImages() && !repo.hasLandedFiles()) return // media-only sends are legitimate
         // a gated send (degraded session, issue #65) returns false — keep the composer text for the retry
         if (repo.sendPrompt(text)) { composer = ""; repo.clearDraft(composerKey()) } // clear the persisted draft too (#88)
     }
@@ -507,6 +508,13 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     override fun attachImages(raw: List<ByteArray>) = repo.attachImages(raw)
     override fun removePendingImage(id: Long) = repo.removePendingImage(id)
     override fun hasReadyImages(): Boolean = repo.hasReadyImages()
+
+    override val pendingFiles: List<dev.ccpocket.app.data.PendingFile> get() = repo.pendingFiles
+    override fun attachFiles(files: List<dev.ccpocket.app.media.PickedFile>) = repo.attachFiles(files)
+    override fun removePendingFile(id: Long) = repo.removePendingFile(id)
+    override fun retryPendingFile(id: Long) = repo.retryPendingFile(id)
+    override fun uploadsBusy(): Boolean = repo.uploadsBusy()
+    override fun hasLandedFiles(): Boolean = repo.hasLandedFiles()
 
     override val ask: PermissionAsk? get() = repo.pendingAsk.value
     override fun resolve(allow: Boolean, remember: Boolean) {

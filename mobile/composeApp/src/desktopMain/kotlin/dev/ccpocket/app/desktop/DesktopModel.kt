@@ -326,6 +326,17 @@ interface DesktopModel {
     fun removePendingImage(id: Long)
     fun hasReadyImages(): Boolean
 
+    // composer FILE uploads (issue #90): staged files chunk-stream into the session's workspace
+    // inbox; landed paths ride the next send as `@`-references. Default no-ops keep seed/preview
+    // models inert (chips simply never appear).
+    val pendingFiles: List<dev.ccpocket.app.data.PendingFile> get() = emptyList()
+    fun attachFiles(files: List<dev.ccpocket.app.media.PickedFile>) {}
+    fun removePendingFile(id: Long) {}
+    fun retryPendingFile(id: Long) {}
+    /** Uploads still moving → the send button waits (spinner) until they settle. */
+    fun uploadsBusy(): Boolean = false
+    fun hasLandedFiles(): Boolean = false
+
     // permission (live: inline card in the stream; seed: also drives the focused modal)
     val ask: PermissionAsk?
     fun resolve(allow: Boolean, remember: Boolean)

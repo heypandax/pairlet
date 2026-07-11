@@ -107,6 +107,17 @@
     <string name="send">Send</string>
     <string name="dictate">Dictate</string>
     <string name="attach_image">Attach image</string>
+    <string name="attach_menu">Attach</string>
+    <string name="attach_sheet_photo">Photo</string>
+    <string name="attach_sheet_file">File</string>
+    <string name="attach_sheet_caption">Files are copied into this session\'s workspace · up to 200 MB</string>
+    <string name="file_queued">queued</string>
+    <string name="file_retry">retry</string>
+    <string name="file_upload_failed">upload failed</string>
+    <string name="file_in_workspace">in workspace</string>
+    <string name="file_agent_reads">agent reads it as</string>
+    <string name="file_strip_uploading">uploading %1$d of %2$d…</string>
+    <string name="file_strip_ready">%1$d in workspace — sent with your message</string>
     <string name="error_prefix">error: %1$s</string>
     <string name="cmd_source_builtin">built-in</string>
     <string name="cmd_source_user">user</string>
