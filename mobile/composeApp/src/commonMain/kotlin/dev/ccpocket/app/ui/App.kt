@@ -1066,9 +1066,14 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
 
 @Composable
 private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
-    // restore the composer draft (keyed per conversation, workdir for a brand-new session); re-inits on switch (#29)
+    // Restore the composer draft (keyed per conversation, workdir for a brand-new session). Re-inits on a
+    // REAL switch only — keyed off composerEpoch, NOT draftKey (#29 semantics kept): the key chain flips in
+    // place mid-typing (brand-new session materializing, forked resume corrected by SessionLive), and
+    // re-reading the ≤400ms-stale draft then yanked the live text out from under the IME — on the iOS pinyin
+    // keyboard that committed the space-segmented marked text as raw letters, "claude"→"c l a u d e" (#108,
+    // #93's wild signature). The debounced saver below re-homes the text under the flipped key.
     val draftKey = repo.composerKey()
-    var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
+    var input by remember(repo.composerEpoch.value) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
     var showModeSheet by remember { mutableStateOf(false) }

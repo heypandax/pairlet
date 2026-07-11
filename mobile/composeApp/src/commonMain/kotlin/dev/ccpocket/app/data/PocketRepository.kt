@@ -347,6 +347,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  a private copy at either call site would silently fork draft storage when a key tier is added. */
     fun composerKey(): String? = sessionKey.value ?: convoId.value ?: workdir.value
 
+    /** Composer CONTEXT generation — bumped once per [openSession]. [composerKey]'s chain flips IN PLACE
+     *  while the user may be typing (a brand-new session's first SessionLive minting convoId/sessionId,
+     *  a forked resume/lock-heal corrected from resumeId to the real id), so composers must key their
+     *  LIVE text off this and only re-home the draft on a key flip: re-initializing from the persisted
+     *  draft on every flip rolled the field back to a ≤400ms-stale snapshot mid-IME-composition, which
+     *  on iOS committed the pinyin keyboard's space-segmented marked text as raw letters (#108/#93). */
+    val composerEpoch = mutableStateOf(0)
+
     /** Carry a mid-typing draft onto [to] BEFORE the composer re-keys (a brand-new session's first init
      *  flips the key from convoId to the freshly-minted sessionId while the user may be typing). */
     private fun migrateDraft(to: String?) {
@@ -1532,6 +1540,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
         messages.clear(); convoId.value = null
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
+        composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button

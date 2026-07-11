@@ -64,6 +64,28 @@ class ImeSafeMirrorTest {
         assertEquals("abc", m.field.text)           // and must leave the field alone
     }
 
+    // ── #108: an iOS candidate commit is TWO onValueChange calls in ONE event-loop turn ───────────
+
+    @Test
+    fun echo_supersedes_a_stale_park_before_a_same_turn_commit() {
+        var upstream = ""
+        val m = ImeSafeMirror("").also { it.onExternalChange = { s -> upstream = s } }
+
+        // iOS pinyin keyboard typing an English word: the composition IS the space-segmented marked text
+        m.onValueChange(composing("c l a u d e"))   // field owns the composition, upstream tracks it
+        // a recompose reconciles against a stale lagging upstream (draft re-key / clear-on-send) — PARK
+        m.reconcile("")
+        assertEquals("", m.parked)
+
+        // the user taps the "claude" candidate: setMarkedText (echo) + insertText (commit) arrive back to
+        // back with NO recompose between — reconcile never gets a chance to drop the now-stale park
+        m.onValueChange(composing("c l a u d e"))   // echo: upstream re-converges on the field
+        assertNull(m.parked, "the echo re-converges upstream — a parked write is superseded and must drop")
+        m.onValueChange(committed("claude"))        // the commit must land as chosen…
+        assertEquals("claude", m.field.text, "…not roll back to the stale parked snapshot")
+        assertEquals("claude", upstream)
+    }
+
     // ── #93/#86 regression: a genuine pending external write must STILL survive a composition ──────
 
     @Test
