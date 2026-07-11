@@ -6,14 +6,41 @@ import FirebaseCrashlytics
 import UIKit
 import UserNotifications
 
-/// Hosts the APNs callbacks SwiftUI's `App` can't receive directly. Kotlin (PushController) requests
-/// authorization + registration; the device token lands here and is handed back over the same bridge
-/// pattern as telemetry. Push registration itself is driven from Kotlin, so no prompt fires at cold start.
+/// Hosts the APNs callbacks SwiftUI's `App` can't receive directly. The first-time authorization *prompt*
+/// is Kotlin-driven (PushController.registrar, after pairing) so it never fires at cold start; but once the
+/// user has granted it, we re-`registerForRemoteNotifications` on every launch/foreground here to re-read a
+/// rotated device token (issue #114). Either way the token lands below and is handed back over the same
+/// bridge pattern as telemetry.
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Apple issues a NEW device token on reinstall/restore/(sometimes) OS-or-app update and only hands
+        // it back when we call registerForRemoteNotifications — so we must call it every launch, not just
+        // once at pairing. Without this, a rotated token was never re-read and the relay kept pushing to a
+        // dead one (→ 410 Unregistered forever). See issue #114.
+        refreshPushRegistrationIfAuthorized()
         return true
+    }
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        // also catch a token that rotated while we were backgrounded but not fully relaunched
+        refreshPushRegistrationIfAuthorized()
+    }
+
+    /// Re-fetch the current APNs token when notifications are ALREADY authorized. Gated on the granted
+    /// status so this never shows a prompt — the first-time prompt still follows pairing, driven from
+    /// Kotlin's PushController.registrar. The refreshed token lands in didRegister… below and flows to the
+    /// relay via the existing setPushToken bridge (idempotent: the phone dedupes, the relay upserts).
+    private func refreshPushRegistrationIfAuthorized() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
+            default:
+                break // not yet granted — leave the prompt to the post-pairing registrar
+            }
+        }
     }
 
     func application(_ application: UIApplication,

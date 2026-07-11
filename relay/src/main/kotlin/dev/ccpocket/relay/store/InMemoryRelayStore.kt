@@ -74,6 +74,16 @@ class InMemoryRelayStore : RelayStore {
         Unit
     }
 
+    override suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = lock.withLock {
+        val d = devices[deviceId] ?: return@withLock false
+        if (d.pushPlatform != platform || d.pushToken != token) return@withLock false // re-registered since — keep it
+        devices[deviceId] = Device(
+            d.deviceId, d.accountId, d.devicePubkey, d.credentialHash, d.createdAt, d.lastSeen, d.revoked,
+            pushPlatform = null, pushToken = null,
+        )
+        true
+    }
+
     override suspend fun pushTargets(accountId: String): List<PushTarget> = lock.withLock {
         devices.values
             .filter { it.accountId == accountId && !it.revoked && !it.pushToken.isNullOrBlank() && it.pushPlatform != null }
