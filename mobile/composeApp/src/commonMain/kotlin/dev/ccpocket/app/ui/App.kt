@@ -1167,6 +1167,12 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
     var pinned by rememberBottomPinned(listState)
+    // the Jump-to-latest scroll must survive the pill leaving composition. The pill's onClick sets
+    // pinned=true, and that same recomposition removes the `if (!pinned)` block below — a
+    // rememberCoroutineScope declared INSIDE that block is cancelled the instant it's forgotten,
+    // killing the launched animateScrollToItem before it can run (tap → pill vanishes, list never
+    // reaches the bottom). Hoisting the scope to ChatScreen lets the animation complete.
+    val jumpScope = rememberCoroutineScope()
     // keep the message list hidden until it's first parked at the bottom, so opening a session with
     // history doesn't flash the top then visibly scroll down. Resets per session (convoId); a short
     // grace reveals an empty/new session that has no history to position on.
@@ -1337,10 +1343,9 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 }
                 }
                 if (!pinned) {
-                    val pillScope = rememberCoroutineScope()
                     JumpToLatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)) {
                         pinned = true
-                        pillScope.launch {
+                        jumpScope.launch {
                             if (repo.messages.isNotEmpty()) listState.animateScrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
                         }
                     }
