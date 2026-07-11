@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.session
 
 import dev.ccpocket.daemon.agent.AgentBackendFactory
+import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
@@ -112,8 +113,14 @@ class SessionRegistry(
     @Volatile
     var pushHook: PushHook? = null
 
-    /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is emitted). */
-    suspend fun open(open: OpenSession, sink: OutboundSink): String {
+    /** Installed by the relay client (issue #91): how a BRIDGE conversation's permission ask reaches
+     *  the owner — the ask frame itself never goes to the bridge. Null in local-server mode. */
+    @Volatile
+    var askPushHook: AskPushHook? = null
+
+    /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
+     *  emitted). [origin] names the bridge credential that opened it (issue #91); null = interactive. */
+    suspend fun open(open: OpenSession, sink: OutboundSink, origin: String? = null): String {
         val resume = open.resumeId
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
@@ -134,6 +141,12 @@ class SessionRegistry(
                 val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
                 val recent = externallyActive(resume, open.workdir, file)
                 if (recent) {
+                    // a bridge gets a clean refusal instead of a read-only ObserveSession: observes have
+                    // no prompt path, and a headless adapter can't render "someone else is driving this"
+                    if (origin != null) {
+                        sink.emit(PocketError("bridge_busy", "session is live in another client — try again later"))
+                        return ""
+                    }
                     val convoId = UUID.randomUUID().toString()
                     log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (live foreign writer)")
                     val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
@@ -152,7 +165,10 @@ class SessionRegistry(
         // create() is cheap + never throws (the binary resolves lazily on first launch); the real "CLI not
         // installed" failure surfaces synchronously from c.open() below, so one guard there covers it.
         val convoId = UUID.randomUUID().toString()
-        val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(), pushHookProvider = { pushHook })
+        val c = Conversation(
+            convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
+            pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
+        )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
@@ -275,9 +291,16 @@ class SessionRegistry(
         mutex.withLock {
             convos.values.mapNotNull { c ->
                 val sid = c.sessionId ?: return@mapNotNull null
-                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind)
+                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(
+                    sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind, origin = c.origin,
+                )
             }
         }.groupBy({ it.first }, { it.second })
+
+    /** How many of [ids] are still LIVE conversations — the bridge concurrency budget counts these,
+     *  not the historical ledger (issue #91): an idle-reaped session must not eat a slot forever. */
+    suspend fun liveCountOf(ids: Collection<String>): Int =
+        mutex.withLock { ids.count { it in convos } }
 
     /** Routes a prompt into its conversation. False = the convo is gone (idle-reaped / daemon restarted):
      *  the router answers [dev.ccpocket.protocol.SessionGone] so the phone can re-open + resend instead of

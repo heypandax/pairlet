@@ -174,6 +174,9 @@ data class ActiveSession(
     val gitBranch: String? = null,
     /** which backend owns it — a tap must resume with the right CLI. */
     val agent: AgentKind = AgentKind.CLAUDE,
+    /** the external bridge credential that opened it (issue #91), e.g. "feishu-bot" — clients show
+     *  "via feishu-bot" on the live row. Null = interactive/local session or an older daemon. */
+    val origin: String? = null,
 )
 
 /**

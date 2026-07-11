@@ -54,6 +54,12 @@ class Conversation(
     private val backend: AgentBackend,
     // read dynamically: the relay client installs the hook after this conversation may already exist
     private val pushHookProvider: () -> PushHook? = { null },
+    /** The bridge credential that opened this conversation (issue #91) — null for every interactive
+     *  client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens the ask timeout
+     *  (nobody is watching the sheet live), and arms the ask push below. */
+    val origin: String? = null,
+    // how a bridge conversation's permission ask reaches the OWNER (the bridge never gets the frame)
+    private val askPushHookProvider: () -> AskPushHook? = { null },
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -125,6 +131,11 @@ class Conversation(
 
     @Volatile
     private var intentionalStop = false
+
+    // last time an urgent bridge-approval push fired for this conversation — coalesces a burst of asks
+    // into one owner alert (issue #91). Touched only from the single permission-bridge emit path.
+    @Volatile
+    private var lastAskPushMs = 0L
 
     @Volatile
     private var pendingResumeId: String? = null
@@ -232,6 +243,7 @@ class Conversation(
             contextWindow = claudeWindow(),
             contextUsed = resumeContextUsed, agent = backend.kind,
             degraded = degraded(),
+            origin = origin, // "via <bridge>" label (issue #91); null for interactive sessions
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -436,7 +448,37 @@ class Conversation(
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
-        val b = PermissionBridge(convoId, mode, scope, { sink.emit(it) }, allowRules, respond = backend::respondPermission)
+        // Bridge-origin conversations (issue #91): the ask frame fans out normally (the bridge's egress
+        // filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
+        // the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
+        // is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
+        val emitWithAskPush: suspend (dev.ccpocket.protocol.Frame) -> Unit =
+            if (origin == null) { f -> sink.emit(f) }
+            else { f ->
+                sink.emit(f)
+                if (f is dev.ccpocket.protocol.PermissionAsk) {
+                    askPushHookProvider()?.let { hook ->
+                        // COALESCE (issue #91 LOW): a turn can raise several asks in quick succession; at
+                        // most one urgent approval push per conversation per window so a burst can't spam
+                        // the owner's lock screen. The push is a "come look" nudge — reattach + resurface
+                        // shows every pending card, so one alert covers the batch.
+                        val now = System.currentTimeMillis()
+                        if (now - lastAskPushMs >= ASK_PUSH_COALESCE_MS) {
+                            lastAskPushMs = now
+                            val label = f.title.ifBlank { f.tool }
+                            // off the pump: a control-plane push must never stall stdout parsing
+                            scope.launch { runCatching { hook.onAskPending(workdir, sessionId, origin, label) } }
+                        }
+                    }
+                }
+            }
+        val b = PermissionBridge(
+            convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            verdictTimeoutMs = if (origin != null) BRIDGE_VERDICT_TIMEOUT_MS else DEFAULT_VERDICT_TIMEOUT_MS,
+            // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
+            // allow", so one owner approval can't be replayed by later attacker-supplied prompts
+            forceNeverRemember = origin != null,
+        )
         proc = p
         bridge = b
         // Bind IO + kick off any handshake (Codex initialize → thread/start) SYNCHRONOUSLY, before returning. The
@@ -955,5 +997,15 @@ class Conversation(
 
         // cap on a sub-agent report crossing the wire in a ToolEvent/HistoryMessage (4 MiB frame budget)
         const val SUBAGENT_OUTPUT_MAX = 4000
+
+        // tool-approval verdict windows (issue #91). Interactive: the user is looking at the sheet.
+        // Bridge-origin: the owner must first ARRIVE (push → tap → reattach → resurfaced ask), so 30s
+        // would deny nearly every ask before a human could possibly answer. Still bounded — an
+        // unattended dangerous action resolves to DENY, never hangs, never auto-allows.
+        const val DEFAULT_VERDICT_TIMEOUT_MS = 30_000L
+        const val BRIDGE_VERDICT_TIMEOUT_MS = 120_000L
+
+        // at most one urgent bridge-approval push per conversation per this window (issue #91)
+        const val ASK_PUSH_COALESCE_MS = 60_000L
     }
 }

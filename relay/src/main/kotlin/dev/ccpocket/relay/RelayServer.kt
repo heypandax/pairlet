@@ -9,6 +9,7 @@ import dev.ccpocket.protocol.DeviceRevoked
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
+import dev.ccpocket.protocol.PROTO_V_HEADLESS
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairCodePayload
 import dev.ccpocket.protocol.PairCodeResolve
@@ -116,12 +117,17 @@ class RelayServer(
                         call.respondError(HttpStatusCode.BadRequest, "bad_request")
                         return@post
                     }
-                    when (val r = pairing.redeem(req.ticket, req.devicePubKey)) {
+                    when (val r = pairing.redeem(req.ticket, req.devicePubKey, req.headless)) {
                         is PairingService.RedeemResult.Err ->
                             call.respondError(HttpStatusCode.BadRequest, r.code)
                         is PairingService.RedeemResult.Ok -> {
-                            // hint the daemon (advisory; it allow-lists only after the ticket-PSK handshake succeeds)
-                            broker.controlToDaemon(r.accountId, controlText(DevicePaired(r.deviceId, r.devicePubKey)))
+                            // hint the daemon (advisory; it allow-lists only after the ticket-PSK handshake
+                            // succeeds). A HEADLESS redeem is withheld from pre-bridge daemons (issue #91):
+                            // they have no bridges store and would file the key as a full-power device.
+                            val daemonConn = broker.daemonConn(r.accountId)
+                            if (!req.headless || (daemonConn != null && daemonConn.daemonProtoV >= PROTO_V_HEADLESS)) {
+                                broker.controlToDaemon(r.accountId, controlText(DevicePaired(r.deviceId, r.devicePubKey)))
+                            }
                             call.respondText(
                                 PocketJson.encodeToString(PairCredential(r.deviceId, r.secret, r.accountId)),
                                 ContentType.Application.Json,
@@ -173,11 +179,15 @@ class RelayServer(
             is DaemonAuthenticator.Result.Ok -> r.accountId
         }
 
-        val conn = conn(account, Role.DAEMON, null)
+        val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
         broker.attachDaemon(conn)?.let { old -> runCatching { old.close("superseded") } }
         sendControl(Attached(Role.DAEMON, account))
-        // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem) re-learns them
+        // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
+        // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
+        // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
+        // credential silently escalating to a complete device on daemon downgrade.
         store.devicesForAccount(account).forEach { d ->
+            if (d.headless && hello.protoV < PROTO_V_HEADLESS) return@forEach
             broker.controlToDaemon(account, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
         }
         broker.controlToDevices(account, controlText(PeerPresence(true)))
@@ -203,7 +213,9 @@ class RelayServer(
                 if (!limiter.check("pairbegin:acct:$account", 10, 3_600_000)) {
                     broker.controlToDaemon(account, controlText(AuthError("rate_limited"))); return
                 }
-                when (val m = pairing.mint(account)) {
+                // headless marker rides from the MINTING daemon (issue #91) — authoritative, stamped on the
+                // ticket so the redeemed device inherits it regardless of what the redeeming client declares
+                when (val m = pairing.mint(account, headless = body.headless)) {
                     is PairingService.MintResult.Ok -> {
                         val code = codeStore.put(account, body.e2ePub, m.ticket) // 6-digit code resolves to this payload
                         broker.controlToDaemon(account, controlText(PairTicket(m.ticket, m.ttlSec, code)))
@@ -218,8 +230,12 @@ class RelayServer(
                 broker.controlToDaemon(account, controlText(DeviceRevoked(body.deviceId)))
             }
             is Ping -> broker.controlToDaemon(account, controlText(Pong(body.ts))) // app-level liveness echo
-            // wake an offline phone: push only when no device socket is live (an online phone got TurnDone already)
-            is NotifyPush -> if (broker.deviceCount(account) == 0) pushScope.launch {
+            // wake an offline phone: push only when no INTERACTIVE device socket is live (an online phone
+            // got TurnDone already; an always-on bridge must never mute the owner's pushes — issue #91).
+            // EXCEPTION: an [urgent] notify (a bridge approval) is pushed even with a phone attached — the
+            // ask isn't on the data plane of whatever convo that phone is viewing, so it would otherwise
+            // strand until the timeout→deny.
+            is NotifyPush -> if (body.urgent || broker.interactiveDeviceCount(account) == 0) pushScope.launch {
                 val route = body.workdir?.let { wd -> body.sessionId?.let { sid -> NotifyRoute(wd, sid) } }
                 pushService.notify(account, body.title, body.body, route)
             }
@@ -227,10 +243,16 @@ class RelayServer(
         }
     }
 
-    /** device control TEXT plane: only push-token (de)registration; everything else rides the data plane. */
+    /** device control TEXT plane: only push-token (de)registration; everything else rides the data plane.
+     *  A HEADLESS bridge is REFUSED here (issue #91): this plane bypasses the E2E bridge ingress gate, so
+     *  without this a leaked bridge could register its OWN push token and receive the owner's turn-complete
+     *  alerts (which carry workdir/path/reply-first-line for ANY session). Belt to the pushTargets filter's
+     *  suspenders: even a token that slipped in is dropped at fan-out. */
     private suspend fun handleDeviceControl(deviceId: String, text: String) {
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
-            is RegisterPush -> runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
+            is RegisterPush -> if (store.getDevice(deviceId)?.headless != true) {
+                runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
+            }
             else -> {}
         }
     }
@@ -250,17 +272,24 @@ class RelayServer(
             }
             is DeviceAuthenticator.Result.Ok -> r.accountId
         }
-        if (broker.deviceCount(account) >= MAX_LIVE_DEVICES) {
+        // a bridge socket is presence-invisible (issue #91): it never flips PeerPresence and never
+        // counts toward the "is anyone attached" gates — else an always-on bot mutes every push and
+        // pins the daemon's idle reaper off forever. Its own cap is separate and smaller.
+        val headless = store.getDevice(hello.deviceId)?.headless == true
+        val overCap =
+            if (headless) broker.headlessDeviceCount(account) >= MAX_LIVE_HEADLESS
+            else broker.interactiveDeviceCount(account) >= MAX_LIVE_DEVICES
+        if (overCap) {
             sendControl(AuthError("too_many_connections")); return closeWith("too_many_connections")
         }
 
-        val conn = conn(account, Role.DEVICE, hello.deviceId)
+        val conn = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
         // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
         // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
         // per-device E2E session and deafen it
         broker.attachDevice(conn)?.let { runCatching { it.close("superseded") } }
         sendControl(Attached(Role.DEVICE, account))
-        broker.controlToDaemon(account, controlText(PeerPresence(true)))
+        if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true)))
         try {
             for (frame in incoming) when (frame) {
                 is Frame.Binary -> broker.toDaemonFrom(account, hello.deviceId, frame.data)
@@ -269,19 +298,30 @@ class RelayServer(
             }
         } finally {
             broker.detachDevice(conn)
-            // "peer offline" only when the LAST device socket left — a superseded/overlapping socket's exit
-            // while another is live must not arm the daemon's idle reaper against a watched conversation
-            if (broker.deviceCount(account) == 0) broker.controlToDaemon(account, controlText(PeerPresence(false)))
+            // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
+            // exit while another is live must not arm the daemon's idle reaper against a watched
+            // conversation, and a bridge coming or going never moves presence at all
+            if (!headless && broker.interactiveDeviceCount(account) == 0) {
+                broker.controlToDaemon(account, controlText(PeerPresence(false)))
+            }
         }
     }
 
     // ---- control-frame codec (TEXT plane) + helpers ----
 
-    private fun DefaultWebSocketServerSession.conn(account: String, role: Role, deviceId: String?) = Conn(
+    private fun DefaultWebSocketServerSession.conn(
+        account: String,
+        role: Role,
+        deviceId: String?,
+        headless: Boolean = false,
+        daemonProtoV: Int = 1,
+    ) = Conn(
         account, role, deviceId,
         sendText = { outgoing.send(Frame.Text(it)) },
         sendBinary = { outgoing.send(Frame.Binary(true, it)) },
         close = { reason -> runCatching { close(CloseReason(CloseReason.Codes.NORMAL, reason)) } },
+        headless = headless,
+        daemonProtoV = daemonProtoV,
     )
 
     private fun controlText(frame: PocketFrame): String =
@@ -305,6 +345,7 @@ class RelayServer(
         // raised 256KB->4MB so phone image / large E2E frames aren't killed (FrameTooBigException);
         // receiving peers raise their client maxFrameSize to match.
         const val MAX_FRAME = 4L * 1024 * 1024
-        const val MAX_LIVE_DEVICES = 10
+        const val MAX_LIVE_DEVICES = 10   // interactive (phones/desktops), as before
+        const val MAX_LIVE_HEADLESS = 5   // bridges get their own, smaller pool (issue #91)
     }
 }

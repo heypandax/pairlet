@@ -32,6 +32,10 @@ class PermissionBridge(
     // reading 1–4 questions needs more than the 30s tool-approval window. Withdrawals still clean up
     // via onCancel (control_cancel_request), and closing the session cancels everything.
     private val questionTimeoutMs: Long = 600_000,
+    // issue #91: force EVERY ask on this conversation to be a one-off decision (never remembered). Set for
+    // bridge-origin sessions so a single owner "always allow" can't be replayed by later attacker-supplied
+    // prompts — the whole session is externally driven, so a remembered rule is a standing blank cheque.
+    private val forceNeverRemember: Boolean = false,
 ) {
     // [ask] is the exact PermissionAsk frame we emitted for this request — kept so a phone that reattaches
     // after missing the live frame (backgrounded during plan mode's long post-`result` phase, issue #55)
@@ -51,8 +55,10 @@ class PermissionBridge(
         }
         val meta = ToolMetadata.of(ev.toolName, ev.input)
         // neverRemember tools (ExitPlanMode, AskUserQuestion) are a human-decision gate: never satisfy them
-        // from a remembered rule — every plan/question must be answered explicitly (issue #10).
-        if (!meta.neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
+        // from a remembered rule. [forceNeverRemember] extends that to EVERY ask on a bridge-origin session
+        // (issue #91), so an owner's earlier "always allow" can't auto-clear a new attacker-supplied prompt.
+        val neverRemember = meta.neverRemember || forceNeverRemember
+        if (!neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -64,9 +70,9 @@ class PermissionBridge(
         val ask = PermissionAsk(
             convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff,
             questions = if (isQuestion) AskQuestions.parse(ev.input) else null,
-            neverRemember = meta.neverRemember,
+            neverRemember = neverRemember,
         )
-        pending[askId] = Pending(ask, ev.input, meta.rule, meta.neverRemember, isQuestion, timeout)
+        pending[askId] = Pending(ask, ev.input, meta.rule, neverRemember, isQuestion, timeout)
         emit(ask)
     }
 

@@ -56,7 +56,9 @@ class RequestRouter(
     private val auth: AuthService,
     private val prefs: DaemonPrefs,
 ) {
-    suspend fun handle(frame: Frame, sink: OutboundSink, onOpened: suspend (String) -> Unit = {}) {
+    /** [origin] names the external bridge credential this frame arrived from (issue #91) — null for
+     *  every interactive client. Threaded into [SessionRegistry.open] so the conversation is tagged. */
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
             is ListDirectories -> sink.emit(Directories(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd())))
 
@@ -103,7 +105,7 @@ class RequestRouter(
                     sink.emit(PocketError("bad_workdir", "not a readable directory: ${frame.workdir}"))
                 } else {
                     dirs.noteRecent(wd.toString())
-                    val convoId = registry.open(frame.copy(workdir = wd.toString()), sink)
+                    val convoId = registry.open(frame.copy(workdir = wd.toString()), sink, origin)
                     if (convoId.isNotEmpty()) onOpened(convoId) // "" = backend unavailable (PocketError already sent)
                 }
             }

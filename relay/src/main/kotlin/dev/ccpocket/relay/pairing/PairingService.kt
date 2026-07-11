@@ -22,11 +22,14 @@ class PairingService(
         data class Err(val code: String) : MintResult
     }
 
-    suspend fun mint(accountId: String): MintResult {
+    /** [headless] (issue #91) is the AUTHORITATIVE bridge marker, known only to the minting daemon and
+     *  stamped onto the ticket here; the redeemed device inherits it in [redeem], regardless of what the
+     *  redeeming client self-declares. */
+    suspend fun mint(accountId: String, headless: Boolean = false): MintResult {
         if (store.countUnredeemedTickets(accountId, clock()) >= MAX_UNREDEEMED) return MintResult.Err("too_many_tickets")
         val raw = ByteArray(32).also(rng::nextBytes) // 256-bit: brute force infeasible by entropy alone
         val now = clock()
-        store.insertTicket(Codec.sha256(raw), accountId, now, now + TTL_MS)
+        store.insertTicket(Codec.sha256(raw), accountId, now, now + TTL_MS, headless = headless)
         return MintResult.Ok(Codec.b64uEnc(raw), (TTL_MS / 1000).toInt())
     }
 
@@ -36,19 +39,27 @@ class PairingService(
         data class Err(val code: String) : RedeemResult
     }
 
-    suspend fun redeem(ticket: String, devicePubKeyB64: String): RedeemResult {
+    /** The device's headless flag is derived AUTHORITATIVELY from the claimed ticket ([ClaimedTicket.headless],
+     *  stamped by the minting daemon), and the redeeming client's self-declared [clientHeadless] is IGNORED
+     *  (issue #91): a client redeeming a bridge ticket while lying `headless=false` still lands as a bridge,
+     *  and — the reverse — a client cannot mark a PHONE ticket headless to make its own device presence-
+     *  invisible. This relay always stamps the ticket (0 or 1), so the ticket is the sole authority.
+     *  [clientHeadless] is retained only for wire/signature compatibility. */
+    @Suppress("UNUSED_PARAMETER")
+    suspend fun redeem(ticket: String, devicePubKeyB64: String, clientHeadless: Boolean = false): RedeemResult {
         val raw = runCatching { Codec.b64uDec(ticket) }.getOrNull() ?: return RedeemResult.Err("bad_ticket")
         // opaque to the relay; just guard against junk. P-256 pub = 65B; allow a sane range.
         val devicePub = runCatching { Codec.b64uDec(devicePubKeyB64) }.getOrNull() ?: return RedeemResult.Err("bad_pubkey")
         if (devicePub.size !in 32..133) return RedeemResult.Err("bad_pubkey")
 
-        val accountId = store.claimTicket(Codec.sha256(raw), clock()) ?: return RedeemResult.Err("invalid_or_expired")
-        if (store.countDevices(accountId) >= MAX_DEVICES) return RedeemResult.Err("too_many_devices")
+        val claimed = store.claimTicket(Codec.sha256(raw), clock()) ?: return RedeemResult.Err("invalid_or_expired")
+        if (store.countDevices(claimed.accountId) >= MAX_DEVICES) return RedeemResult.Err("too_many_devices")
 
         val deviceId = Codec.b64uEnc(ByteArray(16).also(rng::nextBytes))
         val secretBytes = ByteArray(32).also(rng::nextBytes)
-        store.insertDevice(Device(deviceId, accountId, devicePub, Codec.sha256(secretBytes), clock(), null, revoked = false))
-        return RedeemResult.Ok(accountId, deviceId, Codec.b64uEnc(secretBytes), devicePubKeyB64)
+        // authoritative: the ticket's marker only, never the client's self-declaration
+        store.insertDevice(Device(deviceId, claimed.accountId, devicePub, Codec.sha256(secretBytes), clock(), null, revoked = false, headless = claimed.headless))
+        return RedeemResult.Ok(claimed.accountId, deviceId, Codec.b64uEnc(secretBytes), devicePubKeyB64)
     }
 
     private companion object {

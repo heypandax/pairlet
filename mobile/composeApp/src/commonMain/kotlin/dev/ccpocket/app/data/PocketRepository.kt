@@ -412,6 +412,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
     val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
+    val sessionOrigin = mutableStateOf<String?>(null)        // external trigger source, e.g. "feishu-bot" → header "via …" chip (issue #91)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
     val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
 
@@ -1220,6 +1221,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 f.model?.let { model.value = it }
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
+                // unconditional (not ?.let): switching from a bridge session to a normal one must CLEAR the chip
+                sessionOrigin.value = f.origin // "via <bridge>" header chip (issue #91); null = interactive/old daemon
                 // window fallback is Claude-only: contextWindowFor knows nothing about gpt-* ids, and a Codex
                 // session with no daemon-sent window was rendering a % against a meaningless Claude 200k —
                 // null instead, and the UI shows raw tokens without a denominator

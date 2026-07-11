@@ -33,6 +33,10 @@ object Db {
             "ALTER TABLE devices ADD COLUMN push_platform TEXT",
             "ALTER TABLE devices ADD COLUMN push_token TEXT",
             "ALTER TABLE devices ADD COLUMN push_updated_at INTEGER",
+            // issue #91: headless bridge marker — every pre-existing device is a phone/desktop (0)
+            "ALTER TABLE devices ADD COLUMN headless INTEGER NOT NULL DEFAULT 0",
+            // issue #91: headless marker stamped on the ticket by the minting daemon (authoritative)
+            "ALTER TABLE pairing_tickets ADD COLUMN headless INTEGER NOT NULL DEFAULT 0",
         ).forEach { sql -> runCatching { conn.createStatement().use { it.execute(sql) } } }
     }
 
@@ -54,7 +58,8 @@ object Db {
           revoked         INTEGER NOT NULL DEFAULT 0,
           push_platform   TEXT,
           push_token      TEXT,
-          push_updated_at INTEGER
+          push_updated_at INTEGER,
+          headless        INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_devices_account ON devices(account_id);
         CREATE TABLE IF NOT EXISTS pairing_tickets (
@@ -63,7 +68,8 @@ object Db {
           created_at  INTEGER NOT NULL,
           expires_at  INTEGER NOT NULL,
           used        INTEGER NOT NULL DEFAULT 0,
-          used_at     INTEGER
+          used_at     INTEGER,
+          headless    INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_tickets_expiry ON pairing_tickets(expires_at);
     """.trimIndent()

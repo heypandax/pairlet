@@ -395,6 +395,18 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun pairBegin_headless_roundtrips_and_old_frames_default_false() {
+        // issue #91: the authoritative bridge marker rides PairBegin from the minting daemon
+        val bridge = Envelope(id = "pb1", ts = 0, to = Route.RELAY, body = PairBegin("pub", headless = true))
+        val json = PocketJson.encodeToString(bridge)
+        assertTrue("\"headless\":true" in json, json)
+        assertEquals(bridge, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's PairBegin (no headless key) decodes to false — the relay mints a phone ticket
+        val old = """{"id":"pb2","ts":0,"to":"RELAY","body":{"t":"pocket/pair.begin","e2ePub":"pub"}}"""
+        assertEquals(PairBegin("pub"), PocketJson.decodeFromString<Envelope>(old).body as PairBegin)
+    }
+
+    @Test
     fun auth_objects_and_state_roundtrip() {
         // argless requests are data objects — encode as bare {"t": …} and decode back to the singleton
         for ((body, tag) in listOf<Pair<Frame, String>>(
@@ -661,5 +673,61 @@ class SerializationRoundTripTest {
         assertTrue(isSubagentTool("Task"))
         assertTrue(isSubagentTool("Agent"))
         assertFalse(isSubagentTool("Bash"))
+    }
+
+    @Test
+    fun bridge_origin_fields_roundtrip_and_old_frames_default_null() {
+        // issue #91: SessionLive.origin — a bridge-opened conversation names its trigger source
+        val bridged = SessionLive("c1", "/x", "sid", origin = "feishu-bot")
+        val bj = PocketJson.encodeToString<SessionLive>(bridged)
+        assertTrue("\"origin\":\"feishu-bot\"" in bj, bj)
+        assertEquals(bridged, PocketJson.decodeFromString<SessionLive>(bj))
+        // an interactive session's frame stays byte-identical to the pre-#91 wire (explicitNulls=false)
+        assertFalse("origin" in PocketJson.encodeToString<SessionLive>(SessionLive("c1", "/x", "sid")))
+        // an OLD daemon's frame (no origin key) decodes to null — no label rendered
+        val legacy = """{"convoId":"c3","workdir":"/z","sessionId":"sid3"}"""
+        assertEquals(null, PocketJson.decodeFromString<SessionLive>(legacy).origin)
+
+        // ActiveSession.origin — the project list's live row label, same four-direction contract
+        val row = ActiveSession("s1", "review MR", executing = true, origin = "feishu-bot")
+        assertEquals(row, PocketJson.decodeFromString<ActiveSession>(PocketJson.encodeToString(row)))
+        assertFalse("origin" in PocketJson.encodeToString(ActiveSession("s1")))
+        assertEquals(null, PocketJson.decodeFromString<ActiveSession>("""{"sessionId":"s1"}""").origin)
+    }
+
+    @Test
+    fun pairRedeem_headless_roundtrips_and_old_shapes_default_false() {
+        // issue #91: the REST redeem body — a bridge declares itself headless
+        val headless = PairRedeem("tkt", "pub", headless = true)
+        val hj = PocketJson.encodeToString(headless)
+        assertTrue("\"headless\":true" in hj, hj)
+        assertEquals(headless, PocketJson.decodeFromString<PairRedeem>(hj))
+        // an OLD app's redeem (no headless key) decodes as an interactive device on a NEW relay
+        assertEquals(PairRedeem("tkt", "pub"), PocketJson.decodeFromString<PairRedeem>("""{"ticket":"tkt","devicePubKey":"pub"}"""))
+        // an OLD relay skips the unknown key the usual ignoreUnknownKeys way — pin the skip shape
+        // (kotlin has no "old decoder" here; the unknown-key tolerance test above covers the mechanism)
+        assertTrue("\"headless\":false" in PocketJson.encodeToString(PairRedeem("tkt", "pub")), "encodeDefaults keeps the flag explicit")
+
+        // DaemonHello.protoV: a NEW daemon announces PROTO_V_HEADLESS; an old relay ignores the value
+        val hello = DaemonHello("acct", "edpub", protoV = PROTO_V_HEADLESS)
+        val hjson = PocketJson.encodeToString(Envelope(id = "h1", ts = 0, to = Route.RELAY, body = hello))
+        assertTrue("\"protoV\":2" in hjson, hjson)
+        assertEquals(hello, PocketJson.decodeFromString<Envelope>(hjson).body)
+        // an OLD daemon's hello (no protoV key) decodes as 1 — the relay must treat it as pre-headless
+        val oldHello = """{"id":"h2","ts":0,"to":"RELAY","body":{"t":"pocket/daemon.hello","accountId":"a","ed25519Pub":"p"}}"""
+        assertEquals(1, (PocketJson.decodeFromString<Envelope>(oldHello).body as DaemonHello).protoV)
+    }
+
+    @Test
+    fun notifyPush_urgent_roundtrips_and_old_frames_default_false() {
+        // issue #91: a bridge-approval push rides the urgent flag so the relay delivers it even with a
+        // phone attached elsewhere
+        val urgent = Envelope(id = "n1", ts = 0, to = Route.RELAY, body = NotifyPush("Approval needed", "Run command waiting", workdir = "/w", sessionId = "s", urgent = true))
+        val json = PocketJson.encodeToString(urgent)
+        assertTrue("\"urgent\":true" in json, json)
+        assertEquals(urgent, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's push (no urgent key) decodes to false — the ordinary deviceCount==0 gate applies
+        val old = """{"id":"n2","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b"}}"""
+        assertEquals(NotifyPush("t", "b"), PocketJson.decodeFromString<Envelope>(old).body as NotifyPush)
     }
 }

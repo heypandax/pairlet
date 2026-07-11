@@ -1,10 +1,12 @@
 package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.DaemonCore
+import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Attached
+import dev.ccpocket.protocol.PROTO_V_HEADLESS
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.Challenge
 import dev.ccpocket.protocol.DaemonAuth
@@ -87,6 +89,19 @@ class RelayClient(
     /** Loopback diagnostics (`pair`/`status`): is a relay session currently attached… */
     val attached: Boolean get() = dataOut != null
 
+    /** The headless-bridge authority (issue #91) — PairLoopback serves list/revoke/mint from it. */
+    val bridges: dev.ccpocket.daemon.bridge.BridgeRegistry get() = sessions.bridges
+
+    /** True while an interactive pairing ticket could still be redeemed (headless mint must wait). */
+    fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
+
+    /** Revoke a bridge credential: prune locally NOW (the security anchor — its handshake key dies with
+     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed. */
+    suspend fun revokeBridge(deviceId: String) {
+        sessions.onDeviceRevoked(deviceId)
+        controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
+    }
+
     /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
     suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
 
@@ -103,6 +118,22 @@ class RelayClient(
                     body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",
                     workdir = workdir.toString(),
                     sessionId = sessionId,
+                ),
+            )
+        }
+        // issue #91: a BRIDGE conversation's permission ask can't reach the bridge (egress whitelist) —
+        // push the owner instead. Deliberately NOT gated on peerOnline: the phone being online does not
+        // mean it is attached to the bridge's conversation (unlike TurnDone, which an attached client
+        // already received on the data plane). The relay still suppresses the push while any interactive
+        // device socket is live, so an in-app owner isn't double-alerted.
+        core.registry.askPushHook = AskPushHook { workdir, sessionId, origin, tool ->
+            if (core.prefs.pushEnabled) controlOutbox.send(
+                NotifyPush(
+                    title = "Approval needed — $origin",
+                    body = "${workdir.fileName ?: "session"}: $tool is waiting for your decision",
+                    workdir = workdir.toString(),
+                    sessionId = sessionId,
+                    urgent = true, // deliver even if a phone is attached elsewhere — the ask isn't on its data plane
                 ),
             )
         }
@@ -145,11 +176,15 @@ class RelayClient(
         controlOutbox.send(NotifyPush(title = title, body = body, workdir = "", sessionId = null))
     }
 
-    /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK. */
-    suspend fun mintTicket(): PairTicket? {
-        controlOutbox.send(PairBegin(identity.e2ePubB64)) // relay needs our E2E pub to serve the code path
+    /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK.
+     *  [headless] mints a BRIDGE ticket (issue #91): it skips the interactive-mint exclusion stamp so
+     *  only real phone pairings block a headless mint — the caller records the intent right after. */
+    suspend fun mintTicket(headless: Boolean = false): PairTicket? {
+        // relay needs our E2E pub to serve the code path; headless is the authoritative bridge marker the
+        // relay stamps onto the ticket (issue #91) so a lying redeem can't dodge presence/push/replay
+        controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless))
         return withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() }
-            ?.also { sessions.onMintedTicket(it.ticket) }
+            ?.also { sessions.onMintedTicket(it.ticket, headless) }
     }
 
     private suspend fun connectOnce() {
@@ -220,7 +255,9 @@ class RelayClient(
 
     /** DaemonHello -> Challenge -> DaemonAuth -> Attached. Throws on rejection (caller retries). */
     private suspend fun DefaultClientWebSocketSession.authenticate() {
-        outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64))))
+        // protoV = PROTO_V_HEADLESS: tells the relay we understand headless bridge devices, so it may
+        // replay their DevicePaired rows to us (it withholds them from older daemons — issue #91)
+        outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64, protoV = PROTO_V_HEADLESS))))
         val challenge = nextControl() as? Challenge ?: error("expected challenge")
         outgoing.send(WsFrame.Text(controlText(DaemonAuth(identity.signChallenge(challenge.nonce)))))
         when (val r = nextControl()) {

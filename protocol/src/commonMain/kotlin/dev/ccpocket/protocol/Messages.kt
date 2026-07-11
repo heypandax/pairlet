@@ -343,6 +343,10 @@ data class SessionLive(
     // the resumed transcript's tail) — the session is likely past its context window and every send just
     // bloats the transcript (issue #65). Clients warn + gate the next send; old clients ignore the field.
     val degraded: Boolean = false,
+    // The external trigger source that opened this conversation — the bridge credential's name (issue #91,
+    // e.g. "feishu-bot"), so clients can label it "via feishu-bot". Null = opened by an interactive
+    // device (today's behavior) or an older daemon; old clients ignore the field.
+    val origin: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -659,6 +663,12 @@ enum class Role {
 @SerialName("pocket/daemon.hello")
 data class DaemonHello(val accountId: String, val ed25519Pub: String, val protoV: Int = 1) : ToRelay
 
+/** The [DaemonHello.protoV] from which a daemon understands headless bridge devices (issue #91).
+ *  The relay replays a headless [DevicePaired] ONLY to daemons at or above this version: an older
+ *  daemon has no bridges store, would file the announced key into its full-power device allow-list,
+ *  and a bridge credential would silently escalate to a complete device on downgrade. */
+const val PROTO_V_HEADLESS: Int = 2
+
 /** relay -> daemon: a single-use nonce to sign (bound to this socket, short TTL). */
 @Serializable
 @SerialName("pocket/challenge")
@@ -691,10 +701,15 @@ data class AuthError(val code: String, val message: String? = null) : ToRelay
 // ---- pairing (only an authenticated daemon may mint) ----
 
 /** daemon -> relay: mint a short-lived, single-use pairing ticket. Carries the daemon's E2E public
- *  key so the relay can serve it to a phone that pairs by short code (the QR path keeps it out-of-band). */
+ *  key so the relay can serve it to a phone that pairs by short code (the QR path keeps it out-of-band).
+ *  [headless] (issue #91) is the AUTHORITATIVE bridge marker: the MINTING daemon knows whether it is
+ *  issuing a bridge ticket, so the relay stamps the flag onto the ticket and later onto the redeemed
+ *  device — never trusting the redeeming client's self-declared [PairRedeem.headless]. Old daemons omit
+ *  it (mint a phone ticket, as before); old relays ignore it (the device then rides PairRedeem.headless,
+ *  which is why that field remains). */
 @Serializable
 @SerialName("pocket/pair.begin")
-data class PairBegin(val e2ePub: String) : ToRelay
+data class PairBegin(val e2ePub: String, val headless: Boolean = false) : ToRelay
 
 /** relay -> daemon: the raw ticket (for the QR) plus a short 6-digit code to type on the phone. */
 @Serializable
@@ -764,13 +779,25 @@ data class NotifyPush(
     val body: String,
     val workdir: String? = null,
     val sessionId: String? = null,
+    // issue #91: an [urgent] notify (a bridge conversation needs the OWNER's approval) is pushed even
+    // when an interactive device socket is live — unlike an ordinary turn-complete, the ask is NOT on
+    // the data plane of whatever conversation that phone is viewing, so suppressing it would strand the
+    // approval until it times out to deny. Old relays ignore the field (they gate on deviceCount==0 as
+    // before → an online-but-elsewhere phone misses it, degrading to the timeout).
+    val urgent: Boolean = false,
 ) : ToRelay
 
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----
 
-/** device -> relay (HTTP body): redeem a scanned ticket, registering its X25519 static pubkey. */
+/** device -> relay (HTTP body): redeem a scanned ticket, registering its X25519 static pubkey.
+ *  [headless] is a LEGACY / fallback hint (issue #91): a NEW relay ignores it and derives the
+ *  authoritative bridge marker from the TICKET (stamped by the minting daemon via [PairBegin.headless]),
+ *  so a client that redeems a bridge ticket while lying `headless=false` cannot escape the relay-side
+ *  presence/push/replay handling. The field is only consulted by an OLD relay that predates ticket-side
+ *  marking. Either way the daemon enforces the capability restriction independently, anchored to the
+ *  pairing ticket. */
 @Serializable
-data class PairRedeem(val ticket: String, val devicePubKey: String)
+data class PairRedeem(val ticket: String, val devicePubKey: String, val headless: Boolean = false)
 
 /** relay -> device (HTTP body): the issued device credential + the account it is bound to. */
 @Serializable

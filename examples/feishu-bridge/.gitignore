@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+bridge-credential.json
+.pocket-device.json

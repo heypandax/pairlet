@@ -933,7 +933,13 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
             )
         }
         Text(
-            buildString { append(e.name); e.gitBranch?.let { append(" · ⑂ ").append(it) } },
+            buildString {
+                append(e.name)
+                e.gitBranch?.let { append(" · ⑂ ").append(it) }
+                // a bridge-opened session says so in the list (issue #91): the owner sees at a glance
+                // that an IM bot, not a person, is driving it
+                liveOrigin(e)?.let { append(" · via ").append(it) }
+            },
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
             modifier = Modifier.padding(top = 4.dp),
         )
@@ -1160,6 +1166,12 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
                         Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1)
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
+                        // external trigger source (issue #91): a bridge-opened session says so — the owner
+                        // should know an IM bot, not a person, is driving this conversation
+                        repo.sessionOrigin.value?.let { origin ->
+                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
+                            Text("via $origin", color = Tok.warn, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 if (!repo.observing.value) {
