@@ -25,6 +25,9 @@ import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -395,8 +398,17 @@ class SessionRegistry(
     suspend fun closeAll() {
         val all = mutex.withLock { convos.values.toList().also { convos.clear() } }
         val obs = mutex.withLock { observes.values.toList().also { observes.clear() } }
-        all.forEach { it.close() }
-        obs.forEach { it.close() }
+        // Close in parallel. The daemon-shutdown hook (Main.kt / DaemonServer.kt) runs this, and each
+        // Conversation.close can spend AgentProcess's bounded EOF->SIGTERM->SIGKILL grace on a wedged
+        // child (issue #101). Serialised, N wedged sessions would sum past launchd/systemd's stop
+        // timeout and get the daemon SIGKILLed mid-flush — the very transcript loss #101 fixes. So the
+        // per-session grace stays bounded AND the total stays ~one session's budget, not N.
+        // runCatching per close so a single failure (or the scope being cancelled) can't abandon the
+        // remaining reaps.
+        coroutineScope {
+            (all.map { async { runCatching { it.close() } } } +
+                obs.map { async { runCatching { it.close() } } }).awaitAll()
+        }
     }
 
     private suspend fun get(id: String): Conversation? = mutex.withLock { convos[id] }
