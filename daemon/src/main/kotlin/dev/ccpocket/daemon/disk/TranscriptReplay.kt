@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.disk
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -74,6 +75,12 @@ object TranscriptReplay {
                         val label = listOfNotNull(input.str("subagent_type"), input.str("description"))
                             .joinToString(": ").ifBlank { "sub-agent" }
                         items += HistoryMessage(ChatRole.TOOL, label.take(maxTextLen), tool = name) to block.str("id")
+                    } else if (isWorkflowTool(name)) {
+                        // Workflow run card (issue #106): keyed like a sub-agent so the launch ack's
+                        // tool_result can patch in the run id (the separately-replayed WorkflowUpdate
+                        // then binds the full progress tree to this row)
+                        val label = input.str("description")?.ifBlank { null } ?: "workflow"
+                        items += HistoryMessage(ChatRole.TOOL, label.take(maxTextLen), tool = name) to block.str("id")
                     } else {
                         items += HistoryMessage(
                             ChatRole.TOOL,
@@ -87,10 +94,14 @@ object TranscriptReplay {
         return items
     }
 
-    /** Patch a sub-agent card with its outcome + report when the main-chain tool_result shows up. */
+    /** Patch a sub-agent/workflow card with its outcome when the main-chain tool_result shows up.
+     *  A Workflow launch's record also carries a root-level `toolUseResult {taskType:"local_workflow",
+     *  runId}` — that run id binds the card to its separately-replayed [WorkflowFiles] run (#106). */
     private fun attachSubagentResults(obj: JsonObject, out: ArrayList<HistoryMessage>, taskIdx: HashMap<String, Int>) {
         if (taskIdx.isEmpty()) return
         val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
+        val workflowRunId = (obj["toolUseResult"] as? JsonObject)
+            ?.takeIf { it.str("taskType") == "local_workflow" }?.str("runId")
         for (el in content) {
             val block = el as? JsonObject ?: continue
             if (block.str("type") != "tool_result") continue
@@ -99,6 +110,7 @@ object TranscriptReplay {
             out[idx] = prev.copy(
                 ok = (block["is_error"] as? JsonPrimitive)?.booleanOrNull != true,
                 output = subagentReport(toolResultText(block["content"])),
+                workflowRunId = workflowRunId ?: prev.workflowRunId,
             )
         }
     }

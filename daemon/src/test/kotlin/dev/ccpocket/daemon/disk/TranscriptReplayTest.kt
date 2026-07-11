@@ -90,4 +90,41 @@ class TranscriptReplayTest {
         assertEquals("No response requested.", msgs[1].text)
         assertTrue(!msgs[3].error) // the real reply
     }
+    @Test
+    fun workflow_tool_row_gets_its_run_id_from_the_launch_acks_toolUseResult() {
+        // records mirror a real probe run (claude 2.1.206): the Workflow tool_use, then the launch
+        // ack whose ROOT-level toolUseResult carries the run id — the only place it appears
+        val f = tmpFile("wf.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01Ly","name":"Workflow","input":{"script":"export const meta = …","description":"probe"}}]}}""",
+                """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01Ly","type":"tool_result","content":"Workflow launched in background. Task ID: wvw3rra3y"}]},"toolUseResult":{"status":"async_launched","taskId":"wvw3rra3y","taskType":"local_workflow","workflowName":"probe-mini","runId":"wf_03737500-658","summary":"probe minimal workflow"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"launched"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(2, msgs.size) // the tool row + "launched" (the ack user record is not a real turn)
+        val card = msgs[0]
+        assertEquals(ChatRole.TOOL, card.role)
+        assertEquals("Workflow", card.tool)
+        assertEquals("probe", card.text)                  // description, never 280 chars of script
+        assertEquals("wf_03737500-658", card.workflowRunId)
+        assertEquals(true, card.ok)
+    }
+
+    @Test
+    fun plain_task_tool_results_leave_workflowRunId_null() {
+        val f = tmpFile("task.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"subagent_type":"Explore","description":"scan"}}]}}""",
+                """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"report"}]},"toolUseResult":{"content":"report"}}""",
+            ).joinToString("\n"),
+        )
+        val card = TranscriptReplay.read(f).single()
+        assertEquals("Explore: scan", card.text)
+        assertEquals(null, card.workflowRunId)
+    }
 }

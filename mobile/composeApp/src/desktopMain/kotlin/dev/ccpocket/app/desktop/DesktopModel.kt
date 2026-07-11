@@ -182,6 +182,23 @@ interface DesktopModel {
     fun isPinned(sessionId: String): Boolean = pins.any { it.sessionId == sessionId }
     val pinsFull: Boolean get() = pins.size >= MAX_PINS
 
+    // ── workflow orchestration (issue #106): the docked right panel + chat-card binding ──
+    // Defaults keep the seed/demo model untouched; the live model delegates to the repository.
+    /** Runs for the active conversation, keyed by runId. */
+    val workflowRuns: Map<String, dev.ccpocket.protocol.WorkflowRun> get() = emptyMap()
+
+    /** Non-null = the ~360dp workflow panel is docked on this run (clicking the chat card docks it). */
+    val dockedWorkflowRunId: String? get() = null
+    fun openWorkflowPanel(runId: String) {}
+    fun closeWorkflowPanel() {}
+
+    /** The run a chat Workflow card binds to (live: tool_use id; replay: HistoryMessage run id). */
+    fun workflowRunFor(item: ChatItem.Tool): dev.ccpocket.protocol.WorkflowRun? = null
+
+    /** On-demand full prompt/return per agent, keyed "runId#index". */
+    val workflowAgentDetails: Map<String, dev.ccpocket.protocol.WorkflowAgentDetail> get() = emptyMap()
+    fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {}
+
     // fleet: the sidebar's machine groups, the attention queue, and the read-only watch pane
     val machines: List<DkMachine>
     val attention: List<DkAttention>

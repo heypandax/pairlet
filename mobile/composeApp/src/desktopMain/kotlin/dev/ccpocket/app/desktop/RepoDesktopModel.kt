@@ -216,6 +216,16 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
 
     override val watch: DkWatch? get() = null // needs a second live stream — multi-connection repo work
 
+    // ── workflow orchestration (issue #106): delegate to the repository; dock state is ui-local ──
+    override val workflowRuns: Map<String, dev.ccpocket.protocol.WorkflowRun> get() = repo.workflowRuns
+    override val dockedWorkflowRunId: String? get() = repo.viewedWorkflowRunId.value
+    override fun openWorkflowPanel(runId: String) = repo.openWorkflow(runId)
+    override fun closeWorkflowPanel() = repo.closeWorkflow()
+    override fun workflowRunFor(item: ChatItem.Tool): dev.ccpocket.protocol.WorkflowRun? = repo.workflowFor(item)
+    override val workflowAgentDetails: Map<String, dev.ccpocket.protocol.WorkflowAgentDetail> get() = repo.workflowAgentDetails
+    override fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) =
+        repo.fetchWorkflowAgentDetail(runId, agentIndex, agentId)
+
     override val projects: List<DkProject>
         get() = repo.directories.map { it.toDkProject() }
 

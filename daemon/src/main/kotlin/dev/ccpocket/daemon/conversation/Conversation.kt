@@ -7,7 +7,9 @@ import dev.ccpocket.daemon.agent.AgentProcess
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.agent.PermissionBridge
 import dev.ccpocket.daemon.agent.ToolMetadata
+import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.SlashCommandScanner
+import dev.ccpocket.daemon.disk.WorkflowFiles
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AssistantChunk
@@ -26,13 +28,17 @@ import dev.ccpocket.protocol.TokenUsage
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.TurnDone
+import dev.ccpocket.protocol.WorkflowAgentDetail
+import dev.ccpocket.protocol.WorkflowUpdate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -109,6 +115,10 @@ class Conversation(
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
     // jobs indicator and keeps the session "busy" (un-reapable) while anything is still running
     private val jobs = BackgroundJobRegistry()
+
+    // Workflow orchestration runs (issue #106) tracked from the same stream — the fan-out container
+    // the phone renders as a run card + progress tree. Pump-only, like `jobs` (no locking).
+    private val workflows = WorkflowTracker()
 
     // in-flight top-level sub-agent (Task/Agent) calls, keyed by tool_use id (issue #77). Drives the
     // phone's Task card: START on the tool_use, RESULT with the report on completion. `background`
@@ -304,6 +314,7 @@ class Conversation(
             if (resumeId != null) {
                 val history = backend.replayHistory(workdir.toString(), resumeId)
                 if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
+                replayWorkflowRuns(resumeId, sink)
             }
             emitCommands()
         }
@@ -318,6 +329,70 @@ class Conversation(
     private suspend fun emitJobs() {
         lastActivityMs = System.currentTimeMillis()
         sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+    }
+
+    /** Push one Workflow run's live snapshot (issue #106). Also counts as activity, like jobs. */
+    private suspend fun emitWorkflow(taskId: String) {
+        lastActivityMs = System.currentTimeMillis()
+        workflows.snapshotFor(taskId)?.let { sink.emit(WorkflowUpdate(convoId, it)) }
+    }
+
+    /** A settled run's manifest lands on disk ~right after task_updated — read it (briefly retried)
+     *  so the terminal card gains the final return + exact duration. Launched off the pump. */
+    private fun patchWorkflowFromManifest(taskId: String, runId: String?) {
+        if (runId == null) return
+        scope.launch {
+            var run: dev.ccpocket.protocol.WorkflowRun? = null
+            repeat(3) { attempt ->
+                if (run == null) {
+                    delay(700L * (attempt + 1))
+                    run = runCatching { WorkflowFiles.readRun(sessionDir() ?: return@launch, runId) }.getOrNull()
+                }
+            }
+            val manifest = run ?: return@launch
+            if (workflows.onManifest(taskId, manifest.runId, manifest.finalResult, manifest.durationMs, manifest.error)) {
+                workflows.snapshotWithFinal(taskId, manifest.finalResult)?.let { sink.emit(WorkflowUpdate(convoId, it)) }
+            }
+        }
+    }
+
+    /** Re-emit the finished Workflow runs recorded on disk for a resumed/observed session — the replay
+     *  sibling of the live [emitWorkflow] pushes (issue #106). Live (in-memory) runs win over their
+     *  manifest snapshot; missing manifests (killed mid-run before the CLI wrote one) just don't list. */
+    private suspend fun replayWorkflowRuns(resumeId: String, to: OutboundSink) {
+        val dir = ProjectPaths.dirFor(workdir.toString()).resolve(resumeId)
+        val runs = runCatching { WorkflowFiles.listRuns(dir) }.getOrNull().orEmpty()
+        if (runs.isEmpty()) return
+        val liveIds = workflows.snapshots().map { it.runId }.toSet()
+        for (run in runs) {
+            if (run.runId in liveIds) continue
+            runCatching { to.emit(WorkflowUpdate(convoId, run)) }
+        }
+    }
+
+    private fun sessionDir(): java.nio.file.Path? =
+        sessionId?.let { ProjectPaths.dirFor(workdir.toString()).resolve(it) }
+
+    /** The phone opened a workflow agent's detail sheet — read the full prompt/return off disk.
+     *  Tries the LIVE session dir first, then the opened resume id's: a fork mints a new sessionId
+     *  while replayed runs still live under the original transcript's directory. */
+    suspend fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {
+        var detail: WorkflowFiles.AgentDetail? = null
+        if (agentId != null) {
+            val root = ProjectPaths.dirFor(workdir.toString())
+            for (sid in listOfNotNull(sessionId, openedResumeId).distinct()) {
+                detail = runCatching { WorkflowFiles.readAgentDetail(root.resolve(sid), runId, agentId) }.getOrNull()
+                    ?.takeIf { it.prompt != null || it.result != null }
+                if (detail != null) break
+            }
+        }
+        sink.emit(
+            WorkflowAgentDetail(
+                convoId, runId, agentIndex,
+                prompt = detail?.prompt,
+                result = detail?.result,
+            ),
+        )
     }
 
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
@@ -503,6 +578,9 @@ class Conversation(
                             ev.name == "ExitPlanMode" || ev.name == "exit_plan_mode" -> ToolMetadata.of(ev.name, ev.input).preview
                             subagent -> listOfNotNull(ev.input.strField("subagent_type"), ev.input.strField("description"))
                                 .joinToString(": ").ifBlank { "sub-agent" }
+                            // a Workflow's input is the whole orchestration script — preview its description,
+                            // never 280 chars of raw source (issue #106)
+                            isWorkflowTool(ev.name) -> ev.input.strField("description")?.ifBlank { null } ?: "workflow"
                             else -> ev.input?.toString()?.take(280)
                         }
                         if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))
@@ -518,11 +596,31 @@ class Conversation(
                         if (ev.parentId == null) finishSubagentFromResult(ev)
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
                     }
-                    is AgentEvent.BackgroundTaskStarted ->
-                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, System.currentTimeMillis())) emitJobs()
+                    is AgentEvent.BackgroundTaskStarted -> {
+                        val now = System.currentTimeMillis()
+                        if (ev.taskType == "local_workflow" && workflows.onTaskStarted(ev.taskId, ev.toolUseId, ev.workflowName, now)) emitWorkflow(ev.taskId)
+                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, now)) emitJobs()
+                    }
                     is AgentEvent.BackgroundTaskUpdated -> {
                         finishSubagentFromTask(ev)
-                        if (jobs.onTaskUpdated(ev.taskId, ev.status, System.currentTimeMillis())) emitJobs()
+                        val now = System.currentTimeMillis()
+                        if (workflows.onTaskSettled(ev.taskId, ev.status, now)) {
+                            emitWorkflow(ev.taskId)
+                            // the manifest lands right after — patch in the final return/duration when it does
+                            patchWorkflowFromManifest(ev.taskId, workflows.snapshotFor(ev.taskId)?.runId?.takeIf { it.startsWith("wf_") })
+                        }
+                        if (jobs.onTaskUpdated(ev.taskId, ev.status, now)) emitJobs()
+                    }
+                    // Workflow orchestration (issue #106): the launch ack ties the chat card's tool_use to
+                    // the run id; progress snapshots re-emit the whole run (transitions only — the CLI
+                    // omits the array on pure activity ticks, so this is naturally coalesced)
+                    is AgentEvent.WorkflowLaunched -> {
+                        if (workflows.onLaunched(ev.toolUseId, ev.runId, ev.taskId, ev.workflowName, System.currentTimeMillis())) {
+                            ev.taskId?.let { emitWorkflow(it) }
+                        }
+                    }
+                    is AgentEvent.WorkflowProgress -> {
+                        if (workflows.onProgress(ev.taskId, ev.toolUseId, ev.items, System.currentTimeMillis())) emitWorkflow(ev.taskId)
                     }
                     is AgentEvent.AssistantUsage -> lastCallUsage = ev
                     // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
@@ -595,6 +693,8 @@ class Conversation(
             // real process exit before touching the file (intentional stops settle in stopProcess)
             executing = false // a dead process never delivers TurnResult
             p.awaitExit()
+            // workflows died with the process — settle them so no card pulses forever (#106)
+            for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
             backend.onProcessEnded(sessionId)
             if (healSessionLock(p)) return
             // carry the exit code + the agent's last stderr line: a --resume that dies before its first
@@ -659,6 +759,9 @@ class Conversation(
         if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
+        // re-show workflow runs: live (in-memory) ones first, then finished manifests off disk (#106)
+        for (run in workflows.snapshots()) runCatching { newSink.emit(WorkflowUpdate(convoId, run)) }
+        replayWorkflowRuns(sid, newSink)
         // A permission ask / question still awaiting a verdict is re-shown to the reconnecting device: it fired
         // while this phone was away (in plan mode the AskUserQuestion can land minutes after a premature `result`,
         // so the phone is often backgrounded — socket suspended — when the live frame goes out), and without this
@@ -856,6 +959,8 @@ class Conversation(
         proc = null
         bridge = null
         settleSubagents(includeBackground = true) // sub-agents died with the tree — stop their cards spinning
+        // workflows run INSIDE the CLI process — settle any still-running run as KILLED, not a forever-pulse (#106)
+        for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
         if (jobs.clear()) sink.emit(BackgroundJobs(convoId, emptyList())) // the killed process tree took its bg shells with it
         backend.onProcessEnded(sessionId)
     }

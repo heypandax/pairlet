@@ -16,6 +16,7 @@ import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.CancelTurn
+import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Directories
@@ -143,6 +144,9 @@ class RequestRouter(
             is CancelTurn -> registry.cancelTurn(frame)
             // task panel "stop" (issue #80): interrupt the agent's work for this job + settle its row killed
             is StopBackgroundJob -> registry.stopBackgroundJob(frame)
+            // workflow detail sheet (issue #106): read one agent's full prompt/return off disk —
+            // a transcript parse, so off the inbound loop like FetchUsage
+            is GetWorkflowAgentDetail -> scope.launch { registry.fetchWorkflowAgentDetail(frame) }
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)

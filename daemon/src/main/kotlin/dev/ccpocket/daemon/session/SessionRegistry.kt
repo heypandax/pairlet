@@ -12,6 +12,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AuthBlockReason
 import dev.ccpocket.protocol.AuthBlocker
 import dev.ccpocket.protocol.CancelTurn
+import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionMode
@@ -293,6 +294,10 @@ class SessionRegistry(
     suspend fun clearRule(c: ClearAllowRule) = get(c.convoId)?.clearAllowRule(c.rule) ?: Unit
     suspend fun cancelTurn(c: CancelTurn) = get(c.convoId)?.cancelTurn() ?: Unit
     suspend fun stopBackgroundJob(s: StopBackgroundJob) = get(s.convoId)?.stopBackgroundJob(s.jobId) ?: Unit
+
+    /** A workflow agent's detail sheet opened — the conversation reads the full prompt/return off disk (#106). */
+    suspend fun fetchWorkflowAgentDetail(f: GetWorkflowAgentDetail) =
+        get(f.convoId)?.fetchWorkflowAgentDetail(f.runId, f.agentIndex, f.agentId) ?: Unit
 
     /** Workdir of a live conversation — used by voice transcription for term injection. */
     suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir

@@ -163,7 +163,11 @@ class BackgroundJobRegistry {
     private fun kindOf(taskType: String?): JobKind {
         val t = taskType?.lowercase() ?: return JobKind.BASH_BACKGROUND
         return when {
-            "agent" in t || "task" in t -> JobKind.SUBAGENT
+            // a Workflow run ("local_workflow") is a fan-out of sub-agents — the SUBAGENT kind keeps
+            // old apps' job panels honest (it is agent work, not a shell) while new apps render the
+            // dedicated card from WorkflowUpdate; RUNNING here also keeps the session un-reapable
+            // for the whole run (issue #106)
+            "agent" in t || "task" in t || "workflow" in t -> JobKind.SUBAGENT
             "monitor" in t -> JobKind.MONITOR
             else -> JobKind.BASH_BACKGROUND
         }

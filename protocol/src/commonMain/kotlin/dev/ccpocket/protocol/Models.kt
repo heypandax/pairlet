@@ -272,3 +272,106 @@ data class AskQuestion(
     val multiSelect: Boolean = false,
     val options: List<AskOption> = emptyList(),
 )
+
+// ── Workflow orchestration (issue #106) ─────────────────────────────────────────────────────────
+// A Workflow tool call fans out to DOZENS of agents grouped into phases — an orchestration-level
+// run, not one more sub-agent. The daemon tracks it from the CLI's `system/task_progress` events
+// (whose `workflow_progress` array snapshots every agent) and, for finished historical runs, from
+// the on-disk manifest `<sessionDir>/workflows/<runId>.json` (written once, at completion —
+// probed on CLI 2.1.206).
+
+/**
+ * Lifecycle of ONE agent inside a Workflow run. Mapped daemon-side from the CLI's wire states
+ * (`start`/`progress`/`done`/`error`): a `start` with no startedAt is QUEUED, a started/progressing
+ * agent is RUNNING. Decoded tolerantly — a value only a newer daemon knows degrades to [UNKNOWN]
+ * instead of failing the whole [WorkflowUpdate] decode (which the runCatching at every decode site
+ * would silently drop — a card that just stops updating).
+ */
+@Serializable(with = WorkflowAgentStateSerializer::class)
+enum class WorkflowAgentState(internal val wire: String) {
+    QUEUED("queued"),
+    RUNNING("running"),
+    DONE("done"),
+    FAILED("failed"),
+
+    /** Decode fallback for a newer peer's value — render as a muted/indeterminate row. Never encoded. */
+    UNKNOWN("unknown"),
+}
+
+private object WorkflowAgentStateSerializer : KSerializer<WorkflowAgentState> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("WorkflowAgentState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: WorkflowAgentState) = encoder.encodeString(value.wire)
+    override fun deserialize(decoder: Decoder): WorkflowAgentState {
+        val s = decoder.decodeString()
+        return WorkflowAgentState.entries.firstOrNull { it.wire == s } ?: WorkflowAgentState.UNKNOWN
+    }
+}
+
+/** Terminal/live status of a whole Workflow run (the CLI task's own states + UNKNOWN fallback). */
+@Serializable(with = WorkflowRunStatusSerializer::class)
+enum class WorkflowRunStatus(internal val wire: String) {
+    RUNNING("running"),
+    COMPLETED("completed"),
+    FAILED("failed"),
+
+    /** Aborted mid-run (user kill / process death). */
+    KILLED("killed"),
+
+    /** Decode fallback for a newer peer's value. Never encoded. */
+    UNKNOWN("unknown"),
+}
+
+private object WorkflowRunStatusSerializer : KSerializer<WorkflowRunStatus> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("WorkflowRunStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: WorkflowRunStatus) = encoder.encodeString(value.wire)
+    override fun deserialize(decoder: Decoder): WorkflowRunStatus {
+        val s = decoder.decodeString()
+        return WorkflowRunStatus.entries.firstOrNull { it.wire == s } ?: WorkflowRunStatus.UNKNOWN
+    }
+}
+
+/** One declared phase of a Workflow run (the script's `meta.phases`, seeded by the CLI at launch;
+ *  `phase()` calls can add more mid-run). Phase STATUS is derived client-side from its agents. */
+@Serializable
+data class WorkflowPhaseInfo(val index: Int, val title: String)
+
+/**
+ * One agent of a Workflow run — a snapshot row, sized for the progress tree (previews are CLI-capped;
+ * the FULL prompt/result are fetched on demand via GetWorkflowAgentDetail when a row is opened).
+ */
+@Serializable
+data class WorkflowAgentSnap(
+    val index: Int,                    // 1-based agent() call index — stable identity within the run
+    val label: String,
+    val state: WorkflowAgentState,
+    val phaseIndex: Int? = null,       // groups the row under a phase; null = unphased (client groups as "Phase 0")
+    val queuedAt: Long? = null,
+    val startedAt: Long? = null,
+    val durationMs: Long? = null,
+    val error: String? = null,         // FAILED: first line renders as the row's danger caption
+    val resultPreview: String? = null, // one-line return preview (journal row)
+    val promptPreview: String? = null, // collapsed Prompt block seed (detail sheet fetches the full text)
+    val lastToolName: String? = null,  // RUNNING: current activity, e.g. the tool it's inside
+    val agentId: String? = null,       // key for on-demand detail reads (journal/agent-<id>.jsonl)
+    val model: String? = null,
+    val cached: Boolean = false,       // resume replayed this result from the journal cache — no new run
+)
+
+/**
+ * One Workflow run — the orchestration container the phone/desktop render as a chat card +
+ * progress tree. Pushed whole on every state transition ([WorkflowUpdate]); agent identity is
+ * (runId, index) so clients reconcile in place.
+ */
+@Serializable
+data class WorkflowRun(
+    val runId: String,                 // "wf_…" — also the on-disk directory name
+    val name: String,                  // meta.name, e.g. "release-pipeline"
+    val status: WorkflowRunStatus,
+    val toolUseId: String? = null,     // originating Workflow tool_use — correlates the chat card (live)
+    val phases: List<WorkflowPhaseInfo> = emptyList(),
+    val agents: List<WorkflowAgentSnap> = emptyList(),
+    val startedAt: Long = 0,
+    val durationMs: Long? = null,      // terminal only
+    val finalResult: String? = null,   // terminal: the script's return value (daemon-capped preview)
+    val error: String? = null,         // FAILED: the script/run error
+)

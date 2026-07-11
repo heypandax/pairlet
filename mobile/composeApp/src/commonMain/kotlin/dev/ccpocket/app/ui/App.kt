@@ -135,6 +135,7 @@ import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
@@ -1082,6 +1083,10 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
         return
     }
+    if (repo.viewedWorkflowRunId.value != null) { // workflow run view (issue #106): full-screen tree/journal over the chat
+        WorkflowRunScreen(repo) { repo.closeWorkflow() }
+        return
+    }
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
     val listState = rememberLazyListState()
@@ -1207,7 +1212,11 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            MessageItem(m) { imgs, i -> viewer = imgs to i }
+                            MessageItem(
+                                m,
+                                workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
+                                onOpenWorkflow = repo::openWorkflow,
+                            ) { imgs, i -> viewer = imgs to i }
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                     PulseDot(Tok.warn, size = 5.dp)
@@ -1514,7 +1523,13 @@ private fun FileCompletionMenu(
 }
 
 @Composable
-private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> }) {
+private fun MessageItem(
+    m: ChatItem,
+    // Workflow run bound to a Workflow tool card (issue #106) — null with an old daemon or for other tools
+    workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
+    onOpenWorkflow: (String) -> Unit = {},
+    onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
+) {
     when (m) {
         // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
         // rail + warm tint mark "what I said" as a quote; no label, assistant flow untouched
@@ -1544,7 +1559,11 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
             }
         }
         is ChatItem.Thinking -> ThinkingRow(m)
-        is ChatItem.Tool -> if (isSubagentTool(m.tool)) SubagentCard(m) else {
+        // a Workflow tool call with a bound run renders the orchestration card (issue #106);
+        // without one (old daemon / run trimmed) it falls through to the plain tool row
+        is ChatItem.Tool -> if (isWorkflowTool(m.tool) && workflowRun != null) {
+            WorkflowCard(workflowRun) { onOpenWorkflow(workflowRun.runId) }
+        } else if (isSubagentTool(m.tool)) SubagentCard(m) else {
             val isPlan = m.tool == "ExitPlanMode" || m.tool == "exit_plan_mode"
             var expanded by remember(m) { mutableStateOf(isPlan) } // plans read open by default (issue #10)
             Column(

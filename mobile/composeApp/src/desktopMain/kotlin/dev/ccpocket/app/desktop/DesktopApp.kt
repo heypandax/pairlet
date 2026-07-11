@@ -76,6 +76,13 @@ fun DesktopApp(model: DesktopModel) {
                 Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
                 WatchPane(watch, model, Modifier.weight(1f))
             }
+            // workflow orchestration (issue #106): a persistent ~360dp docked panel — the chat stays
+            // fully usable beside it (docked beats overlay, per the workflow-view handoff)
+            val dockedWf = model.dockedWorkflowRunId?.let { model.workflowRuns[it] }
+            if (dockedWf != null) {
+                Box(Modifier.width(1.dp).fillMaxHeight().background(Tok.hair))
+                WorkflowPanel(model, dockedWf)
+            }
         }
         if (model.showNewSession) {
             // anchored under the sidebar's New-session row (header 48 + row 32)

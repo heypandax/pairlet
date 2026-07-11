@@ -379,6 +379,10 @@ data class ToolEvent(
  *  two sides can't drift on the alias list. */
 fun isSubagentTool(tool: String): Boolean = tool == "Task" || tool == "Agent"
 
+/** The CLI's Workflow orchestration tool (one call fans out to dozens of agents — issue #106).
+ *  Shared daemon+clients so the card dispatch and the tracker can't drift. */
+fun isWorkflowTool(tool: String): Boolean = tool == "Workflow"
+
 /** A permission prompt the phone must resolve. askId == Anthropic request_id. */
 @Serializable
 @SerialName("pocket/ask")
@@ -506,6 +510,10 @@ data class HistoryMessage(
     val error: Boolean = false,
     val ok: Boolean? = null,
     val output: String? = null,
+    /** A Workflow TOOL row's run id (issue #106) — lets the replayed card bind to the
+     *  [WorkflowRun] pushed separately via [WorkflowUpdate]. Trailing optional both ways:
+     *  old daemons omit it (the card renders as a plain tool row), old clients ignore it. */
+    val workflowRunId: String? = null,
 )
 
 /** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
@@ -543,6 +551,44 @@ data class CommandList(val convoId: String, val commands: List<SlashCommand>) : 
 @Serializable
 @SerialName("pocket/jobs")
 data class BackgroundJobs(val convoId: String, val jobs: List<BackgroundJob>) : ToPhone
+
+/**
+ * daemon -> phone: one Workflow run's full snapshot (issue #106), pushed on every state transition
+ * (agent started/finished/failed, phase reached, run settled) and replayed once per finished run
+ * when a session is resumed/reattached. Clients key runs by [WorkflowRun.runId] and reconcile
+ * agents by index. Old phones drop the unknown frame — the chat keeps its plain Workflow tool row.
+ */
+@Serializable
+@SerialName("pocket/workflow")
+data class WorkflowUpdate(val convoId: String, val run: WorkflowRun) : ToPhone
+
+/**
+ * phone -> daemon: fetch ONE workflow agent's full prompt + return for the detail sheet — snapshots
+ * only carry CLI-capped previews. The daemon reads the run's on-disk journal/transcript
+ * (`subagents/workflows/<runId>/`) and answers with [WorkflowAgentDetail]. Old daemons drop the
+ * unknown frame; the client's sheet then keeps showing the previews it already has.
+ */
+@Serializable
+@SerialName("pocket/workflow.agent.fetch")
+data class GetWorkflowAgentDetail(
+    val convoId: String,
+    val runId: String,
+    val agentIndex: Int,
+    val agentId: String? = null,
+) : ToDaemon
+
+/** daemon -> phone: the full prompt/result text for one workflow agent ([GetWorkflowAgentDetail]).
+ *  Either side may be null when the on-disk record is gone (run dir cleaned) — the sheet keeps its
+ *  previews. [result] is the agent's return value (pretty-printed when it was structured JSON). */
+@Serializable
+@SerialName("pocket/workflow.agent")
+data class WorkflowAgentDetail(
+    val convoId: String,
+    val runId: String,
+    val agentIndex: Int,
+    val prompt: String? = null,
+    val result: String? = null,
+) : ToPhone
 
 /** daemon -> phone: result of transcribing a voice capture. ok=false carries a user-facing [error]. */
 @Serializable

@@ -99,6 +99,7 @@ import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
 import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
+import dev.ccpocket.app.ui.WorkflowCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
@@ -116,6 +117,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import dev.ccpocket.protocol.SlashCommand
 
 @Composable
@@ -168,7 +170,13 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     itemsIndexed(model.messages) { i, m ->
-                        CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered) }
+                        CenteredStreamRow {
+                            MessageRow(
+                                m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
+                                onOpenWorkflow = model::openWorkflowPanel,
+                            )
+                        }
                     }
                     item(key = "tail") {
                         CenteredStreamRow {
@@ -321,7 +329,14 @@ private fun ChatSubHeader(model: DesktopModel) {
 }
 
 @Composable
-private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boolean = false) {
+private fun MessageRow(
+    item: ChatItem,
+    isLast: Boolean = false,
+    undelivered: Boolean = false,
+    // Workflow run bound to a Workflow tool card (issue #106); clicking docks the right panel
+    workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
+    onOpenWorkflow: (String) -> Unit = {},
+) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
             Column {
@@ -371,7 +386,11 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
         // sub-agent (Task/Agent) runs get the shared dense card (issue #77 / chat-cards handoff):
         // status tile + live progress line + hover-revealed report. Plain tools keep the flat ✓ row.
         is ChatItem.Tool ->
-            if (isSubagentTool(item.tool)) SubagentCard(item, dense = true)
+            // a Workflow run gets the dense orchestration card that docks the right panel (issue #106);
+            // without a bound run (old daemon) it stays the flat tool row
+            if (isWorkflowTool(item.tool) && workflowRun != null) {
+                WorkflowCard(workflowRun, dense = true) { onOpenWorkflow(workflowRun.runId) }
+            } else if (isSubagentTool(item.tool)) SubagentCard(item, dense = true)
             else ToolRow(item.tool, item.preview, if (item.ok == false) ToolStatus.FAIL else ToolStatus.OK)
         is ChatItem.Sys -> Text(
             pathLinked(item.text), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,

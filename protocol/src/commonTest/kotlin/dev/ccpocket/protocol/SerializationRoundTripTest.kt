@@ -662,4 +662,84 @@ class SerializationRoundTripTest {
         assertTrue(isSubagentTool("Agent"))
         assertFalse(isSubagentTool("Bash"))
     }
+
+    @Test
+    fun workflowUpdate_roundtrips_and_null_previews_are_omitted() {
+        val env = Envelope(
+            id = "w1", ts = 0,
+            body = WorkflowUpdate(
+                convoId = "c1",
+                run = WorkflowRun(
+                    runId = "wf_8f3a21c0-abc",
+                    name = "release-pipeline",
+                    status = WorkflowRunStatus.RUNNING,
+                    toolUseId = "toolu_1",
+                    phases = listOf(WorkflowPhaseInfo(1, "resolve"), WorkflowPhaseInfo(2, "analyze")),
+                    agents = listOf(
+                        WorkflowAgentSnap(1, "scan module-auth", WorkflowAgentState.RUNNING, phaseIndex = 2, startedAt = 5, lastToolName = "Grep"),
+                        WorkflowAgentSnap(2, "scan module-core", WorkflowAgentState.DONE, phaseIndex = 2, durationMs = 72_000, resultPreview = "no issues"),
+                        WorkflowAgentSnap(3, "test auth.expiry", WorkflowAgentState.FAILED, phaseIndex = 2, error = "AssertionError: expected refresh"),
+                        WorkflowAgentSnap(4, "package dist", WorkflowAgentState.QUEUED, phaseIndex = 2, queuedAt = 9),
+                    ),
+                    startedAt = 1,
+                ),
+            ),
+        )
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/workflow\"" in json, json)
+        assertTrue("\"status\":\"running\"" in json, json)
+        assertTrue("\"state\":\"queued\"" in json, json)
+        assertTrue("\"state\":\"failed\"" in json, json)
+        assertFalse("finalResult" in json, json)  // explicitNulls=false — terminal-only fields stay off the live frame
+        assertFalse("\"durationMs\":null" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun workflow_future_enum_values_degrade_to_unknown_not_a_dropped_frame() {
+        // a state/status only a NEWER daemon knows must not fail the decode — runCatching at the
+        // client's decode site would silently drop the frame and the card would freeze mid-run
+        val future = """{"id":"w2","ts":0,"to":"PEER","body":{"t":"pocket/workflow","convoId":"c1","run":{
+            "runId":"wf_1","name":"n","status":"paused","agents":[
+            {"index":1,"label":"a","state":"skipped"}]}}}"""
+        val run = (PocketJson.decodeFromString<Envelope>(future).body as WorkflowUpdate).run
+        assertEquals(WorkflowRunStatus.UNKNOWN, run.status)
+        assertEquals(WorkflowAgentState.UNKNOWN, run.agents.single().state)
+    }
+
+    @Test
+    fun workflowAgentDetail_request_response_roundtrip_and_old_frames_default() {
+        val req = Envelope(id = "w3", ts = 0, body = GetWorkflowAgentDetail("c1", "wf_1", 7, agentId = "a1"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/workflow.agent.fetch\"" in reqJson, reqJson)
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+
+        val resp = Envelope(id = "w4", ts = 0, body = WorkflowAgentDetail("c1", "wf_1", 7, prompt = "Investigate…", result = "patched"))
+        assertEquals(resp, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(resp)))
+
+        // a daemon that predates optional agentId still decodes our request minus the hint
+        val oldReq = """{"id":"w5","ts":0,"to":"PEER","body":{"t":"pocket/workflow.agent.fetch","convoId":"c1","runId":"wf_1","agentIndex":7}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(oldReq).body as GetWorkflowAgentDetail).agentId)
+    }
+
+    @Test
+    fun historyMessage_workflowRunId_trails_and_workflow_tool_predicate() {
+        // new daemon → new app: the Workflow tool row carries its run id for card binding
+        val row = HistoryMessage(ChatRole.TOOL, "probe", tool = "Workflow", ok = true, workflowRunId = "wf_1")
+        assertEquals(row, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(row)))
+
+        // old daemon's row (no key) → null; the card renders as a plain tool row
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"tool","text":"x","tool":"Workflow"}""")
+        assertEquals(null, legacy.workflowRunId)
+
+        // old client skips the unknown key without throwing
+        val skipped = PocketJson.decodeFromString<HistoryMessage>(
+            """{"role":"tool","text":"x","tool":"Workflow","workflowRunId":"wf_9","futureKey":1}""",
+        )
+        assertEquals("wf_9", skipped.workflowRunId)
+
+        assertTrue(isWorkflowTool("Workflow"))
+        assertFalse(isWorkflowTool("Task"))
+        assertFalse(isWorkflowTool("Agent"))
+    }
 }
