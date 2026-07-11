@@ -274,7 +274,14 @@ fun main() = application {
                     FullscreenExitStrip(onExit = toggleFullscreen)
                 }
                 Box(Modifier.fillMaxWidth().weight(1f)) {
-                    if (connected) DesktopApp(model) else ConnectPanel(repo)
+                    // the tray's "Open cc-pocket" / row-jump raise the window (issue #111): un-minimize, then
+                    // bring the AWT window to front and focus it — a real menu-bar action once the tray leaves
+                    // the title bar, and harmless (already-frontmost) while it lives there.
+                    if (connected) DesktopApp(model, onActivateWindow = {
+                        windowState.isMinimized = false
+                        window.toFront()
+                        window.requestFocus()
+                    }) else ConnectPanel(repo)
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
                     if (model.showAddComputer) AddComputerModal(repo) { model.showAddComputer = false }
                 }

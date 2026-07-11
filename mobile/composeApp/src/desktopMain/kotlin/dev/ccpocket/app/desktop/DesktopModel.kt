@@ -119,6 +119,10 @@ data class DkAttention(
     val preview: String,
     val seconds: Int?, // countdown when the deadline is known (seed); null = don't invent one (live)
     val live: Boolean, // resolvable through the live connection
+    // an AskUserQuestion, not a permission gate (issue #111): its answer must ride the ALLOW as an answers
+    // map — a bare ALLOW reads "did not answer" to the CLI — so summary surfaces (the tray) route these to
+    // the session instead of offering a Deny/Allow that would silently drop the user's choice
+    val question: Boolean = false,
 )
 
 /** What the ⌘K palette shows: everything, or just project rows ("All projects…"). */
