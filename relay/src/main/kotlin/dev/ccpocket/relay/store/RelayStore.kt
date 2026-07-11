@@ -54,6 +54,10 @@ interface RelayStore {
     // ---- push notifications ----
     /** Store (or clear, when [token] is blank) a device's push token + platform for offline wake-ups. */
     suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long)
+    /** Drop a device's push token after the gateway reported it permanently dead (APNs 410 / FCM 404) —
+     *  but only if it still equals [platform]/[token], so a device that re-registered a fresh token in the
+     *  meantime keeps it. Returns true if a row was actually cleared. */
+    suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean
     /** Registered, non-revoked push targets for an account (devices that currently hold a token). */
     suspend fun pushTargets(accountId: String): List<PushTarget>
 

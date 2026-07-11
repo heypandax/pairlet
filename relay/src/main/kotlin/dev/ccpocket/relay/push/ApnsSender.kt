@@ -48,7 +48,7 @@ class ApnsSender(
         return cachedJwt
     }
 
-    override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): SendResult = withContext(Dispatchers.IO) {
         val payload = buildJsonObject {
             putJsonObject("aps") {
                 putJsonObject("alert") { put("title", title); put("body", body) }
@@ -67,7 +67,20 @@ class ApnsSender(
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
-        if (resp.statusCode() != 200) System.err.println("[push] apns ${resp.statusCode()}: ${resp.body()}")
-        resp.statusCode() == 200
+        if (resp.statusCode() == 200) return@withContext SendResult.ACCEPTED
+        System.err.println("[push] apns ${resp.statusCode()}: ${resp.body()}")
+        if (isTokenFatal(resp.statusCode(), resp.body())) SendResult.INVALID_TOKEN else SendResult.FAILED
+    }
+
+    /** APNs signals a permanently-dead token with 410 Unregistered (always) or 400 with a token-fatal
+     *  reason. Everything else (429 too-many, 5xx, network) is transient and the token is kept. */
+    private fun isTokenFatal(status: Int, body: String): Boolean = when (status) {
+        410 -> true
+        400 -> FATAL_400_REASONS.any { body.contains("\"$it\"") }
+        else -> false
+    }
+
+    private companion object {
+        val FATAL_400_REASONS = listOf("BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered")
     }
 }

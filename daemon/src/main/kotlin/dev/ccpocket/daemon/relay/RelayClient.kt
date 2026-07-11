@@ -94,10 +94,14 @@ class RelayClient(
     fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
 
     suspend fun run() = coroutineScope {
-        // wake an offline phone when a turn completes. peerOnline gates it here (an attached phone got the
-        // TurnDone over the data plane already); the relay re-checks deviceCount before actually pushing.
+        // wake an offline phone when a turn completes. peerOnline gates the relay-attached case and
+        // lanConnected() the direct-LAN one (an attached phone — either transport — got the TurnDone over
+        // the data plane already). The LAN check matters once LAN-resident phones carry LIVE relay tokens
+        // (the #114 follow-up dial): the relay re-checks deviceCount before actually pushing, but it can't
+        // see LAN attachment — without this gate every turn watched over the LAN doubles as a lock-screen
+        // push. Mirrors the reaper's gate below.
         core.registry.pushHook = PushHook { workdir, sessionId, finalText ->
-            if (!peerOnline && core.prefs.pushEnabled) controlOutbox.send(
+            if (!peerOnline && !core.registry.lanConnected() && core.prefs.pushEnabled) controlOutbox.send(
                 NotifyPush(
                     title = workdir.fileName?.toString() ?: "CC Pocket",
                     body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",

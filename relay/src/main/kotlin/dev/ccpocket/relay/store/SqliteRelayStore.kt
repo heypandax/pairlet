@@ -159,6 +159,17 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
         Unit
     }
 
+    override suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = tx { c ->
+        // conditional on the token still matching: a fresh re-registration between send and prune wins
+        c.prepareStatement(
+            "UPDATE devices SET push_platform=NULL, push_token=NULL, push_updated_at=? " +
+                "WHERE device_id=? AND push_platform=? AND push_token=?"
+        ).use { ps ->
+            ps.setLong(1, now); ps.setString(2, deviceId); ps.setString(3, platform); ps.setString(4, token)
+            ps.executeUpdate() > 0
+        }
+    }
+
     override suspend fun pushTargets(accountId: String): List<PushTarget> = tx { c ->
         c.prepareStatement(
             "SELECT device_id, push_platform, push_token FROM devices " +

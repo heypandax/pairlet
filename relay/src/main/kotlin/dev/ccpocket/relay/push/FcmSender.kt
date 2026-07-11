@@ -68,7 +68,7 @@ class FcmSender private constructor(
         return cachedAccess
     }
 
-    override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): Boolean {
+    override suspend fun send(token: String, title: String, body: String, route: NotifyRoute?): SendResult {
         val auth = bearer()
         val payload = buildJsonObject {
             putJsonObject("message") {
@@ -90,8 +90,11 @@ class FcmSender private constructor(
                 HttpResponse.BodyHandlers.ofString(),
             )
         }
-        if (resp.statusCode() != 200) System.err.println("[push] fcm ${resp.statusCode()}: ${resp.body()}")
-        return resp.statusCode() == 200
+        if (resp.statusCode() == 200) return SendResult.ACCEPTED
+        System.err.println("[push] fcm ${resp.statusCode()}: ${resp.body()}")
+        // FCM v1 reports a stale/uninstalled token as 404 with errorCode UNREGISTERED (404 alone suffices).
+        return if (resp.statusCode() == 404 || resp.body().contains("UNREGISTERED")) SendResult.INVALID_TOKEN
+        else SendResult.FAILED
     }
 
     companion object {
