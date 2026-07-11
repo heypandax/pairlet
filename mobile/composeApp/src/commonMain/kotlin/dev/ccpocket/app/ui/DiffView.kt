@@ -522,10 +522,19 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
 
 /** The File tab's whole body — the original full-content view: markdown via [MarkdownText] (selectable,
  *  issue #95), base64 images, everything else as selectable highlighted monospace that reflows when
- *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. */
+ *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. [exportSlot] renders under a
+ *  failed read's reason — the mobile viewer docks its "request export" entry / waiting row there
+ *  (issue #67 v2); null (desktop, plain reads) keeps today's bare error text. */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null, wrap: Boolean) {
+fun FileTabBody(
+    content: FileContent?,
+    ext: String,
+    dense: Boolean = false,
+    path: String? = null,
+    wrap: Boolean,
+    exportSlot: (@Composable () -> Unit)? = null,
+) {
     Box(Modifier.fillMaxSize()) {
         when {
             // documents ride the binary channel whole-or-nothing — while the bytes are in flight the
@@ -540,10 +549,13 @@ fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path
                 // limit in place (its error text is the only wire signal — no structured kind)
                 val err = content.error ?: "?"
                 if ("too large" in err) DocumentTooLargeCard(content.path, err, dense)
-                else Text(
-                    err, color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
-                )
+                else Column(
+                    Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(err, color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    exportSlot?.invoke()
+                }
             }
             content.base64 != null -> {
                 val bytes = remember(content.base64) { runCatching { Base64.Default.decode(content.base64!!) }.getOrNull() }

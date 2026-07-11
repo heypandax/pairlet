@@ -169,6 +169,29 @@ data class ReadFile(
 ) : ToDaemon
 
 /**
+ * phone -> daemon: export ONE file the session did NOT change out to the phone (issue #67 v2 / #79 — the
+ * Bash/script-generated documents and read-only files [ReadFile]'s changed-set gate leaves unreachable).
+ * This deliberately widens past [ReadFile], so it is gated to keep the "no arbitrary-path read" red line:
+ *   - if [path] IS in the session's changed set, it is served straight away (already reachable via [ReadFile]);
+ *   - otherwise the daemon requires the file to sit canonically INSIDE [workdir] (a `..`/symlink escape is
+ *     refused with a readable reason, never served) AND raises an owner [PermissionAsk] ("Export {path} to
+ *     phone?") — the SAME approval firewall the Bash quick-terminal uses. The owner can "Allow once" or
+ *     remember the workspace; an unanswered ask times out to deny. The reply is one [FileContent] (served,
+ *     or ok=false carrying why it was refused/denied). [convoId] scopes the approval + routes the ask to the
+ *     live conversation, exactly like [RunShellCommand]. A daemon that predates this drops the frame — the
+ *     client times out to its "update the computer" state.
+ */
+@Serializable
+@SerialName("pocket/file.export")
+data class ExportFile(
+    val convoId: String,
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val agent: AgentKind = AgentKind.CLAUDE,
+) : ToDaemon
+
+/**
  * phone -> daemon: list the immediate children (files + subdirs) of [subPath] under [workdir], for the
  * composer's `@`-file completion (issue #75). [subPath] is a path RELATIVE to the session's cwd
  * ([workdir]) using the daemon host's separator (empty = the cwd itself); the daemon resolves it inside

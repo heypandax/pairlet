@@ -4,6 +4,7 @@ import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.claude.AuthService
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.disk.DirectoryService
+import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -19,6 +20,7 @@ import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Directories
+import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.Frame
@@ -52,6 +54,7 @@ class RequestRouter(
     private val dirs: DirectoryService,
     private val transcribe: TranscribeService,
     private val shell: ShellService,
+    private val exports: FileExportService,
     private val scope: CoroutineScope,
     private val auth: AuthService,
     private val prefs: DaemonPrefs,
@@ -81,6 +84,12 @@ class RequestRouter(
             is ReadFileDiff -> scope.launch {
                 sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
             }
+            // approval-gated export of a file the session did NOT change (issue #67 v2 / #79). MUST launch,
+            // not await — like RunShellCommand below, it suspends on the human approval gate, and the mode
+            // comes from the daemon's own registry so the gate can't be spoofed client-side.
+            is ExportFile -> scope.launch {
+                exports.run(frame, registry.modeOf(frame.convoId), sink::emit)
+            }
             // composer @-file completion (issue #75): a directory scan → off the inbound pump like the others
             is ListPathEntries -> scope.launch {
                 val res = dirs.listPathEntries(frame.workdir, frame.subPath, frame.limit)
@@ -109,8 +118,9 @@ class RequestRouter(
             }
 
             is SendPrompt -> if (!registry.sendPrompt(frame)) sink.emit(SessionGone(frame.convoId))
-            // a verdict may resolve a SHELL ask (issue #3) or an agent tool ask — shell claims its own by askId
-            is PermissionVerdict -> if (!shell.onVerdict(frame)) registry.verdict(frame)
+            // a verdict may resolve a SHELL ask (issue #3), an EXPORT ask (issue #67 v2), or an agent tool
+            // ask — each service claims its own by askId (pending-map membership) before the registry
+            is PermissionVerdict -> if (!shell.onVerdict(frame) && !exports.onVerdict(frame)) registry.verdict(frame)
             is SwitchMode -> registry.switchMode(frame)
             is ClearAllowRule -> registry.clearRule(frame)
 
@@ -139,6 +149,7 @@ class RequestRouter(
             }
 
             // fan-out: only a REAL close (last attached client) drops the quick-terminal state with it
+            // (exports keep NO cross-request state to drop: every export ask is one-off, never remembered)
             is CloseSession -> { if (registry.close(frame.convoId, sink, frame.force)) shell.forget(frame.convoId) }
             is CancelTurn -> registry.cancelTurn(frame)
             // task panel "stop" (issue #80): interrupt the agent's work for this job + settle its row killed

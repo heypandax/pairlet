@@ -230,4 +230,47 @@ class SessionFilesServiceTest {
         assertTrue(diff.diff!!.length <= SessionFilesService.DIFF_CAP_BYTES)
         assertTrue(diff.diff!!.endsWith("\n")) // cut on a whole-line boundary, not mid-line
     }
+
+    // ── export containment (issue #67 v2 / #79) — the "no arbitrary-path read" red line ──────
+
+    @Test
+    fun export_containment_allows_inside_and_refuses_dotdot_and_symlink_escapes() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val inside = Files.writeString(proj.resolve("out.csv"), "a,b")
+        val secret = Files.writeString(tmp.resolve("secret.txt"), "nope")
+        Files.createSymbolicLink(proj.resolve("link.csv"), secret)
+
+        val ok = SessionFilesService.containedForExport(proj.toString(), "out.csv")
+        assertTrue(ok is SessionFilesService.ExportGate.Allowed)
+        assertEquals(inside.toRealPath(), (ok as SessionFilesService.ExportGate.Allowed).file)
+
+        // lexical `..` escape: refused before the file is even stat'd
+        assertEquals(SessionFilesService.ExportGate.Outside, SessionFilesService.containedForExport(proj.toString(), "../secret.txt"))
+        // symlink escape: inside lexically, outside canonically — refused
+        assertEquals(SessionFilesService.ExportGate.Outside, SessionFilesService.containedForExport(proj.toString(), "link.csv"))
+        // absolute path pointing elsewhere resolves outside too
+        assertEquals(SessionFilesService.ExportGate.Outside, SessionFilesService.containedForExport(proj.toString(), secret.toString()))
+        // gone / a directory → Missing, not Outside (an honest "no such file", not a scary refusal)
+        assertEquals(SessionFilesService.ExportGate.Missing, SessionFilesService.containedForExport(proj.toString(), "ghost.csv"))
+        assertEquals(SessionFilesService.ExportGate.Missing, SessionFilesService.containedForExport(proj.toString(), "."))
+    }
+
+    @Test
+    fun serve_export_reads_contained_files_and_gives_readable_refusals() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        Files.writeString(proj.resolve("report.md"), "# generated")
+        Files.writeString(tmp.resolve("secret.txt"), "nope")
+
+        val served = SessionFilesService.serveExport(proj.toString(), "s", "report.md")
+        assertTrue(served.ok)
+        assertEquals("# generated", served.text)
+
+        val escaped = SessionFilesService.serveExport(proj.toString(), "s", "../secret.txt")
+        assertFalse(escaped.ok)
+        assertTrue("outside" in escaped.error!!, escaped.error)
+
+        val gone = SessionFilesService.serveExport(proj.toString(), "s", "ghost.md")
+        assertFalse(gone.ok)
+        assertTrue("no longer exists" in gone.error!!, gone.error)
+    }
 }
