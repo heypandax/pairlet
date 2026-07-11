@@ -28,7 +28,9 @@ class MainActivity : ComponentActivity() {
         // Edge-to-edge so Compose owns ALL insets (the root Column pads systemBars + ime itself).
         // Without this, pre-15 devices keep decorFitsSystemWindows=true and the window manager
         // pans/resizes the window for the keyboard ON TOP of imePadding() -> composer floats a
-        // full keyboard-height above the IME. The app is always dark -> force light bar icons.
+        // full keyboard-height above the IME. Bars stay transparent; the FOREGROUND icon color is
+        // (re)driven from the resolved theme by SystemBarAppearance (issue #117) — this initial pick
+        // just matches the DARK default so frame 1 is right before the theme resolves.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
