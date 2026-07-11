@@ -611,7 +611,8 @@ class RepoDesktopModel(
     override fun clearConversation() = repo.clearConversation()
 
     override fun send(text: String) {
-        if (text.isBlank() && !repo.hasReadyImages()) return // an image-only send is legitimate
+        if (repo.uploadsBusy()) return // send waits for uploads to settle (composer shows the spinner)
+        if (text.isBlank() && !repo.hasReadyImages() && !repo.hasLandedFiles()) return // media-only sends are legitimate
         // a gated send (degraded session, issue #65) returns false — keep the composer text for the retry
         if (repo.sendPrompt(text)) { composer = ""; repo.clearDraft(composerKey()) } // clear the persisted draft too (#88)
     }
@@ -632,6 +633,26 @@ class RepoDesktopModel(
     override fun attachImages(raw: List<ByteArray>) = repo.attachImages(raw)
     override fun removePendingImage(id: Long) = repo.removePendingImage(id)
     override fun hasReadyImages(): Boolean = repo.hasReadyImages()
+
+    override val pendingFiles: List<dev.ccpocket.app.data.PendingFile> get() = repo.pendingFiles
+    override fun attachFiles(files: List<dev.ccpocket.app.media.PickedFile>) = repo.attachFiles(files)
+    override fun removePendingFile(id: Long) = repo.removePendingFile(id)
+    override fun retryPendingFile(id: Long) = repo.retryPendingFile(id)
+    override fun uploadsBusy(): Boolean = repo.uploadsBusy()
+    override fun hasLandedFiles(): Boolean = repo.hasLandedFiles()
+    // issue #98: a landed video's inbox path is relative to the session cwd; on desktop the daemon is
+    // local, so resolve it against the workdir and hand it to the OS default player (mac `open` plays it
+    // in QuickTime; elsewhere Desktop.open). A remote/absent workdir or a not-yet-synced file just no-ops.
+    override fun openWorkspaceFile(path: String) {
+        val base = repo.workdir.value ?: return
+        runCatching {
+            val raw = java.io.File(path)
+            val f = if (raw.isAbsolute) raw else java.io.File(base, path)
+            if (!f.isFile) return@runCatching
+            if (System.getProperty("os.name").lowercase().contains("mac")) ProcessBuilder("open", f.absolutePath).start()
+            else java.awt.Desktop.getDesktop().open(f)
+        }
+    }
 
     override val ask: PermissionAsk? get() = repo.pendingAsk.value
     // issue #100: forward the daemon's TIMED_OUT verdict to the inline card. The repo keeps the pendingAsk and

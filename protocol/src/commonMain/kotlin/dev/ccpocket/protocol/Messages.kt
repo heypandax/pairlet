@@ -125,6 +125,39 @@ data class AudioChunk(
 data class AudioCancel(val convoId: String, val captureId: String) : ToDaemon
 
 /**
+ * One chunk of a regular file upload (issue #90). Unlike an inline [ImageData] (base64 folded into the
+ * model message, never written to disk) a picked file — PDF/CSV/code/Office/… — is chunk-streamed to the
+ * paired computer and LANDED in the session's workspace so the agent can Read it BY PATH. Chunks of one
+ * file share [captureId]; the daemon reassembles by [idx] and writes the bytes to
+ * `<cwd>/.ccpocket/inbox/<captureId>/<name>`.
+ *
+ * Shape mirrors [AudioChunk] and adds two fields: [name] rides on EVERY chunk so reassembly stays
+ * stateless, and [totalBytes] (set on idx 0, 0 = unknown) lets the daemon reject an over-cap upload
+ * before it buffers a single byte. A daemon that predates this frame can't decode the unknown "t" and
+ * drops it (the runCatching-at-decode path every newer message relies on) — so a new phone MUST arm an
+ * upload timeout and surface an "update the computer's cc-pocket" state rather than hang forever.
+ */
+@Serializable
+@SerialName("pocket/file.chunk")
+data class FileChunk(
+    val convoId: String,
+    val captureId: String,   // phone-generated, one per file (fresh per retry)
+    val idx: Int,            // 0-based
+    val last: Boolean,       // true on the final chunk -> landing happens once 0..idx are all present
+    val name: String,        // the picked file's display name; the daemon sanitizes it to a safe basename
+    val mediaType: String,   // best-effort MIME ("application/pdf" | "text/csv" | "application/octet-stream" | …)
+    val base64: String,
+    val totalBytes: Long = 0, // full file size, carried on idx 0 (0 = unknown) -> early over-cap rejection
+) : ToDaemon
+
+/** Abandon a file upload (user cancelled / retrying); the daemon drops buffered chunks + the partial
+ *  file on disk. Mirrors [AudioCancel]. A daemon that predates this drops the frame — the stale partial
+ *  is reaped by the inbox's own expiry sweep instead. */
+@Serializable
+@SerialName("pocket/file.cancel")
+data class FileUploadCancel(val convoId: String, val captureId: String) : ToDaemon
+
+/**
  * phone -> daemon: run a one-off shell command in [workdir] (the active session's cwd) to check the
  * environment from afar (e.g. `git status`, `node -v`). The daemon gates it through the same approval
  * UI as the Bash tool — auto-run only in bypass mode or for a remembered rule; dangerous commands always
@@ -647,6 +680,33 @@ data class Transcript(
     val ok: Boolean = true,
     val error: String? = null, // e.g. "whisper-cli not found — brew install whisper-cpp"
 ) : ToPhone
+
+/**
+ * daemon -> phone: a file upload settled — the single reply to a completed (failed, or refused)
+ * [FileChunk] stream, mirroring [Transcript]. On success [path] is the landing path RELATIVE to the
+ * session's cwd (`.ccpocket/inbox/<captureId>/<name>`, daemon-host separators) — the client references
+ * it with the composer's `@`-token (the #75 mechanism) so the agent Reads the file by path; no new
+ * daemon read surface is involved. [name] is the sanitized basename actually written (may differ from
+ * [FileChunk.name] — clients display/reference THIS one). ok=false carries a user-facing [error] and
+ * nothing was landed. A phone that predates this drops the unknown frame; a NEW phone that never gets
+ * one (old daemon dropped the chunks) times out to its "update the computer's cc-pocket" state.
+ */
+@Serializable
+@SerialName("pocket/file.uploaded")
+data class FileUploaded(
+    val convoId: String,
+    val captureId: String,
+    val ok: Boolean = true,
+    val path: String? = null,
+    val name: String? = null,
+    val size: Long = 0,
+    val error: String? = null,
+) : ToPhone
+
+/** Hard per-file cap for [FileChunk] uploads, enforced daemon-side (early, via [FileChunk.totalBytes],
+ *  and again on actual bytes written) and pre-checked client-side at pick time. One shared constant so
+ *  the attach sheet's "up to 200 MB" caption and the daemon's refusal can't drift. */
+const val MAX_UPLOAD_BYTES: Long = 200L * 1024 * 1024
 
 /** daemon -> phone: the result of a [RunShellCommand]. stdout/stderr are capped server-side. */
 @Serializable

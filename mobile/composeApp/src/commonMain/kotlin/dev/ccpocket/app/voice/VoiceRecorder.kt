@@ -34,5 +34,7 @@ const val VOICE_MAX_MS = 90_000L
 const val VOICE_SAMPLE_RATE = 16_000
 const val VOICE_BIT_RATE = 24_000
 
-/** Max base64 chars per [dev.ccpocket.protocol.AudioChunk] — a relay frame is 256 KiB minus JSON + E2E headroom. */
+/** Max base64 chars per [dev.ccpocket.protocol.AudioChunk]. The relay frame cap is 4 MiB nowadays,
+ *  but voice captures are small — modest chunks keep the socket responsive mid-recording.
+ *  (File uploads use their own larger chunk size — see PocketRepository.FILE_CHUNK_RAW.) */
 const val AUDIO_CHUNK_B64 = 180_000

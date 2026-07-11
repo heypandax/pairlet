@@ -355,6 +355,21 @@ interface DesktopModel {
     fun removePendingImage(id: Long)
     fun hasReadyImages(): Boolean
 
+    // composer FILE uploads (issue #90): staged files chunk-stream into the session's workspace
+    // inbox; landed paths ride the next send as `@`-references. Default no-ops keep seed/preview
+    // models inert (chips simply never appear).
+    val pendingFiles: List<dev.ccpocket.app.data.PendingFile> get() = emptyList()
+    fun attachFiles(files: List<dev.ccpocket.app.media.PickedFile>) {}
+    fun removePendingFile(id: Long) {}
+    fun retryPendingFile(id: Long) {}
+    /** Uploads still moving → the send button waits (spinner) until they settle. */
+    fun uploadsBusy(): Boolean = false
+    fun hasLandedFiles(): Boolean = false
+    /** Play/open a landed workspace file in the OS default app (issue #98). The desktop app runs on the
+     *  SAME machine as the daemon, so a landed video's inbox path resolves to a real local file — no
+     *  re-fetch needed. Default no-op keeps seed/preview models inert. */
+    fun openWorkspaceFile(path: String) {}
+
     // permission (live: inline card in the stream; seed: also drives the focused modal)
     val ask: PermissionAsk?
     /** The current [ask] is the one the daemon reported TIMED_OUT (issue #100): the inline card flips to its

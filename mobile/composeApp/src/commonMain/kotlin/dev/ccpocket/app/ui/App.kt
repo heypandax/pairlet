@@ -86,7 +86,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
+import dev.ccpocket.app.media.rememberVideoAttacher
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -1086,6 +1088,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     val draftKey = repo.composerKey()
     var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
+    var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
@@ -1104,6 +1107,9 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     }
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
+    val launchFilePicker = rememberFileAttacher { picked -> repo.attachFiles(picked) } // issue #90
+    val launchVideoPicker = rememberVideoAttacher { picked -> repo.attachFiles(picked) } // issue #98 — same upload path, movie-filtered
+    var attachSheet by remember { mutableStateOf(false) } // Photo/File/Video chooser anchored above the composer
     val listState = rememberLazyListState()
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
@@ -1232,7 +1238,9 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
                                 onOpenWorkflow = repo::openWorkflow,
-                            ) { imgs, i -> viewer = imgs to i }
+                                onOpenImages = { imgs, i -> viewer = imgs to i },
+                                onOpenVideo = { videoViewer = it },
+                            )
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                     PulseDot(Tok.warn, size = 5.dp)
@@ -1329,6 +1337,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 }
             } else {
                 val hasReady = repo.hasReadyImages()
+                val hasLanded = repo.hasLandedFiles()      // files already in the workspace inbox (issue #90)
+                val uploadsBusy = repo.uploadsBusy()       // uploads still moving → send waits
                 val voiceState = repo.voice.value
                 // the timer stays visible (frozen) through S3, after Recording stopped carrying it
                 var recElapsed by remember { mutableStateOf(0L) }
@@ -1352,6 +1362,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
+                    LaunchedEffect(capturing) { if (capturing) attachSheet = false }
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd -> input = cmd.completion() }
                     } else if (atFileMatches.isNotEmpty() && !capturing) {
@@ -1359,6 +1370,16 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                             atToken?.let { input = input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end) }
                         }
                     }
+                    // attach sheet (issue #90/#98): Photo keeps the image flow, File opens the document
+                    // picker, Video opens the movie-filtered picker (same chunk-upload into the workspace)
+                    if (attachSheet && !capturing) {
+                        AttachSheet(
+                            onPhoto = { attachSheet = false; launchPicker() },
+                            onFile = { attachSheet = false; launchFilePicker() },
+                            onVideo = { attachSheet = false; launchVideoPicker() },
+                        )
+                    }
+                    PendingFilesStrip(repo.pendingFiles, onCancel = repo::removePendingFile, onRetry = repo::retryPendingFile)
                     AttachTray(repo.pendingImages, repo::removePendingImage)
                     repo.voiceNotice.value?.let { n ->
                         Text(stringResource(n), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
@@ -1380,12 +1401,13 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
                             val attachInteraction = remember { MutableInteractionSource() }
                             val attachPressed by attachInteraction.collectIsPressedAsState()
-                            IconButton(onClick = { launchPicker() }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
-                                Icon(
-                                    AttachImageIcon,
-                                    contentDescription = stringResource(Res.string.attach_image),
-                                    tint = if (repo.pendingImages.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
-                                    modifier = Modifier.size(24.dp),
+                            // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
+                            // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
+                            // deeper but unchanged.
+                            IconButton(onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
+                                AttachPlusGlyph(
+                                    open = attachSheet,
+                                    tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
@@ -1395,7 +1417,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                                 // or an editable composer under a "running" session reads as disconnected (issue #52)
                                 placeholder = stringResource(
                                     when {
-                                        repo.pendingImages.isNotEmpty() -> Res.string.add_message_hint
+                                        repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> Res.string.add_message_hint
                                         repo.streaming.value -> Res.string.message_queued_hint
                                         else -> Res.string.message_claude_hint
                                     },
@@ -1408,19 +1430,30 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                             // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
                             // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
                             // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
-                            if (repo.streaming.value && (input.isNotBlank() || hasReady)) {
+                            if (repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)) {
                                 StopButton { repo.cancelTurn() }
                                 Spacer(Modifier.width(8.dp))
                             }
                             when {
-                                // text/image staged -> SEND, even mid-turn (claude queues it; see above)
-                                input.isNotBlank() || hasReady -> {
+                                // uploads still moving → send WAITS (spinner ring around a muted arrow,
+                                // design: file-attach.jsx) — landing must finish before the @-refs exist
+                                uploadsBusy -> {
+                                    Box(
+                                        Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        SpinnerRing(30.dp, 2.dp)
+                                        Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                                // text/image/file staged -> SEND, even mid-turn (claude queues it; see above)
+                                input.isNotBlank() || hasReady || hasLanded -> {
                                     val sendLabel = stringResource(Res.string.send)
                                     RoundActionButton(
                                         onClick = {
                                             val t = input.trim()
                                             // a gated send (degraded session, issue #65) returns false — keep the text for the retry
-                                            if ((t.isNotBlank() || hasReady) && repo.sendPrompt(t)) { input = ""; repo.clearDraft(draftKey) }
+                                            if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { input = ""; repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
@@ -1441,6 +1474,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
             }
         }
         viewer?.let { (imgs, idx) -> ImageViewer(imgs, idx) { viewer = null } }
+        videoViewer?.let { VideoPlayerOverlay(it) { videoViewer = null } } // issue #98
         if (repo.micPermissionSheet.value) {
             MicPermissionSheet(
                 onOpenSettings = { openAppSettings(); repo.dismissMicSheet() },
@@ -1551,6 +1585,7 @@ private fun MessageItem(
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
     onOpenWorkflow: (String) -> Unit = {},
     onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
+    onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
 ) {
     when (m) {
         // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
@@ -1566,6 +1601,11 @@ private fun MessageItem(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
+                // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
+                m.files.forEach { f ->
+                    if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
+                }
                 if (m.text.isNotBlank()) {
                     SelectionContainer { Text(m.text, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

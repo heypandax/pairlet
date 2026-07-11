@@ -49,8 +49,12 @@ import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileDiff
+import dev.ccpocket.protocol.FileUploadCancel
+import dev.ccpocket.protocol.FileUploaded
+import dev.ccpocket.protocol.MAX_UPLOAD_BYTES
 import dev.ccpocket.protocol.isImageFile
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListPathEntries
@@ -135,6 +139,7 @@ import dev.ccpocket.app.voice.VoiceRecorder
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import io.ktor.client.HttpClient
+import dev.ccpocket.app.media.PickedFile
 import dev.ccpocket.app.media.compressImage
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
@@ -157,6 +162,9 @@ sealed interface ChatItem {
         val pending: Boolean = false,
         val promptId: String? = null,
         val delivered: Boolean = false,
+        /** Files uploaded to the session's workspace inbox and referenced by this turn (issue #90) —
+         *  rendered as file chips with their `@` landing path. Client-side only, like [images]. */
+        val files: List<SentFile> = emptyList(),
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -219,6 +227,53 @@ enum class ConnPhase { Connecting, Reconnecting, RelayUnreachable, ComputerOffli
 
 /** A photo staged in the composer: [bytes] are the current JPEG for the thumbnail; [state] drives the tray UI. */
 class PendingImage(val id: Long, val bytes: ByteArray, val state: ImgState)
+
+/** Upload lifecycle of a staged file (issue #90). Files upload BEFORE send — the bytes land in the
+ *  session's workspace inbox and the send merely references the landed path — unlike photos, which
+ *  ride inline in the prompt frame. One file uploads at a time; the rest wait [Queued]. */
+enum class FileUpState { Queued, Uploading, Landed, Failed }
+
+/**
+ * A file staged in the composer (issue #90). [bytes] are retained until landed so a retry can
+ * re-stream (cleared on land to release memory). [captureId] is minted fresh per attempt;
+ * [path]/[landedName] arrive with the daemon's [dev.ccpocket.protocol.FileUploaded] receipt —
+ * the path is what the sent prompt references as an `@`-token.
+ */
+data class PendingFile(
+    val id: Long,
+    val name: String,
+    val size: Long,
+    val bytes: ByteArray,
+    val mediaType: String,
+    val state: FileUpState,
+    val progress: Float = 0f,
+    val captureId: String? = null,
+    val path: String? = null,
+    val landedName: String? = null,
+    val error: String? = null,
+    // A local playback handle for a picked video (issue #98) — survives the byte-eviction on land so a
+    // just-sent video's card can play it back on this device; null for non-video / where the platform
+    // picker had no stable URI. Never uploaded — client-side only.
+    val localUri: String? = null,
+)
+
+/**
+ * A file that already landed in the workspace inbox, as referenced by a sent turn
+ * ([ChatItem.User.files]). [mediaType] routes the render — a `video/` MIME draws the video card instead
+ * of the file chip (issue #98); it defaults to "" so older call sites keep the chip. [durationSecs] fills
+ * the duration pill when known (null → the pill is omitted; v1 never probes it client-side).
+ * [localUri] is a platform playback handle for the freshly-picked video on THIS device (the card is
+ * client-side + ephemeral, so it only ever exists in the session that picked it) — null after the
+ * bytes are gone / on any other viewer, which the player degrades to "open it on the computer".
+ */
+data class SentFile(
+    val name: String,
+    val size: Long,
+    val path: String,
+    val mediaType: String = "",
+    val durationSecs: Int? = null,
+    val localUri: String? = null,
+)
 
 /** A connect that never reached Attached within the deadline (silent pre-attach hang). Surfaced as a
  *  normal failure so the backoff reconnect kicks in — NOT a CancellationException (which would read as
@@ -422,6 +477,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val sessionsDir = mutableStateOf<String?>(null)
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
+    val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
+    private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
+    private var fileAckDeadline: Job? = null               // last chunk sent → FileUploaded receipt guard
     private var pendingIdSeq = 0L
     val convoId = mutableStateOf<String?>(null)
     val workdir = mutableStateOf<String?>(null)
@@ -1110,7 +1168,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         pendingAsk.value = null
-        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearBackgroundJobs()
+        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         demoMode.value = false // leaving the demo returns to real pairing
         demoConnecting.value = false
         abandonVoice()
@@ -1279,7 +1337,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is SwitchMode -> handle(SessionLive(frame.convoId, workdir.value ?: DemoData.LIVE_DIR, currentSessionId, mode = frame.mode, executing = false))
             is CancelTurn -> handle(TurnDone(frame.convoId))
             is AudioChunk -> if (frame.last) handle(Transcript(frame.convoId, frame.captureId, text = "show me the open files", ok = true))
-            else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel — nothing to echo
+            // file upload (issue #90): pretend the file landed in the demo workspace's inbox
+            is FileChunk -> if (frame.last) {
+                handle(FileUploaded(frame.convoId, frame.captureId, path = ".ccpocket/inbox/${frame.captureId}/${frame.name}", name = frame.name, size = frame.totalBytes))
+            }
+            else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel / FileUploadCancel — nothing to echo
         }
     }
 
@@ -1513,6 +1575,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
+            // file upload receipt (issue #90) — matched on captureId inside; convo guard like CommandList
+            is FileUploaded -> if (f.convoId == convoId.value) onFileUploaded(f)
             is ShellResult -> if (f.convoId == convoId.value) {
                 terminalBusy.value = false
                 val i = terminalEntries.indexOfLast { it.result == null } // fill the in-flight command's slot
@@ -1793,6 +1857,144 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         revalidatePending() // freeing budget may let a previously-rejected photo back in
     }
 
+    // ── file uploads into the workspace inbox (issue #90) ────────────────────────────────────
+
+    /** Any staged file still moving? The send button waits (design: spinner) until uploads settle. */
+    fun uploadsBusy() = pendingFiles.any { it.state == FileUpState.Uploading || it.state == FileUpState.Queued }
+
+    fun hasLandedFiles() = pendingFiles.any { it.state == FileUpState.Landed && it.path != null }
+
+    /** Stage picked files: over-cap picks fail immediately (nothing to stream); the rest queue and
+     *  upload ONE at a time — chunks of a 200 MB file must not starve asks/heartbeats on the socket. */
+    fun attachFiles(picked: List<PickedFile>) {
+        val room = MAX_FILES - pendingFiles.size
+        picked.take(room.coerceAtLeast(0)).forEach { p ->
+            val id = pendingIdSeq++
+            val tooBig = p.size > MAX_UPLOAD_BYTES || p.bytes.size > MAX_UPLOAD_BYTES
+            val unreadable = !tooBig && p.bytes.isEmpty() && p.size > 0 // picker couldn't load it
+            pendingFiles.add(
+                when {
+                    tooBig -> PendingFile(id, p.name, p.size, ByteArray(0), p.mediaType, FileUpState.Failed, error = "larger than 200 MB")
+                    unreadable -> PendingFile(id, p.name, p.size, ByteArray(0), p.mediaType, FileUpState.Failed, error = "couldn't read the file")
+                    else -> PendingFile(id, p.name, p.bytes.size.toLong(), p.bytes, p.mediaType, FileUpState.Queued, localUri = p.localUri)
+                },
+            )
+        }
+        pumpFileUploads()
+    }
+
+    fun removePendingFile(id: Long) {
+        val i = pendingFiles.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val p = pendingFiles[i]
+        if (p.state == FileUpState.Uploading) {
+            fileUploadJob?.cancel()
+            fileAckDeadline?.cancel()
+            val c = convoId.value
+            val cap = p.captureId
+            if (c != null && cap != null) scope.launch { runCatching { send(FileUploadCancel(c, cap)) } }
+        }
+        pendingFiles.removeAt(i)
+        pumpFileUploads()
+    }
+
+    fun retryPendingFile(id: Long) {
+        val i = pendingFiles.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val p = pendingFiles[i]
+        if (p.state != FileUpState.Failed) return
+        if (p.bytes.isEmpty() && p.size > 0) return // over-cap pick — nothing retained to re-stream
+        pendingFiles[i] = p.copy(state = FileUpState.Queued, error = null, progress = 0f, captureId = null)
+        pumpFileUploads()
+    }
+
+    /** Start the next queued upload if none is in flight. Chunks the RAW bytes and base64s each
+     *  chunk independently — the daemon streams chunks to disk as they arrive, so every chunk must
+     *  decode on its own (unlike audio, which re-joins the base64 string before decoding once). */
+    @OptIn(ExperimentalEncodingApi::class)
+    private fun pumpFileUploads() {
+        if (pendingFiles.any { it.state == FileUpState.Uploading }) return
+        val i = pendingFiles.indexOfFirst { it.state == FileUpState.Queued }
+        if (i < 0) return
+        val f = pendingFiles[i]
+        val c = convoId.value
+        if (c == null) {
+            pendingFiles[i] = f.copy(state = FileUpState.Failed, error = "no live session")
+            return
+        }
+        val capId = randomCaptureId()
+        pendingFiles[i] = f.copy(state = FileUpState.Uploading, captureId = capId, progress = 0f)
+        fileUploadJob = scope.launch {
+            val total = f.bytes.size
+            val parts = fileChunkParts(total)
+            try {
+                for (idx in 0 until parts) {
+                    val from = idx * FILE_CHUNK_RAW
+                    val to = minOf(from + FILE_CHUNK_RAW, total)
+                    val b64 = if (to > from) Base64.Default.encode(f.bytes.copyOfRange(from, to)) else ""
+                    send(
+                        FileChunk(
+                            c, capId, idx, last = idx == parts - 1,
+                            name = f.name, mediaType = f.mediaType, base64 = b64,
+                            totalBytes = if (idx == 0) total.toLong() else 0,
+                        ),
+                    )
+                    updateFile(capId) { it.copy(progress = (idx + 1).toFloat() / parts) }
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                failFileUpload(capId, "connection lost — retry")
+                return@launch
+            }
+            armFileAckDeadline(capId)
+        }
+    }
+
+    /** Last chunk sent → the [FileUploaded] receipt must arrive. An old daemon can't decode the
+     *  chunk frames and silently drops them (the wire's forward-compat contract) — this deadline is
+     *  the ONLY thing distinguishing that from success, same idea as the changed-files guard. */
+    private fun armFileAckDeadline(capId: String) {
+        fileAckDeadline?.cancel()
+        fileAckDeadline = scope.launch {
+            delay(UPLOAD_ACK_TIMEOUT_MS)
+            failFileUpload(capId, "no reply from the computer — its cc-pocket may be too old for file upload")
+        }
+    }
+
+    private fun updateFile(capId: String, f: (PendingFile) -> PendingFile) {
+        val i = pendingFiles.indexOfFirst { it.captureId == capId }
+        if (i >= 0) pendingFiles[i] = f(pendingFiles[i])
+    }
+
+    private fun failFileUpload(capId: String, error: String) {
+        val i = pendingFiles.indexOfFirst { it.captureId == capId && it.state == FileUpState.Uploading }
+        if (i < 0) return
+        pendingFiles[i] = pendingFiles[i].copy(state = FileUpState.Failed, error = error)
+        pumpFileUploads()
+    }
+
+    private fun onFileUploaded(f: FileUploaded) {
+        val i = pendingFiles.indexOfFirst { it.captureId == f.captureId }
+        if (i < 0) return // superseded / cancelled / already consumed by a send
+        fileAckDeadline?.cancel()
+        val p = pendingFiles[i]
+        pendingFiles[i] = if (f.ok && f.path != null) {
+            // bytes are on the computer's disk now — drop our copy (a 200 MB hold matters on a phone)
+            p.copy(state = FileUpState.Landed, progress = 1f, path = f.path, landedName = f.name ?: p.name, bytes = ByteArray(0))
+        } else {
+            p.copy(state = FileUpState.Failed, error = f.error ?: "upload failed")
+        }
+        pumpFileUploads()
+    }
+
+    /** Session teardown/switch: kill the loop + receipts and drop staged files (their landed copies
+     *  stay in the old session's inbox — harmless, swept by nothing on purpose: the user sent none). */
+    private fun clearFileUploads() {
+        fileUploadJob?.cancel(); fileUploadJob = null
+        fileAckDeadline?.cancel(); fileAckDeadline = null
+        pendingFiles.clear()
+    }
+
     /** Mark photos Rejected once their cumulative base64 would exceed [IMAGE_BUDGET_B64] (one frame holds them all). */
     private fun revalidatePending() {
         var used = 0
@@ -1814,8 +2016,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     @OptIn(ExperimentalEncodingApi::class)
     fun sendPrompt(text: String): Boolean {
         val c = convoId.value ?: return false
+        if (uploadsBusy()) return false // send waits for uploads to settle (the button shows the spinner)
         val ready = pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes }
-        if (text.isBlank() && ready.isEmpty()) return false
+        val landed = pendingFiles.filter { it.state == FileUpState.Landed && it.path != null }
+        if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
         // slash commands bypass the gate — /clear and /compact are exactly how a dead session heals
         if (sessionDegraded.value && !degradedSendArmed && !text.trimStart().startsWith("/")) {
             degradedSendArmed = true
@@ -1830,16 +2034,26 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         degradedSendArmed = false // consumed — the next prompt into a still-degraded session gates again
         if (voice.value is VoiceState.Failed) clearVoice() // sending dismisses the error chip
         val images = ready.map { ImageData("image/jpeg", Base64.Default.encode(it)) }
+        // landed files ride as `@path` references appended to the prompt — the #75 mechanism, so the
+        // agent Reads the inbox file by path; the daemon never re-parses anything upload-specific
+        val refs = landed.joinToString("\n") { "@${it.path}" }
+        val outText = when {
+            landed.isEmpty() -> text
+            text.isBlank() -> refs
+            else -> text + "\n\n" + refs
+        }
+        val sentFiles = landed.map { SentFile(it.landedName ?: it.name, it.size, it.path!!, mediaType = it.mediaType, localUri = it.localUri) }
         val promptId = newPromptId()
-        messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId))
+        messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId, files = sentFiles))
         promptPending = true
         turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
         if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
         pendingImages.clear()
+        pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
         streaming.value = true
-        workdir.value?.let { promptRetry = PromptRetry(text, images, it, promptId); promptResendArmed = false }
+        workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
-        scope.launch { send(SendPrompt(c, text, images, promptId = promptId)) }
+        scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
         armPromptWatchdog()
         return true
     }
@@ -2361,6 +2575,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         chatTitle.value = null
         messages.clear()
         pendingImages.clear()
+        clearFileUploads()
         clearBackgroundJobs()
         observing.value = false
         abandonVoice()
@@ -2398,6 +2613,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         chatTitle.value = null
         messages.clear()
         pendingImages.clear()
+        clearFileUploads()
         clearBackgroundJobs()
         abandonVoice()
     }
@@ -2407,7 +2623,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessions.clear()
     }
 
-    private companion object {
+    internal companion object {
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
@@ -2425,6 +2641,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val LEVEL_WINDOW = 48                  // rolling waveform samples (~4 s at 12 Hz)
         const val TRANSCRIBE_TIMEOUT_MS = 15_000L    // upload → Transcript round-trip guard
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
+
+        // file uploads (issue #90)
+        const val MAX_FILES = 6                      // staged at once — matches the chip strip's comfortable width
+        // Raw bytes per FileChunk. 768 000 raw → exactly 1 024 000 base64 chars (multiple of 3: no
+        // mid-stream padding), ~1.0 MiB per wire frame after the JSON envelope + Noise AEAD tag —
+        // a 4× margin under the relay's 4 MiB frame cap, big enough that a 200 MB file is ~274
+        // frames, small enough that asks/heartbeats interleave between chunks on the shared socket.
+        const val FILE_CHUNK_RAW = 768_000
+        const val UPLOAD_ACK_TIMEOUT_MS = 20_000L    // last chunk → FileUploaded receipt guard ("update the daemon" state)
+
+        /** Chunks a raw file of [total] bytes into ceil(total / [FILE_CHUNK_RAW]) frames, floored at 1 (an
+         *  empty file still sends one terminal chunk carrying `last=true`). Extracted so the large-file
+         *  boundary — a 200 MB video is 274 frames, and an exact multiple must NOT emit a trailing empty
+         *  chunk — stays unit-testable (issues #90/#98). */
+        fun fileChunkParts(total: Int): Int = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)

@@ -387,6 +387,75 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun fileChunk_roundtrips_and_totalBytes_defaults_for_hand_rolled_frames() {
+        // issue #90: the chunked file-upload stream. idx 0 carries the full size for early over-cap refusal
+        val first = Envelope(
+            id = "fc1", ts = 0,
+            body = FileChunk("c1", "cap-1", 0, last = false, name = "report.pdf", mediaType = "application/pdf", base64 = "QUFB", totalBytes = 2_400_000),
+        )
+        val json = PocketJson.encodeToString(first)
+        assertTrue("\"t\":\"pocket/file.chunk\"" in json, json)
+        assertTrue("\"totalBytes\":2400000" in json, json)
+        assertEquals(first, PocketJson.decodeFromString<Envelope>(json))
+
+        // later chunks ride the default 0 (encodeDefaults puts it on the wire; a differently-defaulting
+        // peer still reads intent), and a frame WITHOUT the key decodes to 0 = unknown
+        val tail = FileChunk("c1", "cap-1", 3, last = true, name = "report.pdf", mediaType = "application/pdf", base64 = "QUJD")
+        assertEquals(tail, PocketJson.decodeFromString<FileChunk>(PocketJson.encodeToString(tail)))
+        val minimal = """{"convoId":"c1","captureId":"cap-1","idx":1,"last":false,"name":"a.csv","mediaType":"text/csv","base64":"QQ=="}"""
+        assertEquals(0L, PocketJson.decodeFromString<FileChunk>(minimal).totalBytes)
+    }
+
+    @Test
+    fun fileUploadCancel_roundtrips() {
+        val env = Envelope(id = "fc2", ts = 0, body = FileUploadCancel("c1", "cap-1"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/file.cancel\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun fileUploaded_success_and_error_variants_roundtrip() {
+        // success: the landing path rides along; error is omitted (explicitNulls=false)
+        val ok = Envelope(
+            id = "fu1", ts = 0,
+            body = FileUploaded("c1", "cap-1", path = ".ccpocket/inbox/cap-1/report.pdf", name = "report.pdf", size = 2_400_000),
+        )
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/file.uploaded\"" in okJson, okJson)
+        assertFalse("error" in okJson, okJson)
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        // failure: nothing landed — path/name absent, error present
+        val err = FileUploaded("c1", "cap-2", ok = false, error = "file too large — the limit is 200 MB")
+        val errJson = PocketJson.encodeToString<FileUploaded>(err)
+        assertTrue("\"ok\":false" in errJson, errJson)
+        assertFalse("path" in errJson, errJson)
+        assertEquals(err, PocketJson.decodeFromString<FileUploaded>(errJson))
+
+        // a minimal frame (only the required keys) reads as a pathless success — pins default semantics
+        val minimal = """{"convoId":"c1","captureId":"cap-3"}"""
+        val back = PocketJson.decodeFromString<FileUploaded>(minimal)
+        assertTrue(back.ok)
+        assertEquals(null, back.path)
+        assertEquals(0L, back.size)
+    }
+
+    @Test
+    fun fileChunk_is_undecodable_to_old_peers_by_design() {
+        // The #90 downgrade story: an OLD daemon can't decode "pocket/file.chunk" (unknown discriminator
+        // throws → runCatching at its decode site drops the frame silently), so a NEW app must arm an
+        // upload timeout instead of waiting on a FileUploaded that will never come. Same contract the
+        // generic unknown_frame_discriminator_throws pins, restated on this exact frame so a future
+        // default-deserializer change can't quietly break the timeout-based degradation.
+        val json = PocketJson.encodeToString(Envelope(id = "fc3", ts = 0, body = FileChunk("c", "cap", 0, true, "a.txt", "text/plain", "QQ==")))
+        assertTrue("\"t\":\"pocket/file.chunk\"" in json, json)
+        // simulate the old peer: a codec whose sealed hierarchy doesn't know the type ≈ unknown "t" here
+        val unknownT = json.replace("pocket/file.chunk", "pocket/file.chunk-from-the-future")
+        assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
+    }
+
+    @Test
     fun transcript_ok_defaults_and_error_variant() {
         val ok = Envelope(id = "6", ts = 0, body = Transcript("c1", "cap-1", text = "hello world"))
         val okJson = PocketJson.encodeToString(ok)
