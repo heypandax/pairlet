@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
@@ -303,11 +304,91 @@ class DesktopUiTest {
     }
 
     @Test
-    fun trayPopoverShowsApprovalsAndSessions() = runComposeUiTest {
-        setContent { PocketTheme { TrayPopover() } }
+    fun trayPopoverShowsRealApprovalsAndSessions() = runComposeUiTest {
+        // was a static mockup showing the developer's own machine names (issue #111) — now driven by the
+        // live-shaped SeedDesktopModel, so every row is real fleet state
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { TrayPopover(model) } }
         assertPresent("PENDING APPROVALS")
         assertPresent("RUNNING SESSIONS")
+        assertPresent("rm -rf ./build && ./gradlew clean") // a REAL fleet approval preview (mac-studio's Bash)
+        assertPresent("mac-studio")                          // the owning machine, not a hardcoded name
+        assertPresent("api-server")                          // a REAL running project on another machine
+        assertPresent("3 computers · 3 sessions")            // header derived from live fleet state
         assertPresent("Open cc-pocket")
+    }
+
+    @Test
+    fun trayApprovalAllowRidesRealResolvePath() = runComposeUiTest {
+        // Allow/Deny must go through model.resolveAttention — the same repo verdict the inline card and the
+        // phone use — not a dead click. Resolving one leaves the fleet attention queue.
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { TrayPopover(model) } }
+        assertEquals(2, model.attention.size)
+        onAllNodes(hasText("Allow")).onFirst().performClick() // rows compose in queue order — first Allow = first row
+        waitForIdle()
+        assertEquals(1, model.attention.size)
+    }
+
+    @Test
+    fun trayOpenMainDismissesThePopover() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showTray = true }
+        setContent { PocketTheme { TrayPopover(model) } }
+        onAllNodes(hasText("Open cc-pocket")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(!model.showTray, "Open cc-pocket dismisses the tray popover")
+    }
+
+    @Test
+    fun traySettingsGearOpensSettings() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { TrayPopover(model) } }
+        assertTrue(!model.showSettings)
+        onAllNodes(hasContentDescription("Settings")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showSettings, "the gear opens Settings (was a dead clickable)")
+    }
+
+    @Test
+    fun trayHeaderCountsAggregateAcrossTheFleet() {
+        val m = SeedDesktopModel()
+        val (computers, sessions) = trayHeaderCounts(m)
+        assertEquals(3, computers)             // three online computers (win-desktop is offline)
+        assertEquals(3, sessions)              // three running projects across the whole fleet
+        assertEquals(m.running.size, sessions) // the header count matches the un-deduped list the tray renders
+    }
+
+    @Test
+    fun trayStatsLabelPluralizes() {
+        assertEquals("3 computers · 3 sessions", trayStatsLabel(3, 3))
+        assertEquals("1 computer · 1 session", trayStatsLabel(1, 1))
+        assertEquals("0 computers · 0 sessions", trayStatsLabel(0, 0))
+    }
+
+    @Test
+    fun trayVisibleCapsAndCountsOverflow() {
+        assertEquals(listOf(1, 2, 3) to 2, trayVisible(listOf(1, 2, 3, 4, 5), 3)) // caps to max, 2 hidden
+        assertEquals(listOf(1, 2) to 0, trayVisible(listOf(1, 2), 3))             // under the cap, none hidden
+        assertEquals(emptyList<Int>() to 0, trayVisible(emptyList(), 3))
+        // the seed fleet fits both section caps without overflow
+        val m = SeedDesktopModel()
+        assertTrue(m.attention.size <= TRAY_MAX_APPROVALS && m.running.size <= TRAY_MAX_RUNNING)
+    }
+
+    @Test
+    fun trayQuestionAskRoutesToSessionInsteadOfBareAllow() = runComposeUiTest {
+        // an AskUserQuestion's answer must ride the ALLOW as an answers map — a bare ALLOW reads "did not
+        // answer" to the CLI — so question rows swap Deny/Allow for an "Answer in session" jump
+        val q = DkAttention(
+            "ask-q", "acct-studio", "mac-studio", DkOs.MAC, "AskUserQuestion", "Which approach should I take?",
+            seconds = null, live = true, question = true,
+        )
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val attention = listOf(q)
+        }
+        setContent { PocketTheme { TrayPopover(model) } }
+        assertPresent("Answer in session ↗")
+        assertTrue(!present("Deny"), "question rows must not offer a bare Deny/Allow")
     }
 
     @Test

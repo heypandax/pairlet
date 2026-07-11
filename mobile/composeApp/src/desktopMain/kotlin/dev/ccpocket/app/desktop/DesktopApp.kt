@@ -34,9 +34,11 @@ import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.isQuestion
 
-/** The two-pane content (sidebar + chat) plus the popover/modal overlays. Window chrome lives in [Main]. */
+/** The two-pane content (sidebar + chat) plus the popover/modal overlays. Window chrome lives in [Main].
+ *  [onActivateWindow] raises/focuses the OS window — the tray's "Open cc-pocket" / row-jump hooks (issue #111);
+ *  [Main] wires it to the AWT window, seed/preview callers leave it a no-op. */
 @Composable
-fun DesktopApp(model: DesktopModel) {
+fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     // sidebar sizing (issue #62): drag the divider to resize; drag it past the minimum (or double-click)
     // to snap-hide it to the edge, where a slim strip brings it back. Persisted across relaunches. This is
     // desktop-shell-local state — the seed/screenshot model keeps the default width and never collapses.
@@ -91,7 +93,7 @@ fun DesktopApp(model: DesktopModel) {
         }
         if (model.showTray) {
             Overlay(onDismiss = { model.showTray = false }, alignment = Alignment.TopEnd, padding = PaddingValues(end = 12.dp, top = 4.dp)) {
-                TrayPopover()
+                TrayPopover(model, onOpenMain = onActivateWindow)
             }
         }
         if (model.switcherOpen) {
