@@ -1,11 +1,14 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
+import dev.ccpocket.protocol.PocketError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,12 +30,16 @@ class PermissionBridge(
     private val emit: suspend (Frame) -> Unit,
     private val allowRules: MutableSet<String>, // session "Always allow" scopes, owned by the Conversation
     private val respond: suspend (askId: String, allow: Boolean, remember: Boolean, originalInput: JsonObject?, updatedInput: String?, denyMessage: String?) -> Unit,
-    private val verdictTimeoutMs: Long = 30_000,
-    // AskUserQuestion asks wait much longer: claude itself waits indefinitely for answers, and a person
-    // reading 1–4 questions needs more than the 30s tool-approval window. Withdrawals still clean up
-    // via onCancel (control_cancel_request), and closing the session cancels everything.
-    private val questionTimeoutMs: Long = 600_000,
+    // How long to wait for the phone's verdict before auto-denying + withdrawing the card. Unified for
+    // tool approvals AND AskUserQuestion (issue #100): claude blocks indefinitely on BOTH, and a person
+    // reading a Write diff on a locked phone is in the exact same spot as one reading 1–4 questions — the
+    // old 30s tool window silently auto-denied them. Both now default to the generous, env-configurable
+    // [ApprovalTimeout.ms]; kept as two params so a test can drive a short timeout. On timeout the card is
+    // retired via [AskWithdrawn]; onCancel (control_cancel_request) and cancelAll clean up the rest.
+    private val verdictTimeoutMs: Long = ApprovalTimeout.ms,
+    private val questionTimeoutMs: Long = ApprovalTimeout.ms,
 ) {
+    private val log = logger("Perms")
     // [ask] is the exact PermissionAsk frame we emitted for this request — kept so a phone that reattaches
     // after missing the live frame (backgrounded during plan mode's long post-`result` phase, issue #55)
     // can be re-shown the card verbatim via [resurfacePending].
@@ -57,14 +64,23 @@ class PermissionBridge(
             return
         }
         val askId = ev.requestId
+        val timeoutMs = if (isQuestion) questionTimeoutMs else verdictTimeoutMs
         val timeout = scope.launch {
-            delay(if (isQuestion) questionTimeoutMs else verdictTimeoutMs)
-            if (pending.remove(askId) != null) respond(askId, false, false, null, null, "timed out")
+            delay(timeoutMs)
+            if (pending.remove(askId) != null) {
+                // issue #100: timing out is the ONE outcome the phone can't observe on its own (from the CLI's
+                // view the request is already answered, so no control_cancel_request ever arrives) — so we MUST
+                // tell it, and we deny with an HONEST reason so claude doesn't report a rejection the user never
+                // made. Different peers, so order doesn't matter: retire the phone's card, unblock the CLI turn.
+                emit(AskWithdrawn(convoId, askId, AskWithdrawnReason.TIMED_OUT))
+                respond(askId, false, false, null, null, TIMEOUT_DENY_MESSAGE)
+            }
         }
         val ask = PermissionAsk(
             convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff,
             questions = if (isQuestion) AskQuestions.parse(ev.input) else null,
             neverRemember = meta.neverRemember,
+            timeoutSec = (timeoutMs / 1000).toInt(), // phone counts its local no-response fallback against the REAL window
         )
         pending[askId] = Pending(ask, ev.input, meta.rule, meta.neverRemember, isQuestion, timeout)
         emit(ask)
@@ -89,7 +105,16 @@ class PermissionBridge(
     }
 
     suspend fun onVerdict(v: PermissionVerdict) {
-        val p = pending.remove(v.askId) ?: return
+        val p = pending.remove(v.askId) ?: run {
+            // issue #100: the ask already left [pending] (it timed out, or a rare double-tap raced the
+            // timeout). Don't swallow the verdict silently — the phone optimistically cleared its card the
+            // instant the user tapped, so without a signal that tap just looks like it succeeded. Surface an
+            // inline "expired" row instead. (A late SHELL verdict lands here too: RequestRouter forwards it to
+            // us after ShellService.onVerdict returns false — so this is the single real drop point for both.)
+            log.warn("$convoId verdict for unknown/expired ask ${v.askId} (${v.decision}) — already resolved, timed out, or withdrawn")
+            emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", convoId))
+            return
+        }
         p.timeoutJob.cancel()
         when (v.decision) {
             Decision.ALLOW -> {
@@ -112,8 +137,22 @@ class PermissionBridge(
         emit(AskWithdrawn(convoId, ev.requestId)) // dismiss the phone's card (old phones drop the frame)
     }
 
-    fun cancelAll() {
-        pending.values.forEach { it.timeoutJob.cancel() }
+    suspend fun cancelAll() {
+        // issue #100: closing / relaunching the session must retire every open card on the phone too — an ask
+        // the user never saw resolved would otherwise linger with live buttons that now do nothing.
+        pending.values.forEach {
+            it.timeoutJob.cancel()
+            emit(AskWithdrawn(convoId, it.ask.askId, AskWithdrawnReason.WITHDRAWN))
+        }
         pending.clear()
+    }
+
+    private companion object {
+        // issue #100: distinct from a real user "deny" so claude phrases its follow-up honestly — it reads
+        // this string as the deny reason. NOT "denied": the user rejected nothing, they just didn't answer.
+        const val TIMEOUT_DENY_MESSAGE =
+            "Approval request timed out: the user did not respond in time (they may be away from their phone). " +
+                "This is NOT a denial — do not treat it as the user rejecting the request. You may retry the " +
+                "operation, or continue with other work and try again later."
     }
 }

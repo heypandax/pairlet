@@ -190,10 +190,15 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     )
                                 }
                             } else if (ask != null) {
+                                // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal
+                                // "auto-denied" state (greyed + Dismiss) rather than staying actionable — the
+                                // repo keeps the pendingAsk and stamps timedOutAskId, so ask is still non-null here.
                                 InlinePermCard(
                                     ask, model.chatAgent, model.chatWorkdir, model.chatBranch,
                                     onAllow = { rem -> model.resolve(allow = true, remember = rem) },
                                     onDeny = { model.resolve(allow = false, remember = false) },
+                                    timedOut = model.askTimedOut,
+                                    onDismiss = { model.dismissAsk() },
                                 )
                             } else if (model.turnStalled) {
                                 // delivered but the agent started no turn within the deadline (issue #104) —

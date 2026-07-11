@@ -415,7 +415,7 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
 // ── upgraded permission sheet (3-way + remember) ────────────────
 @Composable
 fun PermissionSheet(
-    ask: PermissionAsk, workdir: String?,
+    ask: PermissionAsk, workdir: String?, timedOutSignal: Boolean = false,
     onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit, onDismiss: () -> Unit,
 ) {
     var seconds by remember(ask.askId) { mutableStateOf(ask.total()) }
@@ -423,7 +423,10 @@ fun PermissionSheet(
         seconds = ask.total()
         while (seconds > 0) { delay(1000); seconds -= 1 }
     }
-    val timedOut = seconds <= 0
+    // issue #100: the daemon's authoritative TIMED_OUT signal flips the card to its terminal state even when the
+    // local countdown never ran (phone backgrounded/locked — the real scenario). The countdown is now just the
+    // fallback for a pre-#100 daemon, and it counts against the daemon's real window (timeoutSec) not a fixed 30s.
+    val timedOut = timedOutSignal || seconds <= 0
     PocketSheet(onDismiss = { if (timedOut) onDismiss() else onDeny() }) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp, top = 2.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -454,7 +457,9 @@ fun PermissionSheet(
     }
 }
 
-private fun PermissionAsk.total() = 30
+// issue #100: count the local no-response fallback against the daemon's REAL window; a pre-#100 daemon omits
+// timeoutSec → keep the legacy 30s so this phone still matches that daemon's 30s auto-deny.
+private fun PermissionAsk.total() = timeoutSec ?: 30
 
 @Composable
 private fun PermBody(ask: PermissionAsk, workdir: String?) {

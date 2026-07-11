@@ -21,6 +21,7 @@ import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.Telemetry
 import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
@@ -399,6 +400,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val chatTitle = mutableStateOf<String?>(null)            // session title for the chat header (client-side)
     private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
+    // issue #100: the askId the daemon reported as TIMED_OUT — the permission sheet for THIS exact ask renders
+    // its terminal "timed out / auto-denied" state instead of vanishing. Matched by id, so a stale value can
+    // never bleed onto the next card (askIds are unique per request).
+    val timedOutAskId = mutableStateOf<String?>(null)
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
     val terminalEntries = mutableStateListOf<TerminalEntry>() // quick-terminal history for the active session (issue #3)
     val terminalBusy = mutableStateOf(false)                  // a shell command is awaiting approval/result
@@ -1320,8 +1325,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
             is AskWithdrawn -> if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
-                if (pendingAsk.value?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
-                pendingAsk.value = null
+                val ask = pendingAsk.value
+                if (f.reason == AskWithdrawnReason.TIMED_OUT && ask?.questions == null) {
+                    // issue #100: keep the permission card up but flip it to its terminal "timed out" state,
+                    // so a returning user sees what happened instead of a card that silently vanished (which
+                    // read as success). A tap on it now only dismisses — no more silent no-op.
+                    timedOutAskId.value = f.askId
+                } else {
+                    // agent moved on / session closed / a question timed out → dismiss (a question leaves a note)
+                    if (ask?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
+                    pendingAsk.value = null
+                }
             }
             is TurnDone -> if (f.convoId == convoId.value) {
                 promptEvidence()

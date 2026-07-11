@@ -223,6 +223,7 @@ fun App(scope: CoroutineScope) {
             repo.pendingAsk.value?.takeIf { !it.isQuestion }?.let { ask ->
                 PermissionSheet(
                     ask, repo.workdir.value,
+                    timedOutSignal = repo.timedOutAskId.value == ask.askId, // issue #100: daemon said this ask timed out
                     onDeny = { repo.resolve(Decision.DENY) },
                     onOnce = { repo.resolve(Decision.ALLOW) },
                     onAlways = { repo.resolve(Decision.ALLOW, remember = true) },

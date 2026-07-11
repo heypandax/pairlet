@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -152,56 +153,101 @@ private fun DiffView(diff: String) {
     }
 }
 
-/** Inline approval card embedded in the chat stream — command box, or a diff when [PermissionAsk.diff] is set. */
+/**
+ * Inline approval card embedded in the chat stream — command box, or a diff when [PermissionAsk.diff] is set.
+ * On the daemon's TIMED_OUT signal ([timedOut], issue #100) it flips to a terminal state: the request greys
+ * out and Allow/Deny give way to an "Auto-denied (no response)" danger note + Dismiss — so a returning user
+ * sees what happened instead of a card that still looks live, and a late click can no longer fire a verdict
+ * the CLI already stopped waiting for (which the daemon would only answer with `ask_expired`). Mirrors the
+ * phone's [dev.ccpocket.app.ui.PermissionSheet] terminal block.
+ */
 @Composable
-fun InlinePermCard(ask: PermissionAsk, agent: AgentKind, workdir: String, branch: String?, onAllow: (remember: Boolean) -> Unit, onDeny: () -> Unit) {
+fun InlinePermCard(
+    ask: PermissionAsk,
+    agent: AgentKind,
+    workdir: String,
+    branch: String?,
+    onAllow: (remember: Boolean) -> Unit,
+    onDeny: () -> Unit,
+    timedOut: Boolean = false,
+    onDismiss: () -> Unit = {},
+) {
     val color = agentColor(agent)
     val isDiff = ask.diff != null
     var rememberRule by remember(ask.askId) { mutableStateOf(false) }
+    val bodyAlpha = if (timedOut) 0.5f else 1f // grey the (now inert) request, like the phone's terminal sheet
     Column(
         Modifier.widthIn(max = 680.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.raised)
             .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(15.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-            ShieldChip(color)
+            Box(Modifier.alpha(bodyAlpha)) { ShieldChip(color) }
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text(
-                        if (isDiff) "${agentName(agent)} wants to edit files" else "${agentName(agent)} needs permission",
-                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
-                    )
-                    if (agent == AgentKind.CODEX) AgentTag(AgentKind.CODEX)
-                }
-                if (isDiff) {
-                    val diff = ask.diff!!
-                    val added = diff.lines().count { it.startsWith("+") }
-                    val removed = diff.lines().count { it.startsWith("-") }
-                    Row(Modifier.padding(top = 3.dp, bottom = 11.dp)) {
-                        Text(ask.inputPreview + " ", color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp)
-                        Text("+$added", color = Tok.ok, fontFamily = Dk.mono, fontSize = 12.5.sp)
-                        Text(" −$removed", color = Tok.danger, fontFamily = Dk.mono, fontSize = 12.5.sp)
+                Column(Modifier.alpha(bodyAlpha)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(
+                            if (isDiff) "${agentName(agent)} wants to edit files" else "${agentName(agent)} needs permission",
+                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+                        )
+                        if (agent == AgentKind.CODEX) AgentTag(AgentKind.CODEX)
                     }
-                    DiffView(diff)
-                } else {
-                    Text(
-                        "${ask.title} · ${ask.tool}".trim().removePrefix("· "),
-                        color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
-                    )
-                    CommandBox(ask.inputPreview)
-                    Spacer(Modifier.size(10.dp))
-                    DirBranchLine(workdir, branch)
+                    if (isDiff) {
+                        val diff = ask.diff!!
+                        val added = diff.lines().count { it.startsWith("+") }
+                        val removed = diff.lines().count { it.startsWith("-") }
+                        Row(Modifier.padding(top = 3.dp, bottom = 11.dp)) {
+                            Text(ask.inputPreview + " ", color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.5.sp)
+                            Text("+$added", color = Tok.ok, fontFamily = Dk.mono, fontSize = 12.5.sp)
+                            Text(" −$removed", color = Tok.danger, fontFamily = Dk.mono, fontSize = 12.5.sp)
+                        }
+                        DiffView(diff)
+                    } else {
+                        Text(
+                            "${ask.title} · ${ask.tool}".trim().removePrefix("· "),
+                            color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp),
+                        )
+                        CommandBox(ask.inputPreview)
+                        Spacer(Modifier.size(10.dp))
+                        DirBranchLine(workdir, branch)
+                    }
                 }
                 Spacer(Modifier.size(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (canRemember(ask)) RememberCheck("Remember for this session", rememberRule) { rememberRule = !rememberRule }
-                    Spacer(Modifier.weight(1f))
-                    CountdownRing(26.dp, 2.2.dp, color)
-                    DenyButton(onClick = onDeny)
-                    AllowButton(key = !isDiff, onClick = { onAllow(rememberRule) })
+                if (timedOut) {
+                    TimedOutBlock(onDismiss)
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (canRemember(ask)) RememberCheck("Remember for this session", rememberRule) { rememberRule = !rememberRule }
+                        Spacer(Modifier.weight(1f))
+                        CountdownRing(26.dp, 2.2.dp, color)
+                        DenyButton(onClick = onDeny)
+                        AllowButton(key = !isDiff, onClick = { onAllow(rememberRule) })
+                    }
                 }
             }
         }
+    }
+}
+
+/** The inline card's terminal "timed out" state (issue #100): a danger note that the ask auto-denied for want
+ *  of a response, with a Dismiss that just retires the (now inert) card — no verdict is sent. All tokens are
+ *  theme-aware ([Tok]), so it reads in both light and dark. Copy mirrors the phone's PermissionSheet block. */
+@Composable
+private fun TimedOutBlock(onDismiss: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.danger.copy(alpha = 0.08f))
+            .border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(10.dp)).padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(Tok.danger))
+        Column(Modifier.weight(1f)) {
+            Text("Auto-denied (no response)", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("No response within the time limit.", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+        }
+        Text(
+            "Dismiss", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onDismiss).padding(horizontal = 10.dp, vertical = 6.dp),
+        )
     }
 }
 

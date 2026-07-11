@@ -112,6 +112,42 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun askWithdrawn_reason_roundtrips_and_old_frames_default_withdrawn() {
+        // issue #100: the retire-reason is a trailing optional. new daemon → new phone: TIMED_OUT rides along
+        val timed = Envelope(id = "w2", ts = 0, body = AskWithdrawn("c1", "a1", AskWithdrawnReason.TIMED_OUT))
+        val json = PocketJson.encodeToString(timed)
+        assertTrue("\"reason\":\"timed_out\"" in json, json)
+        assertEquals(timed, PocketJson.decodeFromString<Envelope>(json))
+
+        // encodeDefaults puts reason on EVERY withdrawal — the plain (agent-cancel) one carries "withdrawn"
+        assertTrue("\"reason\":\"withdrawn\"" in PocketJson.encodeToString(Envelope(id = "w3", ts = 0, body = AskWithdrawn("c1", "a2"))))
+
+        // an OLD daemon's frame (no reason key) decodes to WITHDRAWN — every phone keeps today's plain dismiss
+        val old = """{"id":"w4","ts":0,"to":"PEER","body":{"t":"pocket/ask.withdrawn","convoId":"c1","askId":"a3"}}"""
+        assertEquals(AskWithdrawn("c1", "a3", AskWithdrawnReason.WITHDRAWN), PocketJson.decodeFromString<Envelope>(old).body)
+
+        // a reason only a NEWER daemon knows degrades to UNKNOWN (phone just dismisses) instead of the
+        // runCatching-at-decode dropping the whole frame and stranding the card
+        val future = """{"id":"w5","ts":0,"to":"PEER","body":{"t":"pocket/ask.withdrawn","convoId":"c1","askId":"a4","reason":"superseded"}}"""
+        assertEquals(AskWithdrawnReason.UNKNOWN, (PocketJson.decodeFromString<Envelope>(future).body as AskWithdrawn).reason)
+    }
+
+    @Test
+    fun permissionAsk_timeoutSec_roundtrips_and_defaults_null_for_old_daemons() {
+        // issue #100: a new daemon stamps its real approval window so the phone counts its local fallback against it
+        val ask = PermissionAsk("c1", "a1", "Write", "…", timeoutSec = 600)
+        val json = PocketJson.encodeToString(Envelope(id = "ts1", ts = 0, body = ask))
+        assertTrue("\"timeoutSec\":600" in json, json)
+        assertEquals(ask, PocketJson.decodeFromString<Envelope>(json).body)
+
+        // a plain ask omits it (explicitNulls=false) — byte-identical to a pre-#100 daemon's frame
+        assertFalse("timeoutSec" in PocketJson.encodeToString(Envelope(id = "ts2", ts = 0, body = PermissionAsk("c1", "a2", "Bash", "ls"))))
+        // an OLD daemon's ask (no timeoutSec key) decodes to null → the phone falls back to its legacy 30s countdown
+        val old = """{"id":"ts3","ts":0,"to":"PEER","body":{"t":"pocket/ask","convoId":"c1","askId":"a3","tool":"Bash","inputPreview":"ls"}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(old).body as PermissionAsk).timeoutSec)
+    }
+
+    @Test
     fun permissionVerdict_answers_roundtrip_and_old_frames_still_decode() {
         val v = PermissionVerdict(
             "c1", "a1", Decision.ALLOW,
