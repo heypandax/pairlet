@@ -122,6 +122,26 @@ class ImeSafeMirror internal constructor(initial: String) {
             onExternalChange(new.text)
         }
     }
+
+    /**
+     * Reconcile the mirror against the upstream [value]; called on every recomposition. A live composition
+     * owns the field (CJK pinyin as marked text) and rebuilding it drops that text (#93/#86), so an external
+     * write racing a composition is PARKED and lands when the composition ends. But `parked` is only
+     * meaningful WHILE the mirror and upstream disagree: fast typing echoes the field back up through
+     * [onExternalChange], so `value` re-converges on the field a frame after an external write (clear-on-send,
+     * completion, per-session draft #88) parked the now-superseded text. Once `field.text == value` there is
+     * no pending write, and a lingering `parked` would ambush the next composition==null commit — a
+     * punctuation like ，direct-committed with no composition — and roll the whole field back to that stale
+     * snapshot (#118, "打逗号整段清空/自动换行"). So drop it the instant the mirror re-syncs.
+     */
+    internal fun reconcile(value: String) {
+        if (field.text != value) {
+            if (field.composition == null) { field = TextFieldValue(value, TextRange(value.length)); parked = null }
+            else parked = value
+        } else if (parked != null) {
+            parked = null
+        }
+    }
 }
 
 /** [ImeSafeMirror] reconciled against [value] on every composition; [onValueChange] receives each edit. */
@@ -129,10 +149,7 @@ class ImeSafeMirror internal constructor(initial: String) {
 fun rememberImeSafeMirror(value: String, onValueChange: (String) -> Unit): ImeSafeMirror {
     val m = remember { ImeSafeMirror(value) }
     m.onExternalChange = onValueChange
-    if (m.field.text != value) {
-        if (m.field.composition == null) { m.field = TextFieldValue(value, TextRange(value.length)); m.parked = null }
-        else m.parked = value
-    }
+    m.reconcile(value)
     return m
 }
 
