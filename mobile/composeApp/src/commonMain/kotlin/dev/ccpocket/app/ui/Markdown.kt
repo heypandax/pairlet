@@ -60,6 +60,11 @@ interface PathOpener {
 
 val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 
+/** The open session's working directory, so a cwd-relative path can be normalized to an absolute one
+ *  for copy/share (issue #116). Set on both platforms (desktop: chatWorkdir; mobile: repo.workdir);
+ *  null before a session is open, when relative paths simply copy verbatim. */
+val LocalPathCwd = staticCompositionLocalOf<String?> { null }
+
 // Four path shapes, all with the lookbehind that keeps URL tails ("https://host/a/b") and word/word
 // compounds from matching:
 //   • unix `/a/b`  (≥2 segments so prose like "/help" rarely trips it)
@@ -76,7 +81,7 @@ val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 // the JVM accepts (\p{N} → "No such character class"), and a throwing top-level initializer took
 // down the whole FILE on iOS — first Markdown render (= tapping any session) died with
 // FileFailedToInitializeException. Null here just disables path links; the transcript must render.
-private val pathRx: Regex? by lazy {
+internal val pathRx: Regex? by lazy {
     runCatching {
         Regex("""(?<![\w:/])(?:~(?:/[\p{L}0-9._+@%-]+)+|/[\p{L}0-9._+@%-]+(?:/[\p{L}0-9._+@%-]+)+|[A-Za-z]:[\\/][\p{L}0-9._+@%\\/-]+|(?:[\p{L}0-9._+@%-]+/)+[\p{L}0-9._+@%-]*\.[\p{L}0-9]{1,8})/?""")
     }.getOrNull()
@@ -115,10 +120,10 @@ private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String
 
 // http(s) only (matches what the platform viewers accept); the trailing trim drops sentence
 // punctuation that prose glues onto a URL ("see https://x.dev/docs." / 中文句读)
-private val urlRx: Regex? by lazy {
+internal val urlRx: Regex? by lazy {
     runCatching { Regex("""https?://[^\s<>"'`一-鿿）】」，。；！？]+""") }.getOrNull()
 }
-private const val URL_TRAIL = ".,;:!?)]}>"
+internal const val URL_TRAIL = ".,;:!?)]}>"
 
 /** Adds browser link spans over every http(s) URL — phones open an in-app browser, desktop the system
  *  one (see [dev.ccpocket.app.openWebUrl]). Unlike path links this needs no host gate: a URL is
@@ -222,8 +227,8 @@ private fun MdLine(raw: String, color: Color) {
         line.isBlank() -> Spacer(Modifier.height(3.dp))
         line.startsWith("#") -> {
             val level = line.takeWhile { it == '#' }.length
-            Text(
-                pathLinked(inline(line.drop(level).trim())),
+            LinkifiedText(
+                inline(line.drop(level).trim()),
                 color = color,
                 fontWeight = FontWeight.Bold,
                 fontSize = (when (level) { 1 -> 19.sp; 2 -> 17.sp; else -> 15.sp }) * scale,
@@ -233,10 +238,10 @@ private fun MdLine(raw: String, color: Color) {
             val indent = (line.length - trimmed.length).coerceAtMost(8)
             Row(Modifier.padding(start = (indent * 3).dp)) {
                 Text("•  ", color = color, fontSize = body)
-                Text(pathLinked(inline(trimmed.drop(2))), color = color, fontSize = body)
+                LinkifiedText(inline(trimmed.drop(2)), color = color, fontSize = body)
             }
         }
-        else -> Text(pathLinked(inline(line)), color = color, fontSize = body)
+        else -> LinkifiedText(inline(line), color = color, fontSize = body)
     }
 }
 

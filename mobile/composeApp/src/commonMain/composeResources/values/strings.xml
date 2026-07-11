@@ -408,4 +408,8 @@
     <string name="questions_answered_one">Answered %1$d question</string>
     <string name="questions_answered_many">Answered %1$d questions</string>
     <string name="questions_withdrawn">Claude moved on — answers no longer needed</string>
+    <string name="path_copy">Copy</string>
+    <string name="path_open">Open in browser</string>
+    <string name="path_copied">Copied</string>
+    <string name="path_cwd_hint">resolved from session cwd</string>
 </resources>

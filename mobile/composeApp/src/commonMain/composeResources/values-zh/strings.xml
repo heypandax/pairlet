@@ -408,4 +408,8 @@
     <string name="questions_answered_one">回答了 %1$d 个问题</string>
     <string name="questions_answered_many">回答了 %1$d 个问题</string>
     <string name="questions_withdrawn">Claude 已继续，无需再回答</string>
+    <string name="path_copy">复制</string>
+    <string name="path_open">在浏览器打开</string>
+    <string name="path_copied">已复制</string>
+    <string name="path_cwd_hint">已按会话目录解析</string>
 </resources>
