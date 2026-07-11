@@ -1,9 +1,12 @@
 package dev.ccpocket.app.data
 
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.ShareInfo
+import dev.ccpocket.protocol.ShareInvite
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.SlashCommand
@@ -49,6 +52,37 @@ object DemoData {
             path = "/Users/alex/dotfiles", name = "dotfiles", isDir = true,
             hasSessions = true, lastModified = ago(9 * DAY), gitBranch = "main",
         ),
+    )
+
+    /** Owner "Shared folders" management page (issue #115): active now / idle / near-expiry + one revoked
+     *  history row — so the demo shows every card state. */
+    fun shares(): List<ShareInfo> = listOf(
+        ShareInfo(
+            deviceId = "guest-alex", path = "/Users/alex/code/relay-server", tier = AccessTier.COLLABORATE,
+            createdAt = ago(6 * HOUR), expiresAt = epochMillis() + 2 * DAY + 4 * HOUR,
+            guestLabel = "Alex · iPhone", online = true, activeSessions = 1, lastActiveAt = ago(2 * MIN),
+        ),
+        ShareInfo(
+            deviceId = "guest-jordan", path = "/Users/alex/code/design-tokens", tier = AccessTier.REVIEW,
+            createdAt = ago(1 * DAY), expiresAt = epochMillis() + 5 * DAY + 9 * HOUR,
+            guestLabel = "Jordan · iPad", lastActiveAt = ago(3 * HOUR),
+        ),
+        ShareInfo(
+            deviceId = "guest-morgan", path = "/Users/alex/code/billing-svc", tier = AccessTier.COLLABORATE,
+            createdAt = ago(2 * DAY), expiresAt = epochMillis() + HOUR + 12 * MIN, // near-expiry (amber)
+            guestLabel = "Morgan · iPhone", lastActiveAt = ago(40 * MIN),
+        ),
+        ShareInfo(
+            deviceId = "guest-past", path = "/Users/alex/code/acme-api", tier = AccessTier.COLLABORATE,
+            createdAt = ago(5 * DAY), expiresAt = ago(2 * DAY), guestLabel = "Alex · iPhone", revoked = true,
+        ),
+    )
+
+    /** A synthesized invite for the demo owner-invite flow — enough to render the QR + recap. */
+    fun sampleInvite(path: String, tier: AccessTier, expiresInSec: Long): ShareInvite = ShareInvite(
+        relay = "wss://pocket.example", accountId = "demo-account", daemonPub = "demo-daemon-pub",
+        ticket = "DEMO-TICKET-0001", folderName = path.substringAfterLast('/').ifBlank { path },
+        tier = tier, expiresAt = epochMillis() + expiresInSec * 1000, ttlSec = 900, ownerLabel = "Alex-MacBook",
     )
 
     /** Session history for a tapped project. The live project leads with the running session. */

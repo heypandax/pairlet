@@ -30,6 +30,16 @@ import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
+import dev.ccpocket.protocol.AccessTier
+import dev.ccpocket.protocol.CreateShare
+import dev.ccpocket.protocol.ListShares
+import dev.ccpocket.protocol.RevokeShare
+import dev.ccpocket.protocol.ShareCreated
+import dev.ccpocket.protocol.ShareInfo
+import dev.ccpocket.protocol.ShareInvite
+import dev.ccpocket.protocol.ShareListing
+import dev.ccpocket.protocol.ShareRevoked
+import dev.ccpocket.app.pairing.toPairingInfo
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.contextWindowFor
@@ -1147,6 +1157,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is SwitchMode -> handle(SessionLive(frame.convoId, workdir.value ?: DemoData.LIVE_DIR, currentSessionId, mode = frame.mode, executing = false))
             is CancelTurn -> handle(TurnDone(frame.convoId))
             is AudioChunk -> if (frame.last) handle(Transcript(frame.convoId, frame.captureId, text = "show me the open files", ok = true))
+            // folder-share (issue #115): loop the owner control plane back with sample data
+            is CreateShare -> handle(ShareCreated(ok = true, invite = DemoData.sampleInvite(frame.path, frame.tier, frame.expiresInSec)))
+            is ListShares -> handle(ShareListing(DemoData.shares()))
+            is RevokeShare -> handle(ShareRevoked(frame.deviceId, ok = true))
             else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel — nothing to echo
         }
     }
@@ -1367,6 +1381,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
             // the visible listing on its own requested subPath anyway).
             is PathEntries -> if (f.workdir == workdir.value) pathListing.value = f
+            // ── folder-share (issue #115): owner control-plane replies ──
+            is ShareCreated -> { lastShareCreated.value = f; sharesRefreshing.value = false }
+            is ShareListing -> { replace(shares, f.items); sharesLoaded.value = true; sharesRefreshing.value = false }
+            is ShareRevoked -> {
+                sharesRefreshing.value = false
+                if (f.ok) shares.removeAll { it.deviceId == f.deviceId } // optimistic; a follow-up listShares() refreshes for real
+            }
             else -> {}
         }
     }
@@ -1506,6 +1527,35 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun fetchUsage(days: Int = 7) {
         usageLoading.value = true
         scope.launch { send(FetchUsage(days)) }
+    }
+
+    // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
+    /** Folders I've shared out (the management page) — the latest [ShareListing]. */
+    val shares = mutableStateListOf<ShareInfo>()
+    /** True once the first [ShareListing] of this session lands — distinguishes "empty" from "still loading". */
+    val sharesLoaded = mutableStateOf(false)
+    /** A create/list/revoke round-trip is in flight (spinner + button disable). */
+    val sharesRefreshing = mutableStateOf(false)
+    /** The most recent [ShareCreated] — the invite-ready screen reads its `invite`, or its `error`. */
+    val lastShareCreated = mutableStateOf<ShareCreated?>(null)
+
+    /** Owner: mint a scoped, expiring invite for [path]. Reply lands in [lastShareCreated]. */
+    fun createShare(path: String, tier: AccessTier, expiresInSec: Long, label: String? = null) {
+        lastShareCreated.value = null; sharesRefreshing.value = true
+        scope.launch { runCatching { send(CreateShare(path, tier, expiresInSec, label)) } }
+    }
+
+    /** Owner: refresh the list of folders I've shared + who's using them (the management page). */
+    fun listShares() { sharesRefreshing.value = true; scope.launch { runCatching { send(ListShares) } } }
+
+    /** Owner: revoke a share by its guest [deviceId] — cuts the live link now, kills the credential. */
+    fun revokeShare(deviceId: String) { sharesRefreshing.value = true; scope.launch { runCatching { send(RevokeShare(deviceId)) } } }
+
+    /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
+     *  but the daemon scopes this binding to the one shared folder (issue #115). */
+    fun redeemShareInvite(invite: ShareInvite) {
+        status.value = StatusMsg(Res.string.status_pairing)
+        scope.launch { doPair("share") { invite.toPairingInfo() } }
     }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }

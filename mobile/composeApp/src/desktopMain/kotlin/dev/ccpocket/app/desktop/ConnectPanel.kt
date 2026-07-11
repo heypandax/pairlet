@@ -48,6 +48,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.pairing.decodeShareInvite
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.resolve
@@ -60,6 +61,40 @@ fun ConnectPanel(repo: PocketRepository) {
             Text("CC Pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 26.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(28.dp))
             if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingForm(repo) else DevicePicker(repo)
+            Spacer(Modifier.height(18.dp))
+            JoinSharedFolder(repo)
+        }
+    }
+}
+
+/** Guest entry (issue #115): paste a folder-share invite to join ONE folder (not a whole computer). */
+@Composable
+private fun JoinSharedFolder(repo: PocketRepository) {
+    var open by remember { mutableStateOf(false) }
+    var blob by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    if (!open) {
+        Text(
+            "Join a shared folder", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
+        return
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Text("JOIN A SHARED FOLDER", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface).border(1.dp, if (error) Tok.danger else Tok.hair, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 11.dp)) {
+            if (blob.isEmpty()) Text("Paste invite code", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
+            BasicTextField(blob, { blob = it; error = false }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
+        }
+        if (error) {
+            Spacer(Modifier.height(8.dp))
+            Text("This invite is invalid or has expired. Ask for a new one.", color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        PrimaryButton("Join folder", enabled = blob.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            val inv = decodeShareInvite(blob)
+            if (inv != null) repo.redeemShareInvite(inv) else error = true
         }
     }
 }

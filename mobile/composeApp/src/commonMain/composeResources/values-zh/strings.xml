@@ -450,4 +450,34 @@
     <string name="share_left_hours">剩 %1$d 小时</string>
     <string name="share_left_minutes">剩 %1$d 分钟</string>
     <string name="share_expired">已过期</string>
+
+    <!-- folder-share: UI copy added with the four screens -->
+    <string name="share_tier_recommended">推荐</string>
+    <string name="share_revoke_hint_anytime">你可以随时撤销访问权限。</string>
+    <string name="share_recap_access">权限</string>
+    <string name="share_recap_expires">有效期</string>
+    <string name="share_recap_folder">文件夹</string>
+    <string name="share_invite_new_code">重新生成</string>
+    <string name="share_manage_hint">随时在 设置 ▸ 共享文件夹 中管理或撤销。</string>
+    <string name="share_active_label">使用中</string>
+    <string name="share_history_label">历史</string>
+    <string name="share_owner_footer">对方的会话运行在你的电脑和你的 Claude 套餐上。</string>
+    <string name="share_expires_in">%1$s 后过期</string>
+    <string name="share_status_idle">空闲</string>
+    <string name="share_share_again">再次共享</string>
+    <string name="share_expired_label">已过期</string>
+    <string name="share_access_ended">访问已结束</string>
+    <string name="share_ended_body">%1$s 结束了此共享。此文件夹中的会话已无法从本设备访问。</string>
+    <string name="share_the_owner">所有者</string>
+    <string name="share_remove_from_list">从列表移除</string>
+    <string name="share_ask_new_invite">索取新的邀请</string>
+    <string name="share_revoked_disconnected">此共享已被撤销 · 会话已断开</string>
+    <string name="join_scan_title">加入共享文件夹</string>
+    <string name="join_scan_hint">扫描来自文件夹所有者的邀请</string>
+    <string name="join_or_paste">或粘贴邀请码</string>
+    <string name="join_paste_placeholder">粘贴邀请码</string>
+    <string name="join_single_use">邀请仅可使用一次，且很快过期。</string>
+    <string name="join_invalid">邀请无效或已过期。请索取新的邀请。</string>
+    <string name="join_review_title">确认邀请</string>
+    <string name="settings_sharing_section">共享</string>
 </resources>
