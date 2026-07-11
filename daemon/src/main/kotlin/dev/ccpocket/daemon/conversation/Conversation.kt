@@ -688,6 +688,10 @@ class Conversation(
         // for the next idle turn. `proc == null` needs no relaunch (the lazy launch below already bakes the
         // current fields); Codex never arms this (it applies settings per turn). A relaunch failure surfaces as a
         // PocketError (forgetting the id so the client can retry), mirroring the lazy-launch failure just below.
+        // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
+        // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
+        val firstSpawn = proc == null
+        val relaunching = proc != null && !executing && pendingRelaunch
         if (proc != null && !executing && pendingRelaunch) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId) }
@@ -718,7 +722,12 @@ class Conversation(
         lastPrompt = text to images // healSessionLock's resend source — the refused launch loses this turn
         lockForkRetried = false // each user prompt re-arms one heal
         backend.sendPrompt(text, images)
-        promptId?.let { sink.emit(PromptAck(convoId, it)) } // the turn is in the agent's hands — receipt (issue #66)
+        promptId?.let {
+            sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
+            // (issue #104) an ack is NOT a started turn. If the client later reports turnStalled for this prompt,
+            // this line pins whether the ack landed during a spawn/relaunch window (write possibly lost) or steady state.
+            log.info("$convoId acked prompt ${it.take(8)}… → agent (firstSpawn=$firstSpawn relaunch=$relaunching)")
+        }
     }
 
     /**
