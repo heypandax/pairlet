@@ -167,6 +167,7 @@ class RepoDesktopModel(
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
 
     override val connected: Boolean get() = repo.sessionActive.value
+    override val connGen: Int get() = repo.connGen.value
 
     // bindings don't carry an OS on the wire — read it off the user's naming, like the mobile fleet does
     private fun PairedDaemon.dkOs(): DkOs = when (osFromName(displayName())) {

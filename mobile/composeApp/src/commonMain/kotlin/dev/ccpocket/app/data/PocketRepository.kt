@@ -472,6 +472,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      */
     val sessionActive = mutableStateOf(false)
     val connected = mutableStateOf(false)
+    /** Monotonic count of [Attached] edges — every genuine (re)attach to the active daemon. The desktop
+     *  Account pane keys its one-shot auth/presets fetch on this so a pane left open across a daemon restart
+     *  re-fetches instead of stranding the pre-restart account (or a transient "claude CLI not found" captured
+     *  mid-restart) until the user closes and reopens it. Note [connected] alone can't drive this: a daemon
+     *  restart detected via relay PeerPresence re-handshakes without ever flipping [connected] false→true.
+     *  Bumps only on the real attach edge, which the reconnect backoff ladder already rate-limits, so a
+     *  flapping link can't spin the fetch. */
+    val connGen = mutableStateOf(0)
     /** Single source of truth for the connection-state UI (see [ConnPhase]); driven by real events. */
     val phase = mutableStateOf(ConnPhase.Connecting)
     val status = mutableStateOf(StatusMsg(Res.string.status_disconnected))
@@ -809,7 +817,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { attachedThisSession = true; connected.value = true; relayDeadlinePassed = false; ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
+            is Attached -> { attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
@@ -1475,6 +1483,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // test seam (issue #104): feed an inbound frame exactly as a transport would, to exercise the
     // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
     internal fun receiveForTest(f: Frame) = handle(f)
+
+    // control-plane counterpart: Attached/PeerPresence/AuthError flow through handleControl, not handle.
+    // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
+    // the Account pane's fetch re-keys on reconnect.
+    internal fun receiveControlForTest(f: Frame) = handleControl(f)
 
     private fun handle(f: Frame) {
         when (f) {

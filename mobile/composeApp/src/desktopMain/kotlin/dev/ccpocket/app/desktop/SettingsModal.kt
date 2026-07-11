@@ -358,7 +358,10 @@ private fun AccountPane(model: DesktopModel) {
     // an old daemon silently drops pocket/auth.fetch AND pocket/presets.fetch — flip to explicit
     // "update it" lines instead of loading forever (and never offer the token-bearing preset form)
     var timedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { model.refreshAuth(); model.refreshPresets(); delay(4_000); timedOut = true }
+    // key on connGen (bumps on every (re)attach), not Unit: a pane left open across a daemon restart/reconnect
+    // must re-fetch — otherwise it strands the pre-restart account or a transient "claude CLI not found" until
+    // a manual close/reopen re-runs this. Reset the 4s "update the daemon" grace at the start of each run.
+    LaunchedEffect(model.connGen) { timedOut = false; model.refreshAuth(); model.refreshPresets(); delay(4_000); timedOut = true }
     val s = model.authState
     val ps = model.presetsState
     val activePreset = ps?.activeId?.let { id -> ps.presets.firstOrNull { it.id == id } }

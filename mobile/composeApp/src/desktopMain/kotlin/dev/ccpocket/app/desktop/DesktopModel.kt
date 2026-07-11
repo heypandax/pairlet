@@ -146,6 +146,9 @@ data class DkWatch(
 interface DesktopModel {
     // connection + computer switcher
     val connected: Boolean
+    /** Bumps on every (re)attach to the active daemon. The Account pane keys its auth/presets fetch on this
+     *  so a reconnect (e.g. a daemon restart) refills it without a manual close/reopen. 0 = seed/preview. */
+    val connGen: Int get() = 0
     val activeComputer: DkComputer?
     val computers: List<DkComputer>
     fun selectComputer(c: DkComputer)

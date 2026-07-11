@@ -62,6 +62,24 @@ class RepoDesktopModelRefreshTest {
     }
 
     @Test
+    fun attachedBumpsConnGenSoTheAccountPaneRefetchesOnReconnect() {
+        // The Account pane keys its one-shot auth/presets fetch on model.connGen. A restarted daemon pushes
+        // no fresh AuthState on reattach, so without a connGen bump a pane left open across the restart would
+        // strand the pre-restart account (or a transient "claude CLI not found") until a manual close/reopen.
+        // Each genuine (re)attach must bump connGen so the LaunchedEffect re-keys and re-fetches.
+        val (repo, model) = demoModel()
+        repo.authState.value = dev.ccpocket.protocol.AuthState(loggedIn = true, email = "stale@old.host")
+        assertEquals(0, model.connGen)
+
+        repo.receiveControlForTest(dev.ccpocket.protocol.Attached(dev.ccpocket.protocol.Role.DEVICE, "acct-test"))
+        assertEquals(1, model.connGen) // first attach — pane's first fetch
+
+        // a daemon restart reattaches; the relay re-broadcasts presence and the transport re-handshakes
+        repo.receiveControlForTest(dev.ccpocket.protocol.Attached(dev.ccpocket.protocol.Role.DEVICE, "acct-test"))
+        assertEquals(2, model.connGen) // reconnect edge → pane re-keys → re-fetch (the fix)
+    }
+
+    @Test
     fun disconnectClearsPerDaemonPresetAndAuthTruth() {
         // issue #113 secrets red line: a machine switch must not carry one daemon's presets truth into
         // the next. A stale non-null presetsState would keep the token-bearing form unlocked after
