@@ -25,7 +25,8 @@ class RepoDesktopModelRefreshTest {
             relay = "wss://test", accountId = "acct-test", daemonPub = "pk", deviceId = "dev", credential = "cred",
         )
         repo.enterDemo()
-        return repo to RepoDesktopModel(repo, scope)
+        // FakeDesktopStore: never read or write the developer's real store file from tests (issue #102)
+        return repo to RepoDesktopModel(repo, scope, FakeDesktopStore())
     }
 
     @Test
