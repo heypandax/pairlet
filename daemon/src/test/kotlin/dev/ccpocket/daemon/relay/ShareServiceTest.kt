@@ -26,10 +26,16 @@ class ShareServiceTest {
     private val revoked = mutableListOf<String>()
     private var interactivePending = false
 
-    private fun service(now: Long = 1_000_000) = ShareService(
+    private fun freshRegistry() = BridgeRegistry(
+        File(dir, "b-${System.nanoTime()}.json"),
+        File(dir, "g-${System.nanoTime()}.json"),
+        File(dir, "gs-${System.nanoTime()}.json"),
+    )
+
+    private fun service(now: Long = 1_000_000, reg: BridgeRegistry = registry) = ShareService(
         accountId = "acct", daemonPubB64 = "daemonpub", relayWsBase = "wss://relay",
         ownerLabel = { "Pandas-Mac" },
-        registry = registry,
+        registry = reg,
         mintTicket = { _ -> PairTicket("tkt-abc", 120, "482913") },
         interactivePairingPending = { interactivePending },
         revokeCredential = { id -> revoked += id },
@@ -109,10 +115,11 @@ class ShareServiceTest {
     fun create_clamps_the_share_lifetime_to_sane_bounds() = runBlocking {
         // a sub-floor lifetime (typo, or an attacker minimizing the audit window) is raised to the 5-min
         // floor; an absurd one is capped at the 90-day ceiling — a share can neither be effectively
-        // instant nor "never expires"
-        val floored = service().create(CreateShare(shared.path, expiresInSec = 1)).invite!!
+        // instant nor "never expires". Each mint uses its OWN registry: create() serializes mints via the
+        // #91 intent-pending guard, so a second mint on the same registry would be refused (not the clamp).
+        val floored = service(reg = freshRegistry()).create(CreateShare(shared.path, expiresInSec = 1)).invite!!
         assertEquals(1_000_000 + 5 * 60 * 1000L, floored.expiresAt) // 5-min floor, not 1 second
-        val capped = service().create(CreateShare(shared.path, expiresInSec = 100L * 365 * 24 * 3600)).invite!!
+        val capped = service(reg = freshRegistry()).create(CreateShare(shared.path, expiresInSec = 100L * 365 * 24 * 3600)).invite!!
         assertEquals(1_000_000 + 90L * 24 * 3600 * 1000, capped.expiresAt) // 90-day ceiling, not 100 years
     }
 
