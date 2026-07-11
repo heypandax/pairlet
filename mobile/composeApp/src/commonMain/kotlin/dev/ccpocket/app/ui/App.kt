@@ -159,10 +159,16 @@ fun App(scope: CoroutineScope) {
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
+    val appLock = repo.appLock
     dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
         repo.onAppForeground()
         dev.ccpocket.app.data.FleetRuntime.coordinator?.onAppForeground()
+        appLock.onForeground() // App Lock (issue #109): re-lock per policy / drop the cover on return
     }
+    // App Lock: arm auto-lock when fully backgrounded; draw the opaque privacy cover the instant the app is
+    // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
+    dev.ccpocket.app.OnAppBackground { appLock.onBackground() }
+    dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
     // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
     // registers its own handler later in composition, which wins while it is showing (LIFO).
@@ -178,6 +184,7 @@ fun App(scope: CoroutineScope) {
     // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick tracks a
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
     PocketTheme(mode = repo.themeMode.value, fontScale = repo.fontScale.value) {
+      Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
@@ -231,6 +238,12 @@ fun App(scope: CoroutineScope) {
                 )
             }
         }
+        // App Lock (issue #109): the gate blocks ALL content (incl. the permission sheet) until biometrics
+        // pass; the cover masks the app-switcher snapshot while briefly backgrounded. Both reuse the same
+        // branded lockup. Desktop never reaches App(), so this overlay is Android/iOS-only by construction.
+        if (appLock.locked.value) AppLockGate(appLock)
+        else if (appLock.covered.value) AppLockCover()
+      }
     }
 }
 

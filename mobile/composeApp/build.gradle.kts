@@ -60,6 +60,7 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.biometric) // App Lock (issue #109): BiometricPrompt + FragmentActivity
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.cryptography.provider.jdk) // E2E crypto provider (registers on this target)
