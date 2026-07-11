@@ -86,8 +86,14 @@ import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.AuthState
+import dev.ccpocket.protocol.ActivatePreset
+import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchPresets
 import dev.ccpocket.protocol.FetchUsage
+import dev.ccpocket.protocol.PresetsState
+import dev.ccpocket.protocol.SavePreset
+import dev.ccpocket.protocol.Secret
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
@@ -1164,6 +1170,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
+        // per-daemon truth must not survive a machine switch: a stale non-null presetsState would keep
+        // the token-bearing create/edit form UNLOCKED after switching to a daemon that predates presets
+        // (it silently drops FetchPresets), breaking "never fire a plaintext token at a peer that can't
+        // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
+        authState.value = null
+        presetsState.value = null; presetsStateRev.value = 0
         convoId.value = null
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
@@ -1398,6 +1410,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items); sessionsRefreshing.value = false }
             is Usage -> { usage.value = f; usageLoading.value = false }
             is AuthState -> authState.value = f
+            // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
+            // key on the rev, not the value, so an identical state still settles spinners/pending forms
+            is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
@@ -1761,6 +1776,56 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun authCancelLogin() = scope.launch { runCatching { send(AuthLoginCancel) } }
 
     fun authLogout() = scope.launch { runCatching { send(AuthLogout) } }
+
+    /** API presets (issue #113): the daemon's presets truth — the latest [PresetsState] reply wins.
+     *  Null until first fetched (or the daemon predates pocket/presets.* and silently drops the
+     *  request — the client then shows an "update the daemon" line and NEVER offers the token form,
+     *  so a plaintext token can't be fired at a peer that won't store it). */
+    val presetsState = mutableStateOf<PresetsState?>(null)
+
+    /** Monotonic count of [PresetsState] replies — the settle signal for spinners/forms (see handle). */
+    val presetsStateRev = mutableStateOf(0)
+
+    fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
+
+    /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
+     *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */
+    fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) =
+        scope.launch {
+            runCatching {
+                send(
+                    SavePreset(
+                        id = id, name = name, baseUrl = baseUrl, tokenVar = tokenVar,
+                        token = token?.takeIf { it.isNotBlank() }?.let(::Secret),
+                        model = model?.takeIf { it.isNotBlank() },
+                        smallFastModel = smallFastModel?.takeIf { it.isNotBlank() },
+                    ),
+                )
+            }
+        }
+
+    fun deletePreset(id: String, force: Boolean = false) = scope.launch { runCatching { send(DeletePreset(id, force)) } }
+
+    /** Switch the active preset (null = back to the computer's own env/login). Same semantics as an
+     *  account switch: mid-task sessions refuse via [PresetsState.blockers]; idle ones close + resume. */
+    fun activatePreset(id: String?, force: Boolean = false) = scope.launch { runCatching { send(ActivatePreset(id, force)) } }
+
+    /** Stop ONE preset-switch blocker (hard close), then re-attempt activating [retryId] — the daemon
+     *  either proceeds (that was the last blocker) or replies with the remaining list. */
+    fun presetStopBlocker(convoId: String, retryId: String?) = scope.launch {
+        runCatching {
+            send(CloseSession(convoId, force = true))
+            send(ActivatePreset(retryId))
+        }
+    }
+
+    /** Same, for a blocked DELETE of the active preset: close one blocker, retry the delete. */
+    fun presetStopBlockerForDelete(convoId: String, deleteId: String) = scope.launch {
+        runCatching {
+            send(CloseSession(convoId, force = true))
+            send(DeletePreset(deleteId))
+        }
+    }
 
     /** Token-usage dashboard (issue #26): the latest daemon-aggregated snapshot + a fetch-in-flight flag. */
     val usage = mutableStateOf<Usage?>(null)

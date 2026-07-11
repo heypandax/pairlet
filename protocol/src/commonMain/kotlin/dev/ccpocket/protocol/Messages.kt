@@ -306,6 +306,54 @@ data object AuthLogout : ToDaemon
 @SerialName("pocket/push.prefs.set")
 data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
 
+// ── API presets (issue #113): named env overrides for third-party API users ──
+// Every pocket/presets.* request is answered by one [PresetsState]. A daemon that predates these
+// silently drops them (undecodable frame) — the client shows an "update the daemon" line instead,
+// and MUST NOT offer the token-bearing create/edit form until a [PresetsState] reply proves the
+// daemon understands presets (so a plaintext token is never fired at a peer that can't store it).
+
+/** client -> daemon: list the saved presets (masked) + which one is active. */
+@Serializable
+@SerialName("pocket/presets.fetch")
+data object FetchPresets : ToDaemon
+
+/**
+ * client -> daemon: create ([id] null) or update ([id] set) one preset. [token] is WRITE-ONLY: the
+ * plaintext rides this frame over the E2E channel, is stored on the daemon, and only ever comes back
+ * as [PresetSummary.tokenMask]. On update, a null [token] keeps the stored one ("leave blank to keep").
+ * [tokenVar] picks which env var carries it ([PresetEnv.TOKEN_VARS]). Validation failures come back
+ * as [PresetsState.error] with [PresetsState.fieldError] naming the offending field.
+ */
+@Serializable
+@SerialName("pocket/presets.save")
+data class SavePreset(
+    val id: String? = null,
+    val name: String,
+    val baseUrl: String,
+    val tokenVar: String = PresetEnv.AUTH_TOKEN,
+    val token: Secret? = null,
+    val model: String? = null,
+    val smallFastModel: String? = null,
+) : ToDaemon
+
+/** client -> daemon: delete a preset. Deleting the ACTIVE one deactivates first — same switch
+ *  semantics as [ActivatePreset] (mid-task sessions refuse via blockers, idle ones are closed). */
+@Serializable
+@SerialName("pocket/presets.delete")
+data class DeletePreset(val id: String, val force: Boolean = false) : ToDaemon
+
+/**
+ * client -> daemon: make [id] the active preset (null = deactivate, back to the computer's own env /
+ * login). New sessions launch with the preset's env injected; sessions already open keep the endpoint
+ * they started with. Switch semantics mirror [AuthLogin]: refused with [PresetsState.blockers] while
+ * any conversation is mid-task (its running process holds the OLD env for its next turn), idle-but-open
+ * conversations are closed automatically (they cold-resume under the new env). [force] = the user saw
+ * the blocker list and chose "stop all & switch".
+ */
+@Serializable
+@SerialName("pocket/presets.activate")
+data class ActivatePreset(val id: String? = null, val force: Boolean = false) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -339,6 +387,24 @@ data class AuthState(
     val loginPending: Boolean = false,
     val loginUrl: String? = null,
     val error: String? = null,
+    val blockers: List<AuthBlocker> = emptyList(),
+) : ToPhone
+
+/**
+ * daemon -> client: the presets truth — the single reply to every pocket/presets.* request. Tokens
+ * appear ONLY as masks ([PresetSummary.tokenMask]); there is no frame that carries one back out.
+ * [error] is a user-facing refusal (validation, mid-task guard); the list still reflects the actual
+ * stored state alongside it. [fieldError] names the offending [SavePreset] field ("name" | "baseUrl" |
+ * "token") so the form can mark it inline. When the refusal is the mid-task guard, [blockers] itemizes
+ * the working conversations — same rendering as the OAuth account-switch refusal card.
+ */
+@Serializable
+@SerialName("pocket/presets.state")
+data class PresetsState(
+    val presets: List<PresetSummary> = emptyList(),
+    val activeId: String? = null,
+    val error: String? = null,
+    val fieldError: String? = null,
     val blockers: List<AuthBlocker> = emptyList(),
 ) : ToPhone
 

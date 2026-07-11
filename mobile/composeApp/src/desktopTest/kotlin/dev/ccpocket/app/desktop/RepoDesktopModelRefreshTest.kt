@@ -60,4 +60,24 @@ class RepoDesktopModelRefreshTest {
         assertEquals(a.path, model.sessionGroups.first { it.current }.path)
         assertTrue(model.sessionGroups.first { it.path == b.path }.sessions.isNotEmpty()) // B kept its snapshot
     }
+
+    @Test
+    fun disconnectClearsPerDaemonPresetAndAuthTruth() {
+        // issue #113 secrets red line: a machine switch must not carry one daemon's presets truth into
+        // the next. A stale non-null presetsState would keep the token-bearing form unlocked after
+        // switching to a daemon that predates presets (it silently drops FetchPresets).
+        val (repo, _) = demoModel()
+        repo.presetsState.value = dev.ccpocket.protocol.PresetsState(
+            presets = listOf(dev.ccpocket.protocol.PresetSummary("p1", "Work proxy", "https://x", tokenMask = "sk-…••••3f9a")),
+            activeId = "p1",
+        )
+        repo.presetsStateRev.value = 3
+        repo.authState.value = dev.ccpocket.protocol.AuthState(loggedIn = true, email = "a@b.c")
+
+        repo.disconnect()
+
+        assertEquals(null, repo.presetsState.value)
+        assertEquals(0, repo.presetsStateRev.value)
+        assertEquals(null, repo.authState.value) // account is a fresh fetch on the next daemon too
+    }
 }

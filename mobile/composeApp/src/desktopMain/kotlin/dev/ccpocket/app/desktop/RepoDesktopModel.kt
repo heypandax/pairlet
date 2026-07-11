@@ -758,6 +758,17 @@ class RepoDesktopModel(
     override fun cancelAuthLogin() { repo.authCancelLogin() }
     override fun logoutAccount() { repo.authLogout() }
 
+    override val presetsState: dev.ccpocket.protocol.PresetsState? get() = repo.presetsState.value
+    override val presetsRev: Int get() = repo.presetsStateRev.value
+    override fun refreshPresets() { repo.fetchPresets() }
+    override fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) {
+        repo.savePreset(id, name, baseUrl, tokenVar, token, model, smallFastModel)
+    }
+    override fun deletePreset(id: String, force: Boolean) { repo.deletePreset(id, force) }
+    override fun activatePreset(id: String?, force: Boolean) { repo.activatePreset(id, force) }
+    override fun stopPresetBlocker(convoId: String, retryId: String?) { repo.presetStopBlocker(convoId, retryId) }
+    override fun stopPresetDeleteBlocker(convoId: String, deleteId: String) { repo.presetStopBlockerForDelete(convoId, deleteId) }
+
     private fun paired(c: DkComputer) = repo.pairedList.firstOrNull { it.accountId == c.accountId }
     override fun renameComputer(c: DkComputer, label: String?) { paired(c)?.let { repo.renameDaemon(it, label) } }
     override fun revokeComputer(c: DkComputer) { paired(c)?.let { repo.unpair(it) } }

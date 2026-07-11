@@ -8,6 +8,7 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
+import kotlin.jvm.JvmInline
 
 /**
  * The autonomy ladder — the four permission modes claude's `--permission-mode` actually accepts,
@@ -283,6 +284,56 @@ data class AuthBlocker(
     val cwd: String,
     val reason: AuthBlockReason,
     val jobLabels: List<String> = emptyList(), // running background-job labels (BACKGROUND_JOBS only)
+)
+
+// ── API presets (issue #113) ──────────────────────────────────────────────
+
+/** The env vars an API preset may set on a session launch — the single source of truth for both the
+ *  daemon (injection + scrubbing) and the clients (field labels / the AUTH_TOKEN|API_KEY toggle). */
+object PresetEnv {
+    const val BASE_URL = "ANTHROPIC_BASE_URL"
+    const val AUTH_TOKEN = "ANTHROPIC_AUTH_TOKEN"
+    const val API_KEY = "ANTHROPIC_API_KEY"
+    const val MODEL = "ANTHROPIC_MODEL"
+    const val SMALL_FAST_MODEL = "ANTHROPIC_SMALL_FAST_MODEL"
+    // scrub-only (a preset never SETS it): a proxy user's daemon service env often carries
+    // ANTHROPIC_CUSTOM_HEADERS="Authorization: Bearer <real cred>". Left in place, an active preset
+    // would ship that credential to its OWN third-party base URL — a cross-endpoint secret leak.
+    const val CUSTOM_HEADERS = "ANTHROPIC_CUSTOM_HEADERS"
+
+    /** Valid [PresetSummary.tokenVar] / token-var choices (a preset's token is one or the other). */
+    val TOKEN_VARS: List<String> = listOf(AUTH_TOKEN, API_KEY)
+
+    /** Every var an active-preset launch SCRUBS before applying its own — superset of what a preset
+     *  sets, so no stale ambient auth (a leftover key, or [CUSTOM_HEADERS] bound to a different
+     *  endpoint) survives into the preset's child process. Single source of truth for the scrub. */
+    val SCRUBBED: List<String> = listOf(BASE_URL, AUTH_TOKEN, API_KEY, MODEL, SMALL_FAST_MODEL, CUSTOM_HEADERS)
+}
+
+/** A write-only secret riding client → daemon (a preset's API token). Serializes as a plain JSON
+ *  string; [toString] redacts so an accidentally logged frame can't spill it. Never sent daemon → client. */
+@Serializable
+@JvmInline
+value class Secret(val value: String) {
+    override fun toString(): String = "«redacted»"
+}
+
+/**
+ * One saved API endpoint preset as the CLIENT sees it — the daemon-side plaintext token is reduced to
+ * [tokenMask] before it ever reaches a frame (secrets red line: tokens are write-only, stored on the
+ * computer, never sent back). [tokenVar] is one of [PresetEnv.TOKEN_VARS]; kept a plain string (like
+ * [AuthState.apiKeySource]) so a future var name degrades to display text instead of failing the decode.
+ */
+@Serializable
+data class PresetSummary(
+    val id: String,
+    val name: String,
+    val baseUrl: String,
+    val tokenVar: String = PresetEnv.AUTH_TOKEN,
+    /** Short prefix + last 4, middle elided (e.g. `sk-…••••3f9a`) — derived on the daemon, never reversible. */
+    val tokenMask: String = "",
+    val model: String? = null,          // ANTHROPIC_MODEL override (optional model routing)
+    val smallFastModel: String? = null, // ANTHROPIC_SMALL_FAST_MODEL override
 )
 
 /** One option of an [AskQuestion]: a short label (what gets sent back as the answer) + a one-line description. */

@@ -889,4 +889,82 @@ class SerializationRoundTripTest {
         assertFalse(isWorkflowTool("Task"))
         assertFalse(isWorkflowTool("Agent"))
     }
+
+    // ── API presets (issue #113) ─────────────────────────────────────────
+
+    @Test
+    fun presets_requests_roundtrip_and_token_is_write_only_plus_redacted() {
+        // create: the plaintext token rides client → daemon as a plain JSON string (E2E protects transport)
+        val save = Envelope(
+            id = "s1", ts = 0,
+            body = SavePreset(
+                name = "Work proxy", baseUrl = "https://api.example-proxy.com/v1",
+                tokenVar = PresetEnv.API_KEY, token = Secret("sk-live-9f2a4c8e3f9a"),
+                model = "gpt-4o", smallFastModel = "gpt-4o-mini",
+            ),
+        )
+        val saveJson = PocketJson.encodeToString(save)
+        assertTrue("\"t\":\"pocket/presets.save\"" in saveJson, saveJson)
+        assertTrue("\"token\":\"sk-live-9f2a4c8e3f9a\"" in saveJson, saveJson) // inline value class = bare string
+        assertFalse("\"id\":\"" in saveJson.substringAfter("body"), saveJson)  // null id (create) omitted
+        assertEquals(save, PocketJson.decodeFromString<Envelope>(saveJson))
+
+        // …but the frame's toString (accidental logging) redacts the secret
+        val printed = save.toString()
+        assertFalse("sk-live-9f2a4c8e3f9a" in printed, printed)
+        assertTrue("«redacted»" in printed, printed)
+
+        // edit keeping the stored token: null token omitted on the wire ("leave blank to keep")
+        val keep = PocketJson.encodeToString(Envelope(id = "s2", ts = 0, body = SavePreset(id = "p1", name = "n", baseUrl = "https://x")))
+        assertFalse("\"token\":" in keep, keep)
+
+        // activate / deactivate / delete round-trip; activate-null omits id
+        val act = Envelope(id = "a1", ts = 0, body = ActivatePreset(id = "p1", force = true))
+        assertEquals(act, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(act)))
+        val deact = PocketJson.encodeToString(Envelope(id = "a2", ts = 0, body = ActivatePreset()))
+        assertTrue("\"t\":\"pocket/presets.activate\"" in deact, deact)
+        assertFalse("\"id\":" in deact.substringAfter("body"), deact)
+        val del = Envelope(id = "d1", ts = 0, body = DeletePreset("p1"))
+        assertEquals(del, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(del)))
+    }
+
+    @Test
+    fun presetsState_masks_only_and_decodes_tolerantly() {
+        val state = Envelope(
+            id = "ps1", ts = 0,
+            body = PresetsState(
+                presets = listOf(
+                    PresetSummary("p1", "Work proxy", "https://api.example-proxy.com/v1", PresetEnv.AUTH_TOKEN, "sk-…••••3f9a", model = "gpt-4o"),
+                    PresetSummary("p2", "Personal key", "https://api.anthropic.com", PresetEnv.API_KEY, "sk-…••••a71c"),
+                ),
+                activeId = "p1",
+            ),
+        )
+        val json = PocketJson.encodeToString(state)
+        assertTrue("\"t\":\"pocket/presets.state\"" in json, json)
+        assertTrue("sk-…••••3f9a" in json, json) // the mask IS the only token-shaped thing on this wire
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(json))
+
+        // refusal carries blockers in the same shape as AuthState (shared client card)
+        val blocked = PresetsState(
+            presets = emptyList(), activeId = null,
+            error = "Sessions on this computer are still working",
+            blockers = listOf(AuthBlocker(convoId = "c1", cwd = "/w/acme-web", reason = AuthBlockReason.EXECUTING)),
+        )
+        val bj = PocketJson.encodeToString(Envelope(id = "ps2", ts = 0, body = blocked))
+        assertEquals(blocked, PocketJson.decodeFromString<Envelope>(bj).body as PresetsState)
+
+        // a NEWER daemon's summary (extra key + unknown tokenVar) still decodes: ignoreUnknownKeys +
+        // tokenVar-as-string keep a future var name from failing the whole pane
+        val future = """{"id":"f1","ts":0,"to":"PEER","body":{"t":"pocket/presets.state","presets":[
+            {"id":"p9","name":"n","baseUrl":"https://x","tokenVar":"ANTHROPIC_FANCY_TOKEN","tokenMask":"••••","shiny":true}],"activeId":"p9"}}"""
+        val dec = PocketJson.decodeFromString<Envelope>(future).body as PresetsState
+        assertEquals("ANTHROPIC_FANCY_TOKEN", dec.presets.single().tokenVar)
+
+        // a minimal old-shape state (empty object) decodes to safe defaults — tail-append compatibility
+        val minimal = PocketJson.decodeFromString<Envelope>("""{"id":"f2","ts":0,"to":"PEER","body":{"t":"pocket/presets.state"}}""").body as PresetsState
+        assertEquals(emptyList(), minimal.presets)
+        assertEquals(null, minimal.activeId)
+        assertEquals(null, minimal.fieldError)
+    }
 }

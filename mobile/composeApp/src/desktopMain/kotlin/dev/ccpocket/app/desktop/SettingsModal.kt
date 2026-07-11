@@ -3,6 +3,9 @@ package dev.ccpocket.app.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,11 +25,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -39,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -49,6 +57,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +73,9 @@ import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
+import dev.ccpocket.protocol.PresetEnv
+import dev.ccpocket.protocol.PresetSummary
+import dev.ccpocket.protocol.PresetsState
 
 private enum class SettingsTab(val label: String, val icon: ImageVector) {
     GENERAL("General", Icons.Outlined.Tune),
@@ -319,24 +332,79 @@ private fun ModeRow(m: DkMode, selected: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * The active computer's Claude CLI account (issue: switch accounts without a terminal). One account at a
- * time, mirroring the official desktop app: "Switch account" signs the CLI out and starts `claude auth
- * login` on the daemon host; the OAuth page yields a code the user pastes back here. All state is the
- * daemon's latest AuthState push — this pane holds no login state machine of its own.
+ * The active computer's Claude CLI auth (OAuth account switch, issue #73 lineage) PLUS API presets
+ * (issue #113): named env overrides (base URL / token / model routing) a third-party API user switches
+ * between — the API-key counterpart of the OAuth account switch, sharing one pane and one refusal
+ * treatment. All state is the daemon's latest AuthState/PresetsState push; tokens ride up write-only
+ * and only ever come back masked, so nothing here can even render a plaintext secret.
  */
 @Composable
 private fun AccountPane(model: DesktopModel) {
-    // an old daemon silently drops pocket/auth.fetch — flip to an explicit "update it" line instead of loading forever
+    // an old daemon silently drops pocket/auth.fetch AND pocket/presets.fetch — flip to explicit
+    // "update it" lines instead of loading forever (and never offer the token-bearing preset form)
     var timedOut by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { model.refreshAuth(); delay(4_000); timedOut = true }
+    LaunchedEffect(Unit) { model.refreshAuth(); model.refreshPresets(); delay(4_000); timedOut = true }
     val s = model.authState
+    val ps = model.presetsState
+    val activePreset = ps?.activeId?.let { id -> ps.presets.firstOrNull { it.id == id } }
     var confirmSwitch by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf("") }
     val uriHandler = LocalUriHandler.current
     val clipboard = LocalClipboardManager.current
 
+    // One preset op in flight at a time: drives the tapped row's spinner (design 3a) and the local
+    // reach timeout (3c's inline error). lastOp survives the refusal reply — the blockers card needs
+    // to know what "Stop" / "Stop all & switch" retries; inFlight clears on ANY reply.
+    var inFlight by remember { mutableStateOf<PresetOp?>(null) }
+    var lastOp by remember { mutableStateOf<PresetOp?>(null) }
+    var reachError by remember { mutableStateOf(false) }
+    // keyed on the reply REV, not the state value: an equal-content reply (no-change save) must
+    // still settle the spinner — success and refusal both answer with a state
+    LaunchedEffect(model.presetsRev) { if (model.presetsRev > 0) inFlight = null }
+    LaunchedEffect(inFlight) {
+        if (inFlight == null) return@LaunchedEffect
+        delay(8_000)
+        if (inFlight != null) { inFlight = null; reachError = true }
+    }
+    val runOp: (PresetOp) -> Unit = { op ->
+        reachError = false; lastOp = op; inFlight = op
+        when (op) {
+            is PresetOp.Activate -> model.activatePreset(op.id)
+            is PresetOp.Delete -> model.deletePreset(op.id)
+        }
+    }
+    val stopOne: (String) -> Unit = { convoId ->
+        lastOp?.let { op ->
+            reachError = false; inFlight = op
+            when (op) {
+                is PresetOp.Activate -> model.stopPresetBlocker(convoId, op.id)
+                is PresetOp.Delete -> model.stopPresetDeleteBlocker(convoId, op.id)
+            }
+        }
+    }
+    val runForce: () -> Unit = {
+        lastOp?.let { op ->
+            reachError = false; inFlight = op
+            when (op) {
+                is PresetOp.Activate -> model.activatePreset(op.id, force = true)
+                is PresetOp.Delete -> model.deletePreset(op.id, force = true)
+            }
+        }
+    }
+
+    // form mode replaces the pane content in place (design 2a — same undecorated window, ‹ Presets back)
+    var editing by remember { mutableStateOf<PresetFormTarget?>(null) }
+    editing?.let { target ->
+        PresetForm(
+            model, ps, target,
+            onDelete = { id -> runOp(PresetOp.Delete(id)); editing = null },
+            onClose = { editing = null },
+        )
+        return
+    }
+
     Column {
-        Group("Claude account", "The account the ${model.activeComputer?.name ?: "active computer"}'s Claude CLI is signed in with.") {
+        Group("Authentication", "How this computer's Claude CLI signs in.") {
             when {
                 s == null -> Text(
                     when {
@@ -383,27 +451,29 @@ private fun AccountPane(model: DesktopModel) {
                     }
                 }
 
+                // a preset drives new sessions: show ITS truth (masked) as the authentication card —
+                // design 1a/3b. The daemon's own login/env still exists underneath; Deactivate returns to it.
+                activePreset != null -> PresetAuthCard(activePreset) { runOp(PresetOp.Activate(null)) }
+
                 // an API key / forwarding endpoint authenticates via env var, not an OAuth login: the CLI
                 // still reports loggedIn + authMethod "claude.ai", but email/plan are null and `claude auth
-                // login/logout` can't override the key. Explain that instead of dangling a dead switch (#73).
+                // login/logout` can't override the key (#73). Presets below are the actionable path now.
                 s.loggedIn && !s.apiKeySource.isNullOrBlank() -> Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                         .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
                 ) {
                     val keySource = s.apiKeySource.orEmpty() // non-blank per the branch guard (a protocol prop can't smart-cast cross-module)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Authenticated with an API key", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-                            Text(keySource, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
+                        Text("API key", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        MonoPill("env · $keySource", accent = false)
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Hairline(vertical = 13.dp)
                     Text(
-                        "This computer's Claude CLI runs on an API key — a key or forwarding endpoint set in its " +
-                            "environment, not a Claude subscription login. Switching accounts and signing out here only " +
-                            "apply to claude.ai logins; to change the key or endpoint, edit $keySource / " +
-                            "ANTHROPIC_BASE_URL on the computer and reconnect.",
+                        "Set in the computer's environment ($keySource / ANTHROPIC_BASE_URL), not a Claude login. " +
+                            if (ps != null) "Activate a preset below to run new sessions on a saved endpoint instead, or edit the variables on the computer."
+                            else "To change the key or endpoint, edit the variables on the computer and reconnect.",
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp,
                     )
                 }
@@ -441,65 +511,565 @@ private fun AccountPane(model: DesktopModel) {
                     }
                 }
 
+                // design 1b (unconfigured) merged with the OAuth entry point: no login, no env key,
+                // no active preset — offer both ways in (sign in, or save a preset below)
                 else -> Column(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                         .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
                 ) {
-                    Text("Not signed in", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Rounded.Lock, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
+                        Text("No account or API key set on this computer", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        MonoPill("unconfigured", accent = false)
+                    }
+                    Hairline(vertical = 13.dp)
                     Text(
-                        "The Claude CLI on this computer has no active account.",
-                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
+                        "This computer's Claude CLI has no login and no base URL or auth token in its environment. " +
+                            if (ps != null) "Sign in with Claude, or save a preset below to point new sessions at an endpoint."
+                            else "Sign in with Claude to get started.",
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 8.dp),
                     )
                     Row { TextBtn("Sign in…", Tok.accent) { model.switchAccount() } }
                 }
             }
             // mid-task refusal with structure: name each blocker and offer to stop it — per row or all at
             // once — instead of the dead-end string (which stays as the fallback for pre-blockers daemons)
-            if (s?.blockers?.isNotEmpty() == true) Column(
-                Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
-                    Text("These sessions are still working and block the switch:", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                }
-                s.blockers.forEach { b ->
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                b.cwd.substringAfterLast('/').substringAfterLast('\\').ifBlank { b.cwd },
-                                color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                when (b.reason) {
-                                    dev.ccpocket.protocol.AuthBlockReason.EXECUTING -> "Mid-turn right now"
-                                    dev.ccpocket.protocol.AuthBlockReason.BACKGROUND_JOBS ->
-                                        "${b.jobLabels.size.coerceAtLeast(1)} background task${if (b.jobLabels.size == 1) "" else "s"}" +
-                                            (b.jobLabels.firstOrNull()?.let { ": $it" } ?: "")
-                                    dev.ccpocket.protocol.AuthBlockReason.UNKNOWN -> "Still working" // newer daemon's reason
-                                },
-                                color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        // stops this one (background shells die with it; transcript persists) and retries the switch
-                        TextBtn("Stop", Tok.danger) { model.stopAuthBlocker(b.convoId) }
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextBtn("Stop all & switch", Tok.danger) { model.switchAccount(force = true) }
-                    Text("Sessions can be resumed afterwards; their background tasks end.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
-                }
+            if (s?.blockers?.isNotEmpty() == true) WorkingBlockersCard(
+                s.blockers,
+                onStopOne = { model.stopAuthBlocker(it) },
+                onForce = { model.switchAccount(force = true) },
+            )
+            else s?.error?.let { ErrorRow(it) }
+        }
+
+        // design 1a-1d: the presets group lives on the SAME pane for every auth flavor — OAuth users
+        // see it too (1c), which is exactly how a subscription user discovers third-party endpoints
+        Group("API presets", "Saved endpoints you can switch between. New sessions use the active one.") {
+            PresetsSection(
+                ps = ps,
+                timedOut = timedOut,
+                connected = model.connected,
+                oauthActive = activePreset == null && s?.loggedIn == true && s.apiKeySource.isNullOrBlank(),
+                computerName = model.activeComputer?.name,
+                inFlight = inFlight,
+                reachError = reachError,
+                onActivate = { runOp(PresetOp.Activate(it)) },
+                onEdit = { editing = PresetFormTarget.Edit(it) },
+                onDelete = { runOp(PresetOp.Delete(it)) },
+                onNew = { editing = PresetFormTarget.New },
+                onStopOne = stopOne,
+                onForce = runForce,
+            )
+        }
+    }
+}
+
+// ── API presets (issue #113) ─────────────────────────────────────────────
+
+/** One preset op awaiting its PresetsState reply — what the spinner shows and the blockers card retries. */
+private sealed interface PresetOp {
+    data class Activate(val id: String?) : PresetOp // null = deactivate (back to the computer's own auth)
+    data class Delete(val id: String) : PresetOp
+}
+
+private sealed interface PresetFormTarget {
+    data object New : PresetFormTarget
+    data class Edit(val preset: PresetSummary) : PresetFormTarget
+}
+
+/** The Authentication card while a preset drives new sessions (design 1a/3b): its truth, masked. */
+@Composable
+private fun PresetAuthCard(p: PresetSummary, onDeactivate: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
+            Text("API key", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            MonoPill("preset · ${p.name}", accent = true)
+        }
+        Hairline(vertical = 13.dp)
+        CapLabel("Base URL")
+        Text(p.baseUrl, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        CapLabel("Token", topPad = 12.dp)
+        Row(modifier = Modifier.padding(top = 4.dp)) {
+            Text(p.tokenVar, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp)
+            Text(" · ${p.tokenMask}", color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp)
+        }
+        if (p.model != null || p.smallFastModel != null) {
+            CapLabel("Model route", topPad = 12.dp)
+            val route = listOfNotNull(
+                p.model?.let { "model → $it" },
+                p.smallFastModel?.let { "fast → $it" },
+            ).joinToString(" · ")
+            Text(route, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        // the way back to the computer's own login/env — same switch semantics as activating (blockers may refuse)
+        Row { TextBtn("Deactivate", Tok.muted, onDeactivate) }
+    }
+}
+
+/** The "API presets" group body: list + new-row + settle note + refusal/error surfaces (design 1a-3d). */
+@Composable
+private fun PresetsSection(
+    ps: PresetsState?,
+    timedOut: Boolean,
+    connected: Boolean,
+    oauthActive: Boolean,
+    computerName: String?,
+    inFlight: PresetOp?,
+    reachError: Boolean,
+    onActivate: (String?) -> Unit,
+    onEdit: (PresetSummary) -> Unit,
+    onDelete: (String) -> Unit,
+    onNew: () -> Unit,
+    onStopOne: (String) -> Unit,
+    onForce: () -> Unit,
+) {
+    if (ps == null) {
+        Text(
+            when {
+                !connected -> "Connect a computer to manage API presets."
+                timedOut -> "Presets need the computer's daemon updated first."
+                else -> "Loading presets…"
+            },
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 19.sp,
+        )
+        return
+    }
+    Column {
+        if (ps.presets.isEmpty()) {
+            // 1b empty vs 1c OAuth-coexist: same slot, different explanation
+            InfoBox(
+                withIcon = oauthActive,
+                text = if (oauthActive) {
+                    "Presets are for third-party API endpoints. Activating one runs new sessions on that key instead of your Claude login."
+                } else {
+                    "No presets yet. Save an endpoint to switch base URLs and keys without editing the computer's environment."
+                },
+            )
+        } else {
+            val activating = (inFlight as? PresetOp.Activate)?.id
+            ps.presets.forEach { p ->
+                PresetRow(
+                    p = p,
+                    active = p.id == ps.activeId,
+                    // 3a: while another row activates, the old active row's accent fades out
+                    dimmedActive = inFlight != null && p.id == ps.activeId,
+                    activating = activating == p.id,
+                    onActivate = { if (inFlight == null) onActivate(p.id) },
+                    onEdit = { onEdit(p) },
+                    onDelete = { onDelete(p.id) },
+                )
             }
-            else s?.error?.let {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 10.dp)) {
-                    Icon(Icons.Rounded.Warning, null, tint = Tok.danger, modifier = Modifier.size(13.dp))
-                    Text(it, color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)
-                }
+        }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).dashedBorder(Tok.hair, 11.dp).hoverFill(RoundedCornerShape(11.dp))
+                .clickable(onClick = onNew).padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("New preset", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+        }
+        if (ps.activeId != null) Text(
+            "New sessions on ${computerName ?: "this computer"} use this preset. Sessions already open keep the endpoint they started with.",
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 12.dp),
+        )
+        if (ps.blockers.isNotEmpty()) WorkingBlockersCard(ps.blockers, onStopOne = onStopOne, onForce = onForce)
+        else if (reachError) ErrorRow("Couldn't reach the computer — try again.")
+        else ps.error?.let { ErrorRow(it) }
+        // the secrets red line, stated where the secrets are handled
+        Text(
+            "Tokens are stored on the computer and never sent back to this app.",
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(top = 16.dp),
+        )
+    }
+}
+
+/** One preset row: dot + name + host; trailing = active tag / Activating… spinner / hover Edit·Delete. */
+@Composable
+private fun PresetRow(
+    p: PresetSummary,
+    active: Boolean,
+    dimmedActive: Boolean,
+    activating: Boolean,
+    onActivate: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    val border = when {
+        activating -> Tok.hair
+        active -> Tok.accent.copy(alpha = if (dimmedActive) 0.22f else 0.55f)
+        else -> Tok.hair
+    }
+    val fill = when {
+        activating -> Tok.accent.copy(alpha = 0.04f)
+        active -> Tok.accent.copy(alpha = if (dimmedActive) 0.03f else 0.09f)
+        else -> Color.Transparent
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(9.dp)).background(fill)
+            .border(1.5.dp, border, RoundedCornerShape(9.dp)).hoverable(src)
+            .clickable(enabled = !active && !activating, onClick = onActivate)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Dot(if (active) Tok.accent.copy(alpha = if (dimmedActive) 0.35f else 1f) else Tok.muted, 8.dp)
+        Text(
+            p.name, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp,
+            fontWeight = if (active && !dimmedActive) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            presetHost(p.baseUrl), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        when {
+            activating -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                CircularProgressIndicator(Modifier.size(11.dp), color = Tok.accent, strokeWidth = 1.5.dp)
+                Text("Activating…", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
+            }
+            active -> Text(
+                "active", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp,
+                modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.13f)).padding(horizontal = 7.dp, vertical = 2.dp),
+            )
+            hovered -> Row {
+                TextBtn("Edit", Tok.tx2, onEdit)
+                TextBtn("Delete", Tok.danger, onDelete)
             }
         }
     }
 }
+
+/**
+ * Create/edit form (design 2a-2c), replacing the pane content in place. The token field is WRITE-ONLY:
+ * masked while typing (eye toggle reveals), never prefilled on edit — "•••• stored — leave blank to
+ * keep" is the placeholder, and leaving it blank keeps the daemon-stored secret. Save stays disabled
+ * while locally invalid (2b); a daemon-side refusal comes back inline via PresetsState.fieldError.
+ */
+@Composable
+private fun PresetForm(
+    model: DesktopModel,
+    ps: PresetsState?,
+    target: PresetFormTarget,
+    onDelete: (String) -> Unit,
+    onClose: () -> Unit,
+) {
+    val initial = (target as? PresetFormTarget.Edit)?.preset
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var baseUrl by remember { mutableStateOf(initial?.baseUrl ?: "") }
+    var tokenVar by remember { mutableStateOf(initial?.tokenVar ?: PresetEnv.AUTH_TOKEN) }
+    var token by remember { mutableStateOf("") }
+    var reveal by remember { mutableStateOf(false) }
+    var routingOpen by remember { mutableStateOf(initial?.model != null || initial?.smallFastModel != null) }
+    var routeModel by remember { mutableStateOf(initial?.model ?: "") }
+    var routeFast by remember { mutableStateOf(initial?.smallFastModel ?: "") }
+    var nameTouched by remember { mutableStateOf(false) }
+    var urlTouched by remember { mutableStateOf(false) }
+    var tokenTouched by remember { mutableStateOf(false) }
+    var awaitingSave by remember { mutableStateOf(false) }
+    var daemonError by remember { mutableStateOf<Pair<String?, String>?>(null) } // fieldError → message
+
+    // the save reply (keyed on the reply rev — an equal-content reply must still settle the form):
+    // success closes; a refusal surfaces inline on the named field
+    LaunchedEffect(model.presetsRev) {
+        if (!awaitingSave || ps == null) return@LaunchedEffect
+        awaitingSave = false
+        val err = ps.error
+        if (err == null) onClose() else daemonError = ps.fieldError to err
+    }
+
+    val others = ps?.presets.orEmpty().filter { it.id != initial?.id }
+    val nameError = when {
+        name.isNotBlank() && others.any { it.name.equals(name.trim(), ignoreCase = true) } -> "A preset named '${name.trim()}' already exists."
+        nameTouched && name.isBlank() -> "Name is required."
+        else -> daemonError?.takeIf { it.first == "name" }?.second
+    }
+    val urlError = when {
+        baseUrl.isNotBlank() && !isHttpUrl(baseUrl.trim()) -> "Enter a valid http(s) URL."
+        urlTouched && baseUrl.isBlank() -> "Enter a valid http(s) URL."
+        else -> daemonError?.takeIf { it.first == "baseUrl" }?.second
+    }
+    val tokenError =
+        if (initial == null && tokenTouched && token.isBlank()) "Paste the API key or token."
+        else daemonError?.takeIf { it.first == "token" }?.second
+    val valid = name.isNotBlank() && nameError == null && isHttpUrl(baseUrl.trim()) && (initial != null || token.isNotBlank())
+
+    Column {
+        Text(
+            "‹ Presets", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+            modifier = Modifier.clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp)).clickable(onClick = onClose).padding(horizontal = 4.dp, vertical = 2.dp),
+        )
+        Text(
+            if (initial == null) "New preset" else "Edit preset",
+            color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 8.dp, bottom = 18.dp),
+        )
+
+        Text("Name", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(6.dp))
+        FormInput(name, { name = it; nameTouched = true; daemonError = null }, mono = false, error = nameError != null, placeholder = "Work proxy")
+        FieldError(nameError)
+
+        Text("Base URL", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp))
+        Spacer(Modifier.height(6.dp))
+        FormInput(baseUrl, { baseUrl = it; urlTouched = true; daemonError = null }, mono = true, error = urlError != null, placeholder = "https://api.example-proxy.com/v1")
+        FieldError(urlError)
+        if (urlError == null) HelperLine(PresetEnv.BASE_URL, "— where the CLI sends requests.")
+
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp)) {
+            Text("Auth token", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            // which env var carries the secret — AUTH_TOKEN (forwarding proxies) vs API_KEY (direct keys)
+            Row(
+                Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(2.dp),
+            ) {
+                SegChip("AUTH_TOKEN", tokenVar == PresetEnv.AUTH_TOKEN) { tokenVar = PresetEnv.AUTH_TOKEN }
+                SegChip("API_KEY", tokenVar == PresetEnv.API_KEY) { tokenVar = PresetEnv.API_KEY }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        FormInput(
+            token, { token = it; tokenTouched = true; daemonError = null }, mono = true, error = tokenError != null,
+            placeholder = if (initial == null) "Paste token" else "•••• stored — leave blank to keep",
+            visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation('•'),
+            accent = reveal,
+            trailing = {
+                Icon(
+                    if (reveal) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, if (reveal) "Hide token" else "Reveal token",
+                    tint = if (reveal) Tok.accent else Tok.tx2,
+                    modifier = Modifier.size(15.dp).clip(RoundedCornerShape(4.dp)).clickable { reveal = !reveal },
+                )
+            },
+        )
+        FieldError(tokenError)
+        if (tokenError == null) HelperLine(tokenVar, "— stored on the computer, never shown here again.")
+
+        // model routing (optional): the two env vars the CLI reads for model steering
+        Row(
+            Modifier.fillMaxWidth().padding(top = 14.dp).clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
+                .clickable { routingOpen = !routingOpen }.padding(horizontal = 11.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(if (routingOpen) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight, null, tint = Tok.muted, modifier = Modifier.size(14.dp))
+            Text("Model routing", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+            Text(
+                if (routeModel.isBlank() && routeFast.isBlank()) "(optional)" else "(set)",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+            )
+        }
+        if (routingOpen) {
+            Text("Model", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 12.dp))
+            Spacer(Modifier.height(6.dp))
+            FormInput(routeModel, { routeModel = it }, mono = true, error = false, placeholder = "gpt-4o")
+            HelperLine(PresetEnv.MODEL, "— what new sessions run on.")
+            Text("Small / fast model", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 12.dp))
+            Spacer(Modifier.height(6.dp))
+            FormInput(routeFast, { routeFast = it }, mono = true, error = false, placeholder = "gpt-4o-mini")
+            HelperLine(PresetEnv.SMALL_FAST_MODEL, "— for the CLI's quick internal calls.")
+        }
+
+        daemonError?.takeIf { it.first !in listOf("name", "baseUrl", "token") }?.let { ErrorRow(it.second) }
+
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 20.dp)) {
+            if (initial != null) TextBtn("Delete", Tok.danger) { onDelete(initial.id) } // pinned left (2b)
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Cancel", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
+                    .hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClose).padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+            FilledBtn("Save preset", enabled = valid && !awaitingSave) {
+                awaitingSave = true
+                daemonError = null
+                model.savePreset(
+                    id = initial?.id,
+                    name = name.trim(),
+                    baseUrl = baseUrl.trim(),
+                    tokenVar = tokenVar,
+                    token = token.takeIf { it.isNotBlank() },
+                    model = routeModel.trim().takeIf { it.isNotBlank() },
+                    smallFastModel = routeFast.trim().takeIf { it.isNotBlank() },
+                )
+            }
+        }
+    }
+}
+
+/** Mid-task refusal card shared by the OAuth account switch and preset switching (design 3c):
+ *  name each working session, offer per-row Stop and "Stop all & switch". */
+@Composable
+private fun WorkingBlockersCard(
+    blockers: List<dev.ccpocket.protocol.AuthBlocker>,
+    onStopOne: (String) -> Unit,
+    onForce: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+            .border(1.dp, Tok.warn.copy(alpha = 0.4f), RoundedCornerShape(12.dp)).padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
+            Text("These sessions are still working and block the switch:", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        }
+        blockers.forEach { b ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        b.cwd.substringAfterLast('/').substringAfterLast('\\').ifBlank { b.cwd },
+                        color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        when (b.reason) {
+                            dev.ccpocket.protocol.AuthBlockReason.EXECUTING -> "Mid-turn right now"
+                            dev.ccpocket.protocol.AuthBlockReason.BACKGROUND_JOBS ->
+                                "${b.jobLabels.size.coerceAtLeast(1)} background task${if (b.jobLabels.size == 1) "" else "s"}" +
+                                    (b.jobLabels.firstOrNull()?.let { ": $it" } ?: "")
+                            dev.ccpocket.protocol.AuthBlockReason.UNKNOWN -> "Still working" // newer daemon's reason
+                        },
+                        color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // stops this one (background shells die with it; transcript persists) and retries the switch
+                TextBtn("Stop", Tok.danger) { onStopOne(b.convoId) }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextBtn("Stop all & switch", Tok.danger, onForce)
+            Text("Sessions can be resumed afterwards; their background tasks end.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+        }
+    }
+}
+
+// small form/display primitives for the pane
+
+@Composable
+private fun FormInput(
+    value: String,
+    onChange: (String) -> Unit,
+    mono: Boolean,
+    error: Boolean,
+    placeholder: String,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    accent: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(Tok.base)
+            .border(1.dp, if (error) Tok.danger else if (accent) Tok.accent.copy(alpha = 0.4f) else Tok.hair, RoundedCornerShape(7.dp))
+            .padding(horizontal = 11.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.weight(1f)) {
+            if (value.isEmpty()) Text(placeholder, color = Tok.muted, fontFamily = if (mono) Dk.mono else Dk.ui, fontSize = if (mono) 11.sp else 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicTextField(
+                value, onChange, singleLine = true,
+                textStyle = TextStyle(color = Tok.tx, fontFamily = if (mono) Dk.mono else Dk.ui, fontSize = if (mono) 11.sp else 13.sp),
+                cursorBrush = SolidColor(Tok.accent),
+                visualTransformation = visualTransformation,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        trailing?.invoke()
+    }
+}
+
+@Composable
+private fun FieldError(msg: String?) {
+    if (msg != null) Text(msg, color = Tok.danger, fontFamily = Dk.ui, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+}
+
+@Composable
+private fun HelperLine(mono: String, rest: String) {
+    Row(modifier = Modifier.padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(mono, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
+        Text(rest, color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp)
+    }
+}
+
+@Composable
+private fun SegChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label, color = if (selected) Tok.tx else Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+        modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(if (selected) Tok.hair else Color.Transparent)
+            .clickable(onClick = onClick).padding(horizontal = 7.dp, vertical = 2.5.dp),
+    )
+}
+
+@Composable
+private fun FilledBtn(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Text(
+        label, color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(if (enabled) Tok.accent else Tok.surface)
+            .border(1.dp, if (enabled) Tok.accent else Tok.hair, RoundedCornerShape(7.dp))
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+private fun MonoPill(label: String, accent: Boolean) {
+    Text(
+        label, color = if (accent) Tok.accent else Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+        modifier = Modifier.clip(RoundedCornerShape(20.dp))
+            .background(if (accent) Tok.accent.copy(alpha = 0.13f) else Tok.base)
+            .border(1.dp, if (accent) Tok.accent.copy(alpha = 0.3f) else Tok.hair, RoundedCornerShape(20.dp))
+            .padding(horizontal = 8.dp, vertical = 2.5.dp),
+    )
+}
+
+@Composable
+private fun CapLabel(label: String, topPad: androidx.compose.ui.unit.Dp = 0.dp) {
+    Text(
+        label.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp,
+        fontWeight = FontWeight.SemiBold, letterSpacing = 0.9.sp, modifier = Modifier.padding(top = topPad),
+    )
+}
+
+@Composable
+private fun Hairline(vertical: androidx.compose.ui.unit.Dp) {
+    Box(Modifier.fillMaxWidth().padding(vertical = vertical).height(1.dp).background(Tok.hair))
+}
+
+@Composable
+private fun InfoBox(withIcon: Boolean, text: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (withIcon) Icon(Icons.Outlined.Info, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
+        Text(text, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp)
+    }
+}
+
+@Composable
+private fun ErrorRow(msg: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(9.dp))
+            .background(Tok.danger.copy(alpha = 0.08f)).border(1.dp, Tok.danger.copy(alpha = 0.35f), RoundedCornerShape(9.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Rounded.Warning, null, tint = Tok.danger, modifier = Modifier.size(14.dp))
+        Text(msg, color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp)
+    }
+}
+
+/** Row display form of a base URL: scheme and path stripped (design 1a: `api.example-proxy.com`). */
+private fun presetHost(url: String): String = url.substringAfter("://").substringBefore("/").ifBlank { url }
+
+private fun isHttpUrl(s: String): Boolean = runCatching {
+    val u = java.net.URI(s)
+    (u.scheme == "http" || u.scheme == "https") && !u.host.isNullOrBlank()
+}.getOrDefault(false)
 
 @Composable
 private fun ComputersPane(model: DesktopModel) {

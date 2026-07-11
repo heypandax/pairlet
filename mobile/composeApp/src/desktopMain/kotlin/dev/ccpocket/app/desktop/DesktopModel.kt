@@ -444,6 +444,23 @@ interface DesktopModel {
     fun cancelAuthLogin() {}
     fun logoutAccount() {}
 
+    // API presets (issue #113, Settings ▸ Account): named env overrides for third-party API users,
+    // stored on the daemon; tokens ride up write-only and only ever come back masked. Null = not
+    // fetched yet or the daemon predates pocket/presets.* (show "update the daemon", hide the form).
+    val presetsState: dev.ccpocket.protocol.PresetsState? get() = null
+    /** Bumps on EVERY PresetsState reply (even one equal to the last) — what op-settle effects key on. */
+    val presetsRev: Int get() = 0
+    fun refreshPresets() {}
+    /** Create ([id] null) / update one preset; a null [token] on update keeps the stored one. */
+    fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) {}
+    fun deletePreset(id: String, force: Boolean = false) {}
+    /** Make [id] the active preset (null = deactivate). Same refusal semantics as [switchAccount]. */
+    fun activatePreset(id: String?, force: Boolean = false) {}
+    /** Stop one PresetsState.blockers session (hard close) and re-attempt activating [retryId]. */
+    fun stopPresetBlocker(convoId: String, retryId: String?) {}
+    /** Same, when the blocked op was deleting the active preset — retries the delete instead. */
+    fun stopPresetDeleteBlocker(convoId: String, deleteId: String) {}
+
     companion object {
         /** Pin cap — ⌘1–9 is the whole affordance, so the list never outgrows the keycaps. */
         const val MAX_PINS = 9
