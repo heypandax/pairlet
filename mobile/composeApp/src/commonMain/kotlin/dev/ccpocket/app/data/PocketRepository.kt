@@ -1029,7 +1029,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  coordinator (tests, satellites, headless) has nothing to retire. Keeps the repo core off the fleet global. */
     var onBeforeSwitch: ((accountId: String) -> Unit)? = null
 
-    /** Switch the active computer: tear down the current link, pin [target], reconnect to it. */
+    /** Switch the active computer: tear down the current link, pin [target], reconnect to it.
+     *  This is the COLD path — [FleetCoordinator.switchTo] promotes a hot satellite instead when it can
+     *  (issue #103) and only falls back here when no live link to [target] exists yet. */
     fun switchDaemon(target: PairedDaemon) {
         if (paired.value?.accountId == target.accountId && sessionActive.value) return
         onBeforeSwitch?.invoke(target.accountId)
@@ -1038,6 +1040,72 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         Pairing.setActive(target.accountId)
         firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
+    }
+
+    // ── fleet promote (issue #103): switching machines swaps two live repos instead of re-dialing ────
+
+    /**
+     * The RISING side of a fleet promote: a satellite about to become the primary adopts the shell-level
+     * state whose in-memory mirrors were seeded at CONSTRUCTION time and kept fresh only on the outgoing
+     * primary — the setters persist to SecureStore, but this instance never re-reads it. Covers the
+     * Settings prefs, the per-session launch-params memory, and the pairing list (renames / direct URLs /
+     * host names learned after this satellite was built). Without this, promoting flips Settings back in
+     * time (a theme picked after app start would snap back on the first machine switch).
+     */
+    internal fun adoptShellState(from: PocketRepository) {
+        notificationsOn.value = from.notificationsOn.value
+        defaultMode.value = from.defaultMode.value
+        defaultEffort.value = from.defaultEffort.value
+        defaultModel.value = from.defaultModel.value
+        contextWindowOverride.value = from.contextWindowOverride.value
+        defaultAgent.value = from.defaultAgent.value
+        agentFilter.value = from.agentFilter.value
+        treeView.value = from.treeView.value
+        fontScale.value = from.fontScale.value
+        themeMode.value = from.themeMode.value
+        replace(pinnedPaths, from.pinnedPaths.toList())
+        sessionParams.clear(); sessionParams.putAll(from.sessionParams)
+        replace(pairedList, from.pairedList.toList())
+        // freshen this binding's own copy too (pinned at construction — a rename/hostName/directUrl learned
+        // since then lives only in the outgoing primary's list)
+        paired.value = from.pairedList.firstOrNull { it.accountId == paired.value?.accountId } ?: paired.value
+    }
+
+    /**
+     * The DEMOTED side of a fleet promote: the outgoing primary becomes its machine's satellite WITHOUT
+     * dropping the live link. Clears exactly the session/chat-scoped state that [disconnect] and
+     * [openSession] clear — leaving a machine closes its chat view either way — but keeps the transport,
+     * the loaded directory list, and the per-machine data (usage/auth) that make the link worth keeping
+     * hot. The reclaim rule matches [openSession]/[backToBrowse]: an idle (or observed) conversation is
+     * closed on the daemon; a RUNNING turn stays alive in the background and reattaches on the next
+     * resume. [pendingOpen] must die here — a queued cross-machine open firing on a headless satellite
+     * link would open a ghost session nobody is watching.
+     */
+    internal fun demoteToSatellite() {
+        convoId.value?.let { c -> if (observing.value || !streaming.value) scope.launch { send(CloseSession(c)) } }
+        pendingOpen = null
+        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false
+        promptRetry = null; promptPending = false; promptResendArmed = false
+        convoId.value = null; currentSessionId = null; sessionKey.value = null
+        workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
+        sessionsDir.value = null; sessions.clear()
+        chatTitle.value = null; observing.value = false; streaming.value = false
+        opening.value = false; openTimedOut.value = false; switching.value = false
+        autoFocusComposer.value = false
+        pendingAsk.value = null
+        messages.clear(); pendingImages.clear()
+        terminalEntries.clear(); terminalBusy.value = false
+        changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
+        closeFileViewer()
+        pathListing.value = null
+        allowRules.clear()
+        slashCommands.clear()
+        clearBackgroundJobs()
+        sessionDegraded.value = false; degradedSendArmed = false
+        model.value = null; effort.value = null; sessionAgent.value = null
+        contextUsed.value = null; contextWindow.value = null
+        refreshing.value = false; sessionsRefreshing.value = false
+        abandonVoice()
     }
 
     /** Write-through for a binding's stored direct URL: persist, refresh the list, patch the active copy.

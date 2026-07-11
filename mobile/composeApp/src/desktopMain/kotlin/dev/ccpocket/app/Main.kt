@@ -73,11 +73,20 @@ fun main() = application {
         position = savedBounds?.let { WindowPosition(it[0].dp, it[1].dp) } ?: WindowPosition(Alignment.Center),
     )
     val scope = rememberCoroutineScope()
-    val repo = remember { PocketRepository(scope) }
     // fleet: one live link per paired computer (primary + pinned satellites) — the grouped sidebar,
-    // attention popover, and palette badges read across all of them
-    remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
-    val model = remember { RepoDesktopModel(repo, scope) }
+    // attention popover, and palette badges read across all of them. Desktop opts into hot-satellite
+    // promotion (issue #103): switching machines swaps the target's Ready satellite in as the primary
+    // instead of tearing links down and re-handshaking, so `repo` below is an OBSERVABLE read — the
+    // window content (theme, panels, effects) re-keys onto the promoted instance on each switch.
+    val fleet = remember {
+        dev.ccpocket.app.data.FleetCoordinator(scope, PocketRepository(scope)).also {
+            it.promoteHotSatellites = true
+            dev.ccpocket.app.data.FleetRuntime.coordinator = it
+            it.start()
+        }
+    }
+    val repo = fleet.primary
+    val model = remember { RepoDesktopModel(fleet.primary, scope, fleet) }
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // paired → connect straight away
@@ -182,6 +191,11 @@ fun main() = application {
                 override fun windowLostFocus(e: java.awt.event.WindowEvent?) { windowFocused = false }
             }
             window.addWindowFocusListener(l)
+            onDispose { window.removeWindowFocusListener(l) }
+        }
+        // keyed on the CURRENT primary: a machine switch promotes another repo instance (issue #103), and
+        // the turn-finished seam must ride along or notifications/badges silently die after the first switch
+        DisposableEffect(repo) {
             repo.onTurnFinished = { title, preview ->
                 if (!windowFocused) {
                     unseenDone++
@@ -189,10 +203,7 @@ fun main() = application {
                     DesktopNotify.notify(title, preview ?: "Turn complete")
                 }
             }
-            onDispose {
-                window.removeWindowFocusListener(l)
-                repo.onTurnFinished = null
-            }
+            onDispose { repo.onTurnFinished = null }
         }
         // native fullscreen wiring (issue #94): stash the AWT window so the toggle above can drive it, mark
         // it fullscreen-capable, and subscribe to OS-driven fullscreen transitions so `fullscreen` mirrors

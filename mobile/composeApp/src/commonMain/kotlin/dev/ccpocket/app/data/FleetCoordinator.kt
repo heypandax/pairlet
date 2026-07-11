@@ -1,8 +1,10 @@
 package dev.ccpocket.app.data
 
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import dev.ccpocket.app.pairing.PairedDaemon
+import dev.ccpocket.app.pairing.Pairing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
@@ -23,11 +25,30 @@ import kotlinx.coroutines.withTimeoutOrNull
  * first link), so switchDaemon calls [retireSatellite] synchronously before dialing; sync() then spawns
  * the satellite for the machine being switched AWAY from as usual.
  *
- * Deliberately NOT here yet: per-machine push (the platform singleton stays with the primary), satellite
- * session-opening (watch pane), and the always-on/on-demand connection policy — those follow the
- * "真并发交互缺口" design round.
+ * [switchTo] (issue #103) is the other way to keep that invariant while switching: instead of retiring the
+ * target's hot satellite and re-dialing cold (a several-second handshake that threw away a Ready link), it
+ * PROMOTES the satellite to primary and demotes the outgoing primary to satellite — two live links swap
+ * roles, nobody dials, so each daemon still holds exactly one link throughout. The whole swap runs
+ * synchronously on the UI thread for the same snapshot-conflation reason switchDaemon relies on. Promotion
+ * is gated on [promoteHotSatellites] because the shell must FOLLOW the swap: only a UI whose repo reference
+ * tracks [primary] (the desktop shell) may enable it — mobile binds one repo instance for the app's life
+ * and keeps the cold path.
+ *
+ * Deliberately NOT here yet: per-machine push (the platform singleton stays with the primary — moot on
+ * desktop, where push is a no-op), satellite session-opening (watch pane), and the always-on/on-demand
+ * connection policy — those follow the "真并发交互缺口" design round.
  */
-class FleetCoordinator(private val scope: CoroutineScope, val primary: PocketRepository) {
+class FleetCoordinator(private val scope: CoroutineScope, initialPrimary: PocketRepository) {
+
+    private val primaryState = mutableStateOf(initialPrimary)
+
+    /** The repository the shell is driving. Snapshot-observable: a [switchTo] promote re-points it, and
+     *  every Compose read (or snapshotFlow lambda) tracking it re-derives against the new instance. */
+    val primary: PocketRepository get() = primaryState.value
+
+    /** Opt-in for [switchTo]'s hot-satellite promotion (issue #103). Off by default: a shell whose UI holds
+     *  a FIXED repo reference (mobile) must never have its primary swapped out from under it. */
+    var promoteHotSatellites = false
 
     /** Live links for every binding except the primary's, keyed by accountId. Compose-observable. */
     val satellites = mutableStateMapOf<String, PocketRepository>()
@@ -62,6 +83,41 @@ class FleetCoordinator(private val scope: CoroutineScope, val primary: PocketRep
      *  primary and the satellite from holding two same-device links to one daemon). Idempotent. */
     fun retireSatellite(accountId: String) {
         satellites.remove(accountId)?.disconnect()
+    }
+
+    /**
+     * Switch the shell to [target], reusing its HOT satellite link when one exists (issue #103): the
+     * satellite becomes the primary (link, loaded directories and all — no handshake, no re-list), the
+     * outgoing primary becomes its own machine's satellite (link kept; chat-scoped state cleared exactly
+     * like a cold switch would). No hot satellite — target still dialing, fleet not up, promotion not
+     * enabled — falls back to the cold [PocketRepository.switchDaemon].
+     *
+     * Single-link invariant: nothing here ever dials. The target's only link changes owner; the outgoing
+     * primary's only link is re-keyed into [satellites] within this same synchronous call, so the
+     * collector-driven [sync] that follows sees it already present and spawns nothing. A promoted
+     * satellite that isn't Ready yet (machine offline / reconnecting) is still promoted — the UI shows its
+     * honest phase instantly and its own battle-tested reconnect loop keeps working, which is exactly what
+     * the cold path would converge to after paying the handshake.
+     */
+    fun switchTo(target: PairedDaemon) {
+        val current = primary
+        if (current.paired.value?.accountId == target.accountId && current.sessionActive.value) return
+        val hot = if (promoteHotSatellites) satellites[target.accountId] else null
+        if (hot == null || !hot.sessionActive.value) { current.switchDaemon(target); return }
+
+        satellites.remove(target.accountId) // it's becoming the primary — never two owners for one link
+        hot.adoptShellState(current)        // prefs/pairing-list mirrors seeded at construction — see its doc
+        current.demoteToSatellite()         // close the chat view (idle convos reclaimed), keep the link
+        current.onBeforeSwitch = null       // only the primary owns the retire-before-dial invariant
+        hot.onBeforeSwitch = ::retireSatellite
+        Pairing.setActive(target.accountId) // same persistence a cold switch does — restart lands here
+        primaryState.value = hot
+        // the outgoing primary is its machine's satellite from THIS instant — before any sync() runs —
+        // so the invariant loop finds the slot filled instead of dialing a second link to that daemon
+        current.paired.value?.accountId?.let { satellites[it] = current }
+        // freshen the preloaded list (it may be minutes old); doubles as a liveness write on the adopted
+        // link — a silently-dead socket trips the reconnect path now rather than on the first user action
+        hot.refreshDirectoriesSilently()
     }
 
     /** Re-derive the satellite set from the primary's observable state. Idempotent. */
@@ -128,11 +184,13 @@ class FleetCoordinator(private val scope: CoroutineScope, val primary: PocketRep
     fun browseProject(accountId: String, path: String) = onMachine(accountId) { primary.listSessions(path) }
 
     /** Run [act] with the primary parked on [accountId]: immediately when already there, else switch and
-     *  act the moment the link is Ready — bounded so a machine that never comes up leaves no ghost nav. */
+     *  act the moment the link is Ready — bounded so a machine that never comes up leaves no ghost nav.
+     *  Switching goes through [switchTo]: with a hot satellite the promoted link is Ready at once, so the
+     *  snapshotFlow below completes on its first emission and [act] runs without any visible wait. */
     private fun onMachine(accountId: String, act: () -> Unit) {
         if (primary.paired.value?.accountId == accountId) { act(); return }
         val target = primary.pairedList.firstOrNull { it.accountId == accountId } ?: return
-        primary.switchDaemon(target)
+        switchTo(target)
         scope.launch {
             val ready = withTimeoutOrNull(30_000) {
                 snapshotFlow { primary.phase.value }.first { it == ConnPhase.Ready }
