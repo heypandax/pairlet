@@ -119,8 +119,10 @@ class SessionRegistry(
     var askPushHook: AskPushHook? = null
 
     /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
-     *  emitted). [origin] names the bridge credential that opened it (issue #91); null = interactive. */
-    suspend fun open(open: OpenSession, sink: OutboundSink, origin: String? = null): String {
+     *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
+     *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
+     *  PermissionBridge denies any Read/Write/Edit whose target escapes them; null = unrestricted (owner). */
+    suspend fun open(open: OpenSession, sink: OutboundSink, origin: String? = null, pathScope: List<String>? = null): String {
         val resume = open.resumeId
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
@@ -168,6 +170,7 @@ class SessionRegistry(
         val c = Conversation(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
+            pathScope = pathScope,
         )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`

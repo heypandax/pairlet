@@ -730,4 +730,125 @@ class SerializationRoundTripTest {
         val old = """{"id":"n2","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b"}}"""
         assertEquals(NotifyPush("t", "b"), PocketJson.decodeFromString<Envelope>(old).body as NotifyPush)
     }
+
+    // ---- folder-share (issue #115) ----
+
+    @Test
+    fun accessTier_roundtrips_and_future_tier_degrades_to_safest() {
+        // every known tier round-trips by its wire name
+        val expected = mapOf(
+            AccessTier.REVIEW to "review",
+            AccessTier.COLLABORATE to "collaborate",
+            AccessTier.AUTONOMOUS to "autonomous",
+        )
+        for ((tier, name) in expected) {
+            assertEquals("\"$name\"", PocketJson.encodeToString(tier))
+            assertEquals(tier, PocketJson.decodeFromString<AccessTier>("\"$name\""))
+        }
+        // a tier only a NEWER peer knows must NOT fail the frame — it degrades to the SAFEST (REVIEW-like)
+        // so a scoped credential never falls open on a version skew
+        assertEquals(AccessTier.UNKNOWN, PocketJson.decodeFromString<AccessTier>("\"read_only_v2\""))
+        // and the ceiling of an unknown tier is the most cautious mode (never bypass)
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(AccessTier.UNKNOWN))
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(AccessTier.REVIEW))
+        assertEquals(PermissionMode.ACCEPT_EDITS, AccessTier.ceiling(AccessTier.COLLABORATE))
+        assertEquals(PermissionMode.ACCEPT_EDITS, AccessTier.ceiling(AccessTier.AUTONOMOUS))
+    }
+
+    @Test
+    fun createShare_roundtrips_with_defaults_and_old_frames_default() {
+        val env = Envelope(id = "sh1", ts = 0, body = CreateShare("/Users/panda/repo"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.create\"" in json, json)
+        assertTrue("\"tier\":\"collaborate\"" in json, json)          // encodeDefaults
+        assertTrue("\"expiresInSec\":604800" in json, json)           // 7d default, encodeDefaults
+        assertFalse("label" in json, json)                            // explicitNulls=false
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        // a minimal owner frame (only path) reads with the collaborate/7d defaults
+        val minimal = """{"id":"sh2","ts":0,"to":"PEER","body":{"t":"pocket/share.create","path":"/x"}}"""
+        assertEquals(CreateShare("/x"), PocketJson.decodeFromString<Envelope>(minimal).body)
+    }
+
+    @Test
+    fun listShares_and_revokeShare_roundtrip() {
+        val list = Envelope(id = "sh3", ts = 0, body = ListShares)
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"t\":\"pocket/share.list\"" in listJson, listJson)
+        assertEquals(ListShares, PocketJson.decodeFromString<Envelope>(listJson).body)
+
+        val rev = Envelope(id = "sh4", ts = 0, body = RevokeShare("dev-guest-1"))
+        val revJson = PocketJson.encodeToString(rev)
+        assertTrue("\"t\":\"pocket/share.revoke\"" in revJson, revJson)
+        assertEquals(rev, PocketJson.decodeFromString<Envelope>(revJson))
+    }
+
+    @Test
+    fun shareInvite_and_shareCreated_roundtrip_and_omit_null_error() {
+        val invite = ShareInvite(
+            relay = "wss://pocket.ark-nexus.cc", accountId = "acct", daemonPub = "pub", ticket = "tkt",
+            folderName = "repo", tier = AccessTier.COLLABORATE, expiresAt = 1_800_000_000_000, ttlSec = 120,
+            ownerLabel = "Pandas-MacBook-Pro",
+        )
+        val ok = Envelope(id = "sc1", ts = 0, body = ShareCreated(ok = true, invite = invite))
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/share.created\"" in okJson, okJson)
+        assertTrue("\"folderName\":\"repo\"" in okJson, okJson)
+        assertFalse("\"error\"" in okJson, okJson) // explicitNulls=false — a success carries no error
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        val err = ShareCreated(ok = false, error = "a phone pairing is in progress — retry shortly")
+        val errJson = PocketJson.encodeToString(Envelope(id = "sc2", ts = 0, body = err))
+        assertFalse("invite" in errJson, errJson) // null invite omitted
+        assertEquals(err, PocketJson.decodeFromString<Envelope>(errJson).body)
+    }
+
+    @Test
+    fun shareListing_and_shareRevoked_roundtrip() {
+        val listing = ShareListing(
+            items = listOf(
+                ShareInfo("dev1", "/Users/panda/repo", AccessTier.COLLABORATE, createdAt = 1, expiresAt = 2, online = true, activeSessions = 1),
+                ShareInfo("dev2", "/Users/panda/web", AccessTier.REVIEW, createdAt = 3, expiresAt = 4, guestLabel = "alex", lastActiveAt = 5, revoked = true),
+            ),
+        )
+        val env = Envelope(id = "sl1", ts = 0, body = listing)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.listing\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        val revoked = Envelope(id = "sr1", ts = 0, body = ShareRevoked("dev1", ok = true))
+        val rJson = PocketJson.encodeToString(revoked)
+        assertTrue("\"t\":\"pocket/share.revoked\"" in rJson, rJson)
+        assertFalse("error" in rJson, rJson) // explicitNulls=false
+        assertEquals(revoked, PocketJson.decodeFromString<Envelope>(rJson))
+    }
+
+    @Test
+    fun directoryEntry_share_fields_roundtrip_and_old_frames_default_null() {
+        // a GUEST's shared row carries the origin label + expiry + tier; an ordinary local row omits them
+        val shared = DirectoryEntry(
+            path = "/Users/panda/repo", name = "repo", isDir = true, hasSessions = true,
+            sharedBy = "Pandas-MacBook-Pro", shareExpiresAt = 1_800_000_000_000, shareTier = AccessTier.COLLABORATE,
+        )
+        val json = PocketJson.encodeToString(shared)
+        assertTrue("\"sharedBy\":\"Pandas-MacBook-Pro\"" in json, json)
+        assertTrue("\"shareTier\":\"collaborate\"" in json, json)
+        assertEquals(shared, PocketJson.decodeFromString<DirectoryEntry>(json))
+        // a plain local dir stays byte-identical to the pre-#115 wire (explicitNulls=false)
+        val local = PocketJson.encodeToString(DirectoryEntry(path = "/p", name = "p", isDir = true))
+        assertFalse("sharedBy" in local, local)
+        assertFalse("shareExpiresAt" in local, local)
+        assertFalse("shareTier" in local, local)
+        // an old daemon's entry (no share keys) decodes with null share fields — a plain row
+        val old = """{"path":"/p","name":"p","isDir":true}"""
+        val back = PocketJson.decodeFromString<DirectoryEntry>(old)
+        assertEquals(null, back.sharedBy)
+        assertEquals(null, back.shareExpiresAt)
+        assertEquals(null, back.shareTier)
+        // a FUTURE peer's unknown shareTier degrades to UNKNOWN in-frame and the whole entry still decodes
+        // (not dropped) — the fail-closed contract in structured context, not just a bare string
+        val future = """{"path":"/p","name":"p","isDir":true,"sharedBy":"panda","shareTier":"read_only_v2"}"""
+        val futureBack = PocketJson.decodeFromString<DirectoryEntry>(future)
+        assertEquals(AccessTier.UNKNOWN, futureBack.shareTier)
+        assertEquals("panda", futureBack.sharedBy)
+    }
 }

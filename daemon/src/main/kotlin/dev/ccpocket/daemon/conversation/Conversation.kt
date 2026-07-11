@@ -54,12 +54,16 @@ class Conversation(
     private val backend: AgentBackend,
     // read dynamically: the relay client installs the hook after this conversation may already exist
     private val pushHookProvider: () -> PushHook? = { null },
-    /** The bridge credential that opened this conversation (issue #91) — null for every interactive
-     *  client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens the ask timeout
-     *  (nobody is watching the sheet live), and arms the ask push below. */
+    /** The restricted credential that opened this conversation (issue #91 bridge / #115 guest) — null for
+     *  every interactive owner client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens
+     *  the ask timeout (nobody is watching the sheet live), and arms the ask push below. */
     val origin: String? = null,
     // how a bridge conversation's permission ask reaches the OWNER (the bridge never gets the frame)
     private val askPushHookProvider: () -> AskPushHook? = { null },
+    /** GUEST folder-share scope (issue #115): the canonical shared roots this conversation is confined to.
+     *  Non-null → the PermissionBridge hard-denies any Read/Write/Edit whose target escapes them, BEFORE
+     *  the guest is even asked. Null = an unrestricted owner conversation (no path guard). */
+    private val pathScope: List<String>? = null,
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -443,7 +447,13 @@ class Conversation(
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
     }
 
-    private suspend fun launchProcess(spec: AgentSpec) {
+    // GUEST folder-share (issue #115): a scoped guest conversation launches its agent clean-room — no MCP
+    // servers — so it can't reach the owner's authenticated integrations. One place to stamp it: every
+    // AgentSpec built above flows through here, so the launch flags carry it without touching each site.
+    private val cleanRoom: Boolean = pathScope != null
+
+    private suspend fun launchProcess(rawSpec: AgentSpec) {
+        val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
@@ -478,6 +488,9 @@ class Conversation(
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
             // allow", so one owner approval can't be replayed by later attacker-supplied prompts
             forceNeverRemember = origin != null,
+            // GUEST folder-share (issue #115): confine every file tool to the shared roots
+            pathScope = pathScope,
+            workdir = workdir.toString(),
         )
         proc = p
         bridge = b

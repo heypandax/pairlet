@@ -8,17 +8,32 @@ import dev.ccpocket.protocol.SendPrompt
 import java.io.File
 import java.util.ArrayDeque
 
-/** Why a bridge request was refused — surfaced to the bridge as a [dev.ccpocket.protocol.PocketError]
- *  code so the adapter can log/react without guessing. */
-enum class BridgeDenyCode(val wire: String, val message: String) {
-    FORBIDDEN("bridge_forbidden", "this request type is not permitted for a bridge credential"),
-    BAD_WORKDIR("bridge_forbidden_workdir", "workdir is outside this bridge's allow-list"),
-    PROMPT_TOO_LARGE("bridge_prompt_too_large", "prompt exceeds the bridge size cap"),
+/** Why a restricted request was refused — surfaced as a [dev.ccpocket.protocol.PocketError] code so the
+ *  client can log/react without guessing. The BRIDGE wire code/message (#91, keyed on by adapters) and the
+ *  GUEST wire code/message (#115, shown to a human) are kept SEPARATE so neither audience sees the other's
+ *  terminology — [DeviceSessions] picks the pair by the credential kind. */
+enum class BridgeDenyCode(
+    val wire: String, val message: String,
+    val guestWire: String = wire, val guestMessage: String = message,
+) {
+    FORBIDDEN("bridge_forbidden", "this request type is not permitted for a bridge credential",
+        "share_forbidden", "that action isn't permitted for a folder-share guest"),
+    BAD_WORKDIR("bridge_forbidden_workdir", "workdir is outside this bridge's allow-list",
+        "share_out_of_scope", "that folder is outside your shared folder"),
+    PROMPT_TOO_LARGE("bridge_prompt_too_large", "prompt exceeds the bridge size cap",
+        "share_prompt_too_large", "that message is too long"),
     IMAGES_DENIED("bridge_images_denied", "image attachments are not permitted for a bridge credential"),
-    NOT_OWN_SESSION("bridge_not_own_session", "resume/prompt/close references a session this bridge does not own"),
-    TOO_MANY_SESSIONS("bridge_busy", "this bridge is at its concurrent-session limit"),
-    OPEN_RATE("bridge_rate_limited", "this bridge is opening sessions too fast"),
-    PROMPT_RATE("bridge_rate_limited", "this bridge is sending prompts too fast"),
+    NOT_OWN_SESSION("bridge_not_own_session", "resume/prompt/close references a session this bridge does not own",
+        "share_not_own_session", "that session isn't one you started"),
+    TOO_MANY_SESSIONS("bridge_busy", "this bridge is at its concurrent-session limit",
+        "share_busy", "you're at your live-session limit for this share"),
+    OPEN_RATE("bridge_rate_limited", "this bridge is opening sessions too fast",
+        "share_rate_limited", "you're opening sessions too fast — slow down"),
+    PROMPT_RATE("bridge_rate_limited", "this bridge is sending prompts too fast",
+        "share_rate_limited", "you're sending messages too fast — slow down"),
+    // ---- folder-share (issue #115): guest-first codes (the bridge fields mirror them) ----
+    SHARE_EXPIRED("share_expired", "this folder share has expired"),
+    OUT_OF_SCOPE("share_out_of_scope", "the target is outside this share's folder"),
 }
 
 /** The outcome of vetting one inbound bridge frame. [Allow] may carry a rewritten frame (workdir

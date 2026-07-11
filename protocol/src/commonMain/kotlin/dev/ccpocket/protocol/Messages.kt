@@ -250,6 +250,38 @@ data object AuthLogout : ToDaemon
 @SerialName("pocket/push.prefs.set")
 data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
 
+// ---- folder-share (issue #115): OWNER-only control plane. These are a full-power device gesture —
+//      the daemon handles them only for an interactive OWNER device, NEVER a scoped guest or a headless
+//      bridge (a guest re-sharing the owner's machine is exactly the escalation the scope prevents). A
+//      guest's capability whitelist omits them, and the daemon double-checks the sender is full-power. ----
+
+/**
+ * owner -> daemon: mint a scoped, expiring folder-share invite. The daemon mints a pairing ticket over
+ * its relay link, records a GUEST intent binding [path]+[tier]+lifetime to that ticket, and returns a
+ * [ShareCreated] carrying the redeemable [ShareInvite]. [expiresInSec] is the SHARE lifetime (the guest
+ * is cut when it lapses); the redeem ticket has its own short TTL. A daemon that predates this drops the
+ * frame (the owner's app times out to "update the daemon").
+ */
+@Serializable
+@SerialName("pocket/share.create")
+data class CreateShare(
+    val path: String,
+    val tier: AccessTier = AccessTier.COLLABORATE,
+    val expiresInSec: Long = 7 * 24 * 3600,
+    val label: String? = null, // an optional nickname for the guest, shown on the owner's management page
+) : ToDaemon
+
+/** owner -> daemon: list the folders I've shared + who is using them (the management page). Reply: [ShareListing]. */
+@Serializable
+@SerialName("pocket/share.list")
+data object ListShares : ToDaemon
+
+/** owner -> daemon: revoke a share by its guest [deviceId] — cuts the guest's live link NOW and deletes
+ *  the credential (the ticket is already spent; the key dies). Reply: [ShareRevoked]. */
+@Serializable
+@SerialName("pocket/share.revoke")
+data class RevokeShare(val deviceId: String) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -641,6 +673,29 @@ data class FileDiff(
     val dels: Int = 0,
     val truncated: Boolean = false,
 ) : ToPhone
+
+// ---- folder-share (issue #115): OWNER-side replies ----
+
+/** daemon -> owner: the reply to [CreateShare]. On success [invite] carries the redeemable [ShareInvite]
+ *  (the app renders it as a QR / copyable blob for the guest); on failure [error] says why (e.g. a phone
+ *  pairing is mid-flight, bad path, relay offline). */
+@Serializable
+@SerialName("pocket/share.created")
+data class ShareCreated(
+    val ok: Boolean,
+    val invite: ShareInvite? = null,
+    val error: String? = null,
+) : ToPhone
+
+/** daemon -> owner: the reply to [ListShares] — my active shares + their activity (the management page). */
+@Serializable
+@SerialName("pocket/share.listing")
+data class ShareListing(val items: List<ShareInfo> = emptyList()) : ToPhone
+
+/** daemon -> owner: the reply to [RevokeShare]. [ok] false + [error] when the deviceId wasn't a share. */
+@Serializable
+@SerialName("pocket/share.revoked")
+data class ShareRevoked(val deviceId: String, val ok: Boolean, val error: String? = null) : ToPhone
 
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)

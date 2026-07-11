@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.bridge
 
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -9,25 +10,66 @@ import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
 
 /**
- * Constraints minted with a headless bridge credential (issue #91) — decided by the OWNER at
- * `pair --headless` time and enforced daemon-side on every frame. The bridge itself never gets to
- * relax them: they live in [BridgeStore]'s file, not in anything the credential holder can write.
+ * Which class of restricted credential a [BridgeSpec] describes — the single discriminator the daemon
+ * dispatches capability policy on. Both classes share ONE binding chain (ticket-PSK anchor, mint
+ * serialization, provisional handling; [BridgeRegistry]) but different frame whitelists / guards:
+ *
+ *  - [BRIDGE] (issue #91): a headless external automation. It never SEES a permission ask (approvals
+ *    route to the OWNER) and can only open/prompt/cancel/close. Long-lived, no expiry.
+ *  - [GUEST] (issue #115): a scoped INTERACTIVE collaborator on one shared folder. It approves its OWN
+ *    asks, lists + browses inside the shared root, but never reaches the daemon's management plane or any
+ *    path outside the root. Expires; the owner can revoke.
+ *
+ * Old bridges.json entries (pre-#115) carry no `kind` → default [BRIDGE], so #91 credentials keep their
+ * exact behaviour. A GUEST is persisted to a SEPARATE file (guests.json) so a downgraded daemon that
+ * predates guests never loads it and fails that key closed — the same downgrade-safety argument that
+ * keeps bridge keys out of devices.json.
+ */
+@Serializable
+enum class CredentialKind { BRIDGE, GUEST }
+
+/**
+ * Constraints minted with a restricted credential — decided by the OWNER at mint time and enforced
+ * daemon-side on every frame. The credential holder never gets to relax them: they live in a
+ * [BridgeStore]/[GuestStore] file the holder can't write.
+ *
+ * Named [BridgeSpec] for #91 lineage; generalized in #115 to also describe a [CredentialKind.GUEST]
+ * (adding [kind]/[expiresAt]/[tier]). All additive with backward-compatible defaults, so a pre-#115
+ * bridges.json entry decodes unchanged.
  */
 @Serializable
 data class BridgeSpec(
     val name: String,
-    /** Absolute workdir roots the bridge may open sessions under (canonical, no trailing sep). */
+    /** Absolute workdir roots the credential may open sessions under (canonical, no trailing sep).
+     *  For a GUEST this is the single shared folder (its subtree) — the whole scope boundary. */
     val workdirs: List<String>,
     val maxSessions: Int = DEFAULT_MAX_SESSIONS,
     val opensPerMin: Int = DEFAULT_OPENS_PER_MIN,
     val promptsPerMin: Int = DEFAULT_PROMPTS_PER_MIN,
+    val kind: CredentialKind = CredentialKind.BRIDGE,
+    /** GUEST only: when this share expires (epoch ms). null = no expiry (a bridge). Past → the guest is
+     *  cut and the credential purged (issue #115 §6). */
+    val expiresAt: Long? = null,
+    /** GUEST only: the autonomy tier the owner granted — the permission-mode CEILING (never bypass). */
+    val tier: AccessTier = AccessTier.COLLABORATE,
 ) {
+    val isGuest: Boolean get() = kind == CredentialKind.GUEST
+
+    /** True if this is a GUEST share whose lifetime has lapsed as of [now]. */
+    fun expired(now: Long): Boolean = expiresAt?.let { it <= now } == true
+
     companion object {
         const val DEFAULT_MAX_SESSIONS = 2
         const val DEFAULT_OPENS_PER_MIN = 6
         const val DEFAULT_PROMPTS_PER_MIN = 20
 
-        /** Clamp owner-supplied overrides into sane bounds — a typo'd `--max-sessions 999` must not
+        // a GUEST is interactive (a human at a phone), so its caps are looser than a bridge's but still
+        // bounded — one collaborator must not be able to fork-bomb the owner's machine.
+        const val GUEST_MAX_SESSIONS = 4
+        const val GUEST_OPENS_PER_MIN = 12
+        const val GUEST_PROMPTS_PER_MIN = 60
+
+        /** Clamp owner-supplied bridge overrides into sane bounds — a typo'd `--max-sessions 999` must not
          *  turn one credential into a fork bomb. */
         fun clamped(name: String, workdirs: List<String>, maxSessions: Int?, opensPerMin: Int?, promptsPerMin: Int?) = BridgeSpec(
             name = name,
@@ -36,10 +78,22 @@ data class BridgeSpec(
             opensPerMin = (opensPerMin ?: DEFAULT_OPENS_PER_MIN).coerceIn(1, 30),
             promptsPerMin = (promptsPerMin ?: DEFAULT_PROMPTS_PER_MIN).coerceIn(1, 120),
         )
+
+        /** Build a GUEST spec (issue #115): a single canonical shared root, an access tier, and an expiry. */
+        fun guest(name: String, root: String, tier: AccessTier, expiresAt: Long) = BridgeSpec(
+            name = name,
+            workdirs = listOf(root),
+            maxSessions = GUEST_MAX_SESSIONS,
+            opensPerMin = GUEST_OPENS_PER_MIN,
+            promptsPerMin = GUEST_PROMPTS_PER_MIN,
+            kind = CredentialKind.GUEST,
+            expiresAt = expiresAt,
+            tier = tier,
+        )
     }
 }
 
-/** One registered bridge credential: its E2E static key + the constraints minted with it. */
+/** One registered restricted credential: its E2E static key + the constraints minted with it. */
 @Serializable
 data class BridgeEntry(
     val pubB64: String, // base64url(no-pad) X25519 static public key — the handshake identity
@@ -63,24 +117,52 @@ data class BridgeEntry(
  * daemon's identity key, which carries the same sensitivity).
  */
 object BridgeStore {
-    fun file(): File {
-        val dir = System.getenv("CC_POCKET_IDENTITY")?.let { File(it).parentFile }
-            ?: File(System.getProperty("user.home"), ".cc-pocket")
-        return File(dir, "bridges.json")
-    }
+    fun file(): File = credentialFile("bridges.json")
 
-    fun load(store: File = file()): Map<String, BridgeEntry> = runCatching {
-        if (!store.exists()) return emptyMap()
-        PocketJson.decodeFromString<Map<String, BridgeEntry>>(store.readText())
-    }.getOrDefault(emptyMap())
+    fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
 
-    fun save(map: Map<String, BridgeEntry>, store: File = file()) {
-        runCatching {
-            store.parentFile?.mkdirs()
-            store.writeText(PocketJson.encodeToString(map))
-            runCatching { // best-effort 0600 (POSIX only; Windows ACLs inherit the profile dir)
-                Files.setPosixFilePermissions(store.toPath(), PosixFilePermissions.fromString("rw-------"))
-            }
+    fun save(map: Map<String, BridgeEntry>, store: File = file()) = saveCredentials(map, store)
+}
+
+/**
+ * The persisted registry of GUEST folder-share credentials (issue #115): deviceId -> [BridgeEntry]
+ * (kind = GUEST), in `~/.cc-pocket/guests.json`. A SEPARATE file from bridges.json AND devices.json for
+ * the same downgrade-safety reason #91 keeps bridges out of devices.json, now applied one level deeper:
+ *
+ *  - A daemon that predates #115 (bridge-aware but guest-unaware) never loads guests.json, so a guest
+ *    key is an unknown device to it → handshake refused, fail closed. It CANNOT mis-file a guest as a
+ *    full-power bridge either (guests never touch bridges.json).
+ *  - A guest key must never leak into devices.json (full power) or bridges.json (bridge power) — its
+ *    strictly-scoped enforcement lives only on the relay guest path, so there is no other gate to keep
+ *    in sync.
+ *
+ * Same owner-only permissions as bridges.json / the identity key.
+ */
+object GuestStore {
+    fun file(): File = credentialFile("guests.json")
+
+    fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
+
+    fun save(map: Map<String, BridgeEntry>, store: File = file()) = saveCredentials(map, store)
+}
+
+private fun credentialFile(name: String): File {
+    val dir = System.getenv("CC_POCKET_IDENTITY")?.let { File(it).parentFile }
+        ?: File(System.getProperty("user.home"), ".cc-pocket")
+    return File(dir, name)
+}
+
+private fun loadCredentials(store: File): Map<String, BridgeEntry> = runCatching {
+    if (!store.exists()) return emptyMap()
+    PocketJson.decodeFromString<Map<String, BridgeEntry>>(store.readText())
+}.getOrDefault(emptyMap())
+
+private fun saveCredentials(map: Map<String, BridgeEntry>, store: File) {
+    runCatching {
+        store.parentFile?.mkdirs()
+        store.writeText(PocketJson.encodeToString(map))
+        runCatching { // best-effort 0600 (POSIX only; Windows ACLs inherit the profile dir)
+            Files.setPosixFilePermissions(store.toPath(), PosixFilePermissions.fromString("rw-------"))
         }
     }
 }

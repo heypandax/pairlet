@@ -2,8 +2,10 @@ package dev.ccpocket.app.pairing
 
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.util.B64Url
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.PairCodePayload
 import dev.ccpocket.protocol.PairCredential
+import dev.ccpocket.protocol.ShareInvite
 import dev.ccpocket.protocol.e2e.E2ECrypto
 import io.ktor.client.HttpClient
 import io.ktor.client.request.post

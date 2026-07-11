@@ -54,6 +54,20 @@ object ClaudeLauncher {
         spec.model?.let { add("--model"); add(it) }
         spec.effort?.let { add("--effort"); add(it) }
         spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }
+        // GUEST clean-room (issue #115): strip the owner's private machine-wide context so a scoped guest's
+        // agent can't siphon it. All three are claude-native switches (verified against the installed CLI):
+        if (spec.cleanRoom) {
+            // no MCP servers: ignore ~/.claude.json user servers + the project's .mcp.json entirely, so the
+            // guest can't act through the owner's authenticated integrations (the biggest hole)
+            add("--strict-mcp-config")
+            add("--mcp-config"); add("""{"mcpServers":{}}""")
+            // load only the shared folder's own project/local config — NOT the `user` source (~/.claude
+            // global CLAUDE.md, user skills / commands / settings). Credentials are not a setting source,
+            // so the daemon's login (billing) is untouched.
+            add("--setting-sources"); add("project,local")
+            // keep the owner's auto-memory paths, env vars, git status out of the guest's system prompt
+            add("--exclude-dynamic-system-prompt-sections")
+        }
     }
 
     fun processBuilder(exe: Path, spec: AgentSpec, configDir: Path? = null): ProcessBuilder {

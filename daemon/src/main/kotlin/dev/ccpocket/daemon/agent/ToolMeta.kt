@@ -84,4 +84,21 @@ object ToolMetadata {
         val home = System.getProperty("user.home") ?: return p
         return if (p.startsWith(home)) "~" + p.removePrefix(home) else p
     }
+
+    /** The built-in file tools whose target path the GUEST folder-share guard can STATICALLY confine to
+     *  the shared root (issue #115 §4). Bash is deliberately absent — a shell command's real targets can't
+     *  be parsed from its text, so v1 does not claim to sandbox it (the boundary card says as much). */
+    private val PATH_TOOLS = setOf("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep")
+
+    /**
+     * The filesystem path(s) a tool call targets, for the guest path guard — empty for a non-file tool (so
+     * it is never falsely denied) and for a file tool that named no path (it then operates on the session
+     * cwd, which is already inside the scope). Paths may be relative (resolved against the session workdir
+     * by the caller) or absolute.
+     */
+    fun pathTargets(tool: String, input: JsonObject?): List<String> {
+        if (tool !in PATH_TOOLS) return emptyList()
+        fun str(k: String) = (input?.get(k) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        return listOfNotNull(str("file_path"), str("path"), str("notebook_path"))
+    }
 }

@@ -137,7 +137,22 @@ class RelayClient(
                 ),
             )
         }
+        // issue #115: the OWNER folder-share control plane. Installed on the relay path (minting needs the
+        // relay link; the LAN path can't mint). DeviceSessions dispatches CreateShare/ListShares/RevokeShare
+        // to it for a full-power owner device only.
+        sessions.shareControl = ShareService(
+            accountId = identity.accountId,
+            daemonPubB64 = identity.e2ePubB64,
+            relayWsBase = relayWsBase,
+            ownerLabel = hostname,
+            registry = sessions.bridges,
+            mintTicket = { headless -> mintTicket(headless) },
+            interactivePairingPending = { sessions.interactivePairingPending() },
+            revokeCredential = { deviceId -> revokeBridge(deviceId) },
+            liveSessions = { core.registry.liveByCwd().entries.flatMap { (cwd, list) -> list.map { cwd to it } } },
+        )
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
+        launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
         var backoff = 1_000L
         while (true) {
             try {
@@ -166,6 +181,20 @@ class RelayClient(
             if (!peerOnline && !core.registry.lanConnected()) {
                 val n = core.registry.reapIdle(IDLE_REAP_MS)
                 if (n > 0) log.info("reaped $n idle session(s) — transcripts unhidden for desktop resume")
+            }
+        }
+    }
+
+    /** Cut + purge expired folder shares (issue #115 §6). Runs regardless of phone presence — an expired
+     *  guest must drop immediately, whether or not the owner is online. [revokeBridge] prunes the guest key
+     *  locally NOW (its handshake dies) and best-effort tells the relay to force-close its socket, so the
+     *  guest is severed and its credential can't be reused. */
+    private suspend fun guestExpiryLoop() {
+        while (true) {
+            delay(GUEST_EXPIRY_SCAN_MS)
+            for (id in sessions.bridges.expiredGuestIds()) {
+                log.info("folder share ${id.take(8)}… expired — revoking")
+                runCatching { revokeBridge(id) }
             }
         }
     }
@@ -292,6 +321,7 @@ class RelayClient(
         // ride out brief app-backgrounding / network blips — a reaped session re-opened later resumes in
         // place on the same id (see Conversation.open), so too-short here mostly costs process churn.
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
+        const val GUEST_EXPIRY_SCAN_MS = 30 * 1000L // how often to sweep for expired folder shares (issue #115)
         const val ATTACH_REPLAY_SETTLE_MS = 3_000L // relay device re-announce rides the attach; settled well within this
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
