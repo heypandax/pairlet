@@ -41,6 +41,7 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileDiff
@@ -407,6 +408,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
     val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
+    val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
@@ -1356,6 +1358,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // side once its value landed — canceling on the first arrival would strand the other
             is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFile.value = f
+                // an ExportFile reply rides the same channel + identity — settle the waiting state either way
+                if (exportWaiting.value) { exportWaiting.value = false; exportDeadline?.cancel() }
             }
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFileDiff.value = f
@@ -1683,6 +1687,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // requests carry a client-side deadline: better an honest "update the daemon" than an eternal spinner.
     private var changedFilesDeadline: Job? = null
     private var viewedFileDeadline: Job? = null
+    private var exportDeadline: Job? = null // separate: approval can take the daemon's whole 30s window
 
     /** Ask the daemon for the files this session touched (issue #36); the reply lands in [changedFiles].
      *  Needs the persistent sessionId — pre-first-turn sessions have nothing to list anyway. */
@@ -1711,6 +1716,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         viewedFilePath.value = path
         viewedFile.value = null // show the loading state, not the previous file
         viewedFileDiff.value = null
+        exportWaiting.value = false; exportDeadline?.cancel() // a fresh file owes nothing to a prior export
         // ONE deadline arms both replies; each check no-ops once its reply landed, so a daemon that
         // answers ReadFile but predates ReadFileDiff still gets the honest "needs a newer daemon" state.
         viewedFileDeadline?.cancel()
@@ -1733,7 +1739,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
+        exportDeadline?.cancel(); exportWaiting.value = false
         viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
+    }
+
+    /** Ask the daemon to export the viewer's current path even though this session never changed it
+     *  (issue #67 v2 / #79 — Bash/script-generated files the changed-set firewall refuses). The daemon
+     *  serves changed files straight away and gates everything else behind the owner's approval card
+     *  (the same PermissionAsk sheet as Bash); the reply is a [FileContent] for the same identity, so
+     *  it lands in [viewedFile] like any read — served, or ok=false carrying the refusal/denial reason.
+     *  The deadline outlasts the daemon's 30s approval window; an old daemon drops the unknown frame
+     *  and this lands in the honest "update the daemon" state instead of spinning forever. */
+    fun requestExport() {
+        val path = viewedFilePath.value ?: return
+        val wd = workdir.value ?: return
+        val sid = sessionKey.value ?: currentSessionId ?: return
+        val cid = convoId.value ?: return
+        exportWaiting.value = true
+        exportDeadline?.cancel()
+        exportDeadline = scope.launch {
+            delay(45_000)
+            if (viewedFilePath.value == path && exportWaiting.value) {
+                exportWaiting.value = false
+                viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
+            }
+        }
+        scope.launch { send(ExportFile(cid, wd, sid, path, sessionAgent.value ?: AgentKind.CLAUDE)) }
     }
 
     /** Ask the daemon for the children under the open session's cwd + [subPath] (relative, daemon-native

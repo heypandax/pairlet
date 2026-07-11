@@ -277,6 +277,10 @@
     <string name="file_exceeds_cap">超出传输上限</string>
     <string name="file_too_large_note">文件太大，无法在这里打开——链路传输上限为 %1$s，请到运行 daemon 的电脑上获取。</string>
     <string name="file_transferring">正在通过中转传输…</string>
+    <string name="file_export_request">请求导出（需批准）</string>
+    <string name="file_export_waiting">等待批准…</string>
+    <string name="file_export_other">导出列表外的文件…</string>
+    <string name="file_export_other_hint">项目内路径，如 output/report.xlsx</string>
 
     <!-- ── 子代理卡片（issue #77，chat-cards handoff）──────────── -->
     <string name="subagent_report">报告</string>

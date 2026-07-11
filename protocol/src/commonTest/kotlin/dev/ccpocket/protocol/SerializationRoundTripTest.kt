@@ -222,6 +222,26 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun exportFile_roundtrips_carries_convoId_and_defaults_agent() {
+        // issue #67 v2 / #79: the approval-gated export of a non-changed file. Distinct discriminator from
+        // ReadFile so an old daemon DROPS it (can't serve past the changed-set) instead of mis-serving.
+        val req = Envelope(id = "x1", ts = 0, body = ExportFile("c1", "/w", "sid", "/w/report.xlsx"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/file.export\"" in reqJson, reqJson)
+        assertTrue("\"convoId\":\"c1\"" in reqJson, reqJson) // routes the approval to the live conversation
+        assertTrue("\"agent\":\"claude\"" in reqJson, reqJson) // encodeDefaults, like ReadFile
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+        // reply rides the SAME FileContent channel as ReadFile (served, or ok=false on refuse/deny)
+        val served = FileContent("/w", "sid", "/w/report.xlsx", base64 = "UEsD", mediaType = "application/zip", totalBytes = 3)
+        assertEquals(served, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "x2", ts = 0, body = served))).body)
+        // a frame WITHOUT the agent key (hand-written, or a client that omits defaults) decodes to CLAUDE
+        val noAgent = PocketJson.decodeFromString<Envelope>(
+            """{"id":"x3","ts":0,"body":{"t":"pocket/file.export","convoId":"c1","workdir":"/w","sessionId":"sid","path":"/w/report.xlsx"}}""",
+        )
+        assertEquals(ExportFile("c1", "/w", "sid", "/w/report.xlsx"), noAgent.body)
+    }
+
+    @Test
     fun fileDiff_pair_roundtrips_and_stats_stay_optional() {
         val req = Envelope(id = "d1", ts = 0, body = ReadFileDiff("/w", "sid", "/w/a.kt"))
         val reqJson = PocketJson.encodeToString(req)

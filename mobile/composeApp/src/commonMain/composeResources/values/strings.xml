@@ -277,6 +277,10 @@
     <string name="file_exceeds_cap">exceeds transfer cap</string>
     <string name="file_too_large_note">Too large to open here — the link caps transfers at %1$s. Grab it from the computer running the daemon.</string>
     <string name="file_transferring">transferring over relay…</string>
+    <string name="file_export_request">Request export (needs approval)</string>
+    <string name="file_export_waiting">Waiting for approval…</string>
+    <string name="file_export_other">Export a file not in this list…</string>
+    <string name="file_export_other_hint">path/in/project.xlsx</string>
 
     <!-- ── sub-agent card (issue #77, chat-cards handoff) ────────── -->
     <string name="subagent_report">Report</string>
