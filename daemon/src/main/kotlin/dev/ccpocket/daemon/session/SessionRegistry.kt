@@ -137,6 +137,20 @@ class SessionRegistry(
                 val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
                 val recent = externallyActive(resume, open.workdir, file)
                 if (recent) {
+                    // a reconnecting client re-opens its observe with a FRESH sink (same key, new
+                    // instance). Reap this client's previous observer(s) of the same transcript first —
+                    // they survive the reconnect (the device's sink key revives with it) and would keep
+                    // tailing under a stale convoId, ping-ponging the phone between two SessionLive/
+                    // ConvoHistory streams forever (issue #107).
+                    val stale = mutex.withLock {
+                        val dead = observes.filterValues { it.sessionId == resume && it.isAttachedTo(sink) }
+                        dead.keys.forEach(observes::remove)
+                        dead.values.toList()
+                    }
+                    stale.forEach { o ->
+                        log.info("open ${resume.take(8)}… → reap stale observer ${o.convoId.take(8)}… (same client re-open)")
+                        runCatching { o.close() }
+                    }
                     val convoId = UUID.randomUUID().toString()
                     log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (live foreign writer)")
                     val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
@@ -181,6 +195,9 @@ class SessionRegistry(
         }
         return convoId
     }
+
+    /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */
+    internal suspend fun observing(convoId: String): Boolean = mutex.withLock { observes.containsKey(convoId) }
 
     /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind), newest-first. */
     fun listSessions(workdir: String): List<SessionSummary> =

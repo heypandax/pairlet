@@ -260,6 +260,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var relayDeadlinePassed = false // grace elapsed without attaching -> RelayUnreachable
     private var reconnectGraceJob: Job? = null // brief hold before showing the Reconnecting banner on a blip (#28)
     private var reconnectGracePassed = false   // that hold elapsed -> the Reconnecting banner may show
+    // a ConvoHistory was just merged (issue #107): the very next stream event may be the block the
+    // replay's disk read already caught (chunks parsed during the read race its ConvoHistory on the
+    // wire) — one-shot flag; consumed by the first AssistantChunk/ToolEvent, reset at turn boundaries
+    private var replayEcho = false
 
     // ── push notifications: register the device's APNs/FCM token so the relay can wake it while offline ──
     private var pushToken: PushToken? = null
@@ -1030,10 +1034,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val sid = currentSessionId
         val wd = workdir.value
         val dir = sessionsDir.value
+        val convo = convoId.value
         when {
-            // daemon finds the still-live conversation by sessionId → reattach + history replay
-            convoId.value != null && !observing.value && sid != null && wd != null ->
+            // daemon finds the still-live conversation by sessionId → reattach + history replay, which the
+            // ConvoHistory MERGE turns into a backfill of whatever streamed while the link was down (#107)
+            convo != null && sid != null && wd != null -> {
+                // an observe view re-opens the same way (the daemon mints a fresh ObserveSession — or a
+                // controllable resume if the terminal quit meanwhile). Close the stale observer first: its
+                // sink revives with this reconnected device, and an old daemon would keep BOTH observers
+                // tailing — two SessionLive/ConvoHistory streams ping-ponging the phone between convoIds.
+                if (observing.value) send(CloseSession(convo))
                 send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE))
+            }
             dir != null -> send(ListSessions(dir))
             else -> {} // directory list already refreshed by launchTransport
         }
@@ -1378,6 +1390,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             is TurnDone -> if (f.convoId == convoId.value) {
                 promptEvidence()
+                replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
                 val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
                 // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where
@@ -1438,8 +1451,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     }
                 }
             }
-            // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript
-            is ConvoHistory -> if (f.convoId == convoId.value) { messages.clear(); messages.addAll(f.messages.map(::historyItem)) }
+            // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript.
+            // MERGED, not replaced (issue #107): the replay is the backfill channel for output streamed while
+            // the link was down, but the app may hold rows the transcript doesn't (pending bubbles, dividers,
+            // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
+            // reconciles without flashing, duplicating, or reordering.
+            is ConvoHistory -> if (f.convoId == convoId.value) {
+                val localRows = messages.toList()
+                val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
+                if (merged != localRows) replace(messages, merged)
+                replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
+            }
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
             is ShellResult -> if (f.convoId == convoId.value) {
@@ -1480,6 +1502,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      */
     private fun onToolEvent(f: ToolEvent) {
         val parent = f.parentToolUseId
+        // one-shot replay-echo dedupe (issue #107), tool flavor: a START right after a merged
+        // ConvoHistory may duplicate the replayed tail card (which has no taskId). Fold into it —
+        // patching the live toolUseId in even upgrades the card for later RESULT correlation.
+        if (replayEcho) {
+            replayEcho = false
+            if (f.phase == ToolPhase.START && parent == null) {
+                val i = TranscriptMerge.echoToolIndex(messages, f.tool, f.inputPreview)
+                if (i >= 0) {
+                    messages[i] = (messages[i] as ChatItem.Tool).copy(taskId = f.toolUseId)
+                    return
+                }
+            }
+        }
         fun cardIndex(taskId: String?) =
             if (taskId == null) -1 else messages.indexOfLast { it is ChatItem.Tool && it.taskId == taskId }
         when {
@@ -1520,11 +1555,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         when (val p = c.piece) {
             is StreamPiece.Text -> {
                 finishThinking() // prose starting = the thinking block (if any) is done
+                // one-shot replay-echo dedupe (issue #107): the first block after a merged ConvoHistory
+                // can be the very block the replay already included — appending it would double the
+                // bubble's tail. Only an exact tail match is dropped; anything else streams normally.
+                val echo = replayEcho && TranscriptMerge.isEchoText(messages, p.text)
+                replayEcho = false
+                if (echo) return
                 val last = messages.lastOrNull()
                 if (last is ChatItem.Assistant) messages[messages.lastIndex] = last.copy(text = last.text + p.text)
                 else messages.add(ChatItem.Assistant(p.text))
             }
             is StreamPiece.Thinking -> {
+                replayEcho = false // replay carries no thinking rows — a thinking chunk can't be an echo
                 val last = messages.lastOrNull()
                 if (last is ChatItem.Thinking && last.seconds == null) {
                     messages[messages.lastIndex] = last.copy(text = last.text + p.text)
@@ -1636,7 +1678,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the previous session's in-flight work on every switch. Switching back later resumes by
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
-        messages.clear(); convoId.value = null
+        messages.clear(); convoId.value = null; replayEcho = false
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too

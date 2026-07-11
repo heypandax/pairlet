@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.codex
 
+import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import kotlinx.serialization.json.Json
@@ -17,7 +18,7 @@ import kotlin.io.path.exists
 object CodexTranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun read(file: Path, maxMessages: Int = 100, maxTextLen: Int = 2000): List<HistoryMessage> {
+    fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
         if (!file.exists()) return emptyList()
         val out = ArrayList<HistoryMessage>()
         runCatching {
@@ -32,8 +33,8 @@ object CodexTranscriptReplay {
                         "message" -> {
                             val text = codexMessageText(p)?.takeIf { it.isNotBlank() } ?: continue
                             when (p.str("role")) {
-                                "user" -> if (!isSyntheticUserText(text)) out += HistoryMessage(ChatRole.USER, text.take(maxTextLen))
-                                "assistant" -> out += HistoryMessage(ChatRole.ASSISTANT, text.take(maxTextLen))
+                                "user" -> if (!isSyntheticUserText(text)) out += HistoryMessage(ChatRole.USER, text)
+                                "assistant" -> out += HistoryMessage(ChatRole.ASSISTANT, text)
                                 else -> {}
                             }
                         }
@@ -46,7 +47,8 @@ object CodexTranscriptReplay {
                 }
             }
         }
-        return if (out.size > maxMessages) out.takeLast(maxMessages) else out
+        val capped = if (out.size > maxMessages) out.takeLast(maxMessages) else out
+        return ReplayBudget.fit(capped, maxFrameTextBytes)
     }
 
 }

@@ -172,4 +172,46 @@ class TranscriptReplayTest {
         assertEquals(null, q.answers)
         assertEquals("Deploy now?", q.text) // the question, not {"questions":[...]}
     }
+
+    @Test
+    fun long_reply_replays_in_full_not_clipped_at_2000() {
+        // issue #81: a reply longer than the old 2000-char per-message cap must replay whole. The field
+        // case was a 2343-char answer that surfaced on the phone as only its first 2000 chars, cut
+        // mid-word at "## 建议（" (idx 2000). live streaming was full; only history replay clipped.
+        val f = tmpFile("long.jsonl")
+        val body = "备".repeat(2343) // 2343 CJK chars = 7029 UTF-8 bytes — far past the old 2000-char clip
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"写个长回复"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"$body"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(2, msgs.size)
+        assertEquals(2343, msgs[1].text.length) // full, not truncated to 2000
+        assertEquals(body, msgs[1].text)
+    }
+
+    @Test
+    fun total_frame_budget_keeps_newest_whole_and_stays_under_cap() {
+        // the per-message cap is gone; frame safety now comes from a *total* byte budget. With a tiny
+        // budget the guard keeps the most recent rows intact, truncates the one that straddles, and
+        // drops anything older — so the summed UTF-8 size can never blow past a frame (4 MiB in prod).
+        val f = tmpFile("budget.jsonl")
+        val big = "x".repeat(1000)
+        val lines = (0 until 10).map { i ->
+            """{"type":"assistant","message":{"content":[{"type":"text","text":"m$i-$big"}]}}"""
+        }
+        f.writeText(lines.joinToString("\n"))
+
+        val msgs = TranscriptReplay.read(f, maxFrameTextBytes = 2500) // ~2.5 rows of 1003 bytes each
+
+        val total = msgs.sumOf { ReplayBudget.utf8Size(it.text) }
+        assertTrue(total <= 2500, "summed text bytes $total must stay within budget")
+        assertEquals(3, msgs.size) // newest two whole + one truncated straddling row; older dropped
+        assertEquals("m9-$big", msgs.last().text) // newest kept whole, chronological order preserved
+        assertTrue(msgs.first().text.length < 3 + big.length) // oldest kept row is the truncated one
+    }
 }

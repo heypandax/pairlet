@@ -25,7 +25,7 @@ import kotlin.io.path.getLastModifiedTime
 class ObserveSession(
     val convoId: String,
     private val workdir: String,
-    private val sessionId: String,
+    val sessionId: String, // exposed: the registry reaps a client's stale observer of the same session (issue #107)
     private val file: Path,
     private val sink: OutboundSink,
     parentScope: CoroutineScope,
@@ -64,8 +64,11 @@ class ObserveSession(
         )
     }
 
-    /** True while this observer still streams to [s] — the LAN grace-close ownership check. */
-    fun isAttachedTo(s: OutboundSink): Boolean = sink === s
+    /** True while this observer still streams to [s] — key identity, like Conversation.isAttachedTo:
+     *  the relay mints a fresh [KeyedSink] per inbound frame, so instance identity never matches a
+     *  reconnected client's fresh sink (that mismatch let re-opens stack duplicate observers, issue
+     *  #107). LAN sinks carry no key and keep the old instance-identity behavior. */
+    fun isAttachedTo(s: OutboundSink): Boolean = sinkKey(sink) == sinkKey(s)
 
     fun close() = scope.cancel()
 }
