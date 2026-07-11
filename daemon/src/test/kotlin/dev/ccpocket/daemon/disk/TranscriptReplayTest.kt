@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.QuestionAnswer
 import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
@@ -89,5 +90,86 @@ class TranscriptReplayTest {
         assertTrue(msgs[1].error) // the placeholder
         assertEquals("No response requested.", msgs[1].text)
         assertTrue(!msgs[3].error) // the real reply
+    }
+
+    @Test
+    fun askuserquestion_replays_as_answered_row_not_raw_json() {
+        // issue #110: a resumed/observed AskUserQuestion must replay as the compact (question → answer)
+        // row the live path leaves — not the raw questions JSON that read like a Bash dump
+        val f = tmpFile("ask.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"pick a color"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"question":"Which color do you prefer?","header":"Color","multiSelect":false,"options":[{"label":"Red"},{"label":"Blue"}]}]}}]}}""",
+                // the main-chain tool_result echoes the pick as `"<question>"="<answer>"` (CLI 2.1.206)
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"q1","content":"Your questions have been answered: \"Which color do you prefer?\"=\"Red\". You can now continue with these answers in mind."}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"CHOSE: Red"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(3, msgs.size) // user, the answered question row, the final answer — no raw tool card
+        val q = msgs[1]
+        assertEquals(ChatRole.TOOL, q.role)
+        assertEquals("AskUserQuestion", q.tool)
+        assertEquals(listOf(QuestionAnswer("Which color do you prefer?", "Red")), q.answers)
+        assertTrue(!q.text.contains("options") && !q.text.contains("{")) // never the raw questions JSON
+        assertEquals("CHOSE: Red", msgs[2].text)
+    }
+
+    @Test
+    fun askuserquestion_multi_question_keeps_all_pairs_in_order() {
+        // a multi-question card answers into comma-separated `"q"="a", "q"="a"` — every pair survives, ordered
+        val f = tmpFile("ask-multi.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"m1","name":"AskUserQuestion","input":{"questions":[{"question":"Color?","options":[{"label":"Red"}]},{"question":"Size?","options":[{"label":"Large"}]}]}}]}}""",
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"m1","content":"Your questions have been answered: \"Color?\"=\"Red\", \"Size?\"=\"Large\". Continue."}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        assertEquals(
+            listOf(QuestionAnswer("Color?", "Red"), QuestionAnswer("Size?", "Large")),
+            msgs[0].answers,
+        )
+    }
+
+    @Test
+    fun askuserquestion_freeform_reply_replays_as_blank_question_answer() {
+        // the user answered in their own words instead of picking — a single ("" → reply) pair, like live
+        val f = tmpFile("ask-free.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q2","name":"AskUserQuestion","input":{"questions":[{"question":"Which color?","options":[{"label":"Red"}]}]}}]}}""",
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"q2","content":"The user chose not to answer the question. Instead, the user responded: \"surprise me\"."}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        assertEquals(listOf(QuestionAnswer("", "surprise me")), msgs[0].answers)
+    }
+
+    @Test
+    fun unanswered_askuserquestion_replays_as_readable_question_not_json() {
+        // session ended before the tool_result: no answers to attach, but the row still shows the
+        // question text (readable), never the raw input JSON
+        val f = tmpFile("ask-open.jsonl")
+        f.writeText(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q3","name":"AskUserQuestion","input":{"questions":[{"question":"Deploy now?","options":[{"label":"Yes"},{"label":"No"}]}]}}]}}""",
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        val q = msgs[0]
+        assertEquals("AskUserQuestion", q.tool)
+        assertEquals(null, q.answers)
+        assertEquals("Deploy now?", q.text) // the question, not {"questions":[...]}
     }
 }
