@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
 import dev.ccpocket.app.push.PushController
+import dev.ccpocket.app.lock.AppLockController
+import dev.ccpocket.app.lock.createBiometrics
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
@@ -311,6 +313,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         themeMode.value = mode
         SecureStore.putString(K_THEME_MODE, mode.name)
     }
+
+    /** App Lock (issue #109): the biometric gate state machine + its persisted enable/auto-lock prefs. Lazy so
+     *  the desktop root and the repo unit tests — neither of which mounts the gate — never build the platform
+     *  prompt (createBiometrics()); it is constructed the first time App() reads it on Android/iOS. */
+    val appLock: AppLockController by lazy { AppLockController(scope, createBiometrics()) }
 
     /** Projects the user pinned to the top, newest pin first. Persisted client-side (paths never contain
      *  '\n', so a newline-joined string is a safe, dependency-free encoding). */

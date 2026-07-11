@@ -14,6 +14,7 @@ cryptographyKotlin = "0.4.0"
 composeMultiplatform = "1.7.3"
 agp = "8.7.3"
 androidActivityCompose = "1.9.3"
+androidxBiometric = "1.1.0"
 androidMinSdk = "26"
 androidCompileSdk = "35"
 androidTargetSdk = "35"
@@ -37,6 +38,7 @@ ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "kto
 ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidActivityCompose" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidxBiometric" } # App Lock (issue #109): BiometricPrompt (brings androidx.fragment for FragmentActivity)
 
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }

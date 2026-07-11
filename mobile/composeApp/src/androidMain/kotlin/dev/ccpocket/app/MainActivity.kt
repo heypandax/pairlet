@@ -7,12 +7,13 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.fragment.app.FragmentActivity
+import dev.ccpocket.app.lock.initAppLock
 import dev.ccpocket.app.push.CcPocketMessagingService
 import dev.ccpocket.app.secure.initSecureStore
 import dev.ccpocket.app.share.initFileExport
@@ -20,7 +21,8 @@ import dev.ccpocket.app.telemetry.initTelemetry
 import dev.ccpocket.app.ui.App
 import dev.ccpocket.app.voice.initVoice
 
-class MainActivity : ComponentActivity() {
+// FragmentActivity (not ComponentActivity) so androidx.biometric BiometricPrompt can host its dialog (issue #109).
+class MainActivity : FragmentActivity() {
     private val requestNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,6 +36,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         initSecureStore(this)
+        initAppLock(this) // App Lock (issue #109): the biometric prompt needs this FragmentActivity as host
         initTelemetry(this)
         initVoice(this)
         initUrlOpener(this)
