@@ -231,8 +231,13 @@ interface DesktopModel {
      *  transcript stays on the host and reopening its project resurfaces it. No-op for seed/preview models. */
     fun hideSession(s: DkSession) {}
 
-    /** RECENT — session groups for the projects visited this run, most recently visited first. */
+    /** RECENT — session groups for the visited projects, most recently visited first. The keys persist
+     *  across restarts (issue #102); their session lists refill from the daemon once it's reachable. */
     val sessionGroups: List<DkSessionGroup>
+
+    /** Forget every visited project — RECENT's header clear (issue #102). Pins and hidden rows are
+     *  deliberately untouched. No-op for seed/preview models. */
+    fun clearRecent() {}
 
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false

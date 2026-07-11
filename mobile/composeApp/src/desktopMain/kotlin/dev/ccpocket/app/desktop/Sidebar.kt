@@ -335,10 +335,46 @@ private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick
 // layout exactly, so every consumer must filter through this one definition or the scroll index drifts
 private fun renderedGroups(model: DesktopModel) = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
 
+/** RECENT's section label with the hover clear-all affordance (issue #102): "clear" arms to "sure?",
+ *  a second click forgets every visited project (pins / hidden rows untouched); moving the pointer off
+ *  the header disarms. Mirrors [SectionLabel]'s metrics so the header is identical at rest, and the
+ *  GroupHeader hover-action precedent for the reveal. */
+@Composable
+private fun RecentHeader(model: DesktopModel) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    var arm by remember { mutableStateOf(false) }
+    LaunchedEffect(hovered) { if (!hovered) arm = false } // pointer left — disarm the pending clear
+    Row(
+        Modifier.fillMaxWidth().hoverable(src)
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "RECENT", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.width(1.dp)) // keep the row baseline stable pre-hover (SectionLabel parity)
+        Key("⌘R")
+        if (hovered && model.sessionGroups.isNotEmpty()) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (arm) "sure?" else "clear",
+                color = if (arm) Tok.accent else Tok.tx2,
+                fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                    .clickable { if (arm) { arm = false; model.clearRecent() } else arm = true }
+                    .padding(horizontal = 3.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
-        SectionLabel("Recent", trailing = { Key("⌘R") })
+        RecentHeader(model)
         val groups = renderedGroups(model)
         if (groups.isEmpty()) {
             Text(

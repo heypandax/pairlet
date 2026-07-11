@@ -35,6 +35,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -53,13 +54,36 @@ private data class PinRec(
 @Serializable
 private data class HiddenRec(val accountId: String, val sessionId: String, val cwd: String)
 
+/** Persisted form of a RECENT visit (issue #102) — the KEY only: account + path, list order = recency.
+ *  A visit's session snapshot is a re-pullable cache and deliberately not stored. */
+@Serializable
+private data class VisitRec(val accountId: String, val path: String)
+
+/** Persistence seam for the sidebar's durable state (pins / hidden / visits) — the app reads and writes
+ *  [SecureStore]; tests inject a map so they never touch the developer's real store file. */
+interface DesktopStore {
+    fun getString(key: String): String?
+    fun putString(key: String, value: String)
+}
+
+internal object SecureDesktopStore : DesktopStore {
+    override fun getString(key: String): String? = SecureStore.getString(key)
+    override fun putString(key: String, value: String) = SecureStore.putString(key, value)
+}
+
+private val storeJson = Json { ignoreUnknownKeys = true }
+
 /**
  * Live [DesktopModel] backed by [PocketRepository] — the real app path. Getters read the repo's snapshot
  * state so reads recompose. Note the repo is single-session: the sidebar's SESSIONS group is the *current
  * project's* sessions (set by [openProject]); a global all-computers multi-session view needs a repo change
  * and is deliberately out of scope here. The tray is likewise still seed-only.
  */
-class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope) : DesktopModel {
+class RepoDesktopModel(
+    private val repo: PocketRepository,
+    scope: CoroutineScope,
+    private val store: DesktopStore = SecureDesktopStore,
+) : DesktopModel {
 
     override var switcherOpen by mutableStateOf(false)
     override var showNewSession by mutableStateOf(false)
@@ -182,6 +206,7 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
         }
 
     override fun openRunning(m: DkMachine, p: DkProject) {
+        navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         optimisticSelectedId = null // this path bypasses selectSession — don't let a stale pick re-light mid-open (#82)
         FleetRuntime.forPrimary(repo)?.focusProject(m.computer.accountId, p.path) ?: super.openRunning(m, p)
     }
@@ -283,7 +308,29 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     // The protocol only lists sessions per directory (ListSessions), so cross-project RECENT is built
     // client-side: each visit carries a snapshot of its list, and the current dir always reads live.
     private data class Visit(val accountId: String, val path: String, val snapshot: List<DkSession> = emptyList())
-    private val visits = mutableStateListOf<Visit>() // most recent first
+
+    // most recent first. The KEYS survive restarts (issue #102): loaded from the store here, persisted on
+    // every reorder — snapshots stay empty until [refillRecent] (or a fresh visit) re-lists the dir.
+    private val visits = mutableStateListOf<Visit>().apply {
+        runCatching {
+            store.getString(K_VISITS)?.takeIf { it.isNotBlank() }?.let { s ->
+                val seen = HashMap<String, Int>() // per-account cap — the same MAX_RECENT openProject enforces
+                storeJson.decodeFromString<List<VisitRec>>(s).forEach { r ->
+                    val n = seen.getOrElse(r.accountId) { 0 }
+                    if (n < MAX_RECENT) { add(Visit(r.accountId, r.path)); seen[r.accountId] = n + 1 }
+                }
+            }
+        }
+    }
+
+    /** Persist the visit keys (issue #102) — order carries recency; snapshots are never stored. */
+    private fun saveVisits() =
+        store.putString(K_VISITS, storeJson.encodeToString(visits.map { VisitRec(it.accountId, it.path) }))
+
+    // user-navigation generation — bumped by every explicit sidebar navigation; an in-flight RECENT
+    // refill sweep (issue #102) checks it between steps so it never repoints the list under the user
+    private var navGen = 0
+    private val refilled = HashSet<String>() // accounts whose restored visits were already swept this run
 
     /** Canonical identity of a workdir for RECENT-group dedup. Collapses $HOME → ~ (so the daemon's
      *  absolute cwd like /Users/x/P and the new-session popover's tilde reseed ~/P name the SAME project
@@ -308,11 +355,60 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
         val dir = repo.sessionsDir.value ?: return
         val key = repo.workdir.value?.takeIf { repo.convoId.value != null && sameDir(it, dir) } ?: dir
         val i = visits.indexOfFirst { it.accountId == acct && sameDir(it.path, key) }
-        if (i >= 0) visits[i] = visits[i].copy(path = key, snapshot = sessions)
-        else visits.add(0, Visit(acct, key, sessions))
+        if (i >= 0) {
+            val converged = visits[i].path != key
+            visits[i] = visits[i].copy(path = key, snapshot = sessions)
+            if (converged) saveVisits() // the stored key changed (tilde → absolute, #58) — keep the disk form in step
+        } else {
+            visits.add(0, Visit(acct, key, sessions))
+            saveVisits() // a dir listed outside openProject just entered RECENT (issue #102)
+        }
+    }
+
+    // Restored visits render empty until re-listed (snapshots aren't persisted — issue #102), and the
+    // sidebar hides empty non-current groups, so a restart would LOOK like RECENT was lost. Once the
+    // machine is Ready and the app is still cold-idle (nothing listed or open — never hijack a view the
+    // user already has), re-pull each restored dir through the ordinary listing path. One sweep per
+    // account per run: a reconnect mid-use must not sweep (restoreAfterReconnect owns the current dir).
+    init {
+        scope.launch {
+            // demo mode counts as ready: it loops listings back locally and never attaches a transport
+            // (a real demo run has no binding, so acct is null there and the sweep stays off)
+            snapshotFlow { (repo.phase.value == ConnPhase.Ready || repo.demoMode.value) to repo.paired.value?.accountId }
+                .collect { (ready, acct) ->
+                    if (!ready || acct == null || acct in refilled) return@collect
+                    refilled += acct
+                    if (repo.convoId.value == null && repo.sessionsDir.value == null) refillRecent(acct)
+                }
+        }
+    }
+
+    /** Re-list [acct]'s restored, snapshot-empty visits, oldest first — the most-recent group's echo lands
+     *  last, leaving it the live one (the state the user quit in). Each echo is archived into its visit by
+     *  [snapshotCurrent] (position preserved by the upsert); user navigation stops the remainder, and an
+     *  unanswered dir just stays empty — the sweep must never wedge the sidebar. */
+    private suspend fun refillRecent(acct: String) {
+        val gen = navGen
+        val targets = visits.filter { it.accountId == acct && it.snapshot.isEmpty() }.map { it.path }
+        for (dir in targets.asReversed()) {
+            if (navGen != gen || repo.convoId.value != null) return
+            repo.listSessions(dir)
+            // poll instead of snapshotFlow: the echo must be awaitable before the UI's snapshot-apply
+            // pump exists (and under a nested Unconfined launch the listing itself only runs once this
+            // coroutine suspends — the delay below is that suspension point)
+            val echoed = withTimeoutOrNull(REFILL_ECHO_TIMEOUT_MS) {
+                while (true) {
+                    val d = repo.sessionsDir.value
+                    if (d != null && sameDir(d, dir)) break
+                    delay(REFILL_POLL_MS)
+                }
+            } != null
+            if (echoed) snapshotCurrent()
+        }
     }
 
     override fun openProject(p: DkProject) {
+        navGen++ // user navigation — an in-flight RECENT refill (issue #102) must stop repointing the list
         focusDir(p.path) // the New-session target follows the project the user just opened
         val acct = repo.paired.value?.accountId
         if (acct != null) {
@@ -325,6 +421,7 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
             val v = if (i >= 0) visits.removeAt(i) else Visit(acct, p.path)
             visits.add(0, v)
             visits.filter { it.accountId == acct }.drop(MAX_RECENT).forEach { visits.remove(it) }
+            saveVisits() // order (recency) changed — keep the persisted keys in step (issue #102)
         }
         repo.listSessions(p.path)
     }
@@ -355,29 +452,38 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     override val sessionsRefreshing: Boolean get() = repo.sessionsRefreshing.value
 
     override fun refresh(g: DkSessionGroup?) {
+        navGen++ // manual refresh repoints the list deliberately — stop any RECENT refill sweep (#102)
         repo.refreshDirectoriesSilently() // manual refresh means "sync the sidebar" — projects/running state rides along
         if (g != null && !g.current) snapshotCurrent() // keep the outgoing live group's rows before repointing
         repo.refreshSessions(g?.path) // null → the current dir; no-op when nothing is listed yet
     }
 
+    /** RECENT's header clear (issue #102): forget every visited project. Pins and hidden entries are
+     *  deliberately untouched (a pin is an explicit keep; hidden rows must stay hidden on a re-visit).
+     *  The currently LISTED dir re-enters as the synthetic live group — that list is genuinely open. */
+    override fun clearRecent() {
+        visits.clear()
+        saveVisits()
+    }
+
     override fun selectSession(s: DkSession) {
+        navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         focusDir(s.cwd) // clicking a session focuses its project too, so a following ⌘N lands there
         optimisticSelectedId = s.sessionId // light the clicked row NOW, don't wait out the open (#82)
         repo.openSession(wd = s.cwd, resumeId = s.sessionId, title = s.title, agent = s.agent)
     }
 
     // ── pinned sessions: persisted in the SecureStore beside the pairing list ────────────────────
-    private val pinJson = Json { ignoreUnknownKeys = true }
     private val pinsState = mutableStateListOf<DkPin>().apply {
         runCatching {
-            SecureStore.getString(K_PINS)?.takeIf { it.isNotBlank() }?.let { s ->
-                addAll(pinJson.decodeFromString<List<PinRec>>(s).map { DkPin(it.accountId, it.sessionId, it.cwd, it.title, it.agent) })
+            store.getString(K_PINS)?.takeIf { it.isNotBlank() }?.let { s ->
+                addAll(storeJson.decodeFromString<List<PinRec>>(s).map { DkPin(it.accountId, it.sessionId, it.cwd, it.title, it.agent) })
             }
         }
     }
 
     private fun savePins() {
-        SecureStore.putString(K_PINS, pinJson.encodeToString(pinsState.map { PinRec(it.accountId, it.sessionId, it.cwd, it.title, it.agent) }))
+        store.putString(K_PINS, storeJson.encodeToString(pinsState.map { PinRec(it.accountId, it.sessionId, it.cwd, it.title, it.agent) }))
     }
 
     override val pins: List<DkPin> get() = pinsState
@@ -402,13 +508,13 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     // ── hidden sessions: the RECENT row's ✕ (issue #62) — a persisted, account-scoped remove-from-list ──
     private val hiddenState = mutableStateListOf<HiddenRec>().apply {
         runCatching {
-            SecureStore.getString(K_HIDDEN)?.takeIf { it.isNotBlank() }?.let {
-                addAll(pinJson.decodeFromString<List<HiddenRec>>(it))
+            store.getString(K_HIDDEN)?.takeIf { it.isNotBlank() }?.let {
+                addAll(storeJson.decodeFromString<List<HiddenRec>>(it))
             }
         }
     }
 
-    private fun saveHidden() = SecureStore.putString(K_HIDDEN, pinJson.encodeToString(hiddenState.toList()))
+    private fun saveHidden() = store.putString(K_HIDDEN, storeJson.encodeToString(hiddenState.toList()))
 
     override fun hideSession(s: DkSession) {
         val acct = repo.paired.value?.accountId ?: return
@@ -419,6 +525,7 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     }
 
     override fun openPin(p: DkPin) {
+        navGen++ // user navigation — stop an in-flight RECENT refill from repointing the list (#102)
         if (p.accountId == repo.paired.value?.accountId) {
             focusDir(p.cwd) // jumping to a pin focuses its project, so a following ⌘N lands there
             optimisticSelectedId = p.sessionId // same as selectSession: light the target row through the open (#82)
@@ -582,10 +689,10 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
         get() = repo.themeMode.value
         set(v) { repo.setThemeMode(v) }
     // desktop-only pref (the daemon/mobile never open local terminals) — persisted beside the pins
-    private var terminalAppState by mutableStateOf(TerminalApp.fromId(SecureStore.getString(K_TERMINAL_APP)))
+    private var terminalAppState by mutableStateOf(TerminalApp.fromId(store.getString(K_TERMINAL_APP)))
     override var terminalApp: TerminalApp
         get() = terminalAppState
-        set(v) { terminalAppState = v; SecureStore.putString(K_TERMINAL_APP, v.id) }
+        set(v) { terminalAppState = v; store.putString(K_TERMINAL_APP, v.id) }
 
     override val phonePush: Boolean? get() = repo.pushPrefs.value
     override fun setPhonePush(enabled: Boolean) { repo.setPushEnabled(enabled) }
@@ -619,8 +726,11 @@ class RepoDesktopModel(private val repo: PocketRepository, scope: CoroutineScope
     private companion object {
         const val K_PINS = "desktop_pins"
         const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)
+        const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
         const val K_TERMINAL_APP = "desktop_terminal_app"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
         const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
+        const val REFILL_ECHO_TIMEOUT_MS = 4_000L // per-dir wait for the restored-RECENT sweep's listing echo (#102)
+        const val REFILL_POLL_MS = 50L // echo poll cadence — snapshot notifications may not be pumping yet (#102)
     }
 }
