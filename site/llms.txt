@@ -17,15 +17,18 @@ CC Pocket is a remote control for command-line AI coding agents. The coding agen
 - **Approve from anywhere** — tool-permission requests reach your phone the instant Claude or Codex raises one; allow or deny in seconds. If you don't respond, it times out to a safe deny.
 - **Pick your agent per session** — choose Claude Code or OpenAI Codex when you start a session; streaming output, command/file-change approvals, and interrupts work the same for both. A session stays bound to one backend.
 - **Execution modes** — four modes (ask each step, auto-edit, plan, full auto), a persisted default mode and reasoning effort, plus per-session allow rules, switchable mid-conversation. Codex sessions map to a permission preset (Cautious / Balanced / Autonomous / Full auto) over Codex's approval-policy × sandbox.
-- **Resume any session** — pick up the exact session you left running on your computer, or start a fresh one in any repo, and hand it back to the desktop later with `claude --resume`.
-- **Live streaming** — real-time output, syntax-highlighted code blocks, tool events, and background-task status, exactly as they render in the terminal.
-- **See what changed** — browse every file a session touched and read each change from the phone, with per-language syntax highlighting (sql, py, kt, js and more).
+- **Resume any session** — pick up the exact session you left running on your computer, or start a fresh one in any repo, and hand it back to the desktop later with `claude --resume`. Sessions can be organized into named groups per project, synced between phone and desktop.
+- **Live streaming** — real-time output, syntax-highlighted code blocks, tool events, sub-agent cards, and background-task status, exactly as they render in the terminal; a multi-agent Workflow run gets its own orchestration view with per-phase progress, and missed output is backfilled after a reconnect.
+- **See what changed** — browse every file a session touched with line-level diffs and per-language syntax highlighting (sql, py, kt, js and more); select and copy diff text, preview or export files (approval-gated), and tap or long-press any path for open / full-value copy.
 - **Take over without forking** — a terminal session is observed read-only; "Continue here" resumes it in place, and only branches when the terminal claude is truly still writing (two writers would clobber the transcript).
 - **Tree project browser** — drill through your computer's folders level by level (or a flat recents list), filter as you type, with a live breadcrumb and per-project session counts. Running projects jump straight to the live session; a history badge opens the full session list.
-- **Voice & images** — voice dictation, image attachments, slash-command autocomplete, and model switching — including custom model ids routed through third-party gateways (cc-switch and similar).
+- **Voice & attachments** — voice dictation, image / file / video attachments, `@`-file completion, slash-command autocomplete, and model switching — including custom model ids routed through third-party gateways (cc-switch and similar).
 - **Background tasks & notifications** — long jobs keep running; you get a push notification when the agent finishes.
 - **Native desktop app** — besides phone and tablet, CC Pocket runs as a native macOS / Linux / Windows app (a two-pane "mission control") to drive an agent on *another* computer with the same remote, step-by-step approval, ⌘K navigation and pinned sessions.
 - **Fleet overview** — with several computers paired, one screen shows each machine's online state, running projects and waiting approvals; cross-machine approvals resolve without switching away.
+- **Usage insights** — tokens and estimated cost per model, today's hourly activity bars, and a 30-day calendar heatmap.
+- **Folder sharing** — grant a guest an agent on one folder of your machine, with three access levels (Review / Collaborate / Autonomous), an expiry, and one-tap revoke; the guest's sessions are fenced to that folder (shell commands still run as the owner's user — scoped, not a sandbox).
+- **Biometric app lock** — optional Face ID / fingerprint lock on the app itself, with a branded cover in the app switcher.
 - **LAN direct connect** — on the same network the app talks straight to your computer for lower latency; the relay remains the fallback path from anywhere.
 
 ## How it works

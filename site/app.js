@@ -3,15 +3,12 @@
 (function(){
   const root = document.documentElement;
 
-  // ── brand mark + glyph injection (so HTML stays clean) ──
-  const MARK = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">' +
-    '<path d="M3 5l4 4-4 4" stroke="#D97757" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
-    '<rect x="11" y="4.5" width="3.4" height="13" rx="1.7" fill="#D97757"/></svg>';
+  // ── glyph injection (so HTML stays clean) ──
+  // .brand-mark renders favicon.svg via CSS background — no JS injection, or it double-draws.
   const GH = '<svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' +
     '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
   const STAR = '<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1.5l1.9 4 4.3.5-3.2 2.9.9 4.3L8 11.9 4.1 13.2l.9-4.3L1.8 6l4.3-.5z"/></svg>';
 
-  document.querySelectorAll('.brand-mark').forEach(e => e.innerHTML = MARK);
   document.querySelectorAll('.gh-glyph').forEach(e => e.innerHTML = GH);
   document.querySelectorAll('.star-ico').forEach(e => e.innerHTML = STAR);
 
@@ -74,7 +71,7 @@
   menu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => { menu.classList.remove('open'); burger.innerHTML = BARS; }));
 
   // ── active-section nav indicator ──
-  const sections = ['start','features','how','security'].map(id => document.getElementById(id)).filter(Boolean);
+  const sections = ['features','desktop','how','security','start'].map(id => document.getElementById(id)).filter(Boolean);
   const navLinks = [...document.querySelectorAll('.nav-links a')];
   const spy = new IntersectionObserver((entries) => {
     entries.forEach(e => {
