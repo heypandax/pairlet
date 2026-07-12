@@ -127,6 +127,28 @@ class StreamParserTest {
         assertIs<AgentEvent.UserReplay>(StreamParser.parse("""{"type":"user"}""").single())
     }
 
+    // issue #122: the replay's text is the ledger's settlement key — both content shapes must carry it
+    @Test
+    fun user_replay_carries_text_for_both_content_shapes() {
+        val fromString = StreamParser.parse("""{"type":"user","message":{"role":"user","content":"send it"}}""").single()
+        assertIs<AgentEvent.UserReplay>(fromString)
+        assertEquals("send it", fromString.text)
+        assertEquals(null, fromString.parentId)
+
+        val fromBlocks = StreamParser.parse("""{"type":"user","message":{"content":[{"type":"text","text":"send it"}]}}""").single()
+        assertIs<AgentEvent.UserReplay>(fromBlocks)
+        assertEquals("send it", fromBlocks.text)
+    }
+
+    @Test
+    fun subagent_user_replay_is_parent_tagged() {
+        val ev = StreamParser.parse(
+            """{"type":"user","parent_tool_use_id":"a1","message":{"content":[{"type":"text","text":"inner"}]}}""",
+        ).single()
+        assertIs<AgentEvent.UserReplay>(ev)
+        assertEquals("a1", ev.parentId) // never settles a top-level prompt
+    }
+
     @Test
     fun system_task_events_become_background_task_events_not_sessionInit() {
         val started = StreamParser.parse(
@@ -210,5 +232,61 @@ class StreamParserTest {
             """{"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"text","text":"hi"}]}}""",
         ).single()
         assertEquals(AgentEvent.AssistantText("hi"), ev)
+    }
+    // ── Workflow orchestration events (issue #106) — frames captured verbatim from a real run
+    // (claude 2.1.206, scripts/probe-claude-wire.py workflow scenario) ──────────────────────────
+
+    @Test
+    fun task_progress_with_workflow_progress_array_becomes_workflowProgress() {
+        val ev = StreamParser.parse(
+            """{"type":"system","subtype":"task_progress","task_id":"wvw3rra3y","tool_use_id":"toolu_01Ly","description":"Beta: say-cherry","usage":{"total_tokens":45662,"tool_uses":0,"duration_ms":4265},"last_tool_name":"say-cherry","summary":"probe minimal workflow","workflow_progress":[{"type":"workflow_phase","index":1,"title":"Alpha"},{"type":"workflow_agent","index":1,"label":"say-apple","phaseIndex":1,"phaseTitle":"Alpha","agentId":"a878b","model":"claude-sonnet-5","state":"done","startedAt":1783769400993,"queuedAt":1783769400992,"attempt":1,"promptPreview":"Reply with…","tokens":22831,"toolCalls":0,"durationMs":3266,"resultPreview":"apple"}],"session_id":"s1"}""",
+        ).single()
+        assertIs<AgentEvent.WorkflowProgress>(ev)
+        assertEquals("wvw3rra3y", ev.taskId)
+        assertEquals("toolu_01Ly", ev.toolUseId)
+        assertEquals(2, ev.items.size)
+    }
+
+    @Test
+    fun task_progress_without_workflow_progress_is_ignored_not_sessionInit() {
+        // pure activity ticks omit the array — they carry no per-agent state; and despite having a
+        // session_id they must NOT fall through to the SessionInit branch
+        val ev = StreamParser.parse(
+            """{"type":"system","subtype":"task_progress","task_id":"w1","description":"Alpha: say-apple","usage":{"total_tokens":22831,"tool_uses":0,"duration_ms":3269},"session_id":"s1"}""",
+        ).single()
+        assertIs<AgentEvent.Ignored>(ev)
+    }
+
+    @Test
+    fun task_started_carries_workflow_name() {
+        val ev = StreamParser.parse(
+            """{"type":"system","subtype":"task_started","task_id":"wvw3rra3y","tool_use_id":"toolu_01Ly","description":"probe minimal workflow","task_type":"local_workflow","workflow_name":"probe-mini","prompt":"export const meta = …","session_id":"s1"}""",
+        ).single()
+        assertIs<AgentEvent.BackgroundTaskStarted>(ev)
+        assertEquals("local_workflow", ev.taskType)
+        assertEquals("probe-mini", ev.workflowName)
+    }
+
+    @Test
+    fun workflow_launch_ack_rides_the_user_tool_result_as_workflowLaunched() {
+        // the root-level tool_use_result is the ONLY live carrier of the run id
+        val evs = StreamParser.parse(
+            """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01Ly","type":"tool_result","content":"Workflow launched in background. Task ID: wvw3rra3y"}]},"tool_use_result":{"status":"async_launched","taskId":"wvw3rra3y","taskType":"local_workflow","workflowName":"probe-mini","runId":"wf_03737500-658","summary":"probe minimal workflow","transcriptDir":"/x","scriptPath":"/y"},"session_id":"s1"}""",
+        )
+        val launch = evs.filterIsInstance<AgentEvent.WorkflowLaunched>().single()
+        assertEquals("wf_03737500-658", launch.runId)
+        assertEquals("wvw3rra3y", launch.taskId)
+        assertEquals("toolu_01Ly", launch.toolUseId)
+        assertEquals("probe-mini", launch.workflowName)
+        // the plain ToolResult still flows (jobs/subagent tracking is untouched)
+        assertTrue(evs.any { it is AgentEvent.ToolResult })
+    }
+
+    @Test
+    fun non_workflow_tool_use_result_emits_no_launch_event() {
+        val evs = StreamParser.parse(
+            """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"ok"}]},"tool_use_result":{"stdout":"ok"},"session_id":"s1"}""",
+        )
+        assertTrue(evs.none { it is AgentEvent.WorkflowLaunched })
     }
 }

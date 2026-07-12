@@ -1,0 +1,8 @@
+# cc-pocket side (required): E2E channel + relay HTTP/WS
+websockets>=12.0
+cryptography>=42.0
+aiohttp>=3.9
+
+# Feishu side (only for feishu_bridge.py, not for --selftest): the official Lark SDK's
+# event long-connection + message send. Any IM SDK slots in here for a different adapter.
+lark-oapi>=1.2

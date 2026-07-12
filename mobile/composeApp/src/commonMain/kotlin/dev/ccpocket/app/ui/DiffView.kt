@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -275,10 +276,19 @@ private sealed interface DiffRow {
         // (oldNo, newNo) is strictly increasing within a hunk, so idx + the pair is unique
         override val key get() = "$idx:${line.oldNo}:${line.newNo}"
     }
+    /** Mobile only: a run of a hunk's lines rendered as ONE item so one SelectionContainer can span
+     *  them — that's what lets a touch selection cross lines. Capped at [SELECTION_BLOCK_LINES]. */
+    data class Block(val idx: Int, val blockIdx: Int, val lines: List<DiffLine>) : DiffRow {
+        override val key get() = "b$idx:$blockIdx"
+    }
     data class Gap(val idx: Int, val lines: Int) : DiffRow {
         override val key get() = "g$idx"
     }
 }
+
+/** Mobile selection-block size: big enough that any realistic copy stays inside one block, small
+ *  enough that a whole-file hunk never composes as one giant item (the #81 lesson). */
+private const val SELECTION_BLOCK_LINES = 100
 
 /**
  * The unified diff, rendered per the shared grammar: collapsible hunk-header bands, +/− rows on
@@ -287,6 +297,7 @@ private sealed interface DiffRow {
  * The gutter stays put; code pans on one shared horizontal scroll, or soft-wraps when [wrap]
  * (issue #95 — wrapping is a toggle, not the default, because it breaks column alignment).
  * Code text is selectable (#95); gutters/chrome are not, so a copied selection is only code.
+ * HOW it is selectable differs by surface — see the split at the SelectionContainer below.
  */
 @Composable
 fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: Boolean = false, modifier: Modifier = Modifier) {
@@ -305,7 +316,10 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
                         }
                     }
                     add(DiffRow.Header(i, h))
-                    if (collapsed[i] != true) h.lines.forEach { add(DiffRow.Line(i, it)) }
+                    if (collapsed[i] != true) {
+                        if (dense) h.lines.forEach { add(DiffRow.Line(i, it)) }
+                        else h.lines.chunked(SELECTION_BLOCK_LINES).forEachIndexed { bi, block -> add(DiffRow.Block(i, bi, block)) }
+                    }
                 }
             }
         }
@@ -317,10 +331,18 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
         val fn: (String) -> AnnotatedString = { text -> cache.getOrPut(text) { highlightCodeOrNull(text, ext) ?: AnnotatedString(text) } }
         fn
     }
-    // SelectionContainer makes diff text selectable/copyable; headers & gaps are wrapped in DisableSelection
-    // so a copied selection is only code. When wrap is OFF the code still pans on [hScroll]; on touch,
-    // selection is a long-press (then drag), so panning and selecting coexist — verify on device (issue #95).
-    SelectionContainer(modifier.background(DiffTok.codeBg)) {
+    // Where the SelectionContainer sits is per-surface (the "改动文件无法选择文本" report):
+    //  · desktop (dense): ONE container around the whole list — mouse drag-selects across lines,
+    //    and per-line [hScroll] does not steal the drag (both verified by DiffSelectionContractTest).
+    //  · mobile: container INSIDE each lazy item, around a ≤100-line block of a hunk's rows, so a
+    //    long-press selection still drags across lines. Wrapping the LazyColumn itself is the one
+    //    selection shape this app ships nowhere else, and on iOS it is dead on device — long-press
+    //    never starts a selection — while chat/terminal/subagent, all container-inside-the-item,
+    //    select fine. Cost: a selection can't cross a hunk header or a 100-line block boundary;
+    //    the File tab (one Text in one container) remains the copy-everything surface.
+    // Headers & gaps are wrapped in DisableSelection so a desktop copied selection is only code;
+    // inside a mobile block the same DisableSelection keeps gutters/± out of the block's selection.
+    val list: @Composable () -> Unit = {
         LazyColumn(Modifier.fillMaxSize()) {
             items(rows.size, key = { rows[it].key }) { i ->
                 when (val row = rows[i]) {
@@ -332,11 +354,18 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
                         ) { collapsed[row.idx] = collapsed[row.idx] != true }
                     }
                     is DiffRow.Line -> DiffLineRow(row.line, dense, wrap, hScroll, highlight)
+                    is DiffRow.Block -> SelectionContainer {
+                        Column(Modifier.fillMaxWidth()) {
+                            row.lines.forEach { DiffLineRow(it, dense, wrap, hScroll, highlight) }
+                        }
+                    }
                     is DiffRow.Gap -> DisableSelection { GapRow(row.lines) }
                 }
             }
         }
     }
+    if (dense) SelectionContainer(modifier.background(DiffTok.codeBg)) { list() }
+    else Box(modifier.background(DiffTok.codeBg)) { list() }
 }
 
 @Composable
@@ -426,7 +455,15 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: 
                 )
             }
         }
-        val body = remember(line.text, highlight) { highlight(line.text) }
+        // Selectable through the ambient container: the per-block one on mobile, the whole-list one
+        // on desktop (see DiffView). Rows are separate Texts, and a copied multi-Text selection is
+        // concatenated with NO separator — so each row carries its own trailing \n: invisible under
+        // maxLines=1+Clip, and it's what makes a multi-line copy paste as lines. Not in wrap mode
+        // (a trailing newline renders an empty extra line there).
+        val body = remember(line.text, highlight, wrap) {
+            if (wrap) highlight(line.text)
+            else buildAnnotatedString { append(highlight(line.text)); append('\n') }
+        }
         Text(
             body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
             softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,
@@ -522,10 +559,19 @@ fun DiffEmptyState(glyph: String, title: String, caption: String?) {
 
 /** The File tab's whole body — the original full-content view: markdown via [MarkdownText] (selectable,
  *  issue #95), base64 images, everything else as selectable highlighted monospace that reflows when
- *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. */
+ *  [wrap] is on (else it pans horizontally). [dense] = desktop metrics. [exportSlot] renders under a
+ *  failed read's reason — the mobile viewer docks its "request export" entry / waiting row there
+ *  (issue #67 v2); null (desktop, plain reads) keeps today's bare error text. */
 @OptIn(ExperimentalEncodingApi::class)
 @Composable
-fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path: String? = null, wrap: Boolean) {
+fun FileTabBody(
+    content: FileContent?,
+    ext: String,
+    dense: Boolean = false,
+    path: String? = null,
+    wrap: Boolean,
+    exportSlot: (@Composable () -> Unit)? = null,
+) {
     Box(Modifier.fillMaxSize()) {
         when {
             // documents ride the binary channel whole-or-nothing — while the bytes are in flight the
@@ -540,10 +586,13 @@ fun FileTabBody(content: FileContent?, ext: String, dense: Boolean = false, path
                 // limit in place (its error text is the only wire signal — no structured kind)
                 val err = content.error ?: "?"
                 if ("too large" in err) DocumentTooLargeCard(content.path, err, dense)
-                else Text(
-                    err, color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
-                )
+                else Column(
+                    Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(err, color = Tok.muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+                    exportSlot?.invoke()
+                }
             }
             content.base64 != null -> {
                 val bytes = remember(content.base64) { runCatching { Base64.Default.decode(content.base64!!) }.getOrNull() }

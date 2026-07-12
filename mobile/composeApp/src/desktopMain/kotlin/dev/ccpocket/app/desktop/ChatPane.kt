@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -55,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -84,9 +86,28 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.draganddrop.DragAndDropEvent
+import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.draganddrop.awtTransferable
 import dev.ccpocket.app.data.ChatItem
+import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.ImgState
+import dev.ccpocket.app.data.PendingFile
+import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.share.previewFile
+import dev.ccpocket.app.ui.CheckMiniGlyph
+import dev.ccpocket.app.ui.RetryGlyph
+import dev.ccpocket.app.ui.SpinnerRing
+import dev.ccpocket.app.ui.VideoPoster
+import dev.ccpocket.app.ui.fileGlyphKind
+import dev.ccpocket.app.ui.fmtSize
+import dev.ccpocket.app.ui.glyphFor
+import dev.ccpocket.app.ui.isVideoAttachment
+import java.awt.datatransfer.DataFlavor
+import java.io.File
 import dev.ccpocket.app.theme.Tok
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -94,15 +115,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.AttachImageIcon
+import dev.ccpocket.app.ui.LocalPathCwd
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
+import dev.ccpocket.app.ui.TruncatedNote
+import dev.ccpocket.app.ui.renderClip
 import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
+import dev.ccpocket.app.ui.WorkflowCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
-import dev.ccpocket.app.ui.rememberImeSafeMirror
 import dev.ccpocket.app.ui.completion
 import dev.ccpocket.app.ui.atTokenAt
 import dev.ccpocket.app.ui.atDirOf
@@ -116,6 +140,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import dev.ccpocket.protocol.SlashCommand
 
 @Composable
@@ -137,8 +162,40 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
     // the opener's own exists() cache) survive recomposition. A remote session's cwd isn't local, so
     // those relative paths fail exists() and stay plain — no dead links.
     val pathOpener = remember(model.chatWorkdir) { DesktopPathOpener(model.chatWorkdir) }
-    CompositionLocalProvider(LocalPathOpener provides pathOpener) {
-    Column(modifier.fillMaxSize().background(Tok.base)) {
+    CompositionLocalProvider(LocalPathOpener provides pathOpener, LocalPathCwd provides model.chatWorkdir) {
+    // Drag a file anywhere over THIS pane and it arms as a drop target (issue #90, design:
+    // desktop-attach.jsx) — the sidebar deliberately does not participate. Dropped images join the
+    // inline-image pipeline; every other file chunk-streams into the session's workspace inbox.
+    val dragOver = remember { mutableStateOf(false) }
+    val dropTarget = remember(model) {
+        @OptIn(ExperimentalComposeUiApi::class)
+        object : DragAndDropTarget {
+            override fun onEntered(event: DragAndDropEvent) { dragOver.value = true }
+            override fun onExited(event: DragAndDropEvent) { dragOver.value = false }
+            override fun onEnded(event: DragAndDropEvent) { dragOver.value = false }
+            override fun onDrop(event: DragAndDropEvent): Boolean {
+                dragOver.value = false
+                val files = runCatching {
+                    @Suppress("UNCHECKED_CAST")
+                    event.awtTransferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
+                }.getOrNull() ?: return false
+                val picked = pickedFromDisk(files)
+                if (picked.images.isNotEmpty()) model.attachImages(picked.images)
+                if (picked.files.isNotEmpty()) model.attachFiles(picked.files)
+                return picked.images.isNotEmpty() || picked.files.isNotEmpty()
+            }
+        }
+    }
+    @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
+    Box(
+        modifier.fillMaxSize().dragAndDropTarget(
+            shouldStartDragAndDrop = { e ->
+                runCatching { e.awtTransferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor) }.getOrDefault(false)
+            },
+            target = dropTarget,
+        ),
+    ) {
+    Column(Modifier.fillMaxSize().background(Tok.base)) {
         // split view marks the pane that owns the keyboard with a 2px terracotta top hairline (Fleet ⑥)
         if (focused) Box(Modifier.fillMaxWidth().height(2.dp).background(Tok.accent))
         // While a QuestionCard text field (its "Other…" / freeform box) owns the keyboard, the composer
@@ -168,7 +225,14 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     itemsIndexed(model.messages) { i, m ->
-                        CenteredStreamRow { MessageRow(m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered) }
+                        CenteredStreamRow {
+                            MessageRow(
+                                m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
+                                onOpenWorkflow = model::openWorkflowPanel,
+                                onOpenVideo = { model.openWorkspaceFile(it.path) },
+                            )
+                        }
                     }
                     item(key = "tail") {
                         CenteredStreamRow {
@@ -190,10 +254,32 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     )
                                 }
                             } else if (ask != null) {
+                                // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal
+                                // "auto-denied" state (greyed + Dismiss) rather than staying actionable — the
+                                // repo keeps the pendingAsk and stamps timedOutAskId, so ask is still non-null here.
                                 InlinePermCard(
                                     ask, model.chatAgent, model.chatWorkdir, model.chatBranch,
                                     onAllow = { rem -> model.resolve(allow = true, remember = rem) },
                                     onDeny = { model.resolve(allow = false, remember = false) },
+                                    timedOut = model.askTimedOut,
+                                    onDismiss = { model.dismissAsk() },
+                                )
+                            } else if (model.turnStalled) {
+                                // delivered but the agent started no turn within the deadline (issue #104) —
+                                // replace the blinking caret with a restrained, clickable resend cue.
+                                Text(
+                                    "no response yet — click to resend", color = Tok.warn,
+                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.resendStalled() }
+                                        .padding(vertical = 3.dp, horizontal = 6.dp),
+                                )
+                            } else if (model.turnQueued) {
+                                // sent mid-turn and the running turn went quiet: queued (healthy), not swallowed —
+                                // status only, no resend affordance (the queued original would double-run).
+                                Text(
+                                    "queued — the current turn is still running", color = Tok.muted,
+                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    modifier = Modifier.padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
                             } else if (model.streaming) {
                                 Box(Modifier.size(width = 7.dp, height = 15.dp).clip(RoundedCornerShape(1.dp)).blinkAccent())
@@ -205,6 +291,8 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         }
         SessionHealthStrip(model)
         if (model.observing) ObserveBar(model) else Composer(model, suppressAutoFocus = questionOwnsInput)
+    }
+    if (dragOver.value) DropOverlay()
     }
     }
 }
@@ -321,7 +409,15 @@ private fun ChatSubHeader(model: DesktopModel) {
 }
 
 @Composable
-private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boolean = false) {
+private fun MessageRow(
+    item: ChatItem,
+    isLast: Boolean = false,
+    undelivered: Boolean = false,
+    // Workflow run bound to a Workflow tool card (issue #106); clicking docks the right panel
+    workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
+    onOpenWorkflow: (String) -> Unit = {},
+    onOpenVideo: (SentFile) -> Unit = {},
+) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
             Column {
@@ -337,10 +433,25 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
                     DisableSelection {
                         SentImages(item.images) { i -> previewFile("image-${i + 1}.jpg", item.images[i], "image/jpeg") }
                     }
+                    if (item.text.isNotBlank() || item.files.isNotEmpty()) Spacer(Modifier.height(8.dp))
+                }
+                // uploaded files (issue #90): dense single-line chip with the @inbox landing path; videos
+                // (issue #98) render as a 16:9 thumb that opens the landed clip in the OS player
+                if (item.files.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item.files.forEach { f ->
+                            if (isVideoAttachment(f.mediaType, f.name)) DesktopSentVideoThumb(f) { onOpenVideo(f) }
+                            else DesktopSentFileChip(f)
+                        }
+                    }
                     if (item.text.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
                 if (item.text.isNotBlank()) {
-                    Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                    // renderClip: one pathological row (~800 KB skill injection) shouldn't hit the
+                    // pathLinked regex + single-paragraph layout whole; CopyableBlock keeps full text
+                    val shown = renderClip(item.text)
+                    Text(pathLinked(shown), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                    if (shown.length < item.text.length) TruncatedNote(item.text.length)
                 }
                 // delivery state (issue #66): "sending…" after a short grace while the daemon hasn't
                 // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last).
@@ -371,7 +482,11 @@ private fun MessageRow(item: ChatItem, isLast: Boolean = false, undelivered: Boo
         // sub-agent (Task/Agent) runs get the shared dense card (issue #77 / chat-cards handoff):
         // status tile + live progress line + hover-revealed report. Plain tools keep the flat ✓ row.
         is ChatItem.Tool ->
-            if (isSubagentTool(item.tool)) SubagentCard(item, dense = true)
+            // a Workflow run gets the dense orchestration card that docks the right panel (issue #106);
+            // without a bound run (old daemon) it stays the flat tool row
+            if (isWorkflowTool(item.tool) && workflowRun != null) {
+                WorkflowCard(workflowRun, dense = true) { onOpenWorkflow(workflowRun.runId) }
+            } else if (isSubagentTool(item.tool)) SubagentCard(item, dense = true)
             else ToolRow(item.tool, item.preview, if (item.ok == false) ToolStatus.FAIL else ToolStatus.OK)
         is ChatItem.Sys -> Text(
             pathLinked(item.text), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
@@ -525,7 +640,12 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
         ) {
             Column(Modifier.widthIn(max = Dk.maxStreamWidth).fillMaxWidth()) {
                 val scope = rememberCoroutineScope()
-                val submit = { if (model.composer.isNotBlank() || model.hasReadyImages()) model.send(model.composer) }
+                val uploadsBusy = model.uploadsBusy()
+                val submit = {
+                    if (!model.uploadsBusy() && (model.composer.isNotBlank() || model.hasReadyImages() || model.hasLandedFiles())) {
+                        model.send(model.composer)
+                    }
+                }
                 val composerFocus = remember { FocusRequester() }
                 var composerFocused by remember { mutableStateOf(false) }
                 // Land ready-to-type: focus the composer whenever a session becomes current — a brand-new
@@ -556,19 +676,18 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 var slashSel by remember(slashQuery) { mutableStateOf(0) }          // keyed: retyping resets to the top hit
                 var slashDismissed by remember(slashQuery) { mutableStateOf(false) } // Esc hides until the query changes
                 val slashOpen = slashCmds.isNotEmpty() && !slashDismissed
-                // the field mirror below moves the cursor to the end of the completed text
+                // an explicit write through the String facade — ComposerState lands the caret at the end
                 val completeSlash = { cmd: SlashCommand -> model.composer = cmd.completion() }
-                // The editable value, HOISTED here so the "@file" menu can read the caret position.
-                // TextFieldValue (not the model's plain String) because shift+Enter inserts the newline at
-                // the cursor ourselves (Compose desktop has no shift+Enter binding) and @-completion needs
-                // the caret too. External-write reconcile + IME-composition safety (#86, same root as
-                // mobile #93) live in the shared ImeSafeMirror.
-                val mirror = rememberImeSafeMirror(model.composer) { model.composer = it }
-                var field by mirror::field
+                // The model OWNS the field (ComposerState — drafts follow sessions in the model layer, #88);
+                // the pane reads its caret for the "@file" menu and writes caret-precise edits itself
+                // (shift+Enter newline — Compose desktop has no binding for it — and @-completion).
+                // IME-composition safety for whole-text writes (#86, same root as mobile #93) lives in
+                // ComposerState.setText; there is no per-frame reconcile against a String copy anymore.
+                val composer = model.composerState
                 // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
                 // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).
                 val sep = model.pathSep
-                val atToken = remember(field.text, field.selection) { atTokenAt(field.text, field.selection.min) }
+                val atToken = remember(composer.field.text, composer.field.selection) { atTokenAt(composer.field.text, composer.field.selection.min) }
                 val atDir = atToken?.let { atDirOf(it.query, sep) } ?: ""
                 val atLeaf = atToken?.let { atLeafOf(it.query, sep) } ?: ""
                 // re-list only when the directory part changes — typing the leaf just filters client-side
@@ -587,11 +706,11 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                     val token = atToken ?: return
                     val insert = atInsertText(atDir, entry, sep)
                     val from = token.at + 1
-                    val newText = field.text.replaceRange(from, token.end, insert)
-                    field = TextFieldValue(newText, TextRange(from + insert.length))
-                    model.composer = newText
+                    val newText = composer.field.text.replaceRange(from, token.end, insert)
+                    composer.update(TextFieldValue(newText, TextRange(from + insert.length)))
                     if (!entry.isDir) atClosedAt = insert // the just-completed query — don't reopen on this exact value
                 }
+                if (model.pendingFiles.isNotEmpty()) PendingFilesRow(model)
                 if (model.pendingImages.isNotEmpty()) PendingImagesRow(model)
                 if (slashOpen) SlashMenu(slashCmds, slashSel, onPick = completeSlash)
                 if (atOpen) FileMenu(atEntries, atSel, atDir, sep, atListing?.truncated == true, onPick = applyEntry)
@@ -607,11 +726,17 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                     // pinned to the row's bottom edge.)
                     Box(
                         Modifier.padding(bottom = 5.dp).size(24.dp).clip(RoundedCornerShape(999.dp)).clickable {
-                            // FileDialog blocks its thread — keep the UI free, then hand results back
-                            scope.launch { withContext(Dispatchers.IO) { pickImages() }.takeIf { it.isNotEmpty() }?.let(model::attachImages) }
+                            // ONE dialog for any attachment (issue #90): images join the inline pipeline,
+                            // everything else uploads to the workspace inbox. FileDialog blocks its
+                            // thread — keep the UI free, then hand results back
+                            scope.launch {
+                                val picked = withContext(Dispatchers.IO) { pickAttachments() }
+                                if (picked.images.isNotEmpty()) model.attachImages(picked.images)
+                                if (picked.files.isNotEmpty()) model.attachFiles(picked.files)
+                            }
                         },
                         contentAlignment = Alignment.Center,
-                    ) { Icon(AttachImageIcon, "attach images", tint = Tok.tx2, modifier = Modifier.size(18.dp)) }
+                    ) { Icon(AttachImageIcon, "attach files", tint = Tok.tx2, modifier = Modifier.size(18.dp)) }
                     Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
                         // ONE explicit style for the field AND its placeholder: material3 Text otherwise
                         // merges bodyLarge's line height + letter spacing into the placeholder while
@@ -620,11 +745,11 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         if (model.composer.isEmpty()) {
                             Text("Message ${if (model.chatAgent == AgentKind.CODEX) "Codex" else "Claude"}…", style = fieldStyle.copy(color = Tok.muted))
                         }
-                        // `field` is hoisted above (the @-file menu reads its caret); onValueChange keeps it +
-                        // model.composer in sync, and the reconcile up there absorbs external writes.
+                        // the model's ComposerState is the ONE source of truth: onValueChange is the only
+                        // path user/IME edits take, and external writes call its explicit methods directly.
                         BasicTextField(
-                            value = field,
-                            onValueChange = mirror::onValueChange,
+                            value = composer.field,
+                            onValueChange = composer::onValueChange,
                             textStyle = fieldStyle,
                             cursorBrush = SolidColor(Tok.accent),
                             modifier = Modifier.fillMaxWidth().focusRequester(composerFocus)
@@ -675,10 +800,9 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                     }
                                     e.key != Key.Enter || e.type != KeyEventType.KeyDown -> false
                                     e.isShiftPressed -> { // ⇧⏎ newline, as the hint row below promises
-                                        val sel = field.selection
-                                        val text = field.text.replaceRange(sel.min, sel.max, "\n")
-                                        field = TextFieldValue(text, TextRange(sel.min + 1))
-                                        model.composer = text
+                                        val cur = composer.field
+                                        val sel = cur.selection
+                                        composer.update(TextFieldValue(cur.text.replaceRange(sel.min, sel.max, "\n"), TextRange(sel.min + 1)))
                                         true
                                     }
                                     else -> { submit(); true }
@@ -686,8 +810,9 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             },
                         )
                     }
-                    // ■ interrupt rides BESIDE send while a turn runs (send itself never morphs) — the
-                    // interrupted prompt returns to the composer via stopTurn (#48); Esc does the same
+                    // ■ interrupt rides BESIDE send while a turn runs (send itself never morphs) — a
+                    // just-sent prompt returns to the composer via stopTurn (#48, quick-regret window
+                    // only); Esc does the same
                     if (model.streaming) {
                         Box(
                             Modifier.size(34.dp).clip(RoundedCornerShape(999.dp))
@@ -695,12 +820,34 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             contentAlignment = Alignment.Center,
                         ) { Box(Modifier.size(11.dp).clip(RoundedCornerShape(2.dp)).background(Tok.danger)) }
                     }
-                    Box(
-                        Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent).clickable { submit() },
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.base, modifier = Modifier.size(16.dp)) }
+                    if (uploadsBusy) {
+                        // send WAITS while uploads run (design: desktop-attach.jsx) — the landed
+                        // @-references don't exist until the daemon's receipt lands
+                        Box(
+                            Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.base)
+                                .border(1.dp, Tok.hair, RoundedCornerShape(999.dp)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            SpinnerRing(24.dp, 2.dp)
+                            Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.muted, modifier = Modifier.size(14.dp))
+                        }
+                    } else {
+                        Box(
+                            Modifier.size(34.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent).clickable { submit() },
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.base, modifier = Modifier.size(16.dp)) }
+                    }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 7.dp, start = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (uploadsBusy) {
+                        val active = model.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued }
+                        Box(Modifier.size(5.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent))
+                        Text(
+                            "uploading $active of ${model.pendingFiles.size} — send waits",
+                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                        )
+                        Spacer(Modifier.weight(1f))
+                    }
                     Key("⏎"); Text("send", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
                     Key("⇧⏎"); Text("newline", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
                     if (model.streaming) { Key("esc"); Text("stop", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
@@ -812,6 +959,160 @@ private fun FileMenu(
 
 /** Staged composer attachments: thumbnails with a remove ✕; Rejected (over the frame budget) shows dimmed
  *  with a warning border. They ride the next send (the repo folds Ready images into SendPrompt). */
+@Composable
+private fun PendingFilesRow(model: DesktopModel) {
+    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        model.pendingFiles.forEach { f -> DesktopPendingFileChip(f, model) }
+    }
+}
+
+/** Dense composer chip (design: desktop-attach.jsx PendingChip): 26dp glyph tile, mono name,
+ *  "64% · 6.1 MB" caption, a 2.5dp linear progress bar along the base, and a hover-revealed
+ *  action button — ✕ cancels while moving, ↻ retries when failed. */
+@Composable
+private fun DesktopPendingFileChip(f: PendingFile, model: DesktopModel) {
+    val failed = f.state == FileUpState.Failed
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    val shape = RoundedCornerShape(9.dp)
+    Box(
+        Modifier.widthIn(min = 190.dp, max = 230.dp).hoverable(src).clip(shape)
+            .background(if (failed) Tok.danger.copy(alpha = 0.07f) else Tok.surface)
+            .border(1.dp, if (failed) Tok.danger else Tok.hair, shape)
+            .clickable(enabled = failed) { model.retryPendingFile(f.id) },
+    ) {
+        Row(
+            Modifier.padding(start = 8.dp, top = 7.dp, bottom = 8.dp, end = 30.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(9.dp),
+        ) {
+            Box(
+                Modifier.size(26.dp).clip(RoundedCornerShape(6.dp))
+                    .background(if (failed) Tok.danger.copy(alpha = 0.12f) else Tok.base)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (failed) Icon(RetryGlyph, null, tint = Tok.danger, modifier = Modifier.size(15.dp))
+                else Icon(glyphFor(fileGlyphKind(f.name)), null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    f.name, color = if (failed) Tok.danger else Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    when (f.state) {
+                        FileUpState.Failed -> "upload failed · retry"
+                        FileUpState.Queued -> "queued  ·  ${fmtSize(f.size)}"
+                        FileUpState.Landed -> "✓  ·  ${fmtSize(f.size)}"
+                        FileUpState.Uploading -> "${(f.progress * 100).toInt()}%  ·  ${fmtSize(f.size)}"
+                    },
+                    color = if (failed) Tok.danger else Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
+                    modifier = Modifier.padding(top = 1.dp), maxLines = 1,
+                )
+            }
+        }
+        // hover-revealed action: retry when failed, cancel/remove otherwise
+        if (hovered) {
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(6.dp).size(20.dp).clip(RoundedCornerShape(6.dp))
+                    .background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(6.dp))
+                    .clickable { if (failed) model.retryPendingFile(f.id) else model.removePendingFile(f.id) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (failed) Icon(RetryGlyph, null, tint = Tok.danger, modifier = Modifier.size(12.dp))
+                else Icon(Icons.Rounded.Close, "cancel upload", tint = Tok.tx2, modifier = Modifier.size(12.dp))
+            }
+        }
+        // thin linear progress along the chip base
+        if (!failed) {
+            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.5.dp).background(Tok.hair)) {
+                Box(Modifier.fillMaxWidth(f.progress.coerceIn(0f, 1f)).height(2.5.dp).background(Tok.accent))
+            }
+        }
+    }
+}
+
+/** Delivered file in the stream (design: desktop-attach.jsx SentFileChip): one dense line —
+ *  glyph tile · mono name · size · terracotta @inbox path. */
+@Composable
+private fun DesktopSentFileChip(f: SentFile) {
+    val shape = RoundedCornerShape(9.dp)
+    Row(
+        Modifier.widthIn(max = 420.dp).clip(shape).background(Tok.surface).border(1.dp, Tok.hair, shape)
+            .padding(start = 8.dp, top = 7.dp, bottom = 7.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center,
+        ) { Icon(glyphFor(fileGlyphKind(f.name)), null, tint = Tok.tx2, modifier = Modifier.size(16.dp)) }
+        Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1)
+        Text(
+            "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+        )
+    }
+}
+
+/** Delivered VIDEO in the stream (design: desktop-attach.jsx SentVideoThumb): a 220px 16:9 poster
+ *  (placeholder + play glyph + optional duration), then mono name · size · terracotta @inbox path.
+ *  Clicking plays the landed clip in the OS default player — the desktop app is co-located with the
+ *  daemon, so the inbox path is a real local file. */
+@Composable
+private fun DesktopSentVideoThumb(f: SentFile, onOpen: () -> Unit) {
+    Column(Modifier.width(220.dp)) {
+        Box(Modifier.width(220.dp).clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp)).clickable { onOpen() }) {
+            VideoPoster(durationSecs = f.durationSecs, buttonSize = 40.dp, glyphSize = 17.dp, cornerRadius = 9.dp)
+        }
+        Row(
+            Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(f.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(fmtSize(f.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1)
+            Text(
+                "@${f.path}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+    }
+}
+
+/** Full-pane drop overlay (design: desktop-attach-app.jsx DropOverlay): dimmed scrim, dashed
+ *  terracotta boundary inset 12dp, upload glyph tile + the workspace-framed prompt. */
+@Composable
+private fun DropOverlay() {
+    Box(Modifier.fillMaxSize().background(Color(0x8C08090A))) {
+        Box(
+            Modifier.fillMaxSize().padding(12.dp)
+                .dashedBorder(Tok.accent, radius = 14.dp, stroke = 2.dp)
+                .clip(RoundedCornerShape(14.dp)).background(Tok.accent.copy(alpha = 0.06f)),
+        )
+        Column(
+            Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                Modifier.size(58.dp).clip(RoundedCornerShape(16.dp)).background(Tok.accent.copy(alpha = 0.14f))
+                    .border(1.dp, Tok.accent.copy(alpha = 0.4f), RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.accent, modifier = Modifier.size(28.dp)) }
+            Text(
+                "Drop to add to this session's workspace",
+                color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "images · files · videos — up to 200 MB",
+                color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
+            )
+        }
+    }
+}
+
 @Composable
 private fun PendingImagesRow(model: DesktopModel) {
     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

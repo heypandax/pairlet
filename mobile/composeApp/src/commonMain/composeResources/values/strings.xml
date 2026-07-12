@@ -52,6 +52,8 @@
     <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
     <string name="msg_sending">Sending…</string>
     <string name="msg_delivered">Delivered to your computer</string>
+    <string name="msg_no_response">No response yet — tap to resend</string>
+    <string name="msg_queued">Queued — the current turn is still running</string>
     <string name="session_degraded_banner">This session looks over its context limit — recent replies were API failures. Start a new session or send /clear.</string>
     <string name="context_high_banner">Context %1$s full — consider a new session or /clear soon</string>
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
@@ -99,6 +101,7 @@
     <string name="thought_for">Thought for %1$ds</string>
     <string name="code_copy">copy</string>
     <string name="code_copied">copied</string>
+    <string name="text_render_truncated">long content clipped for display · full text ≈%1$s chars · copy gets everything</string>
     <string name="jump_to_latest">Jump to latest</string>
     <string name="observing_notice">👁 Observing · running in a terminal</string>
     <string name="continue_here">Continue here</string>
@@ -107,6 +110,22 @@
     <string name="send">Send</string>
     <string name="dictate">Dictate</string>
     <string name="attach_image">Attach image</string>
+    <string name="attach_menu">Attach</string>
+    <string name="attach_sheet_photo">Photo</string>
+    <string name="attach_sheet_file">File</string>
+    <string name="attach_sheet_video">Video</string>
+    <string name="attach_sheet_caption">Files are copied into this session\'s workspace · up to 200 MB</string>
+    <!-- video attachment player (issue #98) -->
+    <string name="video_play">Play</string>
+    <string name="video_workspace_note">This clip lives in this session\'s workspace on your computer — open it there to play.</string>
+    <string name="video_workspace_hint">Saved to the workspace for the agent · not sent to the model</string>
+    <string name="file_queued">queued</string>
+    <string name="file_retry">retry</string>
+    <string name="file_upload_failed">upload failed</string>
+    <string name="file_in_workspace">in workspace</string>
+    <string name="file_agent_reads">agent reads it as</string>
+    <string name="file_strip_uploading">uploading %1$d of %2$d…</string>
+    <string name="file_strip_ready">%1$d in workspace — sent with your message</string>
     <string name="error_prefix">error: %1$s</string>
     <string name="cmd_source_builtin">built-in</string>
     <string name="cmd_source_user">user</string>
@@ -200,6 +219,31 @@
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
     <string name="appearance_hint">Choose the app\'s color theme. System follows your device\'s light/dark setting.</string>
+    <!-- ── App Lock / security (issue #109) ───────────────────────── -->
+    <string name="security_section">SECURITY</string>
+    <string name="app_lock_require">Require %1$s</string>
+    <string name="app_lock_require_sub">Unlock with %1$s when you open cc-pocket.</string>
+    <string name="app_lock_autolock">Auto-lock</string>
+    <string name="app_lock_immediately">Immediately</string>
+    <string name="app_lock_after_1min">After 1 minute</string>
+    <string name="app_lock_autolock_hint">How soon cc-pocket re-locks after you leave it.</string>
+    <string name="app_lock_verifying">Verifying with %1$s to turn on…</string>
+    <string name="app_lock_reason">Unlock cc-pocket</string>
+    <string name="app_lock_enable_reason">Confirm it\'s you to turn on App Lock</string>
+    <string name="biometry_face">Face ID</string>
+    <string name="biometry_touch">Touch ID</string>
+    <string name="biometry_fingerprint">Fingerprint</string>
+    <string name="biometry_generic">biometrics</string>
+    <string name="app_lock_status_locked">Locked</string>
+    <string name="app_lock_sub_locked">Unlock to open your sessions.</string>
+    <string name="app_lock_unlock">Unlock with %1$s</string>
+    <string name="app_lock_passcode">Enter passcode</string>
+    <string name="app_lock_status_failed">Not recognized · Try again</string>
+    <string name="app_lock_try_again">Try %1$s again</string>
+    <string name="app_lock_status_fallback">%1$s failed · Enter your passcode</string>
+    <string name="app_lock_sub_fallback">Too many attempts</string>
+    <string name="app_lock_status_lockedout">%1$s is locked</string>
+    <string name="app_lock_sub_lockedout">Enter your passcode to re-enable it.</string>
     <string name="new_path_open">New session in a folder</string>
     <string name="new_path_open_row">Open another folder by path…</string>
     <string name="new_path_title">New session in a folder</string>
@@ -277,6 +321,10 @@
     <string name="file_exceeds_cap">exceeds transfer cap</string>
     <string name="file_too_large_note">Too large to open here — the link caps transfers at %1$s. Grab it from the computer running the daemon.</string>
     <string name="file_transferring">transferring over relay…</string>
+    <string name="file_export_request">Request export (needs approval)</string>
+    <string name="file_export_waiting">Waiting for approval…</string>
+    <string name="file_export_other">Export a file not in this list…</string>
+    <string name="file_export_other_hint">path/in/project.xlsx</string>
 
     <!-- ── sub-agent card (issue #77, chat-cards handoff) ────────── -->
     <string name="subagent_report">Report</string>
@@ -378,4 +426,120 @@
     <string name="questions_answered_one">Answered %1$d question</string>
     <string name="questions_answered_many">Answered %1$d questions</string>
     <string name="questions_withdrawn">Claude moved on — answers no longer needed</string>
+    <string name="path_copy">Copy</string>
+    <string name="path_open">Open in browser</string>
+    <string name="path_copied">Copied</string>
+    <string name="path_cwd_hint">resolved from session cwd</string>
+
+    <!-- ── folder-share (issue #115) ─────────────────────────────── -->
+    <string name="share_this_folder">Share this folder…</string>
+    <string name="settings_shared_folders">Shared folders</string>
+
+    <!-- owner: invite composer -->
+    <string name="share_composer_title">Share folder</string>
+    <string name="share_access_level">Access level</string>
+    <string name="share_tier_review">Review</string>
+    <string name="share_tier_review_desc">Approve every action</string>
+    <string name="share_tier_collaborate">Collaborate</string>
+    <string name="share_tier_collaborate_desc">Edits here apply; shell still asks</string>
+    <string name="share_tier_autonomous">Autonomous</string>
+    <string name="share_tier_autonomous_desc">Fewest prompts — shell still asks</string>
+    <string name="share_expires_label">Expires</string>
+    <string name="share_boundary_get">They get</string>
+    <string name="share_boundary_get_agents">Run agents in this folder</string>
+    <string name="share_boundary_get_files">Read and edit files here</string>
+    <string name="share_boundary_get_env">Its git, dependencies, environment</string>
+    <string name="share_boundary_not">They don\'t get</string>
+    <string name="share_boundary_not_folders">Your other folders</string>
+    <string name="share_boundary_not_memory">Your global CLAUDE.md and memory</string>
+    <string name="share_boundary_not_mcp">Your MCP integrations and accounts</string>
+    <string name="share_boundary_not_switch">Account switching</string>
+    <string name="share_boundary_shell_warn">Shell commands are not sandboxed — they run as your user.</string>
+    <string name="share_create">Create invite</string>
+    <string name="share_creating">Creating invite…</string>
+    <string name="share_create_failed">Couldn\'t create the invite. Update the computer\'s daemon, then try again.</string>
+
+    <!-- owner: invite ready -->
+    <string name="share_invite_ready">Invite ready</string>
+    <string name="share_invite_hint">Paste this code into CC Pocket ▸ Connect to join. It works once.</string>
+    <string name="share_invite_code">Invite code</string>
+    <string name="share_invite_copy">Copy code</string>
+    <string name="share_invite_copied">Copied</string>
+    <string name="share_invite_share">Share…</string>
+    <string name="share_invite_expires_in">Expires in %1$s</string>
+    <string name="share_invite_expired_note">This code has expired. Create a new invite.</string>
+    <string name="share_done">Done</string>
+
+    <!-- owner: management -->
+    <string name="shared_folders_title">Shared folders</string>
+    <string name="shared_folders_empty">You haven\'t shared any folders</string>
+    <string name="shared_folders_empty_hint">Long-press a project, then “Share this folder”.</string>
+    <string name="share_guest_someone">someone</string>
+    <string name="share_active_now">active now</string>
+    <string name="share_sessions_live">%1$d live</string>
+    <string name="share_revoke">Revoke</string>
+    <string name="share_revoked_label">Revoked</string>
+    <string name="share_revoke_title">Revoke access?</string>
+    <string name="share_revoke_c1">Their live sessions end immediately.</string>
+    <string name="share_revoke_c2">They lose access to this folder.</string>
+    <string name="share_revoke_c3">This invite can\'t be reused.</string>
+    <string name="share_revoke_confirm">Revoke access</string>
+
+    <!-- guest: accept preview -->
+    <string name="join_title">Join folder</string>
+    <string name="join_get_title">You\'ll be able to</string>
+    <string name="join_note">Scoped access for a trusted collaborator.</string>
+    <string name="join_cta">Join folder</string>
+    <string name="join_decline">Decline</string>
+
+    <!-- guest: shared row badge -->
+    <string name="shared_badge">Shared</string>
+    <string name="shared_by_caption">shared by %1$s</string>
+    <string name="share_info_strip">Permission requests for agents here come to you.</string>
+
+    <!-- expiry captions -->
+    <string name="share_left_days">%1$dd left</string>
+    <string name="share_left_hours">%1$dh left</string>
+    <string name="share_left_minutes">%1$dm left</string>
+    <string name="share_expired">expired</string>
+
+    <!-- folder-share: UI copy added with the four screens -->
+    <string name="share_tier_recommended">RECOMMENDED</string>
+    <string name="share_revoke_hint_anytime">You can revoke access at any time.</string>
+    <string name="share_recap_access">Access</string>
+    <string name="share_recap_expires">Expires</string>
+    <string name="share_recap_folder">Folder</string>
+    <string name="share_invite_new_code">New code</string>
+    <string name="share_manage_hint">Manage or revoke anytime in Settings ▸ Shared folders.</string>
+    <string name="share_active_label">Active</string>
+    <string name="share_history_label">History</string>
+    <string name="share_owner_footer">Guest sessions run on your computer and your Claude plan.</string>
+    <string name="share_expires_in">expires in %1$s</string>
+    <string name="share_status_idle">Idle</string>
+    <string name="share_share_again">Share again</string>
+    <string name="share_expired_label">Expired</string>
+    <string name="share_access_ended">Access ended</string>
+    <string name="share_ended_body">%1$s ended this share. Sessions in this folder are no longer reachable from this device.</string>
+    <string name="share_ended_body_expired">This share has expired. Sessions in this folder are no longer reachable from this device.</string>
+    <string name="share_the_owner">The owner</string>
+    <string name="share_remove_from_list">Remove from list</string>
+    <string name="share_ask_new_invite">Ask for a new invite</string>
+    <string name="share_revoked_disconnected">This share was revoked · session disconnected</string>
+    <string name="join_scan_title">Join a shared folder</string>
+    <string name="join_scan_hint">Scan the invite from the folder\'s owner</string>
+    <string name="join_or_paste">or paste an invite code</string>
+    <string name="join_paste_placeholder">Paste invite code</string>
+    <string name="join_single_use">Invites are single-use and expire quickly.</string>
+    <string name="join_invalid">This invite is invalid or has expired. Ask for a new one.</string>
+    <string name="join_review_title">Review invite</string>
+    <string name="settings_sharing_section">Sharing</string>
+    <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
+    <string name="group_new">New group</string>
+    <string name="group_ungrouped">Ungrouped</string>
+    <string name="group_move_to">Move to group</string>
+    <string name="group_move_out">Remove from group</string>
+    <string name="group_rename">Rename group</string>
+    <string name="group_delete">Delete group</string>
+    <string name="group_delete_confirm">Delete this group? Its sessions move to Ungrouped.</string>
+    <string name="group_name_hint">Group name</string>
 </resources>

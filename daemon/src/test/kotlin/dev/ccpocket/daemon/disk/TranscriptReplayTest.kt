@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.QuestionAnswer
 import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
@@ -89,5 +90,166 @@ class TranscriptReplayTest {
         assertTrue(msgs[1].error) // the placeholder
         assertEquals("No response requested.", msgs[1].text)
         assertTrue(!msgs[3].error) // the real reply
+    }
+
+    @Test
+    fun askuserquestion_replays_as_answered_row_not_raw_json() {
+        // issue #110: a resumed/observed AskUserQuestion must replay as the compact (question → answer)
+        // row the live path leaves — not the raw questions JSON that read like a Bash dump
+        val f = tmpFile("ask.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"pick a color"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"question":"Which color do you prefer?","header":"Color","multiSelect":false,"options":[{"label":"Red"},{"label":"Blue"}]}]}}]}}""",
+                // the main-chain tool_result echoes the pick as `"<question>"="<answer>"` (CLI 2.1.206)
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"q1","content":"Your questions have been answered: \"Which color do you prefer?\"=\"Red\". You can now continue with these answers in mind."}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"CHOSE: Red"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(3, msgs.size) // user, the answered question row, the final answer — no raw tool card
+        val q = msgs[1]
+        assertEquals(ChatRole.TOOL, q.role)
+        assertEquals("AskUserQuestion", q.tool)
+        assertEquals(listOf(QuestionAnswer("Which color do you prefer?", "Red")), q.answers)
+        assertTrue(!q.text.contains("options") && !q.text.contains("{")) // never the raw questions JSON
+        assertEquals("CHOSE: Red", msgs[2].text)
+    }
+
+    @Test
+    fun askuserquestion_multi_question_keeps_all_pairs_in_order() {
+        // a multi-question card answers into comma-separated `"q"="a", "q"="a"` — every pair survives, ordered
+        val f = tmpFile("ask-multi.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"m1","name":"AskUserQuestion","input":{"questions":[{"question":"Color?","options":[{"label":"Red"}]},{"question":"Size?","options":[{"label":"Large"}]}]}}]}}""",
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"m1","content":"Your questions have been answered: \"Color?\"=\"Red\", \"Size?\"=\"Large\". Continue."}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        assertEquals(
+            listOf(QuestionAnswer("Color?", "Red"), QuestionAnswer("Size?", "Large")),
+            msgs[0].answers,
+        )
+    }
+
+    @Test
+    fun askuserquestion_freeform_reply_replays_as_blank_question_answer() {
+        // the user answered in their own words instead of picking — a single ("" → reply) pair, like live
+        val f = tmpFile("ask-free.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q2","name":"AskUserQuestion","input":{"questions":[{"question":"Which color?","options":[{"label":"Red"}]}]}}]}}""",
+                """{"type":"user","toolUseResult":{},"message":{"content":[{"type":"tool_result","tool_use_id":"q2","content":"The user chose not to answer the question. Instead, the user responded: \"surprise me\"."}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        assertEquals(listOf(QuestionAnswer("", "surprise me")), msgs[0].answers)
+    }
+
+    @Test
+    fun unanswered_askuserquestion_replays_as_readable_question_not_json() {
+        // session ended before the tool_result: no answers to attach, but the row still shows the
+        // question text (readable), never the raw input JSON
+        val f = tmpFile("ask-open.jsonl")
+        f.writeText(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q3","name":"AskUserQuestion","input":{"questions":[{"question":"Deploy now?","options":[{"label":"Yes"},{"label":"No"}]}]}}]}}""",
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        val q = msgs[0]
+        assertEquals("AskUserQuestion", q.tool)
+        assertEquals(null, q.answers)
+        assertEquals("Deploy now?", q.text) // the question, not {"questions":[...]}
+    }
+
+    @Test
+    fun long_reply_replays_in_full_not_clipped_at_2000() {
+        // issue #81: a reply longer than the old 2000-char per-message cap must replay whole. The field
+        // case was a 2343-char answer that surfaced on the phone as only its first 2000 chars, cut
+        // mid-word at "## 建议（" (idx 2000). live streaming was full; only history replay clipped.
+        val f = tmpFile("long.jsonl")
+        val body = "备".repeat(2343) // 2343 CJK chars = 7029 UTF-8 bytes — far past the old 2000-char clip
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"写个长回复"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"$body"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(2, msgs.size)
+        assertEquals(2343, msgs[1].text.length) // full, not truncated to 2000
+        assertEquals(body, msgs[1].text)
+    }
+
+    @Test
+    fun total_frame_budget_keeps_newest_whole_and_stays_under_cap() {
+        // the per-message cap is gone; frame safety now comes from a *total* byte budget. With a tiny
+        // budget the guard keeps the most recent rows intact, truncates the one that straddles, and
+        // drops anything older — so the summed UTF-8 size can never blow past a frame (4 MiB in prod).
+        val f = tmpFile("budget.jsonl")
+        val big = "x".repeat(1000)
+        val lines = (0 until 10).map { i ->
+            """{"type":"assistant","message":{"content":[{"type":"text","text":"m$i-$big"}]}}"""
+        }
+        f.writeText(lines.joinToString("\n"))
+
+        val msgs = TranscriptReplay.read(f, maxFrameTextBytes = 2500) // ~2.5 rows of 1003 bytes each
+
+        val total = msgs.sumOf { ReplayBudget.utf8Size(it.text) }
+        assertTrue(total <= 2500, "summed text bytes $total must stay within budget")
+        assertEquals(3, msgs.size) // newest two whole + one truncated straddling row; older dropped
+        assertEquals("m9-$big", msgs.last().text) // newest kept whole, chronological order preserved
+        assertTrue(msgs.first().text.length < 3 + big.length) // oldest kept row is the truncated one
+    }
+
+    @Test
+    fun workflow_tool_row_gets_its_run_id_from_the_launch_acks_toolUseResult() {
+        // records mirror a real probe run (claude 2.1.206): the Workflow tool_use, then the launch
+        // ack whose ROOT-level toolUseResult carries the run id — the only place it appears
+        val f = tmpFile("wf.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01Ly","name":"Workflow","input":{"script":"export const meta = …","description":"probe"}}]}}""",
+                """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01Ly","type":"tool_result","content":"Workflow launched in background. Task ID: wvw3rra3y"}]},"toolUseResult":{"status":"async_launched","taskId":"wvw3rra3y","taskType":"local_workflow","workflowName":"probe-mini","runId":"wf_03737500-658","summary":"probe minimal workflow"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"launched"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(2, msgs.size) // the tool row + "launched" (the ack user record is not a real turn)
+        val card = msgs[0]
+        assertEquals(ChatRole.TOOL, card.role)
+        assertEquals("Workflow", card.tool)
+        assertEquals("probe", card.text)                  // description, never 280 chars of script
+        assertEquals("wf_03737500-658", card.workflowRunId)
+        assertEquals(true, card.ok)
+    }
+
+    @Test
+    fun plain_task_tool_results_leave_workflowRunId_null() {
+        val f = tmpFile("task.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"subagent_type":"Explore","description":"scan"}}]}}""",
+                """{"type":"user","message":{"role":"user","content":[{"tool_use_id":"t1","type":"tool_result","content":"report"}]},"toolUseResult":{"content":"report"}}""",
+            ).joinToString("\n"),
+        )
+        val card = TranscriptReplay.read(f).single()
+        assertEquals("Explore: scan", card.text)
+        assertEquals(null, card.workflowRunId)
     }
 }

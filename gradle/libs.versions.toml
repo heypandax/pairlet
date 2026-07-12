@@ -14,6 +14,7 @@ cryptographyKotlin = "0.4.0"
 composeMultiplatform = "1.7.3"
 agp = "8.7.3"
 androidActivityCompose = "1.9.3"
+androidxBiometric = "1.1.0"
 androidMinSdk = "26"
 androidCompileSdk = "35"
 androidTargetSdk = "35"
@@ -35,8 +36,11 @@ ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
 ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
+# test-only: generates real self-signed / CA-signed X.509 chains for the relay trust-manager tests
+ktor-network-tls-certificates = { module = "io.ktor:ktor-network-tls-certificates", version = "3.0.3" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidActivityCompose" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidxBiometric" } # App Lock (issue #109): BiometricPrompt (brings androidx.fragment for FragmentActivity)
 
 clikt = { module = "com.github.ajalt.clikt:clikt", version.ref = "clikt" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
@@ -45,6 +49,9 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "lo
 
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
+# desktop-only objc bridge for bundle-identity macOS notifications (issue #99); tiny next to the
+# bundled JRE, and its jnidispatch loads under the hardened runtime (disable-library-validation).
+jna = { module = "net.java.dev.jna:jna", version = "5.14.0" }
 nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version = "1.8.0" }
 qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
 # KMP syntax highlighting for chat code blocks (issue #51). Built with Kotlin 2.0.20 — its klibs are

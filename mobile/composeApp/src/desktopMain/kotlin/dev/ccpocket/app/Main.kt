@@ -73,11 +73,20 @@ fun main() = application {
         position = savedBounds?.let { WindowPosition(it[0].dp, it[1].dp) } ?: WindowPosition(Alignment.Center),
     )
     val scope = rememberCoroutineScope()
-    val repo = remember { PocketRepository(scope) }
     // fleet: one live link per paired computer (primary + pinned satellites) — the grouped sidebar,
-    // attention popover, and palette badges read across all of them
-    remember { dev.ccpocket.app.data.FleetCoordinator(scope, repo).also { dev.ccpocket.app.data.FleetRuntime.coordinator = it; it.start() } }
-    val model = remember { RepoDesktopModel(repo, scope) }
+    // attention popover, and palette badges read across all of them. Desktop opts into hot-satellite
+    // promotion (issue #103): switching machines swaps the target's Ready satellite in as the primary
+    // instead of tearing links down and re-handshaking, so `repo` below is an OBSERVABLE read — the
+    // window content (theme, panels, effects) re-keys onto the promoted instance on each switch.
+    val fleet = remember {
+        dev.ccpocket.app.data.FleetCoordinator(scope, PocketRepository(scope)).also {
+            it.promoteHotSatellites = true
+            dev.ccpocket.app.data.FleetRuntime.coordinator = it
+            it.start()
+        }
+    }
+    val repo = fleet.primary
+    val model = remember { RepoDesktopModel(fleet.primary, scope, fleet) }
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // paired → connect straight away
@@ -182,16 +191,34 @@ fun main() = application {
                 override fun windowLostFocus(e: java.awt.event.WindowEvent?) { windowFocused = false }
             }
             window.addWindowFocusListener(l)
-            repo.onTurnFinished = { title, preview ->
+            onDispose { window.removeWindowFocusListener(l) }
+        }
+        // keyed on the CURRENT primary: a machine switch promotes another repo instance (issue #103), and
+        // the turn-finished seam must ride along or notifications/badges silently die after the first switch
+        DisposableEffect(repo) {
+            repo.onTurnFinished = { title, preview, sessionId ->
                 if (!windowFocused) {
                     unseenDone++
                     DesktopNotify.badge(unseenDone)
-                    DesktopNotify.notify(title, preview ?: "Turn complete")
+                    DesktopNotify.notify(title, preview ?: "Turn complete", sessionId)
+                }
+            }
+            // banner clicked (issue #99): the OS already activated the app (bundle identity); surface the
+            // window and jump back to the finished session when we still know it. The callback arrives on
+            // the AppKit main thread — hop to the EDT before touching the window or Compose state.
+            DesktopNotify.onActivate = { sessionId ->
+                java.awt.EventQueue.invokeLater {
+                    windowState.isMinimized = false
+                    window.toFront()
+                    window.requestFocus()
+                    if (sessionId != null && repo.sessionActive.value && repo.sessionKey.value != sessionId) {
+                        model.liveSession(sessionId)?.let(model::selectSession)
+                    }
                 }
             }
             onDispose {
-                window.removeWindowFocusListener(l)
                 repo.onTurnFinished = null
+                DesktopNotify.onActivate = null
             }
         }
         // native fullscreen wiring (issue #94): stash the AWT window so the toggle above can drive it, mark
@@ -274,7 +301,14 @@ fun main() = application {
                     FullscreenExitStrip(onExit = toggleFullscreen)
                 }
                 Box(Modifier.fillMaxWidth().weight(1f)) {
-                    if (connected) DesktopApp(model) else ConnectPanel(repo)
+                    // the tray's "Open cc-pocket" / row-jump raise the window (issue #111): un-minimize, then
+                    // bring the AWT window to front and focus it — a real menu-bar action once the tray leaves
+                    // the title bar, and harmless (already-frontmost) while it lives there.
+                    if (connected) DesktopApp(model, onActivateWindow = {
+                        windowState.isMinimized = false
+                        window.toFront()
+                        window.requestFocus()
+                    }) else ConnectPanel(repo)
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
                     if (model.showAddComputer) AddComputerModal(repo) { model.showAddComputer = false }
                 }

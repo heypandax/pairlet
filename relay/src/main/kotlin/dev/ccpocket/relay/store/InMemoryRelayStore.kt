@@ -8,7 +8,7 @@ class InMemoryRelayStore : RelayStore {
     private val lock = Mutex()
     private val accounts = HashMap<String, Account>()
     private val devices = HashMap<String, Device>()
-    private data class Ticket(val accountId: String, val createdAt: Long, val expiresAt: Long, var used: Boolean)
+    private data class Ticket(val accountId: String, val createdAt: Long, val expiresAt: Long, var used: Boolean, val headless: Boolean)
     private val tickets = HashMap<String, Ticket>() // key = hex(ticketHash)
 
     @OptIn(ExperimentalStdlibApi::class)
@@ -26,14 +26,14 @@ class InMemoryRelayStore : RelayStore {
         Unit
     }
 
-    override suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long): Unit =
-        lock.withLock { tickets[key(ticketHash)] = Ticket(accountId, createdAt, expiresAt, used = false); Unit }
+    override suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long, headless: Boolean): Unit =
+        lock.withLock { tickets[key(ticketHash)] = Ticket(accountId, createdAt, expiresAt, used = false, headless = headless); Unit }
 
-    override suspend fun claimTicket(ticketHash: ByteArray, now: Long): String? = lock.withLock {
+    override suspend fun claimTicket(ticketHash: ByteArray, now: Long): ClaimedTicket? = lock.withLock {
         val t = tickets[key(ticketHash)] ?: return@withLock null
         if (t.used || t.expiresAt <= now) return@withLock null
         t.used = true
-        t.accountId
+        ClaimedTicket(t.accountId, t.headless)
     }
 
     override suspend fun countUnredeemedTickets(accountId: String, now: Long): Int = lock.withLock {
@@ -53,12 +53,22 @@ class InMemoryRelayStore : RelayStore {
     override suspend fun revokeDevice(accountId: String, deviceId: String): Boolean = lock.withLock {
         val d = devices[deviceId] ?: return@withLock false
         if (d.accountId != accountId || d.revoked) return@withLock false
-        devices[deviceId] = Device(d.deviceId, d.accountId, d.devicePubkey, d.credentialHash, d.createdAt, d.lastSeen, revoked = true)
+        devices[deviceId] = Device(
+            d.deviceId, d.accountId, d.devicePubkey, d.credentialHash, d.createdAt, d.lastSeen,
+            revoked = true, headless = d.headless,
+        )
         true
     }
 
     override suspend fun touchDevice(deviceId: String, now: Long): Unit = lock.withLock {
-        devices[deviceId]?.let { devices[deviceId] = Device(it.deviceId, it.accountId, it.devicePubkey, it.credentialHash, it.createdAt, now, it.revoked, it.pushPlatform, it.pushToken) }
+        // rebuilds must CARRY headless: a login-touch that dropped it would silently turn a bridge back
+        // into a presence-counting "phone" and re-mute every push (issue #91)
+        devices[deviceId]?.let {
+            devices[deviceId] = Device(
+                it.deviceId, it.accountId, it.devicePubkey, it.credentialHash, it.createdAt, now,
+                it.revoked, it.pushPlatform, it.pushToken, headless = it.headless,
+            )
+        }
         Unit
     }
 
@@ -69,14 +79,26 @@ class InMemoryRelayStore : RelayStore {
                 it.deviceId, it.accountId, it.devicePubkey, it.credentialHash, it.createdAt, it.lastSeen, it.revoked,
                 pushPlatform = if (clear) null else platform,
                 pushToken = if (clear) null else token,
+                headless = it.headless,
             )
         }
         Unit
     }
 
+    override suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean = lock.withLock {
+        val d = devices[deviceId] ?: return@withLock false
+        if (d.pushPlatform != platform || d.pushToken != token) return@withLock false // re-registered since — keep it
+        devices[deviceId] = Device(
+            d.deviceId, d.accountId, d.devicePubkey, d.credentialHash, d.createdAt, d.lastSeen, d.revoked,
+            pushPlatform = null, pushToken = null,
+        )
+        true
+    }
+
     override suspend fun pushTargets(accountId: String): List<PushTarget> = lock.withLock {
         devices.values
-            .filter { it.accountId == accountId && !it.revoked && !it.pushToken.isNullOrBlank() && it.pushPlatform != null }
+            // headless bridges are excluded (issue #91) — never route the owner's session pushes to a bot
+            .filter { it.accountId == accountId && !it.revoked && !it.headless && !it.pushToken.isNullOrBlank() && it.pushPlatform != null }
             .map { PushTarget(it.deviceId, it.pushPlatform!!, it.pushToken!!) }
     }
 

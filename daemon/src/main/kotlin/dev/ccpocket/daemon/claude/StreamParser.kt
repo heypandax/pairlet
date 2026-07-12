@@ -41,7 +41,10 @@ object StreamParser {
         // tool_result. They carry session_id too, so they must be matched on subtype BEFORE the init fallback.
         when (root.str("subtype")) {
             "task_started" -> root.str("task_id")?.let {
-                return AgentEvent.BackgroundTaskStarted(it, root.str("tool_use_id"), root.str("description"), root.str("task_type"))
+                return AgentEvent.BackgroundTaskStarted(
+                    it, root.str("tool_use_id"), root.str("description"), root.str("task_type"),
+                    workflowName = root.str("workflow_name"), // rides a Workflow launch (issue #106)
+                )
             }
             "task_updated" -> root.str("task_id")?.let {
                 return AgentEvent.BackgroundTaskUpdated(it, (root["patch"] as? JsonObject)?.let { p -> p.str("status") })
@@ -50,6 +53,13 @@ object StreamParser {
             // pair is the authoritative completion (its tool_result was only the launch ack) — issue #77
             "task_notification" -> root.str("task_id")?.let {
                 return AgentEvent.BackgroundTaskUpdated(it, root.str("status"), toolUseId = root.str("tool_use_id"), summary = root.str("summary"))
+            }
+            // a Workflow run's progress snapshot: the CLI re-sends the CUMULATIVE workflow_progress
+            // array on every agent/phase state transition; pure activity ticks omit the array and are
+            // ignored here (they carry no per-agent state) — issue #106, probed on 2.1.206
+            "task_progress" -> root.str("task_id")?.let { tid ->
+                val items = root["workflow_progress"] as? JsonArray ?: return AgentEvent.Ignored("system/task_progress")
+                return AgentEvent.WorkflowProgress(tid, root.str("tool_use_id"), items)
             }
         }
         // session_id appears on hook_started/hook_response as well as init — take the first one we see
@@ -109,8 +119,12 @@ object StreamParser {
      * back in. We surface tool_results (for background-job tracking) and treat everything else as a replay.
      */
     private fun parseUser(root: JsonObject): List<AgentEvent> {
-        val content = (root["message"] as? JsonObject)?.get("content") as? JsonArray
-            ?: return listOf(AgentEvent.UserReplay)
+        val parentId = root.str("parent_tool_use_id")
+        val rawContent = (root["message"] as? JsonObject)?.get("content")
+        val content = rawContent as? JsonArray
+            // a plain-string content is the common replay shape for a text-only prompt — carry the text
+            // so the Conversation's unconsumed-prompt ledger can settle the matching entry (issue #122)
+            ?: return listOf(AgentEvent.UserReplay(text = (rawContent as? JsonPrimitive)?.contentOrNull, parentId = parentId))
         val results = content.mapNotNull { el ->
             val block = el as? JsonObject ?: return@mapNotNull null
             if (block.str("type") != "tool_result") return@mapNotNull null
@@ -118,10 +132,30 @@ object StreamParser {
                 toolUseId = block.str("tool_use_id"),
                 content = toolResultText(block["content"]),
                 isError = (block["is_error"] as? JsonPrimitive)?.booleanOrNull == true,
-                parentId = root.str("parent_tool_use_id"), // set = a result INSIDE a sub-agent, not the main chain
+                parentId = parentId, // set = a result INSIDE a sub-agent, not the main chain
             )
         }
-        return results.ifEmpty { listOf(AgentEvent.UserReplay) }
+        // a Workflow tool's async-launch ack: the run id ONLY reaches the live stream via this
+        // root-level tool_use_result (`{taskType:"local_workflow", runId, taskId, workflowName}`,
+        // probed 2.1.206) — surface it so the tracker can tie the chat card to the run (issue #106)
+        val launch = (root["tool_use_result"] as? JsonObject)
+            ?.takeIf { it.str("taskType") == "local_workflow" }
+            ?.let { r ->
+                r.str("runId")?.let { runId ->
+                    AgentEvent.WorkflowLaunched(
+                        toolUseId = (content.firstOrNull() as? JsonObject)?.str("tool_use_id"),
+                        runId = runId,
+                        taskId = r.str("taskId"),
+                        workflowName = r.str("workflowName"),
+                    )
+                }
+            }
+        val all = if (launch != null) results + launch else results
+        return all.ifEmpty {
+            val text = content.mapNotNull { (it as? JsonObject)?.takeIf { b -> b.str("type") == "text" }?.str("text") }
+                .joinToString("\n")
+            listOf(AgentEvent.UserReplay(text = text, parentId = parentId))
+        }
     }
 
     /** tool_result `content` is either a raw string or an array of {type:text,text:…} blocks. */

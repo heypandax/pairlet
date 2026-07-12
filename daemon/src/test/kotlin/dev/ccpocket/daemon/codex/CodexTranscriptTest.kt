@@ -120,6 +120,24 @@ class CodexTranscriptTest {
     }
 
     @Test
+    fun replay_keeps_a_long_reply_whole() {
+        // issue #81 (codex side, mirrors the Claude replay): an assistant reply longer than the old
+        // 2000-char per-message cap must replay whole, not clip.
+        val body = "长".repeat(2343)
+        val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-long", ".jsonl").also {
+            it.writeText(
+                """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-long","cwd":"/repo","cli_version":"0.124.0"}}""" + "\n" +
+                    """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"长回复"}]}}""" + "\n" +
+                    """{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"$body"}]}}""",
+            )
+        }
+        val msgs = CodexTranscriptReplay.read(f)
+        assertEquals(2, msgs.size)
+        assertEquals(2343, msgs[1].text.length) // full, not truncated to 2000
+        assertEquals(body, msgs[1].text)
+    }
+
+    @Test
     fun readThreadNames_parses_index_last_wins_and_skips_blanks() {
         val index = Files.createTempFile("session_index", ".jsonl").also {
             it.writeText(

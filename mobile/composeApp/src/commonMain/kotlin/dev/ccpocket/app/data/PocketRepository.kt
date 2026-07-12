@@ -1,6 +1,7 @@
 package dev.ccpocket.app.data
 
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import dev.ccpocket.app.ensureLocalNetworkAccess
@@ -9,11 +10,14 @@ import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
 import dev.ccpocket.app.net.RelayConnection
+import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
 import kotlinx.coroutines.flow.merge
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
 import dev.ccpocket.app.push.PushController
+import dev.ccpocket.app.lock.AppLockController
+import dev.ccpocket.app.lock.createBiometrics
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
@@ -21,15 +25,28 @@ import dev.ccpocket.app.telemetry.TelEvent
 import dev.ccpocket.app.telemetry.TelKey
 import dev.ccpocket.app.telemetry.Telemetry
 import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.Attached
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.BackgroundJob
+import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
+import dev.ccpocket.protocol.AccessTier
+import dev.ccpocket.protocol.CreateShare
+import dev.ccpocket.protocol.ListShares
+import dev.ccpocket.protocol.RevokeShare
+import dev.ccpocket.protocol.ShareCreated
+import dev.ccpocket.protocol.ShareEnded
+import dev.ccpocket.protocol.ShareInfo
+import dev.ccpocket.protocol.ShareInvite
+import dev.ccpocket.protocol.ShareListing
+import dev.ccpocket.protocol.ShareRevoked
+import dev.ccpocket.app.pairing.toPairingInfo
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.contextWindowFor
@@ -41,9 +58,14 @@ import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileDiff
+import dev.ccpocket.protocol.FileUploadCancel
+import dev.ccpocket.protocol.FileUploaded
+import dev.ccpocket.protocol.MAX_UPLOAD_BYTES
 import dev.ccpocket.protocol.isImageFile
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListPathEntries
@@ -75,8 +97,14 @@ import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.AuthState
+import dev.ccpocket.protocol.ActivatePreset
+import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchPresets
 import dev.ccpocket.protocol.FetchUsage
+import dev.ccpocket.protocol.PresetsState
+import dev.ccpocket.protocol.SavePreset
+import dev.ccpocket.protocol.Secret
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.Usage
 import dev.ccpocket.protocol.StreamPiece
@@ -84,6 +112,9 @@ import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.ToolEvent
+import dev.ccpocket.protocol.WorkflowAgentDetail
+import dev.ccpocket.protocol.WorkflowRun
+import dev.ccpocket.protocol.WorkflowUpdate
 import dev.ccpocket.protocol.ToolPhase
 import dev.ccpocket.protocol.Transcript
 import dev.ccpocket.protocol.AudioCancel
@@ -92,6 +123,11 @@ import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.SetPushPrefs
 import dev.ccpocket.protocol.PushPrefs
+import dev.ccpocket.protocol.SessionGroup
+import dev.ccpocket.protocol.GroupCreate
+import dev.ccpocket.protocol.GroupRename
+import dev.ccpocket.protocol.GroupDelete
+import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.preview_cmd_title
@@ -125,6 +161,7 @@ import dev.ccpocket.app.voice.VoiceRecorder
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString
 import io.ktor.client.HttpClient
+import dev.ccpocket.app.media.PickedFile
 import dev.ccpocket.app.media.compressImage
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
@@ -147,6 +184,9 @@ sealed interface ChatItem {
         val pending: Boolean = false,
         val promptId: String? = null,
         val delivered: Boolean = false,
+        /** Files uploaded to the session's workspace inbox and referenced by this turn (issue #90) —
+         *  rendered as file chips with their `@` landing path. Client-side only, like [images]. */
+        val files: List<SentFile> = emptyList(),
     ) : ChatItem
     data class Assistant(val text: String) : ChatItem
 
@@ -164,6 +204,9 @@ sealed interface ChatItem {
         val output: String? = null,
         val childCount: Int = 0,
         val lastChild: String? = null,
+        /** A replayed Workflow card's run id (issue #106) — binds it to [PocketRepository.workflowRuns].
+         *  Live cards bind via [taskId] == the run's originating tool_use id instead. */
+        val workflowRunId: String? = null,
     ) : ChatItem
     data class Sys(val text: String) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
@@ -207,6 +250,53 @@ enum class ConnPhase { Connecting, Reconnecting, RelayUnreachable, ComputerOffli
 /** A photo staged in the composer: [bytes] are the current JPEG for the thumbnail; [state] drives the tray UI. */
 class PendingImage(val id: Long, val bytes: ByteArray, val state: ImgState)
 
+/** Upload lifecycle of a staged file (issue #90). Files upload BEFORE send — the bytes land in the
+ *  session's workspace inbox and the send merely references the landed path — unlike photos, which
+ *  ride inline in the prompt frame. One file uploads at a time; the rest wait [Queued]. */
+enum class FileUpState { Queued, Uploading, Landed, Failed }
+
+/**
+ * A file staged in the composer (issue #90). [bytes] are retained until landed so a retry can
+ * re-stream (cleared on land to release memory). [captureId] is minted fresh per attempt;
+ * [path]/[landedName] arrive with the daemon's [dev.ccpocket.protocol.FileUploaded] receipt —
+ * the path is what the sent prompt references as an `@`-token.
+ */
+data class PendingFile(
+    val id: Long,
+    val name: String,
+    val size: Long,
+    val bytes: ByteArray,
+    val mediaType: String,
+    val state: FileUpState,
+    val progress: Float = 0f,
+    val captureId: String? = null,
+    val path: String? = null,
+    val landedName: String? = null,
+    val error: String? = null,
+    // A local playback handle for a picked video (issue #98) — survives the byte-eviction on land so a
+    // just-sent video's card can play it back on this device; null for non-video / where the platform
+    // picker had no stable URI. Never uploaded — client-side only.
+    val localUri: String? = null,
+)
+
+/**
+ * A file that already landed in the workspace inbox, as referenced by a sent turn
+ * ([ChatItem.User.files]). [mediaType] routes the render — a `video/` MIME draws the video card instead
+ * of the file chip (issue #98); it defaults to "" so older call sites keep the chip. [durationSecs] fills
+ * the duration pill when known (null → the pill is omitted; v1 never probes it client-side).
+ * [localUri] is a platform playback handle for the freshly-picked video on THIS device (the card is
+ * client-side + ephemeral, so it only ever exists in the session that picked it) — null after the
+ * bytes are gone / on any other viewer, which the player degrades to "open it on the computer".
+ */
+data class SentFile(
+    val name: String,
+    val size: Long,
+    val path: String,
+    val mediaType: String = "",
+    val durationSecs: Int? = null,
+    val localUri: String? = null,
+)
+
 /** A connect that never reached Attached within the deadline (silent pre-attach hang). Surfaced as a
  *  normal failure so the backoff reconnect kicks in — NOT a CancellationException (which would read as
  *  an intentional teardown and skip the retry). */
@@ -226,7 +316,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private val direct = RelayConnection()
     private val relay = RelayE2EConnection()
     private val directE2E = DirectE2EConnection()
-    private var useRelay = false
+    internal var useRelay = false // internal for tests (mirrors promptReceiptTimeoutMs)
     // direct-first routing: a failed direct attempt silently falls back to the relay and cools down,
     // so a dead stored address costs one 3s probe per minute, not one per reconnect tick. Both maps are
     // per ACCOUNT — this repo switches bindings, and machine A's failed probe must not gate machine B's.
@@ -255,11 +345,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var relayDeadlinePassed = false // grace elapsed without attaching -> RelayUnreachable
     private var reconnectGraceJob: Job? = null // brief hold before showing the Reconnecting banner on a blip (#28)
     private var reconnectGracePassed = false   // that hold elapsed -> the Reconnecting banner may show
+    // a ConvoHistory was just merged (issue #107): the very next stream event may be the block the
+    // replay's disk read already caught (chunks parsed during the read race its ConvoHistory on the
+    // wire) — one-shot flag; consumed by the first AssistantChunk/ToolEvent, reset at turn boundaries
+    private var replayEcho = false
 
     // ── push notifications: register the device's APNs/FCM token so the relay can wake it while offline ──
     private var pushToken: PushToken? = null
     private var pushStarted = false
     private var pushRegistered: Pair<String, String>? = null // last (platform, token) sent; skip redundant re-sends
+    private var pushDialJob: Job? = null // in-flight one-shot relay dial (direct-LAN registration compensation)
+    // direct-LAN registration seams (internal for tests, mirroring promptReceiptTimeoutMs). directLinkUp
+    // includes the in-flight direct attempt: a RegisterPush buffered into the relay control outbox during
+    // that ≤3s window would otherwise sit undrained for as long as the phone stays on the LAN, then flush
+    // a STALE token over a newer one at the next real relay attach.
+    internal var directLinkUp: () -> Boolean = { directE2E.connected || directAttemptInFlight }
+    internal var pushDial: suspend (PairedDaemon, RegisterPush) -> Unit = { p, f -> RelayControlDial.deposit(p, f) }
+    internal var pushDialRetryMs = 30_000L
     /** Task-complete push toggle (persisted, default on); the single source of truth the Settings switch binds to. */
     val notificationsOn = mutableStateOf(SecureStore.getString(K_NOTIFY) != "0")
 
@@ -312,6 +414,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_THEME_MODE, mode.name)
     }
 
+    /** App Lock (issue #109): the biometric gate state machine + its persisted enable/auto-lock prefs. Lazy so
+     *  the desktop root and the repo unit tests — neither of which mounts the gate — never build the platform
+     *  prompt (createBiometrics()); it is constructed the first time App() reads it on Android/iOS. */
+    val appLock: AppLockController by lazy { AppLockController(scope, createBiometrics()) }
+
     /** Projects the user pinned to the top, newest pin first. Persisted client-side (paths never contain
      *  '\n', so a newline-joined string is a safe, dependency-free encoding). */
     val pinnedPaths = mutableStateListOf<String>().also { list ->
@@ -347,6 +454,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  a private copy at either call site would silently fork draft storage when a key tier is added. */
     fun composerKey(): String? = sessionKey.value ?: convoId.value ?: workdir.value
 
+    /** Composer CONTEXT generation — bumped once per [openSession]. [composerKey]'s chain flips IN PLACE
+     *  while the user may be typing (a brand-new session's first SessionLive minting convoId/sessionId,
+     *  a forked resume/lock-heal corrected from resumeId to the real id), so composers must key their
+     *  LIVE text off this and only re-home the draft on a key flip: re-initializing from the persisted
+     *  draft on every flip rolled the field back to a ≤400ms-stale snapshot mid-IME-composition, which
+     *  on iOS committed the pinyin keyboard's space-segmented marked text as raw letters (#108/#93). */
+    val composerEpoch = mutableStateOf(0)
+
     /** Carry a mid-typing draft onto [to] BEFORE the composer re-keys (a brand-new session's first init
      *  flips the key from convoId to the freshly-minted sessionId while the user may be typing). */
     private fun migrateDraft(to: String?) {
@@ -371,6 +486,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      */
     val sessionActive = mutableStateOf(false)
     val connected = mutableStateOf(false)
+    /** Monotonic count of [Attached] edges — every genuine (re)attach to the active daemon. The desktop
+     *  Account pane keys its one-shot auth/presets fetch on this so a pane left open across a daemon restart
+     *  re-fetches instead of stranding the pre-restart account (or a transient "claude CLI not found" captured
+     *  mid-restart) until the user closes and reopens it. Note [connected] alone can't drive this: a daemon
+     *  restart detected via relay PeerPresence re-handshakes without ever flipping [connected] false→true.
+     *  Bumps only on the real attach edge, which the reconnect backoff ladder already rate-limits, so a
+     *  flapping link can't spin the fetch. */
+    val connGen = mutableStateOf(0)
     /** Single source of truth for the connection-state UI (see [ConnPhase]); driven by real events. */
     val phase = mutableStateOf(ConnPhase.Connecting)
     val status = mutableStateOf(StatusMsg(Res.string.status_disconnected))
@@ -390,14 +513,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val refreshing = mutableStateOf(false)
     val sessions = mutableStateListOf<SessionSummary>()
     val sessionsDir = mutableStateOf<String?>(null)
+    /** Custom session groups for [sessionsDir] (issue #119); empty = none / older daemon that omits them.
+     *  Per-session membership rides on [SessionSummary.group] (a group id, or null = ungrouped). */
+    val sessionGroups = mutableStateListOf<SessionGroup>()
+    /** True when THIS connection may manage groups (issue #119): the daemon sent a groups array (owner on a
+     *  group-aware daemon). Distinguishes it from the two "no groups" cases that both leave [sessionGroups]
+     *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
+     *  vs an older daemon / a guest connection that omits groups entirely (hide the affordance). */
+    val groupsSupported = mutableStateOf(false)
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
+    val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
+    private var fileUploadJob: Job? = null                 // the chunk-send loop of the ONE Uploading file
+    private var fileAckDeadline: Job? = null               // last chunk sent → FileUploaded receipt guard
     private var pendingIdSeq = 0L
     val convoId = mutableStateOf<String?>(null)
     val workdir = mutableStateOf<String?>(null)
     val chatTitle = mutableStateOf<String?>(null)            // session title for the chat header (client-side)
     private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
+    // issue #100: the askId the daemon reported as TIMED_OUT — the permission sheet for THIS exact ask renders
+    // its terminal "timed out / auto-denied" state instead of vanishing. Matched by id, so a stale value can
+    // never bleed onto the next card (askIds are unique per request).
+    val timedOutAskId = mutableStateOf<String?>(null)
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
     val terminalEntries = mutableStateListOf<TerminalEntry>() // quick-terminal history for the active session (issue #3)
     val terminalBusy = mutableStateOf(false)                  // a shell command is awaiting approval/result
@@ -407,11 +545,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
     val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
+    val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
     val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
+    val sessionOrigin = mutableStateOf<String?>(null)        // external trigger source, e.g. "feishu-bot" → header "via …" chip (issue #91)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
     val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
 
@@ -425,6 +565,35 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         contextWindow.value = dev.ccpocket.protocol.provenWindow(win, contextUsed.value)
     }
     val backgroundJobs = mutableStateListOf<BackgroundJob>() // bg shells / sub-agents / monitors the daemon is tracking
+
+    // ── Workflow orchestration (issue #106) ──────────────────────────────────────────────────────
+    /** Workflow runs for the ACTIVE conversation, keyed by runId — live pushes and replayed finished
+     *  manifests both land here; the chat card + progress tree render from this one map. */
+    val workflowRuns = mutableStateMapOf<String, WorkflowRun>()
+
+    /** On-demand full prompt/return per agent, keyed "runId#index" ([fetchWorkflowAgentDetail]). */
+    val workflowAgentDetails = mutableStateMapOf<String, WorkflowAgentDetail>()
+
+    /** Non-null = the full-screen workflow run view is open on this run. */
+    val viewedWorkflowRunId = mutableStateOf<String?>(null)
+
+    /** The run a chat Tool card binds to: live cards match the run's originating tool_use id;
+     *  replayed cards carry the run id itself ([ChatItem.Tool.workflowRunId]). */
+    fun workflowFor(item: ChatItem.Tool): WorkflowRun? =
+        item.workflowRunId?.let { workflowRuns[it] }
+            ?: item.taskId?.let { tid -> workflowRuns.values.firstOrNull { it.toolUseId == tid } }
+
+    fun openWorkflow(runId: String) { viewedWorkflowRunId.value = runId }
+    fun closeWorkflow() { viewedWorkflowRunId.value = null }
+
+    /** Ask the daemon for one agent's full prompt/return (detail sheet). Cached per (run, index);
+     *  an old daemon drops the frame silently — the sheet keeps showing the snapshot previews. */
+    fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {
+        val key = "$runId#$agentIndex"
+        if (workflowAgentDetails.containsKey(key)) return
+        val convo = convoId.value ?: return
+        scope.launch { send(GetWorkflowAgentDetail(convo, runId, agentIndex, agentId)) }
+    }
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val opening = mutableStateOf(false)                      // an OpenSession is in flight — one-tap entries disable on it (a double-tap would open two fresh sessions)
@@ -455,26 +624,77 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var promptWatchdog: Job? = null
     internal var promptReceiptTimeoutMs = 10_000L // > relay RTT + a lazy agent spawn; a test seam shrinks it
 
+    /** Second-stage deadline (issue #104): a [dev.ccpocket.protocol.PromptAck] only means the daemon WROTE
+     *  the prompt to the agent's stdin — not that a turn started. A wedged or mid-relaunch agent can swallow
+     *  that write and emit nothing, leaving [streaming] stuck true and the UI silently "thinking" forever
+     *  (issue #78's receipt watchdog is already cancelled by the ack, so nothing catches this). Once delivered
+     *  we hand off to [armTurnWatchdog]: no chunk/tool/turn-end within [promptTurnTimeoutMs] flips [turnStalled],
+     *  which surfaces an inline "resend" cue instead of an endless spinner. This is deliberately NOT an
+     *  auto-resend: the live daemon Conversation already recorded this promptId (the #66 dedup that makes a
+     *  SessionGone same-id resend safe would here turn a same-id resend into a bare re-ack — no turn), and a
+     *  fresh-id auto-resend would double-run a turn that was merely slow to start. The recovery is user-driven
+     *  ([resendStalledPrompt], fresh id). [turnStalled] retracts on the first real turn frame or a session change.
+     *  Only for prompts sent into an IDLE session — a mid-turn send is the queued case, [turnQueued]. */
+    val turnStalled = mutableStateOf(false)
+
+    /** Queued flavor of the same deadline: the prompt was sent INTO an already-running turn (the composer's
+     *  "sending will queue" state), so the CLI parks it until the next tool boundary / turn end — silence past
+     *  the deadline is expected there, not a swallow. The watchdog can only be pending while the prompt is
+     *  provably still queued (consuming it takes a tool boundary or turn end, and either frame feeds
+     *  [promptEvidence] first), so this surfaces a calm "queued" status instead of [turnStalled]'s resend cue.
+     *  Deliberately NOT actionable: the original still sits in the CLI queue, and a fresh-id resend (the #66
+     *  dedup doesn't apply) would run the instruction twice the moment the turn yields. */
+    val turnQueued = mutableStateOf(false)
+    private var turnWatchdog: Job? = null
+    private var awaitingTurn = false // between a PromptAck (delivered) and the first turn frame
+    private var promptQueued = false // the in-flight prompt was sent mid-turn — the CLI queues it (see [turnQueued])
+    internal var promptTurnTimeoutMs = 45_000L // ack→first-frame budget: a cold model / big context still streams
+        // *some* frame (thinking token, tool start) well inside this; a test seam shrinks it
+
     /** The daemon flagged this session degraded (recent turns were all API-failure placeholders — issue #65). */
     val sessionDegraded = mutableStateOf(false)
     // first send into a degraded session is blocked with an explanation; the next one goes through
     private var degradedSendArmed = false
     private var turnStartMark: kotlin.time.TimeSource.Monotonic.ValueTimeMark? = null // stamps TurnEnded's duration
 
-    /** Desktop notifier seam: fires when the active conversation's turn completes (after the TurnEnded
-     *  marker lands). The UI layer decides whether that deserves a system notification / dock badge. */
-    var onTurnFinished: ((title: String, preview: String?) -> Unit)? = null
+    /** ms since THIS app sent the in-flight turn's prompt — null once the turn ends, or when the turn
+     *  wasn't started here (attached to an already-running session). Anchors the desktop stop-refill
+     *  window (#48): handing the prompt back for re-editing only makes sense near its own send. */
+    fun turnElapsedMs(): Long? = turnStartMark?.elapsedNow()?.inWholeMilliseconds
 
-    /** First daemon evidence for the in-flight prompt (chunk/tool/turn-end/error): drop the retry copy
-     *  and flip the pending User bubble to delivered (issue #41). */
+    /** Desktop notifier seam: fires when the active conversation's turn completes (after the TurnEnded
+     *  marker lands). The UI layer decides whether that deserves a system notification / dock badge.
+     *  [sessionId] identifies the finished session (null before the daemon named it) so a clicked
+     *  notification can jump back to it (issue #99). */
+    var onTurnFinished: ((title: String, preview: String?, sessionId: String?) -> Unit)? = null
+
+    /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
+     *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
+     *  receipt watchdog (issue #78) and the turn-start watchdog (issue #104), clears both stall cues, drops
+     *  the retry copy, and flips the pending User bubble to delivered (issue #41). */
     private fun promptEvidence() {
         promptRetry = null
         promptWatchdog?.cancel(); promptWatchdog = null // the daemon is talking — the receipt deadline is moot
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false // …and a real turn frame moots the turn deadline
         sendStalled.value = false
+        turnStalled.value = false
+        turnQueued.value = false
         if (!promptPending) return
         promptPending = false
         val i = messages.indexOfLast { it is ChatItem.User }
         (messages.getOrNull(i) as? ChatItem.User)?.takeIf { it.pending }?.let { messages[i] = it.copy(pending = false) }
+    }
+
+    /** Delivery receipt ONLY (PromptAck, issue #104): the daemon wrote the prompt to the agent's stdin, but an
+     *  ack is not a started turn. Clear the delivery-stage machinery (the receipt deadline is met) and, if a turn
+     *  is still expected, hand off to the turn-start watchdog. Deliberately keeps [promptRetry] — the resend cue
+     *  (and a late SessionGone in this window) still needs the text/images. The PromptAck handler flips the
+     *  specific bubble to delivered right after this; here we only clear the delivery FLAG. */
+    private fun promptDelivered() {
+        promptWatchdog?.cancel(); promptWatchdog = null // receipt arrived — the delivery deadline is moot
+        sendStalled.value = false
+        promptPending = false
+        if (streaming.value) { awaitingTurn = true; armTurnWatchdog(queued = promptQueued) } // a TurnDone/error already in wouldn't re-arm
     }
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
@@ -544,6 +764,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val info = getInfo(client)
             val keys = Pairing.deviceKeys()
             paired.value = Pairing.redeem(info, keys, client) // upserts the list + pins this as the active account
+            // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
+            // any recorded "share ended" terminal state — else the new binding would open on the dead card
+            paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
+            shareEnded.value = null
             replace(pairedList, Pairing.loadAll())
             addingDevice.value = false
             firstTicket = info.ticket
@@ -636,7 +860,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { attachedThisSession = true; connected.value = true; relayDeadlinePassed = false; ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
+            is Attached -> { attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
@@ -661,19 +885,41 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (pinnedTo != null) return // satellites leave the platform push singleton to the primary link
         if (pushStarted || !notificationsOn.value) return
         pushStarted = true
-        PushController.start { token -> pushToken = token; registerPush() }
+        PushController.start { onPushToken(it) }
     }
 
-    /** (Re)send the push token to the relay over the control plane — or an empty token to de-register when
-     *  notifications are off. Skips when unchanged since the last send (the relay persists it), so the
-     *  foreground-triggered reconnect storm doesn't rewrite the same row. Relay transport only. */
+    /** Platform token callback (and the test seam for it): remember the token, then (re)register. */
+    internal fun onPushToken(token: PushToken) { pushToken = token; registerPush() }
+
+    /** (Re)send the push token — or an empty token to de-register when notifications are off — to the
+     *  relay, whose store is the single push-routing truth. On the relay transport it rides the live
+     *  control plane. The direct-LAN transport has NO relay control plane, and a phone that always finds
+     *  its daemon on the LAN never relay-attaches — "register on the next real relay attach" never comes,
+     *  so its token (and every APNs/FCM rotation) would rot server-side forever (#114 follow-up): instead
+     *  the direct path deposits the token through a one-shot [RelayControlDial]. Skips when unchanged
+     *  since the last send (the relay persists it), so the foreground-triggered reconnect storm doesn't
+     *  rewrite the same row; a failed dial rolls that guard back (+ one timed retry that self-arms while
+     *  the direct link stays up) so the token still converges. */
     private fun registerPush() {
-        if (!useRelay || directE2E.connected) return // direct transport has no relay control plane; register on the next real relay attach
+        if (!useRelay) return // unpaired dev-direct transport: no relay account to deposit to
         val tok = pushToken ?: return
         val sent = tok.platform to (if (notificationsOn.value) tok.token else "")
         if (sent == pushRegistered) return
         pushRegistered = sent
-        scope.launch { runCatching { relay.sendControl(RegisterPush(sent.first, sent.second)) } }
+        if (directLinkUp()) {
+            val p = paired.value ?: return
+            pushDialJob?.cancel() // a newer (platform, token) supersedes an in-flight dial/retry
+            pushDialJob = scope.launch {
+                val err = runCatching { pushDial(p, RegisterPush(sent.first, sent.second)) }.exceptionOrNull() ?: return@launch
+                if (err is CancellationException) throw err // superseded — the newer dial owns the dedup state
+                if (pushRegistered == sent) pushRegistered = null // roll back the dedup: this send never landed
+                if (err is RelayAuthException) return@launch // a revoked credential won't fix itself on a timer
+                delay(pushDialRetryMs)
+                if (directLinkUp() && pushRegistered == null) registerPush()
+            }
+        } else {
+            scope.launch { runCatching { relay.sendControl(RegisterPush(sent.first, sent.second)) } }
+        }
     }
 
     /** Settings toggle: persist the choice, then register (on) or clear (off) the token on the relay. */
@@ -951,10 +1197,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val sid = currentSessionId
         val wd = workdir.value
         val dir = sessionsDir.value
+        val convo = convoId.value
         when {
-            // daemon finds the still-live conversation by sessionId → reattach + history replay
-            convoId.value != null && !observing.value && sid != null && wd != null ->
+            // daemon finds the still-live conversation by sessionId → reattach + history replay, which the
+            // ConvoHistory MERGE turns into a backfill of whatever streamed while the link was down (#107)
+            convo != null && sid != null && wd != null -> {
+                // an observe view re-opens the same way (the daemon mints a fresh ObserveSession — or a
+                // controllable resume if the terminal quit meanwhile). Close the stale observer first: its
+                // sink revives with this reconnected device, and an old daemon would keep BOTH observers
+                // tailing — two SessionLive/ConvoHistory streams ping-ponging the phone between convoIds.
+                if (observing.value) send(CloseSession(convo))
                 send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE))
+            }
             dir != null -> send(ListSessions(dir))
             else -> {} // directory list already refreshed by launchTransport
         }
@@ -966,6 +1220,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) drop the ack→turn deadline too
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
@@ -975,12 +1230,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
+        pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
+        // per-daemon truth must not survive a machine switch: a stale non-null presetsState would keep
+        // the token-bearing create/edit form UNLOCKED after switching to a daemon that predates presets
+        // (it silently drops FetchPresets), breaking "never fire a plaintext token at a peer that can't
+        // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
+        authState.value = null
+        presetsState.value = null; presetsStateRev.value = 0
         convoId.value = null
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         pendingAsk.value = null
-        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearBackgroundJobs()
+        directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         demoMode.value = false // leaving the demo returns to real pairing
         demoConnecting.value = false
         abandonVoice()
@@ -1029,15 +1291,84 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  coordinator (tests, satellites, headless) has nothing to retire. Keeps the repo core off the fleet global. */
     var onBeforeSwitch: ((accountId: String) -> Unit)? = null
 
-    /** Switch the active computer: tear down the current link, pin [target], reconnect to it. */
+    /** Switch the active computer: tear down the current link, pin [target], reconnect to it.
+     *  This is the COLD path — [FleetCoordinator.switchTo] promotes a hot satellite instead when it can
+     *  (issue #103) and only falls back here when no live link to [target] exists yet. */
     fun switchDaemon(target: PairedDaemon) {
         if (paired.value?.accountId == target.accountId && sessionActive.value) return
         onBeforeSwitch?.invoke(target.accountId)
         disconnect()
         paired.value = target
+        shareEnded.value = loadShareEnded(target.accountId) // per-account guest ending follows the switch
         Pairing.setActive(target.accountId)
         firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
+    }
+
+    // ── fleet promote (issue #103): switching machines swaps two live repos instead of re-dialing ────
+
+    /**
+     * The RISING side of a fleet promote: a satellite about to become the primary adopts the shell-level
+     * state whose in-memory mirrors were seeded at CONSTRUCTION time and kept fresh only on the outgoing
+     * primary — the setters persist to SecureStore, but this instance never re-reads it. Covers the
+     * Settings prefs, the per-session launch-params memory, and the pairing list (renames / direct URLs /
+     * host names learned after this satellite was built). Without this, promoting flips Settings back in
+     * time (a theme picked after app start would snap back on the first machine switch).
+     */
+    internal fun adoptShellState(from: PocketRepository) {
+        notificationsOn.value = from.notificationsOn.value
+        defaultMode.value = from.defaultMode.value
+        defaultEffort.value = from.defaultEffort.value
+        defaultModel.value = from.defaultModel.value
+        contextWindowOverride.value = from.contextWindowOverride.value
+        defaultAgent.value = from.defaultAgent.value
+        agentFilter.value = from.agentFilter.value
+        treeView.value = from.treeView.value
+        fontScale.value = from.fontScale.value
+        themeMode.value = from.themeMode.value
+        replace(pinnedPaths, from.pinnedPaths.toList())
+        sessionParams.clear(); sessionParams.putAll(from.sessionParams)
+        replace(pairedList, from.pairedList.toList())
+        // freshen this binding's own copy too (pinned at construction — a rename/hostName/directUrl learned
+        // since then lives only in the outgoing primary's list)
+        paired.value = from.pairedList.firstOrNull { it.accountId == paired.value?.accountId } ?: paired.value
+    }
+
+    /**
+     * The DEMOTED side of a fleet promote: the outgoing primary becomes its machine's satellite WITHOUT
+     * dropping the live link. Clears exactly the session/chat-scoped state that [disconnect] and
+     * [openSession] clear — leaving a machine closes its chat view either way — but keeps the transport,
+     * the loaded directory list, and the per-machine data (usage/auth) that make the link worth keeping
+     * hot. The reclaim rule matches [openSession]/[backToBrowse]: an idle (or observed) conversation is
+     * closed on the daemon; a RUNNING turn stays alive in the background and reattaches on the next
+     * resume. [pendingOpen] must die here — a queued cross-machine open firing on a headless satellite
+     * link would open a ghost session nobody is watching.
+     */
+    internal fun demoteToSatellite() {
+        convoId.value?.let { c -> if (observing.value || !streaming.value) scope.launch { send(CloseSession(c)) } }
+        pendingOpen = null
+        promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false
+        promptRetry = null; promptPending = false; promptResendArmed = false
+        convoId.value = null; currentSessionId = null; sessionKey.value = null
+        workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
+        sessionsDir.value = null; sessions.clear()
+        chatTitle.value = null; observing.value = false; streaming.value = false
+        opening.value = false; openTimedOut.value = false; switching.value = false
+        autoFocusComposer.value = false
+        pendingAsk.value = null
+        messages.clear(); pendingImages.clear()
+        terminalEntries.clear(); terminalBusy.value = false
+        changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
+        closeFileViewer()
+        pathListing.value = null
+        allowRules.clear()
+        slashCommands.clear()
+        clearBackgroundJobs()
+        sessionDegraded.value = false; degradedSendArmed = false
+        model.value = null; effort.value = null; sessionAgent.value = null
+        contextUsed.value = null; contextWindow.value = null
+        refreshing.value = false; sessionsRefreshing.value = false
+        abandonVoice()
     }
 
     /** Write-through for a binding's stored direct URL: persist, refresh the list, patch the active copy.
@@ -1066,14 +1397,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wasActive = paired.value?.accountId == target.accountId
         val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
         replace(pairedList, remaining)
-        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull() }
+        SecureStore.remove(K_SHARE_ENDED_PREFIX + target.accountId) // a removed binding's guest ending goes with it
+        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull(); shareEnded.value = loadShareEnded(paired.value?.accountId) }
     }
 
     /** Remove the currently active binding (the "re-pair" escape hatch when a pairing goes invalid). */
     fun unpairActive() { paired.value?.let { unpair(it) } }
 
+    internal var onSendForTest: ((Frame) -> Unit)? = null // test seam: observe outbound frames (issue #104 resend)
+
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
+        onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
             when {
@@ -1135,6 +1470,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 ),
             )
             is ListSessions -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
+            // #119 groups: demo has no persistence — just re-echo the sample sessions so the UI settles
+            is GroupCreate, is GroupRename, is GroupDelete, is GroupAssign -> {
+                val wd = (frame as? GroupCreate)?.workdir ?: (frame as? GroupRename)?.workdir
+                    ?: (frame as? GroupDelete)?.workdir ?: (frame as GroupAssign).workdir
+                handle(Sessions(wd, DemoData.sessions(wd)))
+            }
             is OpenSession -> {
                 val cid = "demo-convo-${frame.resumeId ?: "new"}"
                 handle(SessionLive(cid, frame.workdir, frame.resumeId ?: DemoData.LIVE_SESSION_ID, mode = frame.mode, executing = false))
@@ -1146,7 +1487,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is SwitchMode -> handle(SessionLive(frame.convoId, workdir.value ?: DemoData.LIVE_DIR, currentSessionId, mode = frame.mode, executing = false))
             is CancelTurn -> handle(TurnDone(frame.convoId))
             is AudioChunk -> if (frame.last) handle(Transcript(frame.convoId, frame.captureId, text = "show me the open files", ok = true))
-            else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel — nothing to echo
+            // file upload (issue #90): pretend the file landed in the demo workspace's inbox
+            is FileChunk -> if (frame.last) {
+                handle(FileUploaded(frame.convoId, frame.captureId, path = ".ccpocket/inbox/${frame.captureId}/${frame.name}", name = frame.name, size = frame.totalBytes))
+            }
+            // folder-share (issue #115): loop the owner control plane back with sample data
+            is CreateShare -> handle(ShareCreated(ok = true, invite = DemoData.sampleInvite(frame.path, frame.tier, frame.expiresInSec)))
+            is ListShares -> handle(ShareListing(DemoData.shares()))
+            is RevokeShare -> handle(ShareRevoked(frame.deviceId, ok = true))
+            else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel / FileUploadCancel — nothing to echo
         }
     }
 
@@ -1182,6 +1531,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         handle(TurnDone(convoId))
     }
 
+    // test seam (issue #104): feed an inbound frame exactly as a transport would, to exercise the
+    // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
+    internal fun receiveForTest(f: Frame) = handle(f)
+
+    // control-plane counterpart: Attached/PeerPresence/AuthError flow through handleControl, not handle.
+    // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
+    // the Account pane's fetch re-keys on reconnect.
+    internal fun receiveControlForTest(f: Frame) = handleControl(f)
+
     private fun handle(f: Frame) {
         when (f) {
             is Directories -> {
@@ -1196,9 +1554,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
                 recomputePhase()
             }
-            is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items); sessionsRefreshing.value = false }
+            is Sessions -> {
+                sessionsDir.value = f.workdir; replace(sessions, f.items)
+                replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
+                groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
+                sessionsRefreshing.value = false
+            }
             is Usage -> { usage.value = f; usageLoading.value = false }
             is AuthState -> authState.value = f
+            // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
+            // key on the rev, not the value, so an identical state still settles spinners/pending forms
+            is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
@@ -1220,6 +1586,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 f.model?.let { model.value = it }
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
+                // unconditional (not ?.let): switching from a bridge session to a normal one must CLEAR the chip
+                sessionOrigin.value = f.origin // "via <bridge>" header chip (issue #91); null = interactive/old daemon
                 // window fallback is Claude-only: contextWindowFor knows nothing about gpt-* ids, and a Codex
                 // session with no daemon-sent window was rendering a % against a meaningless Claude 200k —
                 // null instead, and the UI shows raw tokens without a denominator
@@ -1253,6 +1621,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 val retry = promptRetry
                 if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
                     promptRetry = null; promptResendArmed = false
+                    promptQueued = false // fresh process, no running turn to queue behind — its ack arms the strict deadline
                     streaming.value = true
                     // same promptId as the original: if the first send actually landed, the daemon
                     // dedupes and just re-acks instead of running the turn twice (issue #66)
@@ -1263,7 +1632,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // delivery receipt (issue #66): the daemon handed the turn to the agent — flip the bubble's
             // marker. Also first evidence: the retry copy is obsolete (the prompt cannot be lost anymore).
             is PromptAck -> if (f.convoId == convoId.value) {
-                promptEvidence()
+                promptDelivered() // delivered ≠ turn started (issue #104): hand off to the turn-start watchdog
                 val i = messages.indexOfLast { it is ChatItem.User && it.promptId == f.promptId }
                 (messages.getOrNull(i) as? ChatItem.User)?.let { messages[i] = it.copy(pending = false, delivered = true) }
             }
@@ -1276,11 +1645,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
             is AskWithdrawn -> if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
-                if (pendingAsk.value?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
-                pendingAsk.value = null
+                val ask = pendingAsk.value
+                if (f.reason == AskWithdrawnReason.TIMED_OUT && ask?.questions == null) {
+                    // issue #100: keep the permission card up but flip it to its terminal "timed out" state,
+                    // so a returning user sees what happened instead of a card that silently vanished (which
+                    // read as success). A tap on it now only dismisses — no more silent no-op.
+                    timedOutAskId.value = f.askId
+                } else {
+                    // agent moved on / session closed / a question timed out → dismiss (a question leaves a note)
+                    if (ask?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
+                    pendingAsk.value = null
+                }
             }
             is TurnDone -> if (f.convoId == convoId.value) {
                 promptEvidence()
+                replayEcho = false // turn boundary — the next block belongs to a new turn, never a replay echo
                 val turnWasLive = streaming.value // gate the marker/notify on a turn we actually watched run
                 finishThinking(); streaming.value = false
                 // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where
@@ -1291,7 +1670,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     turnStartMark = null
                     val preview = f.error ?: (messages.lastOrNull { it is ChatItem.Assistant } as? ChatItem.Assistant)
                         ?.text?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140)
-                    onTurnFinished?.invoke(chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket", preview)
+                    onTurnFinished?.invoke(
+                        chatTitle.value ?: workdir.value?.substringAfterLast('/') ?: "CC Pocket",
+                        preview,
+                        sessionKey.value, // click→jump target for the desktop banner (issue #99)
+                    )
                 }
                 // the listed snapshot said `live` at listing time — correct it locally so sidebar/list
                 // dots stop pulsing the moment the turn ends instead of waiting for a manual re-list
@@ -1307,6 +1690,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 upgradeWindowIfProven()
             }
             is BackgroundJobs -> if (f.convoId == convoId.value) replace(backgroundJobs, f.jobs)
+            // Workflow orchestration (issue #106): whole-run snapshots keyed by runId; a re-push of the
+            // same run reconciles in place. finalResult arrives only on the explicit terminal patch —
+            // never let a later plain snapshot blank an already-received final return.
+            is WorkflowUpdate -> if (f.convoId == convoId.value) {
+                val prev = workflowRuns[f.run.runId]
+                workflowRuns[f.run.runId] = if (f.run.finalResult == null && prev?.finalResult != null) {
+                    f.run.copy(finalResult = prev.finalResult)
+                } else f.run
+            }
+            is WorkflowAgentDetail -> if (f.convoId == convoId.value) {
+                workflowAgentDetails["${f.runId}#${f.agentIndex}"] = f
+            }
             is PocketError -> {
                 opening.value = false // a failed open re-enables the one-tap entries right away
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
@@ -1337,10 +1732,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     }
                 }
             }
-            // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript
-            is ConvoHistory -> if (f.convoId == convoId.value) { messages.clear(); messages.addAll(f.messages.map(::historyItem)) }
+            // also convo-scoped: a stale ConvoHistory would wipe the active convo and load the wrong transcript.
+            // MERGED, not replaced (issue #107): the replay is the backfill channel for output streamed while
+            // the link was down, but the app may hold rows the transcript doesn't (pending bubbles, dividers,
+            // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
+            // reconciles without flashing, duplicating, or reordering.
+            is ConvoHistory -> if (f.convoId == convoId.value) {
+                val localRows = messages.toList()
+                val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
+                if (merged != localRows) replace(messages, merged)
+                replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
+            }
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
+            // file upload receipt (issue #90) — matched on captureId inside; convo guard like CommandList
+            is FileUploaded -> if (f.convoId == convoId.value) onFileUploaded(f)
             is ShellResult -> if (f.convoId == convoId.value) {
                 terminalBusy.value = false
                 val i = terminalEntries.indexOfLast { it.result == null } // fill the in-flight command's slot
@@ -1356,6 +1762,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // side once its value landed — canceling on the first arrival would strand the other
             is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFile.value = f
+                // an ExportFile reply rides the same channel + identity — settle the waiting state either way
+                if (exportWaiting.value) { exportWaiting.value = false; exportDeadline?.cancel() }
             }
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFileDiff.value = f
@@ -1364,6 +1772,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
             // the visible listing on its own requested subPath anyway).
             is PathEntries -> if (f.workdir == workdir.value) pathListing.value = f
+            // ── folder-share (issue #115): owner control-plane replies ──
+            is ShareCreated -> { lastShareCreated.value = f; sharesRefreshing.value = false }
+            is ShareListing -> { replace(shares, f.items); sharesLoaded.value = true; sharesRefreshing.value = false }
+            is ShareRevoked -> {
+                sharesRefreshing.value = false
+                if (f.ok) shares.removeAll { it.deviceId == f.deviceId } // optimistic; a follow-up listShares() refreshes for real
+            }
+            // guest side (#115 follow-up): the daemon's precise "your share ended" — arrives right before
+            // the cut, so the terminal card can say revoked-vs-expired instead of a bare disconnect
+            is ShareEnded -> onShareEnded(f)
             else -> {}
         }
     }
@@ -1377,6 +1795,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      */
     private fun onToolEvent(f: ToolEvent) {
         val parent = f.parentToolUseId
+        // one-shot replay-echo dedupe (issue #107), tool flavor: a START right after a merged
+        // ConvoHistory may duplicate the replayed tail card (which has no taskId). Fold into it —
+        // patching the live toolUseId in even upgrades the card for later RESULT correlation.
+        if (replayEcho) {
+            replayEcho = false
+            if (f.phase == ToolPhase.START && parent == null) {
+                val i = TranscriptMerge.echoToolIndex(messages, f.tool, f.inputPreview)
+                if (i >= 0) {
+                    messages[i] = (messages[i] as ChatItem.Tool).copy(taskId = f.toolUseId)
+                    return
+                }
+            }
+        }
         fun cardIndex(taskId: String?) =
             if (taskId == null) -1 else messages.indexOfLast { it is ChatItem.Tool && it.taskId == taskId }
         when {
@@ -1400,26 +1831,42 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         ChatRole.USER -> ChatItem.User(h.text)
         // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
         ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
-        // ok/output: a completed sub-agent card keeps its outcome + expandable report across replays (issue #77)
-        ChatRole.TOOL -> ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output)
+        // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
+        // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77);
+        // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
+        ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
+            ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
     }
 
     private fun <T> replace(list: MutableList<T>, items: List<T>) {
         list.clear(); list.addAll(items)
     }
 
-    private fun clearBackgroundJobs() = replace(backgroundJobs, emptyList())
+    private fun clearBackgroundJobs() {
+        replace(backgroundJobs, emptyList())
+        // workflow state is per-conversation, cleared at the same session boundaries (#106)
+        workflowRuns.clear()
+        workflowAgentDetails.clear()
+        viewedWorkflowRunId.value = null
+    }
 
     private fun appendChunk(c: AssistantChunk) {
         streaming.value = true
         when (val p = c.piece) {
             is StreamPiece.Text -> {
                 finishThinking() // prose starting = the thinking block (if any) is done
+                // one-shot replay-echo dedupe (issue #107): the first block after a merged ConvoHistory
+                // can be the very block the replay already included — appending it would double the
+                // bubble's tail. Only an exact tail match is dropped; anything else streams normally.
+                val echo = replayEcho && TranscriptMerge.isEchoText(messages, p.text)
+                replayEcho = false
+                if (echo) return
                 val last = messages.lastOrNull()
                 if (last is ChatItem.Assistant) messages[messages.lastIndex] = last.copy(text = last.text + p.text)
                 else messages.add(ChatItem.Assistant(p.text))
             }
             is StreamPiece.Thinking -> {
+                replayEcho = false // replay carries no thinking rows — a thinking chunk can't be an echo
                 val last = messages.lastOrNull()
                 if (last is ChatItem.Thinking && last.seconds == null) {
                     messages[messages.lastIndex] = last.copy(text = last.text + p.text)
@@ -1495,6 +1942,56 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun authLogout() = scope.launch { runCatching { send(AuthLogout) } }
 
+    /** API presets (issue #113): the daemon's presets truth — the latest [PresetsState] reply wins.
+     *  Null until first fetched (or the daemon predates pocket/presets.* and silently drops the
+     *  request — the client then shows an "update the daemon" line and NEVER offers the token form,
+     *  so a plaintext token can't be fired at a peer that won't store it). */
+    val presetsState = mutableStateOf<PresetsState?>(null)
+
+    /** Monotonic count of [PresetsState] replies — the settle signal for spinners/forms (see handle). */
+    val presetsStateRev = mutableStateOf(0)
+
+    fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
+
+    /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
+     *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */
+    fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) =
+        scope.launch {
+            runCatching {
+                send(
+                    SavePreset(
+                        id = id, name = name, baseUrl = baseUrl, tokenVar = tokenVar,
+                        token = token?.takeIf { it.isNotBlank() }?.let(::Secret),
+                        model = model?.takeIf { it.isNotBlank() },
+                        smallFastModel = smallFastModel?.takeIf { it.isNotBlank() },
+                    ),
+                )
+            }
+        }
+
+    fun deletePreset(id: String, force: Boolean = false) = scope.launch { runCatching { send(DeletePreset(id, force)) } }
+
+    /** Switch the active preset (null = back to the computer's own env/login). Same semantics as an
+     *  account switch: mid-task sessions refuse via [PresetsState.blockers]; idle ones close + resume. */
+    fun activatePreset(id: String?, force: Boolean = false) = scope.launch { runCatching { send(ActivatePreset(id, force)) } }
+
+    /** Stop ONE preset-switch blocker (hard close), then re-attempt activating [retryId] — the daemon
+     *  either proceeds (that was the last blocker) or replies with the remaining list. */
+    fun presetStopBlocker(convoId: String, retryId: String?) = scope.launch {
+        runCatching {
+            send(CloseSession(convoId, force = true))
+            send(ActivatePreset(retryId))
+        }
+    }
+
+    /** Same, for a blocked DELETE of the active preset: close one blocker, retry the delete. */
+    fun presetStopBlockerForDelete(convoId: String, deleteId: String) = scope.launch {
+        runCatching {
+            send(CloseSession(convoId, force = true))
+            send(DeletePreset(deleteId))
+        }
+    }
+
     /** Token-usage dashboard (issue #26): the latest daemon-aggregated snapshot + a fetch-in-flight flag. */
     val usage = mutableStateOf<Usage?>(null)
     val usageLoading = mutableStateOf(false)
@@ -1503,6 +2000,58 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun fetchUsage(days: Int = 7) {
         usageLoading.value = true
         scope.launch { send(FetchUsage(days)) }
+    }
+
+    // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
+    /** Folders I've shared out (the management page) — the latest [ShareListing]. */
+    val shares = mutableStateListOf<ShareInfo>()
+    /** True once the first [ShareListing] of this session lands — distinguishes "empty" from "still loading". */
+    val sharesLoaded = mutableStateOf(false)
+    /** A create/list/revoke round-trip is in flight (spinner + button disable). */
+    val sharesRefreshing = mutableStateOf(false)
+    /** The most recent [ShareCreated] — the invite-ready screen reads its `invite`, or its `error`. */
+    val lastShareCreated = mutableStateOf<ShareCreated?>(null)
+
+    // ── guest side (issue #115 follow-up): the precise "your share ended" notice ──
+
+    /** Set when the daemon told this GUEST its folder share ended ([ShareEnded]): the precise reason
+     *  behind the disconnect that follows, driving the "Access ended · revoked/expired" terminal instead
+     *  of the generic re-pair screen. Persisted per account (the frame can only ever precede the cut once —
+     *  a relaunch must still light the card) and cleared when the binding is removed. Never set for an
+     *  owner device: the daemon emits the frame exclusively to guest credentials. */
+    val shareEnded = mutableStateOf(loadShareEnded(paired.value?.accountId))
+
+    private fun loadShareEnded(accountId: String?): ShareEnded? {
+        val raw = accountId?.let { SecureStore.getString(K_SHARE_ENDED_PREFIX + it) } ?: return null
+        val t = raw.split('\t')
+        return ShareEnded(reason = t[0], ownerLabel = t.getOrNull(1)?.takeIf { it.isNotEmpty() })
+    }
+
+    internal fun onShareEnded(f: ShareEnded) { // internal: exercised directly by ShareRepoTest
+        shareEnded.value = f
+        paired.value?.let { SecureStore.putString(K_SHARE_ENDED_PREFIX + it.accountId, f.reason + "\t" + (f.ownerLabel ?: "")) }
+        // the credential dies with the notice — the disconnect that follows must not auto-retry (same
+        // terminal treatment as AuthError; the gate renders the ended card off shareEnded, not the generic copy)
+        pairingInvalid = true; retryJob?.cancel(); recomputePhase()
+    }
+
+    /** Owner: mint a scoped, expiring invite for [path]. Reply lands in [lastShareCreated]. */
+    fun createShare(path: String, tier: AccessTier, expiresInSec: Long, label: String? = null) {
+        lastShareCreated.value = null; sharesRefreshing.value = true
+        scope.launch { runCatching { send(CreateShare(path, tier, expiresInSec, label)) } }
+    }
+
+    /** Owner: refresh the list of folders I've shared + who's using them (the management page). */
+    fun listShares() { sharesRefreshing.value = true; scope.launch { runCatching { send(ListShares) } } }
+
+    /** Owner: revoke a share by its guest [deviceId] — cuts the live link now, kills the credential. */
+    fun revokeShare(deviceId: String) { sharesRefreshing.value = true; scope.launch { runCatching { send(RevokeShare(deviceId)) } } }
+
+    /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
+     *  but the daemon scopes this binding to the one shared folder (issue #115). */
+    fun redeemShareInvite(invite: ShareInvite) {
+        status.value = StatusMsg(Res.string.status_pairing)
+        scope.launch { doPair("share") { invite.toPairingInfo() } }
     }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
@@ -1515,6 +2064,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val dir = wd ?: sessionsDir.value ?: return
         refreshWithSpinner(sessionsRefreshing, ListSessions(dir))
     }
+
+    // Session groups (issue #119). Every mutation targets the currently-listed project ([sessionsDir]); the
+    // daemon answers each by re-pushing that dir's Sessions frame, so [sessions]/[sessionGroups] refresh
+    // themselves — no optimistic local edit. Guest connections are owner-gated at the daemon (no-op there).
+    fun createGroup(name: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        if (name.isBlank()) return
+        scope.launch { send(GroupCreate(dir, name.trim())) }
+    }
+    fun renameGroup(groupId: String, name: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        if (name.isBlank()) return
+        scope.launch { send(GroupRename(dir, groupId, name.trim())) }
+    }
+    fun deleteGroup(groupId: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        scope.launch { send(GroupDelete(dir, groupId)) }
+    }
+    /** Move [sessionId] into [groupId], or out of any group when [groupId] is null. */
+    fun assignGroup(sessionId: String, groupId: String?, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        scope.launch { send(GroupAssign(dir, sessionId, groupId)) }
+    }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
@@ -1522,6 +2094,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         openTimedOut.value = false
         promptPending = false // the pending marker belongs to the previous conversation's transcript
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) new session clears any ack→turn stall
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
@@ -1530,11 +2103,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the previous session's in-flight work on every switch. Switching back later resumes by
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
-        messages.clear(); convoId.value = null
+        messages.clear(); convoId.value = null; replayEcho = false
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
+        composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
+        turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
@@ -1589,6 +2164,144 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         revalidatePending() // freeing budget may let a previously-rejected photo back in
     }
 
+    // ── file uploads into the workspace inbox (issue #90) ────────────────────────────────────
+
+    /** Any staged file still moving? The send button waits (design: spinner) until uploads settle. */
+    fun uploadsBusy() = pendingFiles.any { it.state == FileUpState.Uploading || it.state == FileUpState.Queued }
+
+    fun hasLandedFiles() = pendingFiles.any { it.state == FileUpState.Landed && it.path != null }
+
+    /** Stage picked files: over-cap picks fail immediately (nothing to stream); the rest queue and
+     *  upload ONE at a time — chunks of a 200 MB file must not starve asks/heartbeats on the socket. */
+    fun attachFiles(picked: List<PickedFile>) {
+        val room = MAX_FILES - pendingFiles.size
+        picked.take(room.coerceAtLeast(0)).forEach { p ->
+            val id = pendingIdSeq++
+            val tooBig = p.size > MAX_UPLOAD_BYTES || p.bytes.size > MAX_UPLOAD_BYTES
+            val unreadable = !tooBig && p.bytes.isEmpty() && p.size > 0 // picker couldn't load it
+            pendingFiles.add(
+                when {
+                    tooBig -> PendingFile(id, p.name, p.size, ByteArray(0), p.mediaType, FileUpState.Failed, error = "larger than 200 MB")
+                    unreadable -> PendingFile(id, p.name, p.size, ByteArray(0), p.mediaType, FileUpState.Failed, error = "couldn't read the file")
+                    else -> PendingFile(id, p.name, p.bytes.size.toLong(), p.bytes, p.mediaType, FileUpState.Queued, localUri = p.localUri)
+                },
+            )
+        }
+        pumpFileUploads()
+    }
+
+    fun removePendingFile(id: Long) {
+        val i = pendingFiles.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val p = pendingFiles[i]
+        if (p.state == FileUpState.Uploading) {
+            fileUploadJob?.cancel()
+            fileAckDeadline?.cancel()
+            val c = convoId.value
+            val cap = p.captureId
+            if (c != null && cap != null) scope.launch { runCatching { send(FileUploadCancel(c, cap)) } }
+        }
+        pendingFiles.removeAt(i)
+        pumpFileUploads()
+    }
+
+    fun retryPendingFile(id: Long) {
+        val i = pendingFiles.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val p = pendingFiles[i]
+        if (p.state != FileUpState.Failed) return
+        if (p.bytes.isEmpty() && p.size > 0) return // over-cap pick — nothing retained to re-stream
+        pendingFiles[i] = p.copy(state = FileUpState.Queued, error = null, progress = 0f, captureId = null)
+        pumpFileUploads()
+    }
+
+    /** Start the next queued upload if none is in flight. Chunks the RAW bytes and base64s each
+     *  chunk independently — the daemon streams chunks to disk as they arrive, so every chunk must
+     *  decode on its own (unlike audio, which re-joins the base64 string before decoding once). */
+    @OptIn(ExperimentalEncodingApi::class)
+    private fun pumpFileUploads() {
+        if (pendingFiles.any { it.state == FileUpState.Uploading }) return
+        val i = pendingFiles.indexOfFirst { it.state == FileUpState.Queued }
+        if (i < 0) return
+        val f = pendingFiles[i]
+        val c = convoId.value
+        if (c == null) {
+            pendingFiles[i] = f.copy(state = FileUpState.Failed, error = "no live session")
+            return
+        }
+        val capId = randomCaptureId()
+        pendingFiles[i] = f.copy(state = FileUpState.Uploading, captureId = capId, progress = 0f)
+        fileUploadJob = scope.launch {
+            val total = f.bytes.size
+            val parts = fileChunkParts(total)
+            try {
+                for (idx in 0 until parts) {
+                    val from = idx * FILE_CHUNK_RAW
+                    val to = minOf(from + FILE_CHUNK_RAW, total)
+                    val b64 = if (to > from) Base64.Default.encode(f.bytes.copyOfRange(from, to)) else ""
+                    send(
+                        FileChunk(
+                            c, capId, idx, last = idx == parts - 1,
+                            name = f.name, mediaType = f.mediaType, base64 = b64,
+                            totalBytes = if (idx == 0) total.toLong() else 0,
+                        ),
+                    )
+                    updateFile(capId) { it.copy(progress = (idx + 1).toFloat() / parts) }
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                failFileUpload(capId, "connection lost — retry")
+                return@launch
+            }
+            armFileAckDeadline(capId)
+        }
+    }
+
+    /** Last chunk sent → the [FileUploaded] receipt must arrive. An old daemon can't decode the
+     *  chunk frames and silently drops them (the wire's forward-compat contract) — this deadline is
+     *  the ONLY thing distinguishing that from success, same idea as the changed-files guard. */
+    private fun armFileAckDeadline(capId: String) {
+        fileAckDeadline?.cancel()
+        fileAckDeadline = scope.launch {
+            delay(UPLOAD_ACK_TIMEOUT_MS)
+            failFileUpload(capId, "no reply from the computer — its cc-pocket may be too old for file upload")
+        }
+    }
+
+    private fun updateFile(capId: String, f: (PendingFile) -> PendingFile) {
+        val i = pendingFiles.indexOfFirst { it.captureId == capId }
+        if (i >= 0) pendingFiles[i] = f(pendingFiles[i])
+    }
+
+    private fun failFileUpload(capId: String, error: String) {
+        val i = pendingFiles.indexOfFirst { it.captureId == capId && it.state == FileUpState.Uploading }
+        if (i < 0) return
+        pendingFiles[i] = pendingFiles[i].copy(state = FileUpState.Failed, error = error)
+        pumpFileUploads()
+    }
+
+    private fun onFileUploaded(f: FileUploaded) {
+        val i = pendingFiles.indexOfFirst { it.captureId == f.captureId }
+        if (i < 0) return // superseded / cancelled / already consumed by a send
+        fileAckDeadline?.cancel()
+        val p = pendingFiles[i]
+        pendingFiles[i] = if (f.ok && f.path != null) {
+            // bytes are on the computer's disk now — drop our copy (a 200 MB hold matters on a phone)
+            p.copy(state = FileUpState.Landed, progress = 1f, path = f.path, landedName = f.name ?: p.name, bytes = ByteArray(0))
+        } else {
+            p.copy(state = FileUpState.Failed, error = f.error ?: "upload failed")
+        }
+        pumpFileUploads()
+    }
+
+    /** Session teardown/switch: kill the loop + receipts and drop staged files (their landed copies
+     *  stay in the old session's inbox — harmless, swept by nothing on purpose: the user sent none). */
+    private fun clearFileUploads() {
+        fileUploadJob?.cancel(); fileUploadJob = null
+        fileAckDeadline?.cancel(); fileAckDeadline = null
+        pendingFiles.clear()
+    }
+
     /** Mark photos Rejected once their cumulative base64 would exceed [IMAGE_BUDGET_B64] (one frame holds them all). */
     private fun revalidatePending() {
         var used = 0
@@ -1610,8 +2323,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     @OptIn(ExperimentalEncodingApi::class)
     fun sendPrompt(text: String): Boolean {
         val c = convoId.value ?: return false
+        if (uploadsBusy()) return false // send waits for uploads to settle (the button shows the spinner)
         val ready = pendingImages.filter { it.state == ImgState.Ready }.map { it.bytes }
-        if (text.isBlank() && ready.isEmpty()) return false
+        val landed = pendingFiles.filter { it.state == FileUpState.Landed && it.path != null }
+        if (text.isBlank() && ready.isEmpty() && landed.isEmpty()) return false
         // slash commands bypass the gate — /clear and /compact are exactly how a dead session heals
         if (sessionDegraded.value && !degradedSendArmed && !text.trimStart().startsWith("/")) {
             degradedSendArmed = true
@@ -1626,16 +2341,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         degradedSendArmed = false // consumed — the next prompt into a still-degraded session gates again
         if (voice.value is VoiceState.Failed) clearVoice() // sending dismisses the error chip
         val images = ready.map { ImageData("image/jpeg", Base64.Default.encode(it)) }
+        // landed files ride as `@path` references appended to the prompt — the #75 mechanism, so the
+        // agent Reads the inbox file by path; the daemon never re-parses anything upload-specific
+        val refs = landed.joinToString("\n") { "@${it.path}" }
+        val outText = when {
+            landed.isEmpty() -> text
+            text.isBlank() -> refs
+            else -> text + "\n\n" + refs
+        }
+        val sentFiles = landed.map { SentFile(it.landedName ?: it.name, it.size, it.path!!, mediaType = it.mediaType, localUri = it.localUri) }
         val promptId = newPromptId()
-        messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId))
+        messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId, files = sentFiles))
         promptPending = true
         turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
         if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
         pendingImages.clear()
+        pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
+        promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
-        workdir.value?.let { promptRetry = PromptRetry(text, images, it, promptId); promptResendArmed = false }
+        workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
-        scope.launch { send(SendPrompt(c, text, images, promptId = promptId)) }
+        scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
         armPromptWatchdog()
         return true
     }
@@ -1656,6 +2382,53 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // non-Ready phases already have the retry/backoff machinery (and the UI banner) on the case
             if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) launchTransport(reconnect = true)
         }
+    }
+
+    /** Second-stage watchdog (issue #104): a delivered prompt that produces no turn frame within the deadline
+     *  was swallowed by a wedged / mid-relaunch agent. Surface an inline resend cue instead of spinning forever.
+     *  Self-guarded at fire time — a turn frame ([awaitingTurn] cleared), a session change ([convoId] moved off
+     *  the one captured here), or a turn that already ended ([streaming] false) all no-op it, so it never fires
+     *  into a stale conversation and no teardown path has to reach in and cancel it.
+     *  [queued] flips the fired state: a prompt sent mid-turn waits in the CLI's queue, where the same silence
+     *  is expected — it gets the calm [turnQueued] status, never the resend cue (see [turnQueued] for why). */
+    private fun armTurnWatchdog(queued: Boolean) {
+        val c = convoId.value
+        turnWatchdog?.cancel()
+        turnWatchdog = scope.launch {
+            delay(promptTurnTimeoutMs)
+            if (!awaitingTurn || convoId.value != c || !streaming.value) return@launch
+            if (queued) {
+                turnQueued.value = true
+                Telemetry.track(TelEvent.PromptTurnQueued, mapOf(TelKey.Phase to phase.value.name))
+                return@launch
+            }
+            turnStalled.value = true
+            // this fires ONLY after a PromptAck, so it inherently means "daemon delivered, agent produced
+            // nothing" (candidate 3) — distinct from the no-ack stall (issue #78). Phase tags the link state.
+            Telemetry.track(TelEvent.PromptTurnStalled, mapOf(TelKey.Phase to phase.value.name))
+        }
+    }
+
+    /** User tapped the "no response — resend" cue (issue #104). Re-drive the stalled turn under a FRESH
+     *  promptId: the live daemon Conversation already recorded the original id, so a same-id resend would be
+     *  deduped (#66) into a bare re-ack and never run. Single-shot — guarded on [turnStalled], which a real
+     *  turn frame retracts first, so a resend can't land on top of a turn that actually started. No second
+     *  User bubble is added (that duplicate "You" is the very symptom #104 is about); we just re-run the turn. */
+    fun resendStalledPrompt() {
+        if (!turnStalled.value) return
+        val c = convoId.value ?: run { turnStalled.value = false; return }
+        val retry = promptRetry ?: run { turnStalled.value = false; return }
+        turnStalled.value = false
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false
+        val freshId = newPromptId()
+        promptRetry = PromptRetry(retry.text, retry.images, retry.workdir, freshId)
+        promptResendArmed = false
+        promptPending = true // pending until the re-driven turn shows life
+        promptQueued = false // the stalled turn never started — the re-driven copy expects the strict deadline
+        streaming.value = true
+        Telemetry.track(TelEvent.PromptResent)
+        scope.launch { send(SendPrompt(c, retry.text, retry.images, promptId = freshId)) }
+        armPromptWatchdog() // the resent copy gets its own receipt deadline; its ack re-arms the turn watchdog
     }
 
     /** Client-minted id a [dev.ccpocket.protocol.PromptAck] echoes back (issue #66) — random hex is
@@ -1683,6 +2456,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // requests carry a client-side deadline: better an honest "update the daemon" than an eternal spinner.
     private var changedFilesDeadline: Job? = null
     private var viewedFileDeadline: Job? = null
+    private var exportDeadline: Job? = null // separate: approval can take the daemon's whole 30s window
 
     /** Ask the daemon for the files this session touched (issue #36); the reply lands in [changedFiles].
      *  Needs the persistent sessionId — pre-first-turn sessions have nothing to list anyway. */
@@ -1711,6 +2485,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         viewedFilePath.value = path
         viewedFile.value = null // show the loading state, not the previous file
         viewedFileDiff.value = null
+        exportWaiting.value = false; exportDeadline?.cancel() // a fresh file owes nothing to a prior export
         // ONE deadline arms both replies; each check no-ops once its reply landed, so a daemon that
         // answers ReadFile but predates ReadFileDiff still gets the honest "needs a newer daemon" state.
         viewedFileDeadline?.cancel()
@@ -1733,7 +2508,32 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
+        exportDeadline?.cancel(); exportWaiting.value = false
         viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
+    }
+
+    /** Ask the daemon to export the viewer's current path even though this session never changed it
+     *  (issue #67 v2 / #79 — Bash/script-generated files the changed-set firewall refuses). The daemon
+     *  serves changed files straight away and gates everything else behind the owner's approval card
+     *  (the same PermissionAsk sheet as Bash); the reply is a [FileContent] for the same identity, so
+     *  it lands in [viewedFile] like any read — served, or ok=false carrying the refusal/denial reason.
+     *  The deadline outlasts the daemon's 30s approval window; an old daemon drops the unknown frame
+     *  and this lands in the honest "update the daemon" state instead of spinning forever. */
+    fun requestExport() {
+        val path = viewedFilePath.value ?: return
+        val wd = workdir.value ?: return
+        val sid = sessionKey.value ?: currentSessionId ?: return
+        val cid = convoId.value ?: return
+        exportWaiting.value = true
+        exportDeadline?.cancel()
+        exportDeadline = scope.launch {
+            delay(45_000)
+            if (viewedFilePath.value == path && exportWaiting.value) {
+                exportWaiting.value = false
+                viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
+            }
+        }
+        scope.launch { send(ExportFile(cid, wd, sid, path, sessionAgent.value ?: AgentKind.CLAUDE)) }
     }
 
     /** Ask the daemon for the children under the open session's cwd + [subPath] (relative, daemon-native
@@ -2091,6 +2891,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         chatTitle.value = null
         messages.clear()
         pendingImages.clear()
+        clearFileUploads()
         clearBackgroundJobs()
         observing.value = false
         abandonVoice()
@@ -2128,6 +2929,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         chatTitle.value = null
         messages.clear()
         pendingImages.clear()
+        clearFileUploads()
         clearBackgroundJobs()
         abandonVoice()
     }
@@ -2137,7 +2939,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessions.clear()
     }
 
-    private companion object {
+    internal companion object {
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
@@ -2156,6 +2958,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val TRANSCRIBE_TIMEOUT_MS = 15_000L    // upload → Transcript round-trip guard
         const val NATIVE_FINAL_TIMEOUT_MS = 8_000L   // native engine: stop() → Final guard
 
+        // file uploads (issue #90)
+        const val MAX_FILES = 6                      // staged at once — matches the chip strip's comfortable width
+        // Raw bytes per FileChunk. 768 000 raw → exactly 1 024 000 base64 chars (multiple of 3: no
+        // mid-stream padding), ~1.0 MiB per wire frame after the JSON envelope + Noise AEAD tag —
+        // a 4× margin under the relay's 4 MiB frame cap, big enough that a 200 MB file is ~274
+        // frames, small enough that asks/heartbeats interleave between chunks on the shared socket.
+        const val FILE_CHUNK_RAW = 768_000
+        const val UPLOAD_ACK_TIMEOUT_MS = 20_000L    // last chunk → FileUploaded receipt guard ("update the daemon" state)
+
+        /** Chunks a raw file of [total] bytes into ceil(total / [FILE_CHUNK_RAW]) frames, floored at 1 (an
+         *  empty file still sends one terminal chunk carrying `last=true`). Extracted so the large-file
+         *  boundary — a 200 MB video is 274 frames, and an exact multiple must NOT emit a trailing empty
+         *  chunk — stays unit-testable (issues #90/#98). */
+        fun fileChunkParts(total: Int): Int = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
+
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
@@ -2169,6 +2986,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
+        const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
     }

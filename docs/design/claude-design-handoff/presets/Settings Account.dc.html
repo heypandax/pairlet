@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    html, body { margin:0; padding:0; background:#0B0C0D; }
+    * { -webkit-font-smoothing:antialiased; box-sizing:border-box; }
+    .cc-row { transition:border-color .14s ease, background .14s ease; }
+    .cc-row .cc-actions { opacity:0; transition:opacity .13s ease; }
+    .cc-row:hover .cc-actions { opacity:1; }
+    .cc-tbtn { transition:color .12s ease, background .12s ease; cursor:pointer; }
+    .cc-newp { position:relative; transition:border-color .14s ease, background .14s ease; cursor:pointer; }
+    .cc-newp:hover { background:rgba(217,119,87,0.06); }
+    .cc-newp-l:hover { background:rgba(193,95,60,0.06); }
+    .cc-newp:hover .cc-newp-b { border-color:rgba(217,119,87,0.55); }
+    .cc-newp-l:hover .cc-newp-b { border-color:rgba(193,95,60,0.55); }
+    @keyframes ccSpin { to { transform:rotate(360deg); } }
+    .cc-spin { animation:ccSpin .7s linear infinite; }
+  </style>
+</helmet>
+
+<section style="background:#0B0C0D; padding:56px 60px 0; font-family:'Inter',system-ui,sans-serif;">
+
+  <div style="max-width:900px; margin:0 0 44px 0;">
+    <div style="font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace;">cc-pocket · settings ▸ account</div>
+    <div style="font-size:22px; font-weight:600; color:#ECEDEE; margin-top:10px;">Switching the active preset</div>
+    <div style="font-size:13.5px; color:#9BA1A6; margin-top:6px; max-width:560px; line-height:1.5;">Env injects when a session starts, so a switch applies to new sessions. Live sessions block the switch using the same refusal treatment as OAuth account-switch.</div>
+  </div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:56px 48px; align-items:flex-start;">
+
+    <!-- =================== 3a — Activating (DARK) =================== -->
+    <div id="3a" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">3a</span>
+        <span style="font-size:13px; color:#9BA1A6;">Activating · optimistic · dark</span>
+      </div>
+      <div style="width:476px; background:#0E0F11; border:1px solid #2A2E33; border-radius:12px; padding:24px;">
+        <div style="font-size:13.5px; font-weight:600; color:#ECEDEE;">API presets</div>
+        <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">Saved endpoints you can switch between. New sessions use the active one.</div>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+          <!-- previously active, fading out -->
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid rgba(217,119,87,0.22); background:rgba(217,119,87,0.03); transition:all .2s ease;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#D97757; opacity:0.35; flex:none;"></span>
+            <span style="font-size:13px; color:#ECEDEE;">Work proxy</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">api.example-proxy.com</span>
+          </div>
+          <!-- tapped row activating -->
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #2A2E33; background:rgba(217,119,87,0.04);">
+            <span style="width:8px; height:8px; border-radius:50%; background:#4A4F55; flex:none;"></span>
+            <span style="font-size:13px; color:#ECEDEE;">Personal key</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">api.anthropic.com</span>
+            <span style="margin-left:auto; display:flex; align-items:center; gap:7px; flex:none;">
+              <span class="cc-spin" style="width:11px; height:11px; border:1.6px solid rgba(217,119,87,0.3); border-top-color:#D97757; border-radius:50%; display:inline-block;"></span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#D97757;">Activating…</span>
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #2A2E33;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#4A4F55; flex:none;"></span>
+            <span style="font-size:13px; color:#ECEDEE;">Local llama</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">localhost:11434</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 3b — Settled + explanation (DARK) =================== -->
+    <div id="3b" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">3b</span>
+        <span style="font-size:13px; color:#9BA1A6;">Settled · new-sessions note · dark</span>
+      </div>
+      <div style="width:476px; background:#0E0F11; border:1px solid #2A2E33; border-radius:12px; padding:24px;">
+        <!-- updated auth card -->
+        <div style="background:#16181B; border:1px solid #2A2E33; border-radius:12px; padding:14px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"></rect><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>
+            <span style="font-size:13px; font-weight:600; color:#ECEDEE;">API key</span>
+            <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#D97757; background:rgba(217,119,87,0.13); border:1px solid rgba(217,119,87,0.3); padding:2.5px 8px; border-radius:20px;">preset · Personal key</span>
+          </div>
+          <div style="height:1px; background:#22262B; margin:13px 0;"></div>
+          <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#6B7177; font-weight:600;">Base URL</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#ECEDEE; margin-top:4px;">https://api.anthropic.com</div>
+          <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#6B7177; font-weight:600; margin-top:12px;">Token</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#ECEDEE; margin-top:4px;"><span style="color:#9BA1A6;">ANTHROPIC_AUTH_TOKEN</span> · sk-…<span style="color:#6B7177;">••••</span>a71c</div>
+        </div>
+
+        <div style="font-size:13.5px; font-weight:600; color:#ECEDEE; margin-top:20px;">API presets</div>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #2A2E33;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#4A4F55; flex:none;"></span>
+            <span style="font-size:13px; color:#ECEDEE;">Work proxy</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">api.example-proxy.com</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid rgba(217,119,87,0.55); background:rgba(217,119,87,0.09);">
+            <span style="width:8px; height:8px; border-radius:50%; background:#D97757; flex:none; box-shadow:0 0 0 3px rgba(217,119,87,0.18);"></span>
+            <span style="font-size:13px; font-weight:600; color:#ECEDEE;">Personal key</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">api.anthropic.com</span>
+            <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.05em; color:#D97757; background:rgba(217,119,87,0.13); padding:2px 7px; border-radius:5px; flex:none;">active</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #2A2E33;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#4A4F55; flex:none;"></span>
+            <span style="font-size:13px; color:#ECEDEE;">Local llama</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">localhost:11434</span>
+          </div>
+        </div>
+        <div style="font-size:11px; color:#6B7177; margin-top:12px; line-height:1.5;">New sessions on <span style="font-family:'JetBrains Mono',monospace; color:#9BA1A6;">studio-mini</span> use this preset. Sessions already open keep the endpoint they started with.</div>
+      </div>
+    </div>
+
+    <!-- =================== 3c — Blocked by live session + error line (DARK) =================== -->
+    <div id="3c" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">3c</span>
+        <span style="font-size:13px; color:#9BA1A6;">Blocked by live session + reach error · dark</span>
+      </div>
+      <div style="width:476px; display:flex; flex-direction:column; gap:12px;">
+        <div style="background:#0E0F11; border:1px solid #2A2E33; border-radius:12px; padding:24px;">
+          <!-- blockers card -->
+          <div style="background:#16181B; border:1px solid rgba(224,169,59,0.4); border-radius:12px; padding:14px;">
+            <div style="display:flex; align-items:center; gap:9px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E0A93B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 22 20H2L12 3.5Z"></path><path d="M12 10v4M12 17v0"></path></svg>
+              <span style="font-size:12.5px; font-weight:600; color:#ECEDEE;">These sessions are still working and block the switch:</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:2px; margin-top:12px;">
+              <div style="display:flex; align-items:center; gap:11px; padding:9px 4px; border-top:1px solid #22262B;">
+                <div style="min-width:0;">
+                  <div style="font-size:12.5px; color:#ECEDEE;">acme-web</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#6B7177; margin-top:2px;">Mid-turn right now</div>
+                </div>
+                <span style="margin-left:auto; font-size:11.5px; color:#E5604D; padding:3px 9px; border-radius:6px; cursor:pointer; flex:none;">Stop</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:11px; padding:9px 4px; border-top:1px solid #22262B;">
+                <div style="min-width:0;">
+                  <div style="font-size:12.5px; color:#ECEDEE;">robotics-firmware</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#6B7177; margin-top:2px;">2 background tasks: test suite, deploy</div>
+                </div>
+                <span style="margin-left:auto; font-size:11.5px; color:#E5604D; padding:3px 9px; border-radius:6px; cursor:pointer; flex:none;">Stop</span>
+              </div>
+            </div>
+            <div style="height:1px; background:#22262B; margin:12px 0;"></div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:11px; color:#6B7177; line-height:1.45;">Sessions can be resumed afterwards; their background tasks end.</span>
+              <span style="margin-left:auto; font-size:12px; font-weight:600; color:#E5604D; border:1px solid rgba(229,96,77,0.45); padding:6px 12px; border-radius:7px; cursor:pointer; flex:none; white-space:nowrap;">Stop all &amp; switch</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- inline reach error variant -->
+        <div style="display:flex; align-items:center; gap:9px; background:rgba(229,96,77,0.08); border:1px solid rgba(229,96,77,0.35); border-radius:9px; padding:10px 12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E5604D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3.5 22 20H2L12 3.5Z"></path><path d="M12 10v4M12 17v0"></path></svg>
+          <span style="font-size:12px; color:#E5604D;">Couldn't reach the computer — try again.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 3d — Settled (LIGHT) =================== -->
+    <div id="3d" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#FFFFFF; background:#C15F3C; padding:2px 9px; border-radius:6px;">3d</span>
+        <span style="font-size:13px; color:#9BA1A6;">Settled · new-sessions note · light</span>
+      </div>
+      <div style="width:476px; background:#FAF9F7; border:1px solid #E4E1DB; border-radius:12px; padding:24px;">
+        <div style="background:#FFFFFF; border:1px solid #E4E1DB; border-radius:12px; padding:14px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6066" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"></rect><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>
+            <span style="font-size:13px; font-weight:600; color:#1C1D1F;">API key</span>
+            <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#C15F3C; background:rgba(193,95,60,0.1); border:1px solid rgba(193,95,60,0.28); padding:2.5px 8px; border-radius:20px;">preset · Personal key</span>
+          </div>
+          <div style="height:1px; background:#EDEAE4; margin:13px 0;"></div>
+          <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#878C92; font-weight:600;">Base URL</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#1C1D1F; margin-top:4px;">https://api.anthropic.com</div>
+          <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#878C92; font-weight:600; margin-top:12px;">Token</div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#1C1D1F; margin-top:4px;"><span style="color:#5B6066;">ANTHROPIC_AUTH_TOKEN</span> · sk-…<span style="color:#878C92;">••••</span>a71c</div>
+        </div>
+
+        <div style="font-size:13.5px; font-weight:600; color:#1C1D1F; margin-top:20px;">API presets</div>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #E4E1DB;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#C7C3BB; flex:none;"></span>
+            <span style="font-size:13px; color:#1C1D1F;">Work proxy</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92;">api.example-proxy.com</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid rgba(193,95,60,0.5); background:rgba(193,95,60,0.07);">
+            <span style="width:8px; height:8px; border-radius:50%; background:#C15F3C; flex:none; box-shadow:0 0 0 3px rgba(193,95,60,0.15);"></span>
+            <span style="font-size:13px; font-weight:600; color:#1C1D1F;">Personal key</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92;">api.anthropic.com</span>
+            <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.05em; color:#C15F3C; background:rgba(193,95,60,0.1); padding:2px 7px; border-radius:5px; flex:none;">active</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #E4E1DB;">
+            <span style="width:8px; height:8px; border-radius:50%; background:#C7C3BB; flex:none;"></span>
+            <span style="font-size:13px; color:#1C1D1F;">Local llama</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92;">localhost:11434</span>
+          </div>
+        </div>
+        <div style="font-size:11px; color:#878C92; margin-top:12px; line-height:1.5;">New sessions on <span style="font-family:'JetBrains Mono',monospace; color:#5B6066;">studio-mini</span> use this preset. Sessions already open keep the endpoint they started with.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="height:1px; background:#1A1C1F; margin:56px 0 0;"></div>
+
+</section>
+
+<section style="background:#0B0C0D; padding:56px 60px 0; font-family:'Inter',system-ui,sans-serif;">
+
+  <div style="max-width:900px; margin:0 0 44px 0;">
+    <div style="font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace;">cc-pocket · settings ▸ account</div>
+    <div style="font-size:22px; font-weight:600; color:#ECEDEE; margin-top:10px;">Preset form — create &amp; edit</div>
+    <div style="font-size:13.5px; color:#9BA1A6; margin-top:6px; max-width:560px; line-height:1.5;">The form replaces the Account pane's scroll content in place (one undecorated window). Token is write-only — the app can set it but never read it back.</div>
+  </div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:56px 48px; align-items:flex-start;">
+
+    <!-- =================== 2a — Clean create form (DARK) =================== -->
+    <div id="2a" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">2a</span>
+        <span style="font-size:13px; color:#9BA1A6;">New preset · clean · dark</span>
+      </div>
+
+      <div style="width:700px; height:520px; display:flex; background:#0E0F11; border:1px solid #2A2E33; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+        <div style="width:176px; flex:none; background:#121316; border-right:1px solid #2A2E33; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#ECEDEE; background:rgba(217,119,87,0.14); box-shadow:inset 2px 0 0 #D97757;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">About</div>
+        </div>
+        <div style="flex:1; background:#0E0F11; padding:24px; overflow-y:auto; display:flex; flex-direction:column;">
+
+          <div style="display:flex; align-items:center; gap:9px;">
+            <span style="font-size:12.5px; color:#9BA1A6; cursor:pointer;">‹ Presets</span>
+          </div>
+          <div style="font-size:15px; font-weight:600; color:#ECEDEE; margin-top:8px;">New preset</div>
+
+          <!-- Name -->
+          <div style="margin-top:18px;">
+            <div style="font-size:12px; font-weight:500; color:#ECEDEE;">Name</div>
+            <div style="margin-top:6px; background:#131518; border:1px solid #2A2E33; border-radius:7px; padding:8px 11px; font-size:13px; color:#ECEDEE;">Work proxy</div>
+          </div>
+
+          <!-- Base URL -->
+          <div style="margin-top:14px;">
+            <div style="font-size:12px; font-weight:500; color:#ECEDEE;">Base URL</div>
+            <div style="margin-top:6px; background:#131518; border:1px solid #2A2E33; border-radius:7px; padding:8px 11px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177;">https://api.example-proxy.com/v1</div>
+            <div style="font-size:10.5px; color:#6B7177; margin-top:5px;"><span style="font-family:'JetBrains Mono',monospace; color:#9BA1A6;">ANTHROPIC_BASE_URL</span> — where the CLI sends requests.</div>
+          </div>
+
+          <!-- Auth token -->
+          <div style="margin-top:14px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:12px; font-weight:500; color:#ECEDEE;">Auth token</span>
+              <span style="margin-left:auto; display:inline-flex; background:#131518; border:1px solid #2A2E33; border-radius:6px; padding:2px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+                <span style="padding:2.5px 7px; border-radius:4px; background:#2A2E33; color:#ECEDEE;">AUTH_TOKEN</span>
+                <span style="padding:2.5px 7px; border-radius:4px; color:#6B7177;">API_KEY</span>
+              </span>
+            </div>
+            <div style="margin-top:6px; display:flex; align-items:center; background:#131518; border:1px solid #2A2E33; border-radius:7px; padding:8px 11px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#ECEDEE; letter-spacing:1.5px;">••••••••••••••••••••</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto; cursor:pointer;"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>
+            </div>
+            <div style="font-size:10.5px; color:#6B7177; margin-top:5px;"><span style="font-family:'JetBrains Mono',monospace; color:#9BA1A6;">ANTHROPIC_AUTH_TOKEN</span> — stored on the computer, never shown here again.</div>
+          </div>
+
+          <!-- Model routing collapsed -->
+          <div style="margin-top:14px; display:flex; align-items:center; gap:8px; padding:9px 11px; border:1px solid #22262B; border-radius:9px; cursor:pointer;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6B7177" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            <span style="font-size:12px; color:#9BA1A6;">Model routing</span>
+            <span style="font-size:11px; color:#6B7177;">(optional)</span>
+          </div>
+
+          <!-- Footer -->
+          <div style="margin-top:auto; padding-top:20px; display:flex; align-items:center; gap:10px;">
+            <span style="margin-left:auto;"></span>
+            <span style="font-size:12.5px; color:#9BA1A6; padding:8px 14px; border:1px solid #2A2E33; border-radius:7px; cursor:pointer;">Cancel</span>
+            <span style="font-size:12.5px; font-weight:600; color:#0B0C0D; background:#D97757; padding:8px 16px; border-radius:7px; cursor:pointer;">Save preset</span>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- eye-toggle behavior explainer -->
+      <div style="width:700px; display:flex; gap:12px; margin-top:2px;">
+        <div style="flex:1; background:#111315; border:1px solid #22262B; border-radius:10px; padding:12px;">
+          <div style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:#6B7177; font-weight:600;">Masked (default)</div>
+          <div style="margin-top:8px; display:flex; align-items:center; background:#131518; border:1px solid #2A2E33; border-radius:7px; padding:8px 11px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#ECEDEE; letter-spacing:1.5px;">••••••••••••••••</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto;"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>
+          </div>
+        </div>
+        <div style="flex:1; background:#111315; border:1px solid #22262B; border-radius:10px; padding:12px;">
+          <div style="font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:#6B7177; font-weight:600;">Revealed while typing</div>
+          <div style="margin-top:8px; display:flex; align-items:center; background:#131518; border:1px solid rgba(217,119,87,0.4); border-radius:7px; padding:8px 11px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#ECEDEE;">sk-proxy-9f2a4c8e3f9a</span>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto;"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="2.6"></circle><path d="M3 3l18 18" stroke="#D97757"></path></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 2b — Validation errors (DARK, edit mode) =================== -->
+    <div id="2b" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">2b</span>
+        <span style="font-size:13px; color:#9BA1A6;">Edit preset · validation errors · dark</span>
+      </div>
+
+      <div style="width:700px; height:520px; display:flex; background:#0E0F11; border:1px solid #2A2E33; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+        <div style="width:176px; flex:none; background:#121316; border-right:1px solid #2A2E33; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#ECEDEE; background:rgba(217,119,87,0.14); box-shadow:inset 2px 0 0 #D97757;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">About</div>
+        </div>
+        <div style="flex:1; background:#0E0F11; padding:24px; overflow-y:auto; display:flex; flex-direction:column;">
+
+          <div style="display:flex; align-items:center; gap:9px;">
+            <span style="font-size:12.5px; color:#9BA1A6; cursor:pointer;">‹ Presets</span>
+          </div>
+          <div style="font-size:15px; font-weight:600; color:#ECEDEE; margin-top:8px;">Edit preset</div>
+
+          <!-- Name — duplicate error -->
+          <div style="margin-top:18px;">
+            <div style="font-size:12px; font-weight:500; color:#ECEDEE;">Name</div>
+            <div style="margin-top:6px; background:#131518; border:1px solid #E5604D; border-radius:7px; padding:8px 11px; font-size:13px; color:#ECEDEE;">Work proxy</div>
+            <div style="font-size:10.5px; color:#E5604D; margin-top:5px;">A preset named 'Work proxy' already exists.</div>
+          </div>
+
+          <!-- Base URL — malformed error -->
+          <div style="margin-top:14px;">
+            <div style="font-size:12px; font-weight:500; color:#ECEDEE;">Base URL</div>
+            <div style="margin-top:6px; background:#131518; border:1px solid #E5604D; border-radius:7px; padding:8px 11px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#ECEDEE;">api.example-proxy.com</div>
+            <div style="font-size:10.5px; color:#E5604D; margin-top:5px;">Enter a valid https URL.</div>
+          </div>
+
+          <!-- Auth token — empty on create error -->
+          <div style="margin-top:14px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:12px; font-weight:500; color:#ECEDEE;">Auth token</span>
+              <span style="margin-left:auto; display:inline-flex; background:#131518; border:1px solid #2A2E33; border-radius:6px; padding:2px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+                <span style="padding:2.5px 7px; border-radius:4px; background:#2A2E33; color:#ECEDEE;">AUTH_TOKEN</span>
+                <span style="padding:2.5px 7px; border-radius:4px; color:#6B7177;">API_KEY</span>
+              </span>
+            </div>
+            <div style="margin-top:6px; display:flex; align-items:center; background:#131518; border:1px solid #E5604D; border-radius:7px; padding:8px 11px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#4A4F55;">•••• stored — leave blank to keep</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto;"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>
+            </div>
+            <div style="font-size:10.5px; color:#E5604D; margin-top:5px;">Paste the API key or token.</div>
+          </div>
+
+          <!-- Footer with disabled save + delete -->
+          <div style="margin-top:auto; padding-top:20px; display:flex; align-items:center; gap:10px;">
+            <span style="font-size:12.5px; color:#E5604D; padding:8px 12px; cursor:pointer;">Delete</span>
+            <span style="margin-left:auto;"></span>
+            <span style="font-size:12.5px; color:#9BA1A6; padding:8px 14px; border:1px solid #2A2E33; border-radius:7px; cursor:pointer;">Cancel</span>
+            <span style="font-size:12.5px; font-weight:600; color:#6B7177; background:#1A1C1F; border:1px solid #22262B; padding:8px 16px; border-radius:7px;">Save preset</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 2c — Clean form (LIGHT) =================== -->
+    <div id="2c" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#FFFFFF; background:#C15F3C; padding:2px 9px; border-radius:6px;">2c</span>
+        <span style="font-size:13px; color:#9BA1A6;">New preset · clean · light</span>
+      </div>
+
+      <div style="width:700px; height:520px; display:flex; background:#FAF9F7; border:1px solid #E4E1DB; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.28);">
+        <div style="width:176px; flex:none; background:#F1EFEB; border-right:1px solid #E4E1DB; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#878C92; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#1C1D1F; background:rgba(193,95,60,0.12); box-shadow:inset 2px 0 0 #C15F3C;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">About</div>
+        </div>
+        <div style="flex:1; background:#FAF9F7; padding:24px; overflow-y:auto; display:flex; flex-direction:column;">
+
+          <div style="display:flex; align-items:center; gap:9px;">
+            <span style="font-size:12.5px; color:#5B6066; cursor:pointer;">‹ Presets</span>
+          </div>
+          <div style="font-size:15px; font-weight:600; color:#1C1D1F; margin-top:8px;">New preset</div>
+
+          <div style="margin-top:18px;">
+            <div style="font-size:12px; font-weight:500; color:#1C1D1F;">Name</div>
+            <div style="margin-top:6px; background:#FFFFFF; border:1px solid #E4E1DB; border-radius:7px; padding:8px 11px; font-size:13px; color:#1C1D1F;">Work proxy</div>
+          </div>
+
+          <div style="margin-top:14px;">
+            <div style="font-size:12px; font-weight:500; color:#1C1D1F;">Base URL</div>
+            <div style="margin-top:6px; background:#FFFFFF; border:1px solid #E4E1DB; border-radius:7px; padding:8px 11px; font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92;">https://api.example-proxy.com/v1</div>
+            <div style="font-size:10.5px; color:#878C92; margin-top:5px;"><span style="font-family:'JetBrains Mono',monospace; color:#5B6066;">ANTHROPIC_BASE_URL</span> — where the CLI sends requests.</div>
+          </div>
+
+          <div style="margin-top:14px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:12px; font-weight:500; color:#1C1D1F;">Auth token</span>
+              <span style="margin-left:auto; display:inline-flex; background:#F1EFEB; border:1px solid #E4E1DB; border-radius:6px; padding:2px; font-family:'JetBrains Mono',monospace; font-size:10px;">
+                <span style="padding:2.5px 7px; border-radius:4px; background:#FFFFFF; color:#1C1D1F; box-shadow:0 1px 2px rgba(0,0,0,0.06);">AUTH_TOKEN</span>
+                <span style="padding:2.5px 7px; border-radius:4px; color:#878C92;">API_KEY</span>
+              </span>
+            </div>
+            <div style="margin-top:6px; display:flex; align-items:center; background:#FFFFFF; border:1px solid #E4E1DB; border-radius:7px; padding:8px 11px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#1C1D1F; letter-spacing:1.5px;">••••••••••••••••••••</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6066" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="margin-left:auto; cursor:pointer;"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>
+            </div>
+            <div style="font-size:10.5px; color:#878C92; margin-top:5px;"><span style="font-family:'JetBrains Mono',monospace; color:#5B6066;">ANTHROPIC_AUTH_TOKEN</span> — stored on the computer, never shown here again.</div>
+          </div>
+
+          <div style="margin-top:14px; display:flex; align-items:center; gap:8px; padding:9px 11px; border:1px solid #EDEAE4; border-radius:9px; cursor:pointer;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#878C92" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            <span style="font-size:12px; color:#5B6066;">Model routing</span>
+            <span style="font-size:11px; color:#878C92;">(optional)</span>
+          </div>
+
+          <div style="margin-top:auto; padding-top:20px; display:flex; align-items:center; gap:10px;">
+            <span style="margin-left:auto;"></span>
+            <span style="font-size:12.5px; color:#5B6066; padding:8px 14px; border:1px solid #E4E1DB; border-radius:7px; cursor:pointer;">Cancel</span>
+            <span style="font-size:12.5px; font-weight:600; color:#FFFFFF; background:#C15F3C; padding:8px 16px; border-radius:7px; cursor:pointer;">Save preset</span>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="height:1px; background:#1A1C1F; margin:56px 0 0;"></div>
+
+</section>
+
+<section style="min-height:100vh; background:#0B0C0D; padding:56px 60px; font-family:'Inter',system-ui,sans-serif;">
+
+  <div style="max-width:900px; margin:0 0 44px 0;">
+    <div style="font-size:12px; letter-spacing:.16em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace;">cc-pocket · settings ▸ account</div>
+    <div style="font-size:22px; font-weight:600; color:#ECEDEE; margin-top:10px;">Account pane — API presets</div>
+    <div style="font-size:13.5px; color:#9BA1A6; margin-top:6px; max-width:560px; line-height:1.5;">One pane inside the 700×500 Settings modal. Current-auth truth (masked) plus named env presets the user can switch between.</div>
+  </div>
+
+  <div style="display:flex; flex-wrap:wrap; gap:56px 48px; align-items:flex-start;">
+
+    <!-- =================== 1a — API key with presets (DARK) =================== -->
+    <div id="1a" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">1a</span>
+        <span style="font-size:13px; color:#9BA1A6;">API key · presets · dark</span>
+      </div>
+
+      <!-- MODAL SHELL DARK -->
+      <div style="width:700px; height:520px; display:flex; background:#0E0F11; border:1px solid #2A2E33; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+        <!-- rail -->
+        <div style="width:176px; flex:none; background:#121316; border-right:1px solid #2A2E33; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#ECEDEE; background:rgba(217,119,87,0.14); box-shadow:inset 2px 0 0 #D97757;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">About</div>
+        </div>
+        <!-- content -->
+        <div style="flex:1; background:#0E0F11; padding:24px; overflow-y:auto;">
+
+          <!-- GROUP: Authentication -->
+          <div style="font-size:13.5px; font-weight:600; color:#ECEDEE;">Authentication</div>
+          <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">How this computer's Claude CLI signs in.</div>
+
+          <div style="margin-top:12px; background:#16181B; border:1px solid #2A2E33; border-radius:12px; padding:14px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"></rect><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>
+              <span style="font-size:13px; font-weight:600; color:#ECEDEE;">API key</span>
+              <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#D97757; background:rgba(217,119,87,0.13); border:1px solid rgba(217,119,87,0.3); padding:2.5px 8px; border-radius:20px;">preset · Work proxy</span>
+            </div>
+            <div style="height:1px; background:#22262B; margin:13px 0;"></div>
+            <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#6B7177; font-weight:600;">Base URL</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#ECEDEE; margin-top:4px;">https://api.example-proxy.com/v1</div>
+            <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#6B7177; font-weight:600; margin-top:12px;">Token</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#ECEDEE; margin-top:4px;"><span style="color:#9BA1A6;">ANTHROPIC_AUTH_TOKEN</span> · sk-…<span style="color:#6B7177;">••••</span>3f9a</div>
+            <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#6B7177; font-weight:600; margin-top:12px;">Model route</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#9BA1A6; margin-top:4px;">sonnet → <span style="color:#ECEDEE;">gpt-4o</span> · haiku → <span style="color:#ECEDEE;">gpt-4o-mini</span></div>
+          </div>
+
+          <!-- GROUP: API presets -->
+          <div style="font-size:13.5px; font-weight:600; color:#ECEDEE; margin-top:24px;">API presets</div>
+          <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">Saved endpoints you can switch between. New sessions use the active one.</div>
+
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+            <!-- active -->
+            <div class="cc-row" style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid rgba(217,119,87,0.55); background:rgba(217,119,87,0.09);">
+              <span style="width:8px; height:8px; border-radius:50%; background:#D97757; flex:none; box-shadow:0 0 0 3px rgba(217,119,87,0.18);"></span>
+              <span style="font-size:13px; font-weight:600; color:#ECEDEE;">Work proxy</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">api.example-proxy.com</span>
+              <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.05em; color:#D97757; background:rgba(217,119,87,0.13); padding:2px 7px; border-radius:5px; flex:none;">active</span>
+            </div>
+            <!-- idle -->
+            <div class="cc-row" style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #2A2E33; background:transparent;">
+              <span style="width:8px; height:8px; border-radius:50%; background:#4A4F55; flex:none;"></span>
+              <span style="font-size:13px; color:#ECEDEE;">Personal key</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">api.anthropic.com</span>
+              <span class="cc-actions" style="margin-left:auto; display:flex; align-items:center; gap:4px; flex:none;">
+                <span class="cc-tbtn" style="font-size:11.5px; color:#9BA1A6; padding:3px 8px; border-radius:6px;">Edit</span>
+                <span class="cc-tbtn" style="font-size:11.5px; color:#E5604D; padding:3px 8px; border-radius:6px;">Delete</span>
+              </span>
+            </div>
+            <div class="cc-row" style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #2A2E33; background:transparent;">
+              <span style="width:8px; height:8px; border-radius:50%; background:#4A4F55; flex:none;"></span>
+              <span style="font-size:13px; color:#ECEDEE;">Local llama</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#6B7177; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">localhost:11434</span>
+              <span class="cc-actions" style="margin-left:auto; display:flex; align-items:center; gap:4px; flex:none;">
+                <span class="cc-tbtn" style="font-size:11.5px; color:#9BA1A6; padding:3px 8px; border-radius:6px;">Edit</span>
+                <span class="cc-tbtn" style="font-size:11.5px; color:#E5604D; padding:3px 8px; border-radius:6px;">Delete</span>
+              </span>
+            </div>
+            <!-- new preset -->
+            <div class="cc-newp" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:11px; border-radius:11px;">
+              <span class="cc-newp-b" style="position:absolute; inset:0; border:1.5px dashed #34383E; border-radius:11px; pointer-events:none; transition:border-color .14s ease;"></span>
+              <span style="font-size:15px; color:#D97757; line-height:1;">＋</span>
+              <span style="font-size:12.5px; font-weight:500; color:#D97757;">New preset</span>
+            </div>
+          </div>
+
+          <div style="font-size:11px; color:#6B7177; margin-top:16px;">Tokens are stored on the computer and never sent back to this app.</div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 1b — Empty state (DARK) =================== -->
+    <div id="1b" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">1b</span>
+        <span style="font-size:13px; color:#9BA1A6;">Empty · no presets · dark</span>
+      </div>
+
+      <div style="width:700px; height:520px; display:flex; background:#0E0F11; border:1px solid #2A2E33; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+        <div style="width:176px; flex:none; background:#121316; border-right:1px solid #2A2E33; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#ECEDEE; background:rgba(217,119,87,0.14); box-shadow:inset 2px 0 0 #D97757;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">About</div>
+        </div>
+        <div style="flex:1; background:#0E0F11; padding:24px; overflow-y:auto;">
+
+          <div style="font-size:13.5px; font-weight:600; color:#ECEDEE;">Authentication</div>
+          <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">How this computer's Claude CLI signs in.</div>
+
+          <div style="margin-top:12px; background:#16181B; border:1px solid #2A2E33; border-radius:12px; padding:14px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B7177" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"></rect><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>
+              <span style="font-size:13px; font-weight:600; color:#9BA1A6;">No API key set on this computer</span>
+              <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#6B7177; background:#1E2125; border:1px solid #2A2E33; padding:2.5px 8px; border-radius:20px;">unconfigured</span>
+            </div>
+            <div style="height:1px; background:#22262B; margin:13px 0;"></div>
+            <div style="font-size:11.5px; color:#6B7177; line-height:1.55;">This computer's Claude CLI has no base URL or auth token in its environment. Save a preset below to point new sessions at an endpoint.</div>
+          </div>
+
+          <div style="font-size:13.5px; font-weight:600; color:#ECEDEE; margin-top:24px;">API presets</div>
+          <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">Saved endpoints you can switch between. New sessions use the active one.</div>
+
+          <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+            <div style="border:1px solid #22262B; background:#131518; border-radius:10px; padding:16px; font-size:12px; color:#9BA1A6; line-height:1.55;">No presets yet. Save an endpoint to switch base URLs and keys without editing the computer's environment.</div>
+            <div class="cc-newp" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:11px; border-radius:11px;">
+              <span class="cc-newp-b" style="position:absolute; inset:0; border:1.5px dashed #34383E; border-radius:11px; pointer-events:none; transition:border-color .14s ease;"></span>
+              <span style="font-size:15px; color:#D97757; line-height:1;">＋</span>
+              <span style="font-size:12.5px; font-weight:500; color:#D97757;">New preset</span>
+            </div>
+          </div>
+
+          <div style="font-size:11px; color:#6B7177; margin-top:16px;">Tokens are stored on the computer and never sent back to this app.</div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 1c — OAuth coexistence (DARK) =================== -->
+    <div id="1c" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#0B0C0D; background:#D97757; padding:2px 9px; border-radius:6px;">1c</span>
+        <span style="font-size:13px; color:#9BA1A6;">OAuth coexistence · dark</span>
+      </div>
+
+      <div style="width:700px; height:520px; display:flex; background:#0E0F11; border:1px solid #2A2E33; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.5);">
+        <div style="width:176px; flex:none; background:#121316; border-right:1px solid #2A2E33; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#6B7177; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#ECEDEE; background:rgba(217,119,87,0.14); box-shadow:inset 2px 0 0 #D97757;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#9BA1A6;">About</div>
+        </div>
+        <div style="flex:1; background:#0E0F11; padding:24px; overflow-y:auto;">
+
+          <div style="font-size:13.5px; font-weight:600; color:#ECEDEE;">Authentication</div>
+          <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">How this computer's Claude CLI signs in.</div>
+
+          <!-- OAuth account card -->
+          <div style="margin-top:12px; background:#16181B; border:1px solid #2A2E33; border-radius:12px; padding:14px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="width:36px; height:36px; border-radius:50%; background:linear-gradient(135deg,#2A2E33,#1E2125); border:1px solid #2A2E33; display:flex; align-items:center; justify-content:center; flex:none;">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"></circle><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"></path></svg>
+              </span>
+              <div style="min-width:0;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:13px; font-weight:600; color:#ECEDEE;">jordan@example.com</span>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; letter-spacing:.06em; color:#D97757; background:rgba(217,119,87,0.13); border:1px solid rgba(217,119,87,0.3); padding:1.5px 6px; border-radius:5px;">MAX</span>
+                </div>
+                <div style="font-size:11.5px; color:#6B7177; margin-top:2px;">Acme Robotics · Claude subscription (OAuth)</div>
+              </div>
+              <div style="margin-left:auto; display:flex; align-items:center; gap:2px; flex:none;">
+                <span class="cc-tbtn" style="font-size:11.5px; color:#9BA1A6; padding:4px 8px; border-radius:6px;">Switch account…</span>
+                <span class="cc-tbtn" style="font-size:11.5px; color:#E5604D; padding:4px 8px; border-radius:6px;">Log out</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size:13.5px; font-weight:600; color:#ECEDEE; margin-top:24px;">API presets</div>
+          <div style="font-size:11.5px; color:#6B7177; margin-top:3px;">Saved endpoints you can switch between. New sessions use the active one.</div>
+
+          <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px;">
+            <div style="border:1px solid #22262B; background:#131518; border-radius:10px; padding:14px; display:flex; gap:10px; align-items:flex-start;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B7177" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="margin-top:1px; flex:none;"><circle cx="12" cy="12" r="9"></circle><path d="M12 16v-4M12 8.2v0"></path></svg>
+              <div style="font-size:12px; color:#9BA1A6; line-height:1.55;">Presets are for third-party API endpoints. Activating one runs new sessions on that key instead of your Claude login.</div>
+            </div>
+            <div class="cc-newp" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:11px; border-radius:11px;">
+              <span class="cc-newp-b" style="position:absolute; inset:0; border:1.5px dashed #34383E; border-radius:11px; pointer-events:none; transition:border-color .14s ease;"></span>
+              <span style="font-size:15px; color:#D97757; line-height:1;">＋</span>
+              <span style="font-size:12.5px; font-weight:500; color:#D97757;">New preset</span>
+            </div>
+          </div>
+
+          <div style="font-size:11px; color:#6B7177; margin-top:16px;">Tokens are stored on the computer and never sent back to this app.</div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- =================== 1d — API key with presets (LIGHT) =================== -->
+    <div id="1d" style="display:flex; flex-direction:column; gap:14px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:#FFFFFF; background:#C15F3C; padding:2px 9px; border-radius:6px;">1d</span>
+        <span style="font-size:13px; color:#9BA1A6;">API key · presets · light</span>
+      </div>
+
+      <div style="width:700px; height:520px; display:flex; background:#FAF9F7; border:1px solid #E4E1DB; border-radius:14px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.28);">
+        <div style="width:176px; flex:none; background:#F1EFEB; border-right:1px solid #E4E1DB; padding:16px 12px; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:#878C92; font-family:'JetBrains Mono',monospace; padding:2px 10px 10px;">Settings</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">General</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; font-weight:600; color:#1C1D1F; background:rgba(193,95,60,0.12); box-shadow:inset 2px 0 0 #C15F3C;">Account</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">Computers</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">Shortcuts</div>
+          <div style="padding:7px 10px; border-radius:7px; font-size:13px; color:#5B6066;">About</div>
+        </div>
+        <div style="flex:1; background:#FAF9F7; padding:24px; overflow-y:auto;">
+
+          <div style="font-size:13.5px; font-weight:600; color:#1C1D1F;">Authentication</div>
+          <div style="font-size:11.5px; color:#878C92; margin-top:3px;">How this computer's Claude CLI signs in.</div>
+
+          <div style="margin-top:12px; background:#FFFFFF; border:1px solid #E4E1DB; border-radius:12px; padding:14px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6066" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"></rect><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg>
+              <span style="font-size:13px; font-weight:600; color:#1C1D1F;">API key</span>
+              <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#C15F3C; background:rgba(193,95,60,0.1); border:1px solid rgba(193,95,60,0.28); padding:2.5px 8px; border-radius:20px;">preset · Work proxy</span>
+            </div>
+            <div style="height:1px; background:#EDEAE4; margin:13px 0;"></div>
+            <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#878C92; font-weight:600;">Base URL</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#1C1D1F; margin-top:4px;">https://api.example-proxy.com/v1</div>
+            <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#878C92; font-weight:600; margin-top:12px;">Token</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#1C1D1F; margin-top:4px;"><span style="color:#5B6066;">ANTHROPIC_AUTH_TOKEN</span> · sk-…<span style="color:#878C92;">••••</span>3f9a</div>
+            <div style="font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:#878C92; font-weight:600; margin-top:12px;">Model route</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5B6066; margin-top:4px;">sonnet → <span style="color:#1C1D1F;">gpt-4o</span> · haiku → <span style="color:#1C1D1F;">gpt-4o-mini</span></div>
+          </div>
+
+          <div style="font-size:13.5px; font-weight:600; color:#1C1D1F; margin-top:24px;">API presets</div>
+          <div style="font-size:11.5px; color:#878C92; margin-top:3px;">Saved endpoints you can switch between. New sessions use the active one.</div>
+
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:12px;">
+            <div class="cc-row" style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid rgba(193,95,60,0.5); background:rgba(193,95,60,0.07);">
+              <span style="width:8px; height:8px; border-radius:50%; background:#C15F3C; flex:none; box-shadow:0 0 0 3px rgba(193,95,60,0.15);"></span>
+              <span style="font-size:13px; font-weight:600; color:#1C1D1F;">Work proxy</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">api.example-proxy.com</span>
+              <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:.05em; color:#C15F3C; background:rgba(193,95,60,0.1); padding:2px 7px; border-radius:5px; flex:none;">active</span>
+            </div>
+            <div class="cc-row" style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #E4E1DB; background:transparent;">
+              <span style="width:8px; height:8px; border-radius:50%; background:#C7C3BB; flex:none;"></span>
+              <span style="font-size:13px; color:#1C1D1F;">Personal key</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">api.anthropic.com</span>
+              <span class="cc-actions" style="margin-left:auto; display:flex; align-items:center; gap:4px; flex:none;">
+                <span class="cc-tbtn" style="font-size:11.5px; color:#5B6066; padding:3px 8px; border-radius:6px;">Edit</span>
+                <span class="cc-tbtn" style="font-size:11.5px; color:#C53D2B; padding:3px 8px; border-radius:6px;">Delete</span>
+              </span>
+            </div>
+            <div class="cc-row" style="display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:9px; border:1.5px solid #E4E1DB; background:transparent;">
+              <span style="width:8px; height:8px; border-radius:50%; background:#C7C3BB; flex:none;"></span>
+              <span style="font-size:13px; color:#1C1D1F;">Local llama</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#878C92; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">localhost:11434</span>
+              <span class="cc-actions" style="margin-left:auto; display:flex; align-items:center; gap:4px; flex:none;">
+                <span class="cc-tbtn" style="font-size:11.5px; color:#5B6066; padding:3px 8px; border-radius:6px;">Edit</span>
+                <span class="cc-tbtn" style="font-size:11.5px; color:#C53D2B; padding:3px 8px; border-radius:6px;">Delete</span>
+              </span>
+            </div>
+            <div class="cc-newp cc-newp-l" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:11px; border-radius:11px;">
+              <span class="cc-newp-b" style="position:absolute; inset:0; border:1.5px dashed #D6D1C8; border-radius:11px; pointer-events:none; transition:border-color .14s ease;"></span>
+              <span style="font-size:15px; color:#C15F3C; line-height:1;">＋</span>
+              <span style="font-size:12.5px; font-weight:500; color:#C15F3C;">New preset</span>
+            </div>
+          </div>
+
+          <div style="font-size:11px; color:#878C92; margin-top:16px;">Tokens are stored on the computer and never sent back to this app.</div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+</body>
+</html>

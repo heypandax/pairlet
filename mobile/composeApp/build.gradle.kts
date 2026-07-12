@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.3.4"
+val appVersionName = "1.3.5"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -60,6 +60,7 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.biometric) // App Lock (issue #109): BiometricPrompt + FragmentActivity
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.cryptography.provider.jdk) // E2E crypto provider (registers on this target)
@@ -74,6 +75,7 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cryptography.provider.jdk)
+            implementation(libs.jna) // objc bridge: bundle-identity macOS notifications (issue #99); inert off-mac
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -147,7 +149,7 @@ compose.desktop {
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
             packageName = "CC Pocket"
-            packageVersion = "1.3.4"
+            packageVersion = "1.3.5"
             windows {
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
             }

@@ -82,11 +82,22 @@ object SessionFilesService {
 
     /** [readFile] against an explicit transcript [file] — testable without touching `$HOME`. */
     internal fun readFileIn(agent: AgentKind, transcript: Path, workdir: String, sessionId: String, path: String): FileContent {
-        fun fail(error: String) = FileContent(workdir, sessionId, path, ok = false, error = error)
         val allowed = scan(agent, transcript, workdir, diffFor = null).keys
-        val abs = resolve(path, workdir) ?: return fail("bad path")
-        if (abs !in allowed) return fail("not a file this session changed")
-        val file = Path.of(abs)
+        val abs = resolve(path, workdir)
+            ?: return FileContent(workdir, sessionId, path, ok = false, error = "bad path")
+        if (abs !in allowed) return FileContent(workdir, sessionId, path, ok = false, error = "not a file this session changed")
+        return serveAt(Path.of(abs), workdir, sessionId, path)
+    }
+
+    /**
+     * Serve an ALREADY-AUTHORIZED regular file as a capped [FileContent]: UTF-8 text (capped, with
+     * [FileContent.truncated]) for anything decodable, whole-or-nothing base64 for images/documents/other
+     * binaries (a truncated docx is corrupt). The CALLER owns authorization + path containment —
+     * [readFileIn] gates on the session's changed-set, [serveExport] on canonical workdir membership + an
+     * owner approval. Never throws; failures ride [FileContent.error].
+     */
+    fun serveAt(file: Path, workdir: String, sessionId: String, path: String): FileContent {
+        fun fail(error: String) = FileContent(workdir, sessionId, path, ok = false, error = error)
         if (!file.isRegularFile()) return fail("file no longer exists")
         val total = runCatching { file.fileSize() }.getOrDefault(0L)
 
@@ -102,7 +113,7 @@ object SessionFilesService {
             )
         }
 
-        val ext = abs.substringAfterLast('.', "").lowercase()
+        val ext = file.toString().substringAfterLast('.', "").lowercase()
         imageTypes[ext]?.let { return binary(it) }
         documentTypes[ext]?.let { return binary(it) }
 
@@ -115,6 +126,60 @@ object SessionFilesService {
             workdir, sessionId, path,
             text = String(bytes, Charsets.UTF_8), truncated = total > bytes.size, totalBytes = total,
         )
+    }
+
+    // ── approval-gated export of a NON-changed file (issue #67 v2 / #79) ──────────────────────────────
+    // ReadFile is capped to the changed-set; ExportFile widens to any file inside the project tree, but ONLY
+    // behind canonical containment + an owner approval (orchestrated by FileExportService). These three
+    // helpers are the pure, unit-testable pieces of that gate — the containment red line, the changed-set
+    // fast path, and the post-approval serve.
+
+    /** True iff [path] is in this session's changed-set (the [readFile] allow-set). Lets the gated export
+     *  serve a changed file WITHOUT prompting (ReadFile already would) and prompt ONLY for the widening. */
+    fun isChanged(agent: AgentKind, workdir: String, sessionId: String, path: String): Boolean {
+        val transcript = transcriptFor(agent, workdir, sessionId) ?: return false
+        val abs = resolve(path, workdir) ?: return false
+        return abs in scan(agent, transcript, workdir, diffFor = null).keys
+    }
+
+    /** The outcome of resolving an [dev.ccpocket.protocol.ExportFile] path against its workdir. */
+    sealed interface ExportGate {
+        /** A regular file canonically inside the workdir — safe to serve once the owner approves. */
+        data class Allowed(val file: Path) : ExportGate
+
+        /** The path escaped the project tree (`..` or a symlink out) — refuse, never serve. The red line. */
+        data object Outside : ExportGate
+
+        /** Inside the tree, but not a readable regular file (gone / a directory / unreadable workdir). */
+        data object Missing : ExportGate
+    }
+
+    /**
+     * Resolve [path] for export against [workdir], enforcing canonical containment: `toRealPath()` collapses
+     * `..` AND follows symlinks, and `startsWith(realWorkdir)` refuses anything landing outside the project
+     * subtree — the same guard [DirectoryService.listPathEntries] uses, and the load-bearing boundary that
+     * keeps ExportFile from becoming an arbitrary-path read. A lexical `..` escape is caught before the file
+     * is stat'd; a symlink escape right after. Missing / non-file → [ExportGate.Missing].
+     */
+    fun containedForExport(workdir: String, path: String): ExportGate {
+        val root = runCatching { Path.of(workdir).toRealPath() }.getOrNull() ?: return ExportGate.Missing
+        val lexical = runCatching { root.resolve(path).normalize() }.getOrNull() ?: return ExportGate.Outside
+        if (!lexical.startsWith(root)) return ExportGate.Outside              // `..` escape — refuse before disk
+        val real = runCatching { lexical.toRealPath() }.getOrNull() ?: return ExportGate.Missing
+        if (!real.startsWith(root)) return ExportGate.Outside                 // symlink escape — refuse
+        if (!real.isRegularFile()) return ExportGate.Missing                  // a directory / special file
+        return ExportGate.Allowed(real)
+    }
+
+    /** Serve [path] for an APPROVED export: [containedForExport] then the same capped read as [readFile].
+     *  NO changed-set / approval logic — the caller (FileExportService) owns that. Failures ride the error. */
+    fun serveExport(workdir: String, sessionId: String, path: String): FileContent {
+        fun fail(error: String) = FileContent(workdir, sessionId, path, ok = false, error = error)
+        return when (val gate = containedForExport(workdir, path)) {
+            is ExportGate.Allowed -> serveAt(gate.file, workdir, sessionId, path)
+            ExportGate.Outside -> fail("that path is outside this session's project folder, so it can't be exported")
+            ExportGate.Missing -> fail("that file no longer exists on the computer")
+        }
     }
 
     /** The unified diff of one file [changedFiles] listed. Never throws; failures ride FileDiff.error. */

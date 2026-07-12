@@ -14,7 +14,7 @@ application {
 // The release version: -PappVersion in CI, fallback for local builds. Baked into the
 // cc-pocket-version.properties resource so the daemon knows its own version at runtime —
 // the self-update check compares it against GitHub releases/latest.
-val appVersion = (findProperty("appVersion") as String?) ?: "1.3.4"
+val appVersion = (findProperty("appVersion") as String?) ?: "1.3.5"
 
 tasks.processResources {
     inputs.property("appVersion", appVersion)
@@ -44,11 +44,18 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.core)
+    testImplementation(libs.ktor.network.tls.certificates) // builds test X.509 chains for RelayTrust
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        // CI has no test-report artifact — the console line is all we get on a failure, so it must
+        // carry the assertion message + stack, not just "AssertionFailedError at Foo.kt:85"
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
 
 // Let the daemon read from the real terminal stdin when run via Gradle (test-client REPL).

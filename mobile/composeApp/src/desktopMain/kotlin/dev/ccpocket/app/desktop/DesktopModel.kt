@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
@@ -57,6 +58,10 @@ data class DkProject(
     val path: String,
     val name: String,
     val running: Boolean = false,
+    // folder-share (issue #115): set only on a GUEST's shared project (the daemon stamps DirectoryEntry) —
+    // drives the sidebar's "Shared" provenance pill. Null = an ordinary local dir.
+    val sharedBy: String? = null,      // owner label ("shared by panda")
+    val shareExpiresAt: Long? = null,  // epoch ms — the "6d left" caption
 )
 
 data class DkSession(
@@ -67,7 +72,14 @@ data class DkSession(
     val running: Boolean = false,
     val pending: Int = 0,
     val model: String? = null, // last turn's model id (row shows its alias; null = unknown/older daemon)
+    // custom session-group id this row belongs to (issue #119), or null = ungrouped. Only meaningful for
+    // the CURRENT project's live rows — the daemon lists groups only for the listed dir.
+    val group: String? = null,
 )
+
+/** One custom session group inside a project (issue #119) — the view mirror of protocol's SessionGroup.
+ *  Ordered by [order]; a project with no groups (or an older daemon that omits them) renders sessions flat. */
+data class DkGroup(val id: String, val name: String, val order: Int)
 
 /**
  * One RECENT group — a project the user listed this run, with the sessions we know it has. The
@@ -80,6 +92,10 @@ data class DkSessionGroup(
     val name: String,
     val current: Boolean,
     val sessions: List<DkSession>,
+    // folder-share (issue #115): a guest's shared project keeps its provenance on the RECENT group —
+    // the header renders the "Shared" pill + owner + remaining validity. Null = an ordinary local dir.
+    val sharedBy: String? = null,
+    val shareExpiresAt: Long? = null,
 )
 
 /**
@@ -119,6 +135,10 @@ data class DkAttention(
     val preview: String,
     val seconds: Int?, // countdown when the deadline is known (seed); null = don't invent one (live)
     val live: Boolean, // resolvable through the live connection
+    // an AskUserQuestion, not a permission gate (issue #111): its answer must ride the ALLOW as an answers
+    // map — a bare ALLOW reads "did not answer" to the CLI — so summary surfaces (the tray) route these to
+    // the session instead of offering a Deny/Allow that would silently drop the user's choice
+    val question: Boolean = false,
 )
 
 /** What the ⌘K palette shows: everything, or just project rows ("All projects…"). */
@@ -142,6 +162,9 @@ data class DkWatch(
 interface DesktopModel {
     // connection + computer switcher
     val connected: Boolean
+    /** Bumps on every (re)attach to the active daemon. The Account pane keys its auth/presets fetch on this
+     *  so a reconnect (e.g. a daemon restart) refills it without a manual close/reopen. 0 = seed/preview. */
+    val connGen: Int get() = 0
     val activeComputer: DkComputer?
     val computers: List<DkComputer>
     fun selectComputer(c: DkComputer)
@@ -181,6 +204,23 @@ interface DesktopModel {
     fun jumpPin(i: Int) { pins.getOrNull(i)?.let { openPin(it) } }
     fun isPinned(sessionId: String): Boolean = pins.any { it.sessionId == sessionId }
     val pinsFull: Boolean get() = pins.size >= MAX_PINS
+
+    // ── workflow orchestration (issue #106): the docked right panel + chat-card binding ──
+    // Defaults keep the seed/demo model untouched; the live model delegates to the repository.
+    /** Runs for the active conversation, keyed by runId. */
+    val workflowRuns: Map<String, dev.ccpocket.protocol.WorkflowRun> get() = emptyMap()
+
+    /** Non-null = the ~360dp workflow panel is docked on this run (clicking the chat card docks it). */
+    val dockedWorkflowRunId: String? get() = null
+    fun openWorkflowPanel(runId: String) {}
+    fun closeWorkflowPanel() {}
+
+    /** The run a chat Workflow card binds to (live: tool_use id; replay: HistoryMessage run id). */
+    fun workflowRunFor(item: ChatItem.Tool): dev.ccpocket.protocol.WorkflowRun? = null
+
+    /** On-demand full prompt/return per agent, keyed "runId#index". */
+    val workflowAgentDetails: Map<String, dev.ccpocket.protocol.WorkflowAgentDetail> get() = emptyMap()
+    fun fetchWorkflowAgentDetail(runId: String, agentIndex: Int, agentId: String?) {}
 
     // fleet: the sidebar's machine groups, the attention queue, and the read-only watch pane
     val machines: List<DkMachine>
@@ -227,8 +267,33 @@ interface DesktopModel {
      *  transcript stays on the host and reopening its project resurfaces it. No-op for seed/preview models. */
     fun hideSession(s: DkSession) {}
 
-    /** RECENT — session groups for the projects visited this run, most recently visited first. */
+    /** RECENT — session groups for the visited projects, most recently visited first. The keys persist
+     *  across restarts (issue #102); their session lists refill from the daemon once it's reachable. */
     val sessionGroups: List<DkSessionGroup>
+
+    /** Forget every visited project — RECENT's header clear (issue #102). Pins and hidden rows are
+     *  deliberately untouched. No-op for seed/preview models. */
+    fun clearRecent() {}
+
+    // ── custom session groups (issue #119) ────────────────────────────────────────────────────────
+    // These describe ONLY the current (live-listed) project — the daemon lists groups per directory, so a
+    // non-current RECENT snapshot has none and stays flat. Empty [customGroups] = an older daemon that omits
+    // them OR a project with no groups yet: either way the current project's rows render flat (the degrade).
+    /** The current project's custom groups, ordered; empty = none / older daemon → flat list. */
+    val customGroups: List<DkGroup> get() = emptyList()
+    /** Owner + group-capable connection: false hides every group-edit affordance (a guest is a daemon-side
+     *  no-op anyway; the seed/preview model leaves it inert). */
+    val canEditGroups: Boolean get() = false
+    /** Create a group in the current project (the daemon re-pushes Sessions, refreshing [customGroups]). */
+    fun createGroup(name: String) {}
+    fun renameGroup(groupId: String, name: String) {}
+    /** Delete a group; its sessions fall back to Ungrouped (daemon-side). */
+    fun deleteGroup(groupId: String) {}
+    /** Move [sessionId] into [groupId], or out of any group when [groupId] is null. */
+    fun assignGroup(sessionId: String, groupId: String?) {}
+    /** Per project + per group collapse memory (issue #119; persisted like #102's RECENT keys). */
+    fun groupCollapsed(projectPath: String, groupId: String): Boolean = false
+    fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {}
 
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false
@@ -276,7 +341,21 @@ interface DesktopModel {
      *  the delivery receipt stalled past its deadline (issue #78, common with several computers connected).
      *  ChatPane turns the pending cue from a benign "sending…" into an honest warning on it. */
     val sendUndelivered: Boolean get() = false
+    /** Delivered but no turn started within the deadline (issue #104): the agent swallowed the prompt
+     *  (wedged / mid-relaunch). ChatPane replaces the streaming caret with a tappable "resend" cue. */
+    val turnStalled: Boolean get() = false
+    /** The mid-turn-send sibling: the prompt is queued in the CLI behind a running turn that has gone
+     *  quiet past the same deadline. Healthy, so ChatPane shows a calm status — never a resend cue
+     *  (the queued original would double-run). */
+    val turnQueued: Boolean get() = false
+    /** The composer's single source of truth — ChatPane renders it and writes caret-precise edits
+     *  (shift+Enter newline, @-file completion) straight into it. See [dev.ccpocket.app.ui.ComposerState]. */
+    val composerState: ComposerState
+    /** String facade over [composerState] for model logic and tests: every assignment is an EXPLICIT
+     *  external write (caret lands at the end; a live IME composition holds it until it ends). */
     var composer: String
+        get() = composerState.text
+        set(value) { composerState.setText(value) }
     fun send(text: String)
 
     // session health (issue #65): degraded = recent turns were all API failures (likely past the context
@@ -326,8 +405,28 @@ interface DesktopModel {
     fun removePendingImage(id: Long)
     fun hasReadyImages(): Boolean
 
+    // composer FILE uploads (issue #90): staged files chunk-stream into the session's workspace
+    // inbox; landed paths ride the next send as `@`-references. Default no-ops keep seed/preview
+    // models inert (chips simply never appear).
+    val pendingFiles: List<dev.ccpocket.app.data.PendingFile> get() = emptyList()
+    fun attachFiles(files: List<dev.ccpocket.app.media.PickedFile>) {}
+    fun removePendingFile(id: Long) {}
+    fun retryPendingFile(id: Long) {}
+    /** Uploads still moving → the send button waits (spinner) until they settle. */
+    fun uploadsBusy(): Boolean = false
+    fun hasLandedFiles(): Boolean = false
+    /** Play/open a landed workspace file in the OS default app (issue #98). The desktop app runs on the
+     *  SAME machine as the daemon, so a landed video's inbox path resolves to a real local file — no
+     *  re-fetch needed. Default no-op keeps seed/preview models inert. */
+    fun openWorkspaceFile(path: String) {}
+
     // permission (live: inline card in the stream; seed: also drives the focused modal)
     val ask: PermissionAsk?
+    /** The current [ask] is the one the daemon reported TIMED_OUT (issue #100): the inline card flips to its
+     *  terminal "auto-denied" state (greyed + danger note + Dismiss) instead of staying actionable, and a late
+     *  click can't send a verdict the CLI already stopped waiting for. Default false so seed/preview models
+     *  render the ordinary actionable card. */
+    val askTimedOut: Boolean get() = false
     fun resolve(allow: Boolean, remember: Boolean)
     fun dismissAsk()
     // AskUserQuestion (ask.questions != null): the picks/free-text ride an ALLOW verdict; skip DENIES with a
@@ -377,8 +476,23 @@ interface DesktopModel {
 
     // interrupt the running turn (■ beside send / Esc); the interrupted prompt returns to the composer (#48)
     fun stopTurn() {}
+    // re-run a delivered-but-no-turn prompt (issue #104) under a fresh id; no-op unless turnStalled
+    fun resendStalled() {}
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
     fun revokeComputer(c: DkComputer)
+
+    // ── folder-share (issue #115): owner management + guest redeem. All default to inert so the
+    //    seed/preview model needs no changes; the live [RepoDesktopModel] wires them to the repo. ──
+    val shares: List<dev.ccpocket.protocol.ShareInfo> get() = emptyList()
+    val sharesLoaded: Boolean get() = false
+    /** The invite minted by the last [createShare] — the owner shows its QR/code, then [clearLastShare]. */
+    val lastShareInvite: dev.ccpocket.protocol.ShareInvite? get() = null
+    fun refreshShares() {}
+    fun createShare(path: String, tier: dev.ccpocket.protocol.AccessTier, expiresInSec: Long) {}
+    fun revokeShare(deviceId: String) {}
+    fun clearLastShare() {}
+    /** Guest: decode + redeem a pasted invite blob; false if it isn't a valid invite. */
+    fun redeemShareInvite(blob: String): Boolean = false
 
     // account (Settings ▸ Account): the ACTIVE computer's Claude CLI login, driven over pocket/auth.*.
     // Null = not fetched yet, or the daemon predates the messages (it silently drops the request).
@@ -392,6 +506,23 @@ interface DesktopModel {
     fun submitAuthCode(code: String) {}
     fun cancelAuthLogin() {}
     fun logoutAccount() {}
+
+    // API presets (issue #113, Settings ▸ Account): named env overrides for third-party API users,
+    // stored on the daemon; tokens ride up write-only and only ever come back masked. Null = not
+    // fetched yet or the daemon predates pocket/presets.* (show "update the daemon", hide the form).
+    val presetsState: dev.ccpocket.protocol.PresetsState? get() = null
+    /** Bumps on EVERY PresetsState reply (even one equal to the last) — what op-settle effects key on. */
+    val presetsRev: Int get() = 0
+    fun refreshPresets() {}
+    /** Create ([id] null) / update one preset; a null [token] on update keeps the stored one. */
+    fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) {}
+    fun deletePreset(id: String, force: Boolean = false) {}
+    /** Make [id] the active preset (null = deactivate). Same refusal semantics as [switchAccount]. */
+    fun activatePreset(id: String?, force: Boolean = false) {}
+    /** Stop one PresetsState.blockers session (hard close) and re-attempt activating [retryId]. */
+    fun stopPresetBlocker(convoId: String, retryId: String?) {}
+    /** Same, when the blocked op was deleting the active preset — retries the delete instead. */
+    fun stopPresetDeleteBlocker(convoId: String, deleteId: String) {}
 
     companion object {
         /** Pin cap — ⌘1–9 is the whole affordance, so the list never outgrows the keycaps. */

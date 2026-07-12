@@ -5,6 +5,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,6 +14,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +62,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -66,8 +71,14 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -75,15 +86,29 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.group_delete
+import dev.ccpocket.app.resources.group_delete_confirm
+import dev.ccpocket.app.resources.group_move_out
+import dev.ccpocket.app.resources.group_move_to
+import dev.ccpocket.app.resources.group_name_hint
+import dev.ccpocket.app.resources.group_new
+import dev.ccpocket.app.resources.group_rename
+import dev.ccpocket.app.resources.group_ungrouped
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.modelAlias
+import dev.ccpocket.app.ui.share.SharedPill
+import dev.ccpocket.app.ui.share.expiryLeft
+import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.protocol.AgentKind
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
+import org.jetbrains.compose.resources.stringResource
 
 internal fun osIcon(os: DkOs): ImageVector = when (os) {
     DkOs.MAC -> Icons.Rounded.LaptopMac
@@ -319,6 +344,7 @@ private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick
             p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 12.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
+        if (p.sharedBy != null) SharedPill() // a guest's shared folder (issue #115) — provenance at a glance
         if (hovered) Text(
             "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp,
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onBrowse).padding(horizontal = 3.dp),
@@ -335,10 +361,46 @@ private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick
 // layout exactly, so every consumer must filter through this one definition or the scroll index drifts
 private fun renderedGroups(model: DesktopModel) = model.sessionGroups.filter { it.current || it.sessions.isNotEmpty() }
 
+/** RECENT's section label with the hover clear-all affordance (issue #102): "clear" arms to "sure?",
+ *  a second click forgets every visited project (pins / hidden rows untouched); moving the pointer off
+ *  the header disarms. Mirrors [SectionLabel]'s metrics so the header is identical at rest, and the
+ *  GroupHeader hover-action precedent for the reveal. */
+@Composable
+private fun RecentHeader(model: DesktopModel) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    var arm by remember { mutableStateOf(false) }
+    LaunchedEffect(hovered) { if (!hovered) arm = false } // pointer left — disarm the pending clear
+    Row(
+        Modifier.fillMaxWidth().hoverable(src)
+            .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "RECENT", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.width(1.dp)) // keep the row baseline stable pre-hover (SectionLabel parity)
+        Key("⌘R")
+        if (hovered && model.sessionGroups.isNotEmpty()) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (arm) "sure?" else "clear",
+                color = if (arm) Tok.accent else Tok.tx2,
+                fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(4.dp))
+                    .clickable { if (arm) { arm = false; model.clearRecent() } else arm = true }
+                    .padding(horizontal = 3.dp),
+            )
+        }
+    }
+}
+
 @Composable
 private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
-        SectionLabel("Recent", trailing = { Key("⌘R") })
+        RecentHeader(model)
         val groups = renderedGroups(model)
         if (groups.isEmpty()) {
             Text(
@@ -392,17 +454,40 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     )
                 }
                 if (!closed) {
-                    if (g.sessions.isEmpty()) {
-                        item(key = "e:${g.path}") {
-                            Text(
-                                "No sessions here yet",
-                                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
-                                modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
-                            )
+                    // issue #119: only the live-listed project carries custom-group data (the daemon lists
+                    // groups per dir) — a RECENT snapshot has none and renders FLAT, which is also the
+                    // degrade path for an older daemon that omits groups entirely.
+                    val custom = if (g.current) model.customGroups else emptyList()
+                    // sessions the current project can be moved between (owner + has groups) — drives the row
+                    // right-click "move to group" menu; empty everywhere else so no menu appears.
+                    val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
+                    // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
+                    // entry forces scrolling past a long session list to create a group. Current + group-aware
+                    // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
+                    // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
+                    if (g.current && model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
+                    if (custom.isEmpty()) {
+                        if (g.sessions.isEmpty()) {
+                            item(key = "e:${g.path}") {
+                                Text(
+                                    "No sessions here yet",
+                                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                                    modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
+                                )
+                            }
                         }
-                    }
-                    items(g.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                        SessionRow(model, s, selected = s.sessionId == selectedId) { model.selectSession(s) }
+                        items(g.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
+                            SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups) { model.selectSession(s) }
+                        }
+                    } else {
+                        sessionSections(g.sessions, custom).forEach { sec ->
+                            item(key = "gh:${g.path}:${sec.id}") { CustomGroupHeader(model, g.path, sec) }
+                            if (!model.groupCollapsed(g.path, sec.id)) {
+                                items(sec.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
+                                    SessionRow(model, s, selected = s.sessionId == selectedId, indented = true, menuGroups = menuGroups) { model.selectSession(s) }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -450,6 +535,20 @@ private fun GroupHeader(g: DkSessionGroup, closed: Boolean, refreshing: Boolean,
             g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
+        if (g.sharedBy != null) {
+            // a guest's shared folder (issue #115): the same neutral hairline pill as mobile — provenance,
+            // not attention — plus "who · how long" at rest. Hover hands that space to the refresh icon
+            // (the SessionRow model-label precedent), so the affordances never fight over 28dp.
+            SharedPill()
+            if (!hovered && !refreshing) {
+                val left = g.shareExpiresAt?.let { expiryLeftText(expiryLeft(it, epochMillis())) }
+                Text(
+                    listOfNotNull(g.sharedBy, left).joinToString(" · "),
+                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp),
+                )
+            }
+        }
         when {
             refreshing -> {
                 val angle by rememberInfiniteTransition().animateFloat(
@@ -468,6 +567,140 @@ private fun GroupHeader(g: DkSessionGroup, closed: Boolean, refreshing: Boolean,
             Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted,
             modifier = Modifier.size(13.dp).rotate(if (closed) -90f else 0f),
         )
+    }
+}
+
+// ── issue #119: custom session-group sections inside the current project ────────────────────────
+
+private const val UNGROUPED_SECTION = "__ungrouped__"
+
+/** A rendered slice of the current project's session list: a named custom group, or the Ungrouped
+ *  fallback ([name] null / [editable] false). Named groups always show — even empty, they're move targets;
+ *  Ungrouped shows only when it actually holds rows. */
+private data class SessionSection(val id: String, val name: String?, val editable: Boolean, val sessions: List<DkSession>)
+
+private fun sessionSections(sessions: List<DkSession>, custom: List<DkGroup>): List<SessionSection> {
+    val ids = custom.mapTo(HashSet()) { it.id }
+    val named = custom.sortedBy { it.order }.map { grp ->
+        SessionSection(grp.id, grp.name, editable = true, sessions = sessions.filter { it.group == grp.id })
+    }
+    // a session whose group id no longer exists (just-deleted group, cross-version) also falls to Ungrouped
+    val ungrouped = sessions.filter { it.group == null || it.group !in ids }
+    return if (ungrouped.isEmpty()) named else named + SessionSection(UNGROUPED_SECTION, name = null, editable = false, sessions = ungrouped)
+}
+
+/** A custom-group sub-header (issue #119): collapse chevron · name · session-count badge, with hover
+ *  rename/delete for editable groups (Ungrouped is a fallback and can't be edited). Rename swaps in an
+ *  inline field; delete arms a confirm bar (group_delete_confirm). */
+@Composable
+private fun CustomGroupHeader(model: DesktopModel, projectPath: String, sec: SessionSection) {
+    var editing by remember(sec.id) { mutableStateOf(false) }
+    var confirming by remember(sec.id) { mutableStateOf(false) }
+    if (editing) {
+        GroupNameInput(initial = sec.name ?: "", onCommit = { model.renameGroup(sec.id, it); editing = false }, onCancel = { editing = false })
+        return
+    }
+    if (confirming) {
+        GroupDeleteConfirm(onConfirm = { model.deleteGroup(sec.id); confirming = false }, onCancel = { confirming = false })
+        return
+    }
+    val collapsed = model.groupCollapsed(projectPath, sec.id)
+    val canEdit = model.canEditGroups && sec.editable
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    Row(
+        Modifier.fillMaxWidth().height(26.dp).hoverable(src).hoverFill()
+            .clickable { model.setGroupCollapsed(projectPath, sec.id, !collapsed) }
+            .padding(start = 14.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(12.dp).rotate(if (collapsed) -90f else 0f))
+        Text(
+            sec.name ?: stringResource(Res.string.group_ungrouped),
+            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+        )
+        Text("${sec.sessions.size}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+        Spacer(Modifier.weight(1f))
+        if (canEdit && hovered) {
+            Text(
+                stringResource(Res.string.group_rename), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { editing = true }.padding(horizontal = 3.dp),
+            )
+            Text(
+                stringResource(Res.string.group_delete), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable { confirming = true }.padding(horizontal = 3.dp),
+            )
+        }
+    }
+}
+
+/** The delete-group confirm bar (issue #119): group_delete_confirm + a Delete verb and an ✕ to back out. */
+@Composable
+private fun GroupDeleteConfirm(onConfirm: () -> Unit, onCancel: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 14.dp, end = 12.dp, top = 3.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(stringResource(Res.string.group_delete_confirm), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp, lineHeight = 14.sp, modifier = Modifier.weight(1f))
+        Text(
+            stringResource(Res.string.group_delete), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onConfirm).padding(horizontal = 3.dp),
+        )
+        Icon(Icons.Rounded.Close, null, tint = Tok.muted, modifier = Modifier.size(12.dp).clip(RoundedCornerShape(4.dp)).clickable(onClick = onCancel))
+    }
+}
+
+/** "+ New group" at the foot of the current project's grouped list (issue #119): click reveals the inline
+ *  name field; committing creates the group (the daemon re-pushes Sessions, which refreshes the sections). */
+@Composable
+private fun NewGroupRow(model: DesktopModel) {
+    var adding by remember { mutableStateOf(false) }
+    if (adding) {
+        GroupNameInput(initial = "", onCommit = { model.createGroup(it); adding = false }, onCancel = { adding = false })
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth().height(28.dp).hoverFill().clickable { adding = true }.padding(start = 14.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(Icons.Rounded.Add, null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
+        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Inline group-name field (issue #119) shared by "New group" and rename: auto-focused, Enter commits a
+ *  non-blank trimmed name, Esc cancels. */
+@Composable
+private fun GroupNameInput(initial: String, onCommit: (String) -> Unit, onCancel: () -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    Row(
+        Modifier.fillMaxWidth().height(30.dp).padding(start = 14.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).border(1.dp, Tok.accent, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (text.isEmpty()) Text(stringResource(Res.string.group_name_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            BasicTextField(
+                value = text, onValueChange = { text = it }, singleLine = true,
+                textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.sp),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).onPreviewKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (e.key) {
+                        Key.Enter, Key.NumPadEnter -> { if (text.isNotBlank()) onCommit(text.trim()); true }
+                        Key.Escape -> { onCancel(); true }
+                        else -> false
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -500,8 +733,35 @@ private fun NewSessionRow(onClick: () -> Unit) {
     }
 }
 
+/** A session row, optionally wrapped in a right-click "move to group" menu (issue #119): the current
+ *  project's editable rows offer "move to <group>" per group + "remove from group" when already grouped. */
 @Composable
-private fun SessionRow(model: DesktopModel, s: DkSession, selected: Boolean, onClick: () -> Unit) {
+private fun SessionRow(
+    model: DesktopModel,
+    s: DkSession,
+    selected: Boolean,
+    indented: Boolean = false,
+    menuGroups: List<DkGroup> = emptyList(),
+    onClick: () -> Unit,
+) {
+    if (menuGroups.isEmpty()) { SessionRowBody(model, s, selected, indented, onClick); return }
+    val moveTo = stringResource(Res.string.group_move_to)
+    val moveOut = stringResource(Res.string.group_move_out)
+    ContextMenuArea(
+        items = {
+            buildList {
+                menuGroups.filter { it.id != s.group }.forEach { grp ->
+                    add(ContextMenuItem("$moveTo · ${grp.name}") { model.assignGroup(s.sessionId, grp.id) })
+                }
+                if (s.group != null) add(ContextMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
+            }
+        },
+        content = { SessionRowBody(model, s, selected, indented, onClick) },
+    )
+}
+
+@Composable
+private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean, indented: Boolean, onClick: () -> Unit) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     val bg = if (selected || hovered) Tok.raised else Color.Transparent
@@ -510,7 +770,7 @@ private fun SessionRow(model: DesktopModel, s: DkSession, selected: Boolean, onC
             Box(Modifier.align(Alignment.CenterStart).padding(vertical = 4.dp).width(2.dp).fillMaxHeight().background(Tok.accent, RoundedCornerShape(2.dp)))
         }
         Row(
-            Modifier.fillMaxSize().padding(horizontal = 12.dp),
+            Modifier.fillMaxSize().padding(start = if (indented) 26.dp else 12.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {

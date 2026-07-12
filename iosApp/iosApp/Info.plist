@@ -53,6 +53,8 @@
     <string>cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>cc-pocket transcribes your dictation on-device so you can speak prompts instead of typing them.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>cc-pocket uses Face ID to lock the app, so only you can open your sessions and approve tool actions.</string>
     <key>NSBonjourServices</key>
     <array>
         <string>_ccpocket._tcp</string>

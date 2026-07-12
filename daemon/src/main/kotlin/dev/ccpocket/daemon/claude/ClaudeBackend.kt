@@ -14,6 +14,7 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.PresetEnv
 import dev.ccpocket.protocol.SessionSummary
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -32,7 +33,13 @@ import java.util.concurrent.atomic.AtomicLong
  * frame builders below (outbound: user turn / interrupt / control_response). Stateless across relaunches —
  * claude bakes mode/model/effort at launch, so [applySettings] asks for a relaunch.
  */
-class ClaudeBackend(private val exe: Path, private val configDir: Path? = null) : AgentBackend {
+class ClaudeBackend(
+    private val exe: Path,
+    private val configDir: Path? = null,
+    // API preset (issue #113): the ACTIVE preset's env for a launch, read per call so an activation
+    // between launches takes effect without touching live backends. Null = no preset (env untouched).
+    private val presetEnv: () -> Map<String, String>? = { null },
+) : AgentBackend {
     private val log = logger("ClaudeBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val interruptSeq = AtomicLong(0)
@@ -42,7 +49,7 @@ class ClaudeBackend(private val exe: Path, private val configDir: Path? = null) 
 
     override val kind: AgentKind = AgentKind.CLAUDE
 
-    override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe, spec, configDir)
+    override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe, spec, configDir, presetEnv())
 
     override suspend fun attach(io: AgentIo, spec: AgentSpec) {
         this.io = io
@@ -164,7 +171,9 @@ class ClaudeBackend(private val exe: Path, private val configDir: Path? = null) 
     // issue #96: read the configured default (settings.json `model` / $ANTHROPIC_MODEL) so a brand-new
     // session's header shows the real model before the first turn. configDir = the daemon's isolated
     // CLAUDE_CONFIG_DIR when credential isolation is on (settings.json is symlinked back to the real one).
-    override fun defaultModel(workdir: String): String? = ClaudeDefaultModel.resolve(workdir, configDir)
+    // An active preset's ANTHROPIC_MODEL wins — that's what the launch will actually inject (issue #113).
+    override fun defaultModel(workdir: String): String? =
+        presetEnv()?.get(PresetEnv.MODEL) ?: ClaudeDefaultModel.resolve(workdir, configDir)
 
     override fun resumeFailedTurnStreak(workdir: String, sessionId: String): Int =
         TranscriptScanner.syntheticTailStreak(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))

@@ -1,17 +1,20 @@
 package dev.ccpocket.daemon.session
 
 import dev.ccpocket.daemon.agent.AgentBackendFactory
+import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AuthBlockReason
 import dev.ccpocket.protocol.AuthBlocker
 import dev.ccpocket.protocol.CancelTurn
+import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionMode
@@ -25,6 +28,9 @@ import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -112,8 +118,16 @@ class SessionRegistry(
     @Volatile
     var pushHook: PushHook? = null
 
-    /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is emitted). */
-    suspend fun open(open: OpenSession, sink: OutboundSink): String {
+    /** Installed by the relay client (issue #91): how a BRIDGE conversation's permission ask reaches
+     *  the owner — the ask frame itself never goes to the bridge. Null in local-server mode. */
+    @Volatile
+    var askPushHook: AskPushHook? = null
+
+    /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
+     *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
+     *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
+     *  PermissionBridge denies any Read/Write/Edit whose target escapes them; null = unrestricted (owner). */
+    suspend fun open(open: OpenSession, sink: OutboundSink, origin: String? = null, pathScope: List<String>? = null): String {
         val resume = open.resumeId
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
@@ -134,6 +148,26 @@ class SessionRegistry(
                 val file = ProjectPaths.dirFor(open.workdir).resolve("$resume.jsonl")
                 val recent = externallyActive(resume, open.workdir, file)
                 if (recent) {
+                    // a bridge gets a clean refusal instead of a read-only ObserveSession: observes have
+                    // no prompt path, and a headless adapter can't render "someone else is driving this"
+                    if (origin != null) {
+                        sink.emit(PocketError("bridge_busy", "session is live in another client — try again later"))
+                        return ""
+                    }
+                    // a reconnecting client re-opens its observe with a FRESH sink (same key, new
+                    // instance). Reap this client's previous observer(s) of the same transcript first —
+                    // they survive the reconnect (the device's sink key revives with it) and would keep
+                    // tailing under a stale convoId, ping-ponging the phone between two SessionLive/
+                    // ConvoHistory streams forever (issue #107).
+                    val stale = mutex.withLock {
+                        val dead = observes.filterValues { it.sessionId == resume && it.isAttachedTo(sink) }
+                        dead.keys.forEach(observes::remove)
+                        dead.values.toList()
+                    }
+                    stale.forEach { o ->
+                        log.info("open ${resume.take(8)}… → reap stale observer ${o.convoId.take(8)}… (same client re-open)")
+                        runCatching { o.close() }
+                    }
                     val convoId = UUID.randomUUID().toString()
                     log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (live foreign writer)")
                     val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
@@ -152,7 +186,11 @@ class SessionRegistry(
         // create() is cheap + never throws (the binary resolves lazily on first launch); the real "CLI not
         // installed" failure surfaces synchronously from c.open() below, so one guard there covers it.
         val convoId = UUID.randomUUID().toString()
-        val c = Conversation(convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(), pushHookProvider = { pushHook })
+        val c = Conversation(
+            convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
+            pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
+            pathScope = pathScope,
+        )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
         // MIGHT still be writing this transcript. Fork (branch to a fresh id, dodging a two-writer clobber) ONLY
@@ -179,18 +217,30 @@ class SessionRegistry(
         return convoId
     }
 
-    /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind), newest-first. */
+    /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */
+    internal suspend fun observing(convoId: String): Boolean = mutex.withLock { observes.containsKey(convoId) }
+
+    /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind),
+     *  newest-first, each stamped with its [SessionGroup] membership (issue #119; null = ungrouped). */
     fun listSessions(workdir: String): List<SessionSummary> =
         backends.values.flatMap { runCatching { it.create().listSessions(workdir) }.getOrDefault(emptyList()) }
+            .map { it.copy(group = SessionGroups.groupOf(workdir, it.sessionId)) }
             .sortedByDescending { it.lastModified }
 
     /**
      * Close conversations with no agent activity for longer than [idleMs]. Returns the reap count.
-     * A conversation with running background work is NEVER reaped — killing it would take its still-running
-     * background shells / sub-agents with it (the "I left it running" case this is meant to preserve). Nor is
-     * one with an unanswered permission ask / question (issue #55): it's blocked on the user, not idle, and
-     * reaping it would silently discard a card the phone is expected to answer (plan mode surfaces the question
-     * long after a premature `result`, past this idle window, while the phone is backgrounded).
+     * A BUSY conversation ([Conversation.isBusy]) is NEVER reaped, however stale its activity clock:
+     *  - a streaming turn (executing): `lastActivityMs` only moves when a stream-json line arrives, and the
+     *    CLI is routinely silent for minutes MID-TURN — a quiet long-running tool (build/test/install), a
+     *    single long generation (no --include-partial-messages), an API-retry backoff. Reaping on the stale
+     *    clock alone killed the process tree mid-task once the phone went offline >90s — the "submitted a
+     *    task, quit the app, came back to find only step 1 done" failure (issue #105). No leak in return:
+     *    a dead process clears `executing` in the pump, so only a LIVE process can hold its conversation.
+     *  - running background work: killing the conversation would take its still-running background shells /
+     *    sub-agents with it (the "I left it running" case this is meant to preserve).
+     *  - an unanswered permission ask / question (issue #55): blocked on the user, not idle — reaping would
+     *    silently discard a card the phone is expected to answer (plan mode surfaces the question long after
+     *    a premature `result`, past this idle window, while the phone is backgrounded).
      */
     suspend fun reapIdle(idleMs: Long): Int {
         // first settle background jobs whose completion event never arrived — otherwise their forever-RUNNING
@@ -199,11 +249,17 @@ class SessionRegistry(
         mutex.withLock { convos.values.toList() }.forEach { runCatching { it.reapStaleJobs(STALE_JOB_MS) } }
         val now = System.currentTimeMillis()
         val stale = mutex.withLock {
-            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.hasBackgroundWork() && !it.hasPendingAsk() }
+            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.isBusy() }
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
-        stale.forEach { it.close(); noteSelfClosed(it) }
+        stale.forEach {
+            // name each casualty: "which session died, when, how stale" is exactly what a field report
+            // of a vanished background task needs from the daemon log (issue #105 was undiagnosable
+            // from the RelayClient's bare reap count)
+            log.info("reapIdle: closing ${it.convoId.take(8)}… (sid=${it.sessionId?.take(8) ?: "-"}, idle ${now - it.lastActivityMs}ms)")
+            it.close(); noteSelfClosed(it)
+        }
         return stale.size
     }
 
@@ -259,6 +315,21 @@ class SessionRegistry(
         return idle.size
     }
 
+    /** Force-close every conversation opened by [origin] (a restricted credential's label). Used on
+     *  revoke/expiry so a guest's sessions END the instant the owner revokes — including convos it opened on
+     *  an EARLIER connection, which DeviceSessions' per-connection `owned` list no longer holds (issue #115
+     *  crypto review L1). Same lifecycle as [closeBusyForAuth]: the killed process trees take their
+     *  background shells with them; transcripts persist. */
+    suspend fun closeByOrigin(origin: String): Int {
+        val hits = mutex.withLock {
+            val s = convos.filterValues { it.origin == origin }
+            convos.keys.removeAll(s.keys)
+            s.values.toList()
+        }
+        hits.forEach { it.close(); noteSelfClosed(it) }
+        return hits.size
+    }
+
     /** cwds of live conversations with running background work — kept "active" in the project list even when idle. */
     suspend fun busyCwds(): Set<String> =
         mutex.withLock { convos.values.filter { it.hasBackgroundWork() }.map { it.workdir.toString() }.toSet() }
@@ -275,9 +346,16 @@ class SessionRegistry(
         mutex.withLock {
             convos.values.mapNotNull { c ->
                 val sid = c.sessionId ?: return@mapNotNull null
-                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind)
+                c.workdir.toString() to dev.ccpocket.protocol.ActiveSession(
+                    sid, executing = c.isExecuting(), busy = c.hasBackgroundWork(), agent = c.kind, origin = c.origin,
+                )
             }
         }.groupBy({ it.first }, { it.second })
+
+    /** How many of [ids] are still LIVE conversations — the bridge concurrency budget counts these,
+     *  not the historical ledger (issue #91): an idle-reaped session must not eat a slot forever. */
+    suspend fun liveCountOf(ids: Collection<String>): Int =
+        mutex.withLock { ids.count { it in convos } }
 
     /** Routes a prompt into its conversation. False = the convo is gone (idle-reaped / daemon restarted):
      *  the router answers [dev.ccpocket.protocol.SessionGone] so the phone can re-open + resend instead of
@@ -293,6 +371,10 @@ class SessionRegistry(
     suspend fun clearRule(c: ClearAllowRule) = get(c.convoId)?.clearAllowRule(c.rule) ?: Unit
     suspend fun cancelTurn(c: CancelTurn) = get(c.convoId)?.cancelTurn() ?: Unit
     suspend fun stopBackgroundJob(s: StopBackgroundJob) = get(s.convoId)?.stopBackgroundJob(s.jobId) ?: Unit
+
+    /** A workflow agent's detail sheet opened — the conversation reads the full prompt/return off disk (#106). */
+    suspend fun fetchWorkflowAgentDetail(f: GetWorkflowAgentDetail) =
+        get(f.convoId)?.fetchWorkflowAgentDetail(f.runId, f.agentIndex, f.agentId) ?: Unit
 
     /** Workdir of a live conversation — used by voice transcription for term injection. */
     suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir
@@ -395,8 +477,17 @@ class SessionRegistry(
     suspend fun closeAll() {
         val all = mutex.withLock { convos.values.toList().also { convos.clear() } }
         val obs = mutex.withLock { observes.values.toList().also { observes.clear() } }
-        all.forEach { it.close() }
-        obs.forEach { it.close() }
+        // Close in parallel. The daemon-shutdown hook (Main.kt / DaemonServer.kt) runs this, and each
+        // Conversation.close can spend AgentProcess's bounded EOF->SIGTERM->SIGKILL grace on a wedged
+        // child (issue #101). Serialised, N wedged sessions would sum past launchd/systemd's stop
+        // timeout and get the daemon SIGKILLed mid-flush — the very transcript loss #101 fixes. So the
+        // per-session grace stays bounded AND the total stays ~one session's budget, not N.
+        // runCatching per close so a single failure (or the scope being cancelled) can't abandon the
+        // remaining reaps.
+        coroutineScope {
+            (all.map { async { runCatching { it.close() } } } +
+                obs.map { async { runCatching { it.close() } } }).awaitAll()
+        }
     }
 
     private suspend fun get(id: String): Conversation? = mutex.withLock { convos[id] }

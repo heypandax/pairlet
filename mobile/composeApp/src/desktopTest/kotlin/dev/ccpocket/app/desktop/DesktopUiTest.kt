@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
@@ -10,9 +11,16 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.group_new
+import dev.ccpocket.app.resources.group_ungrouped
+import dev.ccpocket.app.resources.share_left_days
+import dev.ccpocket.app.resources.shared_badge
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.protocol.AgentKind
@@ -20,6 +28,8 @@ import dev.ccpocket.protocol.PermissionAsk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
 
 /**
  * Headless automated tests for the desktop shell. They render the real composables (driven by [SeedDesktopModel],
@@ -45,6 +55,20 @@ class DesktopUiTest {
     }
 
     @Test
+    fun sharedGroupShowsProvenancePillAndExpiry() = runComposeUiTest {
+        // a guest's shared folder in RECENT (issue #115): the neutral "Shared" pill + "owner · 6d left"
+        // — the same provenance statement mobile's SharedProjectCell makes, on the desktop group header.
+        // The pill/caption strings resolve via getString (the JVM locale picks the resource language).
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        waitForIdle()
+        val badge = runBlocking { getString(Res.string.shared_badge) }
+        val left = runBlocking { getString(Res.string.share_left_days, 6) }
+        assertPresent("acme-api")                 // the shared group's header renders
+        assertPresent(badge)                      // the hairline pill (shared_badge — same string as mobile)
+        assertPresent("panda-mbp · $left")        // origin machine + remaining validity, at rest
+    }
+
+    @Test
     fun recentGroupsCollapse() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertPresent("Bump maxFrame to 4MB")                // the relay group renders expanded
@@ -52,6 +76,99 @@ class DesktopUiTest {
         onAllNodes(hasText("relay")).onLast().performClick()
         waitForIdle()
         assertTrue(!present("Bump maxFrame to 4MB"), "a collapsed group hides its sessions")
+    }
+
+    @Test
+    fun currentProjectRendersCustomGroupSections() = runComposeUiTest {
+        // issue #119: the live project's sessions render segmented under their custom groups + an Ungrouped
+        // fallback, with the owner's "+ New group" create affordance at the foot.
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        waitForIdle()
+        val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
+        val newGroup = runBlocking { getString(Res.string.group_new) }
+        assertPresent("Auth work")              // a named custom group header
+        assertPresent("CI & release")           // the second group
+        assertPresent(ungrouped)                // the fallback section (s2 is ungrouped)
+        assertPresent(newGroup)                 // create affordance — owner-editable current project
+        assertPresent("Refactor auth module")   // s1, under Auth work
+        assertPresent("Fix stream parser test") // s2, under Ungrouped
+    }
+
+    @Test
+    fun customGroupCollapseHidesSessionsAndRemembers() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("Tidy CI workflow")               // s3 under "CI & release", expanded (and not pinned)
+        onAllNodes(hasText("CI & release")).onLast().performClick() // collapse that group
+        waitForIdle()
+        assertTrue(model.groupCollapsed("~/code/cc-pocket", "g-ci"), "the header click toggled collapse state")
+        assertTrue(!present("Tidy CI workflow"), "collapsing a custom group hides its sessions")
+    }
+
+    @Test
+    fun oldDaemonRendersFlatWithNoManagement() = runComposeUiTest {
+        // degrade: an older daemon / guest omits groups → repo reports canEditGroups=false → flat list,
+        // no group headers, no create entry. (groupsSupported=false is what folds into canEditGroups.)
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val customGroups = emptyList<DkGroup>()
+            override val canEditGroups = false
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        val newGroup = runBlocking { getString(Res.string.group_new) }
+        val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
+        assertPresent("Refactor auth module")                             // sessions still render, flat
+        assertTrue(!present("Auth work"), "no custom group headers when groups are empty")
+        assertTrue(!present(newGroup), "no create affordance when the daemon isn't group-aware")
+        assertTrue(!present(ungrouped), "no Ungrouped section in the flat view")
+    }
+
+    @Test
+    fun groupAwareDaemonWithZeroGroupsStillOffersCreate() = runComposeUiTest {
+        // a group-aware owner project that has NO groups yet: the list is flat (no headers / no Ungrouped),
+        // but "+ New group" MUST show so the very first group is creatable (issue #119 — the create entry
+        // lives outside the has-groups branch, gated on canEditGroups not on customGroups being non-empty).
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val customGroups = emptyList<DkGroup>()
+            override val canEditGroups = true
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        val newGroup = runBlocking { getString(Res.string.group_new) }
+        val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
+        assertPresent("Refactor auth module")                             // sessions render, flat
+        assertTrue(!present("Auth work"), "no headers until a group exists")
+        assertTrue(!present(ungrouped), "no Ungrouped section while flat")
+        assertPresent(newGroup)                                           // …but the first group is creatable
+    }
+
+    @Test
+    fun seedGroupMutationsTrackState() {
+        val m = SeedDesktopModel()
+        assertEquals(2, m.customGroups.size)
+        m.createGroup("Docs")
+        assertEquals(3, m.customGroups.size)
+        val docs = m.customGroups.first { it.name == "Docs" }
+        m.assignGroup("s2", docs.id)                                   // move the ungrouped session in
+        assertEquals(docs.id, m.sessions.first { it.sessionId == "s2" }.group)
+        m.renameGroup(docs.id, "Documentation")
+        assertEquals("Documentation", m.customGroups.first { it.id == docs.id }.name)
+        m.assignGroup("s1", null)                                      // move s1 out of Auth work
+        assertEquals(null, m.sessions.first { it.sessionId == "s1" }.group)
+        m.deleteGroup(docs.id)                                         // deleting drops its sessions to Ungrouped
+        assertTrue(m.customGroups.none { it.id == docs.id })
+        assertEquals(null, m.sessions.first { it.sessionId == "s2" }.group)
+    }
+
+    @Test
+    fun seedGroupCollapseToggles() {
+        val m = SeedDesktopModel()
+        assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
+        m.setGroupCollapsed("~/code/cc-pocket", "g-auth", true)
+        assertTrue(m.groupCollapsed("~/code/cc-pocket", "g-auth"))
+        m.setGroupCollapsed("~/code/cc-pocket", "g-auth", false)
+        assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
     }
 
     @Test
@@ -117,6 +234,26 @@ class DesktopUiTest {
         onAllNodes(hasText("/review")).onLast().performClick()
         waitForIdle()
         assertEquals("/review ", model.composer)                      // completes the word + a trailing space (cursor ready for args)
+    }
+
+    @Test
+    fun composerShiftEnterInsertsNewlineAndEnterSends() = runComposeUiTest {
+        // Drives the real ChatPane key handling end-to-end through ComposerState (the retired
+        // ImeSafeMirror's successor): shift+Enter splices a newline at the caret — the hint row's
+        // "⇧⏎ newline" promise — and plain Enter submits, whose clear-on-send empties the field
+        // through the model's String facade (an explicit external write; no reconcile pass exists).
+        val model = SeedDesktopModel().apply { composer = "hello" } // the explicit write lands the caret at the end
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        val field = onAllNodes(hasSetTextAction()).onFirst()
+        field.requestFocus()
+        waitForIdle()
+        field.performKeyInput { withKeyDown(Key.ShiftLeft) { pressKey(Key.Enter) } }
+        waitForIdle()
+        assertEquals("hello\n", model.composer, "shift+Enter inserts a newline instead of sending")
+        field.performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals("", model.composer, "Enter sends and clear-on-send empties the composer")
     }
 
     @Test
@@ -303,11 +440,91 @@ class DesktopUiTest {
     }
 
     @Test
-    fun trayPopoverShowsApprovalsAndSessions() = runComposeUiTest {
-        setContent { PocketTheme { TrayPopover() } }
+    fun trayPopoverShowsRealApprovalsAndSessions() = runComposeUiTest {
+        // was a static mockup showing the developer's own machine names (issue #111) — now driven by the
+        // live-shaped SeedDesktopModel, so every row is real fleet state
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { TrayPopover(model) } }
         assertPresent("PENDING APPROVALS")
         assertPresent("RUNNING SESSIONS")
+        assertPresent("rm -rf ./build && ./gradlew clean") // a REAL fleet approval preview (mac-studio's Bash)
+        assertPresent("mac-studio")                          // the owning machine, not a hardcoded name
+        assertPresent("api-server")                          // a REAL running project on another machine
+        assertPresent("3 computers · 3 sessions")            // header derived from live fleet state
         assertPresent("Open cc-pocket")
+    }
+
+    @Test
+    fun trayApprovalAllowRidesRealResolvePath() = runComposeUiTest {
+        // Allow/Deny must go through model.resolveAttention — the same repo verdict the inline card and the
+        // phone use — not a dead click. Resolving one leaves the fleet attention queue.
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { TrayPopover(model) } }
+        assertEquals(2, model.attention.size)
+        onAllNodes(hasText("Allow")).onFirst().performClick() // rows compose in queue order — first Allow = first row
+        waitForIdle()
+        assertEquals(1, model.attention.size)
+    }
+
+    @Test
+    fun trayOpenMainDismissesThePopover() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showTray = true }
+        setContent { PocketTheme { TrayPopover(model) } }
+        onAllNodes(hasText("Open cc-pocket")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(!model.showTray, "Open cc-pocket dismisses the tray popover")
+    }
+
+    @Test
+    fun traySettingsGearOpensSettings() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { TrayPopover(model) } }
+        assertTrue(!model.showSettings)
+        onAllNodes(hasContentDescription("Settings")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showSettings, "the gear opens Settings (was a dead clickable)")
+    }
+
+    @Test
+    fun trayHeaderCountsAggregateAcrossTheFleet() {
+        val m = SeedDesktopModel()
+        val (computers, sessions) = trayHeaderCounts(m)
+        assertEquals(3, computers)             // three online computers (win-desktop is offline)
+        assertEquals(3, sessions)              // three running projects across the whole fleet
+        assertEquals(m.running.size, sessions) // the header count matches the un-deduped list the tray renders
+    }
+
+    @Test
+    fun trayStatsLabelPluralizes() {
+        assertEquals("3 computers · 3 sessions", trayStatsLabel(3, 3))
+        assertEquals("1 computer · 1 session", trayStatsLabel(1, 1))
+        assertEquals("0 computers · 0 sessions", trayStatsLabel(0, 0))
+    }
+
+    @Test
+    fun trayVisibleCapsAndCountsOverflow() {
+        assertEquals(listOf(1, 2, 3) to 2, trayVisible(listOf(1, 2, 3, 4, 5), 3)) // caps to max, 2 hidden
+        assertEquals(listOf(1, 2) to 0, trayVisible(listOf(1, 2), 3))             // under the cap, none hidden
+        assertEquals(emptyList<Int>() to 0, trayVisible(emptyList(), 3))
+        // the seed fleet fits both section caps without overflow
+        val m = SeedDesktopModel()
+        assertTrue(m.attention.size <= TRAY_MAX_APPROVALS && m.running.size <= TRAY_MAX_RUNNING)
+    }
+
+    @Test
+    fun trayQuestionAskRoutesToSessionInsteadOfBareAllow() = runComposeUiTest {
+        // an AskUserQuestion's answer must ride the ALLOW as an answers map — a bare ALLOW reads "did not
+        // answer" to the CLI — so question rows swap Deny/Allow for an "Answer in session" jump
+        val q = DkAttention(
+            "ask-q", "acct-studio", "mac-studio", DkOs.MAC, "AskUserQuestion", "Which approach should I take?",
+            seconds = null, live = true, question = true,
+        )
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val attention = listOf(q)
+        }
+        setContent { PocketTheme { TrayPopover(model) } }
+        assertPresent("Answer in session ↗")
+        assertTrue(!present("Deny"), "question rows must not offer a bare Deny/Allow")
     }
 
     @Test

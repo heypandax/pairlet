@@ -7,12 +7,13 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.fragment.app.FragmentActivity
+import dev.ccpocket.app.lock.initAppLock
 import dev.ccpocket.app.push.CcPocketMessagingService
 import dev.ccpocket.app.secure.initSecureStore
 import dev.ccpocket.app.share.initFileExport
@@ -20,7 +21,8 @@ import dev.ccpocket.app.telemetry.initTelemetry
 import dev.ccpocket.app.ui.App
 import dev.ccpocket.app.voice.initVoice
 
-class MainActivity : ComponentActivity() {
+// FragmentActivity (not ComponentActivity) so androidx.biometric BiometricPrompt can host its dialog (issue #109).
+class MainActivity : FragmentActivity() {
     private val requestNotif = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,12 +30,15 @@ class MainActivity : ComponentActivity() {
         // Edge-to-edge so Compose owns ALL insets (the root Column pads systemBars + ime itself).
         // Without this, pre-15 devices keep decorFitsSystemWindows=true and the window manager
         // pans/resizes the window for the keyboard ON TOP of imePadding() -> composer floats a
-        // full keyboard-height above the IME. The app is always dark -> force light bar icons.
+        // full keyboard-height above the IME. Bars stay transparent; the FOREGROUND icon color is
+        // (re)driven from the resolved theme by SystemBarAppearance (issue #117) — this initial pick
+        // just matches the DARK default so frame 1 is right before the theme resolves.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         initSecureStore(this)
+        initAppLock(this) // App Lock (issue #109): the biometric prompt needs this FragmentActivity as host
         initTelemetry(this)
         initVoice(this)
         initUrlOpener(this)

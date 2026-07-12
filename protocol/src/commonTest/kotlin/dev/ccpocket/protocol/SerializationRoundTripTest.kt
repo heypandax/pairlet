@@ -7,6 +7,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** The pre-#119 `pocket/sessions` body shape (no `groups`) — used to prove an old app skips a populated
+ *  `groups` array-of-objects via ignoreUnknownKeys. A top-level @Serializable so the plugin generates its serializer. */
+@kotlinx.serialization.Serializable
+private data class OldSessions(val workdir: String, val items: List<SessionSummary> = emptyList())
+
 class SerializationRoundTripTest {
 
     @Test
@@ -109,6 +114,64 @@ class SerializationRoundTripTest {
     fun askWithdrawn_roundtrips() {
         val env = Envelope(id = "w1", ts = 0, body = AskWithdrawn("c1", "a1"))
         assertEquals(env, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(env)))
+    }
+
+    @Test
+    fun shareEnded_roundtrips_with_trailing_optional_defaults() {
+        // issue #115 follow-up: the guest-facing ending notice. Full form round-trips…
+        val env = Envelope(id = "s1", ts = 0, body = ShareEnded(ShareEnded.REASON_EXPIRED, ownerLabel = "Pandas-MacBook"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.ended\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // …the default omits ownerLabel entirely (explicitNulls=false) and carries reason=revoked (encodeDefaults)
+        val plain = PocketJson.encodeToString(Envelope(id = "s2", ts = 0, body = ShareEnded()))
+        assertTrue("\"reason\":\"revoked\"" in plain, plain)
+        assertFalse("ownerLabel" in plain, plain)
+
+        // a MINIMAL frame (a future daemon that omits everything) decodes with both trailing optionals defaulted
+        val minimal = """{"id":"s3","ts":0,"to":"PEER","body":{"t":"pocket/share.ended"}}"""
+        assertEquals(ShareEnded(ShareEnded.REASON_REVOKED, null), PocketJson.decodeFromString<Envelope>(minimal).body)
+
+        // a NEWER daemon's extra fields are skipped, not fatal — the old-app tolerance this frame relies on
+        val future = """{"id":"s4","ts":0,"to":"PEER","body":{"t":"pocket/share.ended","reason":"revoked","ownerLabel":"x","futureField":{"k":1}}}"""
+        assertEquals(ShareEnded(ShareEnded.REASON_REVOKED, "x"), PocketJson.decodeFromString<Envelope>(future).body)
+    }
+
+    @Test
+    fun askWithdrawn_reason_roundtrips_and_old_frames_default_withdrawn() {
+        // issue #100: the retire-reason is a trailing optional. new daemon → new phone: TIMED_OUT rides along
+        val timed = Envelope(id = "w2", ts = 0, body = AskWithdrawn("c1", "a1", AskWithdrawnReason.TIMED_OUT))
+        val json = PocketJson.encodeToString(timed)
+        assertTrue("\"reason\":\"timed_out\"" in json, json)
+        assertEquals(timed, PocketJson.decodeFromString<Envelope>(json))
+
+        // encodeDefaults puts reason on EVERY withdrawal — the plain (agent-cancel) one carries "withdrawn"
+        assertTrue("\"reason\":\"withdrawn\"" in PocketJson.encodeToString(Envelope(id = "w3", ts = 0, body = AskWithdrawn("c1", "a2"))))
+
+        // an OLD daemon's frame (no reason key) decodes to WITHDRAWN — every phone keeps today's plain dismiss
+        val old = """{"id":"w4","ts":0,"to":"PEER","body":{"t":"pocket/ask.withdrawn","convoId":"c1","askId":"a3"}}"""
+        assertEquals(AskWithdrawn("c1", "a3", AskWithdrawnReason.WITHDRAWN), PocketJson.decodeFromString<Envelope>(old).body)
+
+        // a reason only a NEWER daemon knows degrades to UNKNOWN (phone just dismisses) instead of the
+        // runCatching-at-decode dropping the whole frame and stranding the card
+        val future = """{"id":"w5","ts":0,"to":"PEER","body":{"t":"pocket/ask.withdrawn","convoId":"c1","askId":"a4","reason":"superseded"}}"""
+        assertEquals(AskWithdrawnReason.UNKNOWN, (PocketJson.decodeFromString<Envelope>(future).body as AskWithdrawn).reason)
+    }
+
+    @Test
+    fun permissionAsk_timeoutSec_roundtrips_and_defaults_null_for_old_daemons() {
+        // issue #100: a new daemon stamps its real approval window so the phone counts its local fallback against it
+        val ask = PermissionAsk("c1", "a1", "Write", "…", timeoutSec = 600)
+        val json = PocketJson.encodeToString(Envelope(id = "ts1", ts = 0, body = ask))
+        assertTrue("\"timeoutSec\":600" in json, json)
+        assertEquals(ask, PocketJson.decodeFromString<Envelope>(json).body)
+
+        // a plain ask omits it (explicitNulls=false) — byte-identical to a pre-#100 daemon's frame
+        assertFalse("timeoutSec" in PocketJson.encodeToString(Envelope(id = "ts2", ts = 0, body = PermissionAsk("c1", "a2", "Bash", "ls"))))
+        // an OLD daemon's ask (no timeoutSec key) decodes to null → the phone falls back to its legacy 30s countdown
+        val old = """{"id":"ts3","ts":0,"to":"PEER","body":{"t":"pocket/ask","convoId":"c1","askId":"a3","tool":"Bash","inputPreview":"ls"}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(old).body as PermissionAsk).timeoutSec)
     }
 
     @Test
@@ -222,6 +285,26 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun exportFile_roundtrips_carries_convoId_and_defaults_agent() {
+        // issue #67 v2 / #79: the approval-gated export of a non-changed file. Distinct discriminator from
+        // ReadFile so an old daemon DROPS it (can't serve past the changed-set) instead of mis-serving.
+        val req = Envelope(id = "x1", ts = 0, body = ExportFile("c1", "/w", "sid", "/w/report.xlsx"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/file.export\"" in reqJson, reqJson)
+        assertTrue("\"convoId\":\"c1\"" in reqJson, reqJson) // routes the approval to the live conversation
+        assertTrue("\"agent\":\"claude\"" in reqJson, reqJson) // encodeDefaults, like ReadFile
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+        // reply rides the SAME FileContent channel as ReadFile (served, or ok=false on refuse/deny)
+        val served = FileContent("/w", "sid", "/w/report.xlsx", base64 = "UEsD", mediaType = "application/zip", totalBytes = 3)
+        assertEquals(served, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "x2", ts = 0, body = served))).body)
+        // a frame WITHOUT the agent key (hand-written, or a client that omits defaults) decodes to CLAUDE
+        val noAgent = PocketJson.decodeFromString<Envelope>(
+            """{"id":"x3","ts":0,"body":{"t":"pocket/file.export","convoId":"c1","workdir":"/w","sessionId":"sid","path":"/w/report.xlsx"}}""",
+        )
+        assertEquals(ExportFile("c1", "/w", "sid", "/w/report.xlsx"), noAgent.body)
+    }
+
+    @Test
     fun fileDiff_pair_roundtrips_and_stats_stay_optional() {
         val req = Envelope(id = "d1", ts = 0, body = ReadFileDiff("/w", "sid", "/w/a.kt"))
         val reqJson = PocketJson.encodeToString(req)
@@ -331,6 +414,75 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun fileChunk_roundtrips_and_totalBytes_defaults_for_hand_rolled_frames() {
+        // issue #90: the chunked file-upload stream. idx 0 carries the full size for early over-cap refusal
+        val first = Envelope(
+            id = "fc1", ts = 0,
+            body = FileChunk("c1", "cap-1", 0, last = false, name = "report.pdf", mediaType = "application/pdf", base64 = "QUFB", totalBytes = 2_400_000),
+        )
+        val json = PocketJson.encodeToString(first)
+        assertTrue("\"t\":\"pocket/file.chunk\"" in json, json)
+        assertTrue("\"totalBytes\":2400000" in json, json)
+        assertEquals(first, PocketJson.decodeFromString<Envelope>(json))
+
+        // later chunks ride the default 0 (encodeDefaults puts it on the wire; a differently-defaulting
+        // peer still reads intent), and a frame WITHOUT the key decodes to 0 = unknown
+        val tail = FileChunk("c1", "cap-1", 3, last = true, name = "report.pdf", mediaType = "application/pdf", base64 = "QUJD")
+        assertEquals(tail, PocketJson.decodeFromString<FileChunk>(PocketJson.encodeToString(tail)))
+        val minimal = """{"convoId":"c1","captureId":"cap-1","idx":1,"last":false,"name":"a.csv","mediaType":"text/csv","base64":"QQ=="}"""
+        assertEquals(0L, PocketJson.decodeFromString<FileChunk>(minimal).totalBytes)
+    }
+
+    @Test
+    fun fileUploadCancel_roundtrips() {
+        val env = Envelope(id = "fc2", ts = 0, body = FileUploadCancel("c1", "cap-1"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/file.cancel\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun fileUploaded_success_and_error_variants_roundtrip() {
+        // success: the landing path rides along; error is omitted (explicitNulls=false)
+        val ok = Envelope(
+            id = "fu1", ts = 0,
+            body = FileUploaded("c1", "cap-1", path = ".ccpocket/inbox/cap-1/report.pdf", name = "report.pdf", size = 2_400_000),
+        )
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/file.uploaded\"" in okJson, okJson)
+        assertFalse("error" in okJson, okJson)
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        // failure: nothing landed — path/name absent, error present
+        val err = FileUploaded("c1", "cap-2", ok = false, error = "file too large — the limit is 200 MB")
+        val errJson = PocketJson.encodeToString<FileUploaded>(err)
+        assertTrue("\"ok\":false" in errJson, errJson)
+        assertFalse("path" in errJson, errJson)
+        assertEquals(err, PocketJson.decodeFromString<FileUploaded>(errJson))
+
+        // a minimal frame (only the required keys) reads as a pathless success — pins default semantics
+        val minimal = """{"convoId":"c1","captureId":"cap-3"}"""
+        val back = PocketJson.decodeFromString<FileUploaded>(minimal)
+        assertTrue(back.ok)
+        assertEquals(null, back.path)
+        assertEquals(0L, back.size)
+    }
+
+    @Test
+    fun fileChunk_is_undecodable_to_old_peers_by_design() {
+        // The #90 downgrade story: an OLD daemon can't decode "pocket/file.chunk" (unknown discriminator
+        // throws → runCatching at its decode site drops the frame silently), so a NEW app must arm an
+        // upload timeout instead of waiting on a FileUploaded that will never come. Same contract the
+        // generic unknown_frame_discriminator_throws pins, restated on this exact frame so a future
+        // default-deserializer change can't quietly break the timeout-based degradation.
+        val json = PocketJson.encodeToString(Envelope(id = "fc3", ts = 0, body = FileChunk("c", "cap", 0, true, "a.txt", "text/plain", "QQ==")))
+        assertTrue("\"t\":\"pocket/file.chunk\"" in json, json)
+        // simulate the old peer: a codec whose sealed hierarchy doesn't know the type ≈ unknown "t" here
+        val unknownT = json.replace("pocket/file.chunk", "pocket/file.chunk-from-the-future")
+        assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
+    }
+
+    @Test
     fun transcript_ok_defaults_and_error_variant() {
         val ok = Envelope(id = "6", ts = 0, body = Transcript("c1", "cap-1", text = "hello world"))
         val okJson = PocketJson.encodeToString(ok)
@@ -392,6 +544,18 @@ class SerializationRoundTripTest {
         val json = PocketJson.encodeToString(env)
         assertTrue("\"t\":\"pocket/pair.begin\"" in json, json)
         assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun pairBegin_headless_roundtrips_and_old_frames_default_false() {
+        // issue #91: the authoritative bridge marker rides PairBegin from the minting daemon
+        val bridge = Envelope(id = "pb1", ts = 0, to = Route.RELAY, body = PairBegin("pub", headless = true))
+        val json = PocketJson.encodeToString(bridge)
+        assertTrue("\"headless\":true" in json, json)
+        assertEquals(bridge, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's PairBegin (no headless key) decodes to false — the relay mints a phone ticket
+        val old = """{"id":"pb2","ts":0,"to":"RELAY","body":{"t":"pocket/pair.begin","e2ePub":"pub"}}"""
+        assertEquals(PairBegin("pub"), PocketJson.decodeFromString<Envelope>(old).body as PairBegin)
     }
 
     @Test
@@ -661,5 +825,470 @@ class SerializationRoundTripTest {
         assertTrue(isSubagentTool("Task"))
         assertTrue(isSubagentTool("Agent"))
         assertFalse(isSubagentTool("Bash"))
+    }
+
+    @Test
+    fun history_question_answers_roundtrip_and_old_frames_default() {
+        // issue #110: `answers` is OPTIONAL on HistoryMessage — a new daemon and an old app (or the
+        // reverse) keep talking; only an AskUserQuestion row a replay resolved ever carries it
+        val answered = HistoryMessage(
+            ChatRole.TOOL, "Which color do you prefer?", tool = "AskUserQuestion",
+            answers = listOf(QuestionAnswer("Which color do you prefer?", "Red"), QuestionAnswer("", "surprise me")),
+        )
+        val aj = PocketJson.encodeToString(answered)
+        assertTrue("\"answers\"" in aj, aj)
+        assertEquals(answered, PocketJson.decodeFromString<HistoryMessage>(aj))
+
+        // old daemon → new app: no answers key → null, the plain tool card of today
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"tool","text":"{\"questions\":[…]}","tool":"AskUserQuestion"}""")
+        assertEquals(null, legacy.answers)
+
+        // any plain TOOL row stays byte-identical to the pre-#110 wire: answers is null and
+        // explicitNulls=false omits the key
+        val plainJson = PocketJson.encodeToString(HistoryMessage(ChatRole.TOOL, "ls", tool = "Bash"))
+        assertFalse("answers" in plainJson, plainJson)
+    }
+
+    @Test
+    fun workflowUpdate_roundtrips_and_null_previews_are_omitted() {
+        val env = Envelope(
+            id = "w1", ts = 0,
+            body = WorkflowUpdate(
+                convoId = "c1",
+                run = WorkflowRun(
+                    runId = "wf_8f3a21c0-abc",
+                    name = "release-pipeline",
+                    status = WorkflowRunStatus.RUNNING,
+                    toolUseId = "toolu_1",
+                    phases = listOf(WorkflowPhaseInfo(1, "resolve"), WorkflowPhaseInfo(2, "analyze")),
+                    agents = listOf(
+                        WorkflowAgentSnap(1, "scan module-auth", WorkflowAgentState.RUNNING, phaseIndex = 2, startedAt = 5, lastToolName = "Grep"),
+                        WorkflowAgentSnap(2, "scan module-core", WorkflowAgentState.DONE, phaseIndex = 2, durationMs = 72_000, resultPreview = "no issues"),
+                        WorkflowAgentSnap(3, "test auth.expiry", WorkflowAgentState.FAILED, phaseIndex = 2, error = "AssertionError: expected refresh"),
+                        WorkflowAgentSnap(4, "package dist", WorkflowAgentState.QUEUED, phaseIndex = 2, queuedAt = 9),
+                    ),
+                    startedAt = 1,
+                ),
+            ),
+        )
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/workflow\"" in json, json)
+        assertTrue("\"status\":\"running\"" in json, json)
+        assertTrue("\"state\":\"queued\"" in json, json)
+        assertTrue("\"state\":\"failed\"" in json, json)
+        assertFalse("finalResult" in json, json)  // explicitNulls=false — terminal-only fields stay off the live frame
+        assertFalse("\"durationMs\":null" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun workflow_future_enum_values_degrade_to_unknown_not_a_dropped_frame() {
+        // a state/status only a NEWER daemon knows must not fail the decode — runCatching at the
+        // client's decode site would silently drop the frame and the card would freeze mid-run
+        val future = """{"id":"w2","ts":0,"to":"PEER","body":{"t":"pocket/workflow","convoId":"c1","run":{
+            "runId":"wf_1","name":"n","status":"paused","agents":[
+            {"index":1,"label":"a","state":"skipped"}]}}}"""
+        val run = (PocketJson.decodeFromString<Envelope>(future).body as WorkflowUpdate).run
+        assertEquals(WorkflowRunStatus.UNKNOWN, run.status)
+        assertEquals(WorkflowAgentState.UNKNOWN, run.agents.single().state)
+    }
+
+    @Test
+    fun workflowAgentDetail_request_response_roundtrip_and_old_frames_default() {
+        val req = Envelope(id = "w3", ts = 0, body = GetWorkflowAgentDetail("c1", "wf_1", 7, agentId = "a1"))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/workflow.agent.fetch\"" in reqJson, reqJson)
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+
+        val resp = Envelope(id = "w4", ts = 0, body = WorkflowAgentDetail("c1", "wf_1", 7, prompt = "Investigate…", result = "patched"))
+        assertEquals(resp, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(resp)))
+
+        // a daemon that predates optional agentId still decodes our request minus the hint
+        val oldReq = """{"id":"w5","ts":0,"to":"PEER","body":{"t":"pocket/workflow.agent.fetch","convoId":"c1","runId":"wf_1","agentIndex":7}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(oldReq).body as GetWorkflowAgentDetail).agentId)
+    }
+
+    @Test
+    fun historyMessage_workflowRunId_trails_and_workflow_tool_predicate() {
+        // new daemon → new app: the Workflow tool row carries its run id for card binding
+        val row = HistoryMessage(ChatRole.TOOL, "probe", tool = "Workflow", ok = true, workflowRunId = "wf_1")
+        assertEquals(row, PocketJson.decodeFromString<HistoryMessage>(PocketJson.encodeToString(row)))
+
+        // old daemon's row (no key) → null; the card renders as a plain tool row
+        val legacy = PocketJson.decodeFromString<HistoryMessage>("""{"role":"tool","text":"x","tool":"Workflow"}""")
+        assertEquals(null, legacy.workflowRunId)
+
+        // old client skips the unknown key without throwing
+        val skipped = PocketJson.decodeFromString<HistoryMessage>(
+            """{"role":"tool","text":"x","tool":"Workflow","workflowRunId":"wf_9","futureKey":1}""",
+        )
+        assertEquals("wf_9", skipped.workflowRunId)
+
+        assertTrue(isWorkflowTool("Workflow"))
+        assertFalse(isWorkflowTool("Task"))
+        assertFalse(isWorkflowTool("Agent"))
+    }
+
+    // ── API presets (issue #113) ─────────────────────────────────────────
+
+    @Test
+    fun presets_requests_roundtrip_and_token_is_write_only_plus_redacted() {
+        // create: the plaintext token rides client → daemon as a plain JSON string (E2E protects transport)
+        val save = Envelope(
+            id = "s1", ts = 0,
+            body = SavePreset(
+                name = "Work proxy", baseUrl = "https://api.example-proxy.com/v1",
+                tokenVar = PresetEnv.API_KEY, token = Secret("sk-live-9f2a4c8e3f9a"),
+                model = "gpt-4o", smallFastModel = "gpt-4o-mini",
+            ),
+        )
+        val saveJson = PocketJson.encodeToString(save)
+        assertTrue("\"t\":\"pocket/presets.save\"" in saveJson, saveJson)
+        assertTrue("\"token\":\"sk-live-9f2a4c8e3f9a\"" in saveJson, saveJson) // inline value class = bare string
+        assertFalse("\"id\":\"" in saveJson.substringAfter("body"), saveJson)  // null id (create) omitted
+        assertEquals(save, PocketJson.decodeFromString<Envelope>(saveJson))
+
+        // …but the frame's toString (accidental logging) redacts the secret
+        val printed = save.toString()
+        assertFalse("sk-live-9f2a4c8e3f9a" in printed, printed)
+        assertTrue("«redacted»" in printed, printed)
+
+        // edit keeping the stored token: null token omitted on the wire ("leave blank to keep")
+        val keep = PocketJson.encodeToString(Envelope(id = "s2", ts = 0, body = SavePreset(id = "p1", name = "n", baseUrl = "https://x")))
+        assertFalse("\"token\":" in keep, keep)
+
+        // activate / deactivate / delete round-trip; activate-null omits id
+        val act = Envelope(id = "a1", ts = 0, body = ActivatePreset(id = "p1", force = true))
+        assertEquals(act, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(act)))
+        val deact = PocketJson.encodeToString(Envelope(id = "a2", ts = 0, body = ActivatePreset()))
+        assertTrue("\"t\":\"pocket/presets.activate\"" in deact, deact)
+        assertFalse("\"id\":" in deact.substringAfter("body"), deact)
+        val del = Envelope(id = "d1", ts = 0, body = DeletePreset("p1"))
+        assertEquals(del, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(del)))
+    }
+
+    @Test
+    fun presetsState_masks_only_and_decodes_tolerantly() {
+        val state = Envelope(
+            id = "ps1", ts = 0,
+            body = PresetsState(
+                presets = listOf(
+                    PresetSummary("p1", "Work proxy", "https://api.example-proxy.com/v1", PresetEnv.AUTH_TOKEN, "sk-…••••3f9a", model = "gpt-4o"),
+                    PresetSummary("p2", "Personal key", "https://api.anthropic.com", PresetEnv.API_KEY, "sk-…••••a71c"),
+                ),
+                activeId = "p1",
+            ),
+        )
+        val json = PocketJson.encodeToString(state)
+        assertTrue("\"t\":\"pocket/presets.state\"" in json, json)
+        assertTrue("sk-…••••3f9a" in json, json) // the mask IS the only token-shaped thing on this wire
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(json))
+
+        // refusal carries blockers in the same shape as AuthState (shared client card)
+        val blocked = PresetsState(
+            presets = emptyList(), activeId = null,
+            error = "Sessions on this computer are still working",
+            blockers = listOf(AuthBlocker(convoId = "c1", cwd = "/w/acme-web", reason = AuthBlockReason.EXECUTING)),
+        )
+        val bj = PocketJson.encodeToString(Envelope(id = "ps2", ts = 0, body = blocked))
+        assertEquals(blocked, PocketJson.decodeFromString<Envelope>(bj).body as PresetsState)
+
+        // a NEWER daemon's summary (extra key + unknown tokenVar) still decodes: ignoreUnknownKeys +
+        // tokenVar-as-string keep a future var name from failing the whole pane
+        val future = """{"id":"f1","ts":0,"to":"PEER","body":{"t":"pocket/presets.state","presets":[
+            {"id":"p9","name":"n","baseUrl":"https://x","tokenVar":"ANTHROPIC_FANCY_TOKEN","tokenMask":"••••","shiny":true}],"activeId":"p9"}}"""
+        val dec = PocketJson.decodeFromString<Envelope>(future).body as PresetsState
+        assertEquals("ANTHROPIC_FANCY_TOKEN", dec.presets.single().tokenVar)
+
+        // a minimal old-shape state (empty object) decodes to safe defaults — tail-append compatibility
+        val minimal = PocketJson.decodeFromString<Envelope>("""{"id":"f2","ts":0,"to":"PEER","body":{"t":"pocket/presets.state"}}""").body as PresetsState
+        assertEquals(emptyList(), minimal.presets)
+        assertEquals(null, minimal.activeId)
+        assertEquals(null, minimal.fieldError)
+    }
+
+    @Test
+    fun bridge_origin_fields_roundtrip_and_old_frames_default_null() {
+        // issue #91: SessionLive.origin — a bridge-opened conversation names its trigger source
+        val bridged = SessionLive("c1", "/x", "sid", origin = "feishu-bot")
+        val bj = PocketJson.encodeToString<SessionLive>(bridged)
+        assertTrue("\"origin\":\"feishu-bot\"" in bj, bj)
+        assertEquals(bridged, PocketJson.decodeFromString<SessionLive>(bj))
+        // an interactive session's frame stays byte-identical to the pre-#91 wire (explicitNulls=false)
+        assertFalse("origin" in PocketJson.encodeToString<SessionLive>(SessionLive("c1", "/x", "sid")))
+        // an OLD daemon's frame (no origin key) decodes to null — no label rendered
+        val legacy = """{"convoId":"c3","workdir":"/z","sessionId":"sid3"}"""
+        assertEquals(null, PocketJson.decodeFromString<SessionLive>(legacy).origin)
+
+        // ActiveSession.origin — the project list's live row label, same four-direction contract
+        val row = ActiveSession("s1", "review MR", executing = true, origin = "feishu-bot")
+        assertEquals(row, PocketJson.decodeFromString<ActiveSession>(PocketJson.encodeToString(row)))
+        assertFalse("origin" in PocketJson.encodeToString(ActiveSession("s1")))
+        assertEquals(null, PocketJson.decodeFromString<ActiveSession>("""{"sessionId":"s1"}""").origin)
+    }
+
+    @Test
+    fun pairRedeem_headless_roundtrips_and_old_shapes_default_false() {
+        // issue #91: the REST redeem body — a bridge declares itself headless
+        val headless = PairRedeem("tkt", "pub", headless = true)
+        val hj = PocketJson.encodeToString(headless)
+        assertTrue("\"headless\":true" in hj, hj)
+        assertEquals(headless, PocketJson.decodeFromString<PairRedeem>(hj))
+        // an OLD app's redeem (no headless key) decodes as an interactive device on a NEW relay
+        assertEquals(PairRedeem("tkt", "pub"), PocketJson.decodeFromString<PairRedeem>("""{"ticket":"tkt","devicePubKey":"pub"}"""))
+        // an OLD relay skips the unknown key the usual ignoreUnknownKeys way — pin the skip shape
+        // (kotlin has no "old decoder" here; the unknown-key tolerance test above covers the mechanism)
+        assertTrue("\"headless\":false" in PocketJson.encodeToString(PairRedeem("tkt", "pub")), "encodeDefaults keeps the flag explicit")
+
+        // DaemonHello.protoV: a NEW daemon announces PROTO_V_HEADLESS; an old relay ignores the value
+        val hello = DaemonHello("acct", "edpub", protoV = PROTO_V_HEADLESS)
+        val hjson = PocketJson.encodeToString(Envelope(id = "h1", ts = 0, to = Route.RELAY, body = hello))
+        assertTrue("\"protoV\":2" in hjson, hjson)
+        assertEquals(hello, PocketJson.decodeFromString<Envelope>(hjson).body)
+        // an OLD daemon's hello (no protoV key) decodes as 1 — the relay must treat it as pre-headless
+        val oldHello = """{"id":"h2","ts":0,"to":"RELAY","body":{"t":"pocket/daemon.hello","accountId":"a","ed25519Pub":"p"}}"""
+        assertEquals(1, (PocketJson.decodeFromString<Envelope>(oldHello).body as DaemonHello).protoV)
+    }
+
+    @Test
+    fun notifyPush_urgent_roundtrips_and_old_frames_default_false() {
+        // issue #91: a bridge-approval push rides the urgent flag so the relay delivers it even with a
+        // phone attached elsewhere
+        val urgent = Envelope(id = "n1", ts = 0, to = Route.RELAY, body = NotifyPush("Approval needed", "Run command waiting", workdir = "/w", sessionId = "s", urgent = true))
+        val json = PocketJson.encodeToString(urgent)
+        assertTrue("\"urgent\":true" in json, json)
+        assertEquals(urgent, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's push (no urgent key) decodes to false — the ordinary deviceCount==0 gate applies
+        val old = """{"id":"n2","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b"}}"""
+        assertEquals(NotifyPush("t", "b"), PocketJson.decodeFromString<Envelope>(old).body as NotifyPush)
+    }
+
+    // ---- folder-share (issue #115) ----
+
+    @Test
+    fun accessTier_roundtrips_and_future_tier_degrades_to_safest() {
+        // every known tier round-trips by its wire name
+        val expected = mapOf(
+            AccessTier.REVIEW to "review",
+            AccessTier.COLLABORATE to "collaborate",
+            AccessTier.AUTONOMOUS to "autonomous",
+        )
+        for ((tier, name) in expected) {
+            assertEquals("\"$name\"", PocketJson.encodeToString(tier))
+            assertEquals(tier, PocketJson.decodeFromString<AccessTier>("\"$name\""))
+        }
+        // a tier only a NEWER peer knows must NOT fail the frame — it degrades to the SAFEST (REVIEW-like)
+        // so a scoped credential never falls open on a version skew
+        assertEquals(AccessTier.UNKNOWN, PocketJson.decodeFromString<AccessTier>("\"read_only_v2\""))
+        // and the ceiling of an unknown tier is the most cautious mode (never bypass)
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(AccessTier.UNKNOWN))
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(AccessTier.REVIEW))
+        assertEquals(PermissionMode.ACCEPT_EDITS, AccessTier.ceiling(AccessTier.COLLABORATE))
+        assertEquals(PermissionMode.ACCEPT_EDITS, AccessTier.ceiling(AccessTier.AUTONOMOUS))
+    }
+
+    @Test
+    fun createShare_roundtrips_with_defaults_and_old_frames_default() {
+        val env = Envelope(id = "sh1", ts = 0, body = CreateShare("/Users/panda/repo"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.create\"" in json, json)
+        assertTrue("\"tier\":\"collaborate\"" in json, json)          // encodeDefaults
+        assertTrue("\"expiresInSec\":604800" in json, json)           // 7d default, encodeDefaults
+        assertFalse("label" in json, json)                            // explicitNulls=false
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        // a minimal owner frame (only path) reads with the collaborate/7d defaults
+        val minimal = """{"id":"sh2","ts":0,"to":"PEER","body":{"t":"pocket/share.create","path":"/x"}}"""
+        assertEquals(CreateShare("/x"), PocketJson.decodeFromString<Envelope>(minimal).body)
+    }
+
+    @Test
+    fun listShares_and_revokeShare_roundtrip() {
+        val list = Envelope(id = "sh3", ts = 0, body = ListShares)
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"t\":\"pocket/share.list\"" in listJson, listJson)
+        assertEquals(ListShares, PocketJson.decodeFromString<Envelope>(listJson).body)
+
+        val rev = Envelope(id = "sh4", ts = 0, body = RevokeShare("dev-guest-1"))
+        val revJson = PocketJson.encodeToString(rev)
+        assertTrue("\"t\":\"pocket/share.revoke\"" in revJson, revJson)
+        assertEquals(rev, PocketJson.decodeFromString<Envelope>(revJson))
+    }
+
+    @Test
+    fun shareInvite_and_shareCreated_roundtrip_and_omit_null_error() {
+        val invite = ShareInvite(
+            relay = "wss://pocket.ark-nexus.cc", accountId = "acct", daemonPub = "pub", ticket = "tkt",
+            folderName = "repo", tier = AccessTier.COLLABORATE, expiresAt = 1_800_000_000_000, ttlSec = 120,
+            ownerLabel = "Pandas-MacBook-Pro",
+        )
+        val ok = Envelope(id = "sc1", ts = 0, body = ShareCreated(ok = true, invite = invite))
+        val okJson = PocketJson.encodeToString(ok)
+        assertTrue("\"t\":\"pocket/share.created\"" in okJson, okJson)
+        assertTrue("\"folderName\":\"repo\"" in okJson, okJson)
+        assertFalse("\"error\"" in okJson, okJson) // explicitNulls=false — a success carries no error
+        assertEquals(ok, PocketJson.decodeFromString<Envelope>(okJson))
+
+        val err = ShareCreated(ok = false, error = "a phone pairing is in progress — retry shortly")
+        val errJson = PocketJson.encodeToString(Envelope(id = "sc2", ts = 0, body = err))
+        assertFalse("invite" in errJson, errJson) // null invite omitted
+        assertEquals(err, PocketJson.decodeFromString<Envelope>(errJson).body)
+    }
+
+    @Test
+    fun shareListing_and_shareRevoked_roundtrip() {
+        val listing = ShareListing(
+            items = listOf(
+                ShareInfo("dev1", "/Users/panda/repo", AccessTier.COLLABORATE, createdAt = 1, expiresAt = 2, online = true, activeSessions = 1),
+                ShareInfo("dev2", "/Users/panda/web", AccessTier.REVIEW, createdAt = 3, expiresAt = 4, guestLabel = "alex", lastActiveAt = 5, revoked = true),
+            ),
+        )
+        val env = Envelope(id = "sl1", ts = 0, body = listing)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.listing\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        val revoked = Envelope(id = "sr1", ts = 0, body = ShareRevoked("dev1", ok = true))
+        val rJson = PocketJson.encodeToString(revoked)
+        assertTrue("\"t\":\"pocket/share.revoked\"" in rJson, rJson)
+        assertFalse("error" in rJson, rJson) // explicitNulls=false
+        assertEquals(revoked, PocketJson.decodeFromString<Envelope>(rJson))
+    }
+
+    @Test
+    fun directoryEntry_share_fields_roundtrip_and_old_frames_default_null() {
+        // a GUEST's shared row carries the origin label + expiry + tier; an ordinary local row omits them
+        val shared = DirectoryEntry(
+            path = "/Users/panda/repo", name = "repo", isDir = true, hasSessions = true,
+            sharedBy = "Pandas-MacBook-Pro", shareExpiresAt = 1_800_000_000_000, shareTier = AccessTier.COLLABORATE,
+        )
+        val json = PocketJson.encodeToString(shared)
+        assertTrue("\"sharedBy\":\"Pandas-MacBook-Pro\"" in json, json)
+        assertTrue("\"shareTier\":\"collaborate\"" in json, json)
+        assertEquals(shared, PocketJson.decodeFromString<DirectoryEntry>(json))
+        // a plain local dir stays byte-identical to the pre-#115 wire (explicitNulls=false)
+        val local = PocketJson.encodeToString(DirectoryEntry(path = "/p", name = "p", isDir = true))
+        assertFalse("sharedBy" in local, local)
+        assertFalse("shareExpiresAt" in local, local)
+        assertFalse("shareTier" in local, local)
+        // an old daemon's entry (no share keys) decodes with null share fields — a plain row
+        val old = """{"path":"/p","name":"p","isDir":true}"""
+        val back = PocketJson.decodeFromString<DirectoryEntry>(old)
+        assertEquals(null, back.sharedBy)
+        assertEquals(null, back.shareExpiresAt)
+        assertEquals(null, back.shareTier)
+        // a FUTURE peer's unknown shareTier degrades to UNKNOWN in-frame and the whole entry still decodes
+        // (not dropped) — the fail-closed contract in structured context, not just a bare string
+        val future = """{"path":"/p","name":"p","isDir":true,"sharedBy":"panda","shareTier":"read_only_v2"}"""
+        val futureBack = PocketJson.decodeFromString<DirectoryEntry>(future)
+        assertEquals(AccessTier.UNKNOWN, futureBack.shareTier)
+        assertEquals("panda", futureBack.sharedBy)
+    }
+
+    @Test
+    fun share_shapes_tolerate_an_unknown_future_key() {
+        // the new-daemon → OLD-phone direction for the share shapes: a NEWER daemon adds a field the old
+        // phone's schema lacks, and the old phone must SKIP it (ignoreUnknownKeys) rather than drop the whole
+        // frame. Pin it directly on the #115 shapes (the mechanism is shared, but the four-direction contract
+        // is per-shape) — the known fields must survive the skip.
+        val entry = PocketJson.decodeFromString<DirectoryEntry>(
+            """{"path":"/p","name":"p","isDir":true,"sharedBy":"panda","shareTier":"collaborate","futureFlag":true,"futureObj":{"x":1}}""",
+        )
+        assertEquals("panda", entry.sharedBy)
+        assertEquals(AccessTier.COLLABORATE, entry.shareTier)
+
+        val info = PocketJson.decodeFromString<ShareInfo>(
+            """{"deviceId":"d1","path":"/p","tier":"review","createdAt":1,"expiresAt":2,"futureField":[{"k":"v"}]}""",
+        )
+        assertEquals("d1", info.deviceId)
+        assertEquals(AccessTier.REVIEW, info.tier)
+
+        // and the enclosing ShareListing frame still decodes with the unknown key nested in an item
+        val listing = PocketJson.decodeFromString<Envelope>(
+            """{"id":"z1","ts":0,"to":"PEER","body":{"t":"pocket/share.listing","items":[
+               {"deviceId":"d2","path":"/q","tier":"collaborate","createdAt":3,"expiresAt":4,"unknownFuture":9}]}}""",
+        )
+        assertEquals("d2", (listing.body as ShareListing).items.single().deviceId)
+    }
+
+    // ── session groups (issue #119) ──────────────────────────────────────────
+
+    @Test
+    fun sessionGroup_roundtrips() {
+        val g = SessionGroup(id = "g1", name = "Feature work", order = 2)
+        assertEquals(g, PocketJson.decodeFromString<SessionGroup>(PocketJson.encodeToString(g)))
+    }
+
+    @Test
+    fun sessionSummary_group_roundtrips_and_defaults_for_old_daemons() {
+        val s = SessionSummary(
+            sessionId = "s", title = "t", firstPrompt = "p",
+            messageCount = 1, cwd = "/x", lastModified = 0, group = "g1",
+        )
+        assertEquals(s, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(s)))
+        // an old daemon's summary has no `group` key → decodes to null (ungrouped), not an error
+        val old = """{"sessionId":"s","title":"t","firstPrompt":"p","messageCount":1,"cwd":"/x","lastModified":0}"""
+        assertEquals(null, PocketJson.decodeFromString<SessionSummary>(old).group)
+    }
+
+    @Test
+    fun sessions_frame_groups_roundtrip_and_omit_when_null() {
+        val withGroups = Envelope(
+            id = "sg1", ts = 0,
+            body = Sessions(
+                workdir = "/x",
+                items = listOf(SessionSummary("s", "t", "p", 1, "/x", 0, group = "g1")),
+                groups = listOf(SessionGroup("g1", "Docs", 0), SessionGroup("g2", "Bugs", 1)),
+            ),
+        )
+        val json = PocketJson.encodeToString(withGroups)
+        assertTrue("\"t\":\"pocket/sessions\"" in json, json)
+        assertTrue("\"groups\"" in json, json)
+        assertEquals(withGroups, PocketJson.decodeFromString<Envelope>(json))
+
+        // an old daemon omits groups entirely → null, and an old app that never sends them still decodes
+        val noGroups = Sessions(workdir = "/x", items = emptyList())
+        val j2 = PocketJson.encodeToString(noGroups)
+        assertFalse("groups" in j2, j2)
+        assertEquals(noGroups, PocketJson.decodeFromString<Sessions>(j2))
+        // a legacy daemon's frame (no groups key at all) decodes with groups == null
+        val legacy = """{"workdir":"/x","items":[]}"""
+        assertEquals(null, PocketJson.decodeFromString<Sessions>(legacy).groups)
+    }
+
+    @Test
+    fun old_peer_skips_a_populated_groups_array() {
+        // the new-daemon → OLD-app direction, exercised as a STRUCTURED unknown-key skip: an old app whose
+        // schema lacks `groups` decodes a NEW pocket/sessions frame that DOES carry a populated array-of-objects
+        // and must skip it (ignoreUnknownKeys) — the exact skip path over structured data that has bitten before.
+        // [OldSessions] (top-level) simulates the pre-#119 schema.
+        val newFrame = """{"workdir":"/x","items":[],"groups":[{"id":"g1","name":"Docs","order":0}]}"""
+        val back = PocketJson.decodeFromString<OldSessions>(newFrame)
+        assertEquals("/x", back.workdir)
+        assertTrue(back.items.isEmpty())
+    }
+
+    @Test
+    fun group_mutation_frames_roundtrip() {
+        val create = Envelope(id = "1", ts = 0, body = GroupCreate("/x", "Feature"))
+        assertTrue("\"t\":\"pocket/group.create\"" in PocketJson.encodeToString(create))
+        assertEquals(create, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(create)))
+
+        val rename = Envelope(id = "2", ts = 0, body = GroupRename("/x", "g1", "Renamed"))
+        assertTrue("\"t\":\"pocket/group.rename\"" in PocketJson.encodeToString(rename))
+        assertEquals(rename, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(rename)))
+
+        val delete = Envelope(id = "3", ts = 0, body = GroupDelete("/x", "g1"))
+        assertTrue("\"t\":\"pocket/group.delete\"" in PocketJson.encodeToString(delete))
+        assertEquals(delete, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(delete)))
+
+        // assign with a group, and assign-out (groupId null is omitted by explicitNulls=false)
+        val assign = Envelope(id = "4", ts = 0, body = GroupAssign("/x", "s1", "g1"))
+        assertTrue("\"t\":\"pocket/group.assign\"" in PocketJson.encodeToString(assign))
+        assertEquals(assign, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(assign)))
+
+        val unassign = GroupAssign("/x", "s1", null)
+        val uj = PocketJson.encodeToString(unassign)
+        assertFalse("groupId" in uj, uj)
+        assertEquals(unassign, PocketJson.decodeFromString<GroupAssign>(uj))
     }
 }

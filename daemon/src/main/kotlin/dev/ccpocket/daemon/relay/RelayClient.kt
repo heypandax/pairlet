@@ -1,10 +1,12 @@
 package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.DaemonCore
+import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Attached
+import dev.ccpocket.protocol.PROTO_V_HEADLESS
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.Challenge
 import dev.ccpocket.protocol.DaemonAuth
@@ -59,10 +61,20 @@ class RelayClient(
 ) {
     private val log = logger("RelayClient")
 
+    // The trust manager for the relay TLS link. Built once (env/OS trust sources are stable for the
+    // daemon's lifetime). Default is the JVM's own trust store; it only WIDENS to extra user/OS anchors
+    // when CC_POCKET_CACERTS or a Linux system CA bundle is present (issue #124). Never weakens checks.
+    private val relayTrust by lazy { RelayTrust.build() }
+
     // A FRESH client (and CIO selector) per connection attempt: a selector that lived through an interface
     // change (VPN/TUN flip, network switch) can keep dialing a dead path forever. Rebuilding is cheap at
     // reconnect cadence and guarantees every attempt starts from the current network state.
     private fun newClient() = HttpClient(CIO) {
+        engine {
+            // Hand CIO our trust manager. CIO does hostname verification separately (against the request
+            // host), so this only governs chain/anchor validation — hostname checking stays intact.
+            https { trustManager = relayTrust }
+        }
         install(WebSockets) {
             // keepalive ping well under Cloudflare's ~100s idle WS timeout, so the relay link stays up
             pingIntervalMillis = 20_000
@@ -87,6 +99,31 @@ class RelayClient(
     /** Loopback diagnostics (`pair`/`status`): is a relay session currently attached… */
     val attached: Boolean get() = dataOut != null
 
+    /** The headless-bridge authority (issue #91) — PairLoopback serves list/revoke/mint from it. */
+    val bridges: dev.ccpocket.daemon.bridge.BridgeRegistry get() = sessions.bridges
+
+    /** The OWNER folder-share control plane (issue #115) — PairLoopback serves the `share` CLI's
+     *  mint/list/revoke from it. Null until [run] installs it (a request during the brief startup window),
+     *  and always null on the local-server path, which has no relay link to mint a ticket over. */
+    val shareControl: ShareControl? get() = sessions.shareControl
+
+    /** True while an interactive pairing ticket could still be redeemed (headless mint must wait). */
+    fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
+
+    /** Revoke a bridge credential: prune locally NOW (the security anchor — its handshake key dies with
+     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed.
+     *  [reason] flavors the guest-facing [dev.ccpocket.protocol.ShareEnded] notice (#115 follow-up). */
+    suspend fun revokeBridge(deviceId: String, reason: String = dev.ccpocket.protocol.ShareEnded.REASON_REVOKED) {
+        val noticed = sessions.onDeviceRevoked(deviceId, reason)
+        // The guest's ShareEnded notice rides the DATA writer while RevokeDevice rides the CONTROL writer —
+        // two independent pumps with no cross-ordering guarantee. Give the sealed notice a short head start
+        // so the relay forwards it before the revoke force-closes the guest's socket. Purely a delivery
+        // courtesy: the credential is ALREADY dead locally (onDeviceRevoked above — key pruned, E2E session
+        // cut, convos force-closed), so nothing security-relevant rides on this delay.
+        if (noticed) delay(REVOKE_NOTICE_GRACE_MS)
+        controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
+    }
+
     /** Exposes the pairing-ceremony gate to the direct-LAN listener (see DeviceSessions.firstContactPending). */
     suspend fun deviceFirstContactPending(deviceId: String): Boolean = sessions.firstContactPending(deviceId)
 
@@ -94,10 +131,14 @@ class RelayClient(
     fun lastPongAgeMs(): Long? = lastPongAt.takeIf { it != 0L }?.let { System.currentTimeMillis() - it }
 
     suspend fun run() = coroutineScope {
-        // wake an offline phone when a turn completes. peerOnline gates it here (an attached phone got the
-        // TurnDone over the data plane already); the relay re-checks deviceCount before actually pushing.
+        // wake an offline phone when a turn completes. peerOnline gates the relay-attached case and
+        // lanConnected() the direct-LAN one (an attached phone — either transport — got the TurnDone over
+        // the data plane already). The LAN check matters once LAN-resident phones carry LIVE relay tokens
+        // (the #114 follow-up dial): the relay re-checks deviceCount before actually pushing, but it can't
+        // see LAN attachment — without this gate every turn watched over the LAN doubles as a lock-screen
+        // push. Mirrors the reaper's gate below.
         core.registry.pushHook = PushHook { workdir, sessionId, finalText ->
-            if (!peerOnline && core.prefs.pushEnabled) controlOutbox.send(
+            if (!peerOnline && !core.registry.lanConnected() && core.prefs.pushEnabled) controlOutbox.send(
                 NotifyPush(
                     title = workdir.fileName?.toString() ?: "CC Pocket",
                     body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",
@@ -106,7 +147,38 @@ class RelayClient(
                 ),
             )
         }
+        // issue #91: a BRIDGE conversation's permission ask can't reach the bridge (egress whitelist) —
+        // push the owner instead. Deliberately NOT gated on peerOnline: the phone being online does not
+        // mean it is attached to the bridge's conversation (unlike TurnDone, which an attached client
+        // already received on the data plane). The relay still suppresses the push while any interactive
+        // device socket is live, so an in-app owner isn't double-alerted.
+        core.registry.askPushHook = AskPushHook { workdir, sessionId, origin, tool ->
+            if (core.prefs.pushEnabled) controlOutbox.send(
+                NotifyPush(
+                    title = "Approval needed — $origin",
+                    body = "${workdir.fileName ?: "session"}: $tool is waiting for your decision",
+                    workdir = workdir.toString(),
+                    sessionId = sessionId,
+                    urgent = true, // deliver even if a phone is attached elsewhere — the ask isn't on its data plane
+                ),
+            )
+        }
+        // issue #115: the OWNER folder-share control plane. Installed on the relay path (minting needs the
+        // relay link; the LAN path can't mint). DeviceSessions dispatches CreateShare/ListShares/RevokeShare
+        // to it for a full-power owner device only.
+        sessions.shareControl = ShareService(
+            accountId = identity.accountId,
+            daemonPubB64 = identity.e2ePubB64,
+            relayWsBase = relayWsBase,
+            ownerLabel = hostname,
+            registry = sessions.bridges,
+            mintTicket = { headless -> mintTicket(headless) },
+            interactivePairingPending = { sessions.interactivePairingPending() },
+            revokeCredential = { deviceId -> revokeBridge(deviceId) },
+            liveSessions = { core.registry.liveByCwd().entries.flatMap { (cwd, list) -> list.map { cwd to it } } },
+        )
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
+        launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
         var backoff = 1_000L
         while (true) {
             try {
@@ -139,17 +211,35 @@ class RelayClient(
         }
     }
 
+    /** Cut + purge expired folder shares (issue #115 §6). Runs regardless of phone presence — an expired
+     *  guest must drop immediately, whether or not the owner is online. [revokeBridge] prunes the guest key
+     *  locally NOW (its handshake dies) and best-effort tells the relay to force-close its socket, so the
+     *  guest is severed and its credential can't be reused. */
+    private suspend fun guestExpiryLoop() {
+        while (true) {
+            delay(GUEST_EXPIRY_SCAN_MS)
+            for (id in sessions.bridges.expiredGuestIds()) {
+                log.info("folder share ${id.take(8)}… expired — revoking")
+                runCatching { revokeBridge(id, reason = dev.ccpocket.protocol.ShareEnded.REASON_EXPIRED) }
+            }
+        }
+    }
+
     /** Queue a plain notification for the phone (e.g. "new daemon version"). The relay only actually
      *  pushes when no device is attached — an attached user doesn't need APNs to hear from us. */
     suspend fun notifyPhone(title: String, body: String) {
         controlOutbox.send(NotifyPush(title = title, body = body, workdir = "", sessionId = null))
     }
 
-    /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK. */
-    suspend fun mintTicket(): PairTicket? {
-        controlOutbox.send(PairBegin(identity.e2ePubB64)) // relay needs our E2E pub to serve the code path
+    /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK.
+     *  [headless] mints a BRIDGE ticket (issue #91): it skips the interactive-mint exclusion stamp so
+     *  only real phone pairings block a headless mint — the caller records the intent right after. */
+    suspend fun mintTicket(headless: Boolean = false): PairTicket? {
+        // relay needs our E2E pub to serve the code path; headless is the authoritative bridge marker the
+        // relay stamps onto the ticket (issue #91) so a lying redeem can't dodge presence/push/replay
+        controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless))
         return withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() }
-            ?.also { sessions.onMintedTicket(it.ticket) }
+            ?.also { sessions.onMintedTicket(it.ticket, headless) }
     }
 
     private suspend fun connectOnce() {
@@ -220,7 +310,9 @@ class RelayClient(
 
     /** DaemonHello -> Challenge -> DaemonAuth -> Attached. Throws on rejection (caller retries). */
     private suspend fun DefaultClientWebSocketSession.authenticate() {
-        outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64))))
+        // protoV = PROTO_V_HEADLESS: tells the relay we understand headless bridge devices, so it may
+        // replay their DevicePaired rows to us (it withholds them from older daemons — issue #91)
+        outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64, protoV = PROTO_V_HEADLESS))))
         val challenge = nextControl() as? Challenge ?: error("expected challenge")
         outgoing.send(WsFrame.Text(controlText(DaemonAuth(identity.signChallenge(challenge.nonce)))))
         when (val r = nextControl()) {
@@ -255,6 +347,8 @@ class RelayClient(
         // ride out brief app-backgrounding / network blips — a reaped session re-opened later resumes in
         // place on the same id (see Conversation.open), so too-short here mostly costs process churn.
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
+        const val GUEST_EXPIRY_SCAN_MS = 30 * 1000L // how often to sweep for expired folder shares (issue #115)
+        const val REVOKE_NOTICE_GRACE_MS = 250L   // head start for the guest's ShareEnded notice before RevokeDevice cuts its socket
         const val ATTACH_REPLAY_SETTLE_MS = 3_000L // relay device re-announce rides the attach; settled well within this
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)

@@ -16,6 +16,13 @@ class Conn(
     val sendText: suspend (String) -> Unit,
     val sendBinary: suspend (ByteArray) -> Unit,
     val close: suspend (reason: String) -> Unit,
+    // issue #91: a headless bridge socket must not count as "a person is watching" — presence,
+    // offline-push gating, and the interactive connection cap all read [headless]. From the device's
+    // relay-store row (self-declared at redeem; advisory, never a capability).
+    val headless: Boolean = false,
+    // daemons only: the protoV from DaemonHello — gates whether headless DevicePaired rows are
+    // replayed to this daemon (an older daemon would file them as full-power devices).
+    val daemonProtoV: Int = 1,
 )
 
 /**
@@ -58,6 +65,19 @@ class Broker {
 
     suspend fun daemonOnline(account: String): Boolean = mutex.withLock { daemons.containsKey(account) }
     suspend fun deviceCount(account: String): Int = mutex.withLock { devices[account]?.size ?: 0 }
+
+    /** Live INTERACTIVE device sockets (phones/desktops) — the only ones that count for presence and
+     *  for the "push only when nobody is attached" gate. An always-on bridge must never mute pushes
+     *  or convince the daemon a person is watching (issue #91). */
+    suspend fun interactiveDeviceCount(account: String): Int =
+        mutex.withLock { devices[account]?.count { !it.headless } ?: 0 }
+
+    /** Live HEADLESS bridge sockets — capped separately from interactive devices. */
+    suspend fun headlessDeviceCount(account: String): Int =
+        mutex.withLock { devices[account]?.count { it.headless } ?: 0 }
+
+    /** The account's live daemon socket (to read its protoV for replay gating), if any. */
+    suspend fun daemonConn(account: String): Conn? = mutex.withLock { daemons[account] }
 
     /** device -> the account's daemon (data plane, opaque), tagged with the source deviceId. */
     suspend fun toDaemonFrom(account: String, deviceId: String, data: ByteArray) {

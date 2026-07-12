@@ -17,6 +17,34 @@ data class ListDirectories(val root: String? = null) : ToDaemon
 @SerialName("pocket/sessions.list")
 data class ListSessions(val workdir: String) : ToDaemon
 
+// ── session groups (issue #119): optional one-level `project → group → session` organization. Group
+//    metadata lives on the daemon (consistent across clients); each mutation is answered by re-pushing the
+//    workdir's [Sessions] list (with the updated [Sessions.groups] + per-row [SessionSummary.group]) so the
+//    change reflects immediately. A daemon that predates these drops the unknown frame (the group op just
+//    no-ops there — the client keeps its flat list). ──
+
+/** phone -> daemon: create a new group named [name] under [workdir]. Reply: the re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.create")
+data class GroupCreate(val workdir: String, val name: String) : ToDaemon
+
+/** phone -> daemon: rename group [groupId] under [workdir] to [name]. Reply: the re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.rename")
+data class GroupRename(val workdir: String, val groupId: String, val name: String) : ToDaemon
+
+/** phone -> daemon: delete group [groupId] under [workdir]; its sessions fall back to ungrouped (the sessions
+ *  are NOT deleted). Reply: the re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.delete")
+data class GroupDelete(val workdir: String, val groupId: String) : ToDaemon
+
+/** phone -> daemon: file [sessionId] under [groupId] ([groupId] null = move it out of any group). Reply: the
+ *  re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.assign")
+data class GroupAssign(val workdir: String, val sessionId: String, val groupId: String? = null) : ToDaemon
+
 /** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
 @Serializable
 @SerialName("pocket/usage.fetch")
@@ -125,6 +153,39 @@ data class AudioChunk(
 data class AudioCancel(val convoId: String, val captureId: String) : ToDaemon
 
 /**
+ * One chunk of a regular file upload (issue #90). Unlike an inline [ImageData] (base64 folded into the
+ * model message, never written to disk) a picked file — PDF/CSV/code/Office/… — is chunk-streamed to the
+ * paired computer and LANDED in the session's workspace so the agent can Read it BY PATH. Chunks of one
+ * file share [captureId]; the daemon reassembles by [idx] and writes the bytes to
+ * `<cwd>/.ccpocket/inbox/<captureId>/<name>`.
+ *
+ * Shape mirrors [AudioChunk] and adds two fields: [name] rides on EVERY chunk so reassembly stays
+ * stateless, and [totalBytes] (set on idx 0, 0 = unknown) lets the daemon reject an over-cap upload
+ * before it buffers a single byte. A daemon that predates this frame can't decode the unknown "t" and
+ * drops it (the runCatching-at-decode path every newer message relies on) — so a new phone MUST arm an
+ * upload timeout and surface an "update the computer's cc-pocket" state rather than hang forever.
+ */
+@Serializable
+@SerialName("pocket/file.chunk")
+data class FileChunk(
+    val convoId: String,
+    val captureId: String,   // phone-generated, one per file (fresh per retry)
+    val idx: Int,            // 0-based
+    val last: Boolean,       // true on the final chunk -> landing happens once 0..idx are all present
+    val name: String,        // the picked file's display name; the daemon sanitizes it to a safe basename
+    val mediaType: String,   // best-effort MIME ("application/pdf" | "text/csv" | "application/octet-stream" | …)
+    val base64: String,
+    val totalBytes: Long = 0, // full file size, carried on idx 0 (0 = unknown) -> early over-cap rejection
+) : ToDaemon
+
+/** Abandon a file upload (user cancelled / retrying); the daemon drops buffered chunks + the partial
+ *  file on disk. Mirrors [AudioCancel]. A daemon that predates this drops the frame — the stale partial
+ *  is reaped by the inbox's own expiry sweep instead. */
+@Serializable
+@SerialName("pocket/file.cancel")
+data class FileUploadCancel(val convoId: String, val captureId: String) : ToDaemon
+
+/**
  * phone -> daemon: run a one-off shell command in [workdir] (the active session's cwd) to check the
  * environment from afar (e.g. `git status`, `node -v`). The daemon gates it through the same approval
  * UI as the Bash tool — auto-run only in bypass mode or for a remembered rule; dangerous commands always
@@ -162,6 +223,29 @@ data class ListSessionFiles(
 @Serializable
 @SerialName("pocket/file.read")
 data class ReadFile(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val agent: AgentKind = AgentKind.CLAUDE,
+) : ToDaemon
+
+/**
+ * phone -> daemon: export ONE file the session did NOT change out to the phone (issue #67 v2 / #79 — the
+ * Bash/script-generated documents and read-only files [ReadFile]'s changed-set gate leaves unreachable).
+ * This deliberately widens past [ReadFile], so it is gated to keep the "no arbitrary-path read" red line:
+ *   - if [path] IS in the session's changed set, it is served straight away (already reachable via [ReadFile]);
+ *   - otherwise the daemon requires the file to sit canonically INSIDE [workdir] (a `..`/symlink escape is
+ *     refused with a readable reason, never served) AND raises an owner [PermissionAsk] ("Export {path} to
+ *     phone?") — the SAME approval firewall the Bash quick-terminal uses. The owner can "Allow once" or
+ *     remember the workspace; an unanswered ask times out to deny. The reply is one [FileContent] (served,
+ *     or ok=false carrying why it was refused/denied). [convoId] scopes the approval + routes the ask to the
+ *     live conversation, exactly like [RunShellCommand]. A daemon that predates this drops the frame — the
+ *     client times out to its "update the computer" state.
+ */
+@Serializable
+@SerialName("pocket/file.export")
+data class ExportFile(
+    val convoId: String,
     val workdir: String,
     val sessionId: String,
     val path: String,
@@ -250,6 +334,86 @@ data object AuthLogout : ToDaemon
 @SerialName("pocket/push.prefs.set")
 data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
 
+// ── API presets (issue #113): named env overrides for third-party API users ──
+// Every pocket/presets.* request is answered by one [PresetsState]. A daemon that predates these
+// silently drops them (undecodable frame) — the client shows an "update the daemon" line instead,
+// and MUST NOT offer the token-bearing create/edit form until a [PresetsState] reply proves the
+// daemon understands presets (so a plaintext token is never fired at a peer that can't store it).
+
+/** client -> daemon: list the saved presets (masked) + which one is active. */
+@Serializable
+@SerialName("pocket/presets.fetch")
+data object FetchPresets : ToDaemon
+
+/**
+ * client -> daemon: create ([id] null) or update ([id] set) one preset. [token] is WRITE-ONLY: the
+ * plaintext rides this frame over the E2E channel, is stored on the daemon, and only ever comes back
+ * as [PresetSummary.tokenMask]. On update, a null [token] keeps the stored one ("leave blank to keep").
+ * [tokenVar] picks which env var carries it ([PresetEnv.TOKEN_VARS]). Validation failures come back
+ * as [PresetsState.error] with [PresetsState.fieldError] naming the offending field.
+ */
+@Serializable
+@SerialName("pocket/presets.save")
+data class SavePreset(
+    val id: String? = null,
+    val name: String,
+    val baseUrl: String,
+    val tokenVar: String = PresetEnv.AUTH_TOKEN,
+    val token: Secret? = null,
+    val model: String? = null,
+    val smallFastModel: String? = null,
+) : ToDaemon
+
+/** client -> daemon: delete a preset. Deleting the ACTIVE one deactivates first — same switch
+ *  semantics as [ActivatePreset] (mid-task sessions refuse via blockers, idle ones are closed). */
+@Serializable
+@SerialName("pocket/presets.delete")
+data class DeletePreset(val id: String, val force: Boolean = false) : ToDaemon
+
+/**
+ * client -> daemon: make [id] the active preset (null = deactivate, back to the computer's own env /
+ * login). New sessions launch with the preset's env injected; sessions already open keep the endpoint
+ * they started with. Switch semantics mirror [AuthLogin]: refused with [PresetsState.blockers] while
+ * any conversation is mid-task (its running process holds the OLD env for its next turn), idle-but-open
+ * conversations are closed automatically (they cold-resume under the new env). [force] = the user saw
+ * the blocker list and chose "stop all & switch".
+ */
+@Serializable
+@SerialName("pocket/presets.activate")
+data class ActivatePreset(val id: String? = null, val force: Boolean = false) : ToDaemon
+
+// ---- folder-share (issue #115): OWNER-only control plane. These are a full-power device gesture —
+//      the daemon handles them only for an interactive OWNER device, NEVER a scoped guest or a headless
+//      bridge (a guest re-sharing the owner's machine is exactly the escalation the scope prevents). A
+//      guest's capability whitelist omits them, and the daemon double-checks the sender is full-power. ----
+
+/**
+ * owner -> daemon: mint a scoped, expiring folder-share invite. The daemon mints a pairing ticket over
+ * its relay link, records a GUEST intent binding [path]+[tier]+lifetime to that ticket, and returns a
+ * [ShareCreated] carrying the redeemable [ShareInvite]. [expiresInSec] is the SHARE lifetime (the guest
+ * is cut when it lapses); the redeem ticket has its own short TTL. A daemon that predates this drops the
+ * frame (the owner's app times out to "update the daemon").
+ */
+@Serializable
+@SerialName("pocket/share.create")
+data class CreateShare(
+    val path: String,
+    val tier: AccessTier = AccessTier.COLLABORATE,
+    val expiresInSec: Long = 7 * 24 * 3600,
+    val label: String? = null, // an optional nickname for the guest, shown on the owner's management page
+) : ToDaemon
+
+/** owner -> daemon: list the folders I've shared + who is using them (the management page). Reply: [ShareListing]. */
+@Serializable
+@SerialName("pocket/share.list")
+data object ListShares : ToDaemon
+
+/** owner -> daemon: revoke a share by its guest [deviceId] — cuts the guest's live link NOW and deletes
+ *  the credential (the ticket is already spent; the key dies). Reply: [ShareRevoked]. */
+@Serializable
+@SerialName("pocket/share.revoke")
+data class RevokeShare(val deviceId: String) : ToDaemon
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -286,13 +450,38 @@ data class AuthState(
     val blockers: List<AuthBlocker> = emptyList(),
 ) : ToPhone
 
+/**
+ * daemon -> client: the presets truth — the single reply to every pocket/presets.* request. Tokens
+ * appear ONLY as masks ([PresetSummary.tokenMask]); there is no frame that carries one back out.
+ * [error] is a user-facing refusal (validation, mid-task guard); the list still reflects the actual
+ * stored state alongside it. [fieldError] names the offending [SavePreset] field ("name" | "baseUrl" |
+ * "token") so the form can mark it inline. When the refusal is the mid-task guard, [blockers] itemizes
+ * the working conversations — same rendering as the OAuth account-switch refusal card.
+ */
+@Serializable
+@SerialName("pocket/presets.state")
+data class PresetsState(
+    val presets: List<PresetSummary> = emptyList(),
+    val activeId: String? = null,
+    val error: String? = null,
+    val fieldError: String? = null,
+    val blockers: List<AuthBlocker> = emptyList(),
+) : ToPhone
+
 @Serializable
 @SerialName("pocket/dirs")
 data class Directories(val entries: List<DirectoryEntry>, val root: String? = null) : ToPhone
 
 @Serializable
 @SerialName("pocket/sessions")
-data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPhone
+data class Sessions(
+    val workdir: String,
+    val items: List<SessionSummary>,
+    // The project's session groups (issue #119), ordered — the client renders the group headers from this and
+    // files each row under [SessionSummary.group]. A trailing optional: an old daemon omits it (the client shows
+    // no groups, a flat list), an old app ignores it. Re-pushed after every pocket/group.* mutation.
+    val groups: List<SessionGroup>? = null,
+) : ToPhone
 
 /**
  * Aggregated token usage (issue #26). [tokensToday]/[requestsToday]/[cacheHitPct]/[costUsdToday] are for the
@@ -343,6 +532,10 @@ data class SessionLive(
     // the resumed transcript's tail) — the session is likely past its context window and every send just
     // bloats the transcript (issue #65). Clients warn + gate the next send; old clients ignore the field.
     val degraded: Boolean = false,
+    // The external trigger source that opened this conversation — the bridge credential's name (issue #91,
+    // e.g. "feishu-bot"), so clients can label it "via feishu-bot". Null = opened by an interactive
+    // device (today's behavior) or an older daemon; old clients ignore the field.
+    val origin: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -379,6 +572,10 @@ data class ToolEvent(
  *  two sides can't drift on the alias list. */
 fun isSubagentTool(tool: String): Boolean = tool == "Task" || tool == "Agent"
 
+/** The CLI's Workflow orchestration tool (one call fans out to dozens of agents — issue #106).
+ *  Shared daemon+clients so the card dispatch and the tracker can't drift. */
+fun isWorkflowTool(tool: String): Boolean = tool == "Workflow"
+
 /** A permission prompt the phone must resolve. askId == Anthropic request_id. */
 @Serializable
 @SerialName("pocket/ask")
@@ -401,6 +598,12 @@ data class PermissionAsk(
     // Mirrors the daemon's ToolMeta.neverRemember, which stays enforced server-side; this flag only
     // drives client UI. Old daemons omit it — clients fall back through [oneOff].
     val neverRemember: Boolean = false,
+    // How many seconds the daemon will wait for the verdict before it auto-denies and withdraws this card
+    // (issue #100). The phone counts its local "no response" fallback against THIS, so a long daemon-side
+    // window (the product's whole premise is "you're away from the computer") no longer collides with a
+    // hardcoded 30s client countdown. Null from a pre-#100 daemon → the phone keeps its legacy 30s; old
+    // phones ignore the field.
+    val timeoutSec: Int? = null,
 ) : ToPhone
 
 /** Whether this ask is a one-off decision the UI must not offer to remember. The daemon's flag is the
@@ -414,12 +617,19 @@ val PermissionAsk.oneOff: Boolean
  *  predicate instead of re-testing `questions != null` across both clients. */
 val PermissionAsk.isQuestion: Boolean get() = questions != null
 
-/** The agent withdrew a pending ask (claude's control_cancel_request) — dismiss the card/sheet.
- *  Old phones drop the unknown frame type (every decode path is runCatching) and keep their
- *  timeout fallback; that degradation is intentional. */
+/** The daemon retired a pending ask — dismiss / finalize the card. Sent when the agent withdrew it
+ *  (claude's control_cancel_request), when the approval window timed out (issue #100 — the ONE path the
+ *  phone otherwise can't observe, since from the CLI's view a timed-out request is already answered and no
+ *  cancel ever comes), or when the session closes. [reason] tells the phone which terminal state to render;
+ *  it is a trailing optional so a pre-#100 daemon omits it (decodes to [AskWithdrawnReason.WITHDRAWN]) and
+ *  an old phone ignores it (ignoreUnknownKeys) and keeps just dismissing the card. */
 @Serializable
 @SerialName("pocket/ask.withdrawn")
-data class AskWithdrawn(val convoId: String, val askId: String) : ToPhone
+data class AskWithdrawn(
+    val convoId: String,
+    val askId: String,
+    val reason: AskWithdrawnReason = AskWithdrawnReason.WITHDRAWN,
+) : ToPhone
 
 /** Turn finished. finalText is the result text (if any); usage is token accounting (if present).
  *  [error] non-null = the turn FAILED and finalText (if any) is not a real answer: the CLI reported
@@ -492,12 +702,22 @@ enum class ChatRole {
     @SerialName("tool") TOOL,
 }
 
+/** One (question → answer) an AskUserQuestion resolved, reconstructed from a replayed transcript so a
+ *  resumed/observed session shows the compact "answered" row instead of the raw tool JSON (issue #110).
+ *  [question] is blank for a freeform reply. */
+@Serializable
+data class QuestionAnswer(val question: String, val answer: String)
+
 /** One past message in a resumed session's transcript. [error] marks an assistant record that was a
  *  `<synthetic>` API-failure placeholder, not a real reply (issue #65) — clients render it as an error
  *  row; old clients ignore the flag and show the placeholder text as before.
  *  [ok]/[output] land on a sub-agent (Task/Agent) TOOL row only (issue #77): the completed run's
  *  outcome + capped final report, so a replayed transcript keeps the expandable card. Optional both
- *  ways — an old daemon omits them, an old client ignores them. */
+ *  ways — an old daemon omits them, an old client ignores them.
+ *  [answers] lands on an AskUserQuestion TOOL row only (issue #110): the (question → answer) pairs the
+ *  user picked, so a replayed transcript shows the same compact answered row the live path leaves
+ *  behind instead of the raw questions JSON. Optional both ways — an old daemon omits it (the row falls
+ *  back to a plain tool card), an old client ignores it. */
 @Serializable
 data class HistoryMessage(
     val role: ChatRole,
@@ -506,6 +726,11 @@ data class HistoryMessage(
     val error: Boolean = false,
     val ok: Boolean? = null,
     val output: String? = null,
+    val answers: List<QuestionAnswer>? = null,
+    /** A Workflow TOOL row's run id (issue #106) — lets the replayed card bind to the
+     *  [WorkflowRun] pushed separately via [WorkflowUpdate]. Trailing optional both ways:
+     *  old daemons omit it (the card renders as a plain tool row), old clients ignore it. */
+    val workflowRunId: String? = null,
 )
 
 /** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
@@ -544,6 +769,44 @@ data class CommandList(val convoId: String, val commands: List<SlashCommand>) : 
 @SerialName("pocket/jobs")
 data class BackgroundJobs(val convoId: String, val jobs: List<BackgroundJob>) : ToPhone
 
+/**
+ * daemon -> phone: one Workflow run's full snapshot (issue #106), pushed on every state transition
+ * (agent started/finished/failed, phase reached, run settled) and replayed once per finished run
+ * when a session is resumed/reattached. Clients key runs by [WorkflowRun.runId] and reconcile
+ * agents by index. Old phones drop the unknown frame — the chat keeps its plain Workflow tool row.
+ */
+@Serializable
+@SerialName("pocket/workflow")
+data class WorkflowUpdate(val convoId: String, val run: WorkflowRun) : ToPhone
+
+/**
+ * phone -> daemon: fetch ONE workflow agent's full prompt + return for the detail sheet — snapshots
+ * only carry CLI-capped previews. The daemon reads the run's on-disk journal/transcript
+ * (`subagents/workflows/<runId>/`) and answers with [WorkflowAgentDetail]. Old daemons drop the
+ * unknown frame; the client's sheet then keeps showing the previews it already has.
+ */
+@Serializable
+@SerialName("pocket/workflow.agent.fetch")
+data class GetWorkflowAgentDetail(
+    val convoId: String,
+    val runId: String,
+    val agentIndex: Int,
+    val agentId: String? = null,
+) : ToDaemon
+
+/** daemon -> phone: the full prompt/result text for one workflow agent ([GetWorkflowAgentDetail]).
+ *  Either side may be null when the on-disk record is gone (run dir cleaned) — the sheet keeps its
+ *  previews. [result] is the agent's return value (pretty-printed when it was structured JSON). */
+@Serializable
+@SerialName("pocket/workflow.agent")
+data class WorkflowAgentDetail(
+    val convoId: String,
+    val runId: String,
+    val agentIndex: Int,
+    val prompt: String? = null,
+    val result: String? = null,
+) : ToPhone
+
 /** daemon -> phone: result of transcribing a voice capture. ok=false carries a user-facing [error]. */
 @Serializable
 @SerialName("pocket/transcript")
@@ -554,6 +817,33 @@ data class Transcript(
     val ok: Boolean = true,
     val error: String? = null, // e.g. "whisper-cli not found — brew install whisper-cpp"
 ) : ToPhone
+
+/**
+ * daemon -> phone: a file upload settled — the single reply to a completed (failed, or refused)
+ * [FileChunk] stream, mirroring [Transcript]. On success [path] is the landing path RELATIVE to the
+ * session's cwd (`.ccpocket/inbox/<captureId>/<name>`, daemon-host separators) — the client references
+ * it with the composer's `@`-token (the #75 mechanism) so the agent Reads the file by path; no new
+ * daemon read surface is involved. [name] is the sanitized basename actually written (may differ from
+ * [FileChunk.name] — clients display/reference THIS one). ok=false carries a user-facing [error] and
+ * nothing was landed. A phone that predates this drops the unknown frame; a NEW phone that never gets
+ * one (old daemon dropped the chunks) times out to its "update the computer's cc-pocket" state.
+ */
+@Serializable
+@SerialName("pocket/file.uploaded")
+data class FileUploaded(
+    val convoId: String,
+    val captureId: String,
+    val ok: Boolean = true,
+    val path: String? = null,
+    val name: String? = null,
+    val size: Long = 0,
+    val error: String? = null,
+) : ToPhone
+
+/** Hard per-file cap for [FileChunk] uploads, enforced daemon-side (early, via [FileChunk.totalBytes],
+ *  and again on actual bytes written) and pre-checked client-side at pick time. One shared constant so
+ *  the attach sheet's "up to 200 MB" caption and the daemon's refusal can't drift. */
+const val MAX_UPLOAD_BYTES: Long = 200L * 1024 * 1024
 
 /** daemon -> phone: the result of a [RunShellCommand]. stdout/stderr are capped server-side. */
 @Serializable
@@ -638,6 +928,55 @@ data class FileDiff(
     val truncated: Boolean = false,
 ) : ToPhone
 
+// ---- folder-share (issue #115): OWNER-side replies ----
+
+/** daemon -> owner: the reply to [CreateShare]. On success [invite] carries the redeemable [ShareInvite]
+ *  (the app renders it as a QR / copyable blob for the guest); on failure [error] says why (e.g. a phone
+ *  pairing is mid-flight, bad path, relay offline). */
+@Serializable
+@SerialName("pocket/share.created")
+data class ShareCreated(
+    val ok: Boolean,
+    val invite: ShareInvite? = null,
+    val error: String? = null,
+) : ToPhone
+
+/** daemon -> owner: the reply to [ListShares] — my active shares + their activity (the management page). */
+@Serializable
+@SerialName("pocket/share.listing")
+data class ShareListing(val items: List<ShareInfo> = emptyList()) : ToPhone
+
+/** daemon -> owner: the reply to [RevokeShare]. [ok] false + [error] when the deviceId wasn't a share. */
+@Serializable
+@SerialName("pocket/share.revoked")
+data class ShareRevoked(val deviceId: String, val ok: Boolean, val error: String? = null) : ToPhone
+
+/**
+ * daemon -> GUEST (issue #115 follow-up): this device's folder share just ended — the precise "why"
+ * behind the disconnect that follows, so the guest terminal can light "Access ended · revoked"
+ * instead of a bare connection drop. [reason] is [REASON_REVOKED] (the owner cut it) or
+ * [REASON_EXPIRED] (the share lapsed); render unknown future values as a generic ending.
+ *
+ * Delivery is BEST-EFFORT: the daemon seals it right BEFORE pruning the guest credential and asking
+ * the relay to force-close the socket, so it can lose that race (or the guest can simply be offline).
+ * The guest must still survive on the fallback path — credential dead → auth refused on reconnect →
+ * generic "access ended". An OLD app drops the unknown frame (tolerant envelope decode) and keeps
+ * today's disconnect-only behavior. New fields must be TRAILING OPTIONALS (wire compat).
+ */
+@Serializable
+@SerialName("pocket/share.ended")
+data class ShareEnded(
+    val reason: String = REASON_REVOKED,
+    /** owner's computer name for "%s ended this share" — the guest already learned it from the invite
+     *  ([ShareInvite.ownerLabel]), so this leaks nothing new. Null = generic "the owner". */
+    val ownerLabel: String? = null,
+) : ToPhone {
+    companion object {
+        const val REASON_REVOKED = "revoked"
+        const val REASON_EXPIRED = "expired"
+    }
+}
+
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)
 //
@@ -658,6 +997,12 @@ enum class Role {
 @Serializable
 @SerialName("pocket/daemon.hello")
 data class DaemonHello(val accountId: String, val ed25519Pub: String, val protoV: Int = 1) : ToRelay
+
+/** The [DaemonHello.protoV] from which a daemon understands headless bridge devices (issue #91).
+ *  The relay replays a headless [DevicePaired] ONLY to daemons at or above this version: an older
+ *  daemon has no bridges store, would file the announced key into its full-power device allow-list,
+ *  and a bridge credential would silently escalate to a complete device on downgrade. */
+const val PROTO_V_HEADLESS: Int = 2
 
 /** relay -> daemon: a single-use nonce to sign (bound to this socket, short TTL). */
 @Serializable
@@ -691,10 +1036,15 @@ data class AuthError(val code: String, val message: String? = null) : ToRelay
 // ---- pairing (only an authenticated daemon may mint) ----
 
 /** daemon -> relay: mint a short-lived, single-use pairing ticket. Carries the daemon's E2E public
- *  key so the relay can serve it to a phone that pairs by short code (the QR path keeps it out-of-band). */
+ *  key so the relay can serve it to a phone that pairs by short code (the QR path keeps it out-of-band).
+ *  [headless] (issue #91) is the AUTHORITATIVE bridge marker: the MINTING daemon knows whether it is
+ *  issuing a bridge ticket, so the relay stamps the flag onto the ticket and later onto the redeemed
+ *  device — never trusting the redeeming client's self-declared [PairRedeem.headless]. Old daemons omit
+ *  it (mint a phone ticket, as before); old relays ignore it (the device then rides PairRedeem.headless,
+ *  which is why that field remains). */
 @Serializable
 @SerialName("pocket/pair.begin")
-data class PairBegin(val e2ePub: String) : ToRelay
+data class PairBegin(val e2ePub: String, val headless: Boolean = false) : ToRelay
 
 /** relay -> daemon: the raw ticket (for the QR) plus a short 6-digit code to type on the phone. */
 @Serializable
@@ -764,13 +1114,25 @@ data class NotifyPush(
     val body: String,
     val workdir: String? = null,
     val sessionId: String? = null,
+    // issue #91: an [urgent] notify (a bridge conversation needs the OWNER's approval) is pushed even
+    // when an interactive device socket is live — unlike an ordinary turn-complete, the ask is NOT on
+    // the data plane of whatever conversation that phone is viewing, so suppressing it would strand the
+    // approval until it times out to deny. Old relays ignore the field (they gate on deviceCount==0 as
+    // before → an online-but-elsewhere phone misses it, degrading to the timeout).
+    val urgent: Boolean = false,
 ) : ToRelay
 
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----
 
-/** device -> relay (HTTP body): redeem a scanned ticket, registering its X25519 static pubkey. */
+/** device -> relay (HTTP body): redeem a scanned ticket, registering its X25519 static pubkey.
+ *  [headless] is a LEGACY / fallback hint (issue #91): a NEW relay ignores it and derives the
+ *  authoritative bridge marker from the TICKET (stamped by the minting daemon via [PairBegin.headless]),
+ *  so a client that redeems a bridge ticket while lying `headless=false` cannot escape the relay-side
+ *  presence/push/replay handling. The field is only consulted by an OLD relay that predates ticket-side
+ *  marking. Either way the daemon enforces the capability restriction independently, anchored to the
+ *  pairing ticket. */
 @Serializable
-data class PairRedeem(val ticket: String, val devicePubKey: String)
+data class PairRedeem(val ticket: String, val devicePubKey: String, val headless: Boolean = false)
 
 /** relay -> device (HTTP body): the issued device credential + the account it is bound to. */
 @Serializable

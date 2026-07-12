@@ -187,7 +187,9 @@ class WsConnection(
                         }
                     }
                 } else {
-                    log.warn("undecodable frame: ${text.take(120)}")
+                    // length only, never a prefix: a SavePreset that failed to decode (e.g. a future
+                    // field reorder) must not spill its plaintext token into the daemon log
+                    log.warn("undecodable frame (${text.length}B)")
                 }
             }
         } finally {

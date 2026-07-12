@@ -25,7 +25,8 @@ class RepoDesktopModelRefreshTest {
             relay = "wss://test", accountId = "acct-test", daemonPub = "pk", deviceId = "dev", credential = "cred",
         )
         repo.enterDemo()
-        return repo to RepoDesktopModel(repo, scope)
+        // FakeDesktopStore: never read or write the developer's real store file from tests (issue #102)
+        return repo to RepoDesktopModel(repo, scope, store = FakeDesktopStore())
     }
 
     @Test
@@ -58,5 +59,43 @@ class RepoDesktopModelRefreshTest {
         assertEquals(listOf(b.path, a.path), model.sessionGroups.map { it.path }) // no reorder
         assertEquals(a.path, model.sessionGroups.first { it.current }.path)
         assertTrue(model.sessionGroups.first { it.path == b.path }.sessions.isNotEmpty()) // B kept its snapshot
+    }
+
+    @Test
+    fun attachedBumpsConnGenSoTheAccountPaneRefetchesOnReconnect() {
+        // The Account pane keys its one-shot auth/presets fetch on model.connGen. A restarted daemon pushes
+        // no fresh AuthState on reattach, so without a connGen bump a pane left open across the restart would
+        // strand the pre-restart account (or a transient "claude CLI not found") until a manual close/reopen.
+        // Each genuine (re)attach must bump connGen so the LaunchedEffect re-keys and re-fetches.
+        val (repo, model) = demoModel()
+        repo.authState.value = dev.ccpocket.protocol.AuthState(loggedIn = true, email = "stale@old.host")
+        assertEquals(0, model.connGen)
+
+        repo.receiveControlForTest(dev.ccpocket.protocol.Attached(dev.ccpocket.protocol.Role.DEVICE, "acct-test"))
+        assertEquals(1, model.connGen) // first attach — pane's first fetch
+
+        // a daemon restart reattaches; the relay re-broadcasts presence and the transport re-handshakes
+        repo.receiveControlForTest(dev.ccpocket.protocol.Attached(dev.ccpocket.protocol.Role.DEVICE, "acct-test"))
+        assertEquals(2, model.connGen) // reconnect edge → pane re-keys → re-fetch (the fix)
+    }
+
+    @Test
+    fun disconnectClearsPerDaemonPresetAndAuthTruth() {
+        // issue #113 secrets red line: a machine switch must not carry one daemon's presets truth into
+        // the next. A stale non-null presetsState would keep the token-bearing form unlocked after
+        // switching to a daemon that predates presets (it silently drops FetchPresets).
+        val (repo, _) = demoModel()
+        repo.presetsState.value = dev.ccpocket.protocol.PresetsState(
+            presets = listOf(dev.ccpocket.protocol.PresetSummary("p1", "Work proxy", "https://x", tokenMask = "sk-…••••3f9a")),
+            activeId = "p1",
+        )
+        repo.presetsStateRev.value = 3
+        repo.authState.value = dev.ccpocket.protocol.AuthState(loggedIn = true, email = "a@b.c")
+
+        repo.disconnect()
+
+        assertEquals(null, repo.presetsState.value)
+        assertEquals(0, repo.presetsStateRev.value)
+        assertEquals(null, repo.authState.value) // account is a fresh fetch on the next daemon too
     }
 }

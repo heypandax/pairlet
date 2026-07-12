@@ -114,6 +114,11 @@ fun expandLiveSessions(e: DirectoryEntry): List<DirectoryEntry> =
 fun liveAgent(e: DirectoryEntry): AgentKind =
     e.activeSessions.firstOrNull { it.sessionId == e.activeSessionId }?.agent ?: AgentKind.CLAUDE
 
+/** The external trigger source of the entry's linked live session (issue #91) — "feishu-bot" when a
+ *  bridge opened it, null for a person's session (or an older daemon that doesn't stamp it). */
+fun liveOrigin(e: DirectoryEntry): String? =
+    e.activeSessions.firstOrNull { it.sessionId == e.activeSessionId }?.origin
+
 fun buildDirRows(
     dirs: List<DirectoryEntry>,
     query: String,

@@ -60,6 +60,11 @@ interface PathOpener {
 
 val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 
+/** The open session's working directory, so a cwd-relative path can be normalized to an absolute one
+ *  for copy/share (issue #116). Set on both platforms (desktop: chatWorkdir; mobile: repo.workdir);
+ *  null before a session is open, when relative paths simply copy verbatim. */
+val LocalPathCwd = staticCompositionLocalOf<String?> { null }
+
 // Four path shapes, all with the lookbehind that keeps URL tails ("https://host/a/b") and word/word
 // compounds from matching:
 //   • unix `/a/b`  (≥2 segments so prose like "/help" rarely trips it)
@@ -76,7 +81,7 @@ val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 // the JVM accepts (\p{N} → "No such character class"), and a throwing top-level initializer took
 // down the whole FILE on iOS — first Markdown render (= tapping any session) died with
 // FileFailedToInitializeException. Null here just disables path links; the transcript must render.
-private val pathRx: Regex? by lazy {
+internal val pathRx: Regex? by lazy {
     runCatching {
         Regex("""(?<![\w:/])(?:~(?:/[\p{L}0-9._+@%-]+)+|/[\p{L}0-9._+@%-]+(?:/[\p{L}0-9._+@%-]+)+|[A-Za-z]:[\\/][\p{L}0-9._+@%\\/-]+|(?:[\p{L}0-9._+@%-]+/)+[\p{L}0-9._+@%-]*\.[\p{L}0-9]{1,8})/?""")
     }.getOrNull()
@@ -115,10 +120,10 @@ private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String
 
 // http(s) only (matches what the platform viewers accept); the trailing trim drops sentence
 // punctuation that prose glues onto a URL ("see https://x.dev/docs." / 中文句读)
-private val urlRx: Regex? by lazy {
+internal val urlRx: Regex? by lazy {
     runCatching { Regex("""https?://[^\s<>"'`一-鿿）】」，。；！？]+""") }.getOrNull()
 }
-private const val URL_TRAIL = ".,;:!?)]}>"
+internal const val URL_TRAIL = ".,;:!?)]}>"
 
 /** Adds browser link spans over every http(s) URL — phones open an in-app browser, desktop the system
  *  one (see [dev.ccpocket.app.openWebUrl]). Unlike path links this needs no host gate: a URL is
@@ -144,19 +149,52 @@ fun pathLinked(text: AnnotatedString): AnnotatedString {
 fun pathLinked(text: String): AnnotatedString = pathLinked(AnnotatedString(text))
 
 /**
+ * Render-size guard for transcript text. One replayed row can be hundreds of KB — e.g. a skill
+ * injection replayed whole now that replay budgets the *frame* rather than clipping each message
+ * (#81) — and both the plain-Text user row and this file's composable-per-line markdown body kill
+ * the iOS app well before that (an ~800 KB row OOM'd it on open, in a loop). Clip what we RENDER,
+ * never what we copy: every copy affordance keeps the full string. 40k chars is several times the
+ * longest real streamed reply, and ~20× under the observed killer.
+ */
+const val MAX_RENDER_CHARS = 40_000
+
+/** The renderable prefix of [text]: the whole string when within [MAX_RENDER_CHARS]; else cut at the
+ *  last line break under the cap — hard cut mid-line only when a single line exceeds it, stepping off
+ *  a straddled surrogate pair. Pair with [TruncatedNote] whenever the result came back shorter. */
+fun renderClip(text: String): String {
+    if (text.length <= MAX_RENDER_CHARS) return text
+    val nl = text.lastIndexOf('\n', MAX_RENDER_CHARS)
+    if (nl > 0) return text.substring(0, nl)
+    val end = if (text[MAX_RENDER_CHARS - 1].isHighSurrogate()) MAX_RENDER_CHARS - 1 else MAX_RENDER_CHARS
+    return text.substring(0, end)
+}
+
+/** The muted "clipped for display" footer under a [renderClip]-truncated row. [fullChars] is the
+ *  untrimmed length, surfaced as "812K" so the reader knows what copy still carries. */
+@Composable
+fun TruncatedNote(fullChars: Int) {
+    Text(
+        stringResource(Res.string.text_render_truncated, "${fullChars / 1000}K"),
+        color = Tok.muted, fontSize = 11.sp * LocalFontScale.current,
+    )
+}
+
+/**
  * A focused Markdown renderer for assistant output — covers fenced code blocks (language label +
  * copy), inline code, bold, headers, and bullet/numbered lists. Fully themed via [Tok].
  */
 @Composable
 fun MarkdownText(text: String, color: Color) {
+    val shown = renderClip(text)
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        parseBlocks(text).forEach { block ->
+        parseBlocks(shown).forEach { block ->
             when (block) {
                 is MdBlock.Code -> CodeBlock(block.code, block.lang, block.closed)
                 is MdBlock.Table -> TableBlock(block, color)
                 is MdBlock.Lines -> block.lines.forEach { MdLine(it, color) }
             }
         }
+        if (shown.length < text.length) TruncatedNote(text.length)
     }
 }
 
@@ -222,8 +260,8 @@ private fun MdLine(raw: String, color: Color) {
         line.isBlank() -> Spacer(Modifier.height(3.dp))
         line.startsWith("#") -> {
             val level = line.takeWhile { it == '#' }.length
-            Text(
-                pathLinked(inline(line.drop(level).trim())),
+            LinkifiedText(
+                inline(line.drop(level).trim()),
                 color = color,
                 fontWeight = FontWeight.Bold,
                 fontSize = (when (level) { 1 -> 19.sp; 2 -> 17.sp; else -> 15.sp }) * scale,
@@ -233,10 +271,10 @@ private fun MdLine(raw: String, color: Color) {
             val indent = (line.length - trimmed.length).coerceAtMost(8)
             Row(Modifier.padding(start = (indent * 3).dp)) {
                 Text("•  ", color = color, fontSize = body)
-                Text(pathLinked(inline(trimmed.drop(2))), color = color, fontSize = body)
+                LinkifiedText(inline(trimmed.drop(2)), color = color, fontSize = body)
             }
         }
-        else -> Text(pathLinked(inline(line)), color = color, fontSize = body)
+        else -> LinkifiedText(inline(line), color = color, fontSize = body)
     }
 }
 

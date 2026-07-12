@@ -38,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -78,6 +80,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -85,7 +88,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
+import dev.ccpocket.app.media.rememberVideoAttacher
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -124,18 +129,27 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
 import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.ui.share.GuestEnding
+import dev.ccpocket.app.ui.share.ShareFolderScreen
+import dev.ccpocket.app.ui.share.SharedPill
+import dev.ccpocket.app.ui.share.expiryLeft
+import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.app.theme.LocalFontScale
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.openAppSettings
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.SessionGroup
+import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
@@ -159,10 +173,16 @@ fun App(scope: CoroutineScope) {
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
+    val appLock = repo.appLock
     dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
         repo.onAppForeground()
         dev.ccpocket.app.data.FleetRuntime.coordinator?.onAppForeground()
+        appLock.onForeground() // App Lock (issue #109): re-lock per policy / drop the cover on return
     }
+    // App Lock: arm auto-lock when fully backgrounded; draw the opaque privacy cover the instant the app is
+    // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
+    dev.ccpocket.app.OnAppBackground { appLock.onBackground() }
+    dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
     // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
     // registers its own handler later in composition, which wins while it is showing (LIFO).
@@ -178,6 +198,7 @@ fun App(scope: CoroutineScope) {
     // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick tracks a
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
     PocketTheme(mode = repo.themeMode.value, fontScale = repo.fontScale.value) {
+      Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
@@ -223,6 +244,7 @@ fun App(scope: CoroutineScope) {
             repo.pendingAsk.value?.takeIf { !it.isQuestion }?.let { ask ->
                 PermissionSheet(
                     ask, repo.workdir.value,
+                    timedOutSignal = repo.timedOutAskId.value == ask.askId, // issue #100: daemon said this ask timed out
                     onDeny = { repo.resolve(Decision.DENY) },
                     onOnce = { repo.resolve(Decision.ALLOW) },
                     onAlways = { repo.resolve(Decision.ALLOW, remember = true) },
@@ -230,6 +252,12 @@ fun App(scope: CoroutineScope) {
                 )
             }
         }
+        // App Lock (issue #109): the gate blocks ALL content (incl. the permission sheet) until biometrics
+        // pass; the cover masks the app-switcher snapshot while briefly backgrounded. Both reuse the same
+        // branded lockup. Desktop never reaches App(), so this overlay is Android/iOS-only by construction.
+        if (appLock.locked.value) AppLockGate(appLock)
+        else if (appLock.covered.value) AppLockCover()
+      }
     }
 }
 
@@ -287,12 +315,31 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
 @Composable
 private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Unit) {
     when (repo.phase.value) {
-        ConnPhase.PairingInvalid -> CenteredState(
-            Tok.danger,
-            stringResource(Res.string.conn_pairing_invalid_title),
-            stringResource(Res.string.conn_pairing_invalid_body),
-            stringResource(Res.string.conn_repair), { repo.unpairActive() },
-        )
+        ConnPhase.PairingInvalid -> {
+            val ended = repo.shareEnded.value
+            when {
+                // guest share revoked MID-SESSION (design 4c): keep the transcript readable under the slim
+                // danger banner instead of yanking the user to a full-screen card; the ended card waits at browse
+                ended != null && ended.reason == ShareEnded.REASON_REVOKED && repo.convoId.value != null ->
+                    Column(Modifier.fillMaxSize()) {
+                        dev.ccpocket.app.ui.share.ShareRevokedBanner()
+                        Box(Modifier.weight(1f)) { content() }
+                    }
+                // guest share ended (design 4b): the precise, calm terminal card — revoked vs expired
+                ended != null -> dev.ccpocket.app.ui.share.GuestEndedCard(
+                    ownerLabel = ended.ownerLabel,
+                    ending = if (ended.reason == ShareEnded.REASON_EXPIRED) GuestEnding.EXPIRED else GuestEnding.REVOKED,
+                    onRemove = { repo.unpairActive() },
+                    onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
+                )
+                else -> CenteredState(
+                    Tok.danger,
+                    stringResource(Res.string.conn_pairing_invalid_title),
+                    stringResource(Res.string.conn_pairing_invalid_body),
+                    stringResource(Res.string.conn_repair), { repo.unpairActive() },
+                )
+            }
+        }
         ConnPhase.RelayUnreachable -> CenteredState(
             Tok.warn,
             stringResource(Res.string.conn_relay_unreachable_title),
@@ -438,6 +485,9 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     var query by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
+    var shareTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
+    shareTarget?.let { ShareFolderScreen(repo, it, onBack = { shareTarget = null }); return }
     // pull-only list: refresh NOW — entering (and RE-entering, back from a session) shows fresh state
     // instead of the pre-session snapshot — then keep re-pulling quietly
     LaunchedEffect(Unit) { while (true) { repo.refreshDirectoriesSilently(); delay(10_000) } }
@@ -601,7 +651,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             }
         }
     }
-        actionTarget?.let { ProjectActionsSheet(repo, it) { actionTarget = null } }
+        actionTarget?.let { t -> ProjectActionsSheet(repo, t, onShare = { shareTarget = t }) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
             parent = base.takeIf { it.length > 1 }, // seed the current location (root prefix or a drilled folder) so "type the rest of the path" is obvious (#32/#7)
@@ -743,16 +793,44 @@ private fun PocketRepository.openProject(e: DirectoryEntry) {
 private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean, onLongPress: (() -> Unit)? = null) {
     val sid = e.activeSessionId
     val pinned = repo.isPinned(e.path)
-    if (direct && e.open && sid != null) {
-        // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
-        LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
+    when {
+        // a guest's shared folder (issue #115) — neutral "Shared" pill + origin + "6d left"
+        e.sharedBy != null -> SharedProjectCell(repo, e, onLongPress)
+        direct && e.open && sid != null ->
+            // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
+            LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
+        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
     }
-    else DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
 }
 
-/** Long-press a project → pin it to the top, or unpin it. Small sheet, mirrors the app's other actions. */
+/** A guest's shared-folder row (issue #115): folder (mono) + the neutral hairline "Shared" pill,
+ *  the "shared by <owner>" origin, and the remaining validity ("6d left"). Tap opens its sessions. */
 @Composable
-private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onDismiss: () -> Unit) {
+private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongPress: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .combinedClickable(onClick = { repo.openProject(e) }, onLongClick = onLongPress).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(e.name.ifBlank { e.path }, color = Tok.tx, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                SharedPill()
+            }
+            e.sharedBy?.let {
+                Text(stringResource(Res.string.shared_by_caption, it), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            }
+        }
+        e.shareExpiresAt?.let { exp ->
+            Spacer(Modifier.width(8.dp))
+            Text(expiryLeftText(expiryLeft(exp, dev.ccpocket.app.epochMillis())), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, maxLines = 1)
+        }
+    }
+}
+
+/** Long-press a project → pin it to the top, or unpin it, or share it. Small sheet, mirrors the app's other actions. */
+@Composable
+private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onShare: () -> Unit, onDismiss: () -> Unit) {
     val pinned = repo.isPinned(e.path)
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
@@ -768,6 +846,17 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onDis
                     stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
                     color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
                 )
+            }
+            // Share this folder… — owners only; a guest's shared row (sharedBy set) can't re-share the owner's machine.
+            if (e.sharedBy == null) {
+                Row(
+                    Modifier.padding(top = 9.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                        .clickable { onShare(); onDismiss() }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.Rounded.Share, null, tint = Tok.accent, modifier = Modifier.size(18.dp))
+                    Text(stringResource(Res.string.share_this_folder), color = Tok.accent, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                }
             }
         }
     }
@@ -933,7 +1022,13 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
             )
         }
         Text(
-            buildString { append(e.name); e.gitBranch?.let { append(" · ⑂ ").append(it) } },
+            buildString {
+                append(e.name)
+                e.gitBranch?.let { append(" · ⑂ ").append(it) }
+                // a bridge-opened session says so in the list (issue #91): the owner sees at a glance
+                // that an IM bot, not a person, is driving it
+                liveOrigin(e)?.let { append(" · via ").append(it) }
+            },
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1,
             modifier = Modifier.padding(top = 4.dp),
         )
@@ -970,6 +1065,15 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
     val starting = repo.opening.value
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
+    // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
+    // kept per group id and reset per project (keyed on [dir]), so folding a group doesn't leak across projects.
+    var showNewGroup by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<SessionGroup?>(null) }
+    var deleteTarget by remember { mutableStateOf<SessionGroup?>(null) }
+    var manageTarget by remember { mutableStateOf<SessionGroup?>(null) }
+    var moveTarget by remember { mutableStateOf<SessionSummary?>(null) }
+    val collapsed = remember(dir) { mutableStateMapOf<String, Boolean>() }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1023,30 +1127,32 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                         SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
                     }
                 }
-                items(filtered) { s ->
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                            .clickable { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) }.padding(14.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            AgentBadge(s.agent, gap = 8.dp) // shows only for Codex (so resume opens the right backend)
-                            if (s.live || s.busy) { // running, or idle with background work still going
-                                Spacer(Modifier.width(8.dp))
-                                PulseDot(Tok.ok)
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp)
-                            }
+                // issue #119: when the project has groups, render each group as a collapsible section with an
+                // "Ungrouped" bucket at the end. The "+ New group" affordance shows whenever the daemon is
+                // group-aware (groupsSupported) — including zero groups yet, so the FIRST group is creatable —
+                // but hides on an older daemon / guest connection that omits groups entirely, keeping the list
+                // exactly as flat as before (sessionSections then returns one header-less section).
+                val grouped = repo.sessionGroups.isNotEmpty()
+                if (repo.groupsSupported.value) item { NewGroupRow { showNewGroup = true } }
+                for (section in sessionSections(filtered, repo.sessionGroups)) {
+                    val g = section.group
+                    val key = g?.id ?: UNGROUPED_KEY
+                    val isCollapsed = collapsed[key] == true
+                    if (grouped) {
+                        item(key = "grp:$key") {
+                            GroupHeader(
+                                name = g?.name ?: stringResource(Res.string.group_ungrouped),
+                                count = section.sessions.size,
+                                collapsed = isCollapsed,
+                                onToggle = { collapsed[key] = !isCollapsed },
+                                onManage = g?.let { { manageTarget = it } }, // ungrouped bucket: nothing to manage
+                            )
                         }
-                        if (s.firstPrompt.isNotBlank()) Text(
-                            s.firstPrompt, color = Tok.tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        Text(
-                            "💬 ${s.messageCount} · ⑂ ${s.gitBranch ?: "-"} · ${relativeTime(s.lastModified)}",
-                            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 3.dp),
-                        )
+                    }
+                    if (!isCollapsed) {
+                        items(section.sessions, key = { it.sessionId }) { s ->
+                            SessionRow(repo, dir, s, onLongPress = if (grouped) ({ moveTarget = s }) else null)
+                        }
                     }
                 }
             }
@@ -1061,15 +1167,47 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                 onDismiss = { pickMode = false },
             )
         }
+        // issue #119 group management — the daemon re-pushes the Sessions frame after every mutation, so the
+        // list/headers refresh themselves (no optimistic edit here).
+        if (showNewGroup) NewGroupDialog(onConfirm = { repo.createGroup(it) }, onDismiss = { showNewGroup = false })
+        manageTarget?.let { g ->
+            GroupActionsSheet(
+                group = g,
+                onRename = { renameTarget = g },
+                onDelete = { deleteTarget = g },
+                onDismiss = { manageTarget = null },
+            )
+        }
+        renameTarget?.let { g ->
+            RenameGroupDialog(group = g, onConfirm = { repo.renameGroup(g.id, it) }, onDismiss = { renameTarget = null })
+        }
+        deleteTarget?.let { g ->
+            DeleteGroupConfirm(group = g, onConfirm = { repo.deleteGroup(g.id) }, onDismiss = { deleteTarget = null })
+        }
+        moveTarget?.let { s ->
+            MoveSessionSheet(
+                session = s,
+                groups = repo.sessionGroups,
+                onAssign = { repo.assignGroup(s.sessionId, it) },
+                onDismiss = { moveTarget = null },
+            )
+        }
     }
 }
 
 @Composable
 private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
-    // restore the composer draft (keyed per conversation, workdir for a brand-new session); re-inits on switch (#29)
+    // Restore the composer draft (keyed per conversation, workdir for a brand-new session). Re-inits on a
+    // REAL switch only — keyed off composerEpoch, NOT draftKey (#29 semantics kept): the key chain flips in
+    // place mid-typing (brand-new session materializing, forked resume corrected by SessionLive), and
+    // re-reading the ≤400ms-stale draft then yanked the live text out from under the IME — on the iOS pinyin
+    // keyboard that committed the space-segmented marked text as raw letters, "claude"→"c l a u d e" (#108,
+    // #93's wild signature). The debounced saver below re-homes the text under the flipped key.
     val draftKey = repo.composerKey()
-    var input by remember(draftKey) { mutableStateOf(repo.draftFor(draftKey)) }
+    val composer = remember(repo.composerEpoch.value) { ComposerState(repo.draftFor(draftKey)) }
+    val input = composer.text // reads track the field; writes go through composer's explicit methods
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
+    var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
@@ -1082,12 +1220,25 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
         return
     }
+    if (repo.viewedWorkflowRunId.value != null) { // workflow run view (issue #106): full-screen tree/journal over the chat
+        WorkflowRunScreen(repo) { repo.closeWorkflow() }
+        return
+    }
     // platform picker resizes/compresses on-device; the repo budgets the picked photos against the 256 KiB frame
     val launchPicker = rememberImageAttacher { added -> repo.attachImages(added) }
+    val launchFilePicker = rememberFileAttacher { picked -> repo.attachFiles(picked) } // issue #90
+    val launchVideoPicker = rememberVideoAttacher { picked -> repo.attachFiles(picked) } // issue #98 — same upload path, movie-filtered
+    var attachSheet by remember { mutableStateOf(false) } // Photo/File/Video chooser anchored above the composer
     val listState = rememberLazyListState()
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
     var pinned by rememberBottomPinned(listState)
+    // the Jump-to-latest scroll must survive the pill leaving composition. The pill's onClick sets
+    // pinned=true, and that same recomposition removes the `if (!pinned)` block below — a
+    // rememberCoroutineScope declared INSIDE that block is cancelled the instant it's forgotten,
+    // killing the launched animateScrollToItem before it can run (tap → pill vanishes, list never
+    // reaches the bottom). Hoisting the scope to ChatScreen lets the animation complete.
+    val jumpScope = rememberCoroutineScope()
     // keep the message list hidden until it's first parked at the bottom, so opening a session with
     // history doesn't flash the top then visibly scroll down. Resets per session (convoId); a short
     // grace reveals an empty/new session that has no history to position on.
@@ -1121,7 +1272,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.saveDraft(repo.workdir.value, input); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                TextButton({ repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showSessionInfo = true }.padding(vertical = 2.dp)) {
                     // session title leads (design); the generic "Chat" only before the first prompt names it
                     Text(
@@ -1160,6 +1311,12 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
                         Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1)
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
+                        // external trigger source (issue #91): a bridge-opened session says so — the owner
+                        // should know an IM bot, not a person, is driving this conversation
+                        repo.sessionOrigin.value?.let { origin ->
+                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
+                            Text("via $origin", color = Tok.warn, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 if (!repo.observing.value) {
@@ -1194,6 +1351,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 val density = LocalDensity.current
                 var pillHeightPx by remember { mutableStateOf(0) }
                 val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
+                CompositionLocalProvider(LocalPathCwd provides repo.workdir.value) {
                 LazyColumn(
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
@@ -1207,7 +1365,13 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            MessageItem(m) { imgs, i -> viewer = imgs to i }
+                            MessageItem(
+                                m,
+                                workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
+                                onOpenWorkflow = repo::openWorkflow,
+                                onOpenImages = { imgs, i -> viewer = imgs to i },
+                                onOpenVideo = { videoViewer = it },
+                            )
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                     PulseDot(Tok.warn, size = 5.dp)
@@ -1236,13 +1400,20 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     // session) doesn't move on its own, so without this the screen looks dead.
                     val last = repo.messages.lastOrNull()
                     val liveContent = (last is ChatItem.Thinking && last.seconds == null) || last is ChatItem.Assistant
-                    if (repo.streaming.value) item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
+                    when {
+                        // delivered, but the agent produced no turn within the deadline (issue #104): the prompt
+                        // was swallowed (wedged / mid-relaunch). Offer a resend instead of an endless spinner.
+                        repo.turnStalled.value -> item { NoResponseRow { repo.resendStalledPrompt() } }
+                        // sent mid-turn and the running turn has gone quiet: the prompt is queued, not swallowed
+                        repo.turnQueued.value -> item { QueuedRow() }
+                        repo.streaming.value -> item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
+                    }
+                }
                 }
                 if (!pinned) {
-                    val pillScope = rememberCoroutineScope()
                     JumpToLatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp)) {
                         pinned = true
-                        pillScope.launch {
+                        jumpScope.launch {
                             if (repo.messages.isNotEmpty()) listState.animateScrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
                         }
                     }
@@ -1298,6 +1469,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 }
             } else {
                 val hasReady = repo.hasReadyImages()
+                val hasLanded = repo.hasLandedFiles()      // files already in the workspace inbox (issue #90)
+                val uploadsBusy = repo.uploadsBusy()       // uploads still moving → send waits
                 val voiceState = repo.voice.value
                 // the timer stays visible (frozen) through S3, after Recording stopped carrying it
                 var recElapsed by remember { mutableStateOf(0L) }
@@ -1321,13 +1494,24 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
+                    LaunchedEffect(capturing) { if (capturing) attachSheet = false }
                     if (suggestions.isNotEmpty() && !capturing) {
-                        SlashCommandMenu(suggestions) { cmd -> input = cmd.completion() }
+                        SlashCommandMenu(suggestions) { cmd -> composer.setText(cmd.completion()) }
                     } else if (atFileMatches.isNotEmpty() && !capturing) {
                         FileCompletionMenu(atFileMatches, atDir, atSep) { entry ->
-                            atToken?.let { input = input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end) }
+                            atToken?.let { composer.setText(input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end)) }
                         }
                     }
+                    // attach sheet (issue #90/#98): Photo keeps the image flow, File opens the document
+                    // picker, Video opens the movie-filtered picker (same chunk-upload into the workspace)
+                    if (attachSheet && !capturing) {
+                        AttachSheet(
+                            onPhoto = { attachSheet = false; launchPicker() },
+                            onFile = { attachSheet = false; launchFilePicker() },
+                            onVideo = { attachSheet = false; launchVideoPicker() },
+                        )
+                    }
+                    PendingFilesStrip(repo.pendingFiles, onCancel = repo::removePendingFile, onRetry = repo::retryPendingFile)
                     AttachTray(repo.pendingImages, repo::removePendingImage)
                     repo.voiceNotice.value?.let { n ->
                         Text(stringResource(n), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(start = 16.dp, top = 8.dp))
@@ -1349,22 +1533,23 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
                             val attachInteraction = remember { MutableInteractionSource() }
                             val attachPressed by attachInteraction.collectIsPressedAsState()
-                            IconButton(onClick = { launchPicker() }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
-                                Icon(
-                                    AttachImageIcon,
-                                    contentDescription = stringResource(Res.string.attach_image),
-                                    tint = if (repo.pendingImages.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
-                                    modifier = Modifier.size(24.dp),
+                            // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
+                            // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
+                            // deeper but unchanged.
+                            IconButton(onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
+                                AttachPlusGlyph(
+                                    open = attachSheet,
+                                    tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
                             ComposerField(
-                                input, { input = it },
+                                composer,
                                 // mid-turn the field stays enabled (sends queue into the running turn) — say so,
                                 // or an editable composer under a "running" session reads as disconnected (issue #52)
                                 placeholder = stringResource(
                                     when {
-                                        repo.pendingImages.isNotEmpty() -> Res.string.add_message_hint
+                                        repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> Res.string.add_message_hint
                                         repo.streaming.value -> Res.string.message_queued_hint
                                         else -> Res.string.message_claude_hint
                                     },
@@ -1377,19 +1562,32 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                             // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
                             // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
                             // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
-                            if (repo.streaming.value && (input.isNotBlank() || hasReady)) {
+                            if (repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)) {
                                 StopButton { repo.cancelTurn() }
                                 Spacer(Modifier.width(8.dp))
                             }
                             when {
-                                // text/image staged -> SEND, even mid-turn (claude queues it; see above)
-                                input.isNotBlank() || hasReady -> {
+                                // uploads still moving → send WAITS (spinner ring around a muted arrow,
+                                // design: file-attach.jsx) — landing must finish before the @-refs exist
+                                uploadsBusy -> {
+                                    Box(
+                                        Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        SpinnerRing(30.dp, 2.dp)
+                                        Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                                // text/image/file staged -> SEND, even mid-turn (claude queues it; see above)
+                                input.isNotBlank() || hasReady || hasLanded -> {
                                     val sendLabel = stringResource(Res.string.send)
                                     RoundActionButton(
                                         onClick = {
-                                            val t = input.trim()
+                                            // read the state at TAP time (composer.text), not the composition-captured
+                                            // `input` — a same-frame IME commit racing the tap must still be sent
+                                            val t = composer.text.trim()
                                             // a gated send (degraded session, issue #65) returns false — keep the text for the retry
-                                            if ((t.isNotBlank() || hasReady) && repo.sendPrompt(t)) { input = ""; repo.clearDraft(draftKey) }
+                                            if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
@@ -1410,6 +1608,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
             }
         }
         viewer?.let { (imgs, idx) -> ImageViewer(imgs, idx) { viewer = null } }
+        videoViewer?.let { VideoPlayerOverlay(it) { videoViewer = null } } // issue #98
         if (repo.micPermissionSheet.value) {
             MicPermissionSheet(
                 onOpenSettings = { openAppSettings(); repo.dismissMicSheet() },
@@ -1514,7 +1713,14 @@ private fun FileCompletionMenu(
 }
 
 @Composable
-private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> }) {
+private fun MessageItem(
+    m: ChatItem,
+    // Workflow run bound to a Workflow tool card (issue #106) — null with an old daemon or for other tools
+    workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
+    onOpenWorkflow: (String) -> Unit = {},
+    onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
+    onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
+) {
     when (m) {
         // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
         // rail + warm tint mark "what I said" as a quote; no label, assistant flow untouched
@@ -1529,8 +1735,17 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
+                // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
+                m.files.forEach { f ->
+                    if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
+                }
                 if (m.text.isNotBlank()) {
-                    SelectionContainer { Text(m.text, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                    // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
+                    // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
+                    val shown = renderClip(m.text)
+                    SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                    if (shown.length < m.text.length) TruncatedNote(m.text.length)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
                     }
@@ -1544,7 +1759,11 @@ private fun MessageItem(m: ChatItem, onOpenImages: (List<ByteArray>, Int) -> Uni
             }
         }
         is ChatItem.Thinking -> ThinkingRow(m)
-        is ChatItem.Tool -> if (isSubagentTool(m.tool)) SubagentCard(m) else {
+        // a Workflow tool call with a bound run renders the orchestration card (issue #106);
+        // without one (old daemon / run trimmed) it falls through to the plain tool row
+        is ChatItem.Tool -> if (isWorkflowTool(m.tool) && workflowRun != null) {
+            WorkflowCard(workflowRun) { onOpenWorkflow(workflowRun.runId) }
+        } else if (isSubagentTool(m.tool)) SubagentCard(m) else {
             val isPlan = m.tool == "ExitPlanMode" || m.tool == "exit_plan_mode"
             var expanded by remember(m) { mutableStateOf(isPlan) } // plans read open by default (issue #10)
             Column(
@@ -1607,6 +1826,35 @@ private fun WorkingRow() {
     ) {
         PulseDot(Tok.muted)
         Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
+
+/** Queued-behind-a-running-turn cue: the ack'd prompt sits in the CLI's queue while the in-flight turn
+ *  stays silent past the deadline. Calm status (the queued case is healthy) in [WorkingRow]'s visual family,
+ *  and deliberately NOT tappable — the original is still queued, so a resend would run it twice. */
+@Composable
+private fun QueuedRow() {
+    Row(
+        Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PulseDot(Tok.muted, size = 5.dp)
+        Text(stringResource(Res.string.msg_queued), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
+
+/** Delivered-but-no-turn cue (issue #104): a restrained, tappable row that replaces the "thinking" tail
+ *  when a prompt was acked but produced nothing. Warn-toned (not an alarming error), one tap re-runs it. */
+@Composable
+private fun NoResponseRow(onResend: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onResend).padding(vertical = 3.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PulseDot(Tok.warn, size = 5.dp)
+        Text(stringResource(Res.string.msg_no_response), color = Tok.warn, fontSize = 12.5.sp)
     }
 }
 

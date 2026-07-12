@@ -30,9 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,11 +38,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
@@ -63,11 +59,12 @@ internal fun fmtMmSs(seconds: Int): String = "${seconds / 60}:${(seconds % 60).t
 
 internal fun fmtElapsed(ms: Long): String = fmtMmSs((ms / 1000).toInt())
 
-/** The composer text field per the design: base bg, hairline border, radius 12, minHeight 44. */
+/** The composer text field per the design: base bg, hairline border, radius 12, minHeight 44.
+ *  [state] is the field's single source of truth ([ComposerState]) — external writes (completion,
+ *  clear-on-send, draft adopt) go through its explicit methods, never through recomposition. */
 @Composable
 fun ComposerField(
-    value: String,
-    onValueChange: (String) -> Unit,
+    state: ComposerState,
     placeholder: String,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
@@ -78,62 +75,16 @@ fun ComposerField(
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        val mirror = rememberImeSafeMirror(value, onValueChange)
         BasicTextField(
-            mirror.field, mirror::onValueChange,
+            state.field, state::onValueChange,
             textStyle = TextStyle(color = Tok.tx, fontSize = 14.5.sp, lineHeight = 21.sp),
             cursorBrush = SolidColor(Tok.accent),
             maxLines = 4,
             modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp)
                 .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
         )
-        if (value.isEmpty()) Text(placeholder, color = Tok.muted, fontSize = 14.5.sp, maxLines = 1)
+        if (state.text.isEmpty()) Text(placeholder, color = Tok.muted, fontSize = 14.5.sp, maxLines = 1)
     }
-}
-
-/**
- * String-backed TextFieldValue mirror, safe against IME composition — the ONE implementation for every
- * composer (mobile [ComposerField] and the desktop ChatPane). A String-driven BasicTextField strands its
- * selection when the value is replaced from outside (slash/@-file completion, clear-on-send) — mirroring
- * into a TextFieldValue lands the cursor at the end of any external write. But the mirror must never be
- * rebuilt MID-IME-COMPOSITION (#93, #86): during CJK input the pinyin lives in the field's composition
- * (marked text), and rebuilding drops it — a recompose racing fast typing commits the raw letters ("falls
- * back to English"), and on desktop desyncs the IME so 、/， as a line's 2nd char ate the 1st. An external
- * write racing a live composition is PARKED and lands when the composition ends — merely skipping it loses
- * it for good: the next IME event echoes the stale mirror back up through [onExternalChange], the mismatch
- * vanishes, and the write never re-applies (Gboard keeps even Latin words composing, so send stopped
- * clearing the field and completion taps no-op'd).
- */
-class ImeSafeMirror internal constructor(initial: String) {
-    /** Render this; writable so a caller can move the caret itself (desktop shift+Enter newline). */
-    var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
-    internal var parked by mutableStateOf<String?>(null)
-    internal var onExternalChange: (String) -> Unit = {}
-
-    /** Pass as the BasicTextField's onValueChange. */
-    fun onValueChange(new: TextFieldValue) {
-        val landing = parked?.takeIf { new.composition == null }
-        if (landing != null) {
-            parked = null
-            field = TextFieldValue(landing, TextRange(landing.length))
-            onExternalChange(landing)
-        } else {
-            field = new
-            onExternalChange(new.text)
-        }
-    }
-}
-
-/** [ImeSafeMirror] reconciled against [value] on every composition; [onValueChange] receives each edit. */
-@Composable
-fun rememberImeSafeMirror(value: String, onValueChange: (String) -> Unit): ImeSafeMirror {
-    val m = remember { ImeSafeMirror(value) }
-    m.onExternalChange = onValueChange
-    if (m.field.text != value) {
-        if (m.field.composition == null) { m.field = TextFieldValue(value, TextRange(value.length)); m.parked = null }
-        else m.parked = value
-    }
-    return m
 }
 
 /** 44dp round action button: filled terracotta (send/done) or hairline outline (mic). */

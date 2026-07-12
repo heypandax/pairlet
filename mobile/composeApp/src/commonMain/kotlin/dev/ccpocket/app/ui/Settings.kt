@@ -34,10 +34,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.lock.AppLockController
+import dev.ccpocket.app.lock.AutoLockDelay
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.share.JoinFolderScreen
+import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import org.jetbrains.compose.resources.stringResource
@@ -67,6 +71,11 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) { UsageScreen(repo, onBack = { showUsage = false }); return } // full-screen usage dashboard (#26)
+    // folder-share (issue #115): owner management + guest redeem, each full-screen like usage
+    var showShares by remember { mutableStateOf(false) }
+    if (showShares) { SharedFoldersScreen(repo, onBack = { showShares = false }); return }
+    var showJoin by remember { mutableStateOf(false) }
+    if (showJoin) { JoinFolderScreen(repo, onBack = { showJoin = false }, onJoined = { showJoin = false; onBack() }); return }
     // back closes Settings — register a handler so it doesn't fall through to the app-level navigation
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
@@ -94,6 +103,25 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 Text("›", color = Tok.muted, fontSize = 16.sp)
             }
             Spacer(Modifier.height(8.dp))
+            SectionLabel(stringResource(Res.string.settings_sharing_section))
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { showShares = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.settings_shared_folders), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("›", color = Tok.muted, fontSize = 16.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+                Row(
+                    Modifier.fillMaxWidth().clickable { showJoin = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.join_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("›", color = Tok.muted, fontSize = 16.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
             SectionLabel(stringResource(Res.string.notifications_section))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
                 ToggleRow(
@@ -119,6 +147,9 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     }
                 }
             }
+
+            // Security (issue #109): access controls sit right under the permission mode, kept contiguous.
+            SecurityGroup(repo.appLock)
 
             SectionLabel(stringResource(Res.string.default_model_section))
             val modelDefaultLabel = stringResource(Res.string.value_default)
@@ -265,6 +296,91 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
         }
     }
 }
+
+/** Security group (issue #109): the "Require Face ID" switch (verify-once-to-enable, design frame B) plus the
+ *  auto-lock timing sub-row revealed only when settled ON. Biometric name adapts to the device at runtime. */
+@Composable
+private fun SecurityGroup(lock: AppLockController) {
+    val kindName = biometryName(lock.biometryKind)
+    val enableReason = stringResource(Res.string.app_lock_enable_reason)
+    var showAutoLock by remember { mutableStateOf(false) }
+    val showSub = lock.enabled.value && !lock.enabling.value
+
+    SectionLabel(stringResource(Res.string.security_section))
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FaceIdGlyph(color = Tok.accent, size = 22.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(stringResource(Res.string.app_lock_require, kindName), color = Tok.tx, fontSize = 14.sp)
+                Text(stringResource(Res.string.app_lock_require_sub, kindName), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 15.sp)
+            }
+            // ON verifies once before it takes effect; a cancel snaps back OFF (controller.requestEnable)
+            Switch(
+                checked = lock.enabled.value,
+                enabled = !lock.enabling.value && (lock.enabled.value || lock.canUseBiometrics()),
+                onCheckedChange = { on -> if (on) lock.requestEnable(enableReason) else lock.disable() },
+            )
+        }
+        if (showSub) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            Row(
+                Modifier.fillMaxWidth().clickable { showAutoLock = true }.padding(start = 14.dp, end = 12.dp, top = 13.dp, bottom = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.width(34.dp)) // align under the title (glyph 22 + gap 12)
+                Text(stringResource(Res.string.app_lock_autolock), color = Tok.tx, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text(autoLockText(lock.autoLock.value), color = Tok.tx2, fontSize = 13.sp)
+                Spacer(Modifier.width(6.dp))
+                Text("›", color = Tok.muted, fontSize = 16.sp)
+            }
+        }
+    }
+    if (lock.enabling.value) {
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            FaceIdGlyph(color = Tok.muted, size = 14.dp)
+            Spacer(Modifier.width(7.dp))
+            Text(stringResource(Res.string.app_lock_verifying, kindName), color = Tok.muted, fontSize = 11.5.sp)
+        }
+    }
+    if (showAutoLock) AutoLockSheet(lock) { showAutoLock = false }
+}
+
+/** Auto-lock timing bottom sheet (design frame C): Immediately (default) or After 1 minute. */
+@Composable
+private fun AutoLockSheet(lock: AppLockController, onDismiss: () -> Unit) {
+    PocketSheet(onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            Text(
+                stringResource(Res.string.app_lock_autolock), color = Tok.muted, fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+                modifier = Modifier.padding(start = 18.dp, top = 4.dp, bottom = 6.dp),
+            )
+            AutoLockDelay.entries.forEach { d ->
+                val sel = lock.autoLock.value == d
+                Row(
+                    Modifier.fillMaxWidth().clickable { lock.setAutoLock(d); onDismiss() }.padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(autoLockText(d), color = if (sel) Tok.tx else Tok.tx2, fontSize = 15.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
+                    if (sel) Text("✓", color = Tok.accent, fontSize = 14.sp)
+                }
+            }
+            Text(stringResource(Res.string.app_lock_autolock_hint), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp, modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 6.dp))
+        }
+    }
+}
+
+@Composable
+private fun autoLockText(d: AutoLockDelay): String = stringResource(
+    when (d) {
+        AutoLockDelay.IMMEDIATELY -> Res.string.app_lock_immediately
+        AutoLockDelay.AFTER_1_MIN -> Res.string.app_lock_after_1min
+    },
+)
 
 /** A small uppercase group heading, shared by the settings groups. */
 @Composable

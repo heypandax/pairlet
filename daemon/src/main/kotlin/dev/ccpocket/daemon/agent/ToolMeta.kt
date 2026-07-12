@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.agent
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import java.io.File
 
 /** Human-facing metadata for a tool permission request: a verb title, a preview, the allow-rule scope, and danger flags. */
 data class ToolMeta(
@@ -83,5 +84,52 @@ object ToolMetadata {
     private fun tilde(p: String): String {
         val home = System.getProperty("user.home") ?: return p
         return if (p.startsWith(home)) "~" + p.removePrefix(home) else p
+    }
+
+    /** The filesystem-path keys the built-in file tools carry — `file_path` (Read/Write/Edit/MultiEdit),
+     *  `path` (Glob/Grep), `notebook_path` (NotebookEdit). The GUEST guard reads these by KEY, independent of
+     *  tool NAME, so a file tool the CLI adds or renames is still confined (deny-by-default containment)
+     *  instead of silently escaping a hard-coded tool whitelist and falling through to an ask the guest
+     *  self-approves (issue #115 crypto review M1). A non-file tool carries none of these keys (Bash →
+     *  `command`, WebFetch → `url`, …) → empty → correctly unguarded (Bash is the acknowledged v1 gap). */
+    private val PATH_KEYS = listOf("file_path", "path", "notebook_path")
+
+    /**
+     * The filesystem path(s) a tool call targets, for the guest path guard — empty for a tool that carries
+     * none of the [PATH_KEYS] (so a non-file tool is never falsely denied) and for a file tool that named no
+     * path (it then operates on the session cwd, already inside the scope). Paths may be relative (resolved
+     * against the session workdir by the caller) or absolute. [tool] is kept for call-site clarity/telemetry;
+     * confinement is by key so an unlisted file tool can't slip the guard.
+     *
+     * Extra Glob carve-out (followup-115-h1): Glob's search location can ride ENTIRELY in its pattern — an
+     * ABSOLUTE glob (rooted at the filesystem root, e.g. one reaching into etc) reads outside the scope while
+     * setting no path key, so the keyed extract above returns empty and the call would fall through to an ask
+     * the guest self-approves (a guardrail hole, not an adversarial one). So for Glob we also derive the
+     * pattern's literal root directory and treat it as a target. RELATIVE patterns are cwd-relative, hence in
+     * scope, hence deliberately skipped. Grep's pattern is a REGEX (content match), not a path — never mined
+     * (its search location is the path key, already covered above).
+     */
+    fun pathTargets(tool: String, input: JsonObject?): List<String> {
+        fun str(k: String) = (input?.get(k) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        val keyed = PATH_KEYS.mapNotNull { str(it) }
+        val patternRoot = if (tool == "Glob") str("pattern")?.let(::absoluteGlobRoot) else null
+        return keyed + listOfNotNull(patternRoot)
+    }
+
+    /**
+     * The literal root directory an ABSOLUTE glob pattern reaches into, or null for a relative pattern (which
+     * resolves under the in-scope session cwd and so needs no separate target). "Literal" = the prefix before
+     * the first glob metacharacter (one of star, question-mark, open-bracket, open-brace), backed off to its
+     * containing directory so a real on-disk path survives to be canonicalized by [PathScope.contains]. So an
+     * etc-rooted wildcard yields the etc directory; a wildcard at the filesystem root yields the root itself;
+     * a bare absolute file path yields its parent directory. A ".." in the prefix is left for the caller's
+     * canonicalization to collapse. Windows drive-absolute patterns pass through unchanged (File.isAbsolute).
+     */
+    private fun absoluteGlobRoot(pattern: String): String? {
+        if (!File(pattern).isAbsolute) return null // relative pattern is cwd-relative, hence in scope
+        val meta = pattern.indexOfFirst { it in "*?[{" }
+        val literal = if (meta < 0) pattern else pattern.substring(0, meta)
+        val dir = literal.substringBeforeLast(File.separatorChar, "")
+        return dir.ifEmpty { File.separator } // a wildcard directly at the filesystem root
     }
 }

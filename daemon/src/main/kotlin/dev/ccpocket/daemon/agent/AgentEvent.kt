@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.agent
 
 import dev.ccpocket.protocol.TokenUsage
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -39,15 +40,31 @@ sealed interface AgentEvent {
     data class ToolResult(val toolUseId: String?, val content: String?, val isError: Boolean, val parentId: String? = null) : AgentEvent
 
     /** a background task (e.g. a backgrounded shell) began; links task_id to its tool_use. */
-    data class BackgroundTaskStarted(val taskId: String, val toolUseId: String?, val description: String?, val taskType: String?) : AgentEvent
+    data class BackgroundTaskStarted(val taskId: String, val toolUseId: String?, val description: String?, val taskType: String?, val workflowName: String? = null) : AgentEvent
 
     /** a background task changed state (status: completed/failed/…). `task_notification` also carries
      *  [toolUseId] + [summary] — for a backgrounded sub-agent that pair is the authoritative completion
      *  (its tool_result was only the launch ack), so the Task card's outcome comes from here. */
     data class BackgroundTaskUpdated(val taskId: String, val status: String?, val toolUseId: String? = null, val summary: String? = null) : AgentEvent
 
-    /** replayed user turn (Claude --replay-user-messages). */
-    data object UserReplay : AgentEvent
+    /** A Workflow tool's async-launch ack (issue #106): the user-side tool_result rides a root-level
+     *  `tool_use_result {taskType:"local_workflow", runId, taskId, workflowName}` on the Claude wire
+     *  (probed 2.1.206) — the only place the run id reaches the live stream. Ties the chat card's
+     *  tool_use to the run the later `task_progress` events describe. */
+    data class WorkflowLaunched(val toolUseId: String?, val runId: String, val taskId: String?, val workflowName: String?) : AgentEvent
+
+    /** A Workflow run's progress snapshot (`system/task_progress` with a `workflow_progress` array —
+     *  issue #106). [items] is the CLI's CUMULATIVE array of workflow_phase/workflow_agent objects
+     *  (full snapshot, not a delta; kept raw — the conversation's WorkflowTracker owns the schema).
+     *  task_progress events WITHOUT the array (pure activity ticks) never land here. */
+    data class WorkflowProgress(val taskId: String, val toolUseId: String?, val items: JsonArray) : AgentEvent
+
+    /** Replayed user turn (Claude --replay-user-messages) — the CLI echoes a user message on stdout
+     *  only once it has actually CONSUMED it, so this is the daemon's "prompt delivered" receipt
+     *  (issue #122: the unconsumed-prompt ledger settles against it). [text] is the message's text
+     *  content (raw string or joined text blocks) for matching; [parentId] set = a sub-agent's inner
+     *  user line, never a top-level prompt receipt. */
+    data class UserReplay(val text: String? = null, val parentId: String? = null) : AgentEvent
 
     /** Turn finished. [usage] carries the backend result's own numbers — null when the result had NO
      *  usage (interrupted turn, some error exits): absence is a null, never placeholder zeros a consumer

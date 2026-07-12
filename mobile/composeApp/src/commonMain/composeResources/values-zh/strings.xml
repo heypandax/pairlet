@@ -52,6 +52,8 @@
     <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
     <string name="msg_sending">发送中…</string>
     <string name="msg_delivered">已送达电脑</string>
+    <string name="msg_no_response">还没有响应——点此重发</string>
+    <string name="msg_queued">已排队——当前轮仍在运行</string>
     <string name="session_degraded_banner">会话疑似已超上下文上限——最近的回复均为 API 失败。建议开新会话或发送 /clear。</string>
     <string name="context_high_banner">上下文已用 %1$s——建议尽快开新会话或 /clear</string>
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
@@ -99,6 +101,7 @@
     <string name="thought_for">思考了 %1$d 秒</string>
     <string name="code_copy">复制</string>
     <string name="code_copied">已复制</string>
+    <string name="text_render_truncated">内容过长，已截断显示 · 全文约 %1$s 字符 · 复制仍为全文</string>
     <string name="jump_to_latest">回到最新</string>
     <string name="observing_notice">👁 观察中 · 正在终端里运行</string>
     <string name="continue_here">在这里继续</string>
@@ -107,6 +110,22 @@
     <string name="send">发送</string>
     <string name="dictate">语音输入</string>
     <string name="attach_image">添加图片</string>
+    <string name="attach_menu">添加附件</string>
+    <string name="attach_sheet_photo">照片</string>
+    <string name="attach_sheet_file">文件</string>
+    <string name="attach_sheet_video">视频</string>
+    <string name="attach_sheet_caption">文件将复制到该会话的工作区 · 上限 200 MB</string>
+    <!-- 视频附件播放器（issue #98） -->
+    <string name="video_play">播放</string>
+    <string name="video_workspace_note">该视频保存在电脑上这个会话的工作区里 — 在电脑上打开即可播放。</string>
+    <string name="video_workspace_hint">已存入工作区供 agent 读取 · 不会发给模型</string>
+    <string name="file_queued">排队中</string>
+    <string name="file_retry">重试</string>
+    <string name="file_upload_failed">上传失败</string>
+    <string name="file_in_workspace">已入工作区</string>
+    <string name="file_agent_reads">agent 按此路径读取</string>
+    <string name="file_strip_uploading">正在上传 %1$d/%2$d…</string>
+    <string name="file_strip_ready">%1$d 个已入工作区 · 随消息一起发送</string>
     <string name="error_prefix">错误：%1$s</string>
     <string name="cmd_source_builtin">内置</string>
     <string name="cmd_source_user">用户</string>
@@ -200,6 +219,31 @@
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>
     <string name="appearance_hint">选择应用配色。跟随系统会随设备的浅色 / 深色设置切换。</string>
+    <!-- ── 应用锁 / 安全（issue #109）─────────────────────────────── -->
+    <string name="security_section">安全</string>
+    <string name="app_lock_require">需要 %1$s</string>
+    <string name="app_lock_require_sub">打开 cc-pocket 时用 %1$s 解锁。</string>
+    <string name="app_lock_autolock">自动锁定</string>
+    <string name="app_lock_immediately">立即</string>
+    <string name="app_lock_after_1min">离开 1 分钟后</string>
+    <string name="app_lock_autolock_hint">离开 cc-pocket 多久后重新锁定。</string>
+    <string name="app_lock_verifying">正在用 %1$s 验证以开启……</string>
+    <string name="app_lock_reason">解锁 cc-pocket</string>
+    <string name="app_lock_enable_reason">验证身份以开启应用锁</string>
+    <string name="biometry_face">Face ID</string>
+    <string name="biometry_touch">Touch ID</string>
+    <string name="biometry_fingerprint">指纹</string>
+    <string name="biometry_generic">生物识别</string>
+    <string name="app_lock_status_locked">已锁定</string>
+    <string name="app_lock_sub_locked">解锁以打开你的会话。</string>
+    <string name="app_lock_unlock">用 %1$s 解锁</string>
+    <string name="app_lock_passcode">输入设备密码</string>
+    <string name="app_lock_status_failed">未识别 · 重试</string>
+    <string name="app_lock_try_again">重试 %1$s</string>
+    <string name="app_lock_status_fallback">%1$s 失败 · 请输入设备密码</string>
+    <string name="app_lock_sub_fallback">尝试次数过多</string>
+    <string name="app_lock_status_lockedout">%1$s 已锁定</string>
+    <string name="app_lock_sub_lockedout">输入设备密码以重新启用。</string>
     <string name="new_path_open">在文件夹中新建会话</string>
     <string name="new_path_open_row">打开其他目录（输入路径）…</string>
     <string name="new_path_title">在文件夹中新建会话</string>
@@ -277,6 +321,10 @@
     <string name="file_exceeds_cap">超出传输上限</string>
     <string name="file_too_large_note">文件太大，无法在这里打开——链路传输上限为 %1$s，请到运行 daemon 的电脑上获取。</string>
     <string name="file_transferring">正在通过中转传输…</string>
+    <string name="file_export_request">请求导出（需批准）</string>
+    <string name="file_export_waiting">等待批准…</string>
+    <string name="file_export_other">导出列表外的文件…</string>
+    <string name="file_export_other_hint">项目内路径，如 output/report.xlsx</string>
 
     <!-- ── 子代理卡片（issue #77，chat-cards handoff）──────────── -->
     <string name="subagent_report">报告</string>
@@ -378,4 +426,120 @@
     <string name="questions_answered_one">回答了 %1$d 个问题</string>
     <string name="questions_answered_many">回答了 %1$d 个问题</string>
     <string name="questions_withdrawn">Claude 已继续，无需再回答</string>
+    <string name="path_copy">复制</string>
+    <string name="path_open">在浏览器打开</string>
+    <string name="path_copied">已复制</string>
+    <string name="path_cwd_hint">已按会话目录解析</string>
+
+    <!-- ── folder-share (issue #115) ─────────────────────────────── -->
+    <string name="share_this_folder">分享这个文件夹…</string>
+    <string name="settings_shared_folders">已分享的文件夹</string>
+
+    <!-- owner: invite composer -->
+    <string name="share_composer_title">分享文件夹</string>
+    <string name="share_access_level">访问级别</string>
+    <string name="share_tier_review">审阅</string>
+    <string name="share_tier_review_desc">每步操作都需批准</string>
+    <string name="share_tier_collaborate">协作</string>
+    <string name="share_tier_collaborate_desc">此处的编辑自动应用；命令仍会询问</string>
+    <string name="share_tier_autonomous">自主</string>
+    <string name="share_tier_autonomous_desc">最少询问——命令仍会询问</string>
+    <string name="share_expires_label">有效期</string>
+    <string name="share_boundary_get">对方可以</string>
+    <string name="share_boundary_get_agents">在此文件夹运行 agent</string>
+    <string name="share_boundary_get_files">读取和编辑这里的文件</string>
+    <string name="share_boundary_get_env">它的 git、依赖、环境</string>
+    <string name="share_boundary_not">对方不能</string>
+    <string name="share_boundary_not_folders">你的其他文件夹</string>
+    <string name="share_boundary_not_memory">你的全局 CLAUDE.md 与记忆</string>
+    <string name="share_boundary_not_mcp">你的 MCP 集成与账号</string>
+    <string name="share_boundary_not_switch">切换账号</string>
+    <string name="share_boundary_shell_warn">命令行不是沙箱——它们以你的用户身份运行。</string>
+    <string name="share_create">生成邀请</string>
+    <string name="share_creating">正在生成邀请…</string>
+    <string name="share_create_failed">无法生成邀请。请更新电脑上的 daemon 后重试。</string>
+
+    <!-- owner: invite ready -->
+    <string name="share_invite_ready">邀请已就绪</string>
+    <string name="share_invite_hint">让对方在 CC Pocket ▸ 连接 里粘贴此码加入。仅可用一次。</string>
+    <string name="share_invite_code">邀请码</string>
+    <string name="share_invite_copy">复制邀请码</string>
+    <string name="share_invite_copied">已复制</string>
+    <string name="share_invite_share">分享…</string>
+    <string name="share_invite_expires_in">%1$s 后过期</string>
+    <string name="share_invite_expired_note">此邀请码已过期，请重新生成。</string>
+    <string name="share_done">完成</string>
+
+    <!-- owner: management -->
+    <string name="shared_folders_title">已分享的文件夹</string>
+    <string name="shared_folders_empty">你还没有分享任何文件夹</string>
+    <string name="shared_folders_empty_hint">长按一个项目，然后选择“分享这个文件夹”。</string>
+    <string name="share_guest_someone">某人</string>
+    <string name="share_active_now">正在使用</string>
+    <string name="share_sessions_live">%1$d 个进行中</string>
+    <string name="share_revoke">撤销</string>
+    <string name="share_revoked_label">已撤销</string>
+    <string name="share_revoke_title">撤销访问权限？</string>
+    <string name="share_revoke_c1">对方进行中的会话会立即结束。</string>
+    <string name="share_revoke_c2">对方将失去对此文件夹的访问权限。</string>
+    <string name="share_revoke_c3">此邀请无法再次使用。</string>
+    <string name="share_revoke_confirm">撤销访问权限</string>
+
+    <!-- guest: accept preview -->
+    <string name="join_title">加入文件夹</string>
+    <string name="join_get_title">你将可以</string>
+    <string name="join_note">面向可信协作者的受限访问。</string>
+    <string name="join_cta">加入文件夹</string>
+    <string name="join_decline">拒绝</string>
+
+    <!-- guest: shared row badge -->
+    <string name="shared_badge">已分享</string>
+    <string name="shared_by_caption">由 %1$s 分享</string>
+    <string name="share_info_strip">这里 agent 的权限请求会发给你。</string>
+
+    <!-- expiry captions -->
+    <string name="share_left_days">剩 %1$d 天</string>
+    <string name="share_left_hours">剩 %1$d 小时</string>
+    <string name="share_left_minutes">剩 %1$d 分钟</string>
+    <string name="share_expired">已过期</string>
+
+    <!-- folder-share: UI copy added with the four screens -->
+    <string name="share_tier_recommended">推荐</string>
+    <string name="share_revoke_hint_anytime">你可以随时撤销访问权限。</string>
+    <string name="share_recap_access">权限</string>
+    <string name="share_recap_expires">有效期</string>
+    <string name="share_recap_folder">文件夹</string>
+    <string name="share_invite_new_code">重新生成</string>
+    <string name="share_manage_hint">随时在 设置 ▸ 共享文件夹 中管理或撤销。</string>
+    <string name="share_active_label">使用中</string>
+    <string name="share_history_label">历史</string>
+    <string name="share_owner_footer">对方的会话运行在你的电脑和你的 Claude 套餐上。</string>
+    <string name="share_expires_in">%1$s 后过期</string>
+    <string name="share_status_idle">空闲</string>
+    <string name="share_share_again">再次共享</string>
+    <string name="share_expired_label">已过期</string>
+    <string name="share_access_ended">访问已结束</string>
+    <string name="share_ended_body">%1$s 结束了此共享。此文件夹中的会话已无法从本设备访问。</string>
+    <string name="share_ended_body_expired">此共享已过期。此文件夹中的会话已无法从本设备访问。</string>
+    <string name="share_the_owner">所有者</string>
+    <string name="share_remove_from_list">从列表移除</string>
+    <string name="share_ask_new_invite">索取新的邀请</string>
+    <string name="share_revoked_disconnected">此共享已被撤销 · 会话已断开</string>
+    <string name="join_scan_title">加入共享文件夹</string>
+    <string name="join_scan_hint">扫描来自文件夹所有者的邀请</string>
+    <string name="join_or_paste">或粘贴邀请码</string>
+    <string name="join_paste_placeholder">粘贴邀请码</string>
+    <string name="join_single_use">邀请仅可使用一次，且很快过期。</string>
+    <string name="join_invalid">邀请无效或已过期。请索取新的邀请。</string>
+    <string name="join_review_title">确认邀请</string>
+    <string name="settings_sharing_section">共享</string>
+    <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
+    <string name="group_new">新建分组</string>
+    <string name="group_ungrouped">未分组</string>
+    <string name="group_move_to">移动到分组</string>
+    <string name="group_move_out">移出分组</string>
+    <string name="group_rename">重命名分组</string>
+    <string name="group_delete">删除分组</string>
+    <string name="group_delete_confirm">删除该分组？组内会话将回落到未分组。</string>
+    <string name="group_name_hint">分组名称</string>
 </resources>

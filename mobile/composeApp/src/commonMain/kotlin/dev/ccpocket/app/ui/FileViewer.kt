@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material3.CircularProgressIndicator
@@ -22,11 +23,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +43,7 @@ import dev.ccpocket.app.share.exportBytesOf
 import dev.ccpocket.app.share.shareFile
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.ChangedFile
+import dev.ccpocket.protocol.FileContent
 import org.jetbrains.compose.resources.stringResource
 
 // ════════════════════════════════════════════════════════════════════
@@ -87,6 +92,44 @@ fun ChangedFilesSheet(repo: PocketRepository, onOpen: (String) -> Unit, onDismis
                     }
                 }
             }
+            // files the session only GENERATED (Bash/scripts — issue #79) aren't in this list. Offer the
+            // approval-gated export lane (issue #67 v2): type a project path; the viewer takes it from
+            // there (the refusal it shows carries the "request export" entry).
+            if (!repo.changedFilesLoading.value && !repo.changedFilesUnavailable.value) ExportOtherFileRow(onOpen)
+        }
+    }
+}
+
+/** The typed-path entry to the export lane: one subdued line, expanding to a path field. Submitting
+ *  hands the path to the normal viewer flow — no new request kind here. */
+@Composable
+private fun ExportOtherFileRow(onOpen: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    var path by remember { mutableStateOf("") }
+    if (!open) {
+        Text(
+            stringResource(Res.string.file_export_other),
+            color = Tok.muted, fontSize = 12.sp,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(top = 12.dp, bottom = 2.dp),
+        )
+        return
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .padding(start = 12.dp, end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).padding(vertical = 11.dp)) {
+            if (path.isEmpty()) Text(stringResource(Res.string.file_export_other_hint), color = Tok.muted, fontSize = 13.sp)
+            BasicTextField(
+                path, { path = it }, singleLine = true,
+                textStyle = TextStyle(color = Tok.tx, fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        TextButton({ path.trim().takeIf { it.isNotEmpty() }?.let(onOpen) }) {
+            Text(stringResource(Res.string.file_open), color = Tok.accent, fontSize = 13.sp)
         }
     }
 }
@@ -200,7 +243,43 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false, wrap = wrap.diff.value)
-            else FileTabBody(repo.viewedFile.value, ext, path = path, wrap = wrap.file.value)
+            else FileTabBody(
+                repo.viewedFile.value, ext, path = path, wrap = wrap.file.value,
+                // a path the changed-set refused can still leave through the owner's approval gate
+                // (issue #67 v2 / #79) — dock the request entry / waiting row under the refusal text
+                exportSlot = when {
+                    repo.exportWaiting.value -> ({ ExportWaitingRow() })
+                    exportRequestable(repo.viewedFile.value) -> ({ ExportRequestButton { repo.requestExport() } })
+                    else -> null
+                },
+            )
         }
+    }
+}
+
+/** FileContent failures the approval-gated export can still answer (issue #67 v2 / #79): the changed-set
+ *  refusal (the #79 gap itself) and a not-approved outcome (retryable). Matched on the daemon's own error
+ *  strings — the same in-band signal the too-large card already keys on. */
+private fun exportRequestable(content: FileContent?): Boolean {
+    val err = content?.takeIf { !it.ok }?.error ?: return false
+    return "not a file this session changed" in err || "not approved" in err
+}
+
+@Composable
+private fun ExportRequestButton(onClick: () -> Unit) {
+    TextButton(onClick, Modifier.padding(top = 6.dp)) {
+        Text(stringResource(Res.string.file_export_request), color = Tok.accent, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun ExportWaitingRow() {
+    Row(
+        Modifier.padding(top = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CircularProgressIndicator(Modifier.size(14.dp), color = Tok.tx2, strokeWidth = 2.dp)
+        Text(stringResource(Res.string.file_export_waiting), color = Tok.muted, fontSize = 12.sp)
     }
 }

@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalTextToolbar
+import dev.ccpocket.app.rememberPlatformTextToolbar
 
 /** The appearance setting (issue #63). SYSTEM follows the OS light/dark, the other two force it.
  *  Absent/garbage → DARK: the app shipped dark-only, so existing users stay dark until they opt into
@@ -108,16 +110,25 @@ object Tok {
 /** Chat text scale (issue #8), provided once at the app root from PocketRepository.fontScale; 1.0 = design default. */
 val LocalFontScale = staticCompositionLocalOf { 1f }
 
+/** Resolve a [ThemeMode] to an effective dark/light against the current OS setting. Pure seam (extracted
+ *  from [PocketTheme]) so the polarity that also drives the system-bar icon color (issue #117) is unit-tested
+ *  without a composition: LIGHT is never dark, DARK is always dark, SYSTEM follows [systemDark]. */
+fun ThemeMode.resolvesToDark(systemDark: Boolean): Boolean = when (this) {
+    ThemeMode.LIGHT -> false
+    ThemeMode.DARK -> true
+    ThemeMode.SYSTEM -> systemDark
+}
+
 /** Appearance-aware entry point (issue #63): resolves [mode] against the OS so both app roots just pass their
  *  persisted [ThemeMode] — a live system light/dark flip re-themes, LIGHT/DARK force it. Delegates to the
  *  boolean overload, still the default for the ~dozen test/preview `PocketTheme { }` callers. */
 @Composable
 fun PocketTheme(mode: ThemeMode, fontScale: Float = 1f, content: @Composable () -> Unit) {
-    val dark = when (mode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
+    val dark = mode.resolvesToDark(systemDark = isSystemInDarkTheme())
+    // issue #117: align the OS status/navigation-bar FOREGROUND (icon/text) color with the resolved theme so
+    // the bars stay legible in light mode too — Android tints them, iOS/desktop no-op. On the mode overload
+    // only, so the real app roots drive it while the boolean overload used by tests/previews stays inert.
+    SystemBarAppearance(darkTheme = dark)
     PocketTheme(dark = dark, fontScale = fontScale, content = content)
 }
 
@@ -137,8 +148,10 @@ fun PocketTheme(dark: Boolean = true, fontScale: Float = 1f, content: @Composabl
         surfaceVariant = palette.raised, onSurfaceVariant = palette.tx2,
         outline = palette.hair, error = palette.danger,
     )
+    // app-wide text toolbar: identity on android/desktop; iOS gets the select-all reshow fix (TextToolbarFix.kt)
+    val textToolbar = rememberPlatformTextToolbar()
     MaterialTheme(
         colorScheme = scheme,
-        content = { CompositionLocalProvider(LocalFontScale provides fontScale, content = content) },
+        content = { CompositionLocalProvider(LocalFontScale provides fontScale, LocalTextToolbar provides textToolbar, content = content) },
     )
 }

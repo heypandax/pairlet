@@ -19,10 +19,21 @@ class Device(
     val revoked: Boolean,
     val pushPlatform: String? = null, // "apns"/"apns_sandbox"/"fcm"/… ; null until the device registers
     val pushToken: String? = null,    // opaque APNs/FCM token; cleared (null) when the user opts out
+    // issue #91: self-declared at redeem. ADVISORY presence metadata, not a security boundary (the
+    // capability restriction is enforced daemon-side, anchored to the pairing ticket): the relay uses
+    // it to (a) keep an always-on bridge from counting as "a phone is attached" — else pushes go
+    // permanently silent and the daemon's idle reaper never runs — and (b) withhold this device from
+    // the attach replay to daemons whose protoV predates bridges, which would otherwise file the key
+    // into their FULL-POWER allow-list on downgrade.
+    val headless: Boolean = false,
 )
 
 /** A device the relay can push to: a non-revoked device that has registered a token. */
 data class PushTarget(val deviceId: String, val platform: String, val token: String)
+
+/** A successfully claimed pairing ticket: its account plus the minting daemon's [headless] marker
+ *  (issue #91) — the authoritative source the redeemed device's headless flag is set from. */
+data class ClaimedTicket(val accountId: String, val headless: Boolean)
 
 /**
  * Durable, multi-tenant state for the relay. Stores ONLY fingerprints, public keys, and hashes —
@@ -36,9 +47,11 @@ interface RelayStore {
     suspend fun touchAccount(accountId: String, now: Long)
 
     // ---- pairing tickets (only an authenticated daemon mints; single-use) ----
-    suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long)
-    /** Atomically consume an unused, unexpired ticket. Returns its account id, or null if none. */
-    suspend fun claimTicket(ticketHash: ByteArray, now: Long): String?
+    /** [headless] (issue #91) is stamped by the MINTING daemon (PairBegin) and is the authoritative
+     *  bridge marker — the redeemed device inherits it, never the redeeming client's self-declaration. */
+    suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long, headless: Boolean = false)
+    /** Atomically consume an unused, unexpired ticket. Returns (accountId, its headless marker), or null. */
+    suspend fun claimTicket(ticketHash: ByteArray, now: Long): ClaimedTicket?
     suspend fun countUnredeemedTickets(accountId: String, now: Long): Int
 
     // ---- devices ----
@@ -54,7 +67,14 @@ interface RelayStore {
     // ---- push notifications ----
     /** Store (or clear, when [token] is blank) a device's push token + platform for offline wake-ups. */
     suspend fun setPushToken(deviceId: String, platform: String, token: String, now: Long)
-    /** Registered, non-revoked push targets for an account (devices that currently hold a token). */
+    /** Drop a device's push token after the gateway reported it permanently dead (APNs 410 / FCM 404) —
+     *  but only if it still equals [platform]/[token], so a device that re-registered a fresh token in the
+     *  meantime keeps it. Returns true if a row was actually cleared. */
+    suspend fun clearPushToken(deviceId: String, platform: String, token: String, now: Long): Boolean
+    /** Registered, non-revoked, INTERACTIVE push targets for an account (devices holding a token).
+     *  HEADLESS bridges are excluded (issue #91): a bridge must never receive the owner's turn-complete
+     *  pushes (which carry workdir/path/reply-first-line for ANY session), even if it registered a token
+     *  over the control plane — that plane bypasses the E2E bridge ingress gate. */
     suspend fun pushTargets(accountId: String): List<PushTarget>
 
     // ---- maintenance ----

@@ -30,4 +30,16 @@ class ThemeTest {
         assertEquals(Color(0xFF0E0F11), DarkPalette.base)
         assertEquals(Color(0xFFECEDEE), DarkPalette.tx)
     }
+
+    @Test
+    fun resolvesToDark_maps_mode_and_os_to_effective_dark() {
+        // this polarity feeds the system-bar icon color (issue #117): dark -> light icons, light -> dark icons
+        assertFalse(ThemeMode.LIGHT.resolvesToDark(systemDark = true), "LIGHT forces light regardless of OS")
+        assertFalse(ThemeMode.LIGHT.resolvesToDark(systemDark = false))
+        assertTrue(ThemeMode.DARK.resolvesToDark(systemDark = false), "DARK forces dark regardless of OS")
+        assertTrue(ThemeMode.DARK.resolvesToDark(systemDark = true))
+        // SYSTEM tracks the OS, so a live light/dark flip re-tints the bars
+        assertTrue(ThemeMode.SYSTEM.resolvesToDark(systemDark = true))
+        assertFalse(ThemeMode.SYSTEM.resolvesToDark(systemDark = false))
+    }
 }

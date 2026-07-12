@@ -2,7 +2,9 @@ package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.QuestionAnswer
 import dev.ccpocket.protocol.isSubagentTool
+import dev.ccpocket.protocol.isWorkflowTool
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -16,12 +18,18 @@ import kotlin.io.path.exists
 /** Reads a session `.jsonl` into a flat list of [HistoryMessage]s for replaying a resumed chat. */
 object TranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private const val ASK_TOOL = "AskUserQuestion"
+    // the CLI records an answered AskUserQuestion as `… "<question>"="<answer>" …` pairs (verified CLI
+    // 2.1.206 via scripts/probe-claude-wire.py `ask`); one pair per question, comma-joined for multiSelect
+    private val QA_PAIR = Regex("\"([^\"]+)\"=\"([^\"]*)\"")
+    private const val MAX_TOOL_TEXT = 1000 // tool label / input preview cap (display-on-tap, not the reply body)
 
-    /** Bounded so one ConvoHistory frame stays well under the relay's 256 KiB cap. */
-    fun read(file: Path, maxMessages: Int = 100, maxTextLen: Int = 2000): List<HistoryMessage> {
+    /** Count-capped, then byte-budgeted (issue #81) so one ConvoHistory frame stays under the relay's 4 MiB cap. */
+    fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
         if (!file.exists()) return emptyList()
         val out = ArrayList<HistoryMessage>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
+        val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
         runCatching {
             file.bufferedReader().useLines { lines ->
                 for (raw in lines) {
@@ -36,23 +44,27 @@ object TranscriptReplay {
                         // phone replays the real conversation, not background-shell chatter
                         "user" -> {
                             attachSubagentResults(obj, out, taskIdx)
+                            attachQuestionAnswers(obj, out, questionIdx)
                             if (isRealUserTurn(obj)) userText(obj)
                                 .takeIf { it.isNotBlank() && !TranscriptNoise.isNoiseUserText(it) }
-                                ?.let { out += HistoryMessage(ChatRole.USER, it.take(maxTextLen)) }
+                                ?.let { out += HistoryMessage(ChatRole.USER, it) }
                         }
-                        "assistant" -> assistantBlocks(obj, maxTextLen).forEach { (msg, taskId) ->
-                            taskId?.let { taskIdx[it] = out.size }
+                        // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
+                        // the tool name says which map so its later tool_result patches the right one
+                        "assistant" -> assistantBlocks(obj).forEach { (msg, id) ->
+                            id?.let { (if (msg.tool == ASK_TOOL) questionIdx else taskIdx)[it] = out.size }
                             out += msg
                         }
                     }
                 }
             }
         }
-        return if (out.size > maxMessages) out.takeLast(maxMessages) else out
+        val capped = if (out.size > maxMessages) out.takeLast(maxMessages) else out
+        return ReplayBudget.fit(capped, maxFrameTextBytes)
     }
 
     /** One history row + (for a sub-agent tool_use) its tool_use id, so the reader can key the card. */
-    private fun assistantBlocks(obj: JsonObject, maxTextLen: Int): List<Pair<HistoryMessage, String?>> {
+    private fun assistantBlocks(obj: JsonObject): List<Pair<HistoryMessage, String?>> {
         val message = obj["message"] as? JsonObject
         val content = message?.get("content") as? JsonArray ?: return emptyList()
         // `<synthetic>` = the CLI's API-failure placeholder, not a real reply — flag it so the phone
@@ -64,20 +76,38 @@ object TranscriptReplay {
             val block = el as? JsonObject ?: continue
             when (block.str("type")) {
                 "text" -> block.str("text")?.takeIf { it.isNotBlank() }
-                    ?.let { items += HistoryMessage(ChatRole.ASSISTANT, it.take(maxTextLen), error = synthetic) to null }
+                    ?.let { items += HistoryMessage(ChatRole.ASSISTANT, it, error = synthetic) to null }
                 "tool_use" -> {
                     val name = block.str("name") ?: "tool"
                     val input = block["input"] as? JsonObject
-                    if (isSubagentTool(name)) {
-                        // sub-agent card: same "<type>: <description>" label as the live ToolEvent (issue #77);
-                        // its ok/output are patched in when the matching tool_result scrolls past
-                        val label = listOfNotNull(input.str("subagent_type"), input.str("description"))
-                            .joinToString(": ").ifBlank { "sub-agent" }
-                        items += HistoryMessage(ChatRole.TOOL, label.take(maxTextLen), tool = name) to block.str("id")
-                    } else {
-                        items += HistoryMessage(
+                    when {
+                        isSubagentTool(name) -> {
+                            // sub-agent card: same "<type>: <description>" label as the live ToolEvent (issue #77);
+                            // its ok/output are patched in when the matching tool_result scrolls past
+                            val label = listOfNotNull(input.str("subagent_type"), input.str("description"))
+                                .joinToString(": ").ifBlank { "sub-agent" }
+                            items += HistoryMessage(ChatRole.TOOL, label.take(MAX_TOOL_TEXT), tool = name) to block.str("id")
+                        }
+                        isWorkflowTool(name) -> {
+                            // Workflow run card (issue #106): keyed like a sub-agent so the launch ack's
+                            // tool_result can patch in the run id (the separately-replayed WorkflowUpdate
+                            // then binds the full progress tree to this row)
+                            val label = input.str("description")?.ifBlank { null } ?: "workflow"
+                            items += HistoryMessage(ChatRole.TOOL, label.take(MAX_TOOL_TEXT), tool = name) to block.str("id")
+                        }
+                        name == ASK_TOOL -> {
+                            // AskUserQuestion (issue #110): NOT the raw questions JSON (which read like a Bash
+                            // dump). Carry the question text for the rare unanswered replay; `answers` is patched
+                            // in from the matching tool_result so the phone shows the same compact answered row
+                            // the live path leaves behind. Keyed by tool_use id like a sub-agent card.
+                            val questions = (input?.get("questions") as? JsonArray).orEmpty()
+                                .mapNotNull { (it as? JsonObject).str("question") }
+                            val label = questions.joinToString("\n").ifBlank { "Question" }
+                            items += HistoryMessage(ChatRole.TOOL, label.take(MAX_TOOL_TEXT), tool = name) to block.str("id")
+                        }
+                        else -> items += HistoryMessage(
                             ChatRole.TOOL,
-                            text = input?.toString()?.take(1000) ?: "", // full-ish input; the app shows it on tap-to-expand
+                            text = input?.toString()?.take(MAX_TOOL_TEXT) ?: "", // full-ish input; the app shows it on tap-to-expand
                             tool = name,
                         ) to null
                     }
@@ -87,10 +117,14 @@ object TranscriptReplay {
         return items
     }
 
-    /** Patch a sub-agent card with its outcome + report when the main-chain tool_result shows up. */
+    /** Patch a sub-agent/workflow card with its outcome when the main-chain tool_result shows up.
+     *  A Workflow launch's record also carries a root-level `toolUseResult {taskType:"local_workflow",
+     *  runId}` — that run id binds the card to its separately-replayed [WorkflowFiles] run (#106). */
     private fun attachSubagentResults(obj: JsonObject, out: ArrayList<HistoryMessage>, taskIdx: HashMap<String, Int>) {
         if (taskIdx.isEmpty()) return
         val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
+        val workflowRunId = (obj["toolUseResult"] as? JsonObject)
+            ?.takeIf { it.str("taskType") == "local_workflow" }?.str("runId")
         for (el in content) {
             val block = el as? JsonObject ?: continue
             if (block.str("type") != "tool_result") continue
@@ -99,8 +133,38 @@ object TranscriptReplay {
             out[idx] = prev.copy(
                 ok = (block["is_error"] as? JsonPrimitive)?.booleanOrNull != true,
                 output = subagentReport(toolResultText(block["content"])),
+                workflowRunId = workflowRunId ?: prev.workflowRunId,
             )
         }
+    }
+
+    /** Patch an AskUserQuestion row with the user's picks when its main-chain tool_result shows up
+     *  (issue #110) — the mirror of [attachSubagentResults] for the question card. */
+    private fun attachQuestionAnswers(obj: JsonObject, out: ArrayList<HistoryMessage>, questionIdx: HashMap<String, Int>) {
+        if (questionIdx.isEmpty()) return
+        val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
+        for (el in content) {
+            val block = el as? JsonObject ?: continue
+            if (block.str("type") != "tool_result") continue
+            val idx = block.str("tool_use_id")?.let(questionIdx::remove) ?: continue
+            val prev = out.getOrNull(idx) ?: continue
+            val answers = parseAnswers(toolResultText(block["content"])) ?: continue
+            out[idx] = prev.copy(answers = answers)
+        }
+    }
+
+    /** Pull the (question → answer) pairs out of AskUserQuestion's tool_result text. The structured
+     *  picks arrive as `"<question>"="<answer>"` pairs; a freeform reply arrives after a "responded:"
+     *  marker (kept as a blank-question answer). Returns null when neither matches, so the row falls
+     *  back to showing the question text — never the raw JSON. */
+    private fun parseAnswers(content: String?): List<QuestionAnswer>? {
+        content ?: return null
+        val pairs = QA_PAIR.findAll(content)
+            .map { QuestionAnswer(it.groupValues[1].trim().take(2000), it.groupValues[2].trim().take(2000)) }
+            .toList()
+        if (pairs.isNotEmpty()) return pairs
+        val freeform = content.substringAfter("responded:", "").trim().trim('"', ' ', '.').ifBlank { null }
+        return freeform?.let { listOf(QuestionAnswer("", it.take(2000))) }
     }
 
     /** tool_result `content` is either a raw string or an array of {type:text,text:…} blocks. */
