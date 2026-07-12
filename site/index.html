@@ -781,7 +781,7 @@
         <div class="step">
           <div class="n mono">1</div>
           <div class="s-body">
-            <h4><span class="i18n-en">Install the daemon on your computer</span><span class="i18n-zh">在电脑上安装守护进程</span></h4>
+            <h4><span class="i18n-en">Install the daemon on your computer</span><span class="i18n-zh">在电脑上装好 daemon</span></h4>
             <!-- OS tabs: JS preselects the visitor's OS; click to switch in case detection is wrong -->
             <div class="os-tabs" role="tablist" aria-label="Operating system">
               <button class="os-tab" role="tab" data-os="mac">macOS</button>
@@ -798,33 +798,33 @@
             <div class="os-panel" data-os="mac">
               <div class="mode-block" data-mode="install">
                 <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">Apple Silicon &amp; Intel — signed &amp; notarized, checksum-verified, installs under <span class="mono">~/.local</span> and registers the launchd service. Prefer Homebrew? <span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">Apple 芯片与 Intel 通用——已签名公证、下载校验，装到 <span class="mono">~/.local</span> 并注册 launchd 服务。偏好 Homebrew？<span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span></p>
+                <p class="os-note"><span class="i18n-en">Apple Silicon &amp; Intel — signed &amp; notarized, checksum-verified, installs under <span class="mono">~/.local</span> and registers the launchd service. Prefer Homebrew? <span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">Apple 芯片、Intel 都能用——已签名公证、下载自动校验，装进 <span class="mono">~/.local</span>，launchd 服务顺手注册好。想用 Homebrew？<span class="mono">brew install --cask heypandax/tap/cc-pocket</span></span></p>
               </div>
               <div class="mode-block" data-mode="update">
                 <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Homebrew installs: <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">守护进程自我更新（每天自查并推送手机提醒）。Homebrew 安装的用 <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span></p>
+                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Homebrew installs: <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span><span class="i18n-zh">daemon 会自己升级（每天自查新版，有了就推送到手机）。Homebrew 装的用 <span class="mono">brew upgrade --cask heypandax/tap/cc-pocket</span></span></p>
               </div>
             </div>
 
             <div class="os-panel" data-os="linux">
               <div class="mode-block" data-mode="install">
                 <div class="cmd"><span class="prompt mono">$</span><code class="mono">curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">x86_64 / arm64. Installs under <span class="mono">~/.local</span> + a <span class="mono">systemd&nbsp;--user</span> service.</span><span class="i18n-zh">x86_64 / arm64。装到 <span class="mono">~/.local</span> 下，并注册 <span class="mono">systemd&nbsp;--user</span> 服务。</span></p>
+                <p class="os-note"><span class="i18n-en">x86_64 / arm64. Installs under <span class="mono">~/.local</span> + a <span class="mono">systemd&nbsp;--user</span> service.</span><span class="i18n-zh">x86_64 / arm64。装进 <span class="mono">~/.local</span>，注册 <span class="mono">systemd&nbsp;--user</span> 服务。</span></p>
               </div>
               <div class="mode-block" data-mode="update">
                 <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon update</code><button class="copy" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too.</span><span class="i18n-zh">守护进程自我更新（每天自查并推送手机提醒）。重跑安装命令也等效。</span></p>
+                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too.</span><span class="i18n-zh">daemon 会自己升级（每天自查新版，有了就推送到手机）。重跑一遍安装命令也一样。</span></p>
               </div>
             </div>
 
             <div class="os-panel" data-os="windows">
               <div class="mode-block" data-mode="install">
                 <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex</code><button class="copy" data-copy="irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">x86_64. Needs the Claude Code CLI. One command: installs, registers the background service, and opens pairing right away. Prefer <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>? <span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span><span class="i18n-zh">x86_64。需已装 Claude Code CLI。一条命令：安装、注册后台服务并直接进入配对。偏好 <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>？<span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span></p>
+                <p class="os-note"><span class="i18n-en">x86_64. Needs the Claude Code CLI. One command: installs, registers the background service, and opens pairing right away. Prefer <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>? <span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span><span class="i18n-zh">x86_64。要先装好 Claude Code CLI。一条命令搞定：装好、注册后台服务、直接进入配对。想用 <a href="https://scoop.sh" target="_blank" rel="noopener">Scoop</a>？<span class="mono">scoop bucket add heypandax https://github.com/heypandax/scoop-bucket; scoop install cc-pocket-daemon</span></span></p>
               </div>
               <div class="mode-block" data-mode="update">
                 <div class="cmd"><span class="prompt mono">&gt;</span><code class="mono">cc-pocket-daemon update</code><button class="copy" data-copy="cc-pocket-daemon update" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too; Scoop installs: <span class="mono">scoop update cc-pocket-daemon</span></span><span class="i18n-zh">守护进程自我更新（每天自查并推送手机提醒）。重跑安装命令也等效；Scoop 安装的用 <span class="mono">scoop update cc-pocket-daemon</span></span></p>
+                <p class="os-note"><span class="i18n-en">The daemon updates itself (it also checks daily and notifies your phone). Re-running the install one-liner works too; Scoop installs: <span class="mono">scoop update cc-pocket-daemon</span></span><span class="i18n-zh">daemon 会自己升级（每天自查新版，有了就推送到手机）。重跑一遍安装命令也一样；Scoop 装的用 <span class="mono">scoop update cc-pocket-daemon</span></span></p>
               </div>
             </div>
           </div>
@@ -834,18 +834,18 @@
           <div class="s-body">
             <h4><span class="i18n-en">Pair your phone</span><span class="i18n-zh">配对你的手机</span></h4>
             <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket-daemon pair</code><button class="copy" data-copy="cc-pocket-daemon pair" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
-            <p style="font-size:13.5px;color:var(--muted);margin:9px 0 0"><span class="i18n-en">Prints a QR + a 6-digit code in your terminal.</span><span class="i18n-zh">在终端里打印一个二维码和 6 位配对码。</span></p>
+            <p style="font-size:13.5px;color:var(--muted);margin:9px 0 0"><span class="i18n-en">Prints a QR + a 6-digit code in your terminal.</span><span class="i18n-zh">终端里会打出一个二维码和 6 位配对码。</span></p>
           </div>
         </div>
         <div class="step">
           <div class="n mono">3</div>
           <div class="s-body">
             <h4><span class="i18n-en">Open the app, scan the QR</span><span class="i18n-zh">打开 App，扫码</span></h4>
-            <p style="font-size:15px;color:var(--sec);margin:0"><span class="i18n-en">…or type the 6-digit code. You're connected end-to-end.</span><span class="i18n-zh">……或输入那 6 位码。你已端到端连接。</span></p>
+            <p style="font-size:15px;color:var(--sec);margin:0"><span class="i18n-en">…or type the 6-digit code. You're connected end-to-end.</span><span class="i18n-zh">……或者把那 6 位码敲进去。就这样，连上了——端到端加密。</span></p>
           </div>
         </div>
       </div>
-      <p class="step-foot"><span class="i18n-en">Requires an installed, logged-in <span class="mono">claude</span> CLI.</span><span class="i18n-zh">需要电脑上已安装并登录的 <span class="mono">claude</span> CLI。</span></p>
+      <p class="step-foot"><span class="i18n-en">Requires an installed, logged-in <span class="mono">claude</span> CLI.</span><span class="i18n-zh">前提：电脑上装好并登录了 <span class="mono">claude</span> CLI。</span></p>
     </div>
   </div>
 </section>
