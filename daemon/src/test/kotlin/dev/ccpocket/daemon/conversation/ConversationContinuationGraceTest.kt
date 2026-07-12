@@ -111,11 +111,22 @@ class ConversationContinuationGraceTest {
     @Test
     fun plan_mode_result_arms_a_bounded_grace() {
         if (isWindows()) return // stubs run via sh/cat
-        harness(listOf(init, result), PermissionMode.PLAN, graceMs = 1_500, until = ::turnDone) { convo ->
+        // generous grace: this test checks "armed at all" — a loaded CI runner can stall seconds
+        // between the result line and the assert, so a tight window here is a flake, not a check
+        harness(listOf(init, result), PermissionMode.PLAN, graceMs = 60_000, until = ::turnDone) { convo ->
             // the premature result cleared `executing`, no ask/jobs — the grace alone must hold isBusy
             assertFalse(convo.isExecuting(), "result must clear executing")
             assertTrue(convo.isBusy(), "plan-mode turn end must expect the unprompted continuation")
-            delay(2_500) // …but the hold is bounded: no continuation came, the grace lapses
+        }
+    }
+
+    @Test
+    fun the_grace_is_bounded() {
+        if (isWindows()) return
+        // …and the hold lapses: poll for the release instead of sleeping a fixed margin — the
+        // withTimeout fails the test if an unexpired grace were to hold forever
+        harness(listOf(init, result), PermissionMode.PLAN, graceMs = 500, until = ::turnDone) { convo ->
+            withTimeout(10_000) { while (convo.isBusy()) delay(50) }
             assertFalse(convo.isBusy(), "an expired grace must release the conversation")
         }
     }
@@ -140,7 +151,9 @@ class ConversationContinuationGraceTest {
             fs.filterIsInstance<BackgroundJobs>().any { b -> b.jobs.any { it.status == JobStatus.DONE } }
         }
         harness(lines, PermissionMode.DEFAULT, graceMs = 60_000, until = settled) { convo ->
-            assertFalse(convo.isExecuting())
+            // executing/jobs settle a beat after the DONE frame lands on a loaded runner — await the
+            // steady state instead of snapshotting it (both must EVENTUALLY clear; the timeout fails loudly)
+            withTimeout(5_000) { while (convo.isExecuting() || convo.hasBackgroundWork()) delay(20) }
             assertFalse(convo.hasBackgroundWork(), "the completed job must not be what holds the session")
             assertTrue(convo.isBusy(), "a just-completed bg task must hold the session for the follow-up turn")
         }

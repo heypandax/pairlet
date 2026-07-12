@@ -49,6 +49,12 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        // CI has no test-report artifact — the console line is all we get on a failure, so it must
+        // carry the assertion message + stack, not just "AssertionFailedError at Foo.kt:85"
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
 
 // Let the daemon read from the real terminal stdin when run via Gradle (test-client REPL).
