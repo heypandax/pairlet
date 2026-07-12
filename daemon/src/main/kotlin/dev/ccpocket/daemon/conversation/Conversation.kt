@@ -122,6 +122,7 @@ class Conversation(
     var sessionId: String? = null
         private set
 
+    @Volatile
     private var proc: AgentProcess? = null
     private var bridge: PermissionBridge? = null
     private val seq = AtomicLong(0)
@@ -226,10 +227,35 @@ class Conversation(
     @Volatile
     private var interruptRequested = false
 
-    // the last prompt handed to the agent — the resend source when a launch is refused by the CLI's
-    // session lock and healSessionLock relaunches forked (the refused process took the prompt with it)
+    // UNCONSUMED-PROMPT LEDGER (issue #122). A prompt is only PROVEN delivered when the CLI echoes it
+    // back on stdout (`--replay-user-messages` replays a user message once it is actually consumed) —
+    // "written to the stdin channel" proves nothing: the channel write succeeds even when the process
+    // is already dead, and the CLI's own mid-turn queue dies with its process. Every prompt handed to
+    // backend.sendPrompt is recorded here and settled by its matching UserReplay; whatever is still in
+    // the ledger when a fresh process spawns is RE-INJECTED into it, in order (this generalizes the old
+    // healSessionLock lastPrompt single slot — which only survived one prompt and only the lock path).
+    // Guarded by synchronized(promptLedger): touched from the router (sendPrompt) + pump (replay) scopes.
+    private class PendingPrompt(
+        val key: String,
+        val text: String,
+        val images: List<ImageData>,
+        var generation: Long,
+        var redeliveries: Int = 0,
+    )
+
+    private val promptLedger = ArrayDeque<PendingPrompt>()
+    private val localPromptSeq = AtomicLong(0)
+
+    // which launchProcess call a ledger entry was written to — an entry from a PREVIOUS generation (or
+    // with no process at all) can no longer be consumed by anyone: it is lost, not merely queued
     @Volatile
-    private var lastPrompt: Pair<String, List<ImageData>>? = null
+    private var processGeneration = 0L
+
+    // when the last TurnResult landed — anchors the relaunch continuation grace (issue #122 ⑤): a
+    // result may be a PHANTOM (fable emits an early result / fallback mid-turn and keeps working), so
+    // for a short window after one, `!executing` is NOT proof the process is safe to kill
+    @Volatile
+    private var lastTurnEndedMs = 0L
 
     // healSessionLock already fired for the current prompt — one heal per user action, so a fork that
     // somehow gets refused too can't relaunch-loop. Re-armed by the next sendPrompt.
@@ -248,11 +274,66 @@ class Conversation(
 
     private fun degraded(): Boolean = failedTurnStreak >= DEGRADED_STREAK
 
+    /** Issue #122 ⑤: outside the post-result window a phantom early result could hide a live turn in.
+     *  Overridable (system property) so tests — and a field incident — can tune it without a build. */
+    private fun relaunchGraceElapsed(): Boolean =
+        System.currentTimeMillis() - lastTurnEndedMs >=
+            (System.getProperty(RELAUNCH_GRACE_PROP)?.toLongOrNull() ?: RELAUNCH_GRACE_DEFAULT_MS)
+
     /** True if [promptId] was seen before (recording it when not). Bounded LRU-ish: oldest falls off. */
     private fun promptSeenBefore(promptId: String): Boolean = synchronized(seenPromptIds) {
         if (!seenPromptIds.add(promptId)) return true
         if (seenPromptIds.size > SEEN_PROMPTS_MAX) seenPromptIds.iterator().run { next(); remove() }
         false
+    }
+
+    // ---- unconsumed-prompt ledger (issue #122) ----
+
+    /** Record a prompt handed to backend.sendPrompt — unproven until its UserReplay settles it. */
+    private fun recordPromptWritten(promptId: String?, text: String, images: List<ImageData>) {
+        synchronized(promptLedger) {
+            promptLedger.addLast(
+                PendingPrompt(promptId ?: "local-${localPromptSeq.getAndIncrement()}", text, images, processGeneration),
+            )
+            while (promptLedger.size > LEDGER_MAX) promptLedger.removeFirst()
+        }
+    }
+
+    /** The CLI replayed a consumed user message — settle the first ledger entry with matching text.
+     *  Injected plumbing turns (task-notifications, compact summaries) never match a recorded prompt. */
+    private fun settlePromptReplay(text: String?) {
+        text ?: return
+        synchronized(promptLedger) {
+            val iter = promptLedger.iterator()
+            while (iter.hasNext()) if (iter.next().text == text) { iter.remove(); return }
+        }
+    }
+
+    private fun hasUnconsumedPrompts(): Boolean = synchronized(promptLedger) { promptLedger.isNotEmpty() }
+
+    /** /clear + switchDirectory: the old session's undelivered prompts must not leak into a fresh one. */
+    private fun clearPromptLedger() = synchronized(promptLedger) { promptLedger.clear() }
+
+    /** Ledger entries a fresh process (generation [gen]) must be re-handed, oldest first. Stamps them
+     *  onto the new generation and counts the redelivery; an entry redelivered [MAX_REDELIVERIES] times
+     *  without ever seeing its replay is dropped — a safety valve against replay-parse drift turning
+     *  every relaunch into a duplicate turn. */
+    private fun promptsForRedelivery(gen: Long): List<PendingPrompt> = synchronized(promptLedger) {
+        promptLedger.removeAll { it.redeliveries >= MAX_REDELIVERIES }
+        promptLedger.forEach { it.generation = gen; it.redeliveries++ }
+        promptLedger.toList()
+    }
+
+    /** Issue #122 ④: true when [promptId]'s earlier write is provably LOST — it never produced a user
+     *  replay AND the process it was written to is gone (dead or superseded). The entry is removed and
+     *  the caller re-runs the prompt through the normal path instead of hollow-re-acking it. An entry
+     *  still owned by the LIVE process is merely queued mid-turn — that one stays a re-ack (a duplicate
+     *  turn is worse than a duplicate receipt). */
+    private fun releaseLostPrompt(promptId: String): Boolean = synchronized(promptLedger) {
+        val entry = promptLedger.firstOrNull { it.key == promptId } ?: return false
+        val lost = proc == null || entry.generation != processGeneration
+        if (lost) promptLedger.remove(entry)
+        lost
     }
 
     /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
@@ -568,6 +649,7 @@ class Conversation(
         val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
+        processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
         // Bridge-origin conversations (issue #91): the ask frame fans out normally (the bridge's egress
@@ -624,6 +706,16 @@ class Conversation(
         // KICKS OFF the handshake — its writes buffer on the process's stdin channel — so this can't block on the
         // agent; the pump below reads the replies (stdout is buffered until it starts).
         backend.attach(io, spec)
+        // RE-INJECTION (issue #122 ③): whatever the LAST process took to its grave — prompts written to
+        // its stdin (or its internal mid-turn queue) that never produced a consumption replay — is
+        // re-handed to this fresh process, oldest first, before anything else rides it. This is the old
+        // healSessionLock resend generalized to EVERY spawn: crash, shutdown, settings relaunch, lock heal.
+        val redeliver = promptsForRedelivery(processGeneration)
+        if (redeliver.isNotEmpty()) {
+            executing = true // the re-injected prompts start a turn; TurnResult clears it as usual
+            log.info("$convoId re-injecting ${redeliver.size} unconsumed prompt(s) into the fresh agent")
+            redeliver.forEach { backend.sendPrompt(it.text, it.images) }
+        }
         scope.launch(CoroutineName("pump-$convoId")) {
             pump(p, b)
         }
@@ -740,9 +832,12 @@ class Conversation(
                     }
                     is AgentEvent.TurnResult -> {
                         executing = false
-                        // the turn consumed the prompt — no refused launch can need a resend now, and the
-                        // pair pins the prompt's full base64 image payloads for as long as it's held
-                        lastPrompt = null
+                        // relaunch continuation grace anchor (issue #122 ⑤): this result may be a phantom
+                        // (fable early result/fallback) — for RELAUNCH_GRACE ms after it, sendPrompt must
+                        // not treat `!executing` as license to kill this process. NOTE: the ledger is NOT
+                        // settled here — only a UserReplay proves a prompt was consumed (a result says
+                        // nothing about prompts still sitting in the CLI's mid-turn queue).
+                        lastTurnEndedMs = System.currentTimeMillis()
                         // a FOREGROUND sub-agent still tracked at turn end never delivered its result
                         // (interrupted / died) — settle its card so it can't spin forever. Background
                         // runs live across turns; task_notification (or stopProcess) settles those.
@@ -795,7 +890,10 @@ class Conversation(
                     }
                     is AgentEvent.ControlRequest -> b.onControlRequest(ev)
                     is AgentEvent.ControlCancel -> b.onCancel(ev)
-                    AgentEvent.UserReplay -> {}
+                    // the CLI's consumption receipt (issue #122): a top-level user replay proves the
+                    // matching prompt reached the model — settle its ledger entry. A parent-tagged
+                    // replay is a sub-agent's inner user line, never one of ours.
+                    is AgentEvent.UserReplay -> if (ev.parentId == null) settlePromptReplay(ev.text)
                     is AgentEvent.Ignored -> {}
                     is AgentEvent.Unparseable -> {}
                 }
@@ -803,6 +901,9 @@ class Conversation(
         }
         log.info("$convoId pump ended (intentionalStop=$intentionalStop)")
         if (!intentionalStop) {
+            // superseded: a newer launch already owns this conversation (a relaunch raced this pump's
+            // tail) — the old process's death is history, not an error, and must not touch shared state
+            if (proc !== p) return
             // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
             // real process exit before touching the file (intentional stops settle in stopProcess)
             executing = false // a dead process never delivers TurnResult
@@ -811,6 +912,12 @@ class Conversation(
             for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
             backend.onProcessEnded(sessionId)
             if (healSessionLock(p)) return
+            // drop the dead handle (issue #122): the process took its stdin queue with it — with `proc`
+            // still set, every later prompt would be written into a dead pipe and hollow-acked. Nulling
+            // it makes the NEXT prompt lazy-respawn, and that spawn re-injects the unconsumed ledger.
+            proc = null
+            bridge?.cancelAll()
+            bridge = null
             // carry the exit code + the agent's last stderr line: a --resume that dies before its first
             // init (bad session id, context overflow) used to surface as a bare "agent process ended"
             val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
@@ -840,12 +947,10 @@ class Conversation(
         bridge?.cancelAll()
         bridge = null
         val healed = runCatching {
+            // the refused process took the prompt with it — it's still in the unconsumed ledger (no
+            // replay ever came), so launchProcess re-injects it into the forked process (issue #122)
+            if (hasUnconsumedPrompts()) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
             launchProcess(AgentSpec(workdir, resumeId = anchor, model = model, mode = mode, effort = effort, forkSession = true))
-            lastPrompt?.let { (text, images) ->
-                executing = true
-                sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
-                backend.sendPrompt(text, images)
-            }
         }
         if (healed.isFailure) {
             sink.emit(
@@ -887,10 +992,16 @@ class Conversation(
 
     suspend fun sendPrompt(text: String, images: List<ImageData> = emptyList(), promptId: String? = null) {
         // idempotent retry (issue #66): a promptId we already delivered is re-ACKED, never re-run —
-        // the client may resend after a lost ack, and a duplicate turn is worse than a duplicate receipt
+        // the client may resend after a lost ack, and a duplicate turn is worse than a duplicate receipt.
+        // EXCEPT (issue #122 ④): when the ledger proves the earlier write was LOST (no consumption
+        // replay + its process is gone), a re-ack would bury the prompt forever — forget the dedupe and
+        // genuinely re-run it, so the App's turn-stalled auto-resend (#104) can actually rescue the turn.
         if (promptId != null && promptSeenBefore(promptId)) {
-            sink.emit(PromptAck(convoId, promptId))
-            return
+            if (!releaseLostPrompt(promptId)) {
+                sink.emit(PromptAck(convoId, promptId))
+                return
+            }
+            // fall through: promptId stays in seenPromptIds — it is being run for real right now
         }
         if (tryIntercept(text)) {
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
@@ -905,11 +1016,25 @@ class Conversation(
         // for the next idle turn. `proc == null` needs no relaunch (the lazy launch below already bakes the
         // current fields); Codex never arms this (it applies settings per turn). A relaunch failure surfaces as a
         // PocketError (forgetting the id so the client can retry), mirroring the lazy-launch failure just below.
+        //
+        // CONTINUATION GRACE (issue #122 ⑤): `!executing` alone is NOT proof the process is idle — fable can
+        // emit a premature result/fallback and keep working (`executing` only re-arms once the continuation's
+        // next stdout event lands, and a silent thinking stretch emits nothing). So for RELAUNCH_GRACE ms after
+        // the last TurnResult the relaunch also defers: this prompt rides the current process and pendingRelaunch
+        // survives to the next idle send — exactly the established mid-turn behavior, never a killed turn. A
+        // switch still lands promptly in the common case: a human's next message after a REAL turn end almost
+        // always arrives past the grace window. (Deliberately NOT "recent stream activity" as liveness — a
+        // silently-thinking fable would read as idle and get killed.)
+        //
+        // The same deferral covers [continuationExpected]: an armed unprompted-continuation window (plan
+        // mode's premature result, a settled background task — issues #55/#105) is one more "the process
+        // is NOT idle despite !executing" signal, so the relaunch waits it out too.
+        //
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
-        val relaunching = proc != null && !executing && pendingRelaunch
-        if (proc != null && !executing && pendingRelaunch) {
+        val relaunching = proc != null && !executing && pendingRelaunch && relaunchGraceElapsed() && !continuationExpected()
+        if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId) }
             if (relaunched.isFailure) {
@@ -923,9 +1048,14 @@ class Conversation(
         // this appends in place). Without this, the first message after a lazy open would hit the old `proc == null`
         // guard and be silently dropped. A spawn failure (CLI missing / bad resume id) surfaces as a PocketError so
         // it can't propagate out and wedge the inbound pump; proc stays null, so the next prompt simply retries.
+        // This branch is ALSO the respawn after an unexpected process death (issue #122 — the pump nulls `proc`):
+        // then the live sessionId is the anchor (the dead process's turns live in ITS transcript, not the
+        // originally-resumed one), resumed in place — its own id is never a foreign id to fork off.
         if (proc == null) {
+            val anchor = sessionId ?: openedResumeId
+            val fork = if (sessionId == null) openedWithFork else false
             val launched = runCatching {
-                launchProcess(AgentSpec(workdir, openedResumeId, model, mode, effort = effort, forkSession = openedWithFork))
+                launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork))
             }
             if (launched.isFailure) {
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
@@ -936,8 +1066,10 @@ class Conversation(
         }
         executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         lastActivityMs = System.currentTimeMillis()
-        lastPrompt = text to images // healSessionLock's resend source — the refused launch loses this turn
         lockForkRetried = false // each user prompt re-arms one heal
+        // ledger BEFORE the write (issue #122 ③): even a write that dies inside the backend leaves the
+        // prompt recorded, and only the CLI's consumption replay settles it (ack ≠ consumed)
+        recordPromptWritten(promptId, text, images)
         backend.sendPrompt(text, images)
         promptId?.let {
             sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
@@ -1004,6 +1136,7 @@ class Conversation(
      */
     private suspend fun handleClearCommand() {
         stopProcess() // also clears + re-emits background jobs (the killed tree took its bg shells with it)
+        clearPromptLedger() // a wiped session must not re-inject the old one's undelivered prompts (issue #122)
         sessionId = null
         openedResumeId = null // brand-new session — no resume lineage left to preserve
         openedWithFork = false
@@ -1063,6 +1196,7 @@ class Conversation(
     /** Default semantics: kill the current process tree and start a fresh session in the new cwd. */
     suspend fun switchDirectory(newWorkdir: Path) {
         stopProcess()
+        clearPromptLedger() // fresh session in a new cwd — the old session's undelivered prompts die with it (issue #122)
         workdir = newWorkdir
         sessionId = null
         openedResumeId = null // fresh session in the new cwd — no resume lineage left to preserve
@@ -1177,6 +1311,19 @@ class Conversation(
 
         // delivered promptIds kept for retry dedupe — well past any realistic resend window
         const val SEEN_PROMPTS_MAX = 64
+
+        // unconsumed-prompt ledger bounds (issue #122): more pending prompts than this means something
+        // is deeply wrong upstream — cap so pinned base64 image payloads can't grow without bound
+        const val LEDGER_MAX = 16
+
+        // spawns an entry may be re-injected into without ever seeing its consumption replay — then it's
+        // dropped, so replay-parse drift can't turn every future relaunch into a duplicate turn
+        const val MAX_REDELIVERIES = 3
+
+        // continuation grace after a TurnResult before a settings relaunch may kill the process (issue
+        // #122 ⑤) — covers fable's phantom early result + the silent-thinking stretch that follows it
+        const val RELAUNCH_GRACE_PROP = "ccpocket.relaunch.graceMs"
+        const val RELAUNCH_GRACE_DEFAULT_MS = 15_000L
 
         // in-flight sub-agent cards tracked at once (issue #77) — parallel fan-outs stay well under this
         const val MAX_SUBAGENTS = 16

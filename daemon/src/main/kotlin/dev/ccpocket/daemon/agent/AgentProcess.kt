@@ -76,15 +76,26 @@ class AgentProcess private constructor(
                 for (msg in stdin) {
                     w.write(msg); w.write("\n"); w.flush()
                 }
-            } catch (_: Throwable) {
-                // pipe closed on shutdown
+            } catch (t: Throwable) {
+                // broken pipe: the process died under us — say so instead of dying silently (issue #122)
+                log.warn("agent $pid stdin writer ended: ${t.message}")
             } finally {
                 runCatching { w.close() }
+                // close the channel too, so later writeLine calls FAIL FAST instead of buffering into a
+                // dead pipe (or suspending forever once the 64-slot buffer fills) — issue #122: a write
+                // that can't reach the agent must be observable, the Conversation's ledger re-injects it
+                stdin.close()
             }
         }
     }
 
-    suspend fun writeLine(json: String) = stdin.send(json)
+    /** Queue one line for the agent's stdin. A write after the process/pipe died is DROPPED, loudly —
+     *  never silently buffered or suspended forever; the caller's unconsumed-prompt ledger (issue #122)
+     *  is the recovery path, re-injecting the payload into the next spawn. */
+    suspend fun writeLine(json: String) {
+        runCatching { stdin.send(json) }
+            .onFailure { log.warn("agent $pid stdin write dropped (pipe closed): ${json.take(120)}") }
+    }
 
     /** Bounded wait for the OS process to fully exit — its transcript is only flushed then. */
     suspend fun awaitExit(seconds: Long = 5) {
