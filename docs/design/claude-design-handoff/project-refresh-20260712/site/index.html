@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cc-pocket — Drive Claude Code from your phone</title>
+<meta name="description" content="Drive the claude CLI on your computer from your phone. Resume sessions, stream output, and approve tool permissions remotely — end-to-end encrypted, zero-knowledge relay, open source." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ══════════════ NAV ══════════════ -->
+<nav class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="cc-pocket home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="wordmark mono">cc-pocket</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features" data-sec="features"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
+      <a href="#how" data-sec="how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+      <a href="#security" data-sec="security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+      <a href="#start" data-sec="start"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></a>
+    </div>
+    <div class="nav-right">
+      <div class="seg" role="group" aria-label="Language">
+        <button data-setlang="zh">中</button>
+        <button data-setlang="en" class="on">EN</button>
+      </div>
+      <button class="icon-btn" id="theme-btn" aria-label="Toggle theme"></button>
+      <a class="btn btn-primary desktop-github" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <span class="gh-glyph" aria-hidden="true"></span>
+        <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
+        <span class="star-pill mono"><span class="star-ico" aria-hidden="true"></span>2.4k</span>
+      </a>
+      <button class="icon-btn hamburger" id="hamburger" aria-label="Menu"></button>
+    </div>
+  </div>
+</nav>
+<div class="mobile-menu" id="mobile-menu">
+  <a href="#features"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
+  <a href="#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+  <a href="#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+  <a href="#start"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></a>
+  <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener" style="color:var(--accent)">View on GitHub →</a>
+</div>
+
+<span id="top"></span>
+
+<!-- ══════════════ HERO ══════════════ -->
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-copy reveal">
+      <h1>
+        <span class="i18n-en">Drive Claude Code from your phone.</span>
+        <span class="i18n-zh">在手机上操控你的 Claude Code。</span>
+      </h1>
+      <p class="sub">
+        <span class="i18n-en">Resume sessions, stream the output, and approve Claude's tool permissions remotely — from anywhere, end-to-end encrypted.</span>
+        <span class="i18n-zh">恢复会话、看流式输出、远程批准 Claude 的工具授权——从任何地方，端到端加密。</span>
+      </p>
+      <div class="hero-btns">
+        <a class="btn btn-primary" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+          <span class="gh-glyph" aria-hidden="true"></span>
+          <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
+          <span class="star-pill mono"><span class="star-ico" aria-hidden="true"></span>2.4k</span>
+        </a>
+        <a class="btn btn-ghost" href="#how">
+          <span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span>
+        </a>
+      </div>
+      <p class="trustline mono">MIT<span class="dot">·</span>open source<span class="dot">·</span>zero-knowledge relay<span class="dot">·</span>no account</p>
+    </div>
+
+    <div class="hero-visual reveal">
+      <!-- phone: chat screen mid-stream -->
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="app">
+            <div class="app-hd">
+              <div class="row">
+                <span class="dot" style="background:var(--asuccess)"></span>
+                <span class="title">Fix relay reconnect</span>
+                <span style="flex:1"></span>
+                <span class="mono" style="font-size:10px;color:var(--asec);border:1px solid var(--ahair);border-radius:999px;padding:2px 7px">default</span>
+              </div>
+              <div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
+            </div>
+            <div class="app-body">
+              <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes.</div>
+              <div class="tool-row">
+                <span class="dot" style="background:var(--asuccess)"></span>
+                <span class="nm">Bash</span>
+                <span class="tg">gradle :relay:test</span>
+                <span class="meta">9s</span>
+              </div>
+              <div class="codeblock">
+                <div class="cb-hd"><span class="cb-lang">kotlin</span><span class="cb-lang" style="color:var(--asec)">copy</span></div>
+                <pre>fun reconnect() {
+  scope.launch {
+    delay(backoff)
+    open()        <span style="color:var(--asuccess)">// guarded</span>
+  }
+}</pre>
+              </div>
+              <div class="atext">Guard added — reconnect now survives scope cancellation.<span class="caret"></span></div>
+            </div>
+            <div class="app-cmp">
+              <span class="mono" style="font-size:14px;color:var(--asec)">+</span>
+              <div class="field">Message Claude…</div>
+              <div class="send"><svg width="14" height="14" viewBox="0 0 18 18" fill="none"><path d="M9 14V4M9 4l-4 4M9 4l4 4" stroke="#0E0F11" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- floating permission card -->
+      <div class="float-perm app">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px">
+          <span class="perm shield"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg></span>
+          <div style="flex:1">
+            <div style="font-size:10px;color:var(--asec)">Claude needs permission</div>
+            <div style="font-size:12.5px;font-weight:600;color:var(--atext)">Run command · Bash</div>
+          </div>
+          <!-- countdown ring -->
+          <svg width="30" height="30" viewBox="0 0 30 30" class="ring">
+            <circle cx="15" cy="15" r="12" stroke="#2A2E33" stroke-width="2.4" fill="none"/>
+            <circle cx="15" cy="15" r="12" stroke="#D97757" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="22"/>
+          </svg>
+        </div>
+        <div class="perm cmd" style="margin-bottom:11px">rm -rf ./build &amp;&amp; ./gradlew clean</div>
+        <div class="perm-btns">
+          <button class="perm-deny">Deny</button>
+          <button class="perm-allow">Allow</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════ THE MOMENT ══════════════ -->
+<section class="moment">
+  <div class="wrap reveal">
+    <p class="lead">
+      <span class="q">
+        <span class="i18n-en">You stepped away. Claude is blocked on a permission prompt.</span>
+        <span class="i18n-zh">你离开了工位，Claude 正卡在一个授权弹窗上。</span>
+      </span><br/>
+      <span class="a">
+        <span class="i18n-en">Approve it <b>from your pocket</b> in two taps.</span>
+        <span class="i18n-zh">在<b>口袋里</b>两下点掉它。</span>
+      </span>
+    </p>
+    <div class="mini app">
+      <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px">
+        <span class="perm shield"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg></span>
+        <div style="flex:1">
+          <div style="font-size:10px;color:var(--asec)">Claude needs permission</div>
+          <div style="font-size:12.5px;font-weight:600;color:var(--atext)">Edit file</div>
+        </div>
+        <svg width="30" height="30" viewBox="0 0 30 30" class="ring">
+          <circle cx="15" cy="15" r="12" stroke="#2A2E33" stroke-width="2.4" fill="none"/>
+          <circle cx="15" cy="15" r="12" stroke="#D97757" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="40"/>
+        </svg>
+      </div>
+      <div class="perm cmd" style="margin-bottom:11px">src/relay/WsClient.kt</div>
+      <div class="perm-btns">
+        <button class="perm-deny">Deny</button>
+        <button class="perm-allow">Allow</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ FEATURES ══════════════ -->
+<section class="section" id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Features</span><span class="i18n-zh">核心特性</span></p>
+      <h2><span class="i18n-en">Four jobs, done from your pocket.</span><span class="i18n-zh">四件事，口袋里搞定。</span></h2>
+    </div>
+
+    <!-- a. Approve from anywhere -->
+    <div class="feature reveal">
+      <div class="feat-text">
+        <div class="ft-num mono">01</div>
+        <h3><span class="i18n-en">Approve from anywhere</span><span class="i18n-zh">随处批准</span></h3>
+        <p><span class="i18n-en">Tool-permission requests reach your phone the moment Claude raises one. Allow or deny in seconds — and if you don't, it times out to a safe deny.</span><span class="i18n-zh">Claude 一发起工具授权请求，就推到你手机上。几秒内允许或拒绝——若不处理，超时后自动安全拒绝。</span></p>
+        <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>auto-deny on timeout</span>
+      </div>
+      <div class="feat-visual">
+        <div class="phone"><div class="notch"></div><div class="screen"><div class="app">
+          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Chat</span></div><div class="ctx">~/proj/app/cc-pocket · ⑂ main</div></div>
+          <div class="app-body" style="justify-content:flex-end;background:rgba(0,0,0,0.25)">
+            <div style="background:var(--araised);border:1px solid var(--ahair);border-radius:14px;padding:13px">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px">
+                <span class="perm shield"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/></svg></span>
+                <div style="flex:1"><div style="font-size:10px;color:var(--asec)">Claude needs permission</div><div style="font-size:13px;font-weight:600">Run command · Bash</div></div>
+              </div>
+              <div class="perm cmd" style="margin-bottom:10px">rm -rf ./build &amp;&amp; ./gradlew clean</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <svg width="26" height="26" viewBox="0 0 30 30" class="ring"><circle cx="15" cy="15" r="12" stroke="#2A2E33" stroke-width="2.4" fill="none"/><circle cx="15" cy="15" r="12" stroke="#D97757" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-dasharray="75.4" stroke-dashoffset="30"/></svg>
+                <span class="mono" style="font-size:11px;color:var(--asec)">0:18</span>
+                <span style="flex:1"></span>
+                <span class="mono" style="font-size:10px;color:var(--amuted)">⑂ main</span>
+              </div>
+              <div class="perm-btns"><button class="perm-deny">Deny</button><button class="perm-allow">Allow</button></div>
+            </div>
+          </div>
+        </div></div></div>
+      </div>
+    </div>
+
+    <!-- b. Pick up any session -->
+    <div class="feature flip reveal">
+      <div class="feat-text">
+        <div class="ft-num mono">02</div>
+        <h3><span class="i18n-en">Pick up any session</span><span class="i18n-zh">接起任何会话</span></h3>
+        <p><span class="i18n-en">Resume the exact Claude session you left running on your computer — or start a fresh one in any repo.</span><span class="i18n-zh">恢复你电脑上正跑着的那个 Claude 会话——或在任意仓库里新开一个。</span></p>
+        <span class="detail-chip mono"><span class="dot" style="background:var(--asec)"></span>💬 12 · ⑂ main · 2h ago</span>
+      </div>
+      <div class="feat-visual">
+        <div class="phone"><div class="notch"></div><div class="screen"><div class="app">
+          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Sessions</span></div><div class="ctx">Lidapeng-MacBook · ⑂ main</div></div>
+          <div class="app-body" style="gap:9px">
+            <div class="sess-new"><span class="pl">+</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600;color:var(--aacc)">New session</div><div class="mono" style="font-size:9.5px;color:var(--amuted);margin-top:1px">~/proj/app/cc-pocket</div></div></div>
+            <div class="sess-card"><div class="st">Refactor auth module</div><div class="pv">add a unit test for the stream parser</div><div class="mt">💬 12 · ⑂ main · 2h ago</div></div>
+            <div class="sess-card"><div class="st">Fix stream parser test</div><div class="pv">the parser drops the last token on EOF</div><div class="mt">💬 6 · ⑂ fix/parser · 5h ago</div></div>
+            <div class="sess-card"><div class="st">Add relay websocket client</div><div class="pv">scaffold the Ktor WS client with reconnect</div><div class="mt">💬 23 · ⑂ feat/relay · yesterday</div></div>
+          </div>
+        </div></div></div>
+      </div>
+    </div>
+
+    <!-- c. Watch it think, live -->
+    <div class="feature reveal">
+      <div class="feat-text">
+        <div class="ft-num mono">03</div>
+        <h3><span class="i18n-en">Watch it think, live</span><span class="i18n-zh">实时看它思考</span></h3>
+        <p><span class="i18n-en">Real-time streaming output, code blocks and tool events — follow along on the go, exactly as it renders in the terminal.</span><span class="i18n-zh">实时流式输出、代码块、工具事件——在路上也能跟上，和终端里渲染的一模一样。</span></p>
+        <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>↑1.2k ↓340</span>
+      </div>
+      <div class="feat-visual">
+        <div class="phone"><div class="notch"></div><div class="screen"><div class="app">
+          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Refactor auth module</span></div><div class="ctx">~/proj/app/cc-pocket · sonnet-4.5</div></div>
+          <div class="app-body">
+            <div class="user-rail"><div class="atext">add a unit test for the stream parser</div></div>
+            <div class="atext">I'll add a focused test that feeds a chunked SSE response and asserts the reassembled events.</div>
+            <div class="codeblock">
+              <div class="cb-hd"><span class="cb-lang">kotlin</span><span class="cb-lang" style="color:var(--asec)">copy</span></div>
+              <pre>@Test fun reassembles() {
+  val ev = parse(chunks)
+  assertEquals(2, ev.size)
+}</pre>
+            </div>
+            <div class="tool-row"><span class="spin"></span><span class="nm">Bash</span><span class="tg">gradle :protocol:test</span></div>
+            <div class="atext amuted">Running the suite to confirm the new test fails first<span class="caret"></span></div>
+            <div class="mono" style="font-size:9.5px;color:var(--amuted)">↑1.2k ↓340</div>
+          </div>
+        </div></div></div>
+      </div>
+    </div>
+
+    <!-- d. Switch the working directory -->
+    <div class="feature flip reveal">
+      <div class="feat-text">
+        <div class="ft-num mono">04</div>
+        <h3><span class="i18n-en">Switch the working directory</span><span class="i18n-zh">随时切目录</span></h3>
+        <p><span class="i18n-en">Point Claude at any repo on your computer, mid-conversation — recents, a live breadcrumb, and per-project session counts.</span><span class="i18n-zh">对话中途就能把 Claude 指向电脑上任意仓库——最近项目、实时面包屑、每个项目的会话数。</span></p>
+        <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>~/proj/app · 3 sessions</span>
+      </div>
+      <div class="feat-visual">
+        <div class="phone"><div class="notch"></div><div class="screen"><div class="app">
+          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Choose a directory</span></div><div class="ctx">Lidapeng-MacBook</div></div>
+          <div class="app-body" style="gap:4px">
+            <div class="mono" style="font-size:9px;color:var(--amuted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">Recents</div>
+            <div class="dir-row"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 5.5A1.5 1.5 0 013.5 4h3l1.5 1.6h6A1.5 1.5 0 0115 7v6.5A1.5 1.5 0 0113.5 15h-10A1.5 1.5 0 012 13.5z"/></svg><span class="nm">~/proj/app/cc-pocket</span><span class="dir-pill">3 sessions</span></div>
+            <div class="dir-row"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 5.5A1.5 1.5 0 013.5 4h3l1.5 1.6h6A1.5 1.5 0 0115 7v6.5A1.5 1.5 0 0113.5 15h-10A1.5 1.5 0 012 13.5z"/></svg><span class="nm">~/proj/app/cc-dashboard</span><span class="dir-pill">8 sessions</span></div>
+            <div class="dir-row"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 5.5A1.5 1.5 0 013.5 4h3l1.5 1.6h6A1.5 1.5 0 0115 7v6.5A1.5 1.5 0 0113.5 15h-10A1.5 1.5 0 012 13.5z"/></svg><span class="nm">~/work/api-server</span><span class="dir-pill">1 session</span></div>
+            <div class="dir-bc" style="margin:10px 0 4px">~ / proj / app</div>
+            <div class="dir-row"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 5.5A1.5 1.5 0 013.5 4h3l1.5 1.6h6A1.5 1.5 0 0115 7v6.5A1.5 1.5 0 0113.5 15h-10A1.5 1.5 0 012 13.5z"/></svg><span class="nm">analyse</span></div>
+            <div class="dir-row" style="border-bottom:0"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 5.5A1.5 1.5 0 013.5 4h3l1.5 1.6h6A1.5 1.5 0 0115 7v6.5A1.5 1.5 0 0113.5 15h-10A1.5 1.5 0 012 13.5z"/></svg><span class="nm">nanobanana</span></div>
+          </div>
+        </div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ HOW IT WORKS ══════════════ -->
+<section class="section arch" id="how">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></p>
+      <h2><span class="i18n-en">A zero-knowledge bridge, phone to computer.</span><span class="i18n-zh">从手机到电脑的零知识桥接。</span></h2>
+    </div>
+    <div class="arch-flow reveal">
+      <div class="node">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg></div>
+        <div class="nlabel">phone</div>
+        <div class="nsub"><span class="i18n-en">Compose Multiplatform</span><span class="i18n-zh">Compose 跨平台</span></div>
+      </div>
+      <div class="connector"><span class="clabel">wss · ciphertext →</span><span class="line"></span><span class="csub">E2E encrypted</span></div>
+      <div class="node">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8.5 4.2v6.1c0 4.9-3.6 8.1-8.5 9.2-4.9-1.1-8.5-4.3-8.5-9.2V6.7L12 2.5z"/><path d="M9 12l2 2 4-4.5"/></svg></div>
+        <div class="nlabel">relay</div>
+        <div class="nsub"><span class="i18n-en">zero-knowledge broker</span><span class="i18n-zh">零知识中继</span></div>
+      </div>
+      <div class="connector"><span class="clabel">wss · ciphertext →</span><span class="line"></span><span class="csub">opaque frames</span></div>
+      <div class="node">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <div class="nlabel">daemon</div>
+        <div class="nsub"><span class="i18n-en">your computer</span><span class="i18n-zh">你的电脑</span></div>
+      </div>
+      <div class="connector"><span class="clabel">stdio →</span><span class="line"></span><span class="csub">local</span></div>
+      <div class="node">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l4 4-4 4M11 15h6"/><rect x="2.5" y="3" width="19" height="18" rx="2.5"/></svg></div>
+        <div class="nlabel mono">claude</div>
+        <div class="nsub"><span class="i18n-en">CLI on your machine</span><span class="i18n-zh">本机 CLI</span></div>
+      </div>
+    </div>
+    <p class="arch-cap reveal">
+      <span class="i18n-en">The relay only forwards opaque encrypted frames. Plaintext never leaves your phone and your computer.</span>
+      <span class="i18n-zh">中继只转发不透明的加密帧。明文永远不离开你的手机和你的电脑。</span>
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════ SECURITY ══════════════ -->
+<section class="section" id="security">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></p>
+      <h2><span class="i18n-en">The relay can't read a thing.</span><span class="i18n-zh">中继什么也读不到。</span></h2>
+    </div>
+    <div class="sec-grid">
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l8.5 4.2v6.1c0 4.9-3.6 8.1-8.5 9.2-4.9-1.1-8.5-4.3-8.5-9.2V6.7L12 2.5z"/><path d="M9.5 12.5l-2 2M14.5 9.5l-5 5"/></svg></div>
+        <h4><span class="i18n-en">Zero-knowledge relay</span><span class="i18n-zh">零知识中继</span></h4>
+        <p><span class="i18n-en">Forwards ciphertext only; holds no message content and no private keys.</span><span class="i18n-zh">只转发密文；不保存任何消息内容，也不持有私钥。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg></div>
+        <h4><span class="i18n-en">End-to-end encrypted</span><span class="i18n-zh">端到端加密</span></h4>
+        <p><span class="i18n-en">P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake; plaintext stays on your two trusted endpoints.</span><span class="i18n-zh">P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手；明文只留在你的两个可信端点。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 9.5h18M7 14.5h4"/></svg></div>
+        <h4><span class="i18n-en">No accounts, no login</span><span class="i18n-zh">无账号、免登录</span></h4>
+        <p><span class="i18n-en">Pair by scanning a QR or typing a 6-digit code; the daemon's key travels out-of-band so even a malicious relay can't MITM.</span><span class="i18n-zh">扫码或输入 6 位配对码即可；守护进程的密钥经带外传递，即便恶意中继也无法中间人攻击。</span></p>
+      </div>
+      <div class="sec-card reveal">
+        <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6L4 11l5 5M15 6l5 5-5 5"/></svg></div>
+        <h4><span class="i18n-en">Open &amp; self-hostable</span><span class="i18n-zh">开源可自托管</span></h4>
+        <p><span class="i18n-en">Clean-room Kotlin, MIT, zero content logging; run your own relay.</span><span class="i18n-zh">纯净室 Kotlin，MIT 许可，零内容日志；可自建中继。</span></p>
+      </div>
+    </div>
+    <div class="pullquote reveal">
+      <blockquote><span class="i18n-en">Trust without trusting us.</span><span class="i18n-zh">信任，但不必信任我们。</span></blockquote>
+      <a class="tm-link" href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Read the full threat model →</span><span class="i18n-zh">阅读完整威胁模型 →</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ GET STARTED ══════════════ -->
+<section class="section" id="start" style="background:var(--surface);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair)">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <p class="eyebrow"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></p>
+      <h2><span class="i18n-en">Three commands to connected.</span><span class="i18n-zh">三条命令，连上。</span></h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <div class="n mono">1</div>
+        <div class="s-body">
+          <h4><span class="i18n-en">Install the daemon on your Mac</span><span class="i18n-zh">在 Mac 上安装守护进程</span> <span class="mono">(Homebrew)</span></h4>
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">brew install --cask heypandax/tap/cc-pocket</code><button class="copy" data-copy="brew install --cask heypandax/tap/cc-pocket" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="n mono">2</div>
+        <div class="s-body">
+          <h4><span class="i18n-en">Pair your phone</span><span class="i18n-zh">配对你的手机</span></h4>
+          <div class="cmd"><span class="prompt mono">$</span><code class="mono">cc-pocket pair</code><button class="copy" data-copy="cc-pocket pair" aria-label="Copy"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="1.5"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3h-6A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></button></div>
+          <p style="font-size:13.5px;color:var(--muted);margin:9px 0 0"><span class="i18n-en">Prints a QR + a 6-digit code in your terminal.</span><span class="i18n-zh">在终端里打印一个二维码和 6 位配对码。</span></p>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="n mono">3</div>
+        <div class="s-body">
+          <h4><span class="i18n-en">Open the app, scan the QR</span><span class="i18n-zh">打开 App，扫码</span></h4>
+          <p style="font-size:15px;color:var(--sec);margin:0"><span class="i18n-en">…or type the 6-digit code. You're connected end-to-end.</span><span class="i18n-zh">……或输入那 6 位码。你已端到端连接。</span></p>
+        </div>
+      </div>
+    </div>
+    <p class="step-foot"><span class="i18n-en">Requires an installed, logged-in <span class="mono">claude</span> CLI.</span><span class="i18n-zh">需要电脑上已安装并登录的 <span class="mono">claude</span> CLI。</span></p>
+    <div class="get-cta reveal">
+      <a class="btn btn-primary" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+        <span class="gh-glyph" aria-hidden="true"></span>
+        <span class="i18n-en">View on GitHub</span><span class="i18n-zh">在 GitHub 查看</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ OPEN SOURCE BAND ══════════════ -->
+<section class="osband">
+  <div class="wrap reveal">
+    <p>
+      <span class="i18n-en">Free and open source. <span class="accent">MIT licensed.</span> Clean-room Kotlin. Android · iOS · desktop, one Compose Multiplatform codebase.</span>
+      <span class="i18n-zh">自由开源，<span class="accent">MIT 许可</span>，纯净室 Kotlin 实现。Android · iOS · 桌面，同一套 Compose Multiplatform 代码。</span>
+    </p>
+    <a class="btn btn-primary" href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">
+      <span class="star-ico" aria-hidden="true"></span>
+      <span class="i18n-en">Star on GitHub</span><span class="i18n-zh">在 GitHub 加星</span>
+    </a>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="top">
+      <div class="brand-col">
+        <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">cc-pocket</span></a>
+        <p class="tagline"><span class="i18n-en">Claude Code, in your pocket. End-to-end encrypted, no account.</span><span class="i18n-zh">Claude Code，装进口袋。端到端加密，无需账号。</span></p>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Product</span><span class="i18n-zh">产品</span></h5>
+        <a href="#features"><span class="i18n-en">Features</span><span class="i18n-zh">特性</span></a>
+        <a href="#how"><span class="i18n-en">How it works</span><span class="i18n-zh">工作原理</span></a>
+        <a href="#security"><span class="i18n-en">Security</span><span class="i18n-zh">安全</span></a>
+        <a href="#start"><span class="i18n-en">Get started</span><span class="i18n-zh">开始使用</span></a>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Resources</span><span class="i18n-zh">资源</span></h5>
+        <a href="https://github.com/heypandax/cc-pocket" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" target="_blank" rel="noopener"><span class="i18n-en">Security model</span><span class="i18n-zh">安全模型</span></a>
+        <a href="https://github.com/heypandax/cc-pocket#readme" target="_blank" rel="noopener"><span class="i18n-en">User guide</span><span class="i18n-zh">使用指南</span></a>
+        <a href="https://heypandax.github.io/cc-pocket/privacy.html" target="_blank" rel="noopener"><span class="i18n-en">Privacy policy</span><span class="i18n-zh">隐私政策</span></a>
+      </div>
+      <div class="col">
+        <h5><span class="i18n-en">Legal</span><span class="i18n-zh">法律</span></h5>
+        <a href="https://github.com/heypandax/cc-pocket/blob/main/LICENSE" target="_blank" rel="noopener"><span class="i18n-en">MIT License</span><span class="i18n-zh">MIT 许可证</span></a>
+      </div>
+    </div>
+    <div class="bottom">
+      <span class="copy-line mono">© 2026 cc-pocket · MIT</span>
+      <div class="seg" role="group" aria-label="Language">
+        <button data-setlang="zh">中</button>
+        <button data-setlang="en" class="on">EN</button>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

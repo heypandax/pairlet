@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cc-pocket — Claude asks you</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #08090A;
+    min-height: 100vh;
+    font-family: 'Inter', 'Noto Sans SC', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { padding: 0; }
+
+  /* subtle press feedback */
+  .qm-press { transition: transform 0.12s ease, background 0.16s ease, border-color 0.16s ease; }
+  .qm-press:active { transform: scale(0.975); }
+
+  /* option hover (pointer devices) */
+  .qm-opt { transition: border-color 0.16s ease, background 0.16s ease; }
+
+  /* blinking terracotta text caret (IME focus) */
+  @keyframes qmBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  .qm-caret {
+    display: inline-block; width: 2px; height: 1.02em;
+    background: #D97757; margin-left: 1px; vertical-align: text-bottom;
+    transform: translateY(2px);
+    animation: qmBlink 1.05s steps(1) infinite;
+  }
+
+  /* pulsing running dot */
+  @keyframes qmPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.82); } }
+  .qm-pulse { animation: qmPulse 1.3s ease-in-out infinite; }
+
+  /* withdrawn notice — a slow, quiet fade toward gone (loops so it stays legible in the board) */
+  @keyframes qmDrift { 0% { opacity: 0.72; } 70% { opacity: 0.72; } 100% { opacity: 0.4; } }
+  .qm-fade { animation: qmDrift 6s ease-in-out infinite alternate; }
+
+  /* hide scrollbars inside device frames */
+  .qm-scroll::-webkit-scrollbar { width: 0; height: 0; }
+  .qm-scroll { scrollbar-width: none; }
+
+  /* CJK: prefer Noto Sans SC for Han; keep mono for code/paths */
+  [lang="zh"], .qm-han { font-family: 'Inter', 'Noto Sans SC', -apple-system, system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="qm-core.jsx?v=2"></script>
+<script type="text/babel" src="qm-card.jsx?v=2"></script>
+<script type="text/babel" src="qm-board.jsx?v=2"></script>
+</body>
+</html>

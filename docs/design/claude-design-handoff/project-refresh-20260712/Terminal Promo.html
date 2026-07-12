@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Terminal — cc-pocket promo</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: #000; }
+  body {
+    width: 1080px; height: 1440px; position: relative; overflow: hidden;
+    font-family: "JetBrains Mono", "SF Mono", Menlo, "PingFang SC", monospace;
+    background:
+      radial-gradient(1200px 900px at 18% 8%, #171c28 0%, transparent 55%),
+      radial-gradient(1000px 800px at 88% 90%, #221c2a 0%, transparent 60%),
+      linear-gradient(165deg, #0f1114 0%, #0a0b0d 45%, #060708 100%);
+  }
+  .window {
+    position: absolute; left: 43px; top: 168px; width: 994px; height: 1078px;
+    border-radius: 11px; overflow: hidden; background: #101012;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 0 0 1.5px rgba(0,0,0,0.6),
+      0 28px 70px rgba(0,0,0,0.62), 0 70px 140px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;
+  }
+  .titlebar {
+    height: 30px; flex-shrink: 0; position: relative; display: flex; align-items: center;
+    background: linear-gradient(#2e2f33, #28292d); border-bottom: 1px solid #000;
+  }
+  .lights { display: flex; gap: 8px; padding-left: 10px; }
+  .light { width: 12px; height: 12px; border-radius: 999px; }
+  .tt { position: absolute; left: 0; right: 0; text-align: center; font-size: 12.5px; font-weight: 500; color: #b0b0b5;
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif; }
+  .term { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 18px 22px 20px; }
+  .lines { flex: 1; min-height: 0; font-size: 13px; line-height: 21px; color: #ECEDEE; }
+  .ln { display: flex; }
+  .ln .pre { white-space: pre; flex-shrink: 0; }
+  .ln .tx { flex: 1; min-width: 0; }
+  .dim { color: #9BA1A6; }
+  .acc { color: #D97757; }
+  .grn { color: #4FB477; }
+  .gap { height: 16px; }
+  .sgap { height: 5px; }
+  /* input box */
+  .inbox {
+    flex-shrink: 0; border: 1px solid #3a3d42; border-radius: 8px;
+    padding: 9px 12px; font-size: 13px; color: #ECEDEE; display: flex; align-items: center;
+  }
+  .cursor { display: inline-block; width: 8px; height: 16px; background: #ECEDEE; margin-left: 7px;
+    vertical-align: text-bottom; animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  .caps { flex-shrink: 0; display: flex; justify-content: space-between; padding: 7px 4px 0;
+    font-size: 11.5px; color: #6d7278; }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="lights">
+        <span class="light" style="background:#ff5f57"></span>
+        <span class="light" style="background:#febc2e"></span>
+        <span class="light" style="background:#28c840"></span>
+      </div>
+      <div class="tt">cc-pocket — claude — 104×34</div>
+    </div>
+    <div class="term">
+      <div class="lines" id="lines"></div>
+      <div class="inbox"><span class="dim">&gt;&nbsp;</span><span class="cursor"></span></div>
+      <div class="caps"><span>? for shortcuts</span><span>claude-opus-4-8</span></div>
+    </div>
+  </div>
+<script>
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const L = [
+  { t:'user', s:'手机连不上 daemon 了，日志里有 FrameTooBigException，帮我查一下' },
+  { t:'gap' },
+  { t:'b', s:'我先看 relay 的帧大小限制。' },
+  { t:'gap' },
+  { t:'tool', n:'Read', a:'relay/src/main/kotlin/net/RelayServer.kt' },
+  { t:'r', s:'Read 182 lines' },
+  { t:'sgap' },
+  { t:'tool', n:'Grep', a:'pattern: "maxFrameSize", path: "relay/"' },
+  { t:'r', s:'Found 3 matches' },
+  { t:'gap' },
+  { t:'b', s:'找到了：relay 的 maxFrame 只有 256KB，大会话的历史帧一发过来就被踢断连接。我把上限改成 4MB，并给超限帧加一条告警日志。' },
+  { t:'gap' },
+  { t:'tool', n:'Update', a:'relay/src/main/kotlin/net/RelayServer.kt' },
+  { t:'r', s:'Updated 2 lines' },
+  { t:'sgap' },
+  { t:'tool', n:'Bash', a:'./gradlew :relay:test' },
+  { t:'r', s:'BUILD SUCCESSFUL in 38s · 24 tests passed' },
+  { t:'sgap' },
+  { t:'plain', s:'Update Todos' },
+  { t:'todo', first:true,  done:true,  s:'定位断连根因（maxFrame 256KB）' },
+  { t:'todo', done:true,  s:'上限改为 4MB ＋ 告警日志' },
+  { t:'todo', done:false, s:'重新部署 relay 并回归验证' },
+  { t:'gap' },
+  { t:'spin', s:'Redeploying relay… ', d:'(esc to interrupt · 2m 14s)' },
+];
+document.getElementById('lines').innerHTML = L.map(l => {
+  if (l.t === 'gap')  return '<div class="gap"></div>';
+  if (l.t === 'sgap') return '<div class="sgap"></div>';
+  if (l.t === 'user') return '<div class="ln"><span class="pre dim">&gt; </span><span class="tx dim">' + esc(l.s) + '</span></div>';
+  if (l.t === 'b')    return '<div class="ln"><span class="pre"><span class="acc">⏺</span> </span><span class="tx">' + esc(l.s) + '</span></div>';
+  if (l.t === 'tool') return '<div class="ln"><span class="pre"><span class="acc">⏺</span> </span><span class="tx"><b style="font-weight:600">' + esc(l.n) + '</b><span class="dim">(' + esc(l.a) + ')</span></span></div>';
+  if (l.t === 'plain')return '<div class="ln"><span class="pre"><span class="acc">⏺</span> </span><span class="tx">' + esc(l.s) + '</span></div>';
+  if (l.t === 'r')    return '<div class="ln dim"><span class="pre">  ⎿  </span><span class="tx">' + esc(l.s) + '</span></div>';
+  if (l.t === 'todo') {
+    const box = l.done ? '<span class="grn">☒</span>' : '<span class="dim">☐</span>';
+    const lead = l.first ? '  ⎿  ' : '     ';
+    const cls = l.done ? 'dim' : '';
+    return '<div class="ln"><span class="pre dim">' + lead + '</span><span class="tx ' + cls + '">' + box + ' ' + esc(l.s) + '</span></div>';
+  }
+  if (l.t === 'spin') return '<div class="ln"><span class="pre"><span class="acc">✻</span> </span><span class="tx">' + esc(l.s) + '<span class="dim">' + esc(l.d) + '</span></span></div>';
+  return '';
+}).join('');
+</script>
+</body>
+</html>

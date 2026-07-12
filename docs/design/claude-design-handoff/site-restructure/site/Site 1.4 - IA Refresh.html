@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cc-pocket 1.4 — IA refresh · design review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="v13.css" />
+<link rel="stylesheet" href="changed-files-v2.css" />
+<link rel="stylesheet" href="site-14.css" />
+</head>
+<body>
+
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" rx="22" fill="#0E0F11"/><rect x="26" y="30" width="20" height="20" rx="5" fill="#D97757" fill-opacity="0.9"/><rect x="54" y="30" width="20" height="20" rx="5" fill="#2A2E33"/><rect x="26" y="58" width="20" height="20" rx="5" fill="#2A2E33"/><rect x="54" y="58" width="20" height="20" rx="5" fill="#2A2E33"/></svg>
+</template>
+
+<!-- ══════════ review chrome ══════════ -->
+<div class="rvw-top">
+  <div class="wrap">
+    <span class="rvw-badge"><b>cc-pocket 1.4</b> · IA refresh — new &amp; changed sections</span>
+    <div class="rvw-ctrl">
+      <span class="lbl">Page theme</span>
+      <div class="seg" role="group" aria-label="Theme">
+        <button data-th="dark" class="on">Dark</button>
+        <button data-th="light">Light</button>
+      </div>
+      <div class="seg" role="group" aria-label="Language">
+        <button data-lang-set="zh">中</button>
+        <button data-lang-set="en" class="on">EN</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <!-- ═══════════════════════ SCREEN A ═══════════════════════ -->
+  <section class="frame">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN A</span>
+        <span class="fttl">Landing · feature vignette 03 — “See what changed”</span>
+        <span class="fnote">same alternating rhythm as the four-jobs section · diff colors carry the interest</span>
+      </div>
+    </div>
+
+    <div class="place">
+      <!-- desktop-width slab -->
+      <div class="desktop-col">
+        <span class="caplab">Desktop · ~1120px content column</span>
+        <div class="slab">
+          <div class="feature">
+            <div class="feat-text">
+              <div class="ft-num mono">03</div>
+              <h3><span class="i18n-en">See what changed</span><span class="i18n-zh">看清每一处改动</span></h3>
+              <p><span class="i18n-en">Line-level diffs with per-language highlighting, right on your phone. Text is selectable, you can preview or export the patch, and tapping a path opens the file.</span><span class="i18n-zh">手机上直接看行级 diff，按语言高亮。文本可选中，补丁可预览或导出，点路径即打开文件。</span></p>
+              <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span><span class="plus" style="color:var(--success)">+42</span>&nbsp;<span class="minus" style="color:var(--danger)">−7</span></span>
+            </div>
+            <div class="feat-visual">
+              <div class="phone"><div class="notch"></div><div class="screen"><div class="app filesscreen">
+                <div class="app-hd">
+                  <div class="row">
+                    <span class="dot" style="background:var(--asuccess)"></span>
+                    <span class="title">Files changed</span>
+                    <span style="flex:1"></span>
+                    <span class="mono" style="font-size:10px;color:var(--asec)">2 files · <span style="color:var(--asuccess)">+73</span> <span style="color:var(--adanger)">−16</span></span>
+                  </div>
+                  <div class="ctx">~/proj/app/cc-pocket · ⑂ main</div>
+                </div>
+                <div class="app-body" style="gap:9px">
+                  <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">useReconnect.kt</div><div class="dir">src/net</div></div><div class="rt"><span class="stat"><span class="plus">+42</span></span></div></div>
+                  <div class="fr exp"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.kt</div><div class="dir">src/net/relay</div></div><div class="rt"><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div></div>
+                  <div class="mdiff">
+                    <div class="mdh"><span class="lang">kotlin</span><span>·</span><span>WsClient.kt</span><span class="at">@@ −12,4 +12,6 @@</span></div>
+                    <div class="ml"><span class="g">12</span><span class="s"></span><span class="c"><span class="hl-k">fun</span> reconnect() {</span></div>
+                    <div class="ml del"><span class="g">13</span><span class="s">−</span><span class="c">  scope.launch { open() }</span></div>
+                    <div class="ml add"><span class="g">13</span><span class="s">+</span><span class="c">  appScope.launch {</span></div>
+                    <div class="ml add"><span class="g">14</span><span class="s">+</span><span class="c">    delay(backoff); open(<span class="hl-s">"relay"</span>)</span></div>
+                    <div class="ml add"><span class="g">15</span><span class="s">+</span><span class="c">  } <span class="hl-c">// survives cancel</span></span></div>
+                    <div class="ml"><span class="g">16</span><span class="s"></span><span class="c">}</span></div>
+                  </div>
+                </div>
+              </div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 390 mobile column -->
+      <div class="mob-wrap">
+        <span class="caplab">390px mobile</span>
+        <div class="mob">
+          <div class="mfeat">
+            <div class="ft-num mono">03</div>
+            <h3><span class="i18n-en">See what changed</span><span class="i18n-zh">看清每一处改动</span></h3>
+            <p><span class="i18n-en">Line-level diffs, per-language highlighting, selectable text, preview / export, tap a path to open.</span><span class="i18n-zh">行级 diff、按语言高亮、可选中、可预览导出，点路径即打开。</span></p>
+            <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span><span class="plus" style="color:var(--success)">+42</span>&nbsp;<span class="minus" style="color:var(--danger)">−7</span></span>
+            <div class="phone"><div class="notch"></div><div class="screen"><div class="app filesscreen">
+              <div class="app-hd">
+                <div class="row">
+                  <span class="dot" style="background:var(--asuccess)"></span>
+                  <span class="title">Files changed</span>
+                  <span style="flex:1"></span>
+                  <span class="mono" style="font-size:10px;color:var(--asec)"><span style="color:var(--asuccess)">+73</span> <span style="color:var(--adanger)">−16</span></span>
+                </div>
+                <div class="ctx">~/proj/app/cc-pocket · ⑂ main</div>
+              </div>
+              <div class="app-body" style="gap:9px">
+                <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">useReconnect.kt</div><div class="dir">src/net</div></div><div class="rt"><span class="stat"><span class="plus">+42</span></span></div></div>
+                <div class="fr exp"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.kt</div><div class="dir">src/net/relay</div></div><div class="rt"><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div></div>
+                <div class="mdiff">
+                  <div class="mdh"><span class="lang">kotlin</span><span>·</span><span>WsClient.kt</span><span class="at">@@ −12,4 +12,6 @@</span></div>
+                  <div class="ml"><span class="g">12</span><span class="s"></span><span class="c"><span class="hl-k">fun</span> reconnect() {</span></div>
+                  <div class="ml del"><span class="g">13</span><span class="s">−</span><span class="c">  scope.launch { open() }</span></div>
+                  <div class="ml add"><span class="g">13</span><span class="s">+</span><span class="c">  appScope.launch {</span></div>
+                  <div class="ml add"><span class="g">14</span><span class="s">+</span><span class="c">    delay(backoff); open(<span class="hl-s">"relay"</span>)</span></div>
+                  <div class="ml add"><span class="g">15</span><span class="s">+</span><span class="c">  } <span class="hl-c">// survives cancel</span></span></div>
+                  <div class="ml"><span class="g">16</span><span class="s"></span><span class="c">}</span></div>
+                </div>
+              </div>
+            </div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mnote">
+      <svg class="mn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 5 5 5M16 6l5 5-5 5"/></svg>
+      <div>
+        <h5>Screen A notes</h5>
+        <ul>
+          <li><b>Terracotta appears twice only</b> — the vignette number <span class="mono">03</span> and the chip dot. The diff’s <b style="color:var(--success)">+</b> success green and <b style="color:var(--danger)">−</b> danger red carry the interest.</li>
+          <li><b>Row grammar reused</b> from the Changed Files v2 board — letter badges (<b style="color:var(--success)">A</b> added · <b style="color:var(--info)">M</b> modified) in hairline chips, mono filenames, right-aligned <span class="mono">+N −M</span>.</li>
+          <li><b>Hunk panel</b> — full-width line tints, no horizontal scroller, text stays selectable; deletion on faint danger tint, addition on faint success tint.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ SCREEN B ═══════════════════════ -->
+  <section class="frame">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN B</span>
+        <span class="fttl">Landing · feature vignette 04 — “It finds you — and loses nothing”</span>
+        <span class="fnote">replaces the old “watch it think” vignette · reliability is the story · flipped rhythm</span>
+      </div>
+    </div>
+
+    <div class="place">
+      <div class="desktop-col">
+        <span class="caplab">Desktop · ~1120px content column</span>
+        <div class="slab">
+          <div class="feature flip">
+            <div class="feat-text">
+              <div class="ft-num mono">04</div>
+              <h3><span class="i18n-en">It finds you — and loses nothing</span><span class="i18n-zh">它会找到你——且不丢一个字</span></h3>
+              <p><span class="i18n-en">A push notification lands the moment a turn finishes. If the connection blips mid-stream, the missed output is backfilled on reconnect — the transcript is always complete.</span><span class="i18n-zh">一轮回答刚结束，推送就到。若中途断线，重连后自动补齐漏掉的输出——记录永远完整。</span></p>
+              <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>reconnected · backfilled</span>
+            </div>
+            <div class="feat-visual">
+              <div class="phone"><div class="notch"></div><div class="screen">
+                <!-- system push banner overlaying the top edge -->
+                <div class="pushb app">
+                  <span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0E0F11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/></svg></span>
+                  <div class="tw"><div class="app-name">CC Pocket</div><div class="msg">Claude finished · Fix relay reconnect</div></div>
+                  <span class="ago">now</span>
+                </div>
+                <div class="app" style="padding-top:60px">
+                  <div class="app-hd">
+                    <div class="row">
+                      <span class="dot" style="background:var(--asuccess)"></span>
+                      <span class="title">Fix relay reconnect</span>
+                      <span style="flex:1"></span>
+                      <span class="mono" style="font-size:10px;color:var(--asec);border:1px solid var(--ahair);border-radius:999px;padding:2px 7px">default</span>
+                    </div>
+                    <div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
+                  </div>
+                  <div class="app-body">
+                    <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes.</div>
+                    <div class="sdiv"><span class="rule"></span><span class="lbl">reconnected — output backfilled</span><span class="rule"></span></div>
+                    <div class="atext">I hoisted the backoff timer to an app-level scope, so it survives the socket closing. Re-running the relay suite now.<span class="caret"></span></div>
+                    <div class="tool-row"><span class="spin"></span><span class="nm">Bash</span><span class="tg">gradle :relay:test</span></div>
+                  </div>
+                </div>
+              </div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mob-wrap">
+        <span class="caplab">390px mobile</span>
+        <div class="mob">
+          <div class="mfeat">
+            <div class="ft-num mono">04</div>
+            <h3><span class="i18n-en">It finds you — and loses nothing</span><span class="i18n-zh">它会找到你——且不丢一个字</span></h3>
+            <p><span class="i18n-en">A push lands when a turn finishes; if the connection blips, missed output is backfilled on reconnect.</span><span class="i18n-zh">回答结束即推送；若断线，重连后补齐漏掉的输出。</span></p>
+            <span class="detail-chip mono"><span class="dot" style="background:var(--accent)"></span>reconnected · backfilled</span>
+            <div class="phone"><div class="notch"></div><div class="screen">
+              <div class="pushb app">
+                <span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0E0F11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/></svg></span>
+                <div class="tw"><div class="app-name">CC Pocket</div><div class="msg">Claude finished · Fix relay reconnect</div></div>
+                <span class="ago">now</span>
+              </div>
+              <div class="app" style="padding-top:60px">
+                <div class="app-hd">
+                  <div class="row">
+                    <span class="dot" style="background:var(--asuccess)"></span>
+                    <span class="title">Fix relay reconnect</span>
+                    <span style="flex:1"></span>
+                    <span class="mono" style="font-size:10px;color:var(--asec);border:1px solid var(--ahair);border-radius:999px;padding:2px 7px">default</span>
+                  </div>
+                  <div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div>
+                </div>
+                <div class="app-body">
+                  <div class="atext">The reconnect loop dies after the 3rd retry — the scope owning the timer is cancelled when the socket closes.</div>
+                  <div class="sdiv"><span class="rule"></span><span class="lbl">reconnected — output backfilled</span><span class="rule"></span></div>
+                  <div class="atext">I hoisted the backoff timer to an app-level scope, so it survives the socket closing.<span class="caret"></span></div>
+                  <div class="tool-row"><span class="spin"></span><span class="nm">Bash</span><span class="tg">gradle :relay:test</span></div>
+                </div>
+              </div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mnote">
+      <svg class="mn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 5 2 6 2 6H4.5s2-1 2-6z"/><path d="M9.8 20.5a2.4 2.4 0 0 0 4.4 0"/></svg>
+      <div>
+        <h5>Screen B notes</h5>
+        <ul>
+          <li><b>Single terracotta focal</b> — the streaming caret. The push banner and the backfill divider stay neutral (surface + hairline + muted mono).</li>
+          <li><b>Push banner</b> overlays the top edge: app-icon glyph, <b>CC Pocket</b>, then <span class="mono">Claude finished · Fix relay reconnect</span>.</li>
+          <li><b>Backfill divider</b> — a full-width chip mid-stream reading <span class="mono" style="font-size:11px">reconnected — output backfilled</span> in 10px mono, hairline rule left and right, between two assistant paragraphs.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ SCREEN C ═══════════════════════ -->
+  <section class="frame">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN C</span>
+        <span class="fttl">Landing · “More capabilities” grid refresh</span>
+        <span class="fnote">3×3, conversion-vetted order · shown in both page themes · mobile = single column</span>
+      </div>
+    </div>
+
+    <div class="place">
+      <!-- DARK copy -->
+      <div class="desktop-col">
+        <span class="themelabel">Page theme · dark</span>
+        <div class="themeframe" data-theme="dark">
+          <div class="section-head">
+            <p class="eyebrow"><span class="i18n-en">More capabilities</span><span class="i18n-zh">更多能力</span></p>
+            <h2><span class="i18n-en">And a lot more in your pocket.</span><span class="i18n-zh">口袋里，还有很多。</span></h2>
+          </div>
+          <div class="grid3" data-cap-grid></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="place" style="margin-top:36px">
+      <!-- LIGHT copy -->
+      <div class="desktop-col">
+        <span class="themelabel">Page theme · light</span>
+        <div class="themeframe" data-theme="light">
+          <div class="section-head">
+            <p class="eyebrow"><span class="i18n-en">More capabilities</span><span class="i18n-zh">更多能力</span></p>
+            <h2><span class="i18n-en">And a lot more in your pocket.</span><span class="i18n-zh">口袋里，还有很多。</span></h2>
+          </div>
+          <div class="grid3" data-cap-grid></div>
+        </div>
+      </div>
+
+      <!-- 390 mobile column (single column) -->
+      <div class="mob-wrap">
+        <span class="caplab">390px mobile · single column</span>
+        <div class="mob" data-theme="dark" style="padding:28px 20px 34px">
+          <div class="section-head" style="margin-bottom:26px">
+            <p class="eyebrow" style="margin-bottom:12px"><span class="i18n-en">More capabilities</span><span class="i18n-zh">更多能力</span></p>
+            <h2 style="font-size:26px"><span class="i18n-en">And a lot more in your pocket.</span><span class="i18n-zh">口袋里，还有很多。</span></h2>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:14px" data-cap-grid data-cap-limit="4"></div>
+          <p class="mono" style="font-size:11px;color:var(--muted);margin:16px 0 0;text-align:center">…5 more, stacked</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mnote">
+      <svg class="mn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      <div>
+        <h5>Card anatomy (as shipped) · new icons in the 1.5pt stroke family</h5>
+        <ul>
+          <li><b>Anatomy unchanged</b> — 26px line icon in terracotta, 16px semibold title, 13.5px secondary copy, surface + hairline, radius 16.</li>
+          <li><b>Order (1→9)</b> — Usage insights · Control &amp; permissions · Agents &amp; workflows · Ways to talk to it · Watch it think live · Fleet overview · Share a folder · Sessions &amp; groups · Private by design.</li>
+          <li><b>New icons</b> — <span class="mono">Usage insights</span> (bar chart) · <span class="mono">Agents &amp; workflows</span> (stacked layers) · <span class="mono">Fleet overview</span> (two machines + status dot) · <span class="mono">Share a folder</span> (folder + guest) · <span class="mono">Watch it think live</span> (stream / pulse line).</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ SCREEN D ═══════════════════════ -->
+  <section class="frame" style="border-bottom:0">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN D</span>
+        <span class="fttl">Features page · three new group treatments</span>
+        <span class="fnote">page-themed (dark) · matches the existing .fgroup rhythm</span>
+      </div>
+    </div>
+
+    <!-- D1 — Usage insights -->
+    <div class="board-intro">
+      <span class="kick">D1</span>
+      <h4>“Usage insights” group</h4>
+      <p>Section head + a 3-up card row, plus one compact usage visual strip matching the shipped app — hourly bars beside a 30-day heatmap.</p>
+    </div>
+    <div class="fgroup">
+      <div class="section-head">
+        <p class="eyebrow"><span class="i18n-en">Usage insights</span><span class="i18n-zh">用量洞察</span></p>
+        <h2><span class="i18n-en">Know what your agent costs.</span><span class="i18n-zh">清楚知道你的 agent 花了多少。</span></h2>
+      </div>
+      <div class="grid3">
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 20v-6M12 20v-11M17 20v-4"/></svg></div>
+          <h4>Tokens &amp; estimated cost</h4>
+          <p>Every session totals its tokens and shows a running dollar estimate — no surprises at the end of the day.</p>
+        </div>
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></div>
+          <h4>Today, hour by hour</h4>
+          <p>A calm 24-bar strip of today’s usage. The busiest hour reads full terracotta; the rest sit quiet.</p>
+        </div>
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2"/><path d="M3.5 9h17M8 3v3M16 3v3"/><rect x="7" y="12" width="2.4" height="2.4" rx="0.5" fill="currentColor" stroke="none"/><rect x="11" y="12" width="2.4" height="2.4" rx="0.5" fill="currentColor" stroke="none" opacity="0.5"/></svg></div>
+          <h4>30-day heatmap</h4>
+          <p>A month at a glance — a terracotta opacity ramp shows the heavy days without a single number.</p>
+        </div>
+      </div>
+
+      <div class="usagestrip">
+        <div class="block hours">
+          <span class="blab">Today · hour by hour</span>
+          <div class="ubars" id="ubars"></div>
+          <div class="ustats"><b>1.84M</b> tokens · <b>$4.20</b> est.</div>
+        </div>
+        <div class="block">
+          <span class="blab">Last 30 days</span>
+          <div class="uheat" id="uheat"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- D2 — Share a folder -->
+    <div class="board-intro" style="margin-top:64px">
+      <span class="kick">D2</span>
+      <h4>“Share a folder” group</h4>
+      <p>Section head + a 4-up card row, plus the boundary card — a neutral two-column “they get / they don’t”. No terracotta badges; terracotta lives only in the card icons.</p>
+    </div>
+    <div class="fgroup">
+      <div class="section-head">
+        <p class="eyebrow"><span class="i18n-en">Share a folder</span><span class="i18n-zh">共享一个文件夹</span></p>
+        <h2><span class="i18n-en">Lend an agent, not your laptop.</span><span class="i18n-zh">借出一个 agent，而不是你的电脑。</span></h2>
+      </div>
+      <div class="sec-grid">
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.4A1.6 1.6 0 0 1 4.6 4.8h3.3l1.6 1.7h6.9A1.6 1.6 0 0 1 18 8.1v2.4"/><path d="M3 9v9a1.6 1.6 0 0 0 1.6 1.6H12"/><circle cx="17.5" cy="15" r="2.2"/><path d="M13.8 20.5a3.7 3.7 0 0 1 7.4 0"/></svg></div>
+          <h4>Invite to one folder</h4>
+          <p>Scope a guest to a single directory. Everything outside it stays invisible.</p>
+        </div>
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.6" fill="currentColor" stroke="none"/><circle cx="14" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="17" cy="17" r="1.6" fill="currentColor" stroke="none"/></svg></div>
+          <h4>Three access levels</h4>
+          <p>Read, propose, or run — pick how much rope the guest gets, per invite.</p>
+        </div>
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/><path d="M18 4l2 2-2 2"/></svg></div>
+          <h4>Expiry &amp; revoke</h4>
+          <p>Every share has a clock and a kill switch. Revoke and the link is dead instantly.</p>
+        </div>
+        <div class="sec-card">
+          <div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7.5 3v5.5c0 4.7-3.2 7.6-7.5 9-4.3-1.4-7.5-4.3-7.5-9V6L12 3z"/><path d="M9 12h6"/></svg></div>
+          <h4>Honest boundaries</h4>
+          <p>We tell guests exactly what they can and can’t reach — in plain words.</p>
+        </div>
+      </div>
+
+      <div class="boundary">
+        <div class="bcol">
+          <h5><span class="tag" style="color:var(--success)">THEY GET</span></h5>
+          <ul>
+            <li class="yes"><span class="mk"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5l3.5 3.5 7.5-8"/></svg></span><span><b>The one folder you shared</b> — read, and edit if allowed.</span></li>
+            <li class="yes"><span class="mk"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5l3.5 3.5 7.5-8"/></svg></span><span>A live agent that <b>runs commands inside it</b>.</span></li>
+            <li class="yes"><span class="mk"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5l3.5 3.5 7.5-8"/></svg></span><span>Their own <b>session history</b>, separate from yours.</span></li>
+          </ul>
+        </div>
+        <div class="bcol">
+          <h5><span class="tag" style="color:var(--muted)">THEY DON’T GET</span></h5>
+          <ul>
+            <li class="no"><span class="mk"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l8 8M13 5l-8 8"/></svg></span><span>Any path <b>outside the shared folder</b>.</span></li>
+            <li class="no"><span class="mk"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l8 8M13 5l-8 8"/></svg></span><span>Your <b>other projects, keys, or credentials</b>.</span></li>
+            <li class="no"><span class="mk"><svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l8 8M13 5l-8 8"/></svg></span><span>A way to <b>invite anyone else</b> in.</span></li>
+          </ul>
+        </div>
+        <div class="honest">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.6" r="0.9" fill="currentColor" stroke="none"/></svg>
+          <span><b>The honest part:</b> shell commands run as your user on your machine. We fence the working directory, not the operating system — so we say so, plainly, instead of promising isolation we can’t guarantee.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- D3 — Workflow orchestration supporting visual -->
+    <div class="board-intro" style="margin-top:64px">
+      <span class="kick">D3</span>
+      <h4>“Workflow orchestration” visual (visibility group)</h4>
+      <p>A compact phone frame showing the Workflow run view — stacked agent lanes + a phase progress bar. A supporting visual, not a hero.</p>
+    </div>
+    <div class="fgroup">
+      <div class="fg-block">
+        <div class="fg-copy">
+          <div class="ft-num">—</div>
+          <h3><span class="i18n-en">See the whole swarm at once</span><span class="i18n-zh">一眼看清整个 agent 群</span></h3>
+          <p><span class="i18n-en">When a workflow fans out across dozens of agents, the run view keeps it legible: phases as a segmented bar, agents as stacked lanes, one live pulse for what’s working now.</span><span class="i18n-zh">当一个工作流散开成几十个 agent，运行视图仍然清晰：阶段是分段进度条，agent 是堆叠泳道，一个跳动的点标出此刻正在跑的部分。</span></p>
+        </div>
+        <div class="fg-visual">
+          <div class="phone" style="--pw:280px"><div class="notch"></div><div class="screen"><div class="app">
+            <div class="app-hd">
+              <div class="row">
+                <span class="dot" style="background:var(--asuccess)"></span>
+                <span class="title">Workflow run</span>
+                <span style="flex:1"></span>
+                <span class="mono" style="font-size:10px;color:var(--asec)">phase 2/4</span>
+              </div>
+              <div class="ctx">~/proj/app/cc-pocket · release-pipeline</div>
+            </div>
+            <div class="app-body">
+              <div class="wfcard">
+                <div class="wf-hd">
+                  <span class="wf-tile"><svg width="16" height="16" viewBox="0 0 18 18" fill="none"><rect x="1" y="3.2" width="11" height="2.6" rx="1.3" fill="currentColor"/><rect x="4" y="7.7" width="13" height="2.6" rx="1.3" fill="currentColor" opacity="0.7"/><rect x="2" y="12.2" width="9" height="2.6" rx="1.3" fill="currentColor" opacity="0.45"/></svg></span>
+                  <span class="wf-nm">release-pipeline</span>
+                  <span class="wf-elapsed"><span class="pulse"></span><span class="t">3m 12s</span></span>
+                </div>
+                <div class="wfbar"><span class="done"></span><span class="active wf-breathe"></span><span class="pending"></span><span class="pending"></span></div>
+                <div class="wfmeta"><span>phase 2/4 · <span style="color:var(--atext)">analyze</span></span><span class="mut">·</span><span class="mut">12/34 agents</span></div>
+                <div class="wflanes">
+                  <div class="wlane"><span class="pl">discover</span><div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div></div>
+                  <div class="wlane"><span class="pl">analyze</span><div class="track"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="a"></i><i class="a"></i><i></i><i></i></div></div>
+                  <div class="wlane"><span class="pl">patch</span><div class="track"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+                  <div class="wlane"><span class="pl">verify</span><div class="track"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+                </div>
+              </div>
+              <div class="wfcap"><span class="i18n-en">one glance across <b>34 parallel agents</b></span><span class="i18n-zh">一眼看遍 <b>34 个并行 agent</b></span></div>
+            </div>
+          </div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- D4 — Desktop & fleet bilingual header -->
+    <div class="board-intro" style="margin-top:64px">
+      <span class="kick">D4</span>
+      <h4>“Desktop &amp; fleet” group header</h4>
+      <p>The phrasing is the design — both language variants shown stacked. Existing desktop-window + fleet-card reuse sits underneath (from the 1.3 board).</p>
+    </div>
+    <div class="biheader">
+      <p class="eyebrow"><span class="i18n-en">Desktop &amp; fleet</span><span class="i18n-zh">桌面与机群</span></p>
+      <h2 class="h-en">The phone triages. The desktop commands.</h2>
+      <h2 class="h-zh" lang="zh-CN">手机分诊，桌面指挥。</h2>
+      <p class="bcap">Both variants ship — the site picks one by language; the phrasing carries the division of labor either way.</p>
+    </div>
+    <div class="mnote">
+      <svg class="mn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      <div>
+        <h5>Reuse beneath the header</h5>
+        <ul>
+          <li>The desktop window mockup and floating fleet card ship unchanged from the <b>1.3 Desktop + Fleet</b> board — this group only re-heads them.</li>
+          <li>Device chrome stays dark; the header itself is page-themed and follows the site’s light / dark toggle.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function(){
+  const root = document.documentElement;
+  function group(sel, fn){
+    const btns = [...document.querySelectorAll(sel)];
+    btns.forEach(b => b.addEventListener('click', () => {
+      btns.forEach(x => x.classList.toggle('on', x === b));
+      fn(b);
+    }));
+  }
+  group('[data-th]', b => root.setAttribute('data-theme', b.dataset.th));
+  group('[data-lang-set]', b => {
+    root.setAttribute('data-lang', b.dataset.langSet);
+    root.setAttribute('lang', b.dataset.langSet === 'zh' ? 'zh-CN' : 'en');
+  });
+
+  // ── capability grid (rendered from data so dark/light/mobile stay in sync) ──
+  const CAPS = [
+    { t:'Usage insights', d:'Tokens, estimated cost, and a calm hour-by-hour trend — accounting that soothes, not alarms.',
+      i:'<path d="M4 20h16"/><path d="M7 20v-6M12 20v-11M17 20v-4"/>' },
+    { t:'Control & permissions', d:'Approve or deny every tool call from your phone, with a timeout that fails safe to deny.',
+      i:'<path d="M12 2.5l8 3v6c0 5.2-3.8 8.6-8 10-4.2-1.4-8-4.8-8-10v-6l8-3z"/><path d="M9 12l2 2 4-4.5"/>' },
+    { t:'Agents & workflows', d:'Fan work out across many agents and phases, and watch the whole run stay legible.',
+      i:'<rect x="3" y="4" width="18" height="4.4" rx="1.6"/><rect x="3" y="9.8" width="13" height="4.4" rx="1.6"/><rect x="3" y="15.6" width="9" height="4.4" rx="1.6"/>' },
+    { t:'Ways to talk to it', d:'Type, dictate, or drop in a screenshot — the composer takes text, voice, and images.',
+      i:'<rect x="9" y="3" width="6" height="10.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>' },
+    { t:'Watch it think live', d:'Real-time streaming output, code blocks, and tool events — exactly as the terminal renders them.',
+      i:'<path d="M3 12h3.5l2-6.5 3.5 13 2.2-6.5H21"/>' },
+    { t:'Fleet overview', d:'Every paired computer in one list — who’s online, who’s running, who needs an approval.',
+      i:'<rect x="2.5" y="5" width="9" height="6.5" rx="1.4"/><path d="M5 14.5h4"/><rect x="12.5" y="9.5" width="9" height="6.5" rx="1.4"/><path d="M15 19h4"/><circle cx="20" cy="6" r="1.4" fill="currentColor" stroke="none"/>' },
+    { t:'Share a folder', d:'Lend a guest one directory with a live agent — scoped, expiring, revocable, honest about limits.',
+      i:'<path d="M3 6.4A1.6 1.6 0 0 1 4.6 4.8h3.3l1.6 1.7h6.9A1.6 1.6 0 0 1 18 8.1v2.4"/><path d="M3 9v9a1.6 1.6 0 0 0 1.6 1.6H12"/><circle cx="17.5" cy="15" r="2.2"/><path d="M13.8 20.5a3.7 3.7 0 0 1 7.4 0"/>' },
+    { t:'Sessions & groups', d:'Resume any session in place, or organize them into groups per project and per machine.',
+      i:'<rect x="2.5" y="6.5" width="13" height="9" rx="2.2"/><path d="M6 15.5v3l3.5-3"/><path d="M8 3.5h9.5A2 2 0 0 1 19.5 5.5v9"/>' },
+    { t:'Private by design', d:'End-to-end encrypted, zero-knowledge relay, no account — plaintext never leaves your endpoints.',
+      i:'<rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>' },
+  ];
+  function cardHTML(c){
+    return '<div class="sec-card"><div class="ico"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">'+c.i+'</svg></div>'+
+      '<h4>'+c.t+'</h4><p>'+c.d+'</p></div>';
+  }
+  document.querySelectorAll('[data-cap-grid]').forEach(g => {
+    const lim = g.dataset.capLimit ? parseInt(g.dataset.capLimit,10) : CAPS.length;
+    g.innerHTML = CAPS.slice(0,lim).map(cardHTML).join('');
+  });
+
+  // ── usage strip: 24 hourly bars (peak at 14h) + 30-cell heatmap ──
+  const HOURS = [8,6,5,4,4,7,13,24,40,54,62,68,58,66,94,76,68,55,44,36,30,22,16,10];
+  const PEAK = HOURS.indexOf(Math.max(...HOURS));
+  const ubars = document.getElementById('ubars');
+  if (ubars) ubars.innerHTML = HOURS.map((h,i)=>'<i class="'+(i===PEAK?'peak':'')+'" style="height:'+h+'%"></i>').join('');
+  const HEAT = [12,20,8,34,52,16, 40,66,24,80,44,28, 10,48,72,90,36,20, 60,30,84,54,18,46, 22,70,38,96,26,58];
+  const uheat = document.getElementById('uheat');
+  if (uheat) uheat.innerHTML = HEAT.map(v=>'<span style="background:color-mix(in srgb, var(--accent) '+v+'%, transparent)"></span>').join('');
+})();
+</script>
+</body>
+</html>

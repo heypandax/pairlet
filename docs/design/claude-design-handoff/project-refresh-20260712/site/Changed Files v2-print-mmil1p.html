@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<style data-omelette-print-defaults>
+@media print {
+  @page { margin: 0.5in; }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
+  figure, table, pre, blockquote, img, svg, tr, [class~="card" i] { break-inside: avoid; }
+  img, svg { max-width: 100%; }
+  p { orphans: 3; widows: 3; }
+}
+</style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>cc-pocket — Changed files v2 · design review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="v13.css" />
+<link rel="stylesheet" href="changed-files-v2.css" />
+</head>
+<body>
+
+<template id="__bundler_thumbnail">
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" rx="22" fill="#0E0F11"/><rect x="30" y="30" width="40" height="9" rx="2.5" fill="#4FB477" fill-opacity="0.3"/><rect x="30" y="45" width="40" height="9" rx="2.5" fill="#E5604D" fill-opacity="0.3"/><rect x="30" y="60" width="40" height="9" rx="2.5" fill="#6B7177" fill-opacity="0.3"/><path d="M34 34.5h5M34 49.5h5M34 64.5h5" stroke="#D97757" stroke-width="1.6" stroke-linecap="round"/></svg>
+</template>
+
+<!-- ══════════ review chrome ══════════ -->
+<div class="rvw-top">
+  <div class="wrap">
+    <span class="rvw-badge"><b>cc-pocket</b> · Changed files v2 — git-grade diff review</span>
+    <div class="rvw-ctrl">
+      <span class="lbl" style="text-transform:none;letter-spacing:0">daemon now ships per-file unified diffs · dark theme</span>
+    </div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <!-- ═══════════════════════ SCREEN 1 ═══════════════════════ -->
+  <section class="frame">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN 01</span>
+        <span class="fttl">Mobile · “Files changed” bottom sheet</span>
+        <span class="fnote">over a dimmed chat · status letters + colored stats</span>
+      </div>
+      <div class="states">
+        <span class="slabel">State</span>
+        <div class="seg wrapseg" data-target="s1">
+          <button data-state="default" class="on">Default</button>
+          <button data-state="empty">Empty</button>
+          <button data-state="stale">Stale daemon</button>
+          <button data-state="loading">Loading</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="fit-wrap">
+        <div class="fit-inner" data-fit>
+          <div class="ph appdark" id="s1" data-state="default">
+            <div class="island"></div>
+            <div class="home"></div>
+            <div class="scr">
+              <div class="sbar">
+                <span class="clk">9:41</span>
+                <span class="ind">
+                  <svg width="19" height="12" viewBox="0 0 19 12" fill="currentColor"><rect x="0" y="7.5" width="3.2" height="4.5" rx="0.7"/><rect x="4.8" y="5" width="3.2" height="7" rx="0.7"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx="0.7"/><rect x="14.4" y="0" width="3.2" height="12" rx="0.7"/></svg>
+                  <svg width="17" height="12" viewBox="0 0 17 12" fill="currentColor"><path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5 5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z"/><path d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1 6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z"/><circle cx="8.5" cy="10.5" r="1.5"/></svg>
+                  <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="2" y="2" width="19" height="9" rx="2" fill="currentColor"/><path d="M24.5 4.5v4c0.8-0.3 1.5-1.3 1.5-2s-0.7-1.7-1.5-2Z" fill="currentColor" fill-opacity="0.5"/></svg>
+                </span>
+              </div>
+
+              <!-- dimmed chat behind the sheet -->
+              <div class="chatbg">
+                <div class="cb-hd">
+                  <span class="t">Fix relay reconnect</span>
+                  <span class="md">default</span>
+                </div>
+                <div class="cb-body">
+                  <div class="cbubble">the reconnect loop dies after the 3rd retry — can you find why and add a regression test?</div>
+                  <div class="cbubble">The backoff timer lives on the socket’s own scope, which is cancelled when the socket closes. I hoisted it to an app-level scope and touched a handful of files.</div>
+                  <div class="ctool"><span class="dot" style="background:var(--asuccess);width:7px;height:7px;border-radius:999px"></span><span class="nm">Bash</span><span class="tg">gradle :relay:test</span></div>
+                  <div class="cbubble">Tests pass. 8 files changed — tap to review.</div>
+                </div>
+              </div>
+
+              <div class="scrim"></div>
+
+              <!-- ═══ bottom sheet ═══ -->
+              <div class="sheet" style="height:74%">
+                <div class="grab"></div>
+
+                <!-- DEFAULT -->
+                <div class="s1v" data-variant="default">
+                  <div class="sh-hd">
+                    <span class="ttl">Files changed</span>
+                    <span class="sh-sum">8 files · <span class="plus">+214</span> <span class="minus">−38</span></span>
+                  </div>
+                  <div class="flist">
+                    <div class="fr"><span class="st M">M</span><div class="mid"><div class="fn">App.tsx</div><div class="dir">src/app</div></div><div class="rt"><span class="stat"><span class="plus">+12</span> <span class="minus">−3</span></span><span class="cnt">×3</span></div></div>
+                    <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">useDiff.ts</div><div class="dir">src/hooks</div></div><div class="rt"><span class="stat"><span class="plus">+48</span></span></div></div>
+                    <div class="fr"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.rs</div><div class="dir">src/net/relay</div></div><div class="rt"><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div></div>
+                    <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">0007_add_diffs.sql</div><div class="dir">db/migrations</div></div><div class="rt"><span class="stat"><span class="plus">+42</span></span></div></div>
+                    <div class="fr"><span class="st M">M</span><div class="mid"><div class="fn">theme.css</div><div class="dir">src/styles</div></div><div class="rt"><span class="stat"><span class="plus">+6</span> <span class="minus">−6</span></span><span class="cnt">×2</span></div></div>
+                    <div class="fr"><span class="st D">D</span><div class="mid"><div class="fn">legacy_api.py</div><div class="dir">src/server/api</div></div><div class="rt"><span class="stat"><span class="minus">−120</span></span></div></div>
+                    <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">hero@2x.png</div><div class="dir">assets/images</div></div><div class="rt"><span class="imgtag" title="binary image"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="3.5" width="13" height="11" rx="1.6"/><circle cx="6.4" cy="7.2" r="1.3"/><path d="M3 12l3.5-3 2.5 2 3-3.5 3 4.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div></div>
+                    <div class="fr"><span class="st N">N</span><div class="mid"><div class="fn">explore.ipynb</div><div class="dir">analysis/notebooks</div></div><div class="rt"><span class="stat"><span class="plus">+18</span> <span class="minus">−4</span></span></div></div>
+                  </div>
+                </div>
+
+                <!-- EMPTY -->
+                <div class="s1v hidden" data-variant="empty">
+                  <div class="sh-hd">
+                    <span class="ttl">Files changed</span>
+                    <span class="sh-sum">0 files</span>
+                  </div>
+                  <div class="empty" style="min-height:300px">
+                    <div class="glyph"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.4A1.6 1.6 0 015.6 3.8h3.1l1.5 1.6h6.2A1.6 1.6 0 0118 7v9a1.6 1.6 0 01-1.6 1.6H5.6A1.6 1.6 0 014 16z"/></svg></div>
+                    <div class="et">This session hasn’t changed any files yet.</div>
+                  </div>
+                </div>
+
+                <!-- STALE DAEMON -->
+                <div class="s1v hidden" data-variant="stale">
+                  <div class="sh-hd">
+                    <span class="ttl">Files changed</span>
+                    <span class="sh-sum">8 files · <span style="color:var(--amuted)">—</span></span>
+                  </div>
+                  <div class="flist">
+                    <div class="banner info" style="margin-bottom:4px">
+                      <svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="9" cy="9" r="6.5"/><path d="M9 8v4" stroke-linecap="round"/><circle cx="9" cy="5.6" r="0.9" fill="currentColor" stroke="none"/></svg>
+                      <span class="txt">Update the daemon on your computer to see line-level diffs.</span>
+                    </div>
+                    <div class="fr"><span class="st M">M</span><div class="mid"><div class="fn">App.tsx</div><div class="dir">src/app</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                    <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">useDiff.ts</div><div class="dir">src/hooks</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                    <div class="fr"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.rs</div><div class="dir">src/net/relay</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                    <div class="fr"><span class="st A">A</span><div class="mid"><div class="fn">0007_add_diffs.sql</div><div class="dir">db/migrations</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                    <div class="fr"><span class="st M">M</span><div class="mid"><div class="fn">theme.css</div><div class="dir">src/styles</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                    <div class="fr"><span class="st D">D</span><div class="mid"><div class="fn">legacy_api.py</div><div class="dir">src/server/api</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                    <div class="fr"><span class="st N">N</span><div class="mid"><div class="fn">explore.ipynb</div><div class="dir">analysis/notebooks</div></div><div class="rt"><span class="stat" style="color:var(--amuted)">—</span></div></div>
+                  </div>
+                </div>
+
+                <!-- LOADING -->
+                <div class="s1v hidden" data-variant="loading">
+                  <div class="sh-hd">
+                    <span class="ttl">Files changed</span>
+                    <span class="sh-sum" style="color:var(--amuted)">loading…</span>
+                  </div>
+                  <div class="flist">
+                    <div class="skrow"><span class="sk sq"></span><div style="flex:1;min-width:0"><div class="sk l1"></div><div class="sk l2"></div></div><span class="sk stat"></span></div>
+                    <div class="skrow"><span class="sk sq"></span><div style="flex:1;min-width:0"><div class="sk l1" style="width:64%"></div><div class="sk l2" style="width:28%"></div></div><span class="sk stat"></span></div>
+                    <div class="skrow"><span class="sk sq"></span><div style="flex:1;min-width:0"><div class="sk l1" style="width:44%"></div><div class="sk l2" style="width:38%"></div></div><span class="sk stat"></span></div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mnote">
+      <svg class="mn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h11M4 12h16M4 18h9"/></svg>
+      <div>
+        <h5>Row anatomy</h5>
+        <ul>
+          <li><b>Status glyph</b> — 20×20 rounded square, mono bold: <b style="color:var(--success)">A</b> added · <b style="color:var(--info)">M</b> modified · <b style="color:var(--danger)">D</b> deleted · <b style="color:var(--muted)">N</b> notebook.</li>
+          <li><b>Middle</b> — filename 14 medium, ellipsized, over the tail of its directory (11 mono muted).</li>
+          <li><b>Right</b> — mono <span class="mono" style="color:var(--success)">+N</span> <span class="mono" style="color:var(--danger)">−M</span>, a muted <span class="mono">×3</span> edit-count when a file was touched more than once. Deleted rows show only <span class="mono" style="color:var(--danger)">−120</span>; image rows show an image glyph.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ SCREEN 2 ═══════════════════════ -->
+  <section class="frame">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN 02</span>
+        <span class="fttl">Mobile · full-screen diff viewer</span>
+        <span class="fnote">Diff / File toggle · shared unified-diff grammar</span>
+      </div>
+      <div class="states">
+        <span class="slabel">State</span>
+        <div class="seg wrapseg" data-target="s2">
+          <button data-state="default" class="on">Diff</button>
+          <button data-state="deleted">Deleted</button>
+          <button data-state="image">Image</button>
+          <button data-state="truncated">Truncated</button>
+          <button data-state="stale">Stale daemon</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="fit-wrap">
+        <div class="fit-inner" data-fit>
+          <div class="ph appdark" id="s2" data-state="default">
+            <div class="island"></div>
+            <div class="home"></div>
+            <div class="scr">
+              <div class="sbar">
+                <span class="clk">9:41</span>
+                <span class="ind">
+                  <svg width="19" height="12" viewBox="0 0 19 12" fill="currentColor"><rect x="0" y="7.5" width="3.2" height="4.5" rx="0.7"/><rect x="4.8" y="5" width="3.2" height="7" rx="0.7"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx="0.7"/><rect x="14.4" y="0" width="3.2" height="12" rx="0.7"/></svg>
+                  <svg width="17" height="12" viewBox="0 0 17 12" fill="currentColor"><path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5 5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z"/><path d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1 6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z"/><circle cx="8.5" cy="10.5" r="1.5"/></svg>
+                  <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x="0.5" y="0.5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity="0.4"/><rect x="2" y="2" width="19" height="9" rx="2" fill="currentColor"/><path d="M24.5 4.5v4c0.8-0.3 1.5-1.3 1.5-2s-0.7-1.7-1.5-2Z" fill="currentColor" fill-opacity="0.5"/></svg>
+                </span>
+              </div>
+
+              <!-- DIFF DEFAULT (App.tsx) -->
+              <div class="s2v" data-variant="default,truncated,stale">
+                <div class="dvhd">
+                  <div class="top">
+                    <span class="iconbtn"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 5L6.5 10l5 5"/></svg></span>
+                    <div class="titlewrap"><div class="fn">App.tsx</div><div class="dir">src/app</div></div>
+                    <span class="iconbtn"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span>
+                  </div>
+                  <div class="btm">
+                    <div class="pillseg"><button class="on">Diff</button><button>File</button></div>
+                    <div class="rt"><span class="stat"><span class="plus">+12</span> <span class="minus">−3</span></span><span class="stchip M">M</span></div>
+                  </div>
+                </div>
+                <!-- truncated banner (only in truncated state) -->
+                <div class="trunc" data-variant="truncated"><svg width="13" height="13" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 2.6l6.6 12H2.4L9 2.6z" stroke-linejoin="round"/><path d="M9 7.2v3" stroke-linecap="round"/><circle cx="9" cy="12.4" r="0.8" fill="currentColor" stroke="none"/></svg><span class="txt">Diff truncated — showing first <b style="color:var(--awarn)">200</b> of 480&nbsp;KB.</span></div>
+
+                <!-- stale empty state (only in stale) -->
+                <div class="empty" data-variant="stale" style="flex:1">
+                  <div class="glyph"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 2.5-3 2.5M13 14.5h4"/></svg></div>
+                  <div class="et">Line-level diffs need a newer daemon.</div>
+                  <div class="ec">Run the update command on your computer.</div>
+                </div>
+
+                <!-- the diff body (hidden in stale) -->
+                <div class="diff" data-variant="default,truncated">
+                  <div class="diff-scroll">
+                    <div class="diff-body">
+                      <div class="hunk">
+                        <div class="hunk-hd">
+                          <span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span>
+                          <span class="at">@@ −18,7 +18,9 @@</span>
+                          <span class="ctx-label">export function ChangedFiles</span>
+                          <span class="collapsed-hint">7 lines</span>
+                          <span class="copy-hunk"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg>copy</span>
+                        </div>
+                        <div class="hunk-body">
+                          <div class="dl ctx"><span class="gut old">18</span><span class="gut new">18</span><span class="sign"></span><span class="code"><span class="hl-k">import</span> { useState } <span class="hl-k">from</span> <span class="hl-s">'react'</span></span></div>
+                          <div class="dl ctx"><span class="gut old">19</span><span class="gut new">19</span><span class="sign"></span><span class="code"><span class="hl-k">import</span> { Sheet } <span class="hl-k">from</span> <span class="hl-s">'./Sheet'</span></span></div>
+                          <div class="dl del"><span class="gut old">20</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-k">import</span> { fetchFiles } <span class="hl-k">from</span> <span class="hl-s">'./api'</span></span></div>
+                          <div class="dl add"><span class="gut old"></span><span class="gut new">20</span><span class="sign">+</span><span class="code"><span class="hl-k">import</span> { fetchFiles, fetchDiff } <span class="hl-k">from</span> <span class="hl-s">'./api'</span></span></div>
+                          <div class="dl add"><span class="gut old"></span><span class="gut new">21</span><span class="sign">+</span><span class="code"><span class="hl-k">import</span> { useDiff } <span class="hl-k">from</span> <span class="hl-s">'../hooks/useDiff'</span></span></div>
+                          <div class="dl ctx"><span class="gut old">21</span><span class="gut new">22</span><span class="sign"></span><span class="code"> </span></div>
+                          <div class="dl ctx"><span class="gut old">22</span><span class="gut new">23</span><span class="sign"></span><span class="code"><span class="hl-k">export</span> <span class="hl-k">function</span> ChangedFiles({ session }: Props) {</span></div>
+                        </div>
+                      </div>
+
+                      <div class="dl-sep"><span class="exp"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7l3-3 3 3M6 11l3 3 3-3"/></svg></span> 42 unchanged lines</div>
+                      <div class="sep-extra">
+                        <div class="dl ctx"><span class="gut old">23</span><span class="gut new">24</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> { data } = useSession(sessionId)</span></div>
+                        <div class="dl ctx"><span class="gut old">24</span><span class="gut new">25</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> [tab, setTab] = useState(<span class="hl-s">'diff'</span>)</span></div>
+                      </div>
+
+                      <div class="hunk collapsed">
+                        <div class="hunk-hd">
+                          <span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span>
+                          <span class="at">@@ −64,5 +70,9 @@</span>
+                          <span class="ctx-label">const label = files.length</span>
+                          <span class="collapsed-hint">7 lines</span>
+                          <span class="copy-hunk"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg>copy</span>
+                        </div>
+                        <div class="hunk-body">
+                          <div class="dl ctx"><span class="gut old">64</span><span class="gut new">70</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> [active, setActive] = useState(<span class="hl-n">0</span>)</span></div>
+                          <div class="dl ctx"><span class="gut old">65</span><span class="gut new">71</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> files = data?.files ?? []</span></div>
+                          <div class="dl del"><span class="gut old">66</span><span class="gut new"></span><span class="sign">−</span><span class="code">  <span class="hl-k">const</span> label = files.length + <span class="hl-s">' files'</span></span></div>
+                          <div class="dl add"><span class="gut old"></span><span class="gut new">72</span><span class="sign">+</span><span class="code">  <span class="hl-k">const</span> label = <span class="hl-s">`${files.length} files · +${adds}`</span></span></div>
+                          <div class="dl add"><span class="gut old"></span><span class="gut new">73</span><span class="sign">+</span><span class="code">  <span class="hl-k">const</span> { diff, loading } = useDiff(files[active])</span></div>
+                          <div class="dl ctx"><span class="gut old">67</span><span class="gut new">74</span><span class="sign"></span><span class="code"> </span></div>
+                          <div class="dl ctx"><span class="gut old">68</span><span class="gut new">75</span><span class="sign"></span><span class="code">  <span class="hl-k">return</span> (</span></div>
+                        </div>
+                      </div>
+
+                      <div class="hunk">
+                        <div class="hunk-hd">
+                          <span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span>
+                          <span class="at">@@ −96,4 +104,6 @@</span>
+                          <span class="ctx-label">return (</span>
+                          <span class="collapsed-hint">6 lines</span>
+                          <span class="copy-hunk"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg>copy</span>
+                        </div>
+                        <div class="hunk-body">
+                          <div class="dl ctx"><span class="gut old">96</span><span class="gut new">104</span><span class="sign"></span><span class="code">    &lt;Sheet title=<span class="hl-s">"Files changed"</span>&gt;</span></div>
+                          <div class="dl ctx"><span class="gut old">97</span><span class="gut new">105</span><span class="sign"></span><span class="code">      &lt;Summary stat={stat} /&gt;</span></div>
+                          <div class="dl add"><span class="gut old"></span><span class="gut new">106</span><span class="sign">+</span><span class="code">      {loading &amp;&amp; &lt;DiffSkeleton rows={<span class="hl-n">3</span>} /&gt;}</span></div>
+                          <div class="dl add"><span class="gut old"></span><span class="gut new">107</span><span class="sign">+</span><span class="code">      {diff &amp;&amp; &lt;UnifiedDiff hunks={diff.hunks} /&gt;}</span></div>
+                          <div class="dl ctx"><span class="gut old">98</span><span class="gut new">108</span><span class="sign"></span><span class="code">    &lt;/Sheet&gt;</span></div>
+                          <div class="dl ctx"><span class="gut old">99</span><span class="gut new">109</span><span class="sign"></span><span class="code">  )</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- DELETED (legacy_api.py) -->
+              <div class="s2v hidden" data-variant="deleted">
+                <div class="dvhd">
+                  <div class="top">
+                    <span class="iconbtn"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 5L6.5 10l5 5"/></svg></span>
+                    <div class="titlewrap"><div class="fn">legacy_api.py</div><div class="dir">src/server/api</div></div>
+                    <span class="iconbtn"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span>
+                  </div>
+                  <div class="btm">
+                    <div class="pillseg"><button class="on">Diff</button><button aria-disabled="true">File</button><span class="segcap">File was deleted</span></div>
+                    <div class="rt"><span class="stat"><span class="minus">−120</span></span><span class="stchip D">D</span></div>
+                  </div>
+                </div>
+                <div class="diff">
+                  <div class="diff-scroll">
+                    <div class="diff-body">
+                      <div class="hunk">
+                        <div class="hunk-hd">
+                          <span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span>
+                          <span class="at">@@ −1,10 +0,0 @@</span>
+                          <span class="ctx-label">whole file removed</span>
+                        </div>
+                        <div class="hunk-body">
+                          <div class="dl del"><span class="gut old">1</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-k">from</span> flask <span class="hl-k">import</span> Flask, request</span></div>
+                          <div class="dl del"><span class="gut old">2</span><span class="gut new"></span><span class="sign">−</span><span class="code"> </span></div>
+                          <div class="dl del"><span class="gut old">3</span><span class="gut new"></span><span class="sign">−</span><span class="code">app = Flask(__name__)</span></div>
+                          <div class="dl del"><span class="gut old">4</span><span class="gut new"></span><span class="sign">−</span><span class="code"> </span></div>
+                          <div class="dl del"><span class="gut old">5</span><span class="gut new"></span><span class="sign">−</span><span class="code">@app.route(<span class="hl-s">'/legacy/session'</span>)</span></div>
+                          <div class="dl del"><span class="gut old">6</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-k">def</span> legacy_session():</span></div>
+                          <div class="dl del"><span class="gut old">7</span><span class="gut new"></span><span class="sign">−</span><span class="code">    sid = request.args.get(<span class="hl-s">'id'</span>)</span></div>
+                          <div class="dl del"><span class="gut old">8</span><span class="gut new"></span><span class="sign">−</span><span class="code">    <span class="hl-k">return</span> {<span class="hl-s">'session'</span>: sid, <span class="hl-s">'v'</span>: <span class="hl-n">1</span>}</span></div>
+                          <div class="dl del"><span class="gut old">9</span><span class="gut new"></span><span class="sign">−</span><span class="code"> </span></div>
+                          <div class="dl del"><span class="gut old">10</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-c"># deprecated — replaced by /v2/session</span></span></div>
+                        </div>
+                      </div>
+                      <div class="dl-sep"><span class="exp"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7l3-3 3 3M6 11l3 3 3-3"/></svg></span> 110 more removed lines</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- IMAGE (hero@2x.png) -->
+              <div class="s2v hidden" data-variant="image">
+                <div class="dvhd">
+                  <div class="top">
+                    <span class="iconbtn"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 5L6.5 10l5 5"/></svg></span>
+                    <div class="titlewrap"><div class="fn">hero@2x.png</div><div class="dir">assets/images</div></div>
+                    <span class="iconbtn"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span>
+                  </div>
+                  <div class="btm">
+                    <div class="pillseg"><button aria-disabled="true">Diff</button><button class="on">File</button><span class="segcap">binary file — no text diff</span></div>
+                    <div class="rt"><span class="stchip A">A</span></div>
+                  </div>
+                </div>
+                <div class="imgprev">
+                  <div class="frame"><svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="4" width="19" height="16" rx="2"/><circle cx="8" cy="9.5" r="1.8"/><path d="M3 17l5-4.5 3.5 3 4-4.5L21 16" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                  <div class="cap"><b>hero@2x.png</b><br>1200 × 630 · added · 84&nbsp;KB</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mnote">
+      <svg class="mn-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 5 5 5M16 6l5 5-5 5"/></svg>
+      <div>
+        <h5>Diff grammar (shared with desktop)</h5>
+        <ul>
+          <li><b>Hunk band</b> — <span class="mono">@@ −64,5 +70,9 @@</span> in muted mono on a raised full-width band; tap to collapse (collapsed = chevron + “7 lines”).</li>
+          <li><b>Added</b> rows carry a <span style="color:var(--success)">+</span> and a <b>12% success tint</b> under readable primary text; <b>removed</b> rows a <span style="color:var(--danger)">−</span> and a 12% danger tint with slightly dimmed text; context is plain secondary, 3 lines around each hunk.</li>
+          <li><b>⋯ separator</b> collapses distant runs (“42 unchanged lines”, tap to expand). A quiet mono line-number gutter stays lighter than the code. Monospace throughout, horizontal scroll, no wrap.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ SCREEN 3 ═══════════════════════ -->
+  <section class="frame" style="border-bottom:0">
+    <div class="frame-head">
+      <div class="meta">
+        <span class="fnum">SCREEN 03</span>
+        <span class="fttl">Desktop · Changes two-pane browser</span>
+        <span class="fnote">modal over the two-pane app · same overlay language as ⌘K</span>
+      </div>
+      <div class="states">
+        <span class="slabel">State</span>
+        <div class="seg wrapseg" data-target="s3">
+          <button data-state="default" class="on">Default</button>
+          <button data-state="loading">Loading</button>
+          <button data-state="stale">Stale daemon</button>
+          <button data-state="deleted">Deleted</button>
+          <button data-state="image">Image</button>
+          <button data-state="empty">Empty</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+      <div class="fit-wrap">
+        <div class="fit-inner" data-fit>
+          <div class="desk appdark" id="s3" data-state="default">
+            <div class="desk-bar">
+              <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+              <span class="lbl">cc-pocket</span>
+              <div class="barsearch"><svg width="13" height="13" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.2"/><path d="M12 12l3.2 3.2" stroke-linecap="round"/></svg><span>Search</span><span class="kbd">⌘K</span></div>
+            </div>
+
+            <div class="desk-body">
+              <!-- left session sidebar (constant, dimmed behind scrim) -->
+              <div class="dsb">
+                <div class="comp"><svg width="15" height="15" viewBox="0 0 18 18" fill="#9BA1A6"><path d="M12.3 9.5c0-1.8 1.5-2.7 1.6-2.7-.9-1.3-2.2-1.4-2.7-1.5-1.1-.1-2.2.7-2.8.7-.6 0-1.5-.7-2.4-.6-1.2 0-2.4.7-3 1.8-1.3 2.2-.3 5.5.9 7.3.6.9 1.3 1.9 2.2 1.8.9 0 1.2-.6 2.3-.6 1.1 0 1.3.6 2.3.6 1 0 1.6-.9 2.2-1.8.7-1 .9-2 .9-2.1 0 0-1.7-.7-1.7-2.6z"/></svg><span class="nm">Lidapeng-MBP</span><span class="dot" style="width:6px;height:6px;border-radius:999px;background:var(--asuccess)"></span></div>
+                <div class="zl">Projects</div>
+                <div class="srow"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 4.8A1.3 1.3 0 013.3 3.5h2.9l1.4 1.6h7A1.3 1.3 0 0116 6.4v6.3A1.3 1.3 0 0114.7 14H3.3A1.3 1.3 0 012 12.7z" stroke-linejoin="round"/></svg><span class="nm">cc-pocket</span></div>
+                <div class="srow"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" stroke="#9BA1A6" stroke-width="1.4"><path d="M2 4.8A1.3 1.3 0 013.3 3.5h2.9l1.4 1.6h7A1.3 1.3 0 0116 6.4v6.3A1.3 1.3 0 0114.7 14H3.3A1.3 1.3 0 012 12.7z" stroke-linejoin="round"/></svg><span class="nm">relay</span></div>
+                <div class="zl">Sessions</div>
+                <div class="srow on"><span class="dot" style="width:6px;height:6px;border-radius:999px;background:var(--asuccess)"></span><span class="nm">Fix relay reconnect</span></div>
+                <div class="srow"><span style="width:6px;flex-shrink:0"></span><span class="nm">Add WS reconnect test</span></div>
+                <div class="srow"><span style="width:6px;flex-shrink:0"></span><span class="nm">Refactor auth module</span></div>
+                <div class="foot"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9BA1A6" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1" stroke-linecap="round"/></svg><span class="nm">Settings</span><span class="v">v0.5.0</span></div>
+              </div>
+
+              <!-- right chat pane (constant) with the new ± pill -->
+              <div class="dchat">
+                <div class="chd">
+                  <div class="r1">
+                    <span class="t">Fix relay reconnect</span>
+                    <span class="mode">default <svg width="11" height="11" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span>
+                    <span style="flex:1"></span>
+                    <span class="pmpill" title="Changes">± 8</span>
+                    <span class="kebab"><svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor"><circle cx="4" cy="9" r="1.5"/><circle cx="9" cy="9" r="1.5"/><circle cx="14" cy="9" r="1.5"/></svg></span>
+                  </div>
+                  <div class="ctx">~/code/cc-pocket&nbsp; · &nbsp;⑂ main&nbsp; · &nbsp;sonnet</div>
+                </div>
+                <div class="cbody">
+                  <div class="inner">
+                    <div><div class="youlbl">YOU</div><div class="para">the websocket reconnect dies after the 3rd retry — can you find why and add a regression test?</div></div>
+                    <div class="para dim">The backoff timer is scheduled on the socket’s own scope, which is cancelled the moment the socket closes. Hoisting it to an app-level scope fixes it. I touched 8 files.</div>
+                    <div class="ctool"><span class="dot" style="width:7px;height:7px;border-radius:999px;background:var(--asuccess)"></span><span class="nm">Bash</span><span class="tg">gradle :relay:test</span></div>
+                    <div class="para dim">Tests pass. The reconnect now survives socket-scope cancellation.</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ═══ modal overlay ═══ -->
+              <div class="ovl-scrim">
+
+                <!-- DEFAULT overlay -->
+                <div class="ovl" data-variant="default" data-live-header>
+                  <div class="ovl-hd"><span class="ttl">Changes</span><span class="sum">8 files · <span class="plus">+214</span> <span class="minus">−38</span></span><span class="x"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span></div>
+                  <div class="ovl-mid">
+                    <div class="ovl-list">
+                      <div class="dfr" data-path="~/code/cc-pocket/src/hooks/useDiff.ts" data-stat="<span class='plus'>+48</span>" data-status="A"><span class="st A">A</span><div class="mid"><div class="fn">useDiff.ts</div><div class="dir">src/hooks</div></div><span class="stat"><span class="plus">+48</span></span></div>
+                      <div class="dfr" data-path="~/code/cc-pocket/src/net/relay/WsClient.rs" data-stat="<span class='plus'>+31</span> <span class='minus'>−9</span>" data-status="M"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.rs</div><div class="dir">src/net/relay</div></div><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div>
+                      <div class="dfr sel" data-default data-path="~/code/cc-pocket/src/app/App.tsx" data-stat="<span class='plus'>+12</span> <span class='minus'>−3</span>" data-status="M"><span class="st M">M</span><div class="mid"><div class="fn">App.tsx</div><div class="dir">src/app</div></div><span class="stat"><span class="plus">+12</span> <span class="minus">−3</span></span></div>
+                      <div class="dfr" data-path="~/code/cc-pocket/db/migrations/0007_add_diffs.sql" data-stat="<span class='plus'>+42</span>" data-status="A"><span class="st A">A</span><div class="mid"><div class="fn">0007_add_diffs.sql</div><div class="dir">db/migrations</div></div><span class="stat"><span class="plus">+42</span></span></div>
+                      <div class="dfr" data-path="~/code/cc-pocket/src/styles/theme.css" data-stat="<span class='plus'>+6</span> <span class='minus'>−6</span>" data-status="M"><span class="st M">M</span><div class="mid"><div class="fn">theme.css</div><div class="dir">src/styles</div></div><span class="stat"><span class="plus">+6</span> <span class="minus">−6</span></span></div>
+                      <div class="dfr" data-path="~/code/cc-pocket/src/server/api/legacy_api.py" data-stat="<span class='minus'>−120</span>" data-status="D"><span class="st D">D</span><div class="mid"><div class="fn">legacy_api.py</div><div class="dir">src/server/api</div></div><span class="stat"><span class="minus">−120</span></span></div>
+                      <div class="dfr" data-path="~/code/cc-pocket/assets/images/hero@2x.png" data-status="A"><span class="st A">A</span><div class="mid"><div class="fn">hero@2x.png</div><div class="dir">assets/images</div></div><span class="imgtag"><svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="3.5" width="13" height="11" rx="1.6"/><circle cx="6.4" cy="7.2" r="1.3"/><path d="M3 12l3.5-3 2.5 2 3-3.5 3 4.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+                      <div class="dfr" data-path="~/code/cc-pocket/analysis/notebooks/explore.ipynb" data-stat="<span class='plus'>+18</span> <span class='minus'>−4</span>" data-status="N"><span class="st N">N</span><div class="mid"><div class="fn">explore.ipynb</div><div class="dir">analysis/notebooks</div></div><span class="stat"><span class="plus">+18</span> <span class="minus">−4</span></span></div>
+                    </div>
+                    <div class="ovl-right">
+                      <div class="ovl-fhd">
+                        <span class="path">~/code/cc-pocket/src/app/App.tsx</span>
+                        <span class="copy"><svg width="13" height="13" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></span>
+                        <span class="rt"><span class="stchip M">M</span><span class="stat"><span class="plus">+12</span> <span class="minus">−3</span></span><div class="pillseg"><button class="on">Diff</button><button>File</button></div></span>
+                      </div>
+                      <div class="diff dense">
+                        <div class="diff-scroll">
+                          <div class="diff-body">
+                            <div class="hunk">
+                              <div class="hunk-hd"><span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span><span class="at">@@ −18,7 +18,9 @@</span><span class="ctx-label">export function ChangedFiles</span><span class="collapsed-hint">7 lines</span><span class="copy-hunk"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg>copy hunk</span></div>
+                              <div class="hunk-body">
+                                <div class="dl ctx"><span class="gut old">18</span><span class="gut new">18</span><span class="sign"></span><span class="code"><span class="hl-k">import</span> { useState } <span class="hl-k">from</span> <span class="hl-s">'react'</span></span></div>
+                                <div class="dl ctx"><span class="gut old">19</span><span class="gut new">19</span><span class="sign"></span><span class="code"><span class="hl-k">import</span> { Sheet } <span class="hl-k">from</span> <span class="hl-s">'./Sheet'</span></span></div>
+                                <div class="dl del"><span class="gut old">20</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-k">import</span> { fetchFiles } <span class="hl-k">from</span> <span class="hl-s">'./api'</span></span></div>
+                                <div class="dl add"><span class="gut old"></span><span class="gut new">20</span><span class="sign">+</span><span class="code"><span class="hl-k">import</span> { fetchFiles, fetchDiff } <span class="hl-k">from</span> <span class="hl-s">'./api'</span></span></div>
+                                <div class="dl add"><span class="gut old"></span><span class="gut new">21</span><span class="sign">+</span><span class="code"><span class="hl-k">import</span> { useDiff } <span class="hl-k">from</span> <span class="hl-s">'../hooks/useDiff'</span></span></div>
+                                <div class="dl ctx"><span class="gut old">21</span><span class="gut new">22</span><span class="sign"></span><span class="code"> </span></div>
+                                <div class="dl ctx"><span class="gut old">22</span><span class="gut new">23</span><span class="sign"></span><span class="code"><span class="hl-k">export</span> <span class="hl-k">function</span> ChangedFiles({ session }: Props) {</span></div>
+                              </div>
+                            </div>
+                            <div class="dl-sep"><span class="exp"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7l3-3 3 3M6 11l3 3 3-3"/></svg></span> 42 unchanged lines</div>
+                            <div class="sep-extra">
+                              <div class="dl ctx"><span class="gut old">23</span><span class="gut new">24</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> { data } = useSession(sessionId)</span></div>
+                              <div class="dl ctx"><span class="gut old">24</span><span class="gut new">25</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> [tab, setTab] = useState(<span class="hl-s">'diff'</span>)</span></div>
+                            </div>
+                            <div class="hunk collapsed">
+                              <div class="hunk-hd"><span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span><span class="at">@@ −64,5 +70,9 @@</span><span class="ctx-label">const label = files.length</span><span class="collapsed-hint">7 lines</span><span class="copy-hunk"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg>copy hunk</span></div>
+                              <div class="hunk-body">
+                                <div class="dl ctx"><span class="gut old">64</span><span class="gut new">70</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> [active, setActive] = useState(<span class="hl-n">0</span>)</span></div>
+                                <div class="dl ctx"><span class="gut old">65</span><span class="gut new">71</span><span class="sign"></span><span class="code">  <span class="hl-k">const</span> files = data?.files ?? []</span></div>
+                                <div class="dl del"><span class="gut old">66</span><span class="gut new"></span><span class="sign">−</span><span class="code">  <span class="hl-k">const</span> label = files.length + <span class="hl-s">' files'</span></span></div>
+                                <div class="dl add"><span class="gut old"></span><span class="gut new">72</span><span class="sign">+</span><span class="code">  <span class="hl-k">const</span> label = <span class="hl-s">`${files.length} files · +${adds}`</span></span></div>
+                                <div class="dl add"><span class="gut old"></span><span class="gut new">73</span><span class="sign">+</span><span class="code">  <span class="hl-k">const</span> { diff, loading } = useDiff(files[active])</span></div>
+                                <div class="dl ctx"><span class="gut old">67</span><span class="gut new">74</span><span class="sign"></span><span class="code"> </span></div>
+                                <div class="dl ctx"><span class="gut old">68</span><span class="gut new">75</span><span class="sign"></span><span class="code">  <span class="hl-k">return</span> (</span></div>
+                              </div>
+                            </div>
+                            <div class="hunk">
+                              <div class="hunk-hd"><span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span><span class="at">@@ −96,4 +104,6 @@</span><span class="ctx-label">return (</span><span class="collapsed-hint">6 lines</span><span class="copy-hunk"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 004.5 12H6"/></svg>copy hunk</span></div>
+                              <div class="hunk-body">
+                                <div class="dl ctx"><span class="gut old">96</span><span class="gut new">104</span><span class="sign"></span><span class="code">    &lt;Sheet title=<span class="hl-s">"Files changed"</span>&gt;</span></div>
+                                <div class="dl ctx"><span class="gut old">97</span><span class="gut new">105</span><span class="sign"></span><span class="code">      &lt;Summary stat={stat} /&gt;</span></div>
+                                <div class="dl add"><span class="gut old"></span><span class="gut new">106</span><span class="sign">+</span><span class="code">      {loading &amp;&amp; &lt;DiffSkeleton rows={<span class="hl-n">3</span>} /&gt;}</span></div>
+                                <div class="dl add"><span class="gut old"></span><span class="gut new">107</span><span class="sign">+</span><span class="code">      {diff &amp;&amp; &lt;UnifiedDiff hunks={diff.hunks} /&gt;}</span></div>
+                                <div class="dl ctx"><span class="gut old">98</span><span class="gut new">108</span><span class="sign"></span><span class="code">    &lt;/Sheet&gt;</span></div>
+                                <div class="dl ctx"><span class="gut old">99</span><span class="gut new">109</span><span class="sign"></span><span class="code">  )</span></div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="ovl-foot"><span class="hint"><b>↑↓</b> switch file</span><span class="hint"><b>⏎</b> focus diff</span><span class="hint"><b>⌥←→</b> collapse/expand hunk</span><span class="hint"><b>esc</b> close</span></div>
+                </div>
+
+                <!-- LOADING overlay -->
+                <div class="ovl hidden" data-variant="loading">
+                  <div class="ovl-hd"><span class="ttl">Changes</span><span class="sum" style="color:var(--amuted)">loading…</span><span class="x"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span></div>
+                  <div class="ovl-mid">
+                    <div class="ovl-list">
+                      <div class="dsk"><span class="sk sq"></span><span class="sk l1" style="max-width:120px"></span></div>
+                      <div class="dsk"><span class="sk sq"></span><span class="sk l1" style="max-width:150px"></span></div>
+                      <div class="dsk"><span class="sk sq"></span><span class="sk l1" style="max-width:96px"></span></div>
+                      <div class="dsk"><span class="sk sq"></span><span class="sk l1" style="max-width:140px"></span></div>
+                      <div class="dsk"><span class="sk sq"></span><span class="sk l1" style="max-width:110px"></span></div>
+                      <div class="dsk"><span class="sk sq"></span><span class="sk l1" style="max-width:130px"></span></div>
+                    </div>
+                    <div class="ovl-right"><div class="ovl-spin"><span class="spin"></span></div></div>
+                  </div>
+                  <div class="ovl-foot"><span class="hint"><b>↑↓</b> switch file</span><span class="hint"><b>⏎</b> focus diff</span><span class="hint"><b>⌥←→</b> collapse/expand hunk</span><span class="hint"><b>esc</b> close</span></div>
+                </div>
+
+                <!-- STALE overlay -->
+                <div class="ovl hidden" data-variant="stale">
+                  <div class="ovl-hd"><span class="ttl">Changes</span><span class="sum">8 files · <span style="color:var(--amuted)">—</span></span><span class="x"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span></div>
+                  <div class="ovl-mid">
+                    <div class="ovl-list">
+                      <div class="dfr sel"><span class="st M">M</span><div class="mid"><div class="fn">App.tsx</div><div class="dir">src/app</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                      <div class="dfr"><span class="st A">A</span><div class="mid"><div class="fn">useDiff.ts</div><div class="dir">src/hooks</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.rs</div><div class="dir">src/net/relay</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                      <div class="dfr"><span class="st A">A</span><div class="mid"><div class="fn">0007_add_diffs.sql</div><div class="dir">db/migrations</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">theme.css</div><div class="dir">src/styles</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                      <div class="dfr"><span class="st D">D</span><div class="mid"><div class="fn">legacy_api.py</div><div class="dir">src/server/api</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                      <div class="dfr"><span class="st N">N</span><div class="mid"><div class="fn">explore.ipynb</div><div class="dir">analysis/notebooks</div></div><span class="stat" style="color:var(--amuted)">—</span></div>
+                    </div>
+                    <div class="ovl-right">
+                      <div class="empty">
+                        <div class="glyph"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 2.5-3 2.5M13 14.5h4"/></svg></div>
+                        <div class="et">Line-level diffs need a newer daemon.</div>
+                        <div class="ec">Run the update command on your computer.</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="ovl-foot"><span class="hint"><b>↑↓</b> switch file</span><span class="hint"><b>esc</b> close</span></div>
+                </div>
+
+                <!-- DELETED overlay -->
+                <div class="ovl hidden" data-variant="deleted">
+                  <div class="ovl-hd"><span class="ttl">Changes</span><span class="sum">8 files · <span class="plus">+214</span> <span class="minus">−38</span></span><span class="x"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span></div>
+                  <div class="ovl-mid">
+                    <div class="ovl-list">
+                      <div class="dfr"><span class="st A">A</span><div class="mid"><div class="fn">useDiff.ts</div><div class="dir">src/hooks</div></div><span class="stat"><span class="plus">+48</span></span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.rs</div><div class="dir">src/net/relay</div></div><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">App.tsx</div><div class="dir">src/app</div></div><span class="stat"><span class="plus">+12</span> <span class="minus">−3</span></span></div>
+                      <div class="dfr sel"><span class="st D">D</span><div class="mid"><div class="fn">legacy_api.py</div><div class="dir">src/server/api</div></div><span class="stat"><span class="minus">−120</span></span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">theme.css</div><div class="dir">src/styles</div></div><span class="stat"><span class="plus">+6</span> <span class="minus">−6</span></span></div>
+                      <div class="dfr"><span class="st A">A</span><div class="mid"><div class="fn">hero@2x.png</div><div class="dir">assets/images</div></div><span class="imgtag"><svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="3.5" width="13" height="11" rx="1.6"/><circle cx="6.4" cy="7.2" r="1.3"/><path d="M3 12l3.5-3 2.5 2 3-3.5 3 4.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+                      <div class="dfr"><span class="st N">N</span><div class="mid"><div class="fn">explore.ipynb</div><div class="dir">analysis/notebooks</div></div><span class="stat"><span class="plus">+18</span> <span class="minus">−4</span></span></div>
+                    </div>
+                    <div class="ovl-right">
+                      <div class="ovl-fhd">
+                        <span class="path">~/code/cc-pocket/src/server/api/legacy_api.py</span>
+                        <span class="copy"><svg width="13" height="13" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></span>
+                        <span class="rt"><span class="stchip D">D</span><span class="stat"><span class="minus">−120</span></span><div class="pillseg"><button class="on">Diff</button><button aria-disabled="true">File</button><span class="segcap">File was deleted</span></div></span>
+                      </div>
+                      <div class="diff dense">
+                        <div class="diff-scroll">
+                          <div class="diff-body">
+                            <div class="hunk">
+                              <div class="hunk-hd"><span class="chev"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span><span class="at">@@ −1,10 +0,0 @@</span><span class="ctx-label">whole file removed</span></div>
+                              <div class="hunk-body">
+                                <div class="dl del"><span class="gut old">1</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-k">from</span> flask <span class="hl-k">import</span> Flask, request</span></div>
+                                <div class="dl del"><span class="gut old">2</span><span class="gut new"></span><span class="sign">−</span><span class="code"> </span></div>
+                                <div class="dl del"><span class="gut old">3</span><span class="gut new"></span><span class="sign">−</span><span class="code">app = Flask(__name__)</span></div>
+                                <div class="dl del"><span class="gut old">4</span><span class="gut new"></span><span class="sign">−</span><span class="code"> </span></div>
+                                <div class="dl del"><span class="gut old">5</span><span class="gut new"></span><span class="sign">−</span><span class="code">@app.route(<span class="hl-s">'/legacy/session'</span>)</span></div>
+                                <div class="dl del"><span class="gut old">6</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-k">def</span> legacy_session():</span></div>
+                                <div class="dl del"><span class="gut old">7</span><span class="gut new"></span><span class="sign">−</span><span class="code">    sid = request.args.get(<span class="hl-s">'id'</span>)</span></div>
+                                <div class="dl del"><span class="gut old">8</span><span class="gut new"></span><span class="sign">−</span><span class="code">    <span class="hl-k">return</span> {<span class="hl-s">'session'</span>: sid, <span class="hl-s">'v'</span>: <span class="hl-n">1</span>}</span></div>
+                                <div class="dl del"><span class="gut old">9</span><span class="gut new"></span><span class="sign">−</span><span class="code"> </span></div>
+                                <div class="dl del"><span class="gut old">10</span><span class="gut new"></span><span class="sign">−</span><span class="code"><span class="hl-c"># deprecated — replaced by /v2/session</span></span></div>
+                              </div>
+                            </div>
+                            <div class="dl-sep"><span class="exp"><svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7l3-3 3 3M6 11l3 3 3-3"/></svg></span> 110 more removed lines</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="ovl-foot"><span class="hint"><b>↑↓</b> switch file</span><span class="hint"><b>⌥←→</b> collapse/expand hunk</span><span class="hint"><b>esc</b> close</span></div>
+                </div>
+
+                <!-- IMAGE overlay -->
+                <div class="ovl hidden" data-variant="image">
+                  <div class="ovl-hd"><span class="ttl">Changes</span><span class="sum">8 files · <span class="plus">+214</span> <span class="minus">−38</span></span><span class="x"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span></div>
+                  <div class="ovl-mid">
+                    <div class="ovl-list">
+                      <div class="dfr"><span class="st A">A</span><div class="mid"><div class="fn">useDiff.ts</div><div class="dir">src/hooks</div></div><span class="stat"><span class="plus">+48</span></span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">WsClient.rs</div><div class="dir">src/net/relay</div></div><span class="stat"><span class="plus">+31</span> <span class="minus">−9</span></span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">App.tsx</div><div class="dir">src/app</div></div><span class="stat"><span class="plus">+12</span> <span class="minus">−3</span></span></div>
+                      <div class="dfr"><span class="st M">M</span><div class="mid"><div class="fn">theme.css</div><div class="dir">src/styles</div></div><span class="stat"><span class="plus">+6</span> <span class="minus">−6</span></span></div>
+                      <div class="dfr sel"><span class="st A">A</span><div class="mid"><div class="fn">hero@2x.png</div><div class="dir">assets/images</div></div><span class="imgtag"><svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2.5" y="3.5" width="13" height="11" rx="1.6"/><circle cx="6.4" cy="7.2" r="1.3"/><path d="M3 12l3.5-3 2.5 2 3-3.5 3 4.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+                      <div class="dfr"><span class="st N">N</span><div class="mid"><div class="fn">explore.ipynb</div><div class="dir">analysis/notebooks</div></div><span class="stat"><span class="plus">+18</span> <span class="minus">−4</span></span></div>
+                    </div>
+                    <div class="ovl-right">
+                      <div class="ovl-fhd">
+                        <span class="path">~/code/cc-pocket/assets/images/hero@2x.png</span>
+                        <span class="copy"><svg width="13" height="13" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="6" width="9" height="9" rx="2"/><path d="M12 6V4.5A1.5 1.5 0 0010.5 3H4.5A1.5 1.5 0 003 4.5v6A1.5 1.5 0 004.5 12H6"/></svg></span>
+                        <span class="rt"><span class="stchip A">A</span><div class="pillseg"><button aria-disabled="true">Diff</button><button class="on">File</button><span class="segcap">binary file — no text diff</span></div></span>
+                      </div>
+                      <div class="imgprev">
+                        <div class="frame" style="max-width:420px"><svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="4" width="19" height="16" rx="2"/><circle cx="8" cy="9.5" r="1.8"/><path d="M3 17l5-4.5 3.5 3 4-4.5L21 16" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                        <div class="cap"><b>hero@2x.png</b> · 1200 × 630 · added · 84&nbsp;KB</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="ovl-foot"><span class="hint"><b>↑↓</b> switch file</span><span class="hint"><b>esc</b> close</span></div>
+                </div>
+
+                <!-- EMPTY overlay -->
+                <div class="ovl hidden" data-variant="empty">
+                  <div class="ovl-hd"><span class="ttl">Changes</span><span class="sum">0 files</span><span class="x"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 5l10 10M15 5L5 15"/></svg></span></div>
+                  <div class="ovl-mid">
+                    <div class="empty" style="flex:1">
+                      <div class="glyph"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.4A1.6 1.6 0 015.6 3.8h3.1l1.5 1.6h6.2A1.6 1.6 0 0118 7v9a1.6 1.6 0 01-1.6 1.6H5.6A1.6 1.6 0 014 16z"/></svg></div>
+                      <div class="et">This session hasn’t changed any files yet.</div>
+                    </div>
+                  </div>
+                  <div class="ovl-foot"><span class="hint"><b>esc</b> close</span></div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- cropped chat-header detail strip -->
+    <div class="detail-strip">
+      <div class="dlab">Chat header · new “± 8” entry (left of ⋯)</div>
+      <div class="crop appdark">
+        <div class="dchat" style="background:var(--abase)">
+          <div class="chd">
+            <div class="r1">
+              <span class="t">Fix relay reconnect</span>
+              <span class="mode">default <svg width="11" height="11" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5l5 5 5-5"/></svg></span>
+              <span style="flex:1"></span>
+              <span class="pmpill" title="Changes">± 8</span>
+              <span class="kebab"><svg width="16" height="16" viewBox="0 0 18 18" fill="currentColor"><circle cx="4" cy="9" r="1.5"/><circle cx="9" cy="9" r="1.5"/><circle cx="14" cy="9" r="1.5"/></svg></span>
+            </div>
+            <div class="ctx">~/code/cc-pocket&nbsp; · &nbsp;⑂ main&nbsp; · &nbsp;sonnet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="changed-files-v2.js"></script>
+<script>
+(async () => {
+  if (!document.title || !document.title.trim()) document.title = "Changed Files v2";
+  // Prepend so page-supplied @page / break rules (deck-stage's margin:0,
+  // author CSS) keep source-order precedence over the baseline.
+  const baseCss = document.createElement('style');
+  baseCss.textContent = "@media print {\n  figure, table { break-inside: avoid; }\n  *, *::before, *::after {\n    print-color-adjust: exact; -webkit-print-color-adjust: exact;\n    backdrop-filter: none !important; -webkit-backdrop-filter: none !important;\n    animation-delay: -99s !important; animation-duration: .001s !important;\n    animation-iteration-count: 1 !important; animation-fill-mode: both !important;\n    animation-play-state: running !important; transition-duration: 0s !important;\n  }\n}";
+  document.head.prepend(baseCss);
+  if (document.readyState === 'loading') {
+    await new Promise((r) => document.addEventListener('DOMContentLoaded', r, { once: true }));
+  }
+  let ds = document.querySelector('deck-stage');
+  // whenDefined never resolves when nothing registers the element, so only
+  // await it when a <deck-stage> tag exists (and race a timeout regardless).
+  if (ds && !customElements.get('deck-stage')) {
+    try {
+      await Promise.race([
+        customElements.whenDefined('deck-stage'),
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+    } catch (e) {}
+    ds = document.querySelector('deck-stage');
+  }
+  // dc-runtime assigns window.DCLogic at init and mounts into #dc-root on
+  // DOMContentLoaded; settle on that subtree so React has rendered before
+  // print(). Non-DC pages fall through to weighing body.
+  const isDc = !ds && 'DCLogic' in window;
+  const settleRoot = ds || (isDc ? document.getElementById('dc-root') : null) || document.body;
+  if (settleRoot) {
+    // Weigh only content children — skip script/style/template so inline
+    // Babel/CSS doesn't register as stable "content" before the framework
+    // has mounted anything.
+    const MEDIA = 'img,svg,canvas,video,picture,iframe,embed,object';
+    const weigh = () => {
+      let text = 0, media = 0;
+      for (const c of settleRoot.children) {
+        const t = c.tagName;
+        if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEMPLATE') continue;
+        text += (c.textContent || '').trim().length;
+        media += c.querySelectorAll(MEDIA).length + (c.matches(MEDIA) ? 1 : 0);
+      }
+      return text + media * 100;
+    };
+    // "Non-zero and stable" alone is not sufficient to mean rendered: generic
+    // body can carry a static shell while async main content is pending, and
+    // #dc-root can carry the root DC's static text while child refs are still
+    // .sc-placeholder boxes. Gate generic on readyState 'complete', and never
+    // accept stability while a dc-runtime placeholder is present.
+    const isGeneric = settleRoot === document.body;
+    const deadline = Date.now() + 15000;
+    let last = -1, stable = 0;
+    while (Date.now() < deadline) {
+      const n = weigh();
+      const ready =
+        (!isGeneric || document.readyState === 'complete') &&
+        !settleRoot.querySelector('.sc-placeholder');
+      if (n > 0 && n === last && ready) { if (++stable >= 2) break; } else { stable = 0; }
+      last = n;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  // Project support.js may predate runtime default-seeding; push via bridge.
+  if (isDc && window.__dcSetProps && window.__dcRootName) {
+    try {
+      const dpEl = document.querySelector('script[data-dc-script]');
+      const meta = JSON.parse((dpEl && dpEl.getAttribute('data-props')) || '{}');
+      const bag = {};
+      for (const k in meta)
+        if (k[0] !== '$' && meta[k] && meta[k].default !== undefined)
+          bag[k] = meta[k].default;
+      if (Object.keys(bag).length) {
+        window.__dcSetProps(window.__dcRootName(), bag);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    } catch (e) {}
+  }
+  // Reveal content gated on scroll or visibility before printing. Lazy <img>,
+  // IntersectionObserver fade-ins, and collapsed <details> don't render while
+  // off-screen, so a long page would print with them blank or closed. Open
+  // every <details>, force native-lazy images eager, and scroll the document
+  // through its full height to trip lazy-load + IO; then wait (bounded) for the
+  // newly-triggered images. Inert for deck-stage (slides aren't scroll-gated).
+  try {
+    for (const d of document.querySelectorAll('details')) d.open = true;
+    for (const img of document.querySelectorAll('img[loading="lazy"]'))
+      img.loading = 'eager';
+    const scroller = document.scrollingElement || document.documentElement;
+    const full = Math.max(scroller.scrollHeight, document.body.scrollHeight);
+    const step = window.innerHeight || 800;
+    for (let y = 0; y <= full; y += step) {
+      window.scrollTo(0, y);
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    window.scrollTo(0, 0);
+    await Promise.race([
+      Promise.all(
+        [...document.images].map((img) =>
+          img.complete
+            ? null
+            : new Promise((res) => {
+                img.addEventListener('load', res, { once: true });
+                img.addEventListener('error', res, { once: true });
+              })
+        )
+      ),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]);
+  } catch (e) {}
+  try { await document.fonts.ready; } catch (e) {}
+  // Jump every animation to its end state so print() never captures a slide
+  // mid-entrance. Ordering matters: the 0s-transition style must be live
+  // BEFORE data-deck-active is set so attribute-keyed transitions don't
+  // start a (now-0s) run from the pre-active base.
+  const st = document.createElement('style');
+  st.textContent = '*,*::before,*::after{animation-delay:-99s !important;animation-duration:.001s !important;animation-iteration-count:1 !important;animation-fill-mode:both !important;animation-play-state:running !important;transition-duration:0s !important}';
+  document.head.appendChild(st);
+  for (const d of document.querySelectorAll('deck-stage')) {
+    for (const c of d.children) {
+      const t = c.tagName;
+      if (t === 'SCRIPT' || t === 'STYLE' || t === 'TEMPLATE') continue;
+      c.setAttribute('data-deck-active', '');
+    }
+  }
+  // Re-append deck-stage's @page last so no author @page can add a margin and
+  // spill each full-bleed slide onto two sheets. Backstop for old copies.
+  if (ds) {
+    let pg = document.getElementById('deck-stage-print-page');
+    if (!pg) {
+      pg = document.createElement('style');
+      pg.textContent = '@page{size:' + (+ds.getAttribute('width') || 1920) +
+        'px ' + (+ds.getAttribute('height') || 1080) + 'px;margin:0}';
+    }
+    document.body.appendChild(pg);
+  }
+  try {
+    const sweep = () => {
+      for (const a of document.getAnimations()) {
+        try { a.finish(); } catch (e) {
+          try { a.currentTime = (a.effect && a.effect.getComputedTiming().duration) || 0; a.pause(); } catch (e2) {}
+        }
+      }
+    };
+    sweep();
+    await new Promise((r) => requestAnimationFrame(r));
+    sweep();
+    await new Promise((r) => requestAnimationFrame(r));
+  } catch (e) {}
+  // Size the PDF page to the rendered design unless the file opted into
+  // standard paper via @page{size:letter|A4|…}. Decks own their own @page.
+  // Wrappers (body, …) lose padding+margin so the frame sits at (0,0); the
+  // frame itself loses only margin — its padding is INSIDE the measured
+  // rect and must stay, or content shifts and leaves a gap at bottom/right.
+  var __m = null;
+  try { __m = (() => {
+  var STAMP = true;
+  var docEl = document.documentElement;
+  var doc = { width: docEl.scrollWidth, height: docEl.scrollHeight };
+
+  var ds = document.querySelector('deck-stage');
+  if (ds) {
+    var dw = Number(ds.getAttribute('width')) || 1920;
+    var dh = Number(ds.getAttribute('height')) || 1080;
+    var n = typeof ds.length === 'number' ? ds.length : ds.children.length;
+    var idx = typeof ds.index === 'number' ? ds.index : 0;
+    var frames = [];
+    for (var i = 0; i < n; i++) frames.push({ left: 0, top: 0, width: dw, height: dh });
+    return { kind: 'deck', source: 'declared', doc: doc, frames: frames,
+      authored: frames.map(function(){return{width:true,height:true}}),
+      deck: { width: dw, height: dh, slideCount: n, index: idx },
+      signals: { paperPage: false, pxPage: false } };
+  }
+
+  // Declared kind: a doc-page tag names the kind outright, so no signal
+  // heuristics run (like the deck branch above, signals report false —
+  // they describe inferred classifications only). The tag alone is not
+  // trusted: the element must have upgraded (shadowRoot present), so a
+  // leftover tag whose script was deleted falls through to the heuristics
+  // that handle plain markup.
+  var stageSx = window.scrollX || 0, stageSy = window.scrollY || 0;
+  var dp = document.querySelector('doc-page');
+  if (dp && dp.shadowRoot) {
+    // Crop to the sheet, not the host — the desk around it is screen-only
+    // chrome that must not land in PNG exports.
+    var sheet = dp.shadowRoot.querySelector('.sheet');
+    var sr = (sheet || dp).getBoundingClientRect();
+    return { kind: 'paper-doc', source: 'declared', doc: doc,
+      frames: [{ left: sr.left + stageSx, top: sr.top + stageSy,
+        width: sr.width, height: sr.height }],
+      authored: [{ width: false, height: false }],
+      signals: { paperPage: false, pxPage: false } };
+  }
+  var paperPage = false, pxPage = false;
+  var eachRule = function (fn) {
+    for (var s = 0; s < document.styleSheets.length; s++) {
+      var rs; try { rs = document.styleSheets[s].cssRules; } catch (e) { continue; }
+      for (var r = 0; r < rs.length; r++) {
+        fn(rs[r]);
+        if (rs[r].cssRules) for (var n = 0; n < rs[r].cssRules.length; n++) fn(rs[r].cssRules[n]);
+      }
+    }
+  };
+  eachRule(function (r) {
+    if (r.type !== 6) return;
+    var m = /\bsize\s*:\s*([^;}]+)/i.exec(r.cssText || '');
+    if (!m) return;
+    if (/\b(letter|a[3-5]|legal|ledger)\b/i.test(m[1])) paperPage = true;
+    if (/\d+(?:\.\d+)?px\b/i.test(m[1])) pxPage = true;
+  });
+  var signals = { paperPage: paperPage, pxPage: pxPage };
+
+  var pxVal = function (v) {
+    var m = /^(\d+(?:\.\d+)?)px$/.exec(v || ''); return m ? +m[1] : 0;
+  };
+  var authoredPx = function (el, prop) {
+    if (pxVal(el.style[prop])) return true;
+    var attr = el.getAttribute(prop);
+    if (attr && /^\d+$/.test(attr)) return true;
+    var hit = false;
+    eachRule(function (r) {
+      if (hit || r.type !== 1 || !r.style) return;
+      try { if (el.matches(r.selectorText) && pxVal(r.style[prop])) hit = true; } catch (e) {}
+    });
+    return hit;
+  };
+
+  var el = document.body, rootPxW = false;
+  for (;;) {
+    var kids = [];
+    for (var c = 0; c < el.children.length; c++) {
+      var t = el.children[c].tagName;
+      if (t !== 'SCRIPT' && t !== 'STYLE' && t !== 'TEMPLATE') kids.push(el.children[c]);
+    }
+    if (kids.length !== 1 || !(kids[0] instanceof HTMLElement)) break;
+    if (STAMP) el.setAttribute('data-om-frame-wrap', '');
+    el = kids[0];
+    rootPxW = authoredPx(el, 'width');
+    if (rootPxW) break;
+  }
+  if (!rootPxW) rootPxW = authoredPx(el, 'width');
+
+  // @page{size:letter} alone is a flowing doc; with a px-width root it's a
+  // fixed sheet pretending to be paper — fall through and size to render.
+  if (paperPage && !rootPxW) {
+    return { kind: 'paper-doc', source: 'inferred', doc: doc, signals: signals,
+      frames: [{ left: 0, top: 0, width: doc.width, height: doc.height }],
+      authored: [{ width: false, height: false }] };
+  }
+
+  var sx = window.scrollX || 0, sy = window.scrollY || 0;
+  var rectOf = function (e) {
+    var r = e.getBoundingClientRect();
+    var oy; try { oy = getComputedStyle(e).overflowY; } catch (err) {}
+    var h = oy === 'visible' ? Math.max(r.height, e.scrollHeight || 0) : r.height;
+    return { left: r.left + sx, top: r.top + sy, width: r.width, height: h };
+  };
+
+  // Multi-frame: ≥2 visible non-fixed children, each with authored px width
+  // AND height, all within ±2px of each other. Off unless the page opts in
+  // via data-om-multi-frame on the stop element — guards against card grids
+  // and pricing tables that match the geometry but aren't separate canvases.
+  if (el.hasAttribute('data-om-multi-frame')) {
+    var cands = [];
+    for (var k = 0; k < el.children.length; k++) {
+      var ch = el.children[k];
+      var cs; try { cs = getComputedStyle(ch); } catch (e) { continue; }
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.position === 'fixed') continue;
+      var rc = rectOf(ch);
+      if (rc.width < 2 || rc.height < 2) continue;
+      if (!authoredPx(ch, 'width') || !authoredPx(ch, 'height')) continue;
+      cands.push(rc);
+    }
+    if (cands.length >= 2) {
+      var w0 = cands[0].width, h0 = cands[0].height, ok = true;
+      for (var q = 1; q < cands.length; q++)
+        if (Math.abs(cands[q].width - w0) > 2 || Math.abs(cands[q].height - h0) > 2) ok = false;
+      if (ok) return { kind: 'multi-frame', source: 'inferred', doc: doc, signals: signals,
+        frames: cands, authored: cands.map(function(){return{width:true,height:true}}) };
+    }
+  }
+
+  if (STAMP) el.setAttribute('data-om-frame', '');
+  return { kind: 'single-canvas', source: 'inferred', doc: doc, signals: signals,
+    frames: [rectOf(el)],
+    authored: [{ width: rootPxW, height: authoredPx(el, 'height') }] };
+})(); } catch (e) {}
+  var frame = null;
+  if (__m && __m.kind === 'single-canvas') {
+    var f = __m.frames && __m.frames[0];
+    if (f && f.width >= 200 && f.height >= 200) {
+      frame = f;
+      var fst = document.createElement('style');
+      fst.textContent = '@media print{@page{size:' + Math.ceil(f.width) + 'px ' +
+        Math.ceil(f.height) + 'px;margin:0}' +
+        'html,body,[data-om-frame-wrap]{padding:0!important;margin:0!important;background:none!important}' +
+        '[data-om-frame]{margin:0!important}}';
+      document.body.appendChild(fst);
+    }
+  }
+  // Relax break-inside on oversized elements. An element taller than a
+  // printable page can't honor break-inside: avoid — browsers either overflow
+  // it or push it whole to the next page, leaving a blank gap, then break it
+  // anyway at an arbitrary point. After the final layout (content revealed,
+  // animations jumped), find elements taller than a page that still compute
+  // break-inside: avoid and reset them to auto, so the browser breaks them at
+  // their children's boundaries instead (children keep their own avoid). PAGE_PX
+  // is a conservative portrait estimate at 96 CSS px/in — Letter/A4 usable
+  // height minus our 0.5in margins — so only clearly-oversized elements are
+  // touched and under-page elements still stay whole. Skipped for decks (slides
+  // are sized to the page) and for fixed-size canvases (frame set, or an author
+  // px-based @page) — runs as before for flowing docs on letter/A4.
+  try {
+    if (!ds && !frame && !(__m && __m.signals && __m.signals.pxPage)) {
+      const PAGE_PX = 1024;
+      // Our print defaults add a real @page margin only when the source has
+      // no @page of its own; computed style can't tell us (it reports screen
+      // media), so read the injected rule directly.
+      const defaults = document.querySelector('style[data-omelette-print-defaults]');
+      const pageInset = /@page\s*\{[^}]*margin/.test(defaults ? defaults.textContent || '' : '');
+      const SEL = 'section,article,figure,table,pre,blockquote,[class~="card" i],[class~="page" i],[class~="sheet" i]';
+      for (const el of document.body.querySelectorAll(SEL)) {
+        if (el instanceof HTMLElement && el.offsetHeight > PAGE_PX) {
+          el.setAttribute('data-om-oversized', '');
+          // Fake-paged docs simulate sheets with over-tall break-after:page
+          // boxes; honoring the break spills half-blank pages and ends a
+          // colored box mid-sheet. Flow them, and (only when we own the page
+          // inset) drop the redundant padding/background via the rule below.
+          const cs = getComputedStyle(el);
+          if (cs.breakAfter === 'page' || cs.pageBreakAfter === 'always') {
+            el.setAttribute('data-om-fakepage', '');
+          }
+        }
+      }
+      const ost = document.createElement('style');
+      ost.textContent = '@media print{' +
+        '[data-om-oversized]{break-inside:auto !important;page-break-inside:auto !important}' +
+        '[data-om-fakepage]{break-after:auto !important;page-break-after:auto !important}' +
+        (pageInset ? '[data-om-fakepage]{padding:0 !important;background:none !important}' : '') +
+        '}';
+      document.head.appendChild(ost);
+    }
+  } catch (e) {}
+  // macOS Preview renders Skia-PDF Luminosity soft-masks as opaque grey boxes;
+  // swap the CSS that triggers them for Preview-safe forms.
+  try {
+    for (const el of document.body.querySelectorAll('*')) {
+      const cs = getComputedStyle(el);
+
+      if (cs.boxShadow !== 'none' && cs.filter === 'none') {
+        const outs = [], kept = [];
+        for (const s of cs.boxShadow.split(/,(?![^(]*[)])/)) {
+          const t = s.trim();
+          const m = t.match(/^(rgba?[(][^)]+[)]) (-?[0-9.]+px) (-?[0-9.]+px) ([0-9.]+px) -?[0-9.]+px$/);
+          if (m && parseFloat(m[4]) > 0) outs.push('drop-shadow(' + m[2] + ' ' + m[3] + ' ' + m[4] + ' ' + m[1] + ')');
+          else kept.push(t);
+        }
+        if (outs.length) {
+          el.style.setProperty('filter', outs.join(' '), 'important');
+          el.style.setProperty('box-shadow', kept.join(', ') || 'none', 'important');
+        }
+      }
+
+      const mask = cs.maskImage && cs.maskImage !== 'none' ? cs.maskImage : cs.webkitMaskImage;
+      if (mask && mask !== 'none' && cs.filter === 'none') el.style.setProperty('filter', 'opacity(1)', 'important');
+    }
+  } catch (e) {}
+  setTimeout(() => { try { window.print(); } catch (e) {} }, 200);
+})();
+</script>
+</body>
+</html>
