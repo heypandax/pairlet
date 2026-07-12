@@ -423,8 +423,9 @@ a{color:inherit;text-decoration:none;}
   .hero-btns,.hero .sub{margin-left:auto;margin-right:auto;}
   .hero .sub{max-width:560px;}
   .hero-visual{margin-top:8px;}
-  .feature{grid-template-columns:1fr;gap:32px;}
-  .feature .feat-visual{order:-1!important;}
+  /* Site 1.5 mobile pattern (mfeat): text first, phone below */
+  .feature{grid-template-columns:1fr;gap:26px;}
+  .feature .feat-visual{order:2!important;}
   .feature .feat-text{text-align:center;}
   .feature .feat-text p{margin-left:auto;margin-right:auto;}
   .sec-grid{grid-template-columns:1fr 1fr;}
@@ -449,7 +450,6 @@ a{color:inherit;text-decoration:none;}
   .start-connect .start-sub{font-size:11px;letter-spacing:0.04em;gap:12px;}
   .footer .top{grid-template-columns:1fr 1fr;gap:28px;}
   .osband .wrap{flex-direction:column;text-align:center;align-items:center;}
-  .float-perm{right:0;bottom:14px;width:210px;}
 }
 @media (max-width:420px){
   .footer .top{grid-template-columns:1fr;}
@@ -642,7 +642,9 @@ a{color:inherit;text-decoration:none;}
 .forkcap .accent{color:var(--accent);}
 @media (max-width:900px){
   .fg-block{grid-template-columns:1fr;gap:28px;}
-  .fg-block.flip .fg-visual{order:-1;}
+  .fg-block .fg-visual{order:2;}
+  .fg-block .fg-copy{text-align:center;}
+  .fg-block .fg-copy p{margin-left:auto;margin-right:auto;}
   .mini3{grid-template-columns:1fr;gap:18px;}
 }
 
@@ -779,3 +781,128 @@ a{color:inherit;text-decoration:none;}
 .sec-grid.cols3{grid-template-columns:repeat(3,1fr);}
 @media (max-width:1023px){ .sec-grid.cols3{grid-template-columns:1fr 1fr;} }
 @media (max-width:767px){ .sec-grid.cols3{grid-template-columns:1fr;} }
+
+/* ═══════════════ Site 1.5 — Mobile (from the Site 1.5 - Mobile board) ═══════════════
+   Molecules first (viewport-independent), then the ≤767px layer.
+   House rule holds: device/app chrome stays dark. */
+
+/* breakpoint-gated markup variants (vignette 02 swaps its phone screen) */
+.m-only{display:none!important;}
+
+/* vignette 02 · "take over" phone (app-scoped) */
+.takeover{display:flex;flex-direction:column;gap:9px;}
+.to-live{display:flex;align-items:center;gap:10px;border:1px solid var(--ahair);background:var(--asurface);border-radius:11px;padding:10px 11px;}
+.to-live .pulse{flex-shrink:0;}
+.to-live .nm{font-size:12px;font-weight:600;color:var(--atext);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.to-live .src{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--asec);border:1px solid var(--ahair);border-radius:999px;padding:2px 7px;flex-shrink:0;}
+.to-arrow{display:flex;justify-content:center;color:var(--amuted);padding:1px 0;}
+.to-btn{display:flex;align-items:center;justify-content:center;gap:8px;height:38px;border-radius:11px;background:var(--aacc);color:#0E0F11;font-size:12.5px;font-weight:600;}
+.to-note{display:flex;align-items:center;gap:7px;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--asec);margin-top:2px;}
+.to-note .x{color:var(--asuccess);display:flex;}
+
+/* desktop download text-link line (was inline styles) */
+.dl-desktop-line{text-align:center;margin:34px auto 0;max-width:660px;font-size:14.5px;color:var(--sec);}
+
+@media (max-width:767px){
+  /* markup variants */
+  .m-only{display:flex!important;}
+  .d-only{display:none!important;}
+
+  /* rhythm: 44px sections, 20px gutters (board spacing notes) */
+  .wrap{padding:0 20px;}
+  .section{padding:44px 0;}
+  .section-head{margin-bottom:26px;}
+  .section-head h2{font-size:25px;line-height:1.16;}
+  .section-head p{font-size:15px;}
+  .eyebrow{margin-bottom:12px;}
+
+  /* M1 · nav (56px bar; menu docks right under it) */
+  .nav{height:56px;}
+  .nav.scrolled{height:56px;}
+  .mobile-menu{top:56px;padding:6px 18px 16px;}
+
+  /* M1 · hero — stacked buttons, docked permission card */
+  .hero{padding:98px 0 34px;}
+  .hero h1{font-size:38px;}
+  .hero .sub{font-size:16px;max-width:330px;}
+  .hero-btns{flex-direction:column;gap:10px;margin-bottom:22px;}
+  .hero-btns .btn{width:100%;}
+  .trustline{font-size:11.5px;line-height:1.9;max-width:250px;margin:0 auto;}
+  .hero-visual{flex-direction:column;align-items:center;margin-top:34px;}
+  .hero-visual .phone{--pw:238px;}
+  .float-perm{position:relative;right:auto;bottom:auto;width:100%;margin-top:-26px;z-index:6;border-radius:16px;padding:15px;}
+
+  /* M1 · the moment */
+  .moment .wrap{padding:46px 20px;gap:28px;}
+  .moment .lead{font-size:23px;line-height:1.32;}
+  .moment .mini{width:100%;max-width:300px;}
+
+  /* M2 · vignettes (mfeat sizes; order handled at ≤1023) */
+  .feature{margin-bottom:56px;}
+  .feature .feat-text h3{font-size:23px;}
+  .feature .feat-text p{font-size:15px;}
+
+  /* M3 · desktop window (chat-only) + fleet */
+  .win .ds-side{display:none;}
+  .win-body{grid-template-columns:1fr;min-height:0;}
+  .ds-chat-body{gap:12px;padding:14px;}
+  .ds-chat-body .codeblock pre{font-size:11px;line-height:1.65;padding:10px 12px;}
+  .s1-mock .fleet{width:100%;margin:16px 0 0;}
+  .mini3{gap:16px;margin-top:30px;}
+  .dl-desktop-line{font-size:14px;line-height:1.7;margin-top:26px;text-align:left;}
+
+  /* M4 · architecture + security */
+  .node{padding:18px 16px;}
+  .connector{gap:12px;justify-content:center;}
+  .arch-cap{font-size:14px;margin-top:26px;}
+  .sec-grid{gap:14px;}
+  .sec-card{padding:20px;}
+  .pullquote{margin-top:36px;padding-top:32px;gap:16px;}
+  .pullquote blockquote{font-size:26px;}
+
+  /* M5 · store cards */
+  .dl-grid{gap:14px;}
+  .dl-card{padding:20px;}
+  .dl-ico{background:var(--raised);border:1px solid var(--hair);color:var(--text);}
+  .dl-sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);}
+  .dl-beta{font-size:12.5px;}
+
+  /* M5 · connect flow — pill OS tabs, scrolling command with fade + pinned copy */
+  .step{gap:14px;}
+  .step h4{font-size:15.5px;}
+  .os-tab{font-family:'JetBrains Mono',monospace;font-size:11px;border-radius:999px;padding:5px 11px;}
+  .cmd{position:relative;overflow:hidden;padding:0 8px 0 14px;gap:10px;}
+  .cmd code{display:block;flex:1;min-width:0;overflow-x:auto;padding:12px 0;scrollbar-width:thin;}
+  .cmd code::-webkit-scrollbar{height:5px;}
+  .cmd code::-webkit-scrollbar-thumb{background:#2A2E33;border-radius:999px;}
+  .cmd::after{content:"";position:absolute;top:1px;bottom:1px;right:48px;width:38px;background:linear-gradient(90deg,transparent,var(--code-bg));pointer-events:none;}
+  .cmd .copy{margin-left:0;}
+  .step-foot{margin-top:24px;font-size:13.5px;}
+
+  /* M5 · footer — brand full row, links 2-col, bottom stacked */
+  .footer{padding:38px 0 28px;}
+  .footer .top{grid-template-columns:1fr 1fr;gap:22px 20px;margin-bottom:28px;}
+  .footer .brand-col{grid-column:1 / -1;}
+  .footer .bottom{flex-direction:column;align-items:flex-start;gap:16px;padding-top:24px;}
+
+  /* M6 · features page */
+  .feat-hero h1{font-size:33px;}
+  .feat-hero .sub{font-size:15px;max-width:320px;}
+  .feat-hero .hero-btns{flex-direction:column;align-items:stretch;}
+  .fgroup{padding:40px 0;}
+  .fgroup .section-head{margin-bottom:26px;}
+  .usagestrip{flex-direction:column;gap:20px;padding:18px 18px 20px;}
+  .usagestrip .block.hours{min-width:0;width:100%;}
+  .ubars{height:64px;}
+  .uheat{grid-template-columns:repeat(6,1fr);grid-auto-rows:1fr;aspect-ratio:6/5;width:100%;}
+  .fg-block{gap:24px;}
+  /* fork diagram goes vertical at phone width (its horizontal chain is ~406px) */
+  .forklane{flex-wrap:wrap;justify-content:center;gap:9px;padding:14px 0;}
+  .flabel{width:100%;text-align:center;}
+  .darr{transform:rotate(90deg);}
+  .dstack{flex-direction:row;flex-wrap:wrap;justify-content:center;}
+  .forkcap{text-align:center;}
+  .feat-foot-cta h2{font-size:24px;}
+  .feat-foot-cta .hero-btns{flex-direction:column;align-items:center;}
+  .feat-foot-cta .hero-btns .btn{width:100%;max-width:280px;}
+}

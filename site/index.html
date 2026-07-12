@@ -326,7 +326,7 @@
         <span class="detail-chip mono"><span class="dot" style="background:var(--asec)"></span>💬 12 · ⑂ main · 2h ago</span>
       </div>
       <div class="feat-visual">
-        <div class="phone"><div class="notch"></div><div class="screen"><div class="app">
+        <div class="phone"><div class="notch"></div><div class="screen"><div class="app d-only">
           <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Sessions</span></div><div class="ctx">Lidapeng-MacBook · ⑂ main</div></div>
           <div class="app-body" style="gap:9px">
             <div class="sess-new"><span class="pl">+</span><div style="flex:1"><div style="font-size:12.5px;font-weight:600;color:var(--aacc)">New session</div><div class="mono" style="font-size:9.5px;color:var(--amuted);margin-top:1px">~/proj/app/cc-pocket</div></div></div>
@@ -334,7 +334,22 @@
             <div class="sess-card"><div class="st">Nightly test sweep <span class="tag-codex mono">codex</span></div><div class="pv">run the flaky suite 20× and bisect</div><div class="mt">💬 6 · ⑂ fix/parser · 5h ago</div></div>
             <div class="sess-card"><div class="st">Add relay websocket client</div><div class="pv">scaffold the Ktor WS client with reconnect</div><div class="mt">💬 23 · ⑂ feat/relay · yesterday</div></div>
           </div>
-        </div></div></div>
+        </div>
+        <!-- mobile variant (Site 1.5 · M2): the takeover flow, not the list -->
+        <div class="app m-only">
+          <div class="app-hd"><div class="row"><span class="dot" style="background:var(--asuccess)"></span><span class="title">Resume session</span></div><div class="ctx">Lidapeng-MacBook · ~/proj/app/cc-pocket</div></div>
+          <div class="app-body">
+            <div class="takeover">
+              <div class="mono" style="font-size:9px;color:var(--amuted);letter-spacing:0.12em;text-transform:uppercase">Live on terminal</div>
+              <div class="to-live"><span class="pulse"></span><span class="nm">Fix relay reconnect</span><span class="src">terminal</span></div>
+              <div class="atext amuted" style="font-size:11.5px">Running on <span class="mono" style="font-size:10.5px">Lidapeng-MacBook</span> · 💬 12 · ⑂ main</div>
+              <div class="to-arrow"><svg width="16" height="20" viewBox="0 0 16 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v13M3.5 11.5L8 16l4.5-4.5"/></svg></div>
+              <div class="to-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0E0F11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg><span>Continue on this phone</span></div>
+              <div class="to-note"><span class="x"><svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9.5l3.5 3.5 7.5-8"/></svg></span><span>resumes in place · ⑂ no fork</span></div>
+            </div>
+          </div>
+        </div>
+        </div></div>
       </div>
     </div>
 
@@ -551,7 +566,7 @@
       </div>
     </div>
 
-    <p class="reveal" style="margin-top:34px;font-size:14.5px;color:var(--sec)">
+    <p class="dl-desktop-line reveal">
       <span class="i18n-en">Get the desktop app: <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg" style="color:var(--accent)">macOS · Apple Silicon</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg" style="color:var(--accent)">macOS · Intel</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi" style="color:var(--accent)">Windows (.msi)</a> — full setup in <a href="#start" style="color:var(--accent)">Get started</a>.</span>
       <span class="i18n-zh">下载桌面端：<a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg" style="color:var(--accent)">macOS · Apple 芯片</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg" style="color:var(--accent)">macOS · Intel</a> · <a href="https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi" style="color:var(--accent)">Windows（.msi）</a>——完整安装步骤见<a href="#start" style="color:var(--accent)">开始使用</a>。</span>
     </p>
