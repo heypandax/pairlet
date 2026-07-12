@@ -5,6 +5,7 @@ import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentProcess
 import dev.ccpocket.daemon.agent.AgentSpec
+import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.agent.PermissionBridge
 import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.ProjectPaths
@@ -601,8 +602,12 @@ class Conversation(
         val b = PermissionBridge(
             convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
             // verdict + question windows both default to the generous, env-configurable ApprovalTimeout.ms
-            // (issue #100 unified them). 600s comfortably covers a bridge owner arriving via
-            // push → tap → reattach, superseding issue #91's shorter interactive/bridge split.
+            // (issue #100 unified them). Bridge-origin sessions keep issue #91's 120s FLOOR on top (#32):
+            // the owner arrives via push → tap → reattach, so a deliberately short CC_POCKET_ASK_TIMEOUT_SEC
+            // (clamp floor 30s, a fine preference when the phone is already in hand) must not shrink that
+            // arrival window into an auto-deny.
+            verdictTimeoutMs = if (origin != null) ApprovalTimeout.bridgeMs() else ApprovalTimeout.ms,
+            questionTimeoutMs = if (origin != null) ApprovalTimeout.bridgeMs() else ApprovalTimeout.ms,
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
             // allow", so one owner approval can't be replayed by later attacker-supplied prompts
             forceNeverRemember = origin != null,
