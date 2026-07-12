@@ -101,9 +101,16 @@ class RelayClient(
     fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
 
     /** Revoke a bridge credential: prune locally NOW (the security anchor — its handshake key dies with
-     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed. */
-    suspend fun revokeBridge(deviceId: String) {
-        sessions.onDeviceRevoked(deviceId)
+     *  the bridges.json entry) and best-effort tell the relay so its row is revoked + socket closed.
+     *  [reason] flavors the guest-facing [dev.ccpocket.protocol.ShareEnded] notice (#115 follow-up). */
+    suspend fun revokeBridge(deviceId: String, reason: String = dev.ccpocket.protocol.ShareEnded.REASON_REVOKED) {
+        val noticed = sessions.onDeviceRevoked(deviceId, reason)
+        // The guest's ShareEnded notice rides the DATA writer while RevokeDevice rides the CONTROL writer —
+        // two independent pumps with no cross-ordering guarantee. Give the sealed notice a short head start
+        // so the relay forwards it before the revoke force-closes the guest's socket. Purely a delivery
+        // courtesy: the credential is ALREADY dead locally (onDeviceRevoked above — key pruned, E2E session
+        // cut, convos force-closed), so nothing security-relevant rides on this delay.
+        if (noticed) delay(REVOKE_NOTICE_GRACE_MS)
         controlOutbox.send(dev.ccpocket.protocol.RevokeDevice(deviceId))
     }
 
@@ -203,7 +210,7 @@ class RelayClient(
             delay(GUEST_EXPIRY_SCAN_MS)
             for (id in sessions.bridges.expiredGuestIds()) {
                 log.info("folder share ${id.take(8)}… expired — revoking")
-                runCatching { revokeBridge(id) }
+                runCatching { revokeBridge(id, reason = dev.ccpocket.protocol.ShareEnded.REASON_EXPIRED) }
             }
         }
     }
@@ -331,6 +338,7 @@ class RelayClient(
         // place on the same id (see Conversation.open), so too-short here mostly costs process churn.
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
         const val GUEST_EXPIRY_SCAN_MS = 30 * 1000L // how often to sweep for expired folder shares (issue #115)
+        const val REVOKE_NOTICE_GRACE_MS = 250L   // head start for the guest's ShareEnded notice before RevokeDevice cuts its socket
         const val ATTACH_REPLAY_SETTLE_MS = 3_000L // relay device re-announce rides the attach; settled well within this
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)

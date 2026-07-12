@@ -916,6 +916,32 @@ data class ShareListing(val items: List<ShareInfo> = emptyList()) : ToPhone
 @SerialName("pocket/share.revoked")
 data class ShareRevoked(val deviceId: String, val ok: Boolean, val error: String? = null) : ToPhone
 
+/**
+ * daemon -> GUEST (issue #115 follow-up): this device's folder share just ended — the precise "why"
+ * behind the disconnect that follows, so the guest terminal can light "Access ended · revoked"
+ * instead of a bare connection drop. [reason] is [REASON_REVOKED] (the owner cut it) or
+ * [REASON_EXPIRED] (the share lapsed); render unknown future values as a generic ending.
+ *
+ * Delivery is BEST-EFFORT: the daemon seals it right BEFORE pruning the guest credential and asking
+ * the relay to force-close the socket, so it can lose that race (or the guest can simply be offline).
+ * The guest must still survive on the fallback path — credential dead → auth refused on reconnect →
+ * generic "access ended". An OLD app drops the unknown frame (tolerant envelope decode) and keeps
+ * today's disconnect-only behavior. New fields must be TRAILING OPTIONALS (wire compat).
+ */
+@Serializable
+@SerialName("pocket/share.ended")
+data class ShareEnded(
+    val reason: String = REASON_REVOKED,
+    /** owner's computer name for "%s ended this share" — the guest already learned it from the invite
+     *  ([ShareInvite.ownerLabel]), so this leaks nothing new. Null = generic "the owner". */
+    val ownerLabel: String? = null,
+) : ToPhone {
+    companion object {
+        const val REASON_REVOKED = "revoked"
+        const val REASON_EXPIRED = "expired"
+    }
+}
+
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)
 //

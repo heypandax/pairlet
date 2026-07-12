@@ -112,6 +112,28 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun shareEnded_roundtrips_with_trailing_optional_defaults() {
+        // issue #115 follow-up: the guest-facing ending notice. Full form round-trips…
+        val env = Envelope(id = "s1", ts = 0, body = ShareEnded(ShareEnded.REASON_EXPIRED, ownerLabel = "Pandas-MacBook"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/share.ended\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // …the default omits ownerLabel entirely (explicitNulls=false) and carries reason=revoked (encodeDefaults)
+        val plain = PocketJson.encodeToString(Envelope(id = "s2", ts = 0, body = ShareEnded()))
+        assertTrue("\"reason\":\"revoked\"" in plain, plain)
+        assertFalse("ownerLabel" in plain, plain)
+
+        // a MINIMAL frame (a future daemon that omits everything) decodes with both trailing optionals defaulted
+        val minimal = """{"id":"s3","ts":0,"to":"PEER","body":{"t":"pocket/share.ended"}}"""
+        assertEquals(ShareEnded(ShareEnded.REASON_REVOKED, null), PocketJson.decodeFromString<Envelope>(minimal).body)
+
+        // a NEWER daemon's extra fields are skipped, not fatal — the old-app tolerance this frame relies on
+        val future = """{"id":"s4","ts":0,"to":"PEER","body":{"t":"pocket/share.ended","reason":"revoked","ownerLabel":"x","futureField":{"k":1}}}"""
+        assertEquals(ShareEnded(ShareEnded.REASON_REVOKED, "x"), PocketJson.decodeFromString<Envelope>(future).body)
+    }
+
+    @Test
     fun askWithdrawn_reason_roundtrips_and_old_frames_default_withdrawn() {
         // issue #100: the retire-reason is a trailing optional. new daemon → new phone: TIMED_OUT rides along
         val timed = Envelope(id = "w2", ts = 0, body = AskWithdrawn("c1", "a1", AskWithdrawnReason.TIMED_OUT))

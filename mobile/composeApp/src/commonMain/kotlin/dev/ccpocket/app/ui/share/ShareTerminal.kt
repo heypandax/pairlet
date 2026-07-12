@@ -39,9 +39,11 @@ import org.jetbrains.compose.resources.stringResource
  * surfaces.)
  */
 
-/** Frame 4b — the guest's terminal detail card: muted folder, an honest one-liner, and two ways out. */
+/** Frame 4b — the guest's terminal detail card: muted folder, an honest one-liner, and two ways out.
+ *  [ending] picks the honest body line: REVOKED = "<owner> ended this share", EXPIRED = "this share
+ *  has expired" — the precise distinction the daemon's ShareEnded notice carries (#115 follow-up). */
 @Composable
-fun GuestEndedCard(ownerLabel: String?, onRemove: () -> Unit, onAskNew: () -> Unit) {
+fun GuestEndedCard(ownerLabel: String?, ending: GuestEnding = GuestEnding.REVOKED, onRemove: () -> Unit, onAskNew: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Tok.base).padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Column(
             Modifier.fillMaxWidth().widthIn(max = 340.dp).clip(RoundedCornerShape(20.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(20.dp)).padding(horizontal = 24.dp, vertical = 30.dp),
@@ -54,7 +56,10 @@ fun GuestEndedCard(ownerLabel: String?, onRemove: () -> Unit, onAskNew: () -> Un
             Text(stringResource(Res.string.share_access_ended), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(10.dp))
             Text(
-                stringResource(Res.string.share_ended_body, ownerLabel ?: stringResource(Res.string.share_the_owner)),
+                when (ending) {
+                    GuestEnding.REVOKED -> stringResource(Res.string.share_ended_body, ownerLabel ?: stringResource(Res.string.share_the_owner))
+                    GuestEnding.EXPIRED -> stringResource(Res.string.share_ended_body_expired)
+                },
                 color = Tok.tx2, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 18.sp,
             )
             Spacer(Modifier.height(22.dp))
