@@ -127,6 +127,28 @@ class StreamParserTest {
         assertIs<AgentEvent.UserReplay>(StreamParser.parse("""{"type":"user"}""").single())
     }
 
+    // issue #122: the replay's text is the ledger's settlement key — both content shapes must carry it
+    @Test
+    fun user_replay_carries_text_for_both_content_shapes() {
+        val fromString = StreamParser.parse("""{"type":"user","message":{"role":"user","content":"send it"}}""").single()
+        assertIs<AgentEvent.UserReplay>(fromString)
+        assertEquals("send it", fromString.text)
+        assertEquals(null, fromString.parentId)
+
+        val fromBlocks = StreamParser.parse("""{"type":"user","message":{"content":[{"type":"text","text":"send it"}]}}""").single()
+        assertIs<AgentEvent.UserReplay>(fromBlocks)
+        assertEquals("send it", fromBlocks.text)
+    }
+
+    @Test
+    fun subagent_user_replay_is_parent_tagged() {
+        val ev = StreamParser.parse(
+            """{"type":"user","parent_tool_use_id":"a1","message":{"content":[{"type":"text","text":"inner"}]}}""",
+        ).single()
+        assertIs<AgentEvent.UserReplay>(ev)
+        assertEquals("a1", ev.parentId) // never settles a top-level prompt
+    }
+
     @Test
     fun system_task_events_become_background_task_events_not_sessionInit() {
         val started = StreamParser.parse(

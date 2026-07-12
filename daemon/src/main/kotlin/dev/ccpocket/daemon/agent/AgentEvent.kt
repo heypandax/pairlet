@@ -59,8 +59,12 @@ sealed interface AgentEvent {
      *  task_progress events WITHOUT the array (pure activity ticks) never land here. */
     data class WorkflowProgress(val taskId: String, val toolUseId: String?, val items: JsonArray) : AgentEvent
 
-    /** replayed user turn (Claude --replay-user-messages). */
-    data object UserReplay : AgentEvent
+    /** Replayed user turn (Claude --replay-user-messages) — the CLI echoes a user message on stdout
+     *  only once it has actually CONSUMED it, so this is the daemon's "prompt delivered" receipt
+     *  (issue #122: the unconsumed-prompt ledger settles against it). [text] is the message's text
+     *  content (raw string or joined text blocks) for matching; [parentId] set = a sub-agent's inner
+     *  user line, never a top-level prompt receipt. */
+    data class UserReplay(val text: String? = null, val parentId: String? = null) : AgentEvent
 
     /** Turn finished. [usage] carries the backend result's own numbers — null when the result had NO
      *  usage (interrupted turn, some error exits): absence is a null, never placeholder zeros a consumer
