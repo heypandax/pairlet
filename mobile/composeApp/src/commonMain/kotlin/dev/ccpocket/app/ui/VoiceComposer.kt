@@ -119,6 +119,12 @@ class ImeSafeMirror internal constructor(initial: String) {
             onExternalChange(landing)
         } else {
             field = new
+            // The echo below re-converges upstream on the field, superseding any parked write — the same
+            // judgement [reconcile] makes a frame later (#118), applied HERE because an iOS pinyin
+            // candidate tap delivers setMarkedText + insertText back to back in ONE event-loop turn: no
+            // recompose (hence no reconcile) runs between this echo and the commit, so a park left
+            // behind would land on that commit and roll the field back to the stale snapshot (#108).
+            parked = null
             onExternalChange(new.text)
         }
     }
