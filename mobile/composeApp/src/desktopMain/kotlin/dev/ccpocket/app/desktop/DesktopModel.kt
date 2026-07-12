@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
@@ -308,7 +309,14 @@ interface DesktopModel {
     /** Delivered but no turn started within the deadline (issue #104): the agent swallowed the prompt
      *  (wedged / mid-relaunch). ChatPane replaces the streaming caret with a tappable "resend" cue. */
     val turnStalled: Boolean get() = false
+    /** The composer's single source of truth — ChatPane renders it and writes caret-precise edits
+     *  (shift+Enter newline, @-file completion) straight into it. See [dev.ccpocket.app.ui.ComposerState]. */
+    val composerState: ComposerState
+    /** String facade over [composerState] for model logic and tests: every assignment is an EXPLICIT
+     *  external write (caret lands at the end; a live IME composition holds it until it ends). */
     var composer: String
+        get() = composerState.text
+        set(value) { composerState.setText(value) }
     fun send(text: String)
 
     // session health (issue #65): degraded = recent turns were all API failures (likely past the context
