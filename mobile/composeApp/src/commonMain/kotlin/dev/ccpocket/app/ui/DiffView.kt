@@ -287,6 +287,7 @@ private sealed interface DiffRow {
  * The gutter stays put; code pans on one shared horizontal scroll, or soft-wraps when [wrap]
  * (issue #95 — wrapping is a toggle, not the default, because it breaks column alignment).
  * Code text is selectable (#95); gutters/chrome are not, so a copied selection is only code.
+ * HOW it is selectable differs by surface — see the split at the SelectionContainer below.
  */
 @Composable
 fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: Boolean = false, modifier: Modifier = Modifier) {
@@ -317,10 +318,16 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
         val fn: (String) -> AnnotatedString = { text -> cache.getOrPut(text) { highlightCodeOrNull(text, ext) ?: AnnotatedString(text) } }
         fn
     }
-    // SelectionContainer makes diff text selectable/copyable; headers & gaps are wrapped in DisableSelection
-    // so a copied selection is only code. When wrap is OFF the code still pans on [hScroll]; on touch,
-    // selection is a long-press (then drag), so panning and selecting coexist — verify on device (issue #95).
-    SelectionContainer(modifier.background(DiffTok.codeBg)) {
+    // Where the SelectionContainer sits is per-surface (the "改动文件无法选择文本" report):
+    //  · desktop (dense): ONE container around the whole list — mouse drag-selects across lines,
+    //    and per-line [hScroll] does not steal the drag (both verified by DiffSelectionContractTest).
+    //  · mobile: container INSIDE each line row, around just the code text (DiffLineRow). Wrapping
+    //    the LazyColumn is the one selection shape this app ships nowhere else, and on iOS it is
+    //    dead on device — long-press never starts a selection — while chat/terminal/subagent, all
+    //    container-inside-the-item, select fine. Cost: a selection can't span lines; the File tab
+    //    (one Text in one container) remains the copy-a-block surface.
+    // Headers & gaps are wrapped in DisableSelection so a desktop copied selection is only code.
+    val list: @Composable () -> Unit = {
         LazyColumn(Modifier.fillMaxSize()) {
             items(rows.size, key = { rows[it].key }) { i ->
                 when (val row = rows[i]) {
@@ -337,6 +344,8 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
             }
         }
     }
+    if (dense) SelectionContainer(modifier.background(DiffTok.codeBg)) { list() }
+    else Box(modifier.background(DiffTok.codeBg)) { list() }
 }
 
 @Composable
@@ -427,12 +436,18 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: 
             }
         }
         val body = remember(line.text, highlight) { highlight(line.text) }
-        Text(
-            body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
-            softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,
-            modifier = Modifier.weight(1f).let { if (wrap) it else it.horizontalScroll(hScroll) }
-                .padding(start = if (dense) 9.dp else 8.dp, end = if (dense) 20.dp else 16.dp),
-        )
+        val code = @Composable { mod: Modifier ->
+            Text(
+                body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
+                softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,
+                modifier = mod.let { if (wrap) it else it.horizontalScroll(hScroll) }
+                    .padding(start = if (dense) 9.dp else 8.dp, end = if (dense) 20.dp else 16.dp),
+            )
+        }
+        // mobile: this per-line container IS the selection surface (see DiffView); desktop selects
+        // through the one container around the whole list
+        if (dense) code(Modifier.weight(1f))
+        else SelectionContainer(Modifier.weight(1f)) { code(Modifier) }
     }
 }
 
