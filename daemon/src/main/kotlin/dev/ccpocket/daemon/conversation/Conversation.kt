@@ -585,11 +585,12 @@ class Conversation(
      * hasn't changed just because the phone flipped a setting; the old `resumeId != sessionId` heuristic
      * forked a duplicate session here. Post-init, fork only for a genuinely foreign id (never today's callers).
      */
-    private suspend fun relaunch(resumeId: String? = sessionId) {
-        stopProcess()
+    private suspend fun relaunch(resumeId: String? = sessionId, armExecuting: Boolean = false) {
+        stopProcess() // clears executing — the fresh launch re-arms it (armExecuting) with the right ordering
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
             AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = fork),
+            armExecuting = armExecuting,
         )
     }
 
@@ -646,7 +647,7 @@ class Conversation(
     // AgentSpec built above flows through here, so the launch flags carry it without touching each site.
     private val cleanRoom: Boolean = pathScope != null
 
-    private suspend fun launchProcess(rawSpec: AgentSpec) {
+    private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false) {
         val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
@@ -717,6 +718,11 @@ class Conversation(
             log.info("$convoId re-injecting ${redeliver.size} unconsumed prompt(s) into the fresh agent")
             redeliver.forEach { backend.sendPrompt(it.text, it.images) }
         }
+        // Arm `executing` for a turn-starting (re)launch BEFORE the pump can run (sendPrompt's lazy start /
+        // settings relaunch): the pump's death-branch `executing = false` is then guaranteed to happen-after
+        // this write, so an instant startup death always wins and can't be resurrected by a late arm on the
+        // caller thread (the reap-flake / stranded-■ race). Ordered last so it also covers re-injection.
+        if (armExecuting) executing = true
         scope.launch(CoroutineName("pump-$convoId")) {
             pump(p, b)
         }
@@ -1048,37 +1054,48 @@ class Conversation(
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
         val relaunching = proc != null && !executing && pendingRelaunch && relaunchGraceElapsed() && !continuationExpected()
+        // `executing` must be armed with a happens-before edge to the new pump: a process that dies
+        // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
+        // clear MUST win. Arming AFTER the launch (as before) lost the race under load — the late `true`
+        // stranded the conversation executing forever, never idle-reaped, a permanent ■ on the phone
+        // (surfaced as a SessionRegistryReapTest CI flake). So the (re)launch paths arm it INSIDE
+        // launchProcess right before `scope.launch(pump)` (armExecuting); only the already-live queued
+        // send arms it here, where no new pump can race it.
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
-            val relaunched = runCatching { relaunch(sessionId ?: openedResumeId) }
+            val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true) }
             if (relaunched.isFailure) {
+                executing = false // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to relaunch for the new settings (${relaunched.exceptionOrNull()?.message})", convoId))
                 return
             }
-        }
-        // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
-        // open() recorded (openedResumeId), reusing its fork decision (openedWithFork — false for a plain open, so
-        // this appends in place). Without this, the first message after a lazy open would hit the old `proc == null`
-        // guard and be silently dropped. A spawn failure (CLI missing / bad resume id) surfaces as a PocketError so
-        // it can't propagate out and wedge the inbound pump; proc stays null, so the next prompt simply retries.
-        // This branch is ALSO the respawn after an unexpected process death (issue #122 — the pump nulls `proc`):
-        // then the live sessionId is the anchor (the dead process's turns live in ITS transcript, not the
-        // originally-resumed one), resumed in place — its own id is never a foreign id to fork off.
-        if (proc == null) {
+        } else if (proc == null) {
+            // LAZY START (issue #61): a plain open no longer spawns the agent — the FIRST prompt does. Resume the id
+            // open() recorded (openedResumeId), reusing its fork decision (openedWithFork — false for a plain open, so
+            // this appends in place). Without this, the first message after a lazy open would hit the old `proc == null`
+            // guard and be silently dropped. A spawn failure (CLI missing / bad resume id) surfaces as a PocketError so
+            // it can't propagate out and wedge the inbound pump; proc stays null, so the next prompt simply retries.
+            // This branch is ALSO the respawn after an unexpected process death (issue #122 — the pump nulls `proc`):
+            // then the live sessionId is the anchor (the dead process's turns live in ITS transcript, not the
+            // originally-resumed one), resumed in place — its own id is never a foreign id to fork off.
             val anchor = sessionId ?: openedResumeId
             val fork = if (sessionId == null) openedWithFork else false
             val launched = runCatching {
-                launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork))
+                launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork), armExecuting = true)
             }
             if (launched.isFailure) {
+                executing = false // the spawn never started a turn
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
                 return
             }
+        } else {
+            // queued send onto the already-live process (mid-turn queue, or a steady-state next turn):
+            // no new pump is starting, so there is no death-branch to race — arm executing directly.
+            executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         }
-        executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
         // ledger BEFORE the write (issue #122 ③): even a write that dies inside the backend leaves the
