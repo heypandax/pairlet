@@ -123,6 +123,11 @@ import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.SetPushPrefs
 import dev.ccpocket.protocol.PushPrefs
+import dev.ccpocket.protocol.SessionGroup
+import dev.ccpocket.protocol.GroupCreate
+import dev.ccpocket.protocol.GroupRename
+import dev.ccpocket.protocol.GroupDelete
+import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.preview_cmd_title
@@ -508,6 +513,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val refreshing = mutableStateOf(false)
     val sessions = mutableStateListOf<SessionSummary>()
     val sessionsDir = mutableStateOf<String?>(null)
+    /** Custom session groups for [sessionsDir] (issue #119); empty = none / older daemon that omits them.
+     *  Per-session membership rides on [SessionSummary.group] (a group id, or null = ungrouped). */
+    val sessionGroups = mutableStateListOf<SessionGroup>()
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -1457,6 +1465,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 ),
             )
             is ListSessions -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
+            // #119 groups: demo has no persistence — just re-echo the sample sessions so the UI settles
+            is GroupCreate, is GroupRename, is GroupDelete, is GroupAssign -> {
+                val wd = (frame as? GroupCreate)?.workdir ?: (frame as? GroupRename)?.workdir
+                    ?: (frame as? GroupDelete)?.workdir ?: (frame as GroupAssign).workdir
+                handle(Sessions(wd, DemoData.sessions(wd)))
+            }
             is OpenSession -> {
                 val cid = "demo-convo-${frame.resumeId ?: "new"}"
                 handle(SessionLive(cid, frame.workdir, frame.resumeId ?: DemoData.LIVE_SESSION_ID, mode = frame.mode, executing = false))
@@ -1535,7 +1549,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
                 recomputePhase()
             }
-            is Sessions -> { sessionsDir.value = f.workdir; replace(sessions, f.items); sessionsRefreshing.value = false }
+            is Sessions -> {
+                sessionsDir.value = f.workdir; replace(sessions, f.items)
+                replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
+                sessionsRefreshing.value = false
+            }
             is Usage -> { usage.value = f; usageLoading.value = false }
             is AuthState -> authState.value = f
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
@@ -2039,6 +2057,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun refreshSessions(wd: String? = null) {
         val dir = wd ?: sessionsDir.value ?: return
         refreshWithSpinner(sessionsRefreshing, ListSessions(dir))
+    }
+
+    // Session groups (issue #119). Every mutation targets the currently-listed project ([sessionsDir]); the
+    // daemon answers each by re-pushing that dir's Sessions frame, so [sessions]/[sessionGroups] refresh
+    // themselves — no optimistic local edit. Guest connections are owner-gated at the daemon (no-op there).
+    fun createGroup(name: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        if (name.isBlank()) return
+        scope.launch { send(GroupCreate(dir, name.trim())) }
+    }
+    fun renameGroup(groupId: String, name: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        if (name.isBlank()) return
+        scope.launch { send(GroupRename(dir, groupId, name.trim())) }
+    }
+    fun deleteGroup(groupId: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        scope.launch { send(GroupDelete(dir, groupId)) }
+    }
+    /** Move [sessionId] into [groupId], or out of any group when [groupId] is null. */
+    fun assignGroup(sessionId: String, groupId: String?, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        scope.launch { send(GroupAssign(dir, sessionId, groupId)) }
     }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
