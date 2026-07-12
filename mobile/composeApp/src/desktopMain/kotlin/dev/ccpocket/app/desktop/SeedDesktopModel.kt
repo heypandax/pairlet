@@ -37,7 +37,8 @@ class SeedDesktopModel : DesktopModel {
         DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1), // keeps the Codex diff-approval surface exercised
     )
 
-    // RECENT: the live project plus a previously visited one — exercises the grouped sidebar zone
+    // RECENT: the live project plus a previously visited one — exercises the grouped sidebar zone —
+    // plus a guest's shared folder (issue #115), so the "Shared" pill surface stays exercised too
     override val sessionGroups = listOf(
         DkSessionGroup("~/code/cc-pocket", "cc-pocket", current = true, sessions = sessions),
         DkSessionGroup(
@@ -46,6 +47,13 @@ class SeedDesktopModel : DesktopModel {
                 DkSession("s4", "~/code/relay", "Bump maxFrame to 4MB", model = "claude-sonnet-5-20250929"),
                 DkSession("s5", "~/code/relay", "Rate-limit pairing", model = "claude-opus-4-8"),
             ),
+        ),
+        DkSessionGroup(
+            "~/work/acme-api", "acme-api", current = false,
+            sessions = listOf(DkSession("s6", "~/work/acme-api", "Add rate-limit middleware", model = "claude-sonnet-5-20250929")),
+            sharedBy = "panda-mbp",
+            // 6 days + slack from "now" so the header's live countdown renders a stable "6d left"
+            shareExpiresAt = dev.ccpocket.app.epochMillis() + (6 * 24 + 2) * 3_600_000L,
         ),
     )
 

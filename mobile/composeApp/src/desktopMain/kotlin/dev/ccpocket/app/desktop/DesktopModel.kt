@@ -58,6 +58,10 @@ data class DkProject(
     val path: String,
     val name: String,
     val running: Boolean = false,
+    // folder-share (issue #115): set only on a GUEST's shared project (the daemon stamps DirectoryEntry) —
+    // drives the sidebar's "Shared" provenance pill. Null = an ordinary local dir.
+    val sharedBy: String? = null,      // owner label ("shared by panda")
+    val shareExpiresAt: Long? = null,  // epoch ms — the "6d left" caption
 )
 
 data class DkSession(
@@ -81,6 +85,10 @@ data class DkSessionGroup(
     val name: String,
     val current: Boolean,
     val sessions: List<DkSession>,
+    // folder-share (issue #115): a guest's shared project keeps its provenance on the RECENT group —
+    // the header renders the "Shared" pill + owner + remaining validity. Null = an ordinary local dir.
+    val sharedBy: String? = null,
+    val shareExpiresAt: Long? = null,
 )
 
 /**

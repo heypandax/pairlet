@@ -16,6 +16,9 @@ import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.share_left_days
+import dev.ccpocket.app.resources.shared_badge
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.protocol.AgentKind
@@ -23,6 +26,8 @@ import dev.ccpocket.protocol.PermissionAsk
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
 
 /**
  * Headless automated tests for the desktop shell. They render the real composables (driven by [SeedDesktopModel],
@@ -45,6 +50,20 @@ class DesktopUiTest {
         assertPresent("Tidy CI workflow")      // a Codex session in the list
         assertPresent("Bump maxFrame to 4MB")  // a previously visited project's session — no expanding needed
         assertPresent("sonnet", substring = true) // Claude session header model line
+    }
+
+    @Test
+    fun sharedGroupShowsProvenancePillAndExpiry() = runComposeUiTest {
+        // a guest's shared folder in RECENT (issue #115): the neutral "Shared" pill + "owner · 6d left"
+        // — the same provenance statement mobile's SharedProjectCell makes, on the desktop group header.
+        // The pill/caption strings resolve via getString (the JVM locale picks the resource language).
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        waitForIdle()
+        val badge = runBlocking { getString(Res.string.shared_badge) }
+        val left = runBlocking { getString(Res.string.share_left_days, 6) }
+        assertPresent("acme-api")                 // the shared group's header renders
+        assertPresent(badge)                      // the hairline pill (shared_badge — same string as mobile)
+        assertPresent("panda-mbp · $left")        // origin machine + remaining validity, at rest
     }
 
     @Test

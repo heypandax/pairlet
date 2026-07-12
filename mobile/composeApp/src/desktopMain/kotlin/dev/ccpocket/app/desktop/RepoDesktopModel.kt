@@ -191,7 +191,11 @@ class RepoDesktopModel(
         DkComputer(accountId = accountId, name = displayName(), os = dkOs(), online = online, meta = if (online) "online" else "")
 
     private fun DirectoryEntry.toDkProject() =
-        DkProject(path = path, name = name.ifBlank { path }, running = open || busy)
+        DkProject(
+            path = path, name = name.ifBlank { path }, running = open || busy,
+            // guest share provenance (issue #115) rides along so every project surface can render the pill
+            sharedBy = sharedBy, shareExpiresAt = shareExpiresAt,
+        )
 
     override val activeComputer: DkComputer?
         get() = repo.paired.value?.toDk(online = repo.phase.value == ConnPhase.Ready)
@@ -477,14 +481,21 @@ class RepoDesktopModel(
         if (liveDir != null && keys.none { normCwd(it.path) == normLive }) keys.add(0, Visit(acct, liveDir))
         // sessions the user removed from RECENT via the row ✕ (issue #62) — filtered out of every group
         val hidden = hiddenState.filter { it.accountId == acct }.mapTo(HashSet()) { it.sessionId }
+        // guest share provenance (issue #115): visits carry only account+path, so the "Shared" pill's
+        // owner/expiry re-derive from the directory list (the daemon stamps a guest's shared roots there)
+        val sharedDirs = repo.directories.filter { it.sharedBy != null }.associateBy { normCwd(it.path) }
         keys.map { v ->
-            val current = normLive != null && normCwd(v.path) == normLive
+            val norm = normCwd(v.path)
+            val current = normLive != null && norm == normLive
             val rows = (if (current) sessions else v.snapshot)
+            val share = sharedDirs[norm]
             DkSessionGroup(
                 path = v.path,
                 name = folderName(v.path),
                 current = current,
                 sessions = if (hidden.isEmpty()) rows else rows.filterNot { it.sessionId in hidden },
+                sharedBy = share?.sharedBy,
+                shareExpiresAt = share?.shareExpiresAt,
             )
         }
     }
