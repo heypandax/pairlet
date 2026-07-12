@@ -620,10 +620,15 @@ class RepoDesktopModel(
         if (typed.isEmpty()) return
         showNewSession = false
         optimisticSelectedId = null // a brand-new session has no listed row yet — don't re-light a stale one (#82)
+        // a tilde path (the popover's own seed is tilde'd) that names an already-listed project swaps to
+        // that entry's ABSOLUTE path: the listing below is keyed by the daemon on the workdir string, and
+        // daemons predating the tilde-expanding ListSessions answer a `~/…` list EMPTY — which blanked the
+        // project's sessions the moment ⌘N confirmed. Unknown dirs stay as typed (the daemon expands).
+        val target = repo.directories.firstOrNull { sameDir(it.path, typed) }?.path ?: typed
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
-        openProject(DkProject(path = typed, name = folderName(typed)))
-        repo.openSession(wd = typed, startMode = mode, agent = agent)
+        openProject(DkProject(path = target, name = folderName(target)))
+        repo.openSession(wd = target, startMode = mode, agent = agent)
     }
 
     override val hasChat: Boolean get() = repo.convoId.value != null

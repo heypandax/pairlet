@@ -86,8 +86,14 @@ class RequestRouter(
 
             is ListSessions -> {
                 val busy = registry.busySessionIds()
+                // the new-session popover ships `~` paths raw (only the daemon knows this machine's home),
+                // and claude keys its transcript dirs by the REAL cwd — resolve like OpenSession does, or a
+                // `~/…` listing scans a dir that doesn't exist and answers EMPTY (desktop ⌘N lists the
+                // project it opens in, so its sessions vanished until an absolute-path refresh). An
+                // unresolvable path keeps the raw string: the same empty answer as before.
+                val wd = dirs.validateWorkdir(frame.workdir)?.toString() ?: frame.workdir
                 // merge every backend's resumable sessions for this dir (Claude ~/.claude/projects + Codex ~/.codex/sessions)
-                var items = registry.listSessions(frame.workdir)
+                var items = registry.listSessions(wd)
                     .map { if (it.sessionId in busy) it.copy(busy = true) else it }
                 // a GUEST sees ONLY the sessions IT started — never the owner's other sessions that happen to
                 // live under the shared root (visibility "by initiator", issue #115 comment §3)
