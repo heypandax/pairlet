@@ -62,6 +62,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -275,10 +276,19 @@ private sealed interface DiffRow {
         // (oldNo, newNo) is strictly increasing within a hunk, so idx + the pair is unique
         override val key get() = "$idx:${line.oldNo}:${line.newNo}"
     }
+    /** Mobile only: a run of a hunk's lines rendered as ONE item so one SelectionContainer can span
+     *  them — that's what lets a touch selection cross lines. Capped at [SELECTION_BLOCK_LINES]. */
+    data class Block(val idx: Int, val blockIdx: Int, val lines: List<DiffLine>) : DiffRow {
+        override val key get() = "b$idx:$blockIdx"
+    }
     data class Gap(val idx: Int, val lines: Int) : DiffRow {
         override val key get() = "g$idx"
     }
 }
+
+/** Mobile selection-block size: big enough that any realistic copy stays inside one block, small
+ *  enough that a whole-file hunk never composes as one giant item (the #81 lesson). */
+private const val SELECTION_BLOCK_LINES = 100
 
 /**
  * The unified diff, rendered per the shared grammar: collapsible hunk-header bands, +/− rows on
@@ -306,7 +316,10 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
                         }
                     }
                     add(DiffRow.Header(i, h))
-                    if (collapsed[i] != true) h.lines.forEach { add(DiffRow.Line(i, it)) }
+                    if (collapsed[i] != true) {
+                        if (dense) h.lines.forEach { add(DiffRow.Line(i, it)) }
+                        else h.lines.chunked(SELECTION_BLOCK_LINES).forEachIndexed { bi, block -> add(DiffRow.Block(i, bi, block)) }
+                    }
                 }
             }
         }
@@ -321,12 +334,14 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
     // Where the SelectionContainer sits is per-surface (the "改动文件无法选择文本" report):
     //  · desktop (dense): ONE container around the whole list — mouse drag-selects across lines,
     //    and per-line [hScroll] does not steal the drag (both verified by DiffSelectionContractTest).
-    //  · mobile: container INSIDE each line row, around just the code text (DiffLineRow). Wrapping
-    //    the LazyColumn is the one selection shape this app ships nowhere else, and on iOS it is
-    //    dead on device — long-press never starts a selection — while chat/terminal/subagent, all
-    //    container-inside-the-item, select fine. Cost: a selection can't span lines; the File tab
-    //    (one Text in one container) remains the copy-a-block surface.
-    // Headers & gaps are wrapped in DisableSelection so a desktop copied selection is only code.
+    //  · mobile: container INSIDE each lazy item, around a ≤100-line block of a hunk's rows, so a
+    //    long-press selection still drags across lines. Wrapping the LazyColumn itself is the one
+    //    selection shape this app ships nowhere else, and on iOS it is dead on device — long-press
+    //    never starts a selection — while chat/terminal/subagent, all container-inside-the-item,
+    //    select fine. Cost: a selection can't cross a hunk header or a 100-line block boundary;
+    //    the File tab (one Text in one container) remains the copy-everything surface.
+    // Headers & gaps are wrapped in DisableSelection so a desktop copied selection is only code;
+    // inside a mobile block the same DisableSelection keeps gutters/± out of the block's selection.
     val list: @Composable () -> Unit = {
         LazyColumn(Modifier.fillMaxSize()) {
             items(rows.size, key = { rows[it].key }) { i ->
@@ -339,6 +354,11 @@ fun DiffView(hunks: List<DiffHunk>, ext: String?, dense: Boolean = false, wrap: 
                         ) { collapsed[row.idx] = collapsed[row.idx] != true }
                     }
                     is DiffRow.Line -> DiffLineRow(row.line, dense, wrap, hScroll, highlight)
+                    is DiffRow.Block -> SelectionContainer {
+                        Column(Modifier.fillMaxWidth()) {
+                            row.lines.forEach { DiffLineRow(it, dense, wrap, hScroll, highlight) }
+                        }
+                    }
                     is DiffRow.Gap -> DisableSelection { GapRow(row.lines) }
                 }
             }
@@ -435,19 +455,21 @@ private fun DiffLineRow(line: DiffLine, dense: Boolean, wrap: Boolean, hScroll: 
                 )
             }
         }
-        val body = remember(line.text, highlight) { highlight(line.text) }
-        val code = @Composable { mod: Modifier ->
-            Text(
-                body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
-                softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,
-                modifier = mod.let { if (wrap) it else it.horizontalScroll(hScroll) }
-                    .padding(start = if (dense) 9.dp else 8.dp, end = if (dense) 20.dp else 16.dp),
-            )
+        // Selectable through the ambient container: the per-block one on mobile, the whole-list one
+        // on desktop (see DiffView). Rows are separate Texts, and a copied multi-Text selection is
+        // concatenated with NO separator — so each row carries its own trailing \n: invisible under
+        // maxLines=1+Clip, and it's what makes a multi-line copy paste as lines. Not in wrap mode
+        // (a trailing newline renders an empty extra line there).
+        val body = remember(line.text, highlight, wrap) {
+            if (wrap) highlight(line.text)
+            else buildAnnotatedString { append(highlight(line.text)); append('\n') }
         }
-        // mobile: this per-line container IS the selection surface (see DiffView); desktop selects
-        // through the one container around the whole list
-        if (dense) code(Modifier.weight(1f))
-        else SelectionContainer(Modifier.weight(1f)) { code(Modifier) }
+        Text(
+            body, color = codeColor, fontFamily = FontFamily.Monospace, fontSize = fontSize, lineHeight = lineHeight,
+            softWrap = wrap, maxLines = if (wrap) Int.MAX_VALUE else 1, overflow = TextOverflow.Clip,
+            modifier = Modifier.weight(1f).let { if (wrap) it else it.horizontalScroll(hScroll) }
+                .padding(start = if (dense) 9.dp else 8.dp, end = if (dense) 20.dp else 16.dp),
+        )
     }
 }
 

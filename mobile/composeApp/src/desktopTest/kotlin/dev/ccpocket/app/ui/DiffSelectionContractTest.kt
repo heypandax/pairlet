@@ -29,17 +29,19 @@ import kotlin.test.assertTrue
 
 /**
  * Contract tests for the "改动文件无法选择文本" report: DiffView ships two selection shapes, and both
- * must actually yield copyable text. Mobile (dense=false) selects through a per-line container —
- * long-press must raise the copy toolbar with the pressed word; wrapping the whole LazyColumn
- * instead is dead on iOS devices (chat/terminal, container-inside-the-item, are the shapes that
- * work). Desktop (dense=true) keeps one container around the list — mouse drag must select even
- * though each line also carries the shared horizontalScroll. Re-check on any CMP upgrade.
+ * must actually yield copyable text. Mobile (dense=false) selects through a container around each
+ * ≤100-line block of a hunk — long-press must raise the copy toolbar, and the selection must be
+ * able to span lines; wrapping the whole LazyColumn instead is dead on iOS devices (chat/terminal,
+ * container-inside-the-item, are the shapes that work). Desktop (dense=true) keeps one container
+ * around the list — mouse drag must select even though each line also carries the shared
+ * horizontalScroll. Re-check on any CMP upgrade.
  */
 @OptIn(ExperimentalTestApi::class)
 class DiffSelectionContractTest {
 
     private class RecordingToolbar : TextToolbar {
         var copyCb: (() -> Unit)? = null
+        var selectAllCb: (() -> Unit)? = null
         var shows = 0
         override var status = TextToolbarStatus.Hidden
         override fun hide() { status = TextToolbarStatus.Hidden }
@@ -50,7 +52,7 @@ class DiffSelectionContractTest {
             onCutRequested: (() -> Unit)?,
             onSelectAllRequested: (() -> Unit)?,
         ) {
-            shows++; copyCb = onCopyRequested; status = TextToolbarStatus.Shown
+            shows++; copyCb = onCopyRequested; selectAllCb = onSelectAllRequested; status = TextToolbarStatus.Shown
         }
     }
 
@@ -82,12 +84,12 @@ class DiffSelectionContractTest {
         val tb = RecordingToolbar()
         val cb = RecordingClipboard()
         setContent { diffUnderTest(tb, cb, dense = false) }
-        onNodeWithText(addedLine).performTouchInput { longClick(center) }
+        onNode(hasText(addedLine, substring = true)).performTouchInput { longClick(center) }
         waitForIdle()
         assertTrue(tb.shows > 0, "long-press must raise the copy toolbar")
         tb.copyCb!!.invoke()
         waitForIdle()
-        assertEquals(addedLine, cb.stored?.text, "copy must yield the pressed code text")
+        assertEquals(addedLine, cb.stored?.text?.trimEnd('\n'), "copy must yield the pressed code text")
     }
 
     @Test
@@ -95,7 +97,7 @@ class DiffSelectionContractTest {
         val tb = RecordingToolbar()
         val cb = RecordingClipboard()
         setContent { diffUnderTest(tb, cb, dense = true) }
-        onNodeWithText(addedLine).performMouseInput {
+        onNode(hasText(addedLine, substring = true)).performMouseInput {
             // start ON the glyphs (the node is row-wide; its center sits in empty space past the
             // short line, and a drag from empty space never starts a selection)
             val y = centerLeft.y
@@ -110,7 +112,27 @@ class DiffSelectionContractTest {
             keyDown(Key.MetaLeft); pressKey(Key.C); keyUp(Key.MetaLeft)
         }
         waitForIdle()
-        assertEquals(addedLine, cb.stored?.text, "mouse drag + copy shortcut must yield the dragged line")
+        assertEquals(addedLine, cb.stored?.text?.trimEnd('\n'), "mouse drag + copy shortcut must yield the dragged line")
+    }
+
+    /** The point of the per-BLOCK container (vs per-line): a mobile selection can span lines.
+     *  Select-all from the long-press menu must therefore cover the whole hunk block — and only
+     *  code: gutters and the ± markers ride in DisableSelection. */
+    @Test
+    fun mobile_selection_spans_lines_within_a_block() = runComposeUiTest {
+        val tb = RecordingToolbar()
+        val cb = RecordingClipboard()
+        setContent { diffUnderTest(tb, cb, dense = false) }
+        onNode(hasText(addedLine, substring = true)).performTouchInput { longClick(center) }
+        waitForIdle()
+        tb.selectAllCb!!.invoke()
+        waitForIdle()
+        tb.copyCb!!.invoke()
+        waitForIdle()
+        assertEquals(
+            "alpha context\nbravo removed\n$addedLine", cb.stored?.text?.trimEnd('\n'),
+            "select-all in a block must yield every code line of the hunk, line-per-line, nothing else",
+        )
     }
 
     @Test
