@@ -61,10 +61,20 @@ class RelayClient(
 ) {
     private val log = logger("RelayClient")
 
+    // The trust manager for the relay TLS link. Built once (env/OS trust sources are stable for the
+    // daemon's lifetime). Default is the JVM's own trust store; it only WIDENS to extra user/OS anchors
+    // when CC_POCKET_CACERTS or a Linux system CA bundle is present (issue #124). Never weakens checks.
+    private val relayTrust by lazy { RelayTrust.build() }
+
     // A FRESH client (and CIO selector) per connection attempt: a selector that lived through an interface
     // change (VPN/TUN flip, network switch) can keep dialing a dead path forever. Rebuilding is cheap at
     // reconnect cadence and guarantees every attempt starts from the current network state.
     private fun newClient() = HttpClient(CIO) {
+        engine {
+            // Hand CIO our trust manager. CIO does hostname verification separately (against the request
+            // host), so this only governs chain/anchor validation — hostname checking stays intact.
+            https { trustManager = relayTrust }
+        }
         install(WebSockets) {
             // keepalive ping well under Cloudflare's ~100s idle WS timeout, so the relay link stays up
             pingIntervalMillis = 20_000

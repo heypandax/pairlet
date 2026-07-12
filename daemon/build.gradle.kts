@@ -44,6 +44,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.core)
+    testImplementation(libs.ktor.network.tls.certificates) // builds test X.509 chains for RelayTrust
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

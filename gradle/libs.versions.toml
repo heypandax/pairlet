@@ -36,6 +36,8 @@ ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
 ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.ref = "ktor" }
+# test-only: generates real self-signed / CA-signed X.509 chains for the relay trust-manager tests
+ktor-network-tls-certificates = { module = "io.ktor:ktor-network-tls-certificates", version = "3.0.3" }
 
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidActivityCompose" }
 androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidxBiometric" } # App Lock (issue #109): BiometricPrompt (brings androidx.fragment for FragmentActivity)
