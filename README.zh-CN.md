@@ -4,11 +4,27 @@
 
 [English](README.md) | **简体中文**
 
-在手机上操控你电脑里的 Claude Code —— 或者 OpenAI Codex —— 从任何地方，而不只是同一局域网。新建/恢复会话、浏览工作目录、发送提示词，并远程批准或拒绝智能体的工具授权请求。每个会话开始时自己挑后端（Claude 或 Codex）；无论选哪个，流式输出、命令与文件改动的批准、打断都一样好用。流量经过一个**零知识中继（zero-knowledge relay）**转发，中继只搬运端到端加密后的密文。纯净室 Kotlin 实现，MIT 许可。
+**你的编程 agent，装进口袋。**CC Pocket 让你用手机——或另一台电脑——操控跑在自己电脑上的 Claude Code 或 OpenAI Codex，走到哪儿管到哪儿，不受局域网限制。实时看它干活，两下点掉工具授权，没聊完的会话随手接起。所有流量都经**零知识中继（zero-knowledge relay）**转发——中继只搬运端到端加密后的密文，无账号，零内容日志。纯净室 Kotlin 实现，MIT 许可。
 
-**🌐 官网：** <https://heypandax.github.io/cc-pocket/> · **📱 下载 App：** [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)（iPhone 与 iPad）· [TestFlight Beta](https://testflight.apple.com/join/8z26MWWr)（新版抢先）· [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)（GitHub Releases）· **🖥️ 桌面端 App：** macOS（.dmg，已签名）—— [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)· [Windows（.msi）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)
+**🌐 官网：**<https://heypandax.github.io/cc-pocket/> · **📋 完整功能列表：**[features](https://heypandax.github.io/cc-pocket/features.html)
 
 <p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/og-image.png" alt="CC Pocket —— 用手机操控电脑上的 Claude Code" width="720"></a></p>
+
+## 获取
+
+| | 平台 | 下载 |
+|---|---|---|
+| 📱 **手机 / 平板** | iOS · iPadOS | [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969) · [TestFlight Beta](https://testflight.apple.com/join/8z26MWWr)（新版抢先） |
+| | Android | [APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)（GitHub Releases） |
+| 🖥️ **桌面端 App** | macOS（.dmg，已签名） | [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg) · [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg) |
+| | Windows | [.msi](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)（未签名——SmartScreen 提示点「更多信息 → 仍要运行」） |
+| | Linux | 从源码构建 |
+| ⚙️ **daemon**（跑 agent 的那台电脑） | macOS · Linux | `curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh \| bash` |
+| | Windows | `irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 \| iex` |
+
+用手机打开[官网](https://heypandax.github.io/cc-pocket/)会直接跳转商店；用电脑打开则显示二维码供扫码。daemon 的细节、Homebrew / Scoop 替代方案与配对步骤见[安装](#安装)。
+
+## 工作原理
 
 ```mermaid
 flowchart LR
@@ -17,96 +33,79 @@ flowchart LR
     daemon -- "stdio" --> agent["claude / codex CLI"]
 ```
 
-中继负责把手机与电脑配对，并在两者之间转发不透明的加密帧；它不保存任何消息内容，也不持有私钥。手机与守护进程（daemon）之间运行一条端到端会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文永远不离开这两个可信端点。
+**daemon** 跑在你电脑上，以子进程方式拉起 `claude` 或 `codex` CLI，并**主动外连**中继——不用开放任何入站端口。**中继**只管两件事：帮设备配对、转发加密帧；消息内容它不存，私钥它没有。App 和 daemon 之间是一条端到端加密会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文永远只在这两个可信端点上。同一局域网里 App 会直连 daemon，延迟更低；出了门，中继兜底。
 
-## 口袋里能做的事
+## 能做什么
 
-- **随处批准** —— Claude 一发起工具授权请求，就立刻推到你手机上。几秒内允许或拒绝；若不处理，超时后自动安全拒绝。
-- **自定问多问少** —— 四档执行模式（每步询问、自动改文件、先计划、全自动），可持久化的**默认模式**与推理**强度（effort）**，外加本会话授权记忆——会话中途随时切换。
-- **接起任何会话** —— 恢复你电脑上正跑着的那个 Claude 会话，或在任意仓库里新开一个；之后在电脑上 `claude --resume` 即可把它交回桌面继续。
-- **实时看它思考** —— 实时流式输出、代码块语法高亮、工具事件与后台任务状态，和终端里渲染的一模一样。
-- **看清改了什么** —— 浏览会话动过的每一个文件，在手机上逐个查看改动，按语言着色（sql、py、kt、js 等）。
-- **接管不分叉** —— 终端里的会话默认只读旁观；「Continue here」原地接续，只有终端的 claude 确实还在写入时才会分支出新会话。
-- **树状浏览项目** —— 在电脑的目录里层层下钻（也可切回平铺最近列表），输入即筛选，带实时面包屑与每个项目的会话数。
-- **任意模型，含自定义 id** —— 会话中途切换模型；经第三方网关（cc-switch 等）路由的模型 id 直接可用。
-- **Claude 或 Codex 任选** —— 新建会话时挑后端，用和 Claude 一样的远程逐步批准来驱动 **OpenAI Codex**：看它流式输出、一步步批准它的命令与 diff、随时打断。Codex 会话有一档权限预设（Cautious / Balanced / Autonomous / Full auto），映射到 Codex 的 approval-policy × sandbox；列表与标题里 Codex 标记为青色（teal）。一个会话始终绑定一个后端。
+- **随处批准** —— agent 一请求授权，手机马上收到，几秒钟就能批；没顾上，超时自动拒绝、不会放行。四档执行模式（每步都问、只管改文件、先出计划、全自动），默认模式与推理强度设一次就记住，本会话的授权记忆随时可查可撤。
+- **Claude 或 Codex，按会话选** —— 开会话时二选一；流式、审批、打断两边手感一样。Codex 会话带一档权限预设（Cautious / Balanced / Autonomous / Full auto），映射到 approval-policy × sandbox，青色标识。
+- **接起任何会话** —— 电脑上跑着的会话拿起手机接着聊，想开新的哪个仓库都行。终端里的会话默认只读旁观，「Continue here」**原地**接管——只有终端确实还在写入时才会分叉。聊完 `claude --resume` 交回桌面。会话还能按项目分组，手机和桌面同步。
+- **实时看它干活** —— 流式输出、代码高亮、带耗时的工具事件、扩展思考、后台任务，一样不少。子 agent 一人一张卡、点开看报告，多 agent 的 `Workflow` 有自己的进度视图。网络一抖也不怕，重连后漏掉的输出自动补齐。
+- **看清改了什么** —— 会话动过的每个文件都摆出来：行级 diff、文字可选可复制、文件能预览能导出（会话外的读取要先过你这关）。对话里的路径点一下就打开，长按还能看完整路径、顺手复制。
+- **用你的方式和它说话** —— 语音听写、图片 / 文件 / 视频附件、`@` 文件补全、斜杠命令自动补全、快捷操作。会话中途换模型——cc-switch 之类第三方网关的自定义 id 也照认。随时打断；中途发的消息也不丢，排进下一回合。
+- **桌面任务控制台** —— macOS / Linux / Windows 原生 App，与手机同一套代码：两栏布局、⌘K 跳转任意处、⌘1–9 直达固定会话、窗口在后台时授权请求出现在菜单栏 / 托盘弹窗。
+- **多机总览（fleet）** —— 配对几台电脑后，谁在线、谁在跑、谁在等审批，一屏看全；隔着机器直接批，切换零等待。
+- **用量洞察** —— 按模型统计 token 与预估费用、今日逐小时活动柱状图、30 天热力图。
+- **共享一个文件夹** —— 把机器上的一个文件夹借给别人跑 agent：三档访问级别、自带有效期、随时一键撤销。Shell 命令仍以你的用户身份运行——这一点我们写得明明白白，不假装是沙箱。
+- **它来找你** —— 回合一结束就推送；心跳保活的重连扛得住换网络；多设备随便配；蜂窝、酒店 Wi-Fi 都能用。
+- **为隐私而设计** —— 端到端加密 + 零知识中继、无账号、可选 Face ID / 生物识别应用锁、开源且可自托管。
 
-语音听写、图片附件、斜杠命令自动补全、模型切换、任务完成推送等一并齐全。**[查看完整功能列表 →](https://heypandax.github.io/cc-pocket/features.html)**
-
-cc-pocket 现在也以原生**桌面 App**（macOS / Linux / Windows）的形式运行，与手机端同一套 Compose Multiplatform 代码——一个两栏式的「任务控制台」，用同样的远程逐步批准去操控**另一台**电脑上的 Claude Code 或 Codex，从此不再只是手机端。下载：macOS（.dmg，已签名）—— [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)· [Windows（.msi）](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)。
-
-## 模块
-
-| 模块 | 作用 | 技术栈 |
-|---|---|---|
-| `:protocol` | 共享的线路协议（`pocket/*` 帧）—— 唯一事实来源 | Kotlin Multiplatform + kotlinx.serialization |
-| `:daemon` | 跑在你电脑上；以子进程方式驱动 `claude`，主动外连中继 | Kotlin/JVM + Ktor |
-| `:relay` | 云端 broker：设备密钥配对、密文路由、多租户、限流 | Kotlin/JVM + Ktor + SQLite |
-| `:mobile` | CC Pocket App 本体 | Compose Multiplatform —— Android · iOS · 桌面 |
+**[查看完整功能列表 →](https://heypandax.github.io/cc-pocket/features.html)**
 
 ## 安装
 
-两部分：手机上的 **App**，以及电脑上连接托管中继的 **daemon**。
+两部分：**App**（见上方[获取](#获取)）和跑 agent 那台电脑上的 **daemon**——中继已经托管好，不用自己搭。
 
-**1. 在手机上装 App** —— iPhone 与 iPad 走 [App Store](https://apps.apple.com/cn/app/cc-pocket-%E9%9A%8F%E8%BA%AB%E7%BC%96%E7%A8%8B%E9%81%A5%E6%8E%A7/id6778773969)，Android 从 GitHub Releases 下 [Android APK](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-android.apk)。新版本会先上 [TestFlight Beta](https://testflight.apple.com/join/8z26MWWr)，比 App Store 过审上架更早。（在手机上打开[官网](https://heypandax.github.io/cc-pocket/)会直接跳转商店；在电脑上则显示二维码供扫码。）
-
-**或者用桌面端 App** —— cc-pocket 也能在你电脑上跑（用它去操控**另一台**机器）：macOS .dmg（已签名 + 公证）—— [Apple 芯片](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-arm64.dmg)· [Intel](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-macos-x86_64.dmg)· [Windows .msi](https://github.com/heypandax/cc-pocket/releases/latest/download/cc-pocket-desktop-windows-x86_64.msi)（未签名 —— SmartScreen 提示点「更多信息 → 仍要运行」）。Linux 桌面端：从源码构建。
-
-**2. 在电脑上装 daemon** —— 中继已为你托管。
-
-**macOS**（Apple Silicon 与 Intel 各有一份签名 + 公证的构建）：
+### macOS（Apple Silicon 与 Intel——均已签名、公证）
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
 cc-pocket-daemon pair                       # 打印一个二维码 + 6 位配对码
 ```
 
-安装器会用 release 的 SHA256SUMS 校验下载、装到 `~/.local`（Claude Code 式的按版本目录），并注册 launchd 服务——开机自启、自动重连。然后配对手机（打开 App，扫码或输入 6 位码）—— 完整步骤见 [`docs/USAGE.md`](docs/USAGE.md)。升级用 `cc-pocket-daemon update`（daemon 每天自查并推送手机提醒；`run` 加 `--auto-update` 可静默自动升级）。
+安装器会用 release 的 SHA256SUMS 校验下载、装到 `~/.local`（Claude Code 式的按版本目录），并注册 launchd 服务——开机自启、自动重连。偏好 Homebrew？`brew install --cask heypandax/tap/cc-pocket`（务必用全名——官方仓有个不相干的同名 cask）。
 
-偏好 Homebrew？`brew install --cask heypandax/tap/cc-pocket` 效果相同（升级用全名 `brew upgrade --cask heypandax/tap/cc-pocket`——官方仓有个不相干的同名 cask）。
-
-**Linux（x86_64 / arm64）**同样一键：
+### Linux（x86_64 / arm64）
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash
 cc-pocket-daemon pair                       # 打印一个二维码 + 6 位配对码
 ```
 
-安装脚本会从 GitHub Releases 拉一个自包含 tarball（内置 JRE —— 无需系统 Java），解到 `~/.local` 下，并注册一个 `systemd --user` 服务；升级用 `cc-pocket-daemon update`（或重跑一遍）。Linux 上的语音转写用 `ffmpeg`，而非 macOS 自带的 `afconvert`。
+安装脚本会拉取自包含 tarball（内置 JRE——无需系统 Java），装到 `~/.local` 下，并注册 `systemd --user` 服务。语音转写用 `ffmpeg`，而非 macOS 自带的 `afconvert`。
 
-**Windows（x86_64）**也是一条命令（需要先装好 [Claude Code CLI](https://github.com/anthropics/claude-code)，守护进程要驱动它）：
+### Windows（x86_64）
+
+需要先装好 [Claude Code CLI](https://github.com/anthropics/claude-code)——daemon 要驱动它。
 
 ```powershell
 irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex
 ```
 
-它会下载最新的自包含构建、注册登录自启的计划任务（守护进程后台运行、自动连上托管 relay），并直接进入配对 —— 一条命令完成 安装 + 启动 + 配对。升级用 `cc-pocket-daemon update`（或重跑同一条）。
+一条命令：安装、注册登录自启的计划任务，并直接进入配对。偏好 [Scoop](https://scoop.sh)？`scoop bucket add heypandax https://github.com/heypandax/scoop-bucket` 然后 `scoop install cc-pocket-daemon`。
 
-偏好 [Scoop](https://scoop.sh)？效果相同：
+### 配对与升级
 
-```powershell
-scoop bucket add heypandax https://github.com/heypandax/scoop-bucket
-scoop install cc-pocket-daemon
-cc-pocket-daemon pair        # 打印一个二维码 + 6 位配对码
-```
+打开 App，**扫描** `cc-pocket-daemon pair` 打印的二维码（或输入 6 位配对码）——这就连上了，端到端加密。完整步骤见 [`docs/USAGE.md`](docs/USAGE.md)。
 
-升级用 `scoop update cc-pocket-daemon`。其他架构：请从源码构建 —— 见 [快速开始](#快速开始)。
+升级随时执行 `cc-pocket-daemon update`——daemon 每天自查新版本并推送手机提醒（`run` 加 `--auto-update` 可静默自动升级）。Homebrew：`brew upgrade --cask heypandax/tap/cc-pocket`；Scoop：`scoop update cc-pocket-daemon`。其他架构：[从源码构建](#从源码构建)。
 
-## 配对原理
+## 安全
 
-无账号、免登录。daemon 首次运行时生成一对静态密钥（它的 `account id` 就是公钥指纹）。要添加一台手机：
+无账号、免登录。daemon 首次运行时生成一对静态密钥（它的 account id 就是公钥指纹），手机配对时注册自己的设备密钥。扫码时 daemon 的公钥直接进手机、不经中继之手（out-of-band），中继就算变坏也插不进来。它从头到尾只见得到密文帧——没有内容，没有私钥，零日志。
 
-```bash
-cc-pocket-daemon pair # 在你电脑上 —— 打印一个二维码 + 6 位配对码
-```
+完整威胁模型与「信任，但不必信任我们」的论证（开源、可自托管）见 [`docs/SECURITY.md`](docs/SECURITY.md)。安全漏洞请走[私密报告通道](https://github.com/heypandax/cc-pocket/security/advisories/new)。
 
-在手机上**扫码**（系统相机或 App 内扫描器）或**输入 6 位码**。手机注册它自己的设备密钥并完成端到端配对。扫码会把 daemon 的密钥经带外（out-of-band）传递，因此即便是恶意中继也无法在这条路径上中间人攻击。
+## 从源码构建
 
-完整威胁模型，以及“信任，但不必信任我们”的论证（开源、可自托管、零内容日志），见 [`docs/SECURITY.md`](docs/SECURITY.md)。
+| 模块 | 作用 | 技术栈 |
+|---|---|---|
+| `:protocol` | 共享的线路协议（`pocket/*` 帧）——唯一事实来源 | Kotlin Multiplatform + kotlinx.serialization |
+| `:daemon` | 跑在你电脑上；以子进程方式拉起 agent CLI，主动外连中继 | Kotlin/JVM + Ktor |
+| `:relay` | 云端 broker：设备密钥配对、密文路由、多租户、限流 | Kotlin/JVM + Ktor + SQLite |
+| `:mobile` | CC Pocket App 本体 | Compose Multiplatform —— Android · iOS · 桌面 |
 
-## 快速开始
-
-需要 **JDK 17**（任意发行版——版本不符时 Gradle toolchain 会自动下载）、**Android SDK**（`ANDROID_HOME` 或 `local.properties`；即使只跑 JVM 任务，Android 模块也会在配置期被加载），以及已安装并登录的 `claude` CLI。构建移动端 App 还需先复制一次仓库自带的 Firebase 占位配置（真实 Firebase 项目只有推送/统计才需要）：
+需要 **JDK 17**（任意发行版——版本不符时 Gradle toolchain 会自动下载）、**Android SDK**（`ANDROID_HOME` 或 `local.properties`；即使只跑 JVM 任务，Android 模块也会在配置期被加载），以及已安装并登录的 `claude` CLI。构建移动端 App 还需先复制一次仓库自带的 Firebase 占位配置（真实 Firebase 项目只有推送 / 统计才需要）：
 
 ```bash
 cp mobile/composeApp/google-services.json.template mobile/composeApp/google-services.json
@@ -137,13 +136,13 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
 
 - 官网 / 落地页 —— <https://heypandax.github.io/cc-pocket/>
 - 完整功能列表 —— <https://heypandax.github.io/cc-pocket/features.html>
-- 使用文档（中文使用文档）—— [`docs/USAGE.md`](docs/USAGE.md)
+- 使用文档（中文）—— [`docs/USAGE.md`](docs/USAGE.md)
 - 运行 / 运维 daemon —— [`docs/RUN.md`](docs/RUN.md)
 - 安全模型与威胁分析 —— [`docs/SECURITY.md`](docs/SECURITY.md)
 - iOS 真机构建与安装 —— [`docs/ios-device.md`](docs/ios-device.md)
 - 中继部署（Caddy + Cloudflare + systemd）—— [`deploy/README.md`](deploy/README.md)
-- 历史立项文档（v1 需求与原始方案，已被代码演进取代）—— [`docs/archive/`](docs/archive/)
 - UI 设计（claude.ai/design 交付）—— [`docs/design/`](docs/design/)
+- 历史立项文档（已被代码演进取代）—— [`docs/archive/`](docs/archive/)
 - 来源 / 纯净室声明 —— [`docs/ANTIPLAGIARISM.md`](docs/ANTIPLAGIARISM.md)
 
 ## 参与贡献
