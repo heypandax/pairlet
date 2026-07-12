@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.agent
 
 import dev.ccpocket.daemon.util.logger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -8,6 +9,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
 
 /**
@@ -44,6 +46,11 @@ class AgentProcess private constructor(
     /** Every write (prompt / allow / deny / rpc) funnels through this one writer -> no interleaving. */
     private val stdin: Channel<String> = Channel(capacity = 64)
 
+    // completed when the stderr pump has read its pipe to EOF — the OS exit alone does NOT imply
+    // lastStderr is populated yet (the reader coroutine may not have been scheduled), and a startup
+    // refusal's parting words are healSessionLock's only evidence
+    private val stderrDrained = CompletableDeferred<Unit>()
+
     private fun launchPumps() {
         scope.launch(Dispatchers.IO + CoroutineName("agent-stdout-$pid")) {
             try {
@@ -69,6 +76,7 @@ class AgentProcess private constructor(
                     }
                 }
             }
+            stderrDrained.complete(Unit)
         }
         scope.launch(Dispatchers.IO + CoroutineName("agent-stdin-$pid")) {
             val w = process.outputStream.bufferedWriter()
@@ -97,9 +105,13 @@ class AgentProcess private constructor(
             .onFailure { log.warn("agent $pid stdin write dropped (pipe closed): ${json.take(120)}") }
     }
 
-    /** Bounded wait for the OS process to fully exit — its transcript is only flushed then. */
+    /** Bounded wait for the OS process to fully exit — its transcript is only flushed then. Also waits
+     *  (bounded) for the stderr pump to drain: callers read [lastStderr] right after this (the
+     *  session-lock heal, the process_exited "why"), and the exit races the reader coroutine. Post-exit
+     *  the pipe is at EOF so the drain settles in microseconds; the timeout only guards a wedged pump. */
     suspend fun awaitExit(seconds: Long = 5) {
         withContext(Dispatchers.IO) { runCatching { process.waitFor(seconds, TimeUnit.SECONDS) } }
+        withTimeoutOrNull(2_000) { stderrDrained.await() }
     }
 
     /**
