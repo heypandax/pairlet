@@ -7,6 +7,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/** The pre-#119 `pocket/sessions` body shape (no `groups`) — used to prove an old app skips a populated
+ *  `groups` array-of-objects via ignoreUnknownKeys. A top-level @Serializable so the plugin generates its serializer. */
+@kotlinx.serialization.Serializable
+private data class OldSessions(val workdir: String, val items: List<SessionSummary> = emptyList())
+
 class SerializationRoundTripTest {
 
     @Test
@@ -1203,5 +1208,87 @@ class SerializationRoundTripTest {
                {"deviceId":"d2","path":"/q","tier":"collaborate","createdAt":3,"expiresAt":4,"unknownFuture":9}]}}""",
         )
         assertEquals("d2", (listing.body as ShareListing).items.single().deviceId)
+    }
+
+    // ── session groups (issue #119) ──────────────────────────────────────────
+
+    @Test
+    fun sessionGroup_roundtrips() {
+        val g = SessionGroup(id = "g1", name = "Feature work", order = 2)
+        assertEquals(g, PocketJson.decodeFromString<SessionGroup>(PocketJson.encodeToString(g)))
+    }
+
+    @Test
+    fun sessionSummary_group_roundtrips_and_defaults_for_old_daemons() {
+        val s = SessionSummary(
+            sessionId = "s", title = "t", firstPrompt = "p",
+            messageCount = 1, cwd = "/x", lastModified = 0, group = "g1",
+        )
+        assertEquals(s, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(s)))
+        // an old daemon's summary has no `group` key → decodes to null (ungrouped), not an error
+        val old = """{"sessionId":"s","title":"t","firstPrompt":"p","messageCount":1,"cwd":"/x","lastModified":0}"""
+        assertEquals(null, PocketJson.decodeFromString<SessionSummary>(old).group)
+    }
+
+    @Test
+    fun sessions_frame_groups_roundtrip_and_omit_when_null() {
+        val withGroups = Envelope(
+            id = "sg1", ts = 0,
+            body = Sessions(
+                workdir = "/x",
+                items = listOf(SessionSummary("s", "t", "p", 1, "/x", 0, group = "g1")),
+                groups = listOf(SessionGroup("g1", "Docs", 0), SessionGroup("g2", "Bugs", 1)),
+            ),
+        )
+        val json = PocketJson.encodeToString(withGroups)
+        assertTrue("\"t\":\"pocket/sessions\"" in json, json)
+        assertTrue("\"groups\"" in json, json)
+        assertEquals(withGroups, PocketJson.decodeFromString<Envelope>(json))
+
+        // an old daemon omits groups entirely → null, and an old app that never sends them still decodes
+        val noGroups = Sessions(workdir = "/x", items = emptyList())
+        val j2 = PocketJson.encodeToString(noGroups)
+        assertFalse("groups" in j2, j2)
+        assertEquals(noGroups, PocketJson.decodeFromString<Sessions>(j2))
+        // a legacy daemon's frame (no groups key at all) decodes with groups == null
+        val legacy = """{"workdir":"/x","items":[]}"""
+        assertEquals(null, PocketJson.decodeFromString<Sessions>(legacy).groups)
+    }
+
+    @Test
+    fun old_peer_skips_a_populated_groups_array() {
+        // the new-daemon → OLD-app direction, exercised as a STRUCTURED unknown-key skip: an old app whose
+        // schema lacks `groups` decodes a NEW pocket/sessions frame that DOES carry a populated array-of-objects
+        // and must skip it (ignoreUnknownKeys) — the exact skip path over structured data that has bitten before.
+        // [OldSessions] (top-level) simulates the pre-#119 schema.
+        val newFrame = """{"workdir":"/x","items":[],"groups":[{"id":"g1","name":"Docs","order":0}]}"""
+        val back = PocketJson.decodeFromString<OldSessions>(newFrame)
+        assertEquals("/x", back.workdir)
+        assertTrue(back.items.isEmpty())
+    }
+
+    @Test
+    fun group_mutation_frames_roundtrip() {
+        val create = Envelope(id = "1", ts = 0, body = GroupCreate("/x", "Feature"))
+        assertTrue("\"t\":\"pocket/group.create\"" in PocketJson.encodeToString(create))
+        assertEquals(create, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(create)))
+
+        val rename = Envelope(id = "2", ts = 0, body = GroupRename("/x", "g1", "Renamed"))
+        assertTrue("\"t\":\"pocket/group.rename\"" in PocketJson.encodeToString(rename))
+        assertEquals(rename, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(rename)))
+
+        val delete = Envelope(id = "3", ts = 0, body = GroupDelete("/x", "g1"))
+        assertTrue("\"t\":\"pocket/group.delete\"" in PocketJson.encodeToString(delete))
+        assertEquals(delete, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(delete)))
+
+        // assign with a group, and assign-out (groupId null is omitted by explicitNulls=false)
+        val assign = Envelope(id = "4", ts = 0, body = GroupAssign("/x", "s1", "g1"))
+        assertTrue("\"t\":\"pocket/group.assign\"" in PocketJson.encodeToString(assign))
+        assertEquals(assign, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(assign)))
+
+        val unassign = GroupAssign("/x", "s1", null)
+        val uj = PocketJson.encodeToString(unassign)
+        assertFalse("groupId" in uj, uj)
+        assertEquals(unassign, PocketJson.decodeFromString<GroupAssign>(uj))
     }
 }

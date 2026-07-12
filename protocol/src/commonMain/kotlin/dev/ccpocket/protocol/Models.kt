@@ -101,7 +101,20 @@ data class SessionSummary(
     val busy: Boolean = false, // has running background work (bg bash / subagent / monitor) — keep it "active" even when idle
     val agent: AgentKind? = null, // which backend owns this transcript (null = older daemon → phone assumes Claude)
     val model: String? = null, // the LAST assistant turn's model id (null = older daemon / no turn yet) — list rows show its alias
+    // The [SessionGroup] id this session is filed under (issue #119), or null = ungrouped. Daemon-side truth,
+    // stamped by the daemon per row; a trailing optional — an old daemon omits it (every row reads ungrouped),
+    // an old app ignores it (renders today's flat list).
+    val group: String? = null,
 )
+
+/**
+ * One optional session GROUP within a project (issue #119): `project → group → session`, scheme A (a session
+ * is in 0 or 1 group). Lives on the daemon (see the daemon's SessionGroups store) so grouping is consistent
+ * across every paired client. [id] is a daemon-minted stable key; [order] is the insertion order the client
+ * lists groups by. Rides the session-list frame as a trailing optional (an old app never sees it).
+ */
+@Serializable
+data class SessionGroup(val id: String, val name: String, val order: Int)
 
 /**
  * One file a session created/edited, as recorded in its transcript (see ListSessionFiles).

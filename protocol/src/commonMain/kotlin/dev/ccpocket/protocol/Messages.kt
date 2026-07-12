@@ -17,6 +17,34 @@ data class ListDirectories(val root: String? = null) : ToDaemon
 @SerialName("pocket/sessions.list")
 data class ListSessions(val workdir: String) : ToDaemon
 
+// ── session groups (issue #119): optional one-level `project → group → session` organization. Group
+//    metadata lives on the daemon (consistent across clients); each mutation is answered by re-pushing the
+//    workdir's [Sessions] list (with the updated [Sessions.groups] + per-row [SessionSummary.group]) so the
+//    change reflects immediately. A daemon that predates these drops the unknown frame (the group op just
+//    no-ops there — the client keeps its flat list). ──
+
+/** phone -> daemon: create a new group named [name] under [workdir]. Reply: the re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.create")
+data class GroupCreate(val workdir: String, val name: String) : ToDaemon
+
+/** phone -> daemon: rename group [groupId] under [workdir] to [name]. Reply: the re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.rename")
+data class GroupRename(val workdir: String, val groupId: String, val name: String) : ToDaemon
+
+/** phone -> daemon: delete group [groupId] under [workdir]; its sessions fall back to ungrouped (the sessions
+ *  are NOT deleted). Reply: the re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.delete")
+data class GroupDelete(val workdir: String, val groupId: String) : ToDaemon
+
+/** phone -> daemon: file [sessionId] under [groupId] ([groupId] null = move it out of any group). Reply: the
+ *  re-pushed [Sessions]. */
+@Serializable
+@SerialName("pocket/group.assign")
+data class GroupAssign(val workdir: String, val sessionId: String, val groupId: String? = null) : ToDaemon
+
 /** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
 @Serializable
 @SerialName("pocket/usage.fetch")
@@ -446,7 +474,14 @@ data class Directories(val entries: List<DirectoryEntry>, val root: String? = nu
 
 @Serializable
 @SerialName("pocket/sessions")
-data class Sessions(val workdir: String, val items: List<SessionSummary>) : ToPhone
+data class Sessions(
+    val workdir: String,
+    val items: List<SessionSummary>,
+    // The project's session groups (issue #119), ordered — the client renders the group headers from this and
+    // files each row under [SessionSummary.group]. A trailing optional: an old daemon omits it (the client shows
+    // no groups, a flat list), an old app ignores it. Re-pushed after every pocket/group.* mutation.
+    val groups: List<SessionGroup>? = null,
+) : ToPhone
 
 /**
  * Aggregated token usage (issue #26). [tokensToday]/[requestsToday]/[cacheHitPct]/[costUsdToday] are for the

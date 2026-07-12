@@ -9,6 +9,7 @@ import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.agent.PermissionBridge
 import dev.ccpocket.daemon.agent.ToolMetadata
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SlashCommandScanner
 import dev.ccpocket.daemon.disk.WorkflowFiles
 import dev.ccpocket.daemon.util.logger
@@ -728,7 +729,20 @@ class Conversation(
                 when (ev) {
                     is AgentEvent.SessionInit -> {
                         val firstTime = sessionId == null
-                        ev.sessionId?.let { sessionId = it }
+                        val prevSid = sessionId
+                        ev.sessionId?.let { newSid ->
+                            // FORK convergence (issue #119): a --fork-session relaunch (heal-lock / take-over /
+                            // conditional fork) reports a sessionId that differs from the one we resumed/ran —
+                            // carry the parent's group membership onto the branch so a forked copy stays filed
+                            // where the user put it. Parent = the id we were running, or (pre-first-turn) the
+                            // resume anchor. A plain in-place resume reports the SAME id → no-op. Single choke
+                            // point for every fork path, so we don't sprinkle inherit() across the callers.
+                            val parentSid = prevSid ?: openedResumeId
+                            if (parentSid != null && parentSid != newSid) {
+                                runCatching { SessionGroups.inherit(workdir.toString(), parentSid, newSid) }
+                            }
+                            sessionId = newSid
+                        }
                         ev.model?.let { model = it; backfilledModel = null } // the agent's resolved model beats the transcript guess
                         if (firstTime && sessionId != null) {
                             reemitLive = false // this announce already carries the fresh sessionId + mode

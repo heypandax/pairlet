@@ -9,6 +9,7 @@ import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.disk.SessionFilesService
+import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -37,6 +38,10 @@ import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileUploadCancel
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.GroupAssign
+import dev.ccpocket.protocol.GroupCreate
+import dev.ccpocket.protocol.GroupDelete
+import dev.ccpocket.protocol.GroupRename
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
@@ -84,21 +89,27 @@ class RequestRouter(
                 if (guestScope != null) sink.emit(Directories(scopedDirectories(guestScope)))
                 else sink.emit(Directories(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd())))
 
-            is ListSessions -> {
-                val busy = registry.busySessionIds()
-                // the new-session popover ships `~` paths raw (only the daemon knows this machine's home),
-                // and claude keys its transcript dirs by the REAL cwd — resolve like OpenSession does, or a
-                // `~/…` listing scans a dir that doesn't exist and answers EMPTY (desktop ⌘N lists the
-                // project it opens in, so its sessions vanished until an absolute-path refresh). An
-                // unresolvable path keeps the raw string: the same empty answer as before.
-                val wd = dirs.validateWorkdir(frame.workdir)?.toString() ?: frame.workdir
-                // merge every backend's resumable sessions for this dir (Claude ~/.claude/projects + Codex ~/.codex/sessions)
-                var items = registry.listSessions(wd)
-                    .map { if (it.sessionId in busy) it.copy(busy = true) else it }
-                // a GUEST sees ONLY the sessions IT started — never the owner's other sessions that happen to
-                // live under the shared root (visibility "by initiator", issue #115 comment §3)
-                if (guestScope != null) items = items.filter { it.sessionId in guestScope.ownedSessions }
-                sink.emit(Sessions(frame.workdir, items))
+            is ListSessions -> emitSessions(frame.workdir, sink, guestScope)
+
+            // session groups (issue #119): mutate the daemon-side group store, then re-push this workdir's
+            // session list so the grouping change reflects immediately (same response path as ListSessions).
+            // A GUEST can't manage groups (they belong to the owner's project view) — silently no-op the
+            // mutation but still answer with the (re-filtered) list so the client isn't left hanging.
+            is GroupCreate -> {
+                if (guestScope == null) SessionGroups.create(groupWorkdir(frame.workdir), frame.name)
+                emitSessions(frame.workdir, sink, guestScope)
+            }
+            is GroupRename -> {
+                if (guestScope == null) SessionGroups.rename(groupWorkdir(frame.workdir), frame.groupId, frame.name)
+                emitSessions(frame.workdir, sink, guestScope)
+            }
+            is GroupDelete -> {
+                if (guestScope == null) SessionGroups.delete(groupWorkdir(frame.workdir), frame.groupId)
+                emitSessions(frame.workdir, sink, guestScope)
+            }
+            is GroupAssign -> {
+                if (guestScope == null) SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
+                emitSessions(frame.workdir, sink, guestScope)
             }
 
             // heavy transcript scan → off the inbound pump so it can't wedge the socket
@@ -226,6 +237,27 @@ class RequestRouter(
 
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
         }
+    }
+
+    /** Resolve a workdir the same way [OpenSession] does (the new-session popover ships `~` paths raw and
+     *  claude keys transcript dirs by the REAL cwd) so both the session listing and the group store agree on
+     *  one dir-key. An unresolvable path keeps the raw string (the same empty answer as before). */
+    private fun groupWorkdir(workdir: String): String = dirs.validateWorkdir(workdir)?.toString() ?: workdir
+
+    /**
+     * Emit this [workdir]'s resumable-session list — the single reply to [ListSessions] AND the re-push after
+     * every session-group mutation (issue #119). Resolves the workdir like [OpenSession] (else a raw `~/…`
+     * listing scans a non-existent dir and answers EMPTY — desktop ⌘N regression), merges every backend's
+     * sessions, marks the busy ones, and stamps the project's groups. A GUEST (issue #115) sees ONLY the
+     * sessions IT started (visibility "by initiator") and no group headers.
+     */
+    private suspend fun emitSessions(workdir: String, sink: OutboundSink, guestScope: GuestScope?) {
+        val busy = registry.busySessionIds()
+        val wd = groupWorkdir(workdir)
+        var items = registry.listSessions(wd).map { if (it.sessionId in busy) it.copy(busy = true) else it }
+        if (guestScope != null) items = items.filter { it.sessionId in guestScope.ownedSessions }
+        val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
+        sink.emit(Sessions(workdir, items, groups = groups))
     }
 
     /**

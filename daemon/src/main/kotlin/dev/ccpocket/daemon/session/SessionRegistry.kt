@@ -8,6 +8,7 @@ import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
+import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AuthBlockReason
@@ -219,9 +220,11 @@ class SessionRegistry(
     /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */
     internal suspend fun observing(convoId: String): Boolean = mutex.withLock { observes.containsKey(convoId) }
 
-    /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind), newest-first. */
+    /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind),
+     *  newest-first, each stamped with its [SessionGroup] membership (issue #119; null = ungrouped). */
     fun listSessions(workdir: String): List<SessionSummary> =
         backends.values.flatMap { runCatching { it.create().listSessions(workdir) }.getOrDefault(emptyList()) }
+            .map { it.copy(group = SessionGroups.groupOf(workdir, it.sessionId)) }
             .sortedByDescending { it.lastModified }
 
     /**
