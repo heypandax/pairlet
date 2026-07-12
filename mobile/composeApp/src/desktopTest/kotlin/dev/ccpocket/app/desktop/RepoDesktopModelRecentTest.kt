@@ -4,6 +4,7 @@ import dev.ccpocket.app.data.DemoData
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +98,27 @@ class RepoDesktopModelRecentTest {
         // a restart after clear stays cleared — nothing refills from thin air
         val (_, m3) = demoModel(store)
         assertTrue(m3.sessionGroups.isEmpty())
+    }
+
+    // issue #115: a guest's shared folder — the daemon stamps sharedBy/shareExpiresAt on its
+    // DirectoryEntry — must keep that provenance on its RECENT group (visits carry only account+path,
+    // so the group re-derives it from the directory list). Ordinary local dirs stay unstamped.
+    @Test
+    fun sharedDirStampsItsRecentGroup() {
+        val (repo, m) = demoModel()
+        val shared = DirectoryEntry(
+            path = "/Users/alex/acme-api", name = "acme-api", isDir = true,
+            sharedBy = "panda-mbp", shareExpiresAt = 123_456L,
+        )
+        repo.directories.add(shared)
+        m.openProject(DkProject(shared.path, shared.name))
+        val g = m.sessionGroups.first { it.path == shared.path }
+        assertEquals("panda-mbp", g.sharedBy)
+        assertEquals(123_456L, g.shareExpiresAt)
+
+        val (a, _) = DemoData.dirs()
+        m.openProject(DkProject(a.path, a.name))
+        assertEquals(null, m.sessionGroups.first { it.path == a.path }.sharedBy)
     }
 
     // issue #97: creating a new session must never clear the other RECENT groups — cross-directory

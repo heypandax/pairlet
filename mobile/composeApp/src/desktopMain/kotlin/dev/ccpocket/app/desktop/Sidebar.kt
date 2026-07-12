@@ -75,10 +75,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.modelAlias
+import dev.ccpocket.app.ui.share.SharedPill
+import dev.ccpocket.app.ui.share.expiryLeft
+import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.protocol.AgentKind
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.filterNotNull
@@ -319,6 +323,7 @@ private fun RunningRow(m: DkMachine, p: DkProject, onBrowse: () -> Unit, onClick
             p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 12.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
+        if (p.sharedBy != null) SharedPill() // a guest's shared folder (issue #115) — provenance at a glance
         if (hovered) Text(
             "≡", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp,
             modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(onClick = onBrowse).padding(horizontal = 3.dp),
@@ -486,6 +491,20 @@ private fun GroupHeader(g: DkSessionGroup, closed: Boolean, refreshing: Boolean,
             g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
+        if (g.sharedBy != null) {
+            // a guest's shared folder (issue #115): the same neutral hairline pill as mobile — provenance,
+            // not attention — plus "who · how long" at rest. Hover hands that space to the refresh icon
+            // (the SessionRow model-label precedent), so the affordances never fight over 28dp.
+            SharedPill()
+            if (!hovered && !refreshing) {
+                val left = g.shareExpiresAt?.let { expiryLeftText(expiryLeft(it, epochMillis())) }
+                Text(
+                    listOfNotNull(g.sharedBy, left).joinToString(" · "),
+                    color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp),
+                )
+            }
+        }
         when {
             refreshing -> {
                 val angle by rememberInfiniteTransition().animateFloat(
