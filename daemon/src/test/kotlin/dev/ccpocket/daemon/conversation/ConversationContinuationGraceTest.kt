@@ -54,12 +54,17 @@ class ConversationContinuationGraceTest {
 
     private class ScriptedBackend(private val script: Path, private val thenExit: Boolean) : AgentBackend {
         override val kind = AgentKind.CLAUDE
+        private var io: AgentIo? = null
+        // `read` gates the stream on the prompt: Conversation launches the process BEFORE it arms
+        // `executing` (Conversation.sendPrompt), so an ungated `cat` can race its whole script past
+        // the pump first — result processed, THEN executing=true sticks forever (CI flake). The real
+        // CLI never talks before the prompt reaches its stdin, so gating mirrors reality.
         override fun processBuilder(spec: AgentSpec): ProcessBuilder =
-            if (thenExit) ProcessBuilder("sh", "-c", "cat '${script.absolutePathString()}'")
-            else ProcessBuilder("sh", "-c", "cat '${script.absolutePathString()}'; sleep 30")
-        override suspend fun attach(io: AgentIo, spec: AgentSpec) {}
+            if (thenExit) ProcessBuilder("sh", "-c", "read go; cat '${script.absolutePathString()}'")
+            else ProcessBuilder("sh", "-c", "read go; cat '${script.absolutePathString()}'; sleep 30")
+        override suspend fun attach(io: AgentIo, spec: AgentSpec) { this.io = io }
         override suspend fun parse(line: String): List<AgentEvent> = StreamParser.parse(line)
-        override suspend fun sendPrompt(text: String, images: List<ImageData>) {}
+        override suspend fun sendPrompt(text: String, images: List<ImageData>) { io?.writeLine("go") }
         override suspend fun interrupt() {}
         override suspend fun respondPermission(
             askId: String, allow: Boolean, remember: Boolean,
