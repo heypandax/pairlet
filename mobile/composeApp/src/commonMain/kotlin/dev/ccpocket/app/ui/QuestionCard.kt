@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -95,8 +97,13 @@ fun QuestionCard(
     val allAnswered = questions.indices.all { answerOf(it) != null }
     val multiQ = questions.size > 1
     val shape = RoundedCornerShape(16.dp)
-    Box(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // cap the docked card's height so a tall question (many options / 2+ questions) scrolls INSIDE the
+        // card instead of shoving the skip/submit row off the bottom of the screen, unreachable (#125 —
+        // the card docks above the composer with natural height; without a cap Android can't reach its foot)
+        val cardMaxHeight = maxHeight * 0.62f
+        Box(
+        Modifier.fillMaxWidth().heightIn(max = cardMaxHeight).padding(horizontal = 12.dp, vertical = 6.dp)
             .shadow(14.dp, shape).clip(shape).background(Tok.raised).border(1.dp, Tok.hair, shape),
     ) {
         // the quiet arrival cue: a centered terracotta top-hairline that fades at both ends
@@ -129,6 +136,9 @@ fun QuestionCard(
                     }
                 }
             }
+            // scrollable middle — header + chip-tabs (above) and skip/submit (below) stay pinned, so a tall
+            // option list / freeform field scrolls HERE instead of overflowing the capped card (#125)
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             if (freeform) {
                 var focused by remember { mutableStateOf(false) }
                 val ffShape = RoundedCornerShape(12.dp)
@@ -180,6 +190,7 @@ fun QuestionCard(
                 }
                 ReplyLink(back = false) { freeform = true }
             }
+            } // end scrollable middle (#125)
             Row(Modifier.padding(top = 16.dp).fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     stringResource(Res.string.question_skip), color = Tok.muted, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
@@ -206,6 +217,7 @@ fun QuestionCard(
                 }
             }
         }
+    }
     }
 }
 
