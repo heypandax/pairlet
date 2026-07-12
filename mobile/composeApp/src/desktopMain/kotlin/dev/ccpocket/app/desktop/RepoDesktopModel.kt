@@ -306,6 +306,7 @@ class RepoDesktopModel(
                 running = if (it.sessionId == openId) repo.streaming.value || it.busy else it.live || it.busy,
                 pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
                 model = it.model,
+                group = it.group, // custom session-group membership (issue #119)
             )
         }
         // a just-created session isn't on disk until its first turn persists, so ListSessions can't
@@ -516,6 +517,43 @@ class RepoDesktopModel(
     override fun clearRecent() {
         visits.clear()
         saveVisits()
+    }
+
+    // ── custom session groups (issue #119): the current project's groups + mutations ───────────────
+    // repo.sessionGroups already tracks the listed dir's groups (null/older-daemon collapsed to empty
+    // upstream — so an empty list is the flat-render signal). Every mutation targets the current dir; the
+    // daemon answers by re-pushing Sessions, so no optimistic local edit is needed here.
+    override val customGroups: List<DkGroup>
+        get() = repo.sessionGroups.map { DkGroup(it.id, it.name, it.order) }.sortedBy { it.order }
+
+    // owner-only: a guest's shared project (the daemon stamps sharedBy on its DirectoryEntry) can't edit
+    // groups — the daemon rejects it, so hide the affordances. Editable requires a listed current dir.
+    override val canEditGroups: Boolean
+        get() {
+            val dir = repo.sessionsDir.value ?: return false
+            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+        }
+
+    override fun createGroup(name: String) { repo.createGroup(name) }
+    override fun renameGroup(groupId: String, name: String) { repo.renameGroup(groupId, name) }
+    override fun deleteGroup(groupId: String) { repo.deleteGroup(groupId) }
+    override fun assignGroup(sessionId: String, groupId: String?) { repo.assignGroup(sessionId, groupId) }
+
+    // collapse memory keyed by (canonical project path, group id) — persisted like the RECENT visit keys
+    // (issue #102): a snapshot list so reads recompose, written through the same DesktopStore.
+    private val groupCollapsedState = mutableStateListOf<String>().apply {
+        runCatching {
+            store.getString(K_GROUP_COLLAPSED)?.takeIf { it.isNotBlank() }?.let { addAll(storeJson.decodeFromString<List<String>>(it)) }
+        }
+    }
+    private fun groupCollapseKey(path: String, groupId: String) = normCwd(path) + "\u0000" + groupId
+    private fun saveGroupCollapsed() = store.putString(K_GROUP_COLLAPSED, storeJson.encodeToString(groupCollapsedState.toList()))
+    override fun groupCollapsed(projectPath: String, groupId: String): Boolean = groupCollapseKey(projectPath, groupId) in groupCollapsedState
+    override fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {
+        val k = groupCollapseKey(projectPath, groupId)
+        val has = k in groupCollapsedState
+        if (collapsed && !has) { groupCollapsedState.add(k); saveGroupCollapsed() }
+        else if (!collapsed && has) { groupCollapsedState.remove(k); saveGroupCollapsed() }
     }
 
     override fun selectSession(s: DkSession) {
@@ -845,6 +883,7 @@ class RepoDesktopModel(
         const val K_PINS = "desktop_pins"
         const val K_HIDDEN = "desktop_hidden_sessions" // sessions removed from RECENT via the row ✕ (#62)
         const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
+        const val K_GROUP_COLLAPSED = "desktop_group_collapsed" // per project+group collapse memory (issue #119)
         const val K_TERMINAL_APP = "desktop_terminal_app"
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
         const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)

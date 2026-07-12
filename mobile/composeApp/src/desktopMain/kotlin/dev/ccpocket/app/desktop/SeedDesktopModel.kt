@@ -2,6 +2,7 @@ package dev.ccpocket.app.desktop
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.ccpocket.app.data.ChatItem
@@ -31,31 +32,59 @@ class SeedDesktopModel : DesktopModel {
         DkProject("~/code/relay", "relay"),
         DkProject("~/dotfiles", "dotfiles"),
     )
-    override val sessions = listOf(
-        DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929"),
-        DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8"),
-        DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1), // keeps the Codex diff-approval surface exercised
+    // the current project's rows, with issue-#119 custom-group membership: two under named groups + one
+    // ungrouped, so the grouped sidebar zone renders every kind of section. Group membership is overlaid
+    // by [groupOverride] so the seed's assignGroup() moves are observable.
+    private val baseSessions = listOf(
+        DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929", group = "g-auth"),
+        DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8", group = null),
+        DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1, group = "g-ci"), // keeps the Codex diff-approval surface exercised
     )
+    private val groupOverride = mutableStateMapOf<String, String?>()
+    override val sessions: List<DkSession>
+        get() = baseSessions.map { if (groupOverride.containsKey(it.sessionId)) it.copy(group = groupOverride[it.sessionId]) else it }
+
+    // custom groups of the current project (issue #119) — mutable so create/rename/delete are observable
+    private val groupList = mutableStateListOf(DkGroup("g-auth", "Auth work", 0), DkGroup("g-ci", "CI & release", 1))
+    override val customGroups: List<DkGroup> get() = groupList.sortedBy { it.order }
+    override val canEditGroups = true // the seed's current project (cc-pocket) is owner-editable
+    override fun createGroup(name: String) { groupList.add(DkGroup("g-${groupList.size + 1}", name.trim(), groupList.size)) }
+    override fun renameGroup(groupId: String, name: String) {
+        val i = groupList.indexOfFirst { it.id == groupId }
+        if (i >= 0) groupList[i] = groupList[i].copy(name = name.trim())
+    }
+    override fun deleteGroup(groupId: String) {
+        groupList.removeAll { it.id == groupId }
+        baseSessions.filter { (groupOverride[it.sessionId] ?: it.group) == groupId }.forEach { groupOverride[it.sessionId] = null }
+    }
+    override fun assignGroup(sessionId: String, groupId: String?) { groupOverride[sessionId] = groupId }
+    private val groupCollapse = mutableStateListOf<String>()
+    override fun groupCollapsed(projectPath: String, groupId: String) = "$projectPath\u0000$groupId" in groupCollapse
+    override fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {
+        val k = "$projectPath\u0000$groupId"
+        if (collapsed) { if (k !in groupCollapse) groupCollapse.add(k) } else groupCollapse.remove(k)
+    }
 
     // RECENT: the live project plus a previously visited one — exercises the grouped sidebar zone —
     // plus a guest's shared folder (issue #115), so the "Shared" pill surface stays exercised too
-    override val sessionGroups = listOf(
-        DkSessionGroup("~/code/cc-pocket", "cc-pocket", current = true, sessions = sessions),
-        DkSessionGroup(
-            "~/code/relay", "relay", current = false,
-            sessions = listOf(
-                DkSession("s4", "~/code/relay", "Bump maxFrame to 4MB", model = "claude-sonnet-5-20250929"),
-                DkSession("s5", "~/code/relay", "Rate-limit pairing", model = "claude-opus-4-8"),
+    override val sessionGroups: List<DkSessionGroup>
+        get() = listOf(
+            DkSessionGroup("~/code/cc-pocket", "cc-pocket", current = true, sessions = sessions),
+            DkSessionGroup(
+                "~/code/relay", "relay", current = false,
+                sessions = listOf(
+                    DkSession("s4", "~/code/relay", "Bump maxFrame to 4MB", model = "claude-sonnet-5-20250929"),
+                    DkSession("s5", "~/code/relay", "Rate-limit pairing", model = "claude-opus-4-8"),
+                ),
             ),
-        ),
-        DkSessionGroup(
-            "~/work/acme-api", "acme-api", current = false,
-            sessions = listOf(DkSession("s6", "~/work/acme-api", "Add rate-limit middleware", model = "claude-sonnet-5-20250929")),
-            sharedBy = "panda-mbp",
-            // 6 days + slack from "now" so the header's live countdown renders a stable "6d left"
-            shareExpiresAt = dev.ccpocket.app.epochMillis() + (6 * 24 + 2) * 3_600_000L,
-        ),
-    )
+            DkSessionGroup(
+                "~/work/acme-api", "acme-api", current = false,
+                sessions = listOf(DkSession("s6", "~/work/acme-api", "Add rate-limit middleware", model = "claude-sonnet-5-20250929")),
+                sharedBy = "panda-mbp",
+                // 6 days + slack from "now" so the header's live countdown renders a stable "6d left"
+                shareExpiresAt = dev.ccpocket.app.epochMillis() + (6 * 24 + 2) * 3_600_000L,
+            ),
+        )
 
     // the design's three pins: one local + running, one on devbox-linux, one Codex on mac-studio
     private val pinList = mutableStateListOf(

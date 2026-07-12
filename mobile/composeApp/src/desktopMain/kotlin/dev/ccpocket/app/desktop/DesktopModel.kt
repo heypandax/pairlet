@@ -72,7 +72,14 @@ data class DkSession(
     val running: Boolean = false,
     val pending: Int = 0,
     val model: String? = null, // last turn's model id (row shows its alias; null = unknown/older daemon)
+    // custom session-group id this row belongs to (issue #119), or null = ungrouped. Only meaningful for
+    // the CURRENT project's live rows — the daemon lists groups only for the listed dir.
+    val group: String? = null,
 )
+
+/** One custom session group inside a project (issue #119) — the view mirror of protocol's SessionGroup.
+ *  Ordered by [order]; a project with no groups (or an older daemon that omits them) renders sessions flat. */
+data class DkGroup(val id: String, val name: String, val order: Int)
 
 /**
  * One RECENT group — a project the user listed this run, with the sessions we know it has. The
@@ -267,6 +274,26 @@ interface DesktopModel {
     /** Forget every visited project — RECENT's header clear (issue #102). Pins and hidden rows are
      *  deliberately untouched. No-op for seed/preview models. */
     fun clearRecent() {}
+
+    // ── custom session groups (issue #119) ────────────────────────────────────────────────────────
+    // These describe ONLY the current (live-listed) project — the daemon lists groups per directory, so a
+    // non-current RECENT snapshot has none and stays flat. Empty [customGroups] = an older daemon that omits
+    // them OR a project with no groups yet: either way the current project's rows render flat (the degrade).
+    /** The current project's custom groups, ordered; empty = none / older daemon → flat list. */
+    val customGroups: List<DkGroup> get() = emptyList()
+    /** Owner + group-capable connection: false hides every group-edit affordance (a guest is a daemon-side
+     *  no-op anyway; the seed/preview model leaves it inert). */
+    val canEditGroups: Boolean get() = false
+    /** Create a group in the current project (the daemon re-pushes Sessions, refreshing [customGroups]). */
+    fun createGroup(name: String) {}
+    fun renameGroup(groupId: String, name: String) {}
+    /** Delete a group; its sessions fall back to Ungrouped (daemon-side). */
+    fun deleteGroup(groupId: String) {}
+    /** Move [sessionId] into [groupId], or out of any group when [groupId] is null. */
+    fun assignGroup(sessionId: String, groupId: String?) {}
+    /** Per project + per group collapse memory (issue #119; persisted like #102's RECENT keys). */
+    fun groupCollapsed(projectPath: String, groupId: String): Boolean = false
+    fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {}
 
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false

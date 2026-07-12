@@ -17,6 +17,8 @@ import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.group_new
+import dev.ccpocket.app.resources.group_ungrouped
 import dev.ccpocket.app.resources.share_left_days
 import dev.ccpocket.app.resources.shared_badge
 import dev.ccpocket.app.theme.PocketTheme
@@ -74,6 +76,78 @@ class DesktopUiTest {
         onAllNodes(hasText("relay")).onLast().performClick()
         waitForIdle()
         assertTrue(!present("Bump maxFrame to 4MB"), "a collapsed group hides its sessions")
+    }
+
+    @Test
+    fun currentProjectRendersCustomGroupSections() = runComposeUiTest {
+        // issue #119: the live project's sessions render segmented under their custom groups + an Ungrouped
+        // fallback, with the owner's "+ New group" create affordance at the foot.
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        waitForIdle()
+        val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
+        val newGroup = runBlocking { getString(Res.string.group_new) }
+        assertPresent("Auth work")              // a named custom group header
+        assertPresent("CI & release")           // the second group
+        assertPresent(ungrouped)                // the fallback section (s2 is ungrouped)
+        assertPresent(newGroup)                 // create affordance — owner-editable current project
+        assertPresent("Refactor auth module")   // s1, under Auth work
+        assertPresent("Fix stream parser test") // s2, under Ungrouped
+    }
+
+    @Test
+    fun customGroupCollapseHidesSessionsAndRemembers() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("Tidy CI workflow")               // s3 under "CI & release", expanded (and not pinned)
+        onAllNodes(hasText("CI & release")).onLast().performClick() // collapse that group
+        waitForIdle()
+        assertTrue(model.groupCollapsed("~/code/cc-pocket", "g-ci"), "the header click toggled collapse state")
+        assertTrue(!present("Tidy CI workflow"), "collapsing a custom group hides its sessions")
+    }
+
+    @Test
+    fun emptyCustomGroupsRenderFlatWithNoManagement() = runComposeUiTest {
+        // degrade: an older daemon (or a project with no groups) → flat list, no group headers, no create entry
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val customGroups = emptyList<DkGroup>()
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        val newGroup = runBlocking { getString(Res.string.group_new) }
+        val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
+        assertPresent("Refactor auth module")                             // sessions still render, flat
+        assertTrue(!present("Auth work"), "no custom group headers when groups are empty")
+        assertTrue(!present(newGroup), "no create affordance in the degraded flat view")
+        assertTrue(!present(ungrouped), "no Ungrouped section in the flat view")
+    }
+
+    @Test
+    fun seedGroupMutationsTrackState() {
+        val m = SeedDesktopModel()
+        assertEquals(2, m.customGroups.size)
+        m.createGroup("Docs")
+        assertEquals(3, m.customGroups.size)
+        val docs = m.customGroups.first { it.name == "Docs" }
+        m.assignGroup("s2", docs.id)                                   // move the ungrouped session in
+        assertEquals(docs.id, m.sessions.first { it.sessionId == "s2" }.group)
+        m.renameGroup(docs.id, "Documentation")
+        assertEquals("Documentation", m.customGroups.first { it.id == docs.id }.name)
+        m.assignGroup("s1", null)                                      // move s1 out of Auth work
+        assertEquals(null, m.sessions.first { it.sessionId == "s1" }.group)
+        m.deleteGroup(docs.id)                                         // deleting drops its sessions to Ungrouped
+        assertTrue(m.customGroups.none { it.id == docs.id })
+        assertEquals(null, m.sessions.first { it.sessionId == "s2" }.group)
+    }
+
+    @Test
+    fun seedGroupCollapseToggles() {
+        val m = SeedDesktopModel()
+        assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
+        m.setGroupCollapsed("~/code/cc-pocket", "g-auth", true)
+        assertTrue(m.groupCollapsed("~/code/cc-pocket", "g-auth"))
+        m.setGroupCollapsed("~/code/cc-pocket", "g-auth", false)
+        assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
     }
 
     @Test
