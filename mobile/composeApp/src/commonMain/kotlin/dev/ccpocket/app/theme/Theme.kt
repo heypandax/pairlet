@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalTextToolbar
+import dev.ccpocket.app.rememberPlatformTextToolbar
 
 /** The appearance setting (issue #63). SYSTEM follows the OS light/dark, the other two force it.
  *  Absent/garbage → DARK: the app shipped dark-only, so existing users stay dark until they opt into
@@ -146,8 +148,10 @@ fun PocketTheme(dark: Boolean = true, fontScale: Float = 1f, content: @Composabl
         surfaceVariant = palette.raised, onSurfaceVariant = palette.tx2,
         outline = palette.hair, error = palette.danger,
     )
+    // app-wide text toolbar: identity on android/desktop; iOS gets the select-all reshow fix (TextToolbarFix.kt)
+    val textToolbar = rememberPlatformTextToolbar()
     MaterialTheme(
         colorScheme = scheme,
-        content = { CompositionLocalProvider(LocalFontScale provides fontScale, content = content) },
+        content = { CompositionLocalProvider(LocalFontScale provides fontScale, LocalTextToolbar provides textToolbar, content = content) },
     )
 }
