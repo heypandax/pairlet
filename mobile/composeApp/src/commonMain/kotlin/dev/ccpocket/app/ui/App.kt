@@ -1128,11 +1128,12 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                     }
                 }
                 // issue #119: when the project has groups, render each group as a collapsible section with an
-                // "Ungrouped" bucket at the end; the "+ New group" affordance is always present so the very
-                // first group can be created. An older daemon / guest reports no groups → sessionSections
-                // returns a single header-less section, so the list stays exactly as flat as before.
+                // "Ungrouped" bucket at the end. The "+ New group" affordance shows whenever the daemon is
+                // group-aware (groupsSupported) — including zero groups yet, so the FIRST group is creatable —
+                // but hides on an older daemon / guest connection that omits groups entirely, keeping the list
+                // exactly as flat as before (sessionSections then returns one header-less section).
                 val grouped = repo.sessionGroups.isNotEmpty()
-                item { NewGroupRow { showNewGroup = true } }
+                if (repo.groupsSupported.value) item { NewGroupRow { showNewGroup = true } }
                 for (section in sessionSections(filtered, repo.sessionGroups)) {
                     val g = section.group
                     val key = g?.id ?: UNGROUPED_KEY

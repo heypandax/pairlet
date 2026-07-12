@@ -516,6 +516,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Custom session groups for [sessionsDir] (issue #119); empty = none / older daemon that omits them.
      *  Per-session membership rides on [SessionSummary.group] (a group id, or null = ungrouped). */
     val sessionGroups = mutableStateListOf<SessionGroup>()
+    /** True when THIS connection may manage groups (issue #119): the daemon sent a groups array (owner on a
+     *  group-aware daemon). Distinguishes it from the two "no groups" cases that both leave [sessionGroups]
+     *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
+     *  vs an older daemon / a guest connection that omits groups entirely (hide the affordance). */
+    val groupsSupported = mutableStateOf(false)
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -1552,6 +1557,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is Sessions -> {
                 sessionsDir.value = f.workdir; replace(sessions, f.items)
                 replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
+                groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
                 sessionsRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }

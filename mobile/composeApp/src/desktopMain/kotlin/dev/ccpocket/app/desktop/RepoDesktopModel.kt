@@ -526,10 +526,13 @@ class RepoDesktopModel(
     override val customGroups: List<DkGroup>
         get() = repo.sessionGroups.map { DkGroup(it.id, it.name, it.order) }.sortedBy { it.order }
 
-    // owner-only: a guest's shared project (the daemon stamps sharedBy on its DirectoryEntry) can't edit
-    // groups — the daemon rejects it, so hide the affordances. Editable requires a listed current dir.
+    // owner-only AND group-aware daemon: groupsSupported is true only when the daemon sent a groups array
+    // (owner on a group-aware daemon) — so this shows "+ New group" even at zero groups (first one creatable)
+    // yet hides it on an older daemon / guest that omits groups. The sharedBy check is belt-and-suspenders
+    // (a guest already reports groups=null → groupsSupported false). Editable requires a listed current dir.
     override val canEditGroups: Boolean
         get() {
+            if (!repo.groupsSupported.value) return false
             val dir = repo.sessionsDir.value ?: return false
             return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
         }
