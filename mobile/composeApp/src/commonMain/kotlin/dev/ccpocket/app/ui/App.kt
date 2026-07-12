@@ -1196,7 +1196,7 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
 }
 
 @Composable
-private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
+internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) { // internal: rendered offscreen by ShowcaseRender (marketing frames), same precedent as SessionsScreen
     // Restore the composer draft (keyed per conversation, workdir for a brand-new session). Re-inits on a
     // REAL switch only — keyed off composerEpoch, NOT draftKey (#29 semantics kept): the key chain flips in
     // place mid-typing (brand-new session materializing, forked resume corrected by SessionLive), and

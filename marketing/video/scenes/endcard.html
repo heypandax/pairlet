@@ -1,0 +1,32 @@
+<!DOCTYPE html><html lang="zh" data-theme="dark"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../../site/styles.css"><link rel="stylesheet" href="../rig/scene.css">
+<script src="../rig/rig.js"></script>
+<style>
+.ec{display:flex;flex-direction:column;align-items:center;gap:26px;text-align:center;}
+.ec img{width:120px;height:120px;border-radius:28px;box-shadow:0 30px 80px -30px rgba(217,119,87,0.45);opacity:0;}
+.ec .nm{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;color:#ECEDEE;letter-spacing:-0.02em;opacity:0;}
+.ec .big{font-size:34px;font-weight:700;color:#ECEDEE;line-height:1.3;opacity:0;}
+.ec .big em{font-style:normal;color:#D97757;}
+.ec .rows{display:flex;flex-direction:column;gap:10px;opacity:0;}
+.ec .row{font-family:'JetBrains Mono',monospace;font-size:14px;color:#9BA1A6;display:flex;align-items:center;gap:9px;justify-content:center;}
+.ec .row b{color:#ECEDEE;font-weight:600;}
+</style></head><body>
+<div class="stage">
+  <div class="device"><div class="ec">
+    <img src="../../../site/apple-touch-icon.png" class="e1">
+    <div class="nm e2">CC Pocket</div>
+    <div class="big e3">App Store 搜<br><em>CC Pocket</em></div>
+    <div class="rows e4">
+      <div class="row">🆓 <b>开源免费</b> · MIT</div>
+      <div class="row">📱 iPhone · Android · 桌面端</div>
+      <div class="row">GitHub 搜 <b>cc-pocket</b></div>
+    </div>
+  </div></div>
+  <div class="subline" data-sub></div>
+</div>
+<script>
+window.SCENE={frame(t){
+  ['.e1','.e2','.e3','.e4'].forEach((s,i)=>RIG.showAt(RIG.$(s),t,250+i*260,340));
+  RIG.showAt(RIG.$('.subline'),t,250);
+}};
+</script></body></html>

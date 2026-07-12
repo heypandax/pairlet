@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="zh" data-theme="dark"><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../../site/styles.css"><link rel="stylesheet" href="../rig/scene.css">
+<script src="../rig/rig.js"></script>
+<style>
+/* real-app frames (390×844 @2x) inside a simple bezel — sized to the frame's own aspect */
+.shell{position:relative;width:322px;border-radius:40px;border:1px solid #2A2E33;background:#0E0F11;padding:9px;
+  box-shadow:0 40px 90px -40px rgba(0,0,0,0.6);}
+.shell img{display:block;width:100%;border-radius:32px;background:#0E0F11;}
+/* optional system push banner overlaying the shell (query push=1) */
+.shell .pushb{top:16px;left:15px;right:15px;}
+</style></head><body>
+<div class="stage">
+  <div class="brandchip"><img src="../../../site/favicon.svg">CC Pocket</div>
+  <div class="kicker"><div class="k1" data-caption></div></div>
+  <div class="device">
+    <div class="shell">
+      <img id="fr" alt="">
+      <div class="pushb app" id="pb" style="opacity:0;display:none">
+        <span class="ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0E0F11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/></svg></span>
+        <div class="tw"><div class="app-name">CC Pocket</div><div class="msg">Claude 完成 · 给首页加暗色模式</div></div>
+        <span class="ago">now</span>
+      </div>
+    </div>
+  </div>
+  <div class="subline" data-sub></div>
+</div>
+<script>
+const Q=new URLSearchParams(location.search);
+const BASE=Q.get('frames'), N=parseInt(Q.get('n')||'1',10), SFPS=parseInt(Q.get('sfps')||'30',10);
+const PUSH=Q.get('push')==='1';
+const img=document.getElementById('fr');
+// preload every frame up front so screenshots never catch a half-loaded image
+const cache=[]; let loaded=0;
+window.STAGE_READY=false;
+for(let i=0;i<N;i++){const im=new Image();im.onload=im.onerror=()=>{if(++loaded>=N)window.STAGE_READY=true;};
+  im.src=`${BASE}/f${String(i).padStart(5,'0')}.png`;cache.push(im);}
+if(PUSH)document.getElementById('pb').style.display='flex';
+window.SCENE={frame(t){
+  RIG.showAt(RIG.$('.kicker'),t,RIG.at(0.08));
+  RIG.showAt(RIG.$('.subline'),t,250);
+  const idx=Math.min(N-1,Math.floor(t/1000*SFPS));
+  img.src=cache[idx].src;
+  if(PUSH){const drop=RIG.at(0.14),p=RIG.ease(RIG.seg(t,drop,drop+420));
+    const pb=RIG.$('#pb');pb.style.opacity=p;pb.style.transform=`translateY(${(1-p)*-70}px)`;}
+}};
+</script></body></html>

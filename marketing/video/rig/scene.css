@@ -1,0 +1,67 @@
+/* scene.css — the 9:16 stage every promo scene renders on.
+   Loads AFTER site/styles.css. Viewport is 540×960 (render.py screenshots at
+   deviceScaleFactor 2 → 1080×1920). Device/app chrome stays dark, as on the
+   site; the stage itself is always dark for video. */
+
+/* determinism: freeze every CSS animation/transition — rig.js drives motion */
+*, *::before, *::after { animation: none !important; transition: none !important; }
+
+html, body {
+  margin: 0; width: 540px; height: 960px; overflow: hidden;
+  background: #0E0F11; color: #ECEDEE;
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.stage {
+  position: relative; width: 540px; height: 960px; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 84px 34px 72px; box-sizing: border-box;
+}
+.stage::before {                       /* the site's terracotta glow */
+  content: ""; position: absolute; left: 50%; top: -8%;
+  width: 760px; height: 760px; transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(217,119,87,0.14) 0%, transparent 62%);
+  pointer-events: none;
+}
+.stage > * { position: relative; }
+
+/* 花字 — the big on-screen caption (top) */
+.kicker {
+  min-height: 128px; display: flex; flex-direction: column;
+  align-items: center; justify-content: flex-start; gap: 6px;
+  text-align: center; opacity: 0;
+}
+.kicker .k1 {
+  font-size: 42px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.18;
+  color: #ECEDEE; text-wrap: balance;
+}
+.kicker .k1 em { font-style: normal; color: #D97757; }
+.kicker .k2 {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 15px; color: #9BA1A6; letter-spacing: 0.06em;
+}
+
+/* device area (middle) */
+.device { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+.device .phone { --pw: 320px; }
+
+/* 口播字幕条 (bottom) */
+.subline {
+  min-height: 58px; display: flex; align-items: center; justify-content: center;
+  text-align: center; font-size: 19px; line-height: 1.45; color: #9BA1A6;
+  max-width: 440px; opacity: 0;
+}
+
+/* brand corner chip — constant across scenes */
+.brandchip {
+  position: absolute; top: 34px; left: 34px; display: flex; align-items: center; gap: 8px;
+  font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; color: #ECEDEE;
+}
+.brandchip img { width: 22px; height: 22px; border-radius: 6px; display: block; }
+
+/* mac-style window sized for the stage */
+.stage .win { font-size: 12px; }
+
+/* helpers */
+.hidden0 { opacity: 0; }
