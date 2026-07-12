@@ -189,6 +189,63 @@ class PermissionBridgeGuestPathTest {
     }
 
     @Test
+    fun an_absolute_glob_pattern_escaping_the_root_is_denied() = runBlocking {
+        // followup-115-h1: Glob's reach can ride ENTIRELY in `pattern` (no `path` key). An ABSOLUTE glob
+        // like `/etc/**` used to yield empty pathTargets → fall through to an ask the guest self-approves,
+        // reading the owner's whole /etc. Now the pattern's literal root is mined and containment-checked.
+        for (pattern in listOf("/etc/**", "/etc/pass*", "/var/log/**/*.log", "/**")) {
+            val scope = CoroutineScope(Dispatchers.Unconfined)
+            val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+            val b = bridge(emitted = emitted, responses = responses, scope = scope)
+            b.onControlRequest(req("Glob", "pattern", pattern))
+            assertTrue(emitted.isEmpty(), "Glob pattern '$pattern' must not surface an ask (out of scope)")
+            val r = responses.single()
+            assertFalse(r.allow, "Glob '$pattern' out of scope must be denied")
+            assertTrue(r.deny!!.contains("outside the shared folder"))
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun an_absolute_glob_pattern_inside_the_root_falls_through_to_an_ask() = runBlocking {
+        // the in-scope counterpart: an absolute pattern rooted INSIDE the shared folder is legitimate and
+        // must NOT be path-denied — it reaches an ordinary ask like any in-scope file op.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("Glob", "pattern", File(root, "src/**/*.kt").path))
+        assertTrue(emitted.single() is PermissionAsk)
+        assertNull(responses.firstOrNull()?.deny)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_relative_glob_pattern_is_not_treated_as_an_escape() = runBlocking {
+        // a RELATIVE pattern resolves under the (in-scope) session cwd, so it must fall through to an ask,
+        // NOT be mined as an absolute target. Guards against over-eager denial that would break Glob for guests.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("Glob", "pattern", "**/*.kt"))
+        assertTrue(emitted.single() is PermissionAsk)
+        assertNull(responses.firstOrNull()?.deny)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_dotdot_absolute_glob_pattern_is_canonicalized_and_denied() = runBlocking {
+        // a `..` inside an absolute pattern climbs out after the prefix is backed off to a directory and
+        // canonicalized — proves the pattern root rides the SAME canonical containment as keyed paths.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = bridge(emitted = emitted, responses = responses, scope = scope)
+        b.onControlRequest(req("Glob", "pattern", File(root, "../*.txt").path)) // root/../*.txt → parent of root
+        assertTrue(emitted.isEmpty())
+        assertFalse(responses.single().allow)
+        scope.cancel()
+    }
+
+    @Test
     fun a_write_to_a_new_file_inside_the_root_is_allowed() = runBlocking {
         // a not-yet-existing leaf under the root (canonicalizes via the existing prefix) must NOT be
         // false-denied — a guest creating a file in the shared folder is the common case
