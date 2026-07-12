@@ -62,8 +62,14 @@ def render_scene_frames(page, scene_url: str, dur_ms: int, fps: int, frames_dir:
     return n
 
 def encode_segment(frames_dir: Path, fps: int, dur_ms: int, vo: Path | None,
-                   out_mp4: Path):
+                   out_mp4: Path, fade_in=True, fade_out=True):
     dur = dur_ms / 1000
+    # Video Stage V4: scene-to-scene = 8-frame dip-to-black (4f out + 4f in @30fps)
+    dip = 4 / fps
+    vf = ",".join(filter(None, [
+        f"fade=t=in:st=0:d={dip:.4f}" if fade_in else None,
+        f"fade=t=out:st={dur - dip:.4f}:d={dip:.4f}" if fade_out else None,
+    ])) or "null"
     cmd = ["ffmpeg", "-y", "-framerate", str(fps), "-i", str(frames_dir / "f%05d.png")]
     if vo:
         cmd += ["-i", str(vo),
@@ -72,7 +78,7 @@ def encode_segment(frames_dir: Path, fps: int, dur_ms: int, vo: Path | None,
     else:
         cmd += ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
                 "-c:a", "aac", "-b:a", "160k"]
-    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+    cmd += ["-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
             "-r", str(fps), "-t", f"{dur:.3f}", str(out_mp4)]
     sh(cmd)
 
@@ -109,7 +115,10 @@ def main():
     for sc in sb["scenes"]:
         if args.only and sc["id"] != args.only:
             continue
-        vo = tts(sc["vo"], voice, rate) if sc.get("vo") else None
+        # external voiceover wins: drop assets/vo/<sceneId>.mp3 (MiniMax / human read)
+        # and the pipeline uses it verbatim — durations adapt automatically
+        ext = HERE / "assets" / "vo" / f"{sc['id']}.mp3"
+        vo = ext if ext.exists() else (tts(sc["vo"], voice, rate) if sc.get("vo") else None)
         vo_ms = probe_ms(vo) if vo else 0
         dur = max(sc.get("minMs", 0), vo_ms + LEAD_MS + sc.get("tailMs", 400))
         plan.append((sc, vo, dur))
@@ -146,7 +155,9 @@ def main():
                     shutil.copy(f, dst / f.name)
                 continue
             seg = OUT / f"seg-{sc['id']}.mp4"
-            encode_segment(fdir, fps, dur, vo, seg)
+            first = sc is plan[0][0]
+            last = sc is plan[-1][0]
+            encode_segment(fdir, fps, dur, vo, seg, fade_in=not first, fade_out=not last)
             segs.append(seg)
         browser.close()
 

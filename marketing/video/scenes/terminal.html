@@ -2,44 +2,44 @@
 <link rel="stylesheet" href="../../../site/styles.css"><link rel="stylesheet" href="../rig/scene.css">
 <script src="../rig/rig.js"></script>
 <style>
-.term{width:100%;max-width:460px;}
-.term .body{background:#0B0C0D;border:1px solid #2A2E33;border-top:0;border-radius:0 0 14px 14px;
-  padding:16px 16px 18px;height:420px;overflow:hidden;font-family:'JetBrains Mono',ui-monospace,monospace;
-  font-size:12.5px;line-height:1.75;color:#9BA1A6;}
-.term .l{opacity:0;white-space:pre-wrap;word-break:break-all;}
-.term .l .p{color:#D97757;} .term .l .g{color:#4FB477;} .term .l .w{color:#ECEDEE;}
+.device{align-items:center;}
+.termwin .bar{display:flex;align-items:center;padding:10px 14px;background:#16181B;border-bottom:1px solid #2A2E33;position:relative;}
+.termwin .lights{display:flex;gap:7px;} .termwin .lights i{width:11px;height:11px;border-radius:99px;background:#6B7177;opacity:.45;display:block;}
+.termwin .ttl{position:absolute;left:0;right:0;text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:#9BA1A6;}
+.termwin .body{background:#0B0C0D;padding:16px 18px 18px;height:400px;overflow:hidden;
+  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.85;color:#9BA1A6;}
+.termwin .l{opacity:0;white-space:pre-wrap;word-break:break-all;}
+.termwin .l .p{color:#D97757;} .termwin .l .g{color:#4FB477;} .termwin .l .w{color:#ECEDEE;} .termwin .l .d{color:#6B7177;}
 </style></head><body>
 <div class="stage">
   <div class="brandchip"><img src="../../../site/favicon.svg">CC Pocket</div>
   <div class="kicker"><div class="k1" data-caption></div></div>
   <div class="device">
-    <div class="term appdark">
-      <div class="win-bar" style="border:1px solid #2A2E33;border-bottom:1px solid #2A2E33;border-radius:14px 14px 0 0;background:#16181B">
-        <div class="win-lights"><i></i><i></i><i></i></div>
-        <div class="win-titlewrap"><div class="win-title">claude — ~/proj/app/demo</div></div>
-      </div>
+    <div class="termwin" id="tw">
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="ttl">cc-pocket — claude — 104×34</div></div>
       <div class="body" id="tb">
-        <div class="l"><span class="p">❯</span> <span class="w">claude "给首页加暗色模式，改完自己 commit"</span></div>
-        <div class="l">● 我来给首页加上暗色模式。先看一下现有的样式结构…</div>
-        <div class="l"><span class="g">✓</span> Read src/styles/tokens.css</div>
-        <div class="l"><span class="g">✓</span> Read src/pages/Home.tsx</div>
-        <div class="l">● 计划：抽出颜色 token → 增加 data-theme 切换 → 持久化偏好</div>
-        <div class="l"><span class="g">✓</span> Edit src/styles/tokens.css <span class="w">+38 −6</span></div>
-        <div class="l"><span class="g">✓</span> Edit src/components/ThemeToggle.tsx <span class="w">+61</span></div>
-        <div class="l">● 正在接好首页的切换入口，然后跑一遍构建确认没有回归…</div>
-        <div class="l"><span class="g">✓</span> Bash npm run build <span class="w">exit 0 · 4.2s</span></div>
-        <div class="l">● 构建通过。接下来处理系统主题跟随，再统一检查对比度<span id="tc" style="display:inline-block;width:7px;height:13px;background:#D97757;vertical-align:text-bottom"></span></div>
+        <div class="l"><span class="p">&gt;</span> <span class="w">给首页加暗色模式，先问我配色基调，改完自己 commit</span></div>
+        <div class="l"><span class="p">⏺</span> 我先看现有的 token 结构，规划暗色色板。</div>
+        <div class="l"><span class="p">⏺</span> <span class="w">Read</span>(src/styles/tokens.css)</div>
+        <div class="l">  <span class="d">⎿ Read 96 lines</span></div>
+        <div class="l"><span class="p">⏺</span> <span class="w">Update</span>(src/styles/tokens.css)</div>
+        <div class="l">  <span class="d">⎿ Updated 44 lines · +38 −6</span></div>
+        <div class="l"><span class="p">⏺</span> <span class="w">Bash</span>(npm run build)</div>
+        <div class="l">  <span class="d">⎿</span> <span class="g">BUILD SUCCESSFUL · 4.2s</span></div>
+        <div class="l"><span class="w">✻</span> 接切换入口，再统一查对比度… <span class="d">(2m 14s)</span></div>
       </div>
     </div>
   </div>
-  <div class="subline" data-sub></div>
+  <div class="subline"><span data-sub></span></div>
 </div>
 <script>
 window.SCENE={frame(t){
-  RIG.showAt(RIG.$('.kicker'),t,RIG.at(0.10));
-  RIG.showAt(RIG.$('.subline'),t,250);
-  const lines=RIG.$$('#tb .l'), step=RIG.DUR*0.72/lines.length;
-  lines.forEach((l,i)=>RIG.showAt(l,t,200+i*step,180));
-  RIG.caret(RIG.$('#tc'),t,200+lines.length*step);
+  RIG.enter(RIG.$('.brandchip'),t,0,{dy:0,dur:400});
+  RIG.enter(RIG.$('.kicker'),t,0,{dy:28,dur:520,delay:120,curve:RIG.KICK});
+  RIG.wipe(RIG.$('.kicker em'),t,960);
+  RIG.enter(RIG.$('#tw'),t,0,{dy:40,dur:600,delay:60,curve:RIG.SHELL,scale:0.97});
+  RIG.enter(RIG.$('.subline'),t,0,{dy:16,dur:460,delay:380,curve:RIG.KICK});
+  const lines=RIG.$$('#tb .l'), step=(RIG.DUR*0.82-700)/lines.length;
+  lines.forEach((l,i)=>RIG.showAt(l,t,700+i*step,180));
 }};
 </script></body></html>

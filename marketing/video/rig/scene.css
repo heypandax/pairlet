@@ -1,67 +1,106 @@
-/* scene.css — the 9:16 stage every promo scene renders on.
-   Loads AFTER site/styles.css. Viewport is 540×960 (render.py screenshots at
-   deviceScaleFactor 2 → 1080×1920). Device/app chrome stays dark, as on the
-   site; the stage itself is always dark for video. */
+/* scene.css — the 9:16 stage, implemented from the "Video Stage 1.0" board.
+   Viewport 540×960 == board px (render.py screenshots at DPR 2 → 1080×1920).
+   Safe areas (board px): top 48 · right 36 · bottom 84. Dark only. */
 
-/* determinism: freeze every CSS animation/transition — rig.js drives motion */
+/* determinism: freeze CSS animation/transition — rig.js drives all motion */
 *, *::before, *::after { animation: none !important; transition: none !important; }
 
 html, body {
   margin: 0; width: 540px; height: 960px; overflow: hidden;
   background: #0E0F11; color: #ECEDEE;
-  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Inter', -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── stage & background (V1): one glow + one structural idea, nothing else ── */
 .stage {
   position: relative; width: 540px; height: 960px; overflow: hidden;
-  display: flex; flex-direction: column; align-items: center;
-  padding: 84px 34px 72px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; box-sizing: border-box;
 }
-.stage::before {                       /* the site's terracotta glow */
-  content: ""; position: absolute; left: 50%; top: -8%;
-  width: 760px; height: 760px; transform: translateX(-50%);
-  background: radial-gradient(circle, rgba(217,119,87,0.14) 0%, transparent 62%);
+.stage::before {                        /* terracotta radial glow, centered ~34% height */
+  content: ""; position: absolute; left: 50%; top: 34%;
+  width: 760px; height: 760px; transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(217,119,87,0.13) 0%, transparent 62%);
   pointer-events: none;
 }
-.stage > * { position: relative; }
-
-/* 花字 — the big on-screen caption (top) */
-.kicker {
-  min-height: 128px; display: flex; flex-direction: column;
-  align-items: center; justify-content: flex-start; gap: 6px;
-  text-align: center; opacity: 0;
+.stage::after {                         /* faint dot-grid, 26px pitch, radially masked */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: 26px 26px;
+  -webkit-mask-image: radial-gradient(circle at 50% 40%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 40%, #000 0%, transparent 78%);
 }
-.kicker .k1 {
-  font-size: 42px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.18;
-  color: #ECEDEE; text-wrap: balance;
-}
-.kicker .k1 em { font-style: normal; color: #D97757; }
-.kicker .k2 {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 15px; color: #9BA1A6; letter-spacing: 0.06em;
-}
+.stage > * { position: relative; z-index: 1; }
 
-/* device area (middle) */
-.device { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
-.device .phone { --pw: 320px; }
-
-/* 口播字幕条 (bottom) */
-.subline {
-  min-height: 58px; display: flex; align-items: center; justify-content: center;
-  text-align: center; font-size: 19px; line-height: 1.45; color: #9BA1A6;
-  max-width: 440px; opacity: 0;
-}
-
-/* brand corner chip — constant across scenes */
+/* ── brand chip: frosted pill, top-left y60/x28 ── */
 .brandchip {
-  position: absolute; top: 34px; left: 34px; display: flex; align-items: center; gap: 8px;
-  font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; color: #ECEDEE;
+  position: absolute; top: 60px; left: 28px; z-index: 5;
+  display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px 0 9px;
+  border-radius: 999px; background: rgba(14,15,17,0.55); border: 1px solid #2A2E33;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 13px; font-weight: 600; color: #ECEDEE;
 }
 .brandchip img { width: 22px; height: 22px; border-radius: 6px; display: block; }
 
-/* mac-style window sized for the stage */
-.stage .win { font-size: 12px; }
+/* ── 花字 kicker: band y120–214, 44px/700, keyword = highlighter chip ── */
+.kicker {
+  position: absolute; top: 120px; left: 32px; right: 36px; height: 96px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  opacity: 0;
+}
+.kicker .k1 {
+  font-size: 44px; font-weight: 700; line-height: 1.16; letter-spacing: -0.01em;
+  color: #ECEDEE; text-wrap: balance;
+}
+.kicker .k1.short { font-size: 34px; }
+.kicker .k1 em {
+  font-style: normal; color: #D97757;
+  /* highlighter chip: terracotta 20% on the lower 46% of the glyph, radius 3 —
+     rig.wipe() grows background-size 0→100% after the line settles */
+  background-image: linear-gradient(rgba(217,119,87,0.20), rgba(217,119,87,0.20));
+  background-repeat: no-repeat; background-position: 0 78%; background-size: 0% 46%;
+  border-radius: 3px; padding: 0 2px;
+}
+
+/* ── phone shell: w264, top 236, rim glow ── */
+.device {
+  position: absolute; top: 236px; left: 0; right: 0; bottom: 84px;
+  display: flex; align-items: flex-start; justify-content: center;
+}
+.shell {
+  position: relative; width: 264px; border-radius: 38px;
+  border: 1px solid #2A2E33; background: #0E0F11; padding: 9px;
+  box-shadow: 0 44px 90px -44px #000, 0 0 60px -18px rgba(217,119,87,0.25);
+  opacity: 0;
+}
+.shell img { display: block; width: 100%; border-radius: 30px; background: #0E0F11; }
+
+/* push banner (V4): drops from above top-safe, overshoot settle */
+.shell .pushb { top: 12px; left: 12px; right: 12px; }
+
+/* ── 口播字幕 subline: 22px quiet line, bottom 96 ── */
+.subline {
+  position: absolute; bottom: 96px; left: 40px; right: 40px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  font-size: 22px; font-weight: 400; line-height: 1.4; color: #9BA1A6;
+  opacity: 0;
+}
+.subline b, .subline strong { color: #ECEDEE; font-weight: 500; }
+.subline > * { max-width: 460px; }
+
+/* ── non-phone scene surfaces (V3): shared panel treatment ── */
+.panelcard {
+  background: #16181B; border: 1px solid #2A2E33; border-radius: 20px;
+  box-shadow: 0 30px 60px -30px #000;
+}
+/* terminal (V3·1): 470 wide, radius 12, Mac chrome + terracotta rim */
+.termwin {
+  width: 470px; border-radius: 12px; overflow: hidden;
+  border: 1px solid #2A2E33;
+  box-shadow: 0 44px 90px -44px #000, 0 0 70px -20px rgba(217,119,87,0.25);
+  opacity: 0;
+}
 
 /* helpers */
 .hidden0 { opacity: 0; }

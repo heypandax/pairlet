@@ -2,51 +2,55 @@
 <link rel="stylesheet" href="../../../site/styles.css"><link rel="stylesheet" href="../rig/scene.css">
 <script src="../rig/rig.js"></script>
 <style>
-.panels{position:relative;width:100%;max-width:430px;height:430px;}
+.device{align-items:center;}
+.panels{position:relative;width:430px;height:420px;}
 .panel{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0;}
-.uswrap{width:100%;background:#16181B;border:1px solid #2A2E33;border-radius:16px;padding:20px;}
-.uswrap .blab{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#6B7177;}
-.bars{display:flex;align-items:flex-end;gap:3px;height:96px;margin:14px 0 10px;}
-.bars i{flex:1;background:rgba(217,119,87,0.32);border-radius:2px 2px 0 0;transform-origin:bottom;}
-.bars i.peak{background:#D97757;}
-.stats{font-family:'JetBrains Mono',monospace;font-size:13px;color:#9BA1A6;}
-.stats b{color:#ECEDEE;}
-.heat{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:16px;}
-.heat span{aspect-ratio:1;border-radius:4px;border:1px solid #2A2E33;opacity:0;}
+.panel .panelcard{width:100%;padding:22px;}
+.enc{text-align:center;padding:34px 26px!important;}
+.enc .icons{display:flex;gap:16px;justify-content:center;margin-bottom:20px;}
+.enc h3{font-size:24px;font-weight:700;color:#ECEDEE;margin:0 0 12px;}
+.enc h3 em{font-style:normal;color:#D97757;}
+.enc .rows{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#9BA1A6;line-height:2;}
 </style></head><body>
 <div class="stage">
   <div class="brandchip"><img src="../../../site/favicon.svg">CC Pocket</div>
-  <div class="kicker"><div class="k1" id="cap1" style="opacity:1"></div></div>
+  <div class="kicker"><div class="k1" id="cap1"></div></div>
   <div class="device"><div class="panels appdark">
-    <div class="panel p1"><div class="fleet appdark" style="width:100%;box-shadow:none">
+    <div class="panel p1"><div class="panelcard fleet" style="box-shadow:none;width:100%">
       <div class="fleet-hd"><span class="ttl">3 computers</span><span class="sub">1 needs you</span></div>
       <div class="mrow"><svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2.5 19h19"/></svg><span class="nm">Lidapeng-MacBook</span><span class="sdot on"></span><span class="badge acc">2 running</span></div>
       <div class="mrow approve"><svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5.5" width="16" height="10" rx="2"/><path d="M8 19h8M12 15.5V19"/></svg><span class="nm">mac-studio</span><span class="sdot on"></span><span class="badge warn">1 approval</span></div>
       <div class="mrow"><svg class="os" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M7 9l3 2.5-3 2.5M13 14.5h4"/></svg><span class="nm">devbox-linux</span><span class="sdot on"></span><span class="badge acc">idle</span></div>
     </div></div>
-    <div class="panel p2"><div style="text-align:center">
-      <div style="display:flex;gap:14px;justify-content:center;margin-bottom:22px">
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
+    <div class="panel p2"><div class="panelcard enc">
+      <div class="icons">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></svg>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#D97757" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/></svg>
       </div>
-      <div style="font-size:21px;font-weight:600;color:#ECEDEE;line-height:1.5">iPhone · Android · 桌面端<br><span style="color:#D97757">开源 · MIT · 免账号</span></div>
-      <div class="mono" style="font-size:12px;color:#6B7177;margin-top:14px">E2E encrypted · zero-knowledge relay</div>
+      <h3>端到端<em>加密</em>，全平台开源</h3>
+      <div class="rows">中转只见密文 · 密钥只在你的设备之间<br>iPhone · Android · 桌面端 · MIT</div>
     </div></div>
   </div></div>
-  <div class="subline" data-sub></div>
+  <div class="subline"><span id="sub1"></span></div>
 </div>
 <script>
-const CAPS=['几台电脑，一屏全管','<em>端到端加密</em> · 全平台开源'];
+const CAPS=['一台手机，<br><em>管好几台电脑</em>','你的机器，<em>你的密钥</em>'];
+const SUBS=['在哪都能切过去看','开源 · 代码看得见'];
 window.SCENE={frame(t){
-  RIG.showAt(RIG.$('.subline'),t,250);
+  RIG.enter(RIG.$('.brandchip'),t,0,{dy:0,dur:400});
   const seg=RIG.DUR/2, k=Math.min(1,Math.floor(t/seg));
-  document.getElementById('cap1').innerHTML=CAPS[k];
-  [['.p1',0],['.p2',1]].forEach(([s,i])=>{
-    const el=RIG.$(s), t0=i*seg, t1=(i+1)*seg;
-    const inP=RIG.seg(t,t0,t0+300), outP=1-RIG.seg(t,t1-200,t1);
-    el.style.opacity=Math.min(inP, i===1?1:outP);
-  });
-  RIG.$$('.p1 .mrow').forEach((r,i)=>RIG.showAt(r,t,250+i*180));
+  const cap=RIG.$('#cap1');
+  if(cap.dataset.k!==String(k)){cap.dataset.k=String(k);cap.innerHTML=CAPS[k];RIG.$('#sub1').textContent=SUBS[k];}
+  // caption enters per beat; panels hard-cut beneath (V4 exception)
+  const cutT=k*seg;
+  RIG.enter(RIG.$('.kicker'),t,cutT,{dy:28,dur:520,delay:120,curve:RIG.KICK});
+  RIG.wipe(RIG.$('.kicker em'),t,cutT+960);
+  RIG.enter(RIG.$('.subline'),t,cutT,{dy:16,dur:460,delay:380,curve:RIG.KICK});
+  RIG.$('.p1').style.opacity = k===0?1:0;
+  RIG.$('.p2').style.opacity = k===1?1:0;
+  const pn=RIG.$(k===0?'.p1 .panelcard':'.p2 .panelcard');
+  RIG.enter(RIG.$(k===0?'.p1':'.p2'),t,cutT,{dy:40,dur:600,delay:60,curve:RIG.SHELL,scale:0.97});
+  RIG.$$('.p1 .mrow').forEach((r,i)=>RIG.showAt(r,t,300+i*180));
 }};
 </script></body></html>

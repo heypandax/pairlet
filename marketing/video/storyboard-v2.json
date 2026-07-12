@@ -2,34 +2,71 @@
   "id": "v2-realui",
   "lang": "zh",
   "fps": 30,
-  "voice": "zh-CN-YunxiNeural",
-  "rate": "+10%",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "+5%",
   "scenes": [
-    {"id":"terminal","file":"terminal.html","minMs":3400,
-     "vo":"Claude Code 跑到一半，人必须出门——活就断了？",
-     "caption":"AI 干到一半，<em>我要出门了</em>"},
-    {"id":"sessions","frames":"sessions","minMs":4600,
-     "vo":"不。手机上接着盯。这是我做的开源 App，CC Pocket。",
-     "caption":"手机接管，<em>不用提前开任何模式</em>"},
-    {"id":"stream","frames":"stream","minMs":6600,
-     "vo":"地铁上给家里的电脑派活，实时看它写代码。",
-     "caption":"人在地铁，<em>电脑在家干活</em>"},
-    {"id":"askq","frames":"askq","minMs":4800,
-     "vo":"它要确认方案，我点一下就答。",
-     "caption":"它问，<em>我点</em>"},
-    {"id":"done","frames":"done","push":true,"minMs":5000,
-     "vo":"干完了，推送找我。",
-     "caption":"干完了<em>会叫你</em>"},
-    {"id":"diff","frames":"diff","minMs":5000,
-     "vo":"改了哪几个文件，手机上直接看 diff。",
-     "caption":"改动<em>一目了然</em>"},
-    {"id":"usage","frames":"usage","minMs":4400,
-     "vo":"花了多少 token，也看得明明白白。",
-     "caption":"用量花费，<em>明明白白</em>"},
-    {"id":"montage","file":"montage.html","minMs":6400,
-     "vo":"全程端到端加密，中转服务器只见密文。iPhone、安卓、桌面端全有，开源免费。"},
-    {"id":"endcard","file":"endcard.html","minMs":4400,
-     "vo":"App Store 搜 CC Pocket。",
-     "caption":"App Store 搜 <em>CC Pocket</em>"}
+    {
+      "id": "terminal",
+      "file": "terminal.html",
+      "minMs": 3400,
+      "vo": "Claude Code 跑到一半，人必须出门——活就断了？",
+      "caption": "AI 干到一半，<em>我要出门了</em>"
+    },
+    {
+      "id": "sessions",
+      "frames": "sessions",
+      "minMs": 4600,
+      "vo": "不。手机上接着盯。这是我做的开源 App，CC Pocket。",
+      "caption": "手机接管，<br>不用<em>提前开任何模式</em>"
+    },
+    {
+      "id": "stream",
+      "frames": "stream",
+      "minMs": 6600,
+      "vo": "地铁上给家里的电脑派活，实时看它写代码。",
+      "caption": "人在地铁，<br><em>电脑在家干活</em>"
+    },
+    {
+      "id": "askq",
+      "frames": "askq",
+      "minMs": 4800,
+      "vo": "它要确认方案，我点一下就答。",
+      "caption": "它问，<em>我点</em>"
+    },
+    {
+      "id": "done",
+      "frames": "done",
+      "push": true,
+      "minMs": 5000,
+      "vo": "干完了，推送找我。",
+      "caption": "干完了<em>会叫你</em>"
+    },
+    {
+      "id": "diff",
+      "frames": "diff",
+      "minMs": 5000,
+      "vo": "改了哪几个文件，手机上直接看 diff。",
+      "caption": "改动<em>一目了然</em>"
+    },
+    {
+      "id": "usage",
+      "frames": "usage",
+      "minMs": 4400,
+      "vo": "花了多少 token，也看得明明白白。",
+      "caption": "用量花费，<em>明明白白</em>"
+    },
+    {
+      "id": "montage",
+      "file": "montage.html",
+      "minMs": 6400,
+      "vo": "全程端到端加密，中转服务器只见密文。iPhone、安卓、桌面端全有，开源免费。"
+    },
+    {
+      "id": "endcard",
+      "file": "endcard.html",
+      "minMs": 4400,
+      "vo": "App Store 搜 CC Pocket。",
+      "caption": "App Store 搜 <em>CC Pocket</em>"
+    }
   ]
 }

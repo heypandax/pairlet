@@ -12,6 +12,32 @@
     seg(t, t0, t1) { return Math.min(1, Math.max(0, (t - t0) / (t1 - t0))); },
     ease(p) { return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; },
 
+    // cubic-bezier evaluator (CSS timing semantics) — Video Stage V4 ships exact curves
+    bezier(p1x, p1y, p2x, p2y) {
+      const sx = t => 3*p1x*t*(1-t)*(1-t) + 3*p2x*t*t*(1-t) + t*t*t;
+      const sy = t => 3*p1y*t*(1-t)*(1-t) + 3*p2y*t*t*(1-t) + t*t*t;
+      return x => {
+        if (x <= 0) return 0; if (x >= 1) return 1;
+        let lo = 0, hi = 1, mid;
+        for (let i = 0; i < 24; i++) { mid = (lo+hi)/2; if (sx(mid) < x) lo = mid; else hi = mid; }
+        return sy(mid);
+      };
+    },
+
+    // Video Stage V4 element envelopes: enter(el, t, cut, {dy, dur, delay, curve, scale})
+    enter(el, t, cut, o) {
+      if (!el) return;
+      const p = (o.curve || RIG.KICK)(RIG.seg(t, cut + (o.delay||0), cut + (o.delay||0) + o.dur));
+      el.style.opacity = p;
+      const dy = (1 - p) * (o.dy || 0);
+      el.style.transform = `translateY(${dy}px)` + (o.scale ? ` scale(${o.scale + (1-o.scale)*p})` : '');
+    },
+    // keyword highlighter chip: wipe background-size 0→100% (L→R)
+    wipe(el, t, t0, dur = 240) {
+      if (!el) return;
+      el.style.backgroundSize = `${RIG.seg(t, t0, t0 + dur) * 100}% 46%`;
+    },
+
     // fade+rise an element in at t0
     showAt(el, t, t0, fade = 280) {
       if (!el) return;
@@ -70,5 +96,8 @@
     document.documentElement.setAttribute('data-lang', q.get('lang') || 'zh');
   });
 
+  RIG.KICK  = RIG.bezier(0.22, 1,   0.36, 1);   // kicker / subline
+  RIG.SHELL = RIG.bezier(0.16, 1,   0.30, 1);   // phone / terminal / panels
+  RIG.DROP  = RIG.bezier(0.22, 1.4, 0.36, 1);   // push banner (overshoot)
   window.RIG = RIG;
 })();

@@ -2,31 +2,32 @@
 <link rel="stylesheet" href="../../../site/styles.css"><link rel="stylesheet" href="../rig/scene.css">
 <script src="../rig/rig.js"></script>
 <style>
-.ec{display:flex;flex-direction:column;align-items:center;gap:26px;text-align:center;}
-.ec img{width:120px;height:120px;border-radius:28px;box-shadow:0 30px 80px -30px rgba(217,119,87,0.45);opacity:0;}
-.ec .nm{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;color:#ECEDEE;letter-spacing:-0.02em;opacity:0;}
-.ec .big{font-size:34px;font-weight:700;color:#ECEDEE;line-height:1.3;opacity:0;}
-.ec .big em{font-style:normal;color:#D97757;}
-.ec .rows{display:flex;flex-direction:column;gap:10px;opacity:0;}
-.ec .row{font-family:'JetBrains Mono',monospace;font-size:14px;color:#9BA1A6;display:flex;align-items:center;gap:9px;justify-content:center;}
-.ec .row b{color:#ECEDEE;font-weight:600;}
+.device{align-items:center;top:150px;}
+.ec{display:flex;flex-direction:column;align-items:center;gap:24px;text-align:center;}
+.ec img{width:116px;height:116px;border-radius:27px;box-shadow:0 30px 80px -30px rgba(217,119,87,0.45);opacity:0;}
+.ec .nm{font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700;color:#ECEDEE;letter-spacing:-0.02em;opacity:0;}
+.ec .big{font-size:40px;font-weight:700;color:#ECEDEE;line-height:1.24;opacity:0;}
+.ec .big em{font-style:normal;color:#D97757;background-image:linear-gradient(rgba(217,119,87,0.20),rgba(217,119,87,0.20));background-repeat:no-repeat;background-position:0 78%;background-size:0% 46%;border-radius:3px;padding:0 2px;}
+.ec .cta{display:flex;align-items:center;gap:9px;height:52px;padding:0 26px;border-radius:14px;background:#D97757;color:#0E0F11;font-size:17px;font-weight:700;opacity:0;}
+.ec .rows{font-family:'JetBrains Mono',monospace;font-size:13.5px;color:#9BA1A6;line-height:2;opacity:0;}
+.ec .rows b{color:#ECEDEE;}
 </style></head><body>
 <div class="stage">
+  <div class="brandchip"><img src="../../../site/favicon.svg">CC Pocket</div>
   <div class="device"><div class="ec">
     <img src="../../../site/apple-touch-icon.png" class="e1">
     <div class="nm e2">CC Pocket</div>
     <div class="big e3">App Store 搜<br><em>CC Pocket</em></div>
-    <div class="rows e4">
-      <div class="row">🆓 <b>开源免费</b> · MIT</div>
-      <div class="row">📱 iPhone · Android · 桌面端</div>
-      <div class="row">GitHub 搜 <b>cc-pocket</b></div>
-    </div>
+    <div class="cta e4"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M16.36 12.78c.02 2.45 2.15 3.27 2.17 3.28-.02.06-.34 1.17-1.12 2.31-.67.99-1.37 1.97-2.48 1.99-1.08.02-1.43-.64-2.67-.64s-1.62.62-2.65.66c-1.06.04-1.87-1.07-2.55-2.05-1.39-2.01-2.45-5.68-1.02-8.16.71-1.23 1.98-2.01 3.36-2.03 1.05-.02 2.03.71 2.67.71.63 0 1.83-.88 3.09-.75.53.02 2.01.21 2.96 1.61-.08.05-1.77 1.04-1.75 3.07M14.4 5.39c.56-.68.94-1.62.84-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.82-.46 2.39-1.14"/></svg>App Store 下载</div>
+    <div class="rows e5">🆓 <b>开源免费</b> · MIT<br>GitHub 搜 <b>cc-pocket</b> · Android / 桌面端在 Releases</div>
   </div></div>
-  <div class="subline" data-sub></div>
+  <div class="subline"><span data-sub></span></div>
 </div>
 <script>
 window.SCENE={frame(t){
-  ['.e1','.e2','.e3','.e4'].forEach((s,i)=>RIG.showAt(RIG.$(s),t,250+i*260,340));
-  RIG.showAt(RIG.$('.subline'),t,250);
+  RIG.enter(RIG.$('.brandchip'),t,0,{dy:0,dur:400});
+  ['.e1','.e2','.e3','.e4','.e5'].forEach((s,i)=>RIG.enter(RIG.$(s),t,0,{dy:24,dur:520,delay:120+i*180,curve:RIG.KICK}));
+  RIG.wipe(RIG.$('.big em'),t,1400);
+  RIG.enter(RIG.$('.subline'),t,0,{dy:16,dur:460,delay:380,curve:RIG.KICK});
 }};
 </script></body></html>
