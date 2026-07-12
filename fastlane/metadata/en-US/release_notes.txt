@@ -1,11 +1,16 @@
-What's new in 1.3.4
+What's new in 1.3.5
+
+New
+• Session groups: organize a project's sessions into your own groups (workstream / direction / phase), collapsible and synced across phone and desktop
+• Folder sharing: grant someone a single folder on your computer to run agents in, fenced off from the rest
+• File & video upload: send files or videos straight from your phone to the computer
+• Face ID lock: optional biometric unlock for the app
 
 Fixes & improvements
-• Chinese input is solid: fast pinyin no longer stutters or falls back to English, punctuation stops eating characters, and Send clears the box reliably
-• Long replies are no longer cut off behind the composer
-• Task panel: running jobs show elapsed time, can be stopped from your phone with a long-press, and settle instantly
-• Usage: the overview follows Today/7d/30d with a labeled comparison; trend bars share one baseline and the peak label stays visible
-• Changes viewer: diffs and text are selectable, with a new soft-wrap toggle
-• New sessions show their effective model up front; switching models mid-session now applies next turn instead of interrupting the reply
+• Prompts occasionally getting swallowed / needing a resend
+• Question cards freezing so you couldn't scroll to the options, and custom input hidden behind the keyboard
+• Push notifications not arriving (device token is now re-registered)
+• Streaming output lost after a reconnect is now backfilled
+• Hover a path / link to see its full value and copy it in one tap
 
-Note: some fixes need the computer-side cc-pocket-daemon on 1.3.4 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
+Note: some fixes need the computer-side cc-pocket-daemon on 1.3.5 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
