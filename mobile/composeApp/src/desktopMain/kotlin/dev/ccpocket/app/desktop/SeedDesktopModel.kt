@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -143,7 +144,7 @@ class SeedDesktopModel : DesktopModel {
     override fun setPhonePush(enabled: Boolean) { phonePushState = enabled }
     override fun renameComputer(c: DkComputer, label: String?) {}
     override fun revokeComputer(c: DkComputer) {}
-    override var composer by mutableStateOf("")
+    override val composerState = ComposerState()
 
     // account + API presets (issue #113): canned masked state, exactly the shape a daemon replies with —
     // demos the whole Account pane (design 1a/1c) and lets the UI tests drive activate/save/delete for real

@@ -11,7 +11,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
 import dev.ccpocket.app.theme.PocketTheme
@@ -118,6 +120,26 @@ class DesktopUiTest {
         onAllNodes(hasText("/review")).onLast().performClick()
         waitForIdle()
         assertEquals("/review ", model.composer)                      // completes the word + a trailing space (cursor ready for args)
+    }
+
+    @Test
+    fun composerShiftEnterInsertsNewlineAndEnterSends() = runComposeUiTest {
+        // Drives the real ChatPane key handling end-to-end through ComposerState (the retired
+        // ImeSafeMirror's successor): shift+Enter splices a newline at the caret — the hint row's
+        // "⇧⏎ newline" promise — and plain Enter submits, whose clear-on-send empties the field
+        // through the model's String facade (an explicit external write; no reconcile pass exists).
+        val model = SeedDesktopModel().apply { composer = "hello" } // the explicit write lands the caret at the end
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        val field = onAllNodes(hasSetTextAction()).onFirst()
+        field.requestFocus()
+        waitForIdle()
+        field.performKeyInput { withKeyDown(Key.ShiftLeft) { pressKey(Key.Enter) } }
+        waitForIdle()
+        assertEquals("hello\n", model.composer, "shift+Enter inserts a newline instead of sending")
+        field.performKeyInput { pressKey(Key.Enter) }
+        waitForIdle()
+        assertEquals("", model.composer, "Enter sends and clear-on-send empties the composer")
     }
 
     @Test

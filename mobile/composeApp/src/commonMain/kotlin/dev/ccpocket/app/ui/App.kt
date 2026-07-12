@@ -1144,7 +1144,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     // keyboard that committed the space-segmented marked text as raw letters, "claude"→"c l a u d e" (#108,
     // #93's wild signature). The debounced saver below re-homes the text under the flipped key.
     val draftKey = repo.composerKey()
-    var input by remember(repo.composerEpoch.value) { mutableStateOf(repo.draftFor(draftKey)) }
+    val composer = remember(repo.composerEpoch.value) { ComposerState(repo.draftFor(draftKey)) }
+    val input = composer.text // reads track the field; writes go through composer's explicit methods
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
@@ -1211,7 +1212,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.saveDraft(repo.workdir.value, input); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
+                TextButton({ repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showSessionInfo = true }.padding(vertical = 2.dp)) {
                     // session title leads (design); the generic "Chat" only before the first prompt names it
                     Text(
@@ -1433,10 +1434,10 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     LaunchedEffect(capturing) { if (capturing) attachSheet = false }
                     if (suggestions.isNotEmpty() && !capturing) {
-                        SlashCommandMenu(suggestions) { cmd -> input = cmd.completion() }
+                        SlashCommandMenu(suggestions) { cmd -> composer.setText(cmd.completion()) }
                     } else if (atFileMatches.isNotEmpty() && !capturing) {
                         FileCompletionMenu(atFileMatches, atDir, atSep) { entry ->
-                            atToken?.let { input = input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end) }
+                            atToken?.let { composer.setText(input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end)) }
                         }
                     }
                     // attach sheet (issue #90/#98): Photo keeps the image flow, File opens the document
@@ -1481,7 +1482,7 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                             }
                             Spacer(Modifier.width(8.dp))
                             ComposerField(
-                                input, { input = it },
+                                composer,
                                 // mid-turn the field stays enabled (sends queue into the running turn) — say so,
                                 // or an editable composer under a "running" session reads as disconnected (issue #52)
                                 placeholder = stringResource(
@@ -1520,9 +1521,11 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                                     val sendLabel = stringResource(Res.string.send)
                                     RoundActionButton(
                                         onClick = {
-                                            val t = input.trim()
+                                            // read the state at TAP time (composer.text), not the composition-captured
+                                            // `input` — a same-frame IME commit racing the tap must still be sent
+                                            val t = composer.text.trim()
                                             // a gated send (degraded session, issue #65) returns false — keep the text for the retry
-                                            if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { input = ""; repo.clearDraft(draftKey) }
+                                            if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }

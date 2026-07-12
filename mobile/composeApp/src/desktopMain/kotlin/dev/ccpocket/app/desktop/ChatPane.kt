@@ -125,7 +125,6 @@ import dev.ccpocket.app.ui.WorkflowCard
 import dev.ccpocket.app.ui.pathLinked
 import dev.ccpocket.app.ui.rememberBottomPinned
 import dev.ccpocket.app.ui.rememberCopied
-import dev.ccpocket.app.ui.rememberImeSafeMirror
 import dev.ccpocket.app.ui.completion
 import dev.ccpocket.app.ui.atTokenAt
 import dev.ccpocket.app.ui.atDirOf
@@ -663,19 +662,18 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 var slashSel by remember(slashQuery) { mutableStateOf(0) }          // keyed: retyping resets to the top hit
                 var slashDismissed by remember(slashQuery) { mutableStateOf(false) } // Esc hides until the query changes
                 val slashOpen = slashCmds.isNotEmpty() && !slashDismissed
-                // the field mirror below moves the cursor to the end of the completed text
+                // an explicit write through the String facade — ComposerState lands the caret at the end
                 val completeSlash = { cmd: SlashCommand -> model.composer = cmd.completion() }
-                // The editable value, HOISTED here so the "@file" menu can read the caret position.
-                // TextFieldValue (not the model's plain String) because shift+Enter inserts the newline at
-                // the cursor ourselves (Compose desktop has no shift+Enter binding) and @-completion needs
-                // the caret too. External-write reconcile + IME-composition safety (#86, same root as
-                // mobile #93) live in the shared ImeSafeMirror.
-                val mirror = rememberImeSafeMirror(model.composer) { model.composer = it }
-                var field by mirror::field
+                // The model OWNS the field (ComposerState — drafts follow sessions in the model layer, #88);
+                // the pane reads its caret for the "@file" menu and writes caret-precise edits itself
+                // (shift+Enter newline — Compose desktop has no binding for it — and @-completion).
+                // IME-composition safety for whole-text writes (#86, same root as mobile #93) lives in
+                // ComposerState.setText; there is no per-frame reconcile against a String copy anymore.
+                val composer = model.composerState
                 // "@file" completion (issue #75): browse the session cwd via the daemon, filter by the typed
                 // leaf, drill into folders. sep is the daemon host's separator (Windows-safe, #19/#22).
                 val sep = model.pathSep
-                val atToken = remember(field.text, field.selection) { atTokenAt(field.text, field.selection.min) }
+                val atToken = remember(composer.field.text, composer.field.selection) { atTokenAt(composer.field.text, composer.field.selection.min) }
                 val atDir = atToken?.let { atDirOf(it.query, sep) } ?: ""
                 val atLeaf = atToken?.let { atLeafOf(it.query, sep) } ?: ""
                 // re-list only when the directory part changes — typing the leaf just filters client-side
@@ -694,9 +692,8 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                     val token = atToken ?: return
                     val insert = atInsertText(atDir, entry, sep)
                     val from = token.at + 1
-                    val newText = field.text.replaceRange(from, token.end, insert)
-                    field = TextFieldValue(newText, TextRange(from + insert.length))
-                    model.composer = newText
+                    val newText = composer.field.text.replaceRange(from, token.end, insert)
+                    composer.update(TextFieldValue(newText, TextRange(from + insert.length)))
                     if (!entry.isDir) atClosedAt = insert // the just-completed query — don't reopen on this exact value
                 }
                 if (model.pendingFiles.isNotEmpty()) PendingFilesRow(model)
@@ -734,11 +731,11 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         if (model.composer.isEmpty()) {
                             Text("Message ${if (model.chatAgent == AgentKind.CODEX) "Codex" else "Claude"}…", style = fieldStyle.copy(color = Tok.muted))
                         }
-                        // `field` is hoisted above (the @-file menu reads its caret); onValueChange keeps it +
-                        // model.composer in sync, and the reconcile up there absorbs external writes.
+                        // the model's ComposerState is the ONE source of truth: onValueChange is the only
+                        // path user/IME edits take, and external writes call its explicit methods directly.
                         BasicTextField(
-                            value = field,
-                            onValueChange = mirror::onValueChange,
+                            value = composer.field,
+                            onValueChange = composer::onValueChange,
                             textStyle = fieldStyle,
                             cursorBrush = SolidColor(Tok.accent),
                             modifier = Modifier.fillMaxWidth().focusRequester(composerFocus)
@@ -789,10 +786,9 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                     }
                                     e.key != Key.Enter || e.type != KeyEventType.KeyDown -> false
                                     e.isShiftPressed -> { // ⇧⏎ newline, as the hint row below promises
-                                        val sel = field.selection
-                                        val text = field.text.replaceRange(sel.min, sel.max, "\n")
-                                        field = TextFieldValue(text, TextRange(sel.min + 1))
-                                        model.composer = text
+                                        val cur = composer.field
+                                        val sel = cur.selection
+                                        composer.update(TextFieldValue(cur.text.replaceRange(sel.min, sel.max, "\n"), TextRange(sel.min + 1)))
                                         true
                                     }
                                     else -> { submit(); true }

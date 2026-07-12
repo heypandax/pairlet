@@ -16,6 +16,7 @@ import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.fleet.MachineOs
 import dev.ccpocket.app.ui.fleet.osFromName
 import dev.ccpocket.app.ui.folderName
@@ -111,7 +112,7 @@ class RepoDesktopModel(
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
-    override var composer by mutableStateOf("")
+    override val composerState = ComposerState()
 
     // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
     // The composer is a single field, but its TEXT is per-session — keyed by the repo's composerKey()
@@ -131,8 +132,9 @@ class RepoDesktopModel(
         // carries a brand-new session's draft onto its freshly minted sessionId before this fires.
         // Only a REAL switch (composerEpoch bumped by openSession) reloads: the key also flips in place
         // while the user types (brand-new session materializing, forked resume corrected by SessionLive),
-        // and reloading the ≤debounce-stale draft then rolled the live text back mid-IME-composition —
-        // the ChatPane mirror parked that stale snapshot and a later commit could land it (#118/#108).
+        // and reloading the ≤debounce-stale draft then rolled the live text back — a stale whole-text
+        // write [ComposerState.setText] would faithfully land at composition end (#118/#108), so the
+        // epoch gate keeps it from being ISSUED at all; identity flips only re-home the live text.
         scope.launch {
             snapshotFlow { composerKey() to repo.composerEpoch.value }.collect { (key, epoch) ->
                 val switched = epoch != composerEpochSeen
