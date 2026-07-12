@@ -100,6 +100,7 @@
     <string name="thought_for">Thought for %1$ds</string>
     <string name="code_copy">copy</string>
     <string name="code_copied">copied</string>
+    <string name="text_render_truncated">long content clipped for display · full text ≈%1$s chars · copy gets everything</string>
     <string name="jump_to_latest">Jump to latest</string>
     <string name="observing_notice">👁 Observing · running in a terminal</string>
     <string name="continue_here">Continue here</string>

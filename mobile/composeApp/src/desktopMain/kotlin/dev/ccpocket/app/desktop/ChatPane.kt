@@ -119,6 +119,8 @@ import dev.ccpocket.app.ui.LocalPathCwd
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
 import dev.ccpocket.app.ui.QuestionCard
+import dev.ccpocket.app.ui.TruncatedNote
+import dev.ccpocket.app.ui.renderClip
 import dev.ccpocket.app.ui.SentImages
 import dev.ccpocket.app.ui.SubagentCard
 import dev.ccpocket.app.ui.WorkflowCard
@@ -438,7 +440,11 @@ private fun MessageRow(
                     if (item.text.isNotBlank()) Spacer(Modifier.height(8.dp))
                 }
                 if (item.text.isNotBlank()) {
-                    Text(pathLinked(item.text), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                    // renderClip: one pathological row (~800 KB skill injection) shouldn't hit the
+                    // pathLinked regex + single-paragraph layout whole; CopyableBlock keeps full text
+                    val shown = renderClip(item.text)
+                    Text(pathLinked(shown), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.5.sp, lineHeight = 22.sp)
+                    if (shown.length < item.text.length) TruncatedNote(item.text.length)
                 }
                 // delivery state (issue #66): "sending…" after a short grace while the daemon hasn't
                 // receipted; "✓ delivered" once the PromptAck lands, until the reply starts (stops being last).

@@ -1671,7 +1671,11 @@ private fun MessageItem(
                     if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
                 }
                 if (m.text.isNotBlank()) {
-                    SelectionContainer { Text(m.text, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                    // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
+                    // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
+                    val shown = renderClip(m.text)
+                    SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                    if (shown.length < m.text.length) TruncatedNote(m.text.length)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
                     }
