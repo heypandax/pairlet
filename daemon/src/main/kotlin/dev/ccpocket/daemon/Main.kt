@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.claude.ClaudeBackend
@@ -19,9 +20,14 @@ import dev.ccpocket.daemon.relay.LoopbackBridge
 import dev.ccpocket.daemon.relay.LoopbackHeadlessCred
 import dev.ccpocket.daemon.relay.LoopbackHeadlessReq
 import dev.ccpocket.daemon.relay.LoopbackPair
+import dev.ccpocket.daemon.relay.LoopbackShareMinted
+import dev.ccpocket.daemon.relay.LoopbackShareReq
+import dev.ccpocket.daemon.relay.LoopbackShareRevokeReq
 import dev.ccpocket.daemon.relay.LoopbackStatus
 import dev.ccpocket.daemon.relay.PairLoopback
 import dev.ccpocket.daemon.relay.RelayClient
+import dev.ccpocket.protocol.ShareListing
+import dev.ccpocket.protocol.ShareRevoked
 import dev.ccpocket.daemon.server.DaemonServer
 import dev.ccpocket.daemon.server.LanE2E
 import dev.ccpocket.daemon.service.ServiceInstaller
@@ -383,6 +389,140 @@ private class BridgesCmd : CliktCommand(name = "bridges") {
     }
 }
 
+/**
+ * Mint / list / revoke folder-share invites headlessly (issue #115) — the `pair --headless` sibling for
+ * granting a guest a scoped, expiring folder credential without opening the app. The minted code is
+ * byte-identical to the app's "Create invite": the guest pastes it into CC Pocket ▸ Connect.
+ */
+private class ShareCmd : CliktCommand(name = "share") {
+    private val pairPort by option("--pair-port", help = "loopback port of the running daemon").int().default(8799)
+    private val workdir by option("--workdir", help = "absolute directory to share — the guest can only open sessions under it")
+    private val tier by option("--tier", help = "autonomy ceiling the guest runs under (default review)")
+        .choice("review", "collaborate", "autonomous").default("review")
+    private val expires by option("--expires", help = "share lifetime, e.g. 1h / 90m / 2d / 3600s (default 7d; clamped to 5min–90d)")
+    private val label by option("--label", help = "optional nickname for the guest, shown on your Shared page")
+    private val list by option("--list", help = "list active folder shares + who is using them").flag()
+    private val revoke by option("--revoke", help = "revoke a share by its guest deviceId (from --list) — cuts the live link, deletes the key")
+
+    override fun run() = runBlocking {
+        val client = HttpClient(CIO)
+        try {
+            when {
+                list -> shareList(client)
+                revoke != null -> shareRevoke(client, revoke!!)
+                else -> shareMint(client)
+            }
+        } finally {
+            client.close()
+        }
+    }
+
+    private suspend fun shareMint(client: HttpClient) {
+        val wd = workdir?.trim().orEmpty()
+        if (wd.isEmpty()) {
+            echo("✗ share requires --workdir <absolute dir> (or use --list, or --revoke <deviceId>)")
+            echo("  the guest can open sessions ONLY under this folder; approvals still go to YOUR phone.")
+            return
+        }
+        val expSec = expires?.let {
+            parseDuration(it) ?: run { echo("✗ bad --expires \"$it\" — use e.g. 1h, 90m, 2d, or 3600s"); return }
+        }
+        val req = LoopbackShareReq(workdir = wd, tier = tier, expiresInSec = expSec, label = label?.trim()?.takeIf { it.isNotEmpty() })
+        val body = runCatching {
+            client.post("http://127.0.0.1:$pairPort/share") { setBody(PocketJson.encodeToString(req)) }.bodyAsText()
+        }.getOrElse {
+            echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}")
+            return
+        }
+        val minted = runCatching { PocketJson.decodeFromString<LoopbackShareMinted>(body) }.getOrNull()
+        if (minted == null || !minted.ok || minted.code == null) {
+            echo("✗ share failed: ${minted?.error ?: body}")
+            return
+        }
+        val leftMs = (minted.expiresAt ?: 0L) - System.currentTimeMillis()
+        echo("")
+        echo("  Folder share ready — paste into CC Pocket ▸ Connect. Works once.")
+        echo("")
+        echo(minted.code)
+        echo("")
+        echo("  folder:   ${minted.folderName}")
+        echo("  tier:     ${minted.tier}")
+        echo("  expires:  in ${humanDuration(leftMs)} (accept within ${minted.ttlSec}s; the share itself lasts the full window)")
+        echo("")
+        echo("  manage it:  cc-pocket-daemon share --list   |   cc-pocket-daemon share --revoke <deviceId>")
+    }
+
+    private suspend fun shareList(client: HttpClient) {
+        val body = runCatching { client.get("http://127.0.0.1:$pairPort/shares").bodyAsText() }
+            .getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return }
+        val listing = runCatching { PocketJson.decodeFromString<ShareListing>(body) }.getOrNull()
+        when {
+            listing == null -> echo("✗ unexpected reply: $body")
+            listing.items.isEmpty() -> echo("no active folder shares — mint one with: cc-pocket-daemon share --workdir <dir>")
+            else -> {
+                echo("")
+                listing.items.forEach { s ->
+                    val state = when {
+                        s.revoked -> "revoked"
+                        s.expired -> "expired"
+                        s.online -> "active now (${s.activeSessions})"
+                        else -> "idle"
+                    }
+                    echo("  ${s.path}")
+                    echo("    guest:     ${s.guestLabel ?: "someone"} · ${s.tier.name.lowercase()} · $state")
+                    echo("    deviceId:  ${s.deviceId}")
+                    echo("    expires:   in ${humanDuration(s.expiresAt - System.currentTimeMillis())}")
+                }
+                echo("")
+                echo("  revoke one:  cc-pocket-daemon share --revoke <deviceId>")
+            }
+        }
+    }
+
+    private suspend fun shareRevoke(client: HttpClient, deviceId: String) {
+        val body = runCatching {
+            client.post("http://127.0.0.1:$pairPort/share/revoke") {
+                setBody(PocketJson.encodeToString(LoopbackShareRevokeReq(deviceId.trim())))
+            }.bodyAsText()
+        }.getOrElse { echo("✗ no daemon on 127.0.0.1:$pairPort — ${daemonStartHint()}"); return }
+        val res = runCatching { PocketJson.decodeFromString<ShareRevoked>(body) }.getOrNull()
+        when {
+            res == null -> echo("✗ unexpected reply: $body")
+            res.ok -> echo("✓ revoked share ${res.deviceId} — its live link is cut and its key deleted")
+            else -> echo("✗ revoke failed: ${res.error ?: "unknown"}")
+        }
+    }
+
+    /** Parse a duration like `1h`, `90m`, `2d`, `3600s`, or a bare `3600` (seconds) into seconds; null if unparseable. */
+    private fun parseDuration(raw: String): Long? {
+        val m = Regex("^(\\d+)([smhdw]?)$").matchEntire(raw.trim().lowercase()) ?: return null
+        val n = m.groupValues[1].toLongOrNull() ?: return null
+        val mult = when (m.groupValues[2]) {
+            "", "s" -> 1L
+            "m" -> 60L
+            "h" -> 3600L
+            "d" -> 86_400L
+            "w" -> 604_800L
+            else -> return null
+        }
+        return n * mult
+    }
+
+    /** Human "6d" / "3h" / "45m" for a remaining-milliseconds span (coarse; the largest one or two units). */
+    private fun humanDuration(ms: Long): String {
+        if (ms <= 0) return "expired"
+        val s = ms / 1000
+        val d = s / 86_400
+        val h = (s % 86_400) / 3600
+        val m = (s % 3600) / 60
+        return when {
+            d > 0 -> if (h > 0) "${d}d ${h}h" else "${d}d"
+            h > 0 -> if (m > 0) "${h}h ${m}m" else "${h}h"
+            else -> "${m}m"
+        }
+    }
+}
+
 private class UpdateCmd : CliktCommand(name = "update") {
     private val check by option("--check", help = "only report whether a newer release exists").flag()
 
@@ -522,5 +662,5 @@ fun main(args: Array<String>) {
     // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), StatusCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
 }

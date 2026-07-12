@@ -2,6 +2,8 @@ package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.util.logger
+import dev.ccpocket.protocol.AccessTier
+import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.PocketJson
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -76,6 +78,37 @@ data class LoopbackBridge(
 @Serializable
 data class LoopbackRevokeReq(val idOrName: String)
 
+/** CLI -> daemon (loopback): mint a folder-share invite (issue #115) — the headless sibling of the app's
+ *  "Create invite". [tier] is the AccessTier wire string (review|collaborate|autonomous); null/unknown →
+ *  the safest (REVIEW). [expiresInSec] is the SHARE lifetime; null → the [CreateShare] default, and the
+ *  daemon clamps it to 5min…90day regardless. */
+@Serializable
+data class LoopbackShareReq(
+    val workdir: String,
+    val tier: String? = null,
+    val expiresInSec: Long? = null,
+    val label: String? = null,
+)
+
+/** daemon -> CLI: the minted folder share. [code] is byte-identical to the app's "Create invite" code —
+ *  the guest pastes it into Connect (single use). [expiresAt] is the share's cut-off (epoch ms); [ttlSec]
+ *  is the far shorter window the redeem ticket inside the code stays valid to ACCEPT. On failure
+ *  [ok] is false and [error] says why (bad path, a pairing mid-flight, relay offline). */
+@Serializable
+data class LoopbackShareMinted(
+    val ok: Boolean,
+    val code: String? = null,
+    val folderName: String? = null,
+    val tier: String? = null,
+    val expiresAt: Long? = null,
+    val ttlSec: Int? = null,
+    val error: String? = null,
+)
+
+/** CLI -> daemon (loopback): revoke a folder share by its guest deviceId (from `share --list`). */
+@Serializable
+data class LoopbackShareRevokeReq(val deviceId: String)
+
 /**
  * A loopback-only helper so the `pair` CLI can ask the ALREADY-RUNNING daemon to mint a pairing
  * ticket over its single authenticated relay connection — instead of opening a second daemon
@@ -96,6 +129,10 @@ class PairLoopback(
         // redeem→connect→first-frame latency + modest clock skew so a bridge is never mis-classified as
         // a full-power device (issue #91). An abandoned headless mint blocks re-mint for at most this long.
         const val INTENT_GRACE_MS = 120_000L
+
+        // the SHARE lifetime used when `share` is minted without --expires; mirrors CreateShare's default
+        // (7 days). ShareService clamps whatever it receives to 5min…90day, so this is only the "no flag" value.
+        const val SHARE_DEFAULT_SEC = 7L * 24 * 3600
     }
 
     fun start() {
@@ -210,6 +247,90 @@ class PairLoopback(
                     }
                 }
 
+                // ---- owner folder-share (issue #115): mint / list / revoke, headless ----
+                // Reuses the SAME ShareService the app drives over the wire — no re-implemented mint logic,
+                // so the CLI and in-app "Create invite" bind an identical guest intent and emit an identical
+                // code. Loopback reachability == local-user authority, the same trust `pair`/`pair/headless`
+                // already ride: the machine's owner is the one entitled to grant a folder from that machine.
+
+                post("/share") {
+                    val sc = relay.shareControl
+                    if (sc == null) {
+                        // no relay-side control plane yet: daemon still wiring up, or a LAN-only `run` that
+                        // has no relay link to mint a redeem ticket over
+                        call.respondText(
+                            PocketJson.encodeToString(LoopbackShareMinted(ok = false, error = "share minting needs the relay link — the daemon is still starting, or it's running LAN-only")),
+                            ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
+                        )
+                        return@post
+                    }
+                    val req = runCatching { PocketJson.decodeFromString<LoopbackShareReq>(call.receiveText()) }.getOrNull()
+                    if (req == null || req.workdir.isBlank()) {
+                        call.respondText(
+                            PocketJson.encodeToString(LoopbackShareMinted(ok = false, error = "--workdir <absolute dir> is required")),
+                            ContentType.Application.Json, HttpStatusCode.BadRequest,
+                        )
+                        return@post
+                    }
+                    // wire string → tier, authoritatively via the tolerant serializer: an unknown token
+                    // decodes to UNKNOWN, which ShareService then clamps to REVIEW (never falls OPEN)
+                    val tier = req.tier
+                        ?.let { runCatching { PocketJson.decodeFromString(AccessTier.serializer(), "\"$it\"") }.getOrNull() }
+                        ?: AccessTier.REVIEW
+                    val res = sc.create(
+                        CreateShare(
+                            path = req.workdir,
+                            tier = tier,
+                            expiresInSec = req.expiresInSec ?: SHARE_DEFAULT_SEC, // ShareService coerces to 5min…90day
+                            label = req.label?.trim()?.takeIf { it.isNotEmpty() },
+                        ),
+                    )
+                    val invite = res.invite
+                    if (!res.ok || invite == null) {
+                        call.respondText(
+                            PocketJson.encodeToString(LoopbackShareMinted(ok = false, error = res.error ?: "mint failed")),
+                            ContentType.Application.Json,
+                        )
+                        return@post
+                    }
+                    call.respondText(
+                        PocketJson.encodeToString(
+                            LoopbackShareMinted(
+                                ok = true,
+                                code = encodeShareInvite(invite), // byte-identical to the app's ShareInvite.encode()
+                                folderName = invite.folderName,
+                                tier = invite.tier.name.lowercase(), // wire == lowercased name; .wire is module-internal
+                                expiresAt = invite.expiresAt,
+                                ttlSec = invite.ttlSec,
+                            ),
+                        ),
+                        ContentType.Application.Json,
+                    )
+                }
+
+                get("/shares") {
+                    val sc = relay.shareControl
+                    if (sc == null) {
+                        call.respondText("""{"error":"unavailable"}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
+                        return@get
+                    }
+                    call.respondText(PocketJson.encodeToString(sc.list()), ContentType.Application.Json)
+                }
+
+                post("/share/revoke") {
+                    val sc = relay.shareControl
+                    if (sc == null) {
+                        call.respondText("""{"error":"unavailable"}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
+                        return@post
+                    }
+                    val req = runCatching { PocketJson.decodeFromString<LoopbackShareRevokeReq>(call.receiveText()) }.getOrNull()
+                    if (req == null || req.deviceId.isBlank()) {
+                        call.respondText("""{"error":"bad_request"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
+                        return@post
+                    }
+                    call.respondText(PocketJson.encodeToString(sc.revoke(req.deviceId)), ContentType.Application.Json)
+                }
+
                 get("/status") {
                     call.respondText(
                         PocketJson.encodeToString(LoopbackStatus(relay.accountId, relayWsBase, relay.attached, relay.lastPongAgeMs())),
@@ -218,6 +339,6 @@ class PairLoopback(
                 }
             }
         }.start(wait = false)
-        log.info("pair loopback on http://127.0.0.1:$port (POST /pair, POST /pair/headless, GET /bridges, POST /bridge/revoke, GET /status)")
+        log.info("pair loopback on http://127.0.0.1:$port (POST /pair, POST /pair/headless, GET /bridges, POST /bridge/revoke, POST /share, GET /shares, POST /share/revoke, GET /status)")
     }
 }

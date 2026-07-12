@@ -92,6 +92,11 @@ class RelayClient(
     /** The headless-bridge authority (issue #91) — PairLoopback serves list/revoke/mint from it. */
     val bridges: dev.ccpocket.daemon.bridge.BridgeRegistry get() = sessions.bridges
 
+    /** The OWNER folder-share control plane (issue #115) — PairLoopback serves the `share` CLI's
+     *  mint/list/revoke from it. Null until [run] installs it (a request during the brief startup window),
+     *  and always null on the local-server path, which has no relay link to mint a ticket over. */
+    val shareControl: ShareControl? get() = sessions.shareControl
+
     /** True while an interactive pairing ticket could still be redeemed (headless mint must wait). */
     fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
 
