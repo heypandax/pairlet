@@ -619,10 +619,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  auto-resend: the live daemon Conversation already recorded this promptId (the #66 dedup that makes a
      *  SessionGone same-id resend safe would here turn a same-id resend into a bare re-ack — no turn), and a
      *  fresh-id auto-resend would double-run a turn that was merely slow to start. The recovery is user-driven
-     *  ([resendStalledPrompt], fresh id). [turnStalled] retracts on the first real turn frame or a session change. */
+     *  ([resendStalledPrompt], fresh id). [turnStalled] retracts on the first real turn frame or a session change.
+     *  Only for prompts sent into an IDLE session — a mid-turn send is the queued case, [turnQueued]. */
     val turnStalled = mutableStateOf(false)
+
+    /** Queued flavor of the same deadline: the prompt was sent INTO an already-running turn (the composer's
+     *  "sending will queue" state), so the CLI parks it until the next tool boundary / turn end — silence past
+     *  the deadline is expected there, not a swallow. The watchdog can only be pending while the prompt is
+     *  provably still queued (consuming it takes a tool boundary or turn end, and either frame feeds
+     *  [promptEvidence] first), so this surfaces a calm "queued" status instead of [turnStalled]'s resend cue.
+     *  Deliberately NOT actionable: the original still sits in the CLI queue, and a fresh-id resend (the #66
+     *  dedup doesn't apply) would run the instruction twice the moment the turn yields. */
+    val turnQueued = mutableStateOf(false)
     private var turnWatchdog: Job? = null
     private var awaitingTurn = false // between a PromptAck (delivered) and the first turn frame
+    private var promptQueued = false // the in-flight prompt was sent mid-turn — the CLI queues it (see [turnQueued])
     internal var promptTurnTimeoutMs = 45_000L // ack→first-frame budget: a cold model / big context still streams
         // *some* frame (thinking token, tool start) well inside this; a test seam shrinks it
 
@@ -631,6 +642,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // first send into a degraded session is blocked with an explanation; the next one goes through
     private var degradedSendArmed = false
     private var turnStartMark: kotlin.time.TimeSource.Monotonic.ValueTimeMark? = null // stamps TurnEnded's duration
+
+    /** ms since THIS app sent the in-flight turn's prompt — null once the turn ends, or when the turn
+     *  wasn't started here (attached to an already-running session). Anchors the desktop stop-refill
+     *  window (#48): handing the prompt back for re-editing only makes sense near its own send. */
+    fun turnElapsedMs(): Long? = turnStartMark?.elapsedNow()?.inWholeMilliseconds
 
     /** Desktop notifier seam: fires when the active conversation's turn completes (after the TurnEnded
      *  marker lands). The UI layer decides whether that deserves a system notification / dock badge.
@@ -648,6 +664,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false // …and a real turn frame moots the turn deadline
         sendStalled.value = false
         turnStalled.value = false
+        turnQueued.value = false
         if (!promptPending) return
         promptPending = false
         val i = messages.indexOfLast { it is ChatItem.User }
@@ -663,7 +680,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         promptWatchdog?.cancel(); promptWatchdog = null // receipt arrived — the delivery deadline is moot
         sendStalled.value = false
         promptPending = false
-        if (streaming.value) { awaitingTurn = true; armTurnWatchdog() } // a TurnDone/error already in wouldn't re-arm
+        if (streaming.value) { awaitingTurn = true; armTurnWatchdog(queued = promptQueued) } // a TurnDone/error already in wouldn't re-arm
     }
 
     // mode/model/effort are claude launch flags, NOT stored in the transcript jsonl. Leaving an idle
@@ -1185,7 +1202,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false // (issue #104) drop the ack→turn deadline too
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) drop the ack→turn deadline too
         // frames queued for the binding we're leaving must not leak into the next link (both transports
         // are reused across machine switches, and their outboxes deliberately buffer across reconnects)
         directAttemptInFlight = false
@@ -1573,6 +1590,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 val retry = promptRetry
                 if (promptResendArmed && retry != null && !f.observing && f.workdir == retry.workdir) {
                     promptRetry = null; promptResendArmed = false
+                    promptQueued = false // fresh process, no running turn to queue behind — its ack arms the strict deadline
                     streaming.value = true
                     // same promptId as the original: if the first send actually landed, the daemon
                     // dedupes and just re-acks instead of running the turn twice (issue #66)
@@ -1996,7 +2014,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         openTimedOut.value = false
         promptPending = false // the pending marker belongs to the previous conversation's transcript
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
-        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false // (issue #104) new session clears any ack→turn stall
+        turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) new session clears any ack→turn stall
         sessionDegraded.value = false; degradedSendArmed = false // per-session — SessionLive re-announces the truth
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
         // Reclaim the current session ONLY if it's idle (or a read-only observe): a RUNNING turn stays
@@ -2011,6 +2029,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
+        turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         pendingAsk.value = null
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
@@ -2258,6 +2277,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
         pendingImages.clear()
         pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
+        promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
         workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
@@ -2288,13 +2308,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  was swallowed by a wedged / mid-relaunch agent. Surface an inline resend cue instead of spinning forever.
      *  Self-guarded at fire time — a turn frame ([awaitingTurn] cleared), a session change ([convoId] moved off
      *  the one captured here), or a turn that already ended ([streaming] false) all no-op it, so it never fires
-     *  into a stale conversation and no teardown path has to reach in and cancel it. */
-    private fun armTurnWatchdog() {
+     *  into a stale conversation and no teardown path has to reach in and cancel it.
+     *  [queued] flips the fired state: a prompt sent mid-turn waits in the CLI's queue, where the same silence
+     *  is expected — it gets the calm [turnQueued] status, never the resend cue (see [turnQueued] for why). */
+    private fun armTurnWatchdog(queued: Boolean) {
         val c = convoId.value
         turnWatchdog?.cancel()
         turnWatchdog = scope.launch {
             delay(promptTurnTimeoutMs)
             if (!awaitingTurn || convoId.value != c || !streaming.value) return@launch
+            if (queued) {
+                turnQueued.value = true
+                Telemetry.track(TelEvent.PromptTurnQueued, mapOf(TelKey.Phase to phase.value.name))
+                return@launch
+            }
             turnStalled.value = true
             // this fires ONLY after a PromptAck, so it inherently means "daemon delivered, agent produced
             // nothing" (candidate 3) — distinct from the no-ack stall (issue #78). Phase tags the link state.
@@ -2317,6 +2344,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         promptRetry = PromptRetry(retry.text, retry.images, retry.workdir, freshId)
         promptResendArmed = false
         promptPending = true // pending until the re-driven turn shows life
+        promptQueued = false // the stalled turn never started — the re-driven copy expects the strict deadline
         streaming.value = true
         Telemetry.track(TelEvent.PromptResent)
         scope.launch { send(SendPrompt(c, retry.text, retry.images, promptId = freshId)) }

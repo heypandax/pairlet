@@ -631,6 +631,7 @@ class RepoDesktopModel(
     override val sendUndelivered: Boolean get() = repo.phase.value != ConnPhase.Ready || repo.sendStalled.value
     // delivered but no turn started within the deadline (issue #104) — the resend cue's driver
     override val turnStalled: Boolean get() = repo.turnStalled.value
+    override val turnQueued: Boolean get() = repo.turnQueued.value
     override fun resendStalled() = repo.resendStalledPrompt()
 
     override fun switchMode(m: PermissionMode) = repo.switchMode(m)
@@ -769,10 +770,19 @@ class RepoDesktopModel(
     override val observing: Boolean get() = repo.observing.value
     override fun takeOver() { repo.takeOver() }
 
+    // stop-refill (#48) applies only this close to the prompt's own send — the CLI-style "oops" beat
+    // (grab it back before the run really gets going), not a revise-anytime affordance. A test seam.
+    internal var stopRefillWindowMs = 5_000L
+
     override fun stopTurn() {
-        // hand the interrupted prompt back for editing/resending (#48) — never clobber a typed draft.
+        // hand the interrupted prompt back for editing/resending (#48) — never clobber a typed draft,
+        // and only within the quick-regret window of its own send: seconds later a stop means
+        // "that's enough", not "let me rephrase", and the long-gone prompt reappearing then reads as
+        // the composer typing by itself. Null elapsed = the turn wasn't sent from this app (attached
+        // to an already-running session), so there is nothing of the user's to hand back either.
         // The transcript keeps its User bubble: the daemon-side transcript already recorded the turn.
-        if (composer.isBlank()) {
+        val elapsed = repo.turnElapsedMs()
+        if (composer.isBlank() && elapsed != null && elapsed < stopRefillWindowMs) {
             (repo.messages.lastOrNull { it is ChatItem.User } as? ChatItem.User)
                 ?.text?.takeIf { it.isNotBlank() }?.let { composer = it }
         }

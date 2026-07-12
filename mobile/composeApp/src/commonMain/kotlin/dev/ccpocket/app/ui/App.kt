@@ -1344,6 +1344,8 @@ private fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onO
                         // delivered, but the agent produced no turn within the deadline (issue #104): the prompt
                         // was swallowed (wedged / mid-relaunch). Offer a resend instead of an endless spinner.
                         repo.turnStalled.value -> item { NoResponseRow { repo.resendStalledPrompt() } }
+                        // sent mid-turn and the running turn has gone quiet: the prompt is queued, not swallowed
+                        repo.turnQueued.value -> item { QueuedRow() }
                         repo.streaming.value -> item { if (liveContent) PulseDot(Tok.accent) else WorkingRow() }
                     }
                 }
@@ -1764,6 +1766,21 @@ private fun WorkingRow() {
     ) {
         PulseDot(Tok.muted)
         Text(stringResource(Res.string.thinking_streaming), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
+    }
+}
+
+/** Queued-behind-a-running-turn cue: the ack'd prompt sits in the CLI's queue while the in-flight turn
+ *  stays silent past the deadline. Calm status (the queued case is healthy) in [WorkingRow]'s visual family,
+ *  and deliberately NOT tappable — the original is still queued, so a resend would run it twice. */
+@Composable
+private fun QueuedRow() {
+    Row(
+        Modifier.padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PulseDot(Tok.muted, size = 5.dp)
+        Text(stringResource(Res.string.msg_queued), color = Tok.muted, fontSize = 12.5.sp, fontStyle = FontStyle.Italic)
     }
 }
 

@@ -273,6 +273,14 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.resendStalled() }
                                         .padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
+                            } else if (model.turnQueued) {
+                                // sent mid-turn and the running turn went quiet: queued (healthy), not swallowed —
+                                // status only, no resend affordance (the queued original would double-run).
+                                Text(
+                                    "queued — the current turn is still running", color = Tok.muted,
+                                    fontFamily = Dk.mono, fontSize = 11.sp,
+                                    modifier = Modifier.padding(vertical = 3.dp, horizontal = 6.dp),
+                                )
                             } else if (model.streaming) {
                                 Box(Modifier.size(width = 7.dp, height = 15.dp).clip(RoundedCornerShape(1.dp)).blinkAccent())
                             }
@@ -802,8 +810,9 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             },
                         )
                     }
-                    // ■ interrupt rides BESIDE send while a turn runs (send itself never morphs) — the
-                    // interrupted prompt returns to the composer via stopTurn (#48); Esc does the same
+                    // ■ interrupt rides BESIDE send while a turn runs (send itself never morphs) — a
+                    // just-sent prompt returns to the composer via stopTurn (#48, quick-regret window
+                    // only); Esc does the same
                     if (model.streaming) {
                         Box(
                             Modifier.size(34.dp).clip(RoundedCornerShape(999.dp))

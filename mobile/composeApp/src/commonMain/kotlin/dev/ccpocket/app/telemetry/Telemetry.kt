@@ -22,7 +22,10 @@ enum class TelEvent(val id: String) {
     // (wrote it to the agent's stdin) but no turn frame followed within the deadline — the agent swallowed
     // it (wedged / mid-relaunch). PromptResent fires when the user acts on that cue. Together with the
     // no-ack stall (issue #78) they split "never delivered" from "delivered but no turn".
+    // PromptTurnQueued is the mid-turn-send sibling: the same silent deadline hit while the prompt sat in
+    // the CLI's queue behind a running turn — expected, surfaced as a calm status instead of a resend cue.
     PromptTurnStalled("prompt_turn_stalled"),
+    PromptTurnQueued("prompt_turn_queued"),
     PromptResent("prompt_resent"),
     ApprovalShown("approval_shown"),
     ApprovalDecided("approval_decided"),

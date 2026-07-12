@@ -309,6 +309,10 @@ interface DesktopModel {
     /** Delivered but no turn started within the deadline (issue #104): the agent swallowed the prompt
      *  (wedged / mid-relaunch). ChatPane replaces the streaming caret with a tappable "resend" cue. */
     val turnStalled: Boolean get() = false
+    /** The mid-turn-send sibling: the prompt is queued in the CLI behind a running turn that has gone
+     *  quiet past the same deadline. Healthy, so ChatPane shows a calm status — never a resend cue
+     *  (the queued original would double-run). */
+    val turnQueued: Boolean get() = false
     /** The composer's single source of truth — ChatPane renders it and writes caret-precise edits
      *  (shift+Enter newline, @-file completion) straight into it. See [dev.ccpocket.app.ui.ComposerState]. */
     val composerState: ComposerState
