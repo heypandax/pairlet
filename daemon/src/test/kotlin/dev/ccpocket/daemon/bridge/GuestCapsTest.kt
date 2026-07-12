@@ -81,6 +81,8 @@ class GuestCapsTest {
             "pocket/ask", "pocket/ask.withdrawn", "pocket/commands", "pocket/jobs",
             "pocket/dirs", "pocket/sessions", "pocket/path.entries", "pocket/files",
             "pocket/file.content", "pocket/diff.content", "pocket/transcript",
+            // the guest's OWN ending notice — "revoked"/"expired" for its terminal card (#115 follow-up)
+            "pocket/share.ended",
         )
         for (cls in leaves(ToPhone::class)) {
             val inst = runCatching { instantiate(cls) as Frame }.getOrNull() ?: continue
@@ -99,6 +101,10 @@ class GuestCapsTest {
         assertFalse(GuestCaps.egressAllowed(dev.ccpocket.protocol.DaemonInfo("ws://192.168.1.5:8765"))) // no LAN address
         assertFalse(GuestCaps.egressAllowed(dev.ccpocket.protocol.ShareListing()))
         assertFalse(GuestCaps.egressAllowed(dev.ccpocket.protocol.ShareCreated(ok = true)))
+        // …but its OWN ending notice IS deliverable (#115 follow-up) — and stays bridge-denied, so the
+        // guest-vs-bridge egress split holds for the new frame too
+        assertTrue(GuestCaps.egressAllowed(dev.ccpocket.protocol.ShareEnded()))
+        assertFalse(BridgeCaps.egressAllowed(dev.ccpocket.protocol.ShareEnded()))
     }
 
     @Test

@@ -41,6 +41,7 @@ import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.ListShares
 import dev.ccpocket.protocol.RevokeShare
 import dev.ccpocket.protocol.ShareCreated
+import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.ShareInfo
 import dev.ccpocket.protocol.ShareInvite
 import dev.ccpocket.protocol.ShareListing
@@ -733,6 +734,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val info = getInfo(client)
             val keys = Pairing.deviceKeys()
             paired.value = Pairing.redeem(info, keys, client) // upserts the list + pins this as the active account
+            // a FRESH pairing (e.g. a guest redeeming a new invite for the same daemon/accountId) supersedes
+            // any recorded "share ended" terminal state — else the new binding would open on the dead card
+            paired.value?.let { SecureStore.remove(K_SHARE_ENDED_PREFIX + it.accountId) }
+            shareEnded.value = null
             replace(pairedList, Pairing.loadAll())
             addingDevice.value = false
             firstTicket = info.ticket
@@ -1264,6 +1269,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         onBeforeSwitch?.invoke(target.accountId)
         disconnect()
         paired.value = target
+        shareEnded.value = loadShareEnded(target.accountId) // per-account guest ending follows the switch
         Pairing.setActive(target.accountId)
         firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
@@ -1361,7 +1367,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wasActive = paired.value?.accountId == target.accountId
         val remaining = Pairing.remove(target.accountId) // also re-points the active account if it was this one
         replace(pairedList, remaining)
-        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull() }
+        SecureStore.remove(K_SHARE_ENDED_PREFIX + target.accountId) // a removed binding's guest ending goes with it
+        if (wasActive) { disconnect(); paired.value = remaining.lastOrNull(); shareEnded.value = loadShareEnded(paired.value?.accountId) }
     }
 
     /** Remove the currently active binding (the "re-pair" escape hatch when a pairing goes invalid). */
@@ -1730,6 +1737,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 sharesRefreshing.value = false
                 if (f.ok) shares.removeAll { it.deviceId == f.deviceId } // optimistic; a follow-up listShares() refreshes for real
             }
+            // guest side (#115 follow-up): the daemon's precise "your share ended" — arrives right before
+            // the cut, so the terminal card can say revoked-vs-expired instead of a bare disconnect
+            is ShareEnded -> onShareEnded(f)
             else -> {}
         }
     }
@@ -1959,6 +1969,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val sharesRefreshing = mutableStateOf(false)
     /** The most recent [ShareCreated] — the invite-ready screen reads its `invite`, or its `error`. */
     val lastShareCreated = mutableStateOf<ShareCreated?>(null)
+
+    // ── guest side (issue #115 follow-up): the precise "your share ended" notice ──
+
+    /** Set when the daemon told this GUEST its folder share ended ([ShareEnded]): the precise reason
+     *  behind the disconnect that follows, driving the "Access ended · revoked/expired" terminal instead
+     *  of the generic re-pair screen. Persisted per account (the frame can only ever precede the cut once —
+     *  a relaunch must still light the card) and cleared when the binding is removed. Never set for an
+     *  owner device: the daemon emits the frame exclusively to guest credentials. */
+    val shareEnded = mutableStateOf(loadShareEnded(paired.value?.accountId))
+
+    private fun loadShareEnded(accountId: String?): ShareEnded? {
+        val raw = accountId?.let { SecureStore.getString(K_SHARE_ENDED_PREFIX + it) } ?: return null
+        val t = raw.split('\t')
+        return ShareEnded(reason = t[0], ownerLabel = t.getOrNull(1)?.takeIf { it.isNotEmpty() })
+    }
+
+    internal fun onShareEnded(f: ShareEnded) { // internal: exercised directly by ShareRepoTest
+        shareEnded.value = f
+        paired.value?.let { SecureStore.putString(K_SHARE_ENDED_PREFIX + it.accountId, f.reason + "\t" + (f.ownerLabel ?: "")) }
+        // the credential dies with the notice — the disconnect that follows must not auto-retry (same
+        // terminal treatment as AuthError; the gate renders the ended card off shareEnded, not the generic copy)
+        pairingInvalid = true; retryJob?.cancel(); recomputePhase()
+    }
 
     /** Owner: mint a scoped, expiring invite for [path]. Reply lands in [lastShareCreated]. */
     fun createShare(path: String, tier: AccessTier, expiresInSec: Long, label: String? = null) {
@@ -2878,6 +2911,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
+        const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
     }

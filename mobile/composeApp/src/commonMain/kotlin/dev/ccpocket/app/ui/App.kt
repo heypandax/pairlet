@@ -128,6 +128,7 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
 import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.ui.share.GuestEnding
 import dev.ccpocket.app.ui.share.ShareFolderScreen
 import dev.ccpocket.app.ui.share.SharedPill
 import dev.ccpocket.app.ui.share.expiryLeft
@@ -145,6 +146,7 @@ import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.isSubagentTool
 import dev.ccpocket.protocol.isWorkflowTool
 import dev.ccpocket.protocol.PermissionMode
+import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.SlashCommand
 import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.compose.resources.stringResource
@@ -310,12 +312,31 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
 @Composable
 private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Unit) {
     when (repo.phase.value) {
-        ConnPhase.PairingInvalid -> CenteredState(
-            Tok.danger,
-            stringResource(Res.string.conn_pairing_invalid_title),
-            stringResource(Res.string.conn_pairing_invalid_body),
-            stringResource(Res.string.conn_repair), { repo.unpairActive() },
-        )
+        ConnPhase.PairingInvalid -> {
+            val ended = repo.shareEnded.value
+            when {
+                // guest share revoked MID-SESSION (design 4c): keep the transcript readable under the slim
+                // danger banner instead of yanking the user to a full-screen card; the ended card waits at browse
+                ended != null && ended.reason == ShareEnded.REASON_REVOKED && repo.convoId.value != null ->
+                    Column(Modifier.fillMaxSize()) {
+                        dev.ccpocket.app.ui.share.ShareRevokedBanner()
+                        Box(Modifier.weight(1f)) { content() }
+                    }
+                // guest share ended (design 4b): the precise, calm terminal card — revoked vs expired
+                ended != null -> dev.ccpocket.app.ui.share.GuestEndedCard(
+                    ownerLabel = ended.ownerLabel,
+                    ending = if (ended.reason == ShareEnded.REASON_EXPIRED) GuestEnding.EXPIRED else GuestEnding.REVOKED,
+                    onRemove = { repo.unpairActive() },
+                    onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
+                )
+                else -> CenteredState(
+                    Tok.danger,
+                    stringResource(Res.string.conn_pairing_invalid_title),
+                    stringResource(Res.string.conn_pairing_invalid_body),
+                    stringResource(Res.string.conn_repair), { repo.unpairActive() },
+                )
+            }
+        }
         ConnPhase.RelayUnreachable -> CenteredState(
             Tok.warn,
             stringResource(Res.string.conn_relay_unreachable_title),

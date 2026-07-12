@@ -519,6 +519,7 @@
     <string name="share_expired_label">已过期</string>
     <string name="share_access_ended">访问已结束</string>
     <string name="share_ended_body">%1$s 结束了此共享。此文件夹中的会话已无法从本设备访问。</string>
+    <string name="share_ended_body_expired">此共享已过期。此文件夹中的会话已无法从本设备访问。</string>
     <string name="share_the_owner">所有者</string>
     <string name="share_remove_from_list">从列表移除</string>
     <string name="share_ask_new_invite">索取新的邀请</string>

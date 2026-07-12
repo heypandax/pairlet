@@ -2,6 +2,7 @@ package dev.ccpocket.app.data
 
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.AccessTier
+import dev.ccpocket.protocol.ShareEnded
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlin.test.Test
@@ -51,5 +52,25 @@ class ShareRepoTest {
         repo.revokeShare(id)
         assertEquals(before - 1, repo.shares.size)
         assertTrue(repo.shares.none { it.deviceId == id })
+    }
+
+    /** Guest side (#115 follow-up): the daemon's ShareEnded notice lights the precise terminal state and
+     *  persists a per-account row (what loadShareEnded reads back at construction — the relaunch path).
+     *  Deliberately does NOT exercise unpair here: the desktop SecureStore is the developer's real
+     *  properties file and Pairing.remove would edit the real paired list. */
+    @Test fun shareEndedLightsTheTerminalAndPersistsPerAccount() {
+        val key = PocketRepository.K_SHARE_ENDED_PREFIX + "a"
+        val store = dev.ccpocket.app.secure.SecureStore
+        val prior = store.getString(key) // restore whatever was there — a real guest binding must survive this test
+        try {
+            val repo = demoRepo()
+            repo.onShareEnded(ShareEnded(ShareEnded.REASON_EXPIRED, ownerLabel = "Pandas-MacBook"))
+            assertEquals(ShareEnded.REASON_EXPIRED, repo.shareEnded.value?.reason)
+            assertEquals("Pandas-MacBook", repo.shareEnded.value?.ownerLabel)
+            // the persisted row is exactly what loadShareEnded parses back at construction
+            assertEquals(ShareEnded.REASON_EXPIRED + "\tPandas-MacBook", store.getString(key))
+        } finally {
+            if (prior == null) store.remove(key) else store.putString(key, prior)
+        }
     }
 }

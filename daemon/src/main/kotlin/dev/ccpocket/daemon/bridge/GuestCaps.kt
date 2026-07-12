@@ -33,6 +33,7 @@ import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.Sessions
+import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.ToolEvent
@@ -82,6 +83,8 @@ object GuestCaps {
         is FileContent -> true      // read of a file the guest's session touched (transcript-derived)
         is FileDiff -> true
         is Transcript -> true       // voice-capture result for the guest's composer
+        is ShareEnded -> true       // the guest's own ending notice ("revoked"/"expired") — issue #115 follow-up.
+                                    // Guest-FACING by design; still denied to a bridge (BridgeCaps default-deny).
         // Everything else is dropped — notably Usage, AuthState, DaemonInfo, PushPrefs, ShareCreated,
         // ShareListing, ShareRevoked (owner-only). `else` keeps the whitelist closed by default.
         else -> false

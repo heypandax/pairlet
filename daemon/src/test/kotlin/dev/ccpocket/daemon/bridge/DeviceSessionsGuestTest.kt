@@ -135,6 +135,45 @@ class DeviceSessionsGuestTest {
     }
 
     @Test
+    fun revoking_a_confirmed_guest_seals_a_shareEnded_notice_before_the_cut() = runBlocking {
+        // issue #115 follow-up: the owner's revoke must give the guest a PRECISE ending — a ShareEnded
+        // notice sealed with the still-live E2E session BEFORE the credential/session prune — so the
+        // guest terminal lights "Access ended · revoked" instead of a bare disconnect.
+        val root = File(dir, "shared-revoke").apply { mkdirs() }
+        val h = Harness(dir)
+        val keys = bindGuest(h, "guest-ticket-rev", root)
+        val session = handshake(h, "devGuest", keys, "guest-ticket-rev")
+        send(h, "devGuest", session, OpenSession(root.path)) // FIRST transport frame → guest CONFIRMED
+        decode<PocketError>(session, h.outbound.receive().second) // consume the routed agent_unavailable
+        assertTrue(h.bridges.isGuest("devGuest"))
+
+        val noticed = h.sessions.onDeviceRevoked("devGuest", dev.ccpocket.protocol.ShareEnded.REASON_REVOKED)
+        assertTrue(noticed, "a live guest session must report the notice as sealed")
+        // the notice is the ONLY frame emitted by the revoke, decryptable by the guest's live session…
+        val ended = decode<dev.ccpocket.protocol.ShareEnded>(session, h.outbound.receive().second)
+        assertEquals(dev.ccpocket.protocol.ShareEnded.REASON_REVOKED, ended.reason)
+        assertTrue(h.outbound.tryReceive().isFailure) // …and nothing follows it
+        // and the security anchor is untouched: the credential is gone the same call
+        assertTrue(!h.bridges.isGuest("devGuest"))
+
+        // revoking a CONFIRMED guest with NO live E2E session (offline at revoke) reports no notice —
+        // the caller then skips the delivery grace and the guest falls back to the generic ended path
+        val spec2 = BridgeSpec.guest("bob", root.canonicalFile.path, AccessTier.COLLABORATE, Long.MAX_VALUE)
+        h.bridges.recordIntent("guest-ticket-rev2", spec2, ttlMs = 240_000)
+        h.sessions.onMintedTicket("guest-ticket-rev2", headless = true)
+        val keys2 = E2ECrypto.generateKeyPair()
+        h.sessions.onDevicePaired("devGuest2", b64.encodeToString(keys2.publicRaw))
+        val session2 = handshake(h, "devGuest2", keys2, "guest-ticket-rev2")
+        send(h, "devGuest2", session2, OpenSession(root.path)) // FIRST transport frame → confirmed
+        h.outbound.receive()                                   // consume its routed error
+        assertTrue(h.bridges.isGuest("devGuest2"))
+        h.sessions.onDisconnect()                              // the link died — E2E sessions cleared
+        val offlineNoticed = h.sessions.onDeviceRevoked("devGuest2")
+        assertTrue(!offlineNoticed)
+        assertTrue(h.outbound.tryReceive().isFailure) // nothing was (or could be) sealed toward it
+    }
+
+    @Test
     fun guest_project_list_returns_only_the_shared_root_stamped_never_other_folders() = runBlocking {
         // VISIBILITY (issue #115 §1): a guest's ListDirectories must return ONLY its shared root — never any
         // of the owner's other project folders — stamped with the origin label + tier so the app renders the

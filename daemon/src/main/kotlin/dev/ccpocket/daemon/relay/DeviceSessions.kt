@@ -25,6 +25,7 @@ import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.RevokeShare
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionLive
+import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
 import kotlinx.coroutines.sync.Mutex
@@ -159,9 +160,22 @@ class DeviceSessions(
     /** The relay says this device was just revoked: cut key + live E2E session immediately. The persist
      *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For a
      *  GUEST (issue #115) this ALSO ends its running sessions now — the owner's "revoke" promise is "their
-     *  sessions end", not merely "their link drops". */
-    suspend fun onDeviceRevoked(deviceId: String) {
+     *  sessions end", not merely "their link drops".
+     *
+     *  Returns true when a guest-facing [ShareEnded] notice was actually sealed toward the guest (the
+     *  #115 follow-up: the precise "revoked"/"expired" ending for its terminal card). The notice rides
+     *  BEFORE the prune below — the last frame the dying E2E session can still seal — and is pure
+     *  best-effort: everything security-relevant (key death, session cut, convo force-close) is
+     *  unchanged and unconditional right after. */
+    suspend fun onDeviceRevoked(deviceId: String, reason: String = ShareEnded.REASON_REVOKED): Boolean {
         val wasGuest = bridges.isGuest(deviceId)
+        var noticed = false
+        if (wasGuest) {
+            // sealAndSend silently no-ops without a live session — only report a notice that could seal
+            noticed = mutex.withLock { sessions.containsKey(deviceId) }
+            // ownerLabel = the computer name the guest already learned from its invite (leaks nothing new)
+            runCatching { sealAndSend(deviceId, ShareEnded(reason, hostname())) }
+        }
         val guestOrigin = if (wasGuest) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
         val guestConvos = mutex.withLock {
             devicePubs.remove(deviceId); sessions.remove(deviceId); pskFor.remove(deviceId)
@@ -179,6 +193,7 @@ class DeviceSessions(
             guestOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
         }
         log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasGuest) " (guest sessions ended)" else ""}")
+        return noticed
     }
 
     /** True while this device's FIRST post-pairing handshake (the ticket-PSK-bound one) hasn't completed

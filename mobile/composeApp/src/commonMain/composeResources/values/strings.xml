@@ -519,6 +519,7 @@
     <string name="share_expired_label">Expired</string>
     <string name="share_access_ended">Access ended</string>
     <string name="share_ended_body">%1$s ended this share. Sessions in this folder are no longer reachable from this device.</string>
+    <string name="share_ended_body_expired">This share has expired. Sessions in this folder are no longer reachable from this device.</string>
     <string name="share_the_owner">The owner</string>
     <string name="share_remove_from_list">Remove from list</string>
     <string name="share_ask_new_invite">Ask for a new invite</string>
