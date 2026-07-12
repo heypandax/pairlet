@@ -533,4 +533,13 @@
     <string name="join_invalid">This invite is invalid or has expired. Ask for a new one.</string>
     <string name="join_review_title">Review invite</string>
     <string name="settings_sharing_section">Sharing</string>
+    <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
+    <string name="group_new">New group</string>
+    <string name="group_ungrouped">Ungrouped</string>
+    <string name="group_move_to">Move to group</string>
+    <string name="group_move_out">Remove from group</string>
+    <string name="group_rename">Rename group</string>
+    <string name="group_delete">Delete group</string>
+    <string name="group_delete_confirm">Delete this group? Its sessions move to Ungrouped.</string>
+    <string name="group_name_hint">Group name</string>
 </resources>

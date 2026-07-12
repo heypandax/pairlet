@@ -533,4 +533,13 @@
     <string name="join_invalid">邀请无效或已过期。请索取新的邀请。</string>
     <string name="join_review_title">确认邀请</string>
     <string name="settings_sharing_section">共享</string>
+    <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
+    <string name="group_new">新建分组</string>
+    <string name="group_ungrouped">未分组</string>
+    <string name="group_move_to">移动到分组</string>
+    <string name="group_move_out">移出分组</string>
+    <string name="group_rename">重命名分组</string>
+    <string name="group_delete">删除分组</string>
+    <string name="group_delete_confirm">删除该分组？组内会话将回落到未分组。</string>
+    <string name="group_name_hint">分组名称</string>
 </resources>
