@@ -107,10 +107,12 @@ class DesktopUiTest {
     }
 
     @Test
-    fun emptyCustomGroupsRenderFlatWithNoManagement() = runComposeUiTest {
-        // degrade: an older daemon (or a project with no groups) → flat list, no group headers, no create entry
+    fun oldDaemonRendersFlatWithNoManagement() = runComposeUiTest {
+        // degrade: an older daemon / guest omits groups → repo reports canEditGroups=false → flat list,
+        // no group headers, no create entry. (groupsSupported=false is what folds into canEditGroups.)
         val model = object : DesktopModel by SeedDesktopModel() {
             override val customGroups = emptyList<DkGroup>()
+            override val canEditGroups = false
         }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
@@ -118,8 +120,27 @@ class DesktopUiTest {
         val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
         assertPresent("Refactor auth module")                             // sessions still render, flat
         assertTrue(!present("Auth work"), "no custom group headers when groups are empty")
-        assertTrue(!present(newGroup), "no create affordance in the degraded flat view")
+        assertTrue(!present(newGroup), "no create affordance when the daemon isn't group-aware")
         assertTrue(!present(ungrouped), "no Ungrouped section in the flat view")
+    }
+
+    @Test
+    fun groupAwareDaemonWithZeroGroupsStillOffersCreate() = runComposeUiTest {
+        // a group-aware owner project that has NO groups yet: the list is flat (no headers / no Ungrouped),
+        // but "+ New group" MUST show so the very first group is creatable (issue #119 — the create entry
+        // lives outside the has-groups branch, gated on canEditGroups not on customGroups being non-empty).
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val customGroups = emptyList<DkGroup>()
+            override val canEditGroups = true
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        val newGroup = runBlocking { getString(Res.string.group_new) }
+        val ungrouped = runBlocking { getString(Res.string.group_ungrouped) }
+        assertPresent("Refactor auth module")                             // sessions render, flat
+        assertTrue(!present("Auth work"), "no headers until a group exists")
+        assertTrue(!present(ungrouped), "no Ungrouped section while flat")
+        assertPresent(newGroup)                                           // …but the first group is creatable
     }
 
     @Test

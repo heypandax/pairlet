@@ -483,8 +483,11 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                                 }
                             }
                         }
-                        if (model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
                     }
+                    // "+ New group" for the current, group-aware, owner project — OUTSIDE the has-groups
+                    // branch so the FIRST group is creatable from a still-flat list (issue #119). canEditGroups
+                    // already folds in groupsSupported, so an older daemon / guest / RECENT snapshot shows nothing.
+                    if (g.current && model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
                 }
             }
         }
