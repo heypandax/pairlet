@@ -46,7 +46,11 @@ class SessionRegistryObserveReapTest {
         val registry = SessionRegistry(scope, backends = emptyMap(), processProbe = { _, _ -> LiveProcesses.ExternalClaude.PRESENT })
         // a fresh transcript written AFTER the registry booted → externallyActive gate passes (probe stubbed PRESENT)
         Files.createDirectories(projectDir)
-        Files.writeString(projectDir.resolve("$sid.jsonl"), "{}")
+        val transcript = Files.writeString(projectDir.resolve("$sid.jsonl"), "{}")
+        // pin mtime explicitly: Linux inode timestamps come from the kernel's coarse clock, which can lag
+        // System.currentTimeMillis() by a tick — the fresh write then looks older than the registry boot
+        // and the restart-amnesia gate rejects it (flaked on CI; an explicit utimes bypasses the coarse clock)
+        Files.setLastModifiedTime(transcript, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis()))
         val open = OpenSession(workdir, resumeId = sid)
 
         val phoneA1 = registry.open(open, sink("dev:phone"))
