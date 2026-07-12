@@ -80,6 +80,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -138,6 +139,8 @@ import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.openAppSettings
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.SessionGroup
+import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.Decision
@@ -1062,6 +1065,15 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
     val starting = repo.opening.value
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
+    // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
+    // kept per group id and reset per project (keyed on [dir]), so folding a group doesn't leak across projects.
+    var showNewGroup by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<SessionGroup?>(null) }
+    var deleteTarget by remember { mutableStateOf<SessionGroup?>(null) }
+    var manageTarget by remember { mutableStateOf<SessionGroup?>(null) }
+    var moveTarget by remember { mutableStateOf<SessionSummary?>(null) }
+    val collapsed = remember(dir) { mutableStateMapOf<String, Boolean>() }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1115,30 +1127,31 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                         SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
                     }
                 }
-                items(filtered) { s ->
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                            .clickable { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) }.padding(14.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            AgentBadge(s.agent, gap = 8.dp) // shows only for Codex (so resume opens the right backend)
-                            if (s.live || s.busy) { // running, or idle with background work still going
-                                Spacer(Modifier.width(8.dp))
-                                PulseDot(Tok.ok)
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp)
-                            }
+                // issue #119: when the project has groups, render each group as a collapsible section with an
+                // "Ungrouped" bucket at the end; the "+ New group" affordance is always present so the very
+                // first group can be created. An older daemon / guest reports no groups → sessionSections
+                // returns a single header-less section, so the list stays exactly as flat as before.
+                val grouped = repo.sessionGroups.isNotEmpty()
+                item { NewGroupRow { showNewGroup = true } }
+                for (section in sessionSections(filtered, repo.sessionGroups)) {
+                    val g = section.group
+                    val key = g?.id ?: UNGROUPED_KEY
+                    val isCollapsed = collapsed[key] == true
+                    if (grouped) {
+                        item(key = "grp:$key") {
+                            GroupHeader(
+                                name = g?.name ?: stringResource(Res.string.group_ungrouped),
+                                count = section.sessions.size,
+                                collapsed = isCollapsed,
+                                onToggle = { collapsed[key] = !isCollapsed },
+                                onManage = g?.let { { manageTarget = it } }, // ungrouped bucket: nothing to manage
+                            )
                         }
-                        if (s.firstPrompt.isNotBlank()) Text(
-                            s.firstPrompt, color = Tok.tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        Text(
-                            "💬 ${s.messageCount} · ⑂ ${s.gitBranch ?: "-"} · ${relativeTime(s.lastModified)}",
-                            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                            modifier = Modifier.padding(top = 3.dp),
-                        )
+                    }
+                    if (!isCollapsed) {
+                        items(section.sessions, key = { it.sessionId }) { s ->
+                            SessionRow(repo, dir, s, onLongPress = if (grouped) ({ moveTarget = s }) else null)
+                        }
                     }
                 }
             }
@@ -1151,6 +1164,31 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                 agent = repo.defaultAgent.value,
                 onPick = { m, a -> pickMode = false; repo.setDefaultAgent(a); repo.openSession(dir, startMode = m, agent = a) },
                 onDismiss = { pickMode = false },
+            )
+        }
+        // issue #119 group management — the daemon re-pushes the Sessions frame after every mutation, so the
+        // list/headers refresh themselves (no optimistic edit here).
+        if (showNewGroup) NewGroupDialog(onConfirm = { repo.createGroup(it) }, onDismiss = { showNewGroup = false })
+        manageTarget?.let { g ->
+            GroupActionsSheet(
+                group = g,
+                onRename = { renameTarget = g },
+                onDelete = { deleteTarget = g },
+                onDismiss = { manageTarget = null },
+            )
+        }
+        renameTarget?.let { g ->
+            RenameGroupDialog(group = g, onConfirm = { repo.renameGroup(g.id, it) }, onDismiss = { renameTarget = null })
+        }
+        deleteTarget?.let { g ->
+            DeleteGroupConfirm(group = g, onConfirm = { repo.deleteGroup(g.id) }, onDismiss = { deleteTarget = null })
+        }
+        moveTarget?.let { s ->
+            MoveSessionSheet(
+                session = s,
+                groups = repo.sessionGroups,
+                onAssign = { repo.assignGroup(s.sessionId, it) },
+                onDismiss = { moveTarget = null },
             )
         }
     }
