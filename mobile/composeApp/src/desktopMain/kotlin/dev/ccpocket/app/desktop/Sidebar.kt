@@ -461,6 +461,11 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // sessions the current project can be moved between (owner + has groups) — drives the row
                     // right-click "move to group" menu; empty everywhere else so no menu appears.
                     val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
+                    // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
+                    // entry forces scrolling past a long session list to create a group. Current + group-aware
+                    // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
+                    // from a still-flat list; an older daemon / guest / RECENT snapshot shows nothing.
+                    if (g.current && model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
                     if (custom.isEmpty()) {
                         if (g.sessions.isEmpty()) {
                             item(key = "e:${g.path}") {
@@ -484,10 +489,6 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             }
                         }
                     }
-                    // "+ New group" for the current, group-aware, owner project — OUTSIDE the has-groups
-                    // branch so the FIRST group is creatable from a still-flat list (issue #119). canEditGroups
-                    // already folds in groupsSupported, so an older daemon / guest / RECENT snapshot shows nothing.
-                    if (g.current && model.canEditGroups) item(key = "ng:${g.path}") { NewGroupRow(model) }
                 }
             }
         }
