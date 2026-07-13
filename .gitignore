@@ -53,6 +53,6 @@ scripts/__pycache__/
 
 # marketing/video v3 pipeline: rendered deliverables, AI footage binaries, runtime state
 /marketing/video/output/
-/marketing/video/__pycache__/
+/marketing/video/**/__pycache__/
 /marketing/video/assets/footage/**/*.mp4
 /marketing/video/tools/*.json
