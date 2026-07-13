@@ -82,6 +82,19 @@ fun daemonHostName(): String? {
     return raw?.substringBefore('.')?.takeIf { it.isNotBlank() && !it.equals("localhost", ignoreCase = true) }
 }
 
+/**
+ * Startup gate for `run` (issue #130): each agent CLI is optional on its own — a codex-only machine must
+ * boot with claude missing (and vice versa) — but with NEITHER resolvable the daemon has nothing to drive,
+ * so refuse to start with an actionable message. Null = at least one agent found, start normally.
+ */
+internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?): String? =
+    if (claudeExe == null && codexExe == null) {
+        "neither claude nor codex was found — install Claude Code or the Codex CLI, " +
+            "or point the daemon at one with --claude-bin / --codex-bin (or CC_POCKET_CLAUDE_BIN / CC_POCKET_CODEX_BIN)."
+    } else {
+        null
+    }
+
 private class Root : CliktCommand(name = "cc-pocket-daemon") {
     override fun run() = Unit
 }
@@ -103,10 +116,13 @@ private class RunCmd : CliktCommand(name = "run") {
     private val autoUpdate by option("--auto-update", help = "apply daemon updates automatically (installer-managed macOS/Linux installs; others get a notification)").flag()
 
     override fun run() {
-        val exe = ClaudeLauncher.resolveExecutable(claudeBin)
-        // codex is optional: probe for the echo, but resolve lazily per session so a missing codex never
-        // blocks startup — a Codex open then fails with a clear PocketError instead.
+        // Both agent CLIs are optional individually (issue #130): probe each for the banner, but resolve
+        // lazily per session so a missing one never blocks startup — codex-only machines used to crash-loop
+        // under launchd because claude was a hard dependency. An open on a missing backend fails with a
+        // clear PocketError instead. Only BOTH missing refuses to start (nothing this daemon could drive).
+        val exe = runCatching { ClaudeLauncher.resolveExecutable(claudeBin) }.getOrNull()
         val codexExe = runCatching { CodexLauncher.resolveExecutable(codexBin) }.getOrNull()
+        missingAgentsMessage(exe, codexExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
         // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
         // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
         // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
@@ -121,7 +137,7 @@ private class RunCmd : CliktCommand(name = "run") {
         val presetStore = dev.ccpocket.daemon.presets.PresetStore.load()
         val core = DaemonCore(
             mapOf(
-                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(exe, claudeHome, presetStore::activeEnv) },
+                AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(claudeBin, claudeHome, presetStore::activeEnv) }, // resolves the binary lazily on first launch
                 AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
             ),
             prefs = prefs,
@@ -153,7 +169,7 @@ private class RunCmd : CliktCommand(name = "run") {
             val hostNameLazy = lazy { daemonHostName() }
             val hostName: () -> String? = { hostNameLazy.value }
             val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName)
-            echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"} — relay=$relay")
+            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
             // E2E-gated direct listener beside the relay: paired devices on this machine/LAN connect
@@ -193,7 +209,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // phone can only reach us once the user explicitly binds beyond loopback — show the
             // pairing URL/QR only then, never for a loopback bind the phone can't connect to.
             val lan = lanIp()
-            echo("cc-pocket daemon — claude=$exe — codex=${codexExe ?: "(not found)"}")
+            echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"}")
             echo("")
             if (host == "127.0.0.1") {
                 echo("  Bound to 127.0.0.1 (loopback only) — not reachable from your phone.")

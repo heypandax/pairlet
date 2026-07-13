@@ -34,22 +34,30 @@ import java.util.concurrent.atomic.AtomicLong
  * claude bakes mode/model/effort at launch, so [applySettings] asks for a relaunch.
  */
 class ClaudeBackend(
-    private val exe: Path,
+    private val claudeBin: String? = null,
     private val configDir: Path? = null,
     // API preset (issue #113): the ACTIVE preset's env for a launch, read per call so an activation
     // between launches takes effect without touching live backends. Null = no preset (env untouched).
     private val presetEnv: () -> Map<String, String>? = { null },
+    // injectable for tests; production resolves via ClaudeLauncher (explicit --claude-bin → env → PATH)
+    private val resolveExe: () -> Path = { ClaudeLauncher.resolveExecutable(claudeBin) },
 ) : AgentBackend {
     private val log = logger("ClaudeBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val interruptSeq = AtomicLong(0)
 
     @Volatile private var io: AgentIo? = null
+    @Volatile private var resolvedExe: Path? = null // claude binary, resolved lazily on first launch (issue #130)
     @Volatile private var workdir: String = "" // latest launch cwd — for transcript unhide on exit
 
     override val kind: AgentKind = AgentKind.CLAUDE
 
-    override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe, spec, configDir, presetEnv())
+    /** Resolve the claude binary lazily — only a launch needs it, so a codex-only machine still runs the
+     *  daemon (issue #130) and listing/replay work without claude. A Claude launch with no claude then
+     *  fails with a clear PocketError (Conversation's spawn-failure path) instead of crashing the daemon. */
+    private fun exe(): Path = resolvedExe ?: resolveExe().also { resolvedExe = it }
+
+    override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe(), spec, configDir, presetEnv())
 
     override suspend fun attach(io: AgentIo, spec: AgentSpec) {
         this.io = io
