@@ -60,9 +60,11 @@ import dev.ccpocket.app.resources.usage_per_hour
 import dev.ccpocket.app.resources.usage_period_range
 import dev.ccpocket.app.resources.usage_period_today
 import dev.ccpocket.app.resources.usage_requests
+import dev.ccpocket.app.resources.usage_selected
 import dev.ccpocket.app.resources.usage_title
 import dev.ccpocket.app.resources.usage_tokens
 import dev.ccpocket.app.resources.usage_trend
+import dev.ccpocket.app.resources.usage_vs_prev_days
 import dev.ccpocket.app.resources.usage_vs_yesterday
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
@@ -143,18 +145,19 @@ private fun Populated(u: Usage) {
         val windowTokens = u.days.sumOf { it.tokens }
         val scope = if (n <= 1) "today" else "${n}d"
 
-        // Neutral day-over-day momentum, only when both days are real activity: guarding today>0 && yesterday>0
-        // avoids the old "quiet/partial today → ↓100%" trap (which the previous card mis-colored green). A
-        // window-over-window delta ("vs prev 7d") would need the daemon to also send the prior window — not
-        // available today, so we show the honest day-over-day note and flag the aggregate as a follow-up.
+        // Neutral window-over-window momentum (issue #128): the daemon sends the PREVIOUS equal-width window's
+        // total (span 1 → yesterday, 7 → the 7 days before, 30 → the 30 before), so the delta's baseline always
+        // matches the hero's own range — never a day-over-day figure hiding under a 30d headline. Guarding
+        // both windows > 0 keeps the old "quiet/partial window → ↓100%" trap away (which the previous card
+        // mis-colored green). An older daemon omits prevWindowTokens → null → no delta line, calmly.
         val today = u.days.lastOrNull()?.tokens ?: 0L
-        val yesterday = u.days.getOrNull(n - 2)?.tokens
-        val deltaPct = if (n >= 2 && today > 0 && yesterday != null && yesterday > 0)
-            (((today - yesterday) * 100) / yesterday).toInt() else null
+        val prev = u.prevWindowTokens
+        val deltaPct = if (prev != null && prev > 0 && windowTokens > 0)
+            (((windowTokens - prev) * 100) / prev).toInt() else null
         // Window has history but nothing today yet — say so calmly instead of a scary ↓ delta.
         val zeroToday = n >= 2 && today == 0L
 
-        HeroCard(windowTokens, scope, periodCaption(u), deltaPct, zeroToday)
+        HeroCard(windowTokens, scope, periodCaption(u), deltaPct, zeroToday, span = n)
 
         // The three metrics the daemon only knows for TODAY. Kept, but each carries "· today" so its baseline
         // is unmistakable even while the hero above reads a wider window. A missing sub-metric shows a labeled
@@ -173,11 +176,22 @@ private fun Populated(u: Usage) {
         // shows no trend at all: one flat day-block would only repeat the stat cards.
         val hrs = if (u.days.size == 1) u.hours else null
         if (hrs != null || u.days.size >= 2) {
+            // Tap-to-inspect (issue #129): ONE selected index serves whichever trend renders (they're exclusive
+            // per reply shape). Tapping a bar/cell swaps the peak caption for that bucket's own value; tapping
+            // it again (or a heatmap filler cell) falls back to the peak. Keyed on the reply itself, so a range
+            // switch or refresh never carries a stale selection onto a different chart.
+            var selected by remember(u) { mutableStateOf<Int?>(null) }
             SLabel(stringResource(Res.string.usage_trend), right = stringResource(if (hrs != null) Res.string.usage_per_hour else Res.string.usage_per_day))
             when {
-                hrs != null -> { HourlyBars(hrs); PeakRow(hrs.maxByOrNull { it.tokens }) }
-                u.days.size >= 30 -> Heatmap(u.days) // draws its own peak caption + less→more legend under the grid
-                else -> { Bars(u.days); PeakRow(u.days.maxByOrNull { it.tokens }) }
+                hrs != null -> {
+                    HourlyBars(hrs, selected) { selected = it }
+                    TrendCaption(selected?.let(hrs::getOrNull), hrs.maxByOrNull { it.tokens })
+                }
+                u.days.size >= 30 -> Heatmap(u.days, selected) { selected = it } // draws its own caption + less→more legend under the grid
+                else -> {
+                    Bars(u.days, selected) { selected = it }
+                    TrendCaption(selected?.let(u.days::getOrNull), u.days.maxByOrNull { it.tokens }, selLabelOf = ::dayCaptionLabel)
+                }
             }
         }
 
@@ -193,11 +207,12 @@ private fun Populated(u: Usage) {
 /**
  * The primary card: the selected range's total tokens, big and mono. The [scope] tag ("today"/"7d"/"30d")
  * bakes the range into the label; [period] is the muted-mono date sub-caption. The bottom line is either a
- * calm "no usage today yet" note ([zeroToday]) or a NEUTRAL day-over-day delta with its baseline inline —
- * never the old good/bad color inversion.
+ * calm "no usage today yet" note ([zeroToday]) or a NEUTRAL window-over-window delta whose baseline follows
+ * [span] ("vs yesterday" / "vs prev 7d" — a rolling window, deliberately NOT "vs last week") — never the
+ * old good/bad color inversion.
  */
 @Composable
-private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?, zeroToday: Boolean) {
+private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?, zeroToday: Boolean, span: Int) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
             .padding(horizontal = 16.dp, vertical = 15.dp),
@@ -213,10 +228,11 @@ private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?
             zeroToday -> Text(stringResource(Res.string.usage_empty), color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 1.dp))
             deltaPct != null -> {
                 val down = deltaPct < 0
+                val baseline = if (span <= 1) stringResource(Res.string.usage_vs_yesterday) else stringResource(Res.string.usage_vs_prev_days, span)
                 Row(Modifier.padding(top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (down) "▼" else "▲", color = Tok.muted, fontSize = 9.sp)
                     Spacer(Modifier.width(4.dp))
-                    Text("${if (down) -deltaPct else deltaPct}% ${stringResource(Res.string.usage_vs_yesterday)}", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
+                    Text("${if (down) -deltaPct else deltaPct}% $baseline", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
                 }
             }
         }
@@ -285,23 +301,29 @@ private fun Arc(pct: Int) {
     }
 }
 
+/** Daily trend bars. With no [selected] index the peak bar is the full-accent one; tapping a bar makes IT the
+ *  highlight (the rest dim further than the resting 0.42), and tapping it again clears back to the peak view. */
 @Composable
-private fun Bars(days: List<UsageDay>) {
+private fun Bars(days: List<UsageDay>, selected: Int? = null, onSelect: (Int?) -> Unit = {}) {
     val max = days.maxOfOrNull { it.tokens }?.coerceAtLeast(1) ?: 1
     val peakIdx = days.indexOfFirst { it.tokens == days.maxOfOrNull { d -> d.tokens } }
     Row(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         days.forEachIndexed { i, d ->
             val frac = (d.tokens.toFloat() / max).coerceIn(0.03f, 1f)
-            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+            val hi = if (selected != null) i == selected else i == peakIdx
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clickable { onSelect(if (selected == i) null else i) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 // label row measured first, bar scales inside the REMAINING band (weight) — a fixed
                 // frac*100dp bar overflowed the row at the peak, squeezing the peak's own weekday label
                 // to nothing and sinking its bar ~7dp below every other bar's baseline
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
-                    Box(Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(if (i == peakIdx) Tok.accent else Tok.accent.copy(alpha = 0.42f)))
+                    Box(Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)).background(if (hi) Tok.accent else Tok.accent.copy(alpha = if (selected != null) 0.22f else 0.42f)))
                 }
                 if (days.size <= 10) {
                     Spacer(Modifier.height(6.dp))
-                    Text(d.label, color = if (i == peakIdx) Tok.tx2 else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, maxLines = 1)
+                    Text(d.label, color = if (hi) Tok.tx2 else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, maxLines = 1)
                 }
             }
         }
@@ -310,23 +332,28 @@ private fun Bars(days: List<UsageDay>) {
 }
 
 /** Today's 24 hourly buckets. Same 120dp band as [Bars]; the peak hour is full accent, the rest faded; a 3%
- *  stub keeps empty hours on the axis. Only 0/6/12/18 carry a label so the 24-wide row never crowds. */
+ *  stub keeps empty hours on the axis. Only 0/6/12/18 carry a label so the 24-wide row never crowds.
+ *  Same tap-to-inspect contract as [Bars] — the hourly view shares the trend's single selection. */
 @Composable
-private fun HourlyBars(hours: List<UsageDay>) {
+private fun HourlyBars(hours: List<UsageDay>, selected: Int? = null, onSelect: (Int?) -> Unit = {}) {
     val maxTok = hours.maxOfOrNull { it.tokens } ?: 0L
     val max = maxTok.coerceAtLeast(1L)
     val peakIdx = hours.indexOfFirst { it.tokens == maxTok }
     Row(Modifier.fillMaxWidth().height(120.dp).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         hours.forEachIndexed { i, h ->
             val frac = (h.tokens.toFloat() / max).coerceIn(0.03f, 1f)
-            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+            val hi = if (selected != null) i == selected else i == peakIdx
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clickable { onSelect(if (selected == i) null else i) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 // same weighted bar band as [Bars]: the peak's fixed-height bar used to squeeze its label
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.BottomCenter) {
-                    Box(Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)).background(if (i == peakIdx) Tok.accent else Tok.accent.copy(alpha = 0.42f)))
+                    Box(Modifier.fillMaxWidth().fillMaxHeight(frac).clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)).background(if (hi) Tok.accent else Tok.accent.copy(alpha = if (selected != null) 0.22f else 0.42f)))
                 }
                 Spacer(Modifier.height(6.dp))
                 // sparse axis: label 0/6/12/18 only; the rest keep an empty placeholder so bars stay aligned
-                Text(if (i % 6 == 0) i.toString() else "", color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, maxLines = 1)
+                Text(if (i % 6 == 0) i.toString() else "", color = if (hi && selected != null) Tok.tx2 else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 9.sp, maxLines = 1)
             }
         }
     }
@@ -335,9 +362,11 @@ private fun HourlyBars(hours: List<UsageDay>) {
 
 /** 30d calendar heatmap (GitHub-contribution style): 7 columns Mon→Sun, oldest week on top, today on the
  *  bottom row, first day offset by its weekday. Cell intensity = quartile of the window's max; today gets a
- *  hairline ring. Colors are read from [Tok] at draw time (reactive palette — never hoist them to a top val). */
+ *  hairline ring. Tapping a cell rings it and swaps the peak caption for that day's value; tapping it again —
+ *  or an out-of-window filler cell ("blank space") — clears back to the peak (issue #129). Colors are read
+ *  from [Tok] at draw time (reactive palette — never hoist them to a top val). */
 @Composable
-private fun Heatmap(days: List<UsageDay>) {
+private fun Heatmap(days: List<UsageDay>, selected: Int? = null, onSelect: (Int?) -> Unit = {}) {
     if (days.isEmpty()) return
     val lead = weekdayMon0(days.first()) // leading blanks so day 0 sits under its weekday column
     val rows = (lead + days.size + 6) / 7
@@ -360,13 +389,20 @@ private fun Heatmap(days: List<UsageDay>) {
                         d.tokens == 0L -> Tok.raised
                         else -> Tok.accent.copy(alpha = alphas[quartile(d.tokens, max) - 1])
                     }
-                    val ring = if (idx == todayIdx) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(3.dp)) else Modifier
-                    Box(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(3.dp)).background(bg).then(ring))
+                    val ring = when {
+                        idx == selected -> Modifier.border(1.5.dp, Tok.tx2, RoundedCornerShape(3.dp))
+                        idx == todayIdx -> Modifier.border(1.dp, Tok.hair, RoundedCornerShape(3.dp))
+                        else -> Modifier
+                    }
+                    Box(
+                        Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(3.dp)).background(bg).then(ring)
+                            .clickable { onSelect(if (d != null && selected != idx) idx else null) }, // filler / same cell → clear
+                    )
                 }
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { PeakRow(days.maxByOrNull { it.tokens }, labelOf = ::peakLabel) }
+            Box(Modifier.weight(1f)) { TrendCaption(selected?.let(days::getOrNull), days.maxByOrNull { it.tokens }, labelOf = ::peakLabel) }
             Text(stringResource(Res.string.usage_less), color = Tok.muted, fontSize = 10.sp)
             Spacer(Modifier.width(5.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -385,6 +421,26 @@ private fun PeakRow(peak: UsageDay?, labelOf: (UsageDay) -> String = { it.label 
     val p = peak?.takeIf { it.tokens > 0 } ?: return
     Text(stringResource(Res.string.usage_peak, labelOf(p), formatTokens(p.tokens)), color = Tok.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
 }
+
+/** The caption slot under a trend chart (issue #129): the tapped bucket's own value when one is [selected]
+ *  ("Wed Jul 9 · 12.7M tokens", slightly brighter than the resting caption), else the usual [PeakRow].
+ *  [selLabelOf] formats the selected bucket, [labelOf] the peak — the heatmap shares one, the bars differ. */
+@Composable
+private fun TrendCaption(
+    selected: UsageDay?,
+    peak: UsageDay?,
+    labelOf: (UsageDay) -> String = { it.label },
+    selLabelOf: (UsageDay) -> String = labelOf,
+) {
+    if (selected != null) {
+        Text(stringResource(Res.string.usage_selected, selLabelOf(selected), formatTokens(selected.tokens)), color = Tok.tx2, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+    } else {
+        PeakRow(peak, labelOf)
+    }
+}
+
+/** A tapped day bar's caption label: "Wed Jul 9" when the ISO [UsageDay.date] parses, else just the weekday label. */
+internal fun dayCaptionLabel(day: UsageDay): String = monthDay(day.date)?.let { "${day.label} $it" } ?: day.label
 
 private val WEEKDAY_LABELS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 private val COL_LETTERS = WEEKDAY_LABELS.map { it.take(1) }

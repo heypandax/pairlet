@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
  *  the interrupt control_request. The binary path is never executed here — only the encoders are exercised. */
 class ClaudeBackendTest {
     private fun backendWithCapture(written: MutableList<String>): ClaudeBackend =
-        ClaudeBackend(Path.of("/nonexistent/claude")).also {
+        ClaudeBackend(claudeBin = "/nonexistent/claude").also {
             runBlocking { it.attach(AgentIo(writeLine = { line -> written += line }, emit = {}), AgentSpec(Path.of("/x"))) }
         }
 

@@ -294,6 +294,8 @@
     <string name="usage_period_today">Today · %1$s</string>
     <string name="usage_period_range">%1$s – %2$s · %3$d days</string>
     <string name="usage_vs_yesterday">vs yesterday</string>
+    <string name="usage_vs_prev_days">vs prev %1$dd</string>
+    <string name="usage_selected">%1$s · %2$s tokens</string>
     <string name="usage_na">not available yet</string>
     <string name="terminal_open">Terminal</string>
     <string name="terminal_title">Terminal</string>

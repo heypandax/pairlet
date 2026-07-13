@@ -40,6 +40,67 @@ class TranscriptReplayTest {
     }
 
     @Test
+    fun skill_injection_isMeta_row_never_replays_as_user_input() {
+        // issue #126: loading a skill writes TWO user records — the "Launching skill" tool_result ack
+        // and an isMeta:true injection carrying the whole SKILL.md. Neither is the user typing; the
+        // live stream never surfaced them, so replay must not render the payload as a user bubble.
+        val f = tmpFile("skill.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":"用 brain 沉淀一下"}}""",
+                """{"type":"assistant","message":{"content":[{"type":"tool_use","id":"s1","name":"Skill","input":{"skill":"brain"}}]}}""",
+                """{"type":"user","toolUseResult":{},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s1","content":"Launching skill: brain"}]}}""",
+                """{"type":"user","isMeta":true,"sourceToolUseID":"s1","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /Users/x/.claude/skills/brain\n\n# brain\n\n把当前会话的结论沉淀到知识库……（SKILL.md 全文）"}]}}""",
+                """{"type":"assistant","message":{"content":[{"type":"text","text":"已按 skill 流程沉淀"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(3, msgs.size) // the real ask, the Skill tool row, the reply — never the SKILL.md payload
+        assertEquals("用 brain 沉淀一下", msgs[0].text)
+        assertEquals(ChatRole.TOOL, msgs[1].role)
+        assertEquals("已按 skill 流程沉淀", msgs[2].text)
+        assertTrue(msgs.none { it.role == ChatRole.USER && it.text.contains("Base directory for this skill") })
+    }
+
+    @Test
+    fun skill_injection_without_isMeta_is_still_dropped_by_fingerprint() {
+        // an older CLI (or a variant) may omit isMeta — the "Base directory for this skill:" opening is
+        // the fallback fingerprint; slash-command wrapper records are filtered the same way (issue #126)
+        val f = tmpFile("skill-nometa.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /Users/x/.claude/skills/brain\n\nSKILL.md 全文"}]}}""",
+                """{"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>\n<command-message>compact</command-message>"}}""",
+                """{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted.</local-command-stdout>"}}""",
+                """{"type":"user","message":{"role":"user","content":"真正的用户输入"}}""",
+            ).joinToString("\n"),
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size) // only the genuine turn survives
+        assertEquals("真正的用户输入", msgs[0].text)
+    }
+
+    @Test
+    fun user_text_merely_quoting_the_injection_fingerprints_is_kept() {
+        // conservative matching (issue #126 guard-rail): only an OPENING match counts — a user
+        // genuinely discussing these phrases mid-message must never be eaten
+        val f = tmpFile("skill-quote.jsonl")
+        f.writeText(
+            """{"type":"user","message":{"role":"user","content":"请解释 Base directory for this skill: 这行是什么意思，另外 <command-name> 标签是干嘛的"}}""",
+        )
+
+        val msgs = TranscriptReplay.read(f)
+
+        assertEquals(1, msgs.size)
+        assertEquals(ChatRole.USER, msgs[0].role)
+        assertTrue(msgs[0].text.contains("什么意思"))
+    }
+
+    @Test
     fun subagent_run_replays_as_one_card_with_outcome_and_report() {
         // issue #77: sidechain (sub-agent internal) records collapse into the Task/Agent card, which
         // carries the run's label, ok and final report (the CLI's agentId continuation tail stripped)

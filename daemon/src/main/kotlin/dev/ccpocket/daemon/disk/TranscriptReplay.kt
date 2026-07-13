@@ -183,6 +183,10 @@ object TranscriptReplay {
     }
 
     private fun isRealUserTurn(obj: JsonObject): Boolean {
+        // harness-injected user records (a Skill load writing the whole SKILL.md, slash-command
+        // wrappers) are tagged isMeta:true at the root — never the user typing, so never a bubble
+        // (issue #126; live streams don't surface these, only the replay path saw them)
+        if ((obj["isMeta"] as? JsonPrimitive)?.booleanOrNull == true) return false
         if (obj.containsKey("toolUseResult")) return false
         val content = (obj["message"] as? JsonObject)?.get("content")
         if (content is JsonArray && content.isNotEmpty()) {
