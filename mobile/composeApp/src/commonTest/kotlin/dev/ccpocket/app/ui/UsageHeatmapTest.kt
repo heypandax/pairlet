@@ -40,4 +40,12 @@ class UsageHeatmapTest {
         assertEquals("07-05", peakLabel(UsageDay("Sun", 100, date = "2026-07-05")))
         assertEquals("Wed", peakLabel(UsageDay("Wed", 100)))
     }
+
+    @Test
+    fun dayCaptionLabel_appends_month_day_and_falls_back_to_label() {
+        // the tapped bar's caption (issue #129): weekday + "Jul 9" when the ISO date parses
+        assertEquals("Thu Jul 9", dayCaptionLabel(UsageDay("Thu", 100, date = "2026-07-09")))
+        assertEquals("Wed", dayCaptionLabel(UsageDay("Wed", 100)))
+        assertEquals("Wed", dayCaptionLabel(UsageDay("Wed", 100, date = "garbage")))
+    }
 }

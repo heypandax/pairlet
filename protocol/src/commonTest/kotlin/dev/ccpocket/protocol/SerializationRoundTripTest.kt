@@ -220,6 +220,23 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun usage_prevWindowTokens_is_a_trailing_optional() {
+        // new daemon → new app: the previous equal-width window rides along for the hero delta (issue #128)
+        val env = Envelope(id = "u4", ts = 0, body = Usage(days = listOf(UsageDay("Mon", 100, date = "2026-07-06")), prevWindowTokens = 1200))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"prevWindowTokens\":1200" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // new app ← OLD daemon (no key) → null default, the app just shows no delta
+        val old = """{"id":"u5","ts":0,"to":"PEER","body":{"t":"pocket/usage","days":[{"label":"Mon","tokens":100}],"models":[],"tokensToday":100,"requestsToday":2}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(old).body as Usage).prevWindowTokens)
+
+        // unset (null) is omitted on the wire (explicitNulls=false) — byte-identical to an old daemon's frame
+        val unset = PocketJson.encodeToString(Envelope(id = "u6", ts = 0, body = Usage(days = listOf(UsageDay("Mon", 1)))))
+        assertFalse("prevWindowTokens" in unset, unset)
+    }
+
+    @Test
     fun sessionGone_roundtrips() {
         val env = Envelope(id = "3", ts = 0, body = SessionGone("c9"))
         val json = PocketJson.encodeToString(env)

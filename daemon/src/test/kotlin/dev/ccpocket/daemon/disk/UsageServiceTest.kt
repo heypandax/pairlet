@@ -73,4 +73,50 @@ class UsageServiceTest {
             assertEquals(today.toString(), u.days.last().date)
         }
     }
+
+    /** One assistant turn of [tokens] input tokens at noon, [daysAgo] local days back. */
+    private fun turn(daysAgo: Long, tokens: Long, id: String): String {
+        val ts = LocalDate.now(ZoneId.systemDefault()).minusDays(daysAgo).atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant()
+        return """{"type":"assistant","timestamp":"$ts","requestId":"r-$id","message":{"id":"m-$id","model":"claude-opus-4-8","usage":{"input_tokens":$tokens,"output_tokens":0}}}"""
+    }
+
+    @Test
+    fun today_range_prev_window_is_yesterday_only() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(
+                listOf(
+                    turn(0, 300, "a"),  // today → the window
+                    turn(1, 500, "b"),  // yesterday → the prev window
+                    turn(2, 700, "c"),  // the day before → outside both, ignored
+                ).joinToString("\n") + "\n",
+            )
+            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList())
+            assertEquals(300L, u.tokensToday)
+            assertEquals(500L, u.prevWindowTokens, "span 1 compares against yesterday only")
+            // prev-window turns must NOT leak into the trend or the by-model bars
+            assertEquals(300L, u.days.sumOf { it.tokens })
+            assertEquals(300L, u.models.single().tokens)
+        }
+    }
+
+    @Test
+    fun week_range_prev_window_sums_the_7_days_before() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(
+                listOf(
+                    turn(0, 100, "a"),   // in the 7d window
+                    turn(6, 200, "b"),   // oldest day of the 7d window
+                    turn(7, 400, "c"),   // newest day of the prev window
+                    turn(13, 800, "d"),  // oldest day of the prev window
+                    turn(14, 1600, "e"), // outside both windows, ignored
+                ).joinToString("\n") + "\n",
+            )
+            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            assertEquals(300L, u.days.sumOf { it.tokens })
+            assertEquals(1200L, u.prevWindowTokens, "prev window = the 7 days right before the visible 7")
+            assertEquals(300L, u.models.single().tokens, "prev-window turns never feed the model bars")
+        }
+    }
 }

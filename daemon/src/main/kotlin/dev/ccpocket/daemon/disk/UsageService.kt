@@ -43,6 +43,11 @@ object UsageService {
         val span = days.coerceIn(1, 90)
         val today = LocalDate.now(zone)
         val start = today.minusDays((span - 1).toLong())
+        // The PREVIOUS equal-width window [prevStart, start) rides along in the same single pass (issue #128):
+        // the scan horizon doubles (30d view reads 60 days) but each file is still walked exactly once —
+        // turns older than `start` only feed the one prev-window total, never the trend/models/today stats.
+        val prevStart = start.minusDays(span.toLong())
+        var prevWindowTokens = 0L
         val seen = HashSet<String>()
         val perDay = HashMap<LocalDate, Long>()
         val perHour = LongArray(24) // today's tokens by local hour — only surfaced for the Today range
@@ -68,7 +73,7 @@ object UsageService {
                             val msg = obj["message"] as? JsonObject ?: continue
                             val when_ = obj.str("timestamp")?.let(::parseWhen) ?: continue
                             val date = when_.toLocalDate()
-                            if (date.isBefore(start)) continue
+                            if (date.isBefore(prevStart)) continue
                             // dedupe: the same turn reappears in multiple .jsonl after a resume/fork
                             val key = (msg.str("id") ?: "") + ":" + (obj.str("requestId") ?: "")
                             if (key != ":" && !seen.add(key)) continue
@@ -76,6 +81,7 @@ object UsageService {
                             val input = usage.long("input_tokens")
                             val cacheRead = usage.long("cache_read_input_tokens")
                             val total = input + usage.long("output_tokens") + usage.long("cache_creation_input_tokens") + cacheRead
+                            if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
                             perDay[date] = (perDay[date] ?: 0) + total
                             perModel[msg.str("model") ?: "unknown"] = (perModel[msg.str("model") ?: "unknown"] ?: 0) + total
                             if (date == today) {
@@ -98,7 +104,7 @@ object UsageService {
         // split so the shared cache-hit formula (cacheRead / (input + cacheRead)) stays correct.
         for (file in codexFiles) runCatching {
             val mtime = runCatching { Files.getLastModifiedTime(file).toMillis() }.getOrNull() ?: return@runCatching
-            if (Instant.ofEpochMilli(mtime).atZone(zone).toLocalDate().isBefore(start)) return@runCatching // whole file predates the window
+            if (Instant.ofEpochMilli(mtime).atZone(zone).toLocalDate().isBefore(prevStart)) return@runCatching // whole file predates both windows
             var model = "codex"
             file.bufferedReader().useLines { lines ->
                 for (raw in lines) {
@@ -120,8 +126,9 @@ object UsageService {
                     val ts = obj.str("timestamp") ?: continue
                     val when_ = parseWhen(ts) ?: continue
                     val date = when_.toLocalDate()
-                    if (date.isBefore(start)) continue
+                    if (date.isBefore(prevStart)) continue
                     if (!seen.add("cx:$ts:$total")) continue
+                    if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
                     perDay[date] = (perDay[date] ?: 0) + total
                     perModel[model] = (perModel[model] ?: 0) + total
                     if (date == today) {
@@ -158,6 +165,7 @@ object UsageService {
             cacheHitPct = cacheHit,
             costUsdToday = if (costSeen) costToday else null,
             hours = hours,
+            prevWindowTokens = prevWindowTokens,
         )
     }
 

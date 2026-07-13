@@ -489,6 +489,9 @@ data class Sessions(
  * breakdown (desc by tokens). Cost comes from the transcript's own costUSD (null when none is recorded).
  * [hours] is the 24 hourly buckets (00:00→23:00) of TODAY, filled only for the Today range by a newer daemon;
  * null from an older daemon (the phone then hides the Today trend area) and null for the 7d/30d ranges.
+ * [prevWindowTokens] is the total of the PREVIOUS equal-width window (span 1 → yesterday, 7 → the 7 days
+ * before the window, 30 → the 30 days before), so the hero delta compares like-for-like windows (issue #128).
+ * A trailing optional: an old daemon omits it (the app shows no delta), an old app ignores it.
  */
 @Serializable
 @SerialName("pocket/usage")
@@ -500,6 +503,7 @@ data class Usage(
     val cacheHitPct: Int? = null,
     val costUsdToday: Double? = null,
     val hours: List<UsageDay>? = null,
+    val prevWindowTokens: Long? = null,
 ) : ToPhone
 
 /**
