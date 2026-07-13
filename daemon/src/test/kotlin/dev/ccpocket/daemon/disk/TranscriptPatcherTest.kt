@@ -93,6 +93,72 @@ class TranscriptPatcherTest {
     }
 
     @Test
+    fun drops_isMeta_skill_injection_and_relinks_child_to_grandparent() {
+        // issue #126: a Skill load writes an isMeta:true user record carrying the whole SKILL.md —
+        // plumbing, not the user typing. It is dropped and the chain re-stitched across it.
+        val f = tmpFile("sess-skill.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","uuid":"a","parentUuid":null,"message":{"role":"user","content":"用 skill 干活"}}""",
+                """{"type":"user","uuid":"m","parentUuid":"a","isMeta":true,"sourceToolUseID":"s1","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x/skills/brain\n\nSKILL_MD_BODY"}]}}""",
+                """{"type":"assistant","uuid":"b","parentUuid":"m","message":{"content":[{"type":"text","text":"ok"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        assertTrue(TranscriptPatcher.unhide(f))
+        val patched = f.readText().trimEnd().lines()
+        assertEquals(2, patched.size) // the injection turn is gone
+        assertTrue(patched.none { it.contains("SKILL_MD_BODY") })
+        assertTrue(patched[1].contains(""""uuid":"b""""))
+        assertTrue(patched[1].contains(""""parentUuid":"a"""")) // relinked past the dropped injection
+    }
+
+    @Test
+    fun drops_fingerprint_injection_without_isMeta() {
+        // isMeta-less variant (older CLI): the "Base directory for this skill:" opening is the fallback
+        val f = tmpFile("sess-skill-nometa.jsonl")
+        f.writeText(
+            listOf(
+                """{"type":"user","uuid":"a","parentUuid":null,"message":{"role":"user","content":"hi"}}""",
+                """{"type":"user","uuid":"m","parentUuid":"a","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x\n\nSKILL_MD_BODY"}]}}""",
+                """{"type":"assistant","uuid":"b","parentUuid":"m","message":{"content":[{"type":"text","text":"ok"}]}}""",
+            ).joinToString("\n"),
+        )
+
+        assertTrue(TranscriptPatcher.unhide(f))
+        val patched = f.readText().trimEnd().lines()
+        assertEquals(2, patched.size)
+        assertTrue(patched.none { it.contains("SKILL_MD_BODY") })
+        assertTrue(patched[1].contains(""""parentUuid":"a""""))
+    }
+
+    @Test
+    fun keeps_an_isMeta_row_that_carries_a_tool_result() {
+        // a tool_result carrier is NEVER dropped, isMeta or not — removing it would orphan the matching
+        // tool_use and 400 the resumed API chain
+        val f = tmpFile("sess-meta-tr.jsonl")
+        val lines = listOf(
+            """{"type":"assistant","uuid":"t","parentUuid":null,"message":{"content":[{"type":"tool_use","id":"s1","name":"Skill","input":{"skill":"brain"}}]}}""",
+            """{"type":"user","uuid":"r","parentUuid":"t","isMeta":true,"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"s1","content":"Launching skill: brain"}]}}""",
+        )
+        f.writeText(lines.joinToString("\n"))
+
+        assertFalse(TranscriptPatcher.unhide(f)) // nothing safe to drop, no sdk tag -> untouched
+        assertEquals(lines, f.readText().trimEnd().lines())
+    }
+
+    @Test
+    fun keeps_a_user_turn_merely_quoting_the_injection_fingerprint() {
+        // the prefix mid-message is a user genuinely talking about it — opening-only matching keeps it
+        val f = tmpFile("sess-quote.jsonl")
+        val line = """{"type":"user","uuid":"a","parentUuid":null,"message":{"role":"user","content":"请解释 Base directory for this skill: 是什么意思"}}"""
+        f.writeText(line)
+
+        assertFalse(TranscriptPatcher.unhide(f))
+        assertEquals(line, f.readText().trimEnd())
+    }
+
+    @Test
     fun keeps_a_notification_whose_parent_is_a_system_record_so_resume_chain_stays_valid() {
         // issue #24: after /compact the chain root is a `type:"system"` compact_boundary. If the first turn
         // under it is a pure <task-notification>, dropping it would relink the surviving assistant straight

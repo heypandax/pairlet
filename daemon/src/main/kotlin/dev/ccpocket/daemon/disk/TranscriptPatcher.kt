@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -16,8 +17,9 @@ import java.nio.file.attribute.PosixFilePermissions
  *     hides those — we rewrite the tag to interactive `"cli"` so the session shows up.
  *  2. drops harness-injected NOISE the phone session accumulated, so a desktop resume replays the real
  *     conversation instead of background-task chatter: standalone `<task-notification>` user turns
- *     (background-shell lifecycle notices) and `queue-operation` bookkeeping lines. parentUuid links are
- *     re-stitched across dropped turns so the chain stays intact.
+ *     (background-shell lifecycle notices), `queue-operation` bookkeeping lines, and skill/command
+ *     injection turns (root-level isMeta:true, or their text fingerprints — issue #126). parentUuid
+ *     links are re-stitched across dropped turns so the chain stays intact.
  *
  * We deliberately do NOT drop `<system-reminder>` turns: those are routinely PREPENDED to a real user
  * message, so removing by prefix would eat genuine input. A `<task-notification>` turn is only dropped
@@ -30,6 +32,7 @@ object TranscriptPatcher {
     private const val SDK_TAG = "\"entrypoint\":\"sdk-cli\""
     private const val CLI_TAG = "\"entrypoint\":\"cli\""
     private const val QUEUE_OP_TAG = "\"queue-operation\"" // cheap substring marker for the noise prefilter
+    private const val META_TAG = "\"isMeta\":true" // ditto, for skill/command injection rows (issue #126)
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private class Row(val raw: String, val uuid: String?, val parentUuid: String?, val leafUuid: String?, val type: String?, val noise: Boolean)
@@ -42,7 +45,11 @@ object TranscriptPatcher {
         // cheap substring prefilter: the file can only change if it carries an sdk-cli tag or a noise
         // marker. skips JSON-parsing every line on the common no-op (already-cli, noise-free) + re-runs.
         val hasSdk = lines.any { it.contains(SDK_TAG) }
-        val maybeNoise = lines.any { it.contains(QUEUE_OP_TAG) || it.contains(TranscriptNoise.TN_OPEN) }
+        val maybeNoise = lines.any { line ->
+            line.contains(QUEUE_OP_TAG) || line.contains(TranscriptNoise.TN_OPEN) || line.contains(META_TAG) ||
+                line.contains(TranscriptNoise.SKILL_INJECTION_PREFIX) ||
+                TranscriptNoise.COMMAND_WRAPPER_TAGS.any(line::contains)
+        }
         if (!hasSdk && !maybeNoise) return false
 
         val rows = lines.map(::classify) // parse only once we know something might actually change
@@ -126,10 +133,27 @@ object TranscriptPatcher {
         val type = str(obj["type"])
         val noise = when (type) {
             "queue-operation" -> true
-            "user" -> TranscriptNoise.isPureTaskNotification(userText(obj))
+            "user" -> isNoiseUserTurn(obj)
             else -> false
         }
         return Row(line, str(obj["uuid"]), str(obj["parentUuid"]), str(obj["leafUuid"]), type, noise)
+    }
+
+    /** True for a user record that is harness plumbing, not the user typing: a pure task-notification
+     *  turn, or a skill/command injection — root-level isMeta:true, or the text-fingerprint fallback
+     *  for isMeta-less older CLIs (issue #126). A row carrying a tool_result is NEVER noise: dropping
+     *  it would orphan the matching tool_use and 400 the resumed API chain. */
+    private fun isNoiseUserTurn(obj: JsonObject): Boolean {
+        val text = userText(obj)
+        if (TranscriptNoise.isPureTaskNotification(text)) return true
+        if (hasToolResult(obj)) return false
+        val meta = (obj["isMeta"] as? JsonPrimitive)?.booleanOrNull == true
+        return meta || TranscriptNoise.isInjectedHarnessText(text)
+    }
+
+    private fun hasToolResult(obj: JsonObject): Boolean {
+        val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return false
+        return content.any { str((it as? JsonObject)?.get("type")) == "tool_result" }
     }
 
     private fun userText(obj: JsonObject): String? {
