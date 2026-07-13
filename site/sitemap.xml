@@ -1,21 +1,69 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
     <loc>https://heypandax.github.io/cc-pocket/</loc>
-    <lastmod>2026-07-12</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
+    <lastmod>2026-07-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/" />
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/zh/</loc>
+    <lastmod>2026-07-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/features.html</loc>
-    <lastmod>2026-07-12</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html</loc>
+    <lastmod>2026-07-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/claude-code-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/zh/claude-code-mobile-remote.html</loc>
+    <lastmod>2026-07-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/claude-code-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html</loc>
+    <lastmod>2026-07-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/codex-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/zh/codex-mobile-remote.html</loc>
+    <lastmod>2026-07-13</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/codex-mobile-remote.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/guides/compare-remote-options.html</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/guides/security.html</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/guides/self-hosting.html</loc>
+    <lastmod>2026-07-13</lastmod>
+  </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/guides/faq.html</loc>
+    <lastmod>2026-07-13</lastmod>
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/privacy.html</loc>
-    <lastmod>2026-06-25</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.3</priority>
+    <lastmod>2026-07-13</lastmod>
   </url>
 </urlset>

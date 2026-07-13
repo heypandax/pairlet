@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How to use OpenAI Codex from your phone — CC Pocket guide</title>
+<meta name="description" content="A sourced guide to using OpenAI Codex from a phone: compare the official ChatGPT mobile preview with the open-source CC Pocket remote client." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/codex-mobile-remote.html" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" /><meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="How to use OpenAI Codex from your phone" />
+<meta property="og:description" content="Compare OpenAI's official ChatGPT mobile preview with the open-source CC Pocket workflow." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" /><meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." /><meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="How to use OpenAI Codex from your phone" /><meta name="twitter:description" content="A sourced guide to official Codex mobile and open-source CC Pocket." /><meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../styles.css" /><link rel="stylesheet" href="../article.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "TechArticle", "headline": "How to use OpenAI Codex from your phone", "description": "A sourced guide to OpenAI's official Codex mobile preview and the open-source CC Pocket workflow.", "url": "https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html", "datePublished": "2026-07-13", "dateModified": "2026-07-13", "inLanguage": "en", "image": "https://heypandax.github.io/cc-pocket/og-image.png", "author": { "@type": "Organization", "name": "CC Pocket contributors", "url": "https://github.com/heypandax/cc-pocket" }, "about": ["OpenAI Codex", "remote coding", "CC Pocket"], "citation": ["https://openai.com/index/work-with-codex-from-anywhere/", "https://github.com/heypandax/cc-pocket"] },
+    { "@type": "BreadcrumbList", "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "CC Pocket", "item": "https://heypandax.github.io/cc-pocket/" },
+      { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://heypandax.github.io/cc-pocket/#guides" },
+      { "@type": "ListItem", "position": 3, "name": "Codex on your phone", "item": "https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html" }
+    ] }
+  ]
+}
+</script>
+</head>
+<body>
+<nav class="guide-nav"><div class="wrap"><a class="brand" href="../"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a><div class="guide-links"><a href="compare-remote-options.html">Compare</a><a href="security.html">Security</a><a href="faq.html">FAQ</a><a class="lang-link" href="../zh/codex-mobile-remote.html" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+<header class="guide-hero"><div class="wrap"><div class="breadcrumbs"><a href="../">CC Pocket</a> / Guides / Codex mobile remote</div><h1>How to use OpenAI Codex from your phone</h1><p class="guide-deck">OpenAI provides Codex in ChatGPT mobile. CC Pocket provides an independent open-source remote for a Codex CLI process on your own computer—and supports Claude Code in the same app.</p><div class="guide-meta"><span>Last verified July 13, 2026</span><span>6 minute read</span><span>Official sources cited</span></div></div></header>
+<main class="guide-main">
+  <div class="answer-box"><div class="answer-label">Short answer</div><p>Use <strong>Codex in ChatGPT mobile</strong> for OpenAI's first-party experience. Choose <strong>CC Pocket</strong> when you want an MIT-licensed remote you can inspect and self-host, or one app for both Codex and Claude Code.</p></div>
+  <dl class="fact-grid"><div class="fact"><dt>Official mobile</dt><dd>ChatGPT for iOS and Android</dd></div><div class="fact"><dt>CC Pocket backend</dt><dd>Codex CLI on your computer</dd></div><div class="fact"><dt>CC Pocket account</dt><dd>Not required</dd></div></dl>
+
+  <h2 id="official">Option 1: Codex in ChatGPT mobile</h2>
+  <p>OpenAI announced a Codex mobile preview on May 14, 2026. Its official post says Codex is available in ChatGPT on iOS and Android across all ChatGPT plans, including Free and Go. It also says the mobile connection keeps files and credentials on the computer and uses a secure relay.</p>
+  <p>The same announcement said phone-to-Codex support on Windows was “coming soon.” Because rollout details can change, check the linked OpenAI page and current ChatGPT app before relying on a specific platform or plan.</p>
+
+  <h2 id="cc-pocket">Option 2: CC Pocket</h2>
+  <p>CC Pocket connects its mobile or desktop client to a daemon on your computer. The daemon drives the local Codex CLI; your repository and credentials remain on that computer. In the client you can start or resume sessions, stream events, inspect diffs, interrupt work, and respond to approval requests.</p>
+  <ol><li>Install the CC Pocket client.</li><li>Install and pair the daemon on the computer that runs Codex.</li><li>Choose Codex when creating a session, then select a project and permission preset.</li></ol>
+  <p>For exact installation commands, use the current <a href="https://github.com/heypandax/cc-pocket#readme" rel="noopener">CC Pocket README</a>.</p>
+  <figure class="product-figure"><img src="../og-image.png" width="1200" height="630" alt="CC Pocket remote client for OpenAI Codex and Claude Code" /><figcaption>The CC Pocket client connects to a daemon on your computer; it does not upload the project into a CC Pocket cloud IDE.</figcaption></figure>
+
+  <h2 id="differences">What is different?</h2>
+  <div class="guide-table-wrap"><table class="guide-table"><thead><tr><th>Question</th><th>Codex in ChatGPT mobile</th><th>CC Pocket</th></tr></thead><tbody>
+    <tr><td>Provider</td><td>OpenAI, first party</td><td>Independent open-source project</td></tr>
+    <tr><td>Agent support</td><td>OpenAI Codex</td><td>OpenAI Codex and Claude Code</td></tr>
+    <tr><td>Client account</td><td>ChatGPT account and plan access</td><td>No CC Pocket account</td></tr>
+    <tr><td>Source / hosting</td><td>Use OpenAI's product</td><td>MIT source; relay can be self-hosted</td></tr>
+    <tr><td>Best fit</td><td>Official Codex workflow</td><td>Cross-agent use and deployment control</td></tr>
+  </tbody></table></div>
+  <div class="callout"><p><strong>Independent project:</strong> CC Pocket is not affiliated with or endorsed by OpenAI. OpenAI and Codex are trademarks of OpenAI.</p></div>
+
+  <h2 id="security">Security and limits</h2>
+  <p>CC Pocket's client-to-daemon messages use P-256 ECDH, HKDF, and AES-256-GCM. The relay routes encrypted frames without endpoint private keys. Read the <a href="security.html">security model and limitations</a> for the full boundary.</p>
+  <div class="callout limitations"><p><strong>Important:</strong> CC Pocket's local daemon is not an operating-system sandbox. Codex executes within the permissions and sandbox policy configured on your computer. Full-auto modes can run commands without a per-step confirmation.</p></div>
+
+  <section class="sources"><h2>Sources</h2><ol><li><a href="https://openai.com/index/work-with-codex-from-anywhere/" rel="noopener">OpenAI — Work with Codex from anywhere</a> (official mobile announcement, availability, and architecture claims).</li><li><a href="https://github.com/heypandax/cc-pocket" rel="noopener">CC Pocket source repository</a> (license, installation, architecture, and Codex support).</li></ol><p class="source-note">Availability and plan details can change. Facts above were checked on July 13, 2026.</p></section>
+  <section class="related"><h2>Related guides</h2><div class="related-grid"><a class="related-card" href="compare-remote-options.html"><strong>Compare all remote options</strong><span>A side-by-side factual matrix.</span></a><a class="related-card" href="claude-code-mobile-remote.html"><strong>Use Claude Code from your phone</strong><span>Official Remote Control and CC Pocket.</span></a></div></section>
+</main>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
+</body>
+</html>

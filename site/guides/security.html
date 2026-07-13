@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CC Pocket security model: encryption, relay, and limits</title>
+<meta name="description" content="Understand CC Pocket's end-to-end encryption, zero-knowledge relay, pairing, stored metadata, local daemon permissions, telemetry, and known limitations." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/guides/security.html" /><link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/security.html" /><link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/security.html" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" /><meta property="og:site_name" content="CC Pocket" /><meta property="og:title" content="CC Pocket security model" /><meta property="og:description" content="Encryption, relay visibility, endpoint trust, metadata, telemetry, and known limits." /><meta property="og:url" content="https://heypandax.github.io/cc-pocket/guides/security.html" /><meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" /><meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." /><meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="CC Pocket security model" /><meta name="twitter:description" content="What is encrypted, what the relay sees, and what remains trusted." /><meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<link rel="icon" href="../favicon.svg" type="image/svg+xml" /><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" /><link rel="stylesheet" href="../styles.css" /><link rel="stylesheet" href="../article.css" />
+<script type="application/ld+json">
+{ "@context": "https://schema.org", "@type": "TechArticle", "headline": "CC Pocket security model: encryption, relay, and limits", "description": "An explanation of CC Pocket's encryption, pairing, relay visibility, endpoint trust, and known limitations.", "url": "https://heypandax.github.io/cc-pocket/guides/security.html", "datePublished": "2026-07-13", "dateModified": "2026-07-13", "inLanguage": "en", "image": "https://heypandax.github.io/cc-pocket/og-image.png", "author": { "@type": "Organization", "name": "CC Pocket contributors", "url": "https://github.com/heypandax/cc-pocket" }, "about": ["end-to-end encryption", "zero-knowledge relay", "CC Pocket"], "citation": "https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" }
+</script>
+</head>
+<body>
+<nav class="guide-nav"><div class="wrap"><a class="brand" href="../"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a><div class="guide-links"><a href="compare-remote-options.html">Compare</a><a href="self-hosting.html">Self-host</a><a href="faq.html">FAQ</a><a class="lang-link" href="../zh/" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+<header class="guide-hero"><div class="wrap"><div class="breadcrumbs"><a href="../">CC Pocket</a> / Guides / Security</div><h1>CC Pocket security model</h1><p class="guide-deck">The relay is designed not to read session content. The endpoints—your paired client and local daemon—remain trusted and powerful.</p><div class="guide-meta"><span>Last verified July 13, 2026</span><span>Version 1.3.5</span><span>No independent audit</span></div></div></header>
+<main class="guide-main">
+  <div class="answer-box"><div class="answer-label">Trust model</div><p>Messages are encrypted between the CC Pocket client and daemon. The relay routes ciphertext and stores routing credentials, public keys, hashes, and timestamps—not prompts, code, private keys, or session keys.</p></div>
+  <dl class="fact-grid"><div class="fact"><dt>Key agreement</dt><dd>P-256 ECDH + HKDF-SHA256</dd></div><div class="fact"><dt>Message encryption</dt><dd>AES-256-GCM</dd></div><div class="fact"><dt>Daemon authentication</dt><dd>Ed25519 challenge signature</dd></div></dl>
+
+  <h2>Data path</h2>
+  <p><strong>Client → relay → daemon → Claude Code or Codex CLI.</strong> The daemon makes an outbound connection, so the default relay workflow does not require opening an inbound port on your computer. TLS protects each relay connection; an additional end-to-end channel protects content across the relay.</p>
+
+  <h2>Pairing and identity</h2>
+  <p>The daemon creates a static Ed25519 identity and a P-256 encryption identity. A client creates its own P-256 key. Pairing transfers the daemon public key and a short-lived, one-use ticket through a QR code or pairing link. The ticket is mixed into the first handshake as a pre-shared secret, so replacing a forwarded client key causes the handshake to fail.</p>
+
+  <h2>What the relay stores</h2>
+  <div class="guide-table-wrap"><table class="guide-table"><thead><tr><th>Category</th><th>Relay can store or observe</th><th>Relay is designed not to receive</th></tr></thead><tbody>
+    <tr><td>Persistent data</td><td>Account fingerprint, public keys, credential and ticket hashes, timestamps, revocation state</td><td>Private keys, prompts, code, transcript content, session encryption keys</td></tr>
+    <tr><td>Connection metadata</td><td>Source IP, online timing, ciphertext size and timing, account-to-device routing graph</td><td>Plaintext message bodies</td></tr>
+    <tr><td>Logs</td><td>Connection lifecycle, authentication result, rate limits, byte counts</td><td>Decrypted frames</td></tr>
+  </tbody></table></div>
+
+  <h2>What end-to-end encryption does not protect</h2>
+  <ul><li><strong>A compromised endpoint:</strong> the paired client and computer necessarily see plaintext.</li><li><strong>Local execution authority:</strong> the daemon drives a CLI process with the operating-system user's permissions.</li><li><strong>Traffic metadata:</strong> the relay can observe IP addresses, connection times, and encrypted frame sizes.</li><li><strong>Unsafe agent configuration:</strong> full-auto or permissive sandbox settings can allow commands without per-step approval.</li></ul>
+  <div class="callout limitations"><p><strong>Folder sharing is a scope, not a sandbox.</strong> A guest session can be fenced to a folder in the product, but shell commands still execute as the owner's operating-system user.</p></div>
+
+  <h2>Known limitations</h2>
+  <ul><li>The custom Noise-style channel has <strong>not received an independent security audit</strong>.</li><li>The documented mobile key storage uses app-private storage rather than hardware-backed iOS Keychain or Android Keystore.</li><li>Pair-ticket association uses a recent-ticket heuristic intended for sequential interactive pairing.</li><li>Firebase Analytics and Crashlytics may send enumerated product events and crash information directly to Google. The project says these events exclude prompts, code, and session content; this telemetry does not pass through the relay and is separate from the relay's zero-knowledge claim.</li></ul>
+
+  <h2>How to verify or report a problem</h2>
+  <p>The protocol, relay, daemon, and clients are available under the MIT license. The repository documents smoke tests that inspect the encrypted data plane and protocol tests for mismatched keys. Report vulnerabilities through <a href="https://github.com/heypandax/cc-pocket/security/advisories/new" rel="noopener">GitHub private vulnerability reporting</a>, not a public issue.</p>
+
+  <section class="sources"><h2>Primary sources</h2><ol><li><a href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" rel="noopener">CC Pocket security and trust model</a> (full protocol, stored fields, threat table, verification steps, and limitations).</li><li><a href="https://github.com/heypandax/cc-pocket/tree/main/protocol/src/commonMain/kotlin/dev/ccpocket/protocol/e2e" rel="noopener">Shared end-to-end protocol implementation</a>.</li></ol><p class="source-note">This page summarizes project documentation; it is not a third-party security audit.</p></section>
+  <section class="related"><h2>Related guides</h2><div class="related-grid"><a class="related-card" href="self-hosting.html"><strong>Self-host the relay</strong><span>Deployment boundary and components.</span></a><a class="related-card" href="faq.html"><strong>Frequently asked questions</strong><span>Direct answers on accounts, code location, and limitations.</span></a></div></section>
+</main>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
+</body>
+</html>

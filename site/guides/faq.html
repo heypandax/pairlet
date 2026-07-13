@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CC Pocket FAQ — Claude Code and Codex remote control</title>
+<meta name="description" content="Direct answers about CC Pocket accounts, pricing, platforms, Claude Code and Codex support, encryption, self-hosting, local files, and limitations." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/guides/faq.html" /><link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/faq.html" /><link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/faq.html" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" /><meta property="og:site_name" content="CC Pocket" /><meta property="og:title" content="CC Pocket frequently asked questions" /><meta property="og:description" content="Direct answers about accounts, pricing, agents, platforms, encryption, and limitations." /><meta property="og:url" content="https://heypandax.github.io/cc-pocket/guides/faq.html" /><meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" /><meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." /><meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="CC Pocket FAQ" /><meta name="twitter:description" content="Accounts, pricing, agents, platforms, security, and limitations." /><meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<link rel="icon" href="../favicon.svg" type="image/svg+xml" /><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" /><link rel="stylesheet" href="../styles.css" /><link rel="stylesheet" href="../article.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "url": "https://heypandax.github.io/cc-pocket/guides/faq.html",
+  "dateModified": "2026-07-13",
+  "inLanguage": "en",
+  "mainEntity": [
+    { "@type": "Question", "name": "What is CC Pocket?", "acceptedAnswer": { "@type": "Answer", "text": "CC Pocket is an open-source remote client for Claude Code and OpenAI Codex processes running on your own computer. It is not a cloud IDE or a model provider." } },
+    { "@type": "Question", "name": "Does CC Pocket require an account?", "acceptedAnswer": { "@type": "Answer", "text": "No CC Pocket account or sign-up is required. Devices pair to a daemon identity. You still need the appropriate Anthropic or OpenAI access for the coding agent you run." } },
+    { "@type": "Question", "name": "Is CC Pocket free?", "acceptedAnswer": { "@type": "Answer", "text": "CC Pocket is free and MIT-licensed. Agent provider subscriptions, model usage, hosting, network, or app-store charges are separate." } },
+    { "@type": "Question", "name": "Does CC Pocket support both Claude Code and OpenAI Codex?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. You choose Claude Code or Codex for each session. A session stays bound to one backend." } },
+    { "@type": "Question", "name": "Does my source code leave my computer?", "acceptedAnswer": { "@type": "Answer", "text": "The coding agent and repository stay on your computer. Session content sent to a paired client crosses the relay as end-to-end encrypted frames. The paired client and local daemon are trusted endpoints and see plaintext." } },
+    { "@type": "Question", "name": "Can I self-host CC Pocket?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The relay, daemon, protocol, and clients are open source. The repository includes a systemd and Caddy reference deployment for the relay." } },
+    { "@type": "Question", "name": "What platforms does CC Pocket support?", "acceptedAnswer": { "@type": "Answer", "text": "The client supports iOS and iPadOS, Android, macOS, Windows, and Linux. The daemon runs on the computer that hosts the coding agent; current install details are maintained in the project README and releases." } },
+    { "@type": "Question", "name": "Does my computer need to stay on?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. CC Pocket remotely controls a coding-agent process on your computer, so that computer and its daemon must be running and reachable through the relay or local network." } },
+    { "@type": "Question", "name": "Has CC Pocket been independently security audited?", "acceptedAnswer": { "@type": "Answer", "text": "No. The security design and source are public, but the project's custom Noise-style end-to-end channel has not received an independent audit." } }
+  ]
+}
+</script>
+</head>
+<body>
+<nav class="guide-nav"><div class="wrap"><a class="brand" href="../"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a><div class="guide-links"><a href="compare-remote-options.html">Compare</a><a href="security.html">Security</a><a href="self-hosting.html">Self-host</a><a class="lang-link" href="../zh/" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+<header class="guide-hero"><div class="wrap"><div class="breadcrumbs"><a href="../">CC Pocket</a> / Guides / FAQ</div><h1>Frequently asked questions</h1><p class="guide-deck">Short, direct answers about what CC Pocket is, where your code runs, what it costs, and what its security claims do—and do not—cover.</p><div class="guide-meta"><span>Last verified July 13, 2026</span><span>Version 1.3.5</span></div></div></header>
+<main class="guide-main">
+  <div class="faq-list">
+    <section class="faq-item"><h2>What is CC Pocket?</h2><p>CC Pocket is an open-source remote client for Claude Code and OpenAI Codex processes running on your own computer. It is not a cloud IDE or a model provider.</p></section>
+    <section class="faq-item"><h2>Does CC Pocket require an account?</h2><p>No CC Pocket account or sign-up is required. Devices pair to a daemon identity. You still need the appropriate Anthropic or OpenAI access for the coding agent you run.</p></section>
+    <section class="faq-item"><h2>Is CC Pocket free?</h2><p>CC Pocket is free and MIT-licensed. Agent provider subscriptions, model usage, hosting, network, or app-store charges are separate.</p></section>
+    <section class="faq-item"><h2>Does CC Pocket support both Claude Code and OpenAI Codex?</h2><p>Yes. You choose Claude Code or Codex for each session. A session stays bound to one backend.</p></section>
+    <section class="faq-item"><h2>Does my source code leave my computer?</h2><p>The coding agent and repository stay on your computer. Session content sent to a paired client crosses the relay as end-to-end encrypted frames. The paired client and local daemon are trusted endpoints and see plaintext.</p></section>
+    <section class="faq-item"><h2>Can I self-host CC Pocket?</h2><p>Yes. The relay, daemon, protocol, and clients are open source. The repository includes a systemd and Caddy reference deployment for the relay.</p></section>
+    <section class="faq-item"><h2>What platforms does CC Pocket support?</h2><p>The client supports iOS and iPadOS, Android, macOS, Windows, and Linux. The daemon runs on the computer that hosts the coding agent; current install details are maintained in the project README and releases.</p></section>
+    <section class="faq-item"><h2>Does my computer need to stay on?</h2><p>Yes. CC Pocket remotely controls a coding-agent process on your computer, so that computer and its daemon must be running and reachable through the relay or local network.</p></section>
+    <section class="faq-item"><h2>Has CC Pocket been independently security audited?</h2><p>No. The security design and source are public, but the project's custom Noise-style end-to-end channel has not received an independent audit.</p></section>
+  </div>
+  <section class="sources"><h2>Where to verify details</h2><ol><li><a href="https://github.com/heypandax/cc-pocket#readme" rel="noopener">CC Pocket README and installation guide</a>.</li><li><a href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" rel="noopener">Security and trust model</a>.</li><li><a href="../features.html">Complete feature list</a>.</li></ol><p class="source-note">Answers were checked against version 1.3.5 project files on July 13, 2026.</p></section>
+  <section class="related"><h2>Go deeper</h2><div class="related-grid"><a class="related-card" href="security.html"><strong>Security model</strong><span>Encryption, metadata, endpoints, and limitations.</span></a><a class="related-card" href="compare-remote-options.html"><strong>Compare remote options</strong><span>CC Pocket, Claude Remote Control, and Codex mobile.</span></a></div></section>
+</main>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
+</body>
+</html>

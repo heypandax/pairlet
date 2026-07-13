@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Self-hosting the CC Pocket relay: architecture and choices</title>
+<meta name="description" content="Learn how the CC Pocket client, zero-knowledge relay, local daemon, and Claude Code or Codex CLI fit together, plus what self-hosting changes." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/guides/self-hosting.html" /><link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/self-hosting.html" /><link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/self-hosting.html" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" /><meta property="og:site_name" content="CC Pocket" /><meta property="og:title" content="Self-hosting the CC Pocket relay" /><meta property="og:description" content="Client, relay, daemon, agent, and the deployment boundary." /><meta property="og:url" content="https://heypandax.github.io/cc-pocket/guides/self-hosting.html" /><meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" /><meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." /><meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" /><meta name="twitter:title" content="Self-hosting the CC Pocket relay" /><meta name="twitter:description" content="Understand the components and what self-hosting changes." /><meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<link rel="icon" href="../favicon.svg" type="image/svg+xml" /><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" /><link rel="stylesheet" href="../styles.css" /><link rel="stylesheet" href="../article.css" />
+<script type="application/ld+json">
+{ "@context": "https://schema.org", "@type": "TechArticle", "headline": "Self-hosting the CC Pocket relay: architecture and choices", "description": "How the CC Pocket client, relay, daemon, and local coding agent fit together.", "url": "https://heypandax.github.io/cc-pocket/guides/self-hosting.html", "datePublished": "2026-07-13", "dateModified": "2026-07-13", "inLanguage": "en", "image": "https://heypandax.github.io/cc-pocket/og-image.png", "author": { "@type": "Organization", "name": "CC Pocket contributors", "url": "https://github.com/heypandax/cc-pocket" }, "about": ["self-hosting", "zero-knowledge relay", "CC Pocket"], "citation": ["https://github.com/heypandax/cc-pocket/tree/main/deploy", "https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md"] }
+</script>
+</head>
+<body>
+<nav class="guide-nav"><div class="wrap"><a class="brand" href="../"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a><div class="guide-links"><a href="compare-remote-options.html">Compare</a><a href="security.html">Security</a><a href="faq.html">FAQ</a><a class="lang-link" href="../zh/" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+<header class="guide-hero"><div class="wrap"><div class="breadcrumbs"><a href="../">CC Pocket</a> / Guides / Self-hosting</div><h1>Self-hosting the CC Pocket relay</h1><p class="guide-deck">Self-hosting changes who operates the routing service. It does not move Claude Code, Codex, or your repository off your computer.</p><div class="guide-meta"><span>Last verified July 13, 2026</span><span>Infrastructure guide</span><span>MIT source</span></div></div></header>
+<main class="guide-main">
+  <div class="answer-box"><div class="answer-label">Architecture</div><p><strong>Phone or desktop client → WebSocket relay → daemon on your computer → Claude Code or Codex CLI.</strong> Content is end-to-end encrypted between client and daemon.</p></div>
+  <h2>The four components</h2>
+  <div class="guide-table-wrap"><table class="guide-table"><thead><tr><th>Component</th><th>Where it runs</th><th>Responsibility</th></tr></thead><tbody>
+    <tr><td>Client</td><td>Phone, tablet, or another computer</td><td>Shows sessions, sends input, and displays approval requests</td></tr>
+    <tr><td>Relay</td><td>Public server</td><td>Authenticates connections and routes encrypted frames</td></tr>
+    <tr><td>Daemon</td><td>Your coding computer</td><td>Maintains the encrypted endpoint and drives the local CLI</td></tr>
+    <tr><td>Coding agent</td><td>Your coding computer</td><td>Claude Code or Codex reads and edits the selected project</td></tr>
+  </tbody></table></div>
+
+  <h2>Hosted relay or your relay?</h2>
+  <p>The default service minimizes setup. Running your own relay gives you operational control over availability, logs, network policy, updates, and retained routing records. End-to-end encryption is still necessary in either case because the relay remains outside the trusted content endpoints.</p>
+  <p>Self-hosting does <strong>not</strong> eliminate metadata visible to the relay operator: source IPs, connection times, account-to-device routing, and ciphertext size and timing remain observable.</p>
+
+  <h2>Deployment shape</h2>
+  <p>The repository provides a Java 17 relay distribution, a hardened systemd unit, and a Caddy reverse-proxy example. The reference layout binds the Kotlin/Ktor relay to loopback, stores routing state in SQLite, and lets Caddy provide public TLS and WebSocket proxying.</p>
+  <ol><li>Build the relay distribution from the tagged source.</li><li>Run it as a dedicated, unprivileged service account with a persistent SQLite directory.</li><li>Place a TLS reverse proxy in front of the loopback listener.</li><li>Point the daemon and client pairing flow at your <code>wss://</code> relay URL.</li><li>Monitor the health endpoint, logs, certificate renewal, storage, and upgrade process.</li></ol>
+  <p>Use the version-matched <a href="https://github.com/heypandax/cc-pocket/tree/main/deploy" rel="noopener">deployment files</a> rather than copying commands from this overview.</p>
+
+  <h2>What you become responsible for</h2>
+  <ul><li>TLS certificates, DNS, WebSocket proxying, and public network exposure.</li><li>Java and relay upgrades, backups of routing state, and service monitoring.</li><li>Rate limits, logs, access to metadata, and incident response.</li><li>Keeping daemon and client configurations pointed at the same relay.</li></ul>
+  <div class="callout limitations"><p><strong>Self-hosting is an infrastructure task.</strong> Incorrect TLS, database permissions, proxy timeouts, or upgrade procedures can cause outages. Review the deployment and security documents before exposing a relay publicly.</p></div>
+
+  <section class="sources"><h2>Primary sources</h2><ol><li><a href="https://github.com/heypandax/cc-pocket/tree/main/deploy" rel="noopener">CC Pocket relay deployment runbook and service files</a>.</li><li><a href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" rel="noopener">CC Pocket security and trust model</a>.</li><li><a href="https://github.com/heypandax/cc-pocket/tree/main/relay" rel="noopener">Relay source code</a>.</li></ol></section>
+  <section class="related"><h2>Related guides</h2><div class="related-grid"><a class="related-card" href="security.html"><strong>Security model</strong><span>Exactly what the relay stores and observes.</span></a><a class="related-card" href="compare-remote-options.html"><strong>Compare remote options</strong><span>When self-hosting and cross-agent support matter.</span></a></div></section>
+</main>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
+</body>
+</html>
