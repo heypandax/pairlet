@@ -61,6 +61,7 @@ html, body {
   background-image: linear-gradient(rgba(217,119,87,0.20), rgba(217,119,87,0.20));
   background-repeat: no-repeat; background-position: 0 78%; background-size: 0% 46%;
   border-radius: 3px; padding: 0 2px;
+  white-space: nowrap;              /* 关键词（含命令 flag）绝不跨行断开 */
 }
 
 /* ── phone shell: w264, top 236, rim glow ── */

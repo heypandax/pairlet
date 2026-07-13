@@ -29,7 +29,23 @@
 `scene.render(tNanos)` 推进、CSS 动画被 rig/scene.css 冻结、rig.js 驱动 HTML 侧动效。
 同一份剧本渲染两次，逐帧相同。
 
-## 出片（两步）
+## v3 管线（segments+shots，134.5s 正片用；仓库根 `./video.sh` 统一入口）
+
+```bash
+./video.sh lock-facts                        # git 采数 → output/facts.lock.json（显式执行才更新）
+./video.sh resolve-timeline storyboard-v3.json   # 分段 TTS → output/timeline.lock.json（时长唯一权威）
+./video.sh validate storyboard-v3.json --allow-placeholder   # 红线词 + 素材检查
+./video.sh animatic storyboard-v3.json       # 灰卡动态分镜稿 → output/animatic.mp4
+./video.sh render storyboard-v3.json         # 正式渲染（缺素材直接报错，不允许占位出片）
+./video.sh render-scene storyboard-v3.json hook   # 单段迭代
+./video.sh footage-contact-sheet             # Seedance 候选缩略对比页
+```
+
+- **段（segment）= 一段口播**，时长 = max(TTS 实测 + lead + 尾停留, Σ镜头 minMs)，富余给 `flex` 镜头；**镜头（shot）**类型：`html`（舞台场景）/ `frames`（真 UI 帧序列）/ `footage`（Seedance 素材，ffmpeg 预抽帧走 img 换帧，**禁 `<video>` seek**）/ `placeholder`
+- footage 六字段：`source/trimStart/trimEnd/fit/voiceOffset(段级)/shortagePolicy(freeze|loop|error)`；素材规范见 `assets/footage/README.md`
+- 换口播/音色后必须重跑 resolve-timeline 再生成素材——分镜秒数是派生值，不许手写
+
+## 出片（两步，v2 老路径仍可用）
 
 ```bash
 # 1) 渲真 UI 帧（改了剧本或升级了 App 之后跑；约 1.5 分钟）

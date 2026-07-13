@@ -7,9 +7,11 @@
 .termwin .lights{display:flex;gap:7px;} .termwin .lights i{width:11px;height:11px;border-radius:99px;background:#6B7177;opacity:.45;display:block;}
 .termwin .ttl{position:absolute;left:0;right:0;text-align:center;font-family:'JetBrains Mono',monospace;font-size:11px;color:#9BA1A6;}
 .termwin .body{background:#0B0C0D;padding:16px 18px 18px;height:400px;overflow:hidden;
-  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.85;color:#9BA1A6;}
+  font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;line-height:1.9;color:#9BA1A6;}
 .termwin .l{opacity:0;white-space:pre-wrap;word-break:break-all;}
-.termwin .l .p{color:#D97757;} .termwin .l .g{color:#4FB477;} .termwin .l .w{color:#ECEDEE;} .termwin .l .d{color:#6B7177;}
+.termwin .l .p{color:#D97757;} .termwin .l .w{color:#ECEDEE;} .termwin .l .d{color:#6B7177;} .termwin .l .g{color:#4FB477;}
+.termwin .row{display:block;border-radius:6px;padding:1px 8px;margin:0 -8px;}
+.termwin .row.sel{background:rgba(217,119,87,0.16);outline:1px solid rgba(217,119,87,0.4);}
 </style></head><body>
 <div class="stage">
   <div class="brandchip"><img src="../../../site/favicon.svg">CC Pocket</div>
@@ -18,15 +20,15 @@
     <div class="termwin" id="tw">
       <div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="ttl">cc-pocket — claude — 104×34</div></div>
       <div class="body" id="tb">
-        <div class="l"><span class="p">&gt;</span> <span class="w">给首页加暗色模式，先问我配色基调，改完自己 commit</span></div>
-        <div class="l"><span class="p">⏺</span> 我先看现有的 token 结构，规划暗色色板。</div>
-        <div class="l"><span class="p">⏺</span> <span class="w">Read</span>(src/styles/tokens.css)</div>
-        <div class="l">  <span class="d">⎿ Read 96 lines</span></div>
-        <div class="l"><span class="p">⏺</span> <span class="w">Update</span>(src/styles/tokens.css)</div>
-        <div class="l">  <span class="d">⎿ Updated 44 lines · +38 −6</span></div>
-        <div class="l"><span class="p">⏺</span> <span class="w">Bash</span>(npm run build)</div>
-        <div class="l">  <span class="d">⎿</span> <span class="g">BUILD SUCCESSFUL · 4.2s</span></div>
-        <div class="l"><span class="w">✻</span> 接切换入口，再统一查对比度… <span class="d">(2m 14s)</span></div>
+        <div class="l"><span class="p">$</span> <span class="w">claude --resume</span></div>
+        <div class="l"><span class="d">  选择要恢复的会话：</span></div>
+        <div class="l"><span class="row sel" id="selrow"><span class="p">❯</span> <span class="w">给首页加暗色模式，先问我配色基调…</span> <span class="d">· 3 分钟前 · 手机续写</span></span></div>
+        <div class="l"><span class="row">  修复 iOS 键盘遮挡输入框 <span class="d">· 2 小时前</span></span></div>
+        <div class="l"><span class="row">  重构 relay 心跳超时逻辑 <span class="d">· 昨天</span></span></div>
+        <div class="l">&nbsp;</div>
+        <div class="l"><span class="p">⏺</span> 已恢复会话——刚才在手机上的改动都在。</div>
+        <div class="l"><span class="p">⏺</span> <span class="w">Bash</span>(npm run test) <span class="d">⎿</span> <span class="g">42 passed</span></div>
+        <div class="l"><span class="w">✻</span> 继续统一查对比度…</div>
       </div>
     </div>
   </div>
@@ -39,8 +41,9 @@ window.SCENE={frame(t){
   RIG.wipe(RIG.$('.kicker em'),t,960);
   RIG.enter(RIG.$('#tw'),t,0,{dy:40,dur:600,delay:60,curve:RIG.SHELL,scale:0.97});
   RIG.enter(RIG.$('.subline'),t,0,{dy:16,dur:460,delay:380,curve:RIG.KICK});
-  const WARM=new URLSearchParams(location.search).get('warm')==='1';
-  const lines=RIG.$$('#tb .l'), step=(RIG.DUR*0.82-700)/lines.length;
-  lines.forEach((l,i)=>RIG.showAt(l,t,WARM?0:700+i*step,WARM?1:180));
+  const lines=RIG.$$('#tb .l');
+  const cuts=[500,900,1300,1500,1700,1900,RIG.at(0.62),RIG.at(0.74),RIG.at(0.86)];
+  lines.forEach((l,i)=>RIG.showAt(l,t,cuts[i]||1900,180));
+  RIG.press(RIG.$('#selrow'),t,RIG.at(0.55));
 }};
 </script></body></html>

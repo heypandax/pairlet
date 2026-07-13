@@ -246,7 +246,7 @@ private fun CtxPill(ctx: String, big: Boolean) {
  * aliases; Codex sessions list Codex model ids.
  */
 @Composable
-private fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) {
+internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
     val codex = repo.sessionAgent.value == AgentKind.CODEX
     val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
