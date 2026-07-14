@@ -486,6 +486,22 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun daemonInfo_gatewayBaseUrl_is_optional_and_back_compatible() {
+        // gatewayBaseUrl (issue #139) is a trailing optional field with the same four-direction
+        // wire-compat contract as hostname: round-trips when set, omitted when null (byte-identical
+        // to the pre-#139 shape), and an old daemon's frame decodes to null (no throw).
+        val gw = Envelope(id = "g1", ts = 0, body = DaemonInfo("ws://x/v1/ws", "Host", "https://gw.example.com/api"))
+        val json = PocketJson.encodeToString(gw)
+        assertTrue("\"gatewayBaseUrl\":\"https://gw.example.com/api\"" in json, json)
+        assertEquals(gw, PocketJson.decodeFromString<Envelope>(json))
+        // null is omitted on the wire — an OLD app sees exactly the frame it always saw
+        assertFalse("gatewayBaseUrl" in PocketJson.encodeToString(Envelope(id = "g2", ts = 0, body = DaemonInfo("ws://x/v1/ws", "Host"))))
+        // an OLD daemon's frame (no gatewayBaseUrl key) decodes to null — the app shows no gateway hint
+        val legacy = """{"id":"g3","ts":0,"to":"PEER","body":{"t":"pocket/daemon.info","lanUrl":"ws://x/v1/ws","hostname":"Host"}}"""
+        assertEquals(DaemonInfo("ws://x/v1/ws", "Host", null), PocketJson.decodeFromString<Envelope>(legacy).body)
+    }
+
+    @Test
     fun sessionSummary_omits_null_gitBranch() {
         val s = SessionSummary(
             sessionId = "s", title = "t", firstPrompt = "p",

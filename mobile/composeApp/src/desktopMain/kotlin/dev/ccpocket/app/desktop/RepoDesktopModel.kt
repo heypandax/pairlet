@@ -689,6 +689,7 @@ class RepoDesktopModel(
     override val chatModelId: String get() = repo.model.value ?: ""
     override val chatMode: PermissionMode get() = repo.mode.value
     override val chatEffort: String? get() = repo.effort.value
+    override val gatewayBaseUrl: String? get() = repo.gatewayBaseUrl.value // issue #139: DaemonInfo's gateway hint
     override val messages: List<ChatItem> get() = repo.messages
     // older-history lazy load (issue #147) — straight delegation to the shared repository
     override val historyHasMore: Boolean get() = repo.historyHasMore.value

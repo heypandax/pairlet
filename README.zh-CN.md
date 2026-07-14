@@ -52,6 +52,10 @@ flowchart LR
 
 **[查看完整功能列表 →](https://heypandax.github.io/cc-pocket/features.html)**
 
+### 第三方网关 / API 中转用户完全可用
+
+如果你的 Claude Code 走 LLM 网关或 API 中转（配置了 `ANTHROPIC_BASE_URL`），官方 Remote Control [自 v2.1.196 起会直接禁用](https://code.claude.com/docs/en/remote-control)——它要求直连 `api.anthropic.com`。CC Pocket 在你自己的电脑上通过 stdio 驱动 CLI，端点指向哪里都不影响：cc-switch 之类的网关方案、各家厂商的 Anthropic 兼容端点，原样就能用。daemon 检测到网关 `ANTHROPIC_BASE_URL` 后，模型选择器会优先展示常见供应商的一键预设（DeepSeek、GLM、Kimi、Qwen、MiniMax），自定义 model id 输入框照旧保留。id 实际路由到哪个模型，由你的网关决定。
+
 ## 安装
 
 两部分：**App**（见上方[获取](#获取)）和跑 agent 那台电脑上的 **daemon**——中继已经托管好，不用自己搭。

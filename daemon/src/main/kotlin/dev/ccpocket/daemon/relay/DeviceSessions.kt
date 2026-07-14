@@ -52,6 +52,7 @@ class DeviceSessions(
     private val store: File = PairedDevices.file(),
     private val lanUrl: () -> String? = { null }, // advertised in DaemonInfo after each handshake (null = direct listener off)
     private val hostname: () -> String? = { null }, // OS computer name advertised in DaemonInfo (client's default binding name)
+    private val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL in DaemonInfo (issue #139; null = official endpoint)
     /** The restricted-credential authority (issue #91 bridges + #115 guests): classification, constraints,
      *  capability gates. */
     val bridges: BridgeRegistry = BridgeRegistry(),
@@ -253,7 +254,7 @@ class DeviceSessions(
         // A bridge (issue #91) never gets this: it can't use the direct-LAN path (its key isn't in
         // devices.json, so the LAN gate refuses it) and shouldn't learn the host's LAN address. The
         // sealAndSend egress filter would drop it anyway; skipping avoids a pointless sealed frame.
-        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname()))
+        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl()))
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {

@@ -168,7 +168,18 @@ private class RunCmd : CliktCommand(name = "run") {
             // client-side.
             val hostNameLazy = lazy { daemonHostName() }
             val hostName: () -> String? = { hostNameLazy.value }
-            val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName)
+            // third-party gateway detection (issue #139): advertised in DaemonInfo per handshake so the
+            // client's model picker surfaces gateway model presets first. Re-evaluated each time (cheap
+            // file/env reads) — an activated preset shows up on the device's next connect.
+            val gatewayUrl: () -> String? = {
+                runCatching {
+                    dev.ccpocket.daemon.claude.GatewayDetector.resolve(
+                        presetBaseUrl = presetStore.activeEnv()?.get(dev.ccpocket.protocol.PresetEnv.BASE_URL),
+                        userConfigDir = claudeHome,
+                    )
+                }.getOrNull()
+            }
+            val relayClient = RelayClient(relay, identity, core, lanUrl = directUrl, hostname = hostName, gatewayBaseUrl = gatewayUrl)
             echo("cc-pocket daemon — claude=${exe ?: "(not found)"} — codex=${codexExe ?: "(not found)"} — relay=$relay")
             echo("account id: ${identity.accountId}")
             echo("(run `cc-pocket-daemon pair` in another terminal to add a phone)")
@@ -177,7 +188,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // plaintext --local path this REQUIRES the Noise handshake, so a wide bind stays safe. A bind
             // failure (port taken) degrades to relay-only instead of killing the daemon.
             if (directBind != "none") {
-                val gate = LanE2E(identity, directUrl, hostName, firstContactPending = relayClient::deviceFirstContactPending)
+                val gate = LanE2E(identity, directUrl, hostName, gatewayUrl, firstContactPending = relayClient::deviceFirstContactPending)
                 runCatching { DaemonServer(core, directBind, port, gate).run(wait = false) }
                     .onSuccess { echo("direct listener on ws://$directBind:$port/v1/ws (E2E, paired devices only)") }
                     .onFailure { echo("direct listener failed to bind $directBind:$port (${it.message}) — relay only") }

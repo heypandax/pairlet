@@ -1352,6 +1352,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
         authState.value = null
         presetsState.value = null; presetsStateRev.value = 0
+        gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -1698,13 +1699,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
             // re-advertises the same value on every handshake, which must not resurrect a dead probe.
-            is DaemonInfo -> paired.value?.let { p ->
-                if (p.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[p.accountId])) {
-                    rememberDirectUrl(p.accountId, f.lanUrl)
+            is DaemonInfo -> {
+                paired.value?.let { p ->
+                    if (p.directUrl != f.lanUrl && (f.lanUrl == null || f.lanUrl != badDirectUrl[p.accountId])) {
+                        rememberDirectUrl(p.accountId, f.lanUrl)
+                    }
+                    // adopt the daemon's real computer name as this binding's default display name (issue #62);
+                    // a user-set nickname still wins in displayName(). Independent of the directUrl guard above.
+                    if (!f.hostname.isNullOrBlank() && f.hostname != p.hostName) rememberHostName(p.accountId, f.hostname)
                 }
-                // adopt the daemon's real computer name as this binding's default display name (issue #62);
-                // a user-set nickname still wins in displayName(). Independent of the directUrl guard above.
-                if (!f.hostname.isNullOrBlank() && f.hostname != p.hostName) rememberHostName(p.accountId, f.hostname)
+                // gateway hint (issue #139): unconditional, incl. null — a daemon back on the official
+                // endpoint (or an old daemon omitting the field) must clear a previous gateway's value
+                gatewayBaseUrl.value = f.gatewayBaseUrl
             }
             is SessionLive -> {
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
@@ -2129,6 +2135,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Monotonic count of [PresetsState] replies — the settle signal for spinners/forms (see handle). */
     val presetsStateRev = mutableStateOf(0)
+
+    /** The daemon's third-party `ANTHROPIC_BASE_URL` (issue #139), learned from [DaemonInfo] after each
+     *  handshake — non-null means claude launches route through a gateway, so the model picker leads
+     *  with the gateway model presets. Null on the official endpoint or from a daemon that predates it. */
+    val gatewayBaseUrl = mutableStateOf<String?>(null)
 
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 
