@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -203,7 +204,12 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // Reset per question so a fresh ask doesn't inherit the last card's ownership.
         var questionOwnsInput by remember(model.ask?.askId) { mutableStateOf(false) }
         ChatSubHeader(model)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            // the QuestionCard docks inside the LazyColumn's unbounded tail item — hand it a bound from the
+            // pane's real viewport so its #125 cap+inner-scroll works instead of falling back to full natural
+            // height on a very tall question (#150; the card also self-defends against unbounded hosts).
+            // Full viewport height, not *0.62f: the card applies its own 0.62 cap to a bounded host.
+            val chatViewportHeight = maxHeight
             // VIRTUALIZED, like the phone: a long live transcript (hundreds of markdown messages,
             // still streaming) previously composed in full on the EDT via Column(verticalScroll) and
             // froze the window on every appended chunk. LazyColumn renders the viewport only; while
@@ -246,12 +252,16 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // swallows their click-to-focus/cursor pointer input — the box looked dead to
                                 // typing (#76). Carving the card out of selection hands the fields their taps.
                                 DisableSelection {
-                                    QuestionCard(
-                                        ask,
-                                        onAnswer = { answers, response -> model.answerQuestions(answers, response) },
-                                        onSkip = { model.skipQuestions("User skipped the questions") },
-                                        onOwnsInput = { questionOwnsInput = it },
-                                    )
+                                    // heightIn(max) turns the item's infinite height into a bounded constraint,
+                                    // so the card keeps its #125 cap + inner scroll on desktop too (#150).
+                                    Box(Modifier.heightIn(max = chatViewportHeight)) {
+                                        QuestionCard(
+                                            ask,
+                                            onAnswer = { answers, response -> model.answerQuestions(answers, response) },
+                                            onSkip = { model.skipQuestions("User skipped the questions") },
+                                            onOwnsInput = { questionOwnsInput = it },
+                                        )
+                                    }
                                 }
                             } else if (ask != null) {
                                 // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal
