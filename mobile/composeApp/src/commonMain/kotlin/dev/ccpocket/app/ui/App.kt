@@ -53,6 +53,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
@@ -1498,7 +1499,12 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd -> composer.setText(cmd.completion()) }
                     } else if (atFileMatches.isNotEmpty() && !capturing) {
-                        FileCompletionMenu(atFileMatches, atDir, atSep) { entry ->
+                        FileCompletionMenu(
+                            atFileMatches, atDir, atSep,
+                            // issue #133: the quiet eye on a file row opens it in the viewer (the daemon
+                            // now serves any path inside the session's project tree, not just changed ones)
+                            onView = { entry -> repo.openChangedFile((if (atDir.isEmpty()) "" else atDir + atSep) + entry.name) },
+                        ) { entry ->
                             atToken?.let { composer.setText(input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end)) }
                         }
                     }
@@ -1674,12 +1680,14 @@ private fun SlashCommandMenu(commands: List<SlashCommand>, onPick: (SlashCommand
 }
 
 /** The composer's "@file" completion panel (issue #75): tap a row to insert its relative path — a folder
- *  drills in (trailing separator, the daemon re-lists it), a file completes the reference. */
+ *  drills in (trailing separator, the daemon re-lists it), a file completes the reference. [onView]
+ *  (issue #133) docks a quiet eye at a file row's end that opens the file in the viewer instead. */
 @Composable
 private fun FileCompletionMenu(
     entries: List<dev.ccpocket.protocol.PathEntry>,
     dir: String,
     sep: Char,
+    onView: ((dev.ccpocket.protocol.PathEntry) -> Unit)? = null,
     onPick: (dev.ccpocket.protocol.PathEntry) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(Tok.raised)) {
@@ -1692,7 +1700,7 @@ private fun FileCompletionMenu(
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp).padding(bottom = 4.dp)) {
             items(entries) { entry ->
                 Row(
-                    Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(horizontal = 16.dp, vertical = 9.dp),
+                    Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(start = 16.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -1705,7 +1713,16 @@ private fun FileCompletionMenu(
                         fontFamily = FontFamily.Monospace, fontSize = 13.sp,
                         fontWeight = if (entry.isDir) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(vertical = 9.dp),
                     )
+                    if (!entry.isDir && onView != null) {
+                        IconButton(onClick = { onView(entry) }, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                Icons.Rounded.Visibility, stringResource(Res.string.file_view),
+                                tint = Tok.muted, modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

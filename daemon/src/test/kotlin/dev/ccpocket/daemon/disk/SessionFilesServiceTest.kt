@@ -65,9 +65,10 @@ class SessionFilesServiceTest {
     }
 
     @Test
-    fun read_serves_only_paths_the_session_changed() {
+    fun read_serves_changed_paths_and_any_path_inside_the_workdir() {
         val target = tmp.resolve("a.md").also { Files.writeString(it, "# hello") }
-        val secret = tmp.resolve("secret.txt").also { Files.writeString(it, "nope") }
+        // issue #133: an in-tree file the session did NOT change is served too (the @-browse view lane)
+        val untouched = tmp.resolve("untouched.txt").also { Files.writeString(it, "readable") }
         val t = claudeTranscript("Write" to target.toString())
 
         val ok = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", target.toString())
@@ -75,9 +76,43 @@ class SessionFilesServiceTest {
         assertEquals("# hello", ok.text)
         assertFalse(ok.truncated)
 
-        val denied = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", secret.toString())
-        assertFalse(denied.ok)
-        assertNull(denied.text)
+        val inTree = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", untouched.toString())
+        assertTrue(inTree.ok)
+        assertEquals("readable", inTree.text)
+        // a workdir-RELATIVE in-tree path (what the @-completion inserts) works the same
+        val relative = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, tmp.toString(), "s", "untouched.txt")
+        assertTrue(relative.ok)
+        assertEquals("readable", relative.text)
+    }
+
+    @Test
+    fun read_refuses_dotdot_symlink_and_absolute_escapes_outside_the_workdir() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val secret = Files.writeString(tmp.resolve("secret.txt"), "nope")
+        Files.createSymbolicLink(proj.resolve("link.txt"), secret)
+        val t = claudeTranscript("Write" to proj.resolve("a.md").toString())
+
+        for (path in listOf("../secret.txt", secret.toString(), "link.txt")) {
+            val r = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", path)
+            assertFalse(r.ok, "should refuse: $path")
+            assertTrue("outside" in r.error!!, r.error)
+            assertNull(r.text)
+        }
+        // gone-from-the-tree, never changed → an honest "no such file", not a scary refusal
+        val gone = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", "ghost.md")
+        assertFalse(gone.ok)
+        assertTrue("no longer exists" in gone.error!!, gone.error)
+    }
+
+    @Test
+    fun read_still_serves_a_changed_file_outside_the_tree() {
+        // Claude can edit absolute paths outside the cwd; the changed-set lane keeps serving those
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        val outside = Files.writeString(tmp.resolve("notes.txt"), "edited elsewhere")
+        val t = claudeTranscript("Edit" to outside.toString())
+        val r = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", outside.toString())
+        assertTrue(r.ok)
+        assertEquals("edited elsewhere", r.text)
     }
 
     @Test
@@ -244,8 +279,11 @@ class SessionFilesServiceTest {
         assertTrue(ok is SessionFilesService.ExportGate.Allowed)
         assertEquals(inside.toRealPath(), (ok as SessionFilesService.ExportGate.Allowed).file)
 
-        // lexical `..` escape: refused before the file is even stat'd
+        // `..` escape: refused on canonical containment
         assertEquals(SessionFilesService.ExportGate.Outside, SessionFilesService.containedForExport(proj.toString(), "../secret.txt"))
+        // an absolute IN-tree path spelled through a symlinked parent (macOS /var → /private/var) is
+        // still Allowed — the canonical form is the final word both ways
+        assertTrue(SessionFilesService.containedForExport(proj.toString(), inside.toString()) is SessionFilesService.ExportGate.Allowed)
         // symlink escape: inside lexically, outside canonically — refused
         assertEquals(SessionFilesService.ExportGate.Outside, SessionFilesService.containedForExport(proj.toString(), "link.csv"))
         // absolute path pointing elsewhere resolves outside too

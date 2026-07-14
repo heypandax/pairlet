@@ -24,9 +24,14 @@ import kotlin.io.path.isRegularFile
  *
  * The changed-file set is re-derived from the session's own transcript on every call (never cached,
  * never phone-supplied): for Claude, `tool_use` inputs of the file-writing tools; for Codex, the
- * `*** Update/Add/Delete File:` envelopes inside apply_patch tool-call arguments. [readFile] serves
- * ONLY paths in that set — the phone already sees these files through the transcript it can replay,
- * so this adds no read surface beyond it (an arbitrary-path read would bypass the approval firewall).
+ * `*** Update/Add/Delete File:` envelopes inside apply_patch tool-call arguments.
+ *
+ * [readFile]'s serve rule (issue #133): any path canonically INSIDE the workdir is served — the same
+ * `..`/symlink containment red line as the export gate ([containedForExport]), scoped to a (workdir,
+ * sessionId) pair that must name a REAL transcript (so the read surface is the project trees of actual
+ * sessions, never an arbitrary root a client makes up). Paths OUTSIDE the tree are served only when
+ * the changed-set scan proves this session touched them (absolute-path edits) — an arbitrary-path
+ * read stays impossible.
  *
  * Line-level data ([ChangedFile.adds]/[dels] and [fileDiff]) rides the same scan: Claude transcripts
  * carry ready-made `structuredPatch` hunks on each Edit/Write `toolUseResult` (a full-file Write
@@ -73,7 +78,8 @@ object SessionFilesService {
         }.asReversed()
     }
 
-    /** One capped read of a file [changedFiles] listed. Never throws; failures ride FileContent.error. */
+    /** One capped read of a project file (see the serve rule in the class doc — issue #133). Never
+     *  throws; failures ride FileContent.error. */
     fun readFile(agent: AgentKind, workdir: String, sessionId: String, path: String): FileContent {
         val transcript = transcriptFor(agent, workdir, sessionId)
             ?: return FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found")
@@ -81,12 +87,34 @@ object SessionFilesService {
     }
 
     /** [readFile] against an explicit transcript [file] — testable without touching `$HOME`. */
-    internal fun readFileIn(agent: AgentKind, transcript: Path, workdir: String, sessionId: String, path: String): FileContent {
+    internal fun readFileIn(agent: AgentKind, transcript: Path, workdir: String, sessionId: String, path: String): FileContent =
+        when (val gate = readGate(agent, transcript, workdir, path)) {
+            is ReadGate.Serve -> serveAt(gate.file, workdir, sessionId, path)
+            is ReadGate.Refuse -> FileContent(workdir, sessionId, path, ok = false, error = gate.error)
+        }
+
+    /** Resolution of a [readFile] target — see the class doc's serve rule (issue #133). */
+    private sealed interface ReadGate {
+        data class Serve(val file: Path) : ReadGate
+        data class Refuse(val error: String) : ReadGate
+    }
+
+    private fun readGate(agent: AgentKind, transcript: Path, workdir: String, path: String): ReadGate {
+        val abs = resolve(path, workdir) ?: return ReadGate.Refuse("bad path")
+        // canonically inside the workdir → served without a transcript scan (issue #133): these are the
+        // names ListPathEntries already exposes, and the session's agent can read them anyway
+        when (val gate = containedForExport(workdir, path)) {
+            is ExportGate.Allowed -> return ReadGate.Serve(gate.file)
+            ExportGate.Outside, ExportGate.Missing -> {} // fall through to the changed-set check below
+        }
+        // outside the tree (or gone from it): only what THIS session's transcript proves it changed —
+        // the boundary that keeps this from becoming an arbitrary-path read
         val allowed = scan(agent, transcript, workdir, diffFor = null).keys
-        val abs = resolve(path, workdir)
-            ?: return FileContent(workdir, sessionId, path, ok = false, error = "bad path")
-        if (abs !in allowed) return FileContent(workdir, sessionId, path, ok = false, error = "not a file this session changed")
-        return serveAt(Path.of(abs), workdir, sessionId, path)
+        if (abs in allowed) return ReadGate.Serve(Path.of(abs)) // serveAt reports a deleted one gracefully
+        return ReadGate.Refuse(
+            if (containedForExport(workdir, path) == ExportGate.Missing) "that file no longer exists on the computer"
+            else "that path is outside this session's project folder",
+        )
     }
 
     /**
@@ -129,10 +157,11 @@ object SessionFilesService {
     }
 
     // ── approval-gated export of a NON-changed file (issue #67 v2 / #79) ──────────────────────────────
-    // ReadFile is capped to the changed-set; ExportFile widens to any file inside the project tree, but ONLY
-    // behind canonical containment + an owner approval (orchestrated by FileExportService). These three
-    // helpers are the pure, unit-testable pieces of that gate — the containment red line, the changed-set
-    // fast path, and the post-approval serve.
+    // ExportFile serves any file inside the project tree behind canonical containment + an owner approval
+    // (orchestrated by FileExportService). Since #133 ReadFile serves in-tree paths directly, so a NEW
+    // client rarely needs this lane — it remains for old clients and as the approval-gated path. These
+    // three helpers are the pure, unit-testable pieces of that gate — the containment red line, the
+    // changed-set fast path, and the post-approval serve.
 
     /** True iff [path] is in this session's changed-set (the [readFile] allow-set). Lets the gated export
      *  serve a changed file WITHOUT prompting (ReadFile already would) and prompt ONLY for the widening. */
@@ -155,18 +184,21 @@ object SessionFilesService {
     }
 
     /**
-     * Resolve [path] for export against [workdir], enforcing canonical containment: `toRealPath()` collapses
-     * `..` AND follows symlinks, and `startsWith(realWorkdir)` refuses anything landing outside the project
-     * subtree — the same guard [DirectoryService.listPathEntries] uses, and the load-bearing boundary that
-     * keeps ExportFile from becoming an arbitrary-path read. A lexical `..` escape is caught before the file
-     * is stat'd; a symlink escape right after. Missing / non-file → [ExportGate.Missing].
+     * Resolve [path] for a read/export against [workdir], enforcing CANONICAL containment: `toRealPath()`
+     * collapses `..` AND follows symlinks, and `startsWith(realWorkdir)` refuses anything landing outside
+     * the project subtree — the same guard [DirectoryService.listPathEntries] uses, and the load-bearing
+     * boundary that keeps ReadFile/ExportFile from becoming an arbitrary-path read. The canonical form is
+     * the FINAL word both ways: a `..`/symlink escape is refused however it is spelled, and an absolute
+     * in-tree path spelled through a symlinked parent (macOS `/var` → `/private/var`) is still served —
+     * the lexical position only decides whether a nonexistent path reads [ExportGate.Missing] (honest
+     * "no such file" for in-tree names) or [ExportGate.Outside]. Non-files → [ExportGate.Missing].
      */
     fun containedForExport(workdir: String, path: String): ExportGate {
         val root = runCatching { Path.of(workdir).toRealPath() }.getOrNull() ?: return ExportGate.Missing
         val lexical = runCatching { root.resolve(path).normalize() }.getOrNull() ?: return ExportGate.Outside
-        if (!lexical.startsWith(root)) return ExportGate.Outside              // `..` escape — refuse before disk
-        val real = runCatching { lexical.toRealPath() }.getOrNull() ?: return ExportGate.Missing
-        if (!real.startsWith(root)) return ExportGate.Outside                 // symlink escape — refuse
+        val real = runCatching { lexical.toRealPath() }.getOrNull()
+            ?: return if (lexical.startsWith(root)) ExportGate.Missing else ExportGate.Outside
+        if (!real.startsWith(root)) return ExportGate.Outside                 // `..`/symlink escape — refuse
         if (!real.isRegularFile()) return ExportGate.Missing                  // a directory / special file
         return ExportGate.Allowed(real)
     }

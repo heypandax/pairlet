@@ -215,10 +215,14 @@ data class ListSessionFiles(
 ) : ToDaemon
 
 /**
- * phone -> daemon: read one file the session touched. The daemon re-derives the session's
- * changed-file set from the transcript and ONLY serves paths in it — the phone can already see
- * these files' contents through the transcript/diffs, so this adds no new read surface (unlike an
- * arbitrary-path read, which would bypass the approval firewall). Reply is one [FileContent].
+ * phone -> daemon: read one file of the session's project. The daemon serves (issue #133):
+ *   - any path sitting canonically INSIDE [workdir] (`..`/symlink escapes are refused — the same
+ *     containment red line as [ExportFile]), so the files the composer's `@`-completion can name
+ *     are also viewable; and
+ *   - paths OUTSIDE the tree only when the session's own transcript shows this session changed
+ *     them (the pre-#133 changed-set gate, kept for absolute-path edits) — never an arbitrary read.
+ * The (workdir, sessionId) pair must still name a real transcript, anchoring the read to a session
+ * the client can already see. Reply is one [FileContent].
  */
 @Serializable
 @SerialName("pocket/file.read")
