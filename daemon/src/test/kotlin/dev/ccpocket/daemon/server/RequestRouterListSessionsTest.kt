@@ -79,6 +79,10 @@ class RequestRouterListSessionsTest {
             auth = AuthService(scope, { emptyList() }, { 0 }),
             prefs = DaemonPrefs.load(tmp.resolve("prefs.json")),
             presets = PresetService(PresetStore.load(tmp.resolve("presets.json")), { emptyList() }, { 0 }),
+            scheduler = dev.ccpocket.daemon.schedule.SchedulerService(
+                dev.ccpocket.daemon.schedule.ScheduleStore.load(tmp.resolve("schedules.json")),
+                executor = { null },
+            ),
         )
     }
 

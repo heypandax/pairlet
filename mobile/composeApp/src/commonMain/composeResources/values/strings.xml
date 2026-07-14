@@ -546,4 +546,28 @@
     <string name="group_delete">Delete group</string>
     <string name="group_delete_confirm">Delete this group? Its sessions move to Ungrouped.</string>
     <string name="group_name_hint">Group name</string>
+
+    <!-- scheduled tasks (issue #137) -->
+    <string name="schedule_tasks_title">Scheduled tasks</string>
+    <string name="schedule_empty">No scheduled tasks</string>
+    <string name="schedule_empty_hint">Long-press the send button in a session to schedule a message.</string>
+    <string name="schedule_unavailable">Update the computer\'s cc-pocket to use scheduled tasks.</string>
+    <string name="schedule_next_run">next in %1$s</string>
+    <string name="schedule_due_now">due now</string>
+    <string name="schedule_done">done</string>
+    <string name="schedule_missed">missed</string>
+    <string name="schedule_repeat_daily">daily</string>
+    <string name="schedule_repeat_every">every %1$s</string>
+    <string name="schedule_remove">Remove</string>
+    <string name="schedule_send_title">Schedule send</string>
+    <string name="schedule_send_hint">Deliver this message to the session later — it runs even with the phone away.</string>
+    <string name="schedule_opt_30m">30 min</string>
+    <string name="schedule_opt_1h">1 hour</string>
+    <string name="schedule_opt_3h">3 hours</string>
+    <string name="schedule_opt_8h">8 hours</string>
+    <string name="schedule_repeat_toggle">Repeat daily at this time</string>
+    <string name="schedule_confirm">Schedule in %1$s</string>
+    <string name="schedule_created_note">Scheduled — this message will be sent to the session at the picked time.</string>
+    <string name="limit_banner">Usage limit hit — resets in %1$s</string>
+    <string name="limit_autocontinue">Auto-continue after reset</string>
 </resources>

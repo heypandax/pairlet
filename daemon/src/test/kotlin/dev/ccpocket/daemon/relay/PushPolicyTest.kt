@@ -114,4 +114,24 @@ class PushPolicyTest {
         assertNull(PushPolicy.askPush(wd, "sid1", origin = null, tool = "Run command", watched = true, peerOnline = true, lanConnected = false))
         assertNull(PushPolicy.askPush(wd, "sid1", origin = null, tool = "Run command", watched = true, peerOnline = false, lanConnected = true))
     }
+
+    // ---- usage-limit reset-moment parse (issue #137: TurnDone.usageLimitResetAt) ----
+
+    @Test
+    fun limit_reset_epoch_parses_seconds_to_millis() {
+        assertEquals(1_720_000_000_000L, PushPolicy.usageLimitResetAtMs("Claude AI usage limit reached|1720000000"))
+        // already-millis stays as-is (a peer that sends 13 digits)
+        assertEquals(1_720_000_000_000L, PushPolicy.usageLimitResetAtMs("usage limit reached|1720000000000"))
+    }
+
+    @Test
+    fun limit_reset_epoch_absent_or_not_a_limit_yields_null() {
+        // a limit hit whose wording carries no epoch — the button just doesn't show
+        assertNull(PushPolicy.usageLimitResetAtMs("5-hour limit reached ∙ resets 3am"))
+        // an epoch-looking number in a NON-limit error must not light the button
+        assertNull(PushPolicy.usageLimitResetAtMs("turn failed |1720000000"))
+        assertNull(PushPolicy.usageLimitResetAtMs(null))
+        // a pipe followed by a too-short number is not an epoch
+        assertNull(PushPolicy.usageLimitResetAtMs("Claude AI usage limit reached|42"))
+    }
 }

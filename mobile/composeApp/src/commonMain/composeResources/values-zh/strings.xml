@@ -546,4 +546,28 @@
     <string name="group_delete">删除分组</string>
     <string name="group_delete_confirm">删除该分组？组内会话将回落到未分组。</string>
     <string name="group_name_hint">分组名称</string>
+
+    <!-- scheduled tasks (issue #137) -->
+    <string name="schedule_tasks_title">定时任务</string>
+    <string name="schedule_empty">暂无定时任务</string>
+    <string name="schedule_empty_hint">在会话中长按发送键即可预约发送消息。</string>
+    <string name="schedule_unavailable">需要更新电脑上的 cc-pocket 才能使用定时任务。</string>
+    <string name="schedule_next_run">%1$s 后触发</string>
+    <string name="schedule_due_now">即将触发</string>
+    <string name="schedule_done">已完成</string>
+    <string name="schedule_missed">已错过</string>
+    <string name="schedule_repeat_daily">每天</string>
+    <string name="schedule_repeat_every">每 %1$s</string>
+    <string name="schedule_remove">删除</string>
+    <string name="schedule_send_title">预约发送</string>
+    <string name="schedule_send_hint">稍后自动把这条消息发进会话——手机不在也会执行。</string>
+    <string name="schedule_opt_30m">30 分钟</string>
+    <string name="schedule_opt_1h">1 小时</string>
+    <string name="schedule_opt_3h">3 小时</string>
+    <string name="schedule_opt_8h">8 小时</string>
+    <string name="schedule_repeat_toggle">每天这个时间重复</string>
+    <string name="schedule_confirm">%1$s 后发送</string>
+    <string name="schedule_created_note">已预约——将在设定时间自动发送到此会话。</string>
+    <string name="limit_banner">已达用量限额——%1$s 后重置</string>
+    <string name="limit_autocontinue">重置后自动继续</string>
 </resources>

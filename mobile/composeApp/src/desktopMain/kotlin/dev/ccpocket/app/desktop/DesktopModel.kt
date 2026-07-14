@@ -515,6 +515,16 @@ interface DesktopModel {
     /** Guest: decode + redeem a pasted invite blob; false if it isn't a valid invite. */
     fun redeemShareInvite(blob: String): Boolean = false
 
+    // scheduled tasks (issue #137): the ACTIVE computer's schedule list (management surface — the
+    // creation gesture lives on mobile's composer). Defaults keep seed/preview/test fakes inert;
+    // the live model rides the repo. `schedulesStale` = the daemon predates pocket/schedule.*
+    // (it silently drops the request), distinct from an EMPTY list.
+    val schedules: List<dev.ccpocket.protocol.ScheduleInfo> get() = emptyList()
+    val schedulesLoaded: Boolean get() = false
+    val schedulesStale: Boolean get() = false
+    fun refreshSchedules() {}
+    fun cancelSchedule(id: String) {}
+
     // account (Settings ▸ Account): the ACTIVE computer's Claude CLI login, driven over pocket/auth.*.
     // Null = not fetched yet, or the daemon predates the messages (it silently drops the request).
     val authState: dev.ccpocket.protocol.AuthState? get() = null

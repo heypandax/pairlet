@@ -954,7 +954,14 @@ class Conversation(
                             ev.isError && !interrupted -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
                             else -> null
                         }
-                        sink.emit(TurnDone(convoId, ev.finalText, usage, error = error))
+                        // usage-limit reset moment (issue #137): parsed daemon-side so the phone can
+                        // offer one-tap "auto-continue when the limit resets"; null for ordinary errors
+                        sink.emit(
+                            TurnDone(
+                                convoId, ev.finalText, usage, error = error,
+                                usageLimitResetAt = dev.ccpocket.daemon.relay.PushPolicy.usageLimitResetAtMs(error),
+                            ),
+                        )
                         // degraded tracking: consecutive placeholder-only turns mark the session as likely
                         // context-dead; announce transitions so clients warn + gate the next send (issue #65)
                         val wasDegraded = degraded()
