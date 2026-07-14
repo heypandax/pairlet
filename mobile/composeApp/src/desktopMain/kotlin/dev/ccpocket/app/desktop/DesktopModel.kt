@@ -409,6 +409,8 @@ interface DesktopModel {
     val selectedChangedPath: String? get() = null
     val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = null
     val selectedContent: dev.ccpocket.protocol.FileContent? get() = null
+    /** Received/total bytes of an in-flight chunked read (issue #134) — the loading card's determinate bar. */
+    val selectedContentProgress: Pair<Long, Long>? get() = null
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles() }

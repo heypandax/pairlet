@@ -51,6 +51,7 @@
     <string name="conn_connecting_banner">正在连接电脑…</string>
     <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
     <string name="history_loading_earlier">正在加载更早的消息…</string>
+    <string name="history_earlier_seam">· 更早的消息 ·</string>
     <string name="msg_sending">发送中…</string>
     <string name="msg_delivered">已送达电脑</string>
     <string name="msg_no_response">还没有响应——点此重发</string>
@@ -325,9 +326,10 @@
     <string name="file_open">打开</string>
     <string name="file_preview">预览</string>
     <string name="file_no_inline_preview">此文件类型无法内嵌预览</string>
-    <string name="file_exceeds_cap">超出传输上限</string>
-    <string name="file_too_large_note">文件太大，无法在这里打开——链路传输上限为 %1$s，请到运行 daemon 的电脑上获取。</string>
+    <string name="file_too_large_fetch">过大，无法远程拉取</string>
+    <string name="file_open_on_computer">请在电脑上打开</string>
     <string name="file_transferring">正在通过中转传输…</string>
+    <string name="file_transfer_progress">%1$s / 共 %2$s</string>
     <string name="file_export_request">请求导出（需批准）</string>
     <string name="file_export_waiting">等待批准…</string>
     <string name="file_export_other">导出列表外的文件…</string>

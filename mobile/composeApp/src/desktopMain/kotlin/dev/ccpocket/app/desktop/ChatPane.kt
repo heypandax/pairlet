@@ -116,6 +116,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.AttachImageIcon
+import dev.ccpocket.app.ui.EarlierMessagesSeam
+import dev.ccpocket.app.ui.LoadEarlierRow
+import dev.ccpocket.app.ui.rememberEarlierLoaderVisible
+import dev.ccpocket.app.ui.rememberHistorySeam
 import dev.ccpocket.app.ui.LocalPathCwd
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
@@ -220,11 +224,15 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                 if (pinned && model.messages.isNotEmpty()) listState.scrollToItem(model.messages.lastIndex + 1, Int.MAX_VALUE)
             }
             // older-history lazy load (issue #147): a prepended page shifts every index — scroll by the
-            // prepend count (+ the loader row when it stays) so the viewport keeps the row being read
+            // prepend count (+ the loader row when it stays) so the viewport keeps the row being read.
+            // Visuals per the 0714 chat-components handoff (B): the loader lingers through its silent-
+            // failure fade, and a landed page marks the seam above the re-anchored row for a beat.
+            val historyLoaderVisible = rememberEarlierLoaderVisible(model.historyHasMore)
+            val historySeamAt = rememberHistorySeam(model.historyPrependGen, model.lastHistoryPrependCount)
             LaunchedEffect(model.historyPrependGen) {
                 val n = model.lastHistoryPrependCount
                 if (model.historyPrependGen > 0 && n > 0 && !pinned) {
-                    listState.scrollToItem(n + (if (model.historyHasMore) 1 else 0))
+                    listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
                 }
             }
             // one SelectionContainer around the whole stream: desktop text is expected to mouse-drag-select,
@@ -239,24 +247,28 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     // scroll-to-top loader (issue #147): composes only once scrolled into view — exactly
-                    // "reached the top of the loaded window" — and then asks for one older page
-                    if (model.historyHasMore) item(key = "history-loader") {
-                        LaunchedEffect(Unit) { model.loadOlderHistory() }
+                    // "reached the top of the loaded window" — and then asks for one older page. An
+                    // ambient status line, never a button (0714 handoff B1); a dead request fades it
+                    // out silently instead of snapping it away (B2).
+                    if (historyLoaderVisible) item(key = "history-loader") {
+                        if (model.historyHasMore) LaunchedEffect(Unit) { model.loadOlderHistory() }
                         CenteredStreamRow {
-                            Text(
-                                "Loading earlier messages…", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
-                                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
-                            )
+                            LoadEarlierRow(fading = !model.historyHasMore, fontFamily = Dk.ui)
                         }
                     }
                     itemsIndexed(model.messages) { i, m ->
                         CenteredStreamRow {
-                            MessageRow(
-                                m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
-                                workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
-                                onOpenWorkflow = model::openWorkflowPanel,
-                                onOpenVideo = { model.openWorkspaceFile(it.path) },
-                            )
+                            Column(Modifier.fillMaxWidth()) {
+                                // seam (0714 handoff B3): for a beat after a page of older history lands,
+                                // mark where the old window began so the reader keeps their place
+                                if (i == historySeamAt) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
+                                MessageRow(
+                                    m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                    workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
+                                    onOpenWorkflow = model::openWorkflowPanel,
+                                    onOpenVideo = { model.openWorkspaceFile(it.path) },
+                                )
+                            }
                         }
                     }
                     item(key = "tail") {

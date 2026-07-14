@@ -564,6 +564,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val changedFilesUnavailable = mutableStateOf(false)       // no reply (old daemon silently drops the frame) — distinct from "no files"
     val viewedFilePath = mutableStateOf<String?>(null)        // non-null = file viewer open (content may still be loading)
     val viewedFile = mutableStateOf<FileContent?>(null)       // the loaded content; ok=false carries a user-facing error
+    val viewedFileProgress = mutableStateOf<Pair<Long, Long>?>(null) // received/total bytes of an in-flight chunked read (#134 · 0714 A1 determinate bar)
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
     val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
@@ -1955,7 +1956,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // no deadline cancel here: the ONE viewer deadline serves both replies and no-ops per
             // side once its value landed — canceling on the first arrival would strand the other
             is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
-                fileChunks.reset() // a whole-frame reply (incl. a mid-stream failure) supersedes any partial stream
+                dropChunkStream() // a whole-frame reply (incl. a mid-stream failure) supersedes any partial stream
                 viewedFile.value = f
                 // an ExportFile reply rides the same channel + identity — settle the waiting state either way
                 if (exportWaiting.value) { exportWaiting.value = false; exportDeadline?.cancel() }
@@ -1968,6 +1969,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     // honest fallback (same one-deadline-serves-both rule as the FileContent path)
                     armViewedFileDeadline(f.path, f.workdir, f.sessionId, wantDiff = !isImageFile(f.path))
                     fileChunks.add(f)?.let { whole -> viewedFile.value = whole }
+                    // one read after add: mid-stream it advances the loading card's determinate bar,
+                    // the final piece resets the assembler → null clears the bar with it (0714 A1)
+                    viewedFileProgress.value = fileChunks.progress
                 }
             }
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
@@ -2786,6 +2790,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var exportDeadline: Job? = null // separate: approval can take the daemon's whole 30s window
     private val fileChunks = FileChunkAssembler() // reassembles a chunked ReadFile reply (issue #134)
 
+    /** Drop the in-flight chunk stream AND its published progress together — every abandon path
+     *  (fresh read, whole-frame supersede, stall, closed viewer) must clear both, or the next
+     *  loading card would open on a stale determinate bar. */
+    private fun dropChunkStream() {
+        fileChunks.reset()
+        viewedFileProgress.value = null
+    }
+
     /** Ask the daemon for the files this session touched (issue #36); the reply lands in [changedFiles].
      *  Needs the persistent sessionId — pre-first-turn sessions have nothing to list anyway. */
     fun fetchChangedFiles() {
@@ -2814,7 +2826,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         viewedFilePath.value = path
         viewedFile.value = null // show the loading state, not the previous file
         viewedFileDiff.value = null
-        fileChunks.reset() // a fresh read owes nothing to a prior chunk stream
+        dropChunkStream() // a fresh read owes nothing to a prior chunk stream
         exportWaiting.value = false; exportDeadline?.cancel() // a fresh file owes nothing to a prior export
         armViewedFileDeadline(path, wd, sid, wantDiff)
         val agent = sessionAgent.value ?: AgentKind.CLAUDE
@@ -2834,7 +2846,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             delay(ms)
             if (viewedFilePath.value != path) return@launch
             if (viewedFile.value == null) {
-                fileChunks.reset() // a stalled chunk stream is dead — don't let a late stray revive it
+                dropChunkStream() // a stalled chunk stream is dead — don't let a late stray revive it
                 viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
             }
             if (wantDiff && viewedFileDiff.value == null) {
@@ -2846,7 +2858,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
         exportDeadline?.cancel(); exportWaiting.value = false
-        fileChunks.reset()
+        dropChunkStream()
         viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
     }
 

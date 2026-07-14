@@ -51,6 +51,7 @@
     <string name="conn_connecting_banner">Connecting to your computer…</string>
     <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
     <string name="history_loading_earlier">Loading earlier messages…</string>
+    <string name="history_earlier_seam">· earlier messages ·</string>
     <string name="msg_sending">Sending…</string>
     <string name="msg_delivered">Delivered to your computer</string>
     <string name="msg_no_response">No response yet — tap to resend</string>
@@ -325,9 +326,10 @@
     <string name="file_open">Open</string>
     <string name="file_preview">Preview</string>
     <string name="file_no_inline_preview">No inline preview for this file type</string>
-    <string name="file_exceeds_cap">exceeds transfer cap</string>
-    <string name="file_too_large_note">Too large to open here — the link caps transfers at %1$s. Grab it from the computer running the daemon.</string>
+    <string name="file_too_large_fetch">too large to fetch remotely</string>
+    <string name="file_open_on_computer">open it on your computer</string>
     <string name="file_transferring">transferring over relay…</string>
+    <string name="file_transfer_progress">%1$s of %2$s</string>
     <string name="file_export_request">Request export (needs approval)</string>
     <string name="file_export_waiting">Waiting for approval…</string>
     <string name="file_export_other">Export a file not in this list…</string>
