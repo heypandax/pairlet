@@ -37,10 +37,12 @@ import java.util.Base64
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Manages one end-to-end-encrypted [E2ESession] per paired device and bridges decrypted frames into
- * the shared [DaemonCore] router. The daemon is the Noise responder; the device initiates. Paired
- * device public keys are persisted so reconnects survive a daemon restart; the pairing-ticket PSK is
- * kept in memory only for the brief first handshake.
+ * Manages the end-to-end-encrypted [E2ESession]s per paired device (one active + one reconnect-overlap
+ * fallback — see [DeviceLink], issue #146) and bridges decrypted frames into the shared [DaemonCore]
+ * router. The daemon is the Noise responder; the device initiates. Paired device public keys are
+ * persisted so reconnects survive a daemon restart; the pairing-ticket PSK is kept in memory only for
+ * the brief first handshake. Sessions survive the daemon's OWN relay reconnects (issue #145) — they are
+ * bound to the device handshake, not to the relay leg.
  *
  * @param send delivers an inner E2E payload to a device (the caller wraps it for the relay).
  */
@@ -65,7 +67,7 @@ class DeviceSessions(
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
     private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
     private val pskFor = HashMap<String, ByteArray>()       // deviceId -> first-handshake PSK
-    private val sessions = HashMap<String, E2ESession>()
+    private val sessions = HashMap<String, DeviceLink>()    // deviceId -> its live E2E session(s); see DeviceLink (#146)
     private val owned = HashMap<String, MutableList<String>>()
     private val nextId = AtomicLong(0)
     private val seenThisAttach = HashSet<String>()          // devices the relay re-announced since the last attach
@@ -210,10 +212,15 @@ class DeviceSessions(
         }
     }
 
-    /** On disconnect: drop E2E sessions only. Owned conversations keep running in the background so a
-     *  long task survives the phone going away; the idle reaper reclaims them once truly abandoned. */
+    /** The daemon's OWN relay leg dropped. Device E2E sessions are deliberately KEPT (issues #145/#146):
+     *  they bind to the device HANDSHAKE, not to this relay socket — after our reconnect, a phone whose
+     *  own socket stayed healthy keeps talking over the same Noise session with zero re-handshake (its
+     *  PeerPresence(true) edge just re-syncs the page; clearing here was what turned every daemon-side
+     *  relay blip into a phone-side full teardown + supersede storm). Sessions still die on revoke, on
+     *  the attach-replay reconcile, and when a newer handshake displaces them. [owned] is per-connection
+     *  bookkeeping for the guest-revoke path and still resets; owned conversations keep running in the
+     *  background — the idle reaper reclaims them once truly abandoned. */
     suspend fun onDisconnect() = mutex.withLock {
-        sessions.clear()
         owned.clear()
     }
 
@@ -224,7 +231,21 @@ class DeviceSessions(
         if (devicePub == null) { log.warn("handshake from unknown device ${deviceId.take(8)}…"); return }
         val psk = mutex.withLock { pskFor[deviceId] ?: ByteArray(0) }
         val (session, responderEph) = E2ESession.responder(identity.e2ePrivRaw, identity.e2ePubRaw, devicePub, psk, deviceEphPub)
-        mutex.withLock { sessions[deviceId] = session }
+        mutex.withLock {
+            val link = sessions[deviceId]
+            if (link == null) sessions[deviceId] = DeviceLink(session)
+            else {
+                // Keep the PREVIOUS session as the overlap fallback instead of overwriting it (#146): the
+                // relay's supersede kick races the dying socket's last frames, so that socket's LATE
+                // handshake can land AFTER the surviving socket's — a wholesale overwrite deafened the
+                // live one ("transport before handshake" → the phone's 6s list timeout → relaunch →
+                // another supersede: self-heal turned self-harm). The newest handshake seals outbound
+                // (the common case: it IS the live socket); an inbound frame only the fallback can
+                // decrypt promotes that session back (see [transport]).
+                link.fallback = link.active
+                link.active = session
+            }
+        }
         log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B) → session established")
         send(deviceId, Wire.payload(Wire.HANDSHAKE, responderEph))
         // teach the device where this daemon lives on the LAN so its next connect can skip the relay;
@@ -236,9 +257,19 @@ class DeviceSessions(
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {
-        val session = mutex.withLock { sessions[deviceId] }
-        if (session == null) { log.warn("transport before handshake from ${deviceId.take(8)}…"); return }
-        val plaintext = session.open(body)
+        val link = mutex.withLock { sessions[deviceId] }
+        if (link == null) { log.warn("transport before handshake from ${deviceId.take(8)}…"); return }
+        // Trial-decrypt newest-first (open() only advances its receive counter on SUCCESS, so probing the
+        // wrong session is side-effect free; frames arrive sequentially from the relay loop, so opens
+        // never race each other). A FALLBACK hit means the older connection instance is the one actually
+        // alive — its rival's late handshake stole `active` (#146) — so promote it back under the mutex,
+        // and outbound seals follow the proven-alive instance again.
+        var plaintext = link.active.open(body)
+        if (plaintext == null) {
+            val fb = link.fallback
+            plaintext = fb?.open(body)
+            if (plaintext != null && fb != null) mutex.withLock { link.fallback = link.active; link.active = fb }
+        }
         if (plaintext == null) { log.warn("decrypt failed from ${deviceId.take(8)}…"); return }
         val confirmedPsk = mutex.withLock { pskFor.remove(deviceId) } // PSK confirmed; reconnects use authenticated statics
         // FIRST successful decrypt after pairing: the PSK (the exact pairing ticket) is now PROVEN to be
@@ -391,14 +422,25 @@ class DeviceSessions(
         val json = PocketJson.encodeToString(Envelope(nextId.getAndIncrement().toString(), 0L, body = frame))
         // serialize seals per session (the GCM counter must advance atomically). Resolve the live session
         // at seal time rather than capturing one in the sink: conversation sinks outlive a phone reconnect,
-        // and a re-handshake re-keys — a stale session would seal frames the device can't decrypt. No session
-        // means the phone disconnected (sessions cleared on disconnect) and the frame is undeliverable — drop it.
+        // and a re-handshake re-keys — a stale session would seal frames the device can't decrypt. No link
+        // means this device never handshook (or was revoked/pruned) — the frame is undeliverable, drop it.
         val payload = mutex.withLock {
-            val live = sessions[deviceId] ?: return
+            val live = sessions[deviceId]?.active ?: return
             Wire.payload(Wire.TRANSPORT, live.seal(json.encodeToByteArray()))
         }
         send(deviceId, payload)
     }
+
+    /**
+     * The live E2E sessions of ONE device — at most the two ends of a reconnect overlap (issue #146).
+     * [active] seals every outbound frame and is the session that last PROVED itself: it completed the
+     * most recent handshake, or successfully decrypted the most recent inbound frame that [active]
+     * couldn't. [fallback] is the previous handshake's session, retained because the relay's per-device
+     * supersede kick races the dying socket's late frames — its late handshake must not clobber the
+     * surviving socket's session (the "僵会话" deafness loop). Each handshake displaces the fallback, so
+     * a device never holds more than two sessions.
+     */
+    private class DeviceLink(var active: E2ESession, var fallback: E2ESession? = null)
 
     // ---- persistence of paired device public keys (shared with the direct-LAN gate) ----
 
