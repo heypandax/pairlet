@@ -71,12 +71,17 @@ class DirectE2EConnection {
     @Volatile var account: String? = null
         private set
 
+    // connection generation (issue #142) — mirrors RelayE2EConnection: a superseded connect() must stop
+    // touching the shared cross-reconnect outbox / inbound flows the moment a newer one takes over
+    @Volatile private var connSeq = 0
+
     /**
      * Dial + handshake, then serve for the life of the socket. Failure BEFORE the handshake completes
      * (refused/unreachable/timeout/bad handshake) throws [DirectUnreachableException] so the caller falls
      * back to the relay in the same connect attempt; a drop AFTER is a normal transport death (reconnect path).
      */
     suspend fun connect(url: String, paired: PairedDaemon, keys: E2ECrypto.KeyPair) = coroutineScope {
+        val gen = ++connSeq
         account = paired.accountId
         var handshaken = false
         try {
@@ -94,12 +99,16 @@ class DirectE2EConnection {
                 } catch (e: TimeoutCancellationException) {
                     throw DirectUnreachableException("handshake/key-confirmation timeout")
                 }
+                if (gen != connSeq) throw DeadLinkException() // superseded while handshaking — never touch the shared outbox (#142)
                 handshaken = true
                 connected = true
                 control.emit(Attached(Role.DEVICE, paired.accountId))
                 firstFrame?.let { inbound.emit(it) } // don't drop the confirming frame (usually DaemonInfo)
+                outbox.dedupeBacklog() // collapse the reconnect-burst duplicates queued while the link was down (#143)
                 val writer = launch {
                     for (f in outbox) {
+                        // superseded mid-drain: hand the frame back to the live connection, then die (#142)
+                        if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
                         val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                         sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                     }
@@ -107,6 +116,7 @@ class DirectE2EConnection {
                 val pinger = launchHeartbeat() // WS ping under sendOrDie — a wedged LAN link dies in ≤10s, not minutes
                 try {
                     for (frame in incoming) {
+                        if (gen != connSeq) break // a stale reader must not emit into the shared inbound flow (#142)
                         if (frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT) {
                             val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
                             runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }

@@ -174,6 +174,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
@@ -334,12 +335,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var inboundJob: Job? = null     // persistent collector over the transport's inbound flow
     private var connectJob: Job? = null     // the socket loop; returns/throws when the link dies
     private var retryJob: Job? = null       // scheduled auto-reconnect
-    private var retryAttempts = 0
+    internal var retryAttempts = 0          // internal for tests (#144 — the backoff-ladder reset rule)
     private var controlJob: Job? = null     // collects relay control frames (Attached/PeerPresence/AuthError)
     private var graceJob: Job? = null       // silent window before showing RelayUnreachable
     private var listWaitJob: Job? = null    // post-attach wait for the first list before assuming the computer is offline
     private var connectWatchdog: Job? = null // forces a retry if a connect wedges pre-attach (no socket error)
     private var listWaitRetried = false     // one deaf-link re-handshake per episode (see startListWait); reset on Ready
+    private var lastTransportLaunchAt = 0L  // #143: reconnect triggers inside the coalesce window merge into the in-flight attempt
+    internal var transportLaunches = 0      // test seam: counts real (non-coalesced) launchTransport runs
+    private var linkStableJob: Job? = null  // #144: clears the retry-backoff ladder only once the link stays up stableLinkResetMs
+    internal var stableLinkResetMs = STABLE_LINK_RESET_MS // test seam
+    private var presenceProbeJob: Job? = null // #145: healthy-link re-sync probe armed by a daemon-comeback presence edge
+    internal var presenceProbeMs = LIST_WAIT_MS           // test seam
+    internal var linkHealthOverride: (() -> Boolean)? = null // test seam for transportHealthy()
+    private var directoriesRev = 0          // bumped on every Directories reply — the #145 probe's "did the computer answer" check
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
     private var daemonOffline = false       // explicit: got PeerPresence(false), or the post-attach list-wait elapsed
@@ -863,7 +872,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
     private fun handleControl(f: Frame) {
         when (f) {
-            is Attached -> { attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
+            is Attached -> { attachedThisSession = true; connected.value = true; connGen.value++; relayDeadlinePassed = false; armLinkStableReset(); ensurePushStarted(); registerPush(); startListWait(); recomputePhase() }
             // Only re-handshake on a genuine offline->online transition. The relay re-broadcasts
             // PeerPresence(true) on every daemon (re)attach; a redundant true must NOT tear down a healthy
             // transport (that surfaced as a spurious Reconnecting banner when opening a session).
@@ -873,12 +882,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** The computer (re)attached. A restarted/reconnected daemon has a fresh E2E session and no memory of
-     *  the old Noise session, so re-handshake the whole transport — re-sending over the stale session would
-     *  just hit "transport before handshake" at the daemon. launchTransport(reconnect) re-syncs the page. */
+    /** The computer (re)attached. Tearing our HEALTHY socket down on this edge was the #145 cascade's
+     *  first domino (teardown → brief two-socket overlap → relay supersede-kick → drop → retry storm):
+     *  the daemon's own relay blip broadcasts PeerPresence(false→true) at every device, and the daemon
+     *  now KEEPS device E2E sessions across its relay reconnects (#146) — so with a healthy link the
+     *  right move is to re-sync the page over it (refresh the list, reattach the open chat), not to
+     *  rebuild the socket. If the daemon actually RESTARTED (fresh process — our Noise session died with
+     *  it), those frames land in the void: the probe sees no Directories reply within [presenceProbeMs]
+     *  and escalates to ONE full re-handshake. An unhealthy link skips straight to the full reconnect. */
     private fun onComputerBackOnline() {
-        launchTransport(reconnect = true)
+        if (!transportHealthy()) { launchTransport(reconnect = true); return }
+        presenceProbeJob?.cancel()
+        val seenRev = directoriesRev
+        presenceProbeJob = scope.launch {
+            send(ListDirectories())
+            restoreAfterReconnect()
+            delay(presenceProbeMs)
+            if (sessionActive.value && directoriesRev == seenRev) launchTransport(reconnect = true, force = true)
+        }
     }
+
+    /** Is the CURRENT transport demonstrably up? (attached, no observed failure, socket loop still alive) */
+    private fun transportHealthy(): Boolean =
+        linkHealthOverride?.invoke() ?: (connected.value && attachedThisSession && connectJob?.isActive == true)
 
     // ── push registration ───────────────────────────────────────────────────────────────────────────
 
@@ -1048,15 +1074,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // back alive; a truly offline computer costs one extra handshake and stays on this screen.
                 if (!listWaitRetried) {
                     listWaitRetried = true
-                    launchTransport(reconnect = true)
+                    launchTransport(reconnect = true, force = true) // deliberate teardown of a live-but-deaf link — never coalesced (#143)
                 }
             }
         }
     }
 
-    /** (Re)open the active transport's socket. Both transports re-handshake on every connect() call. */
-    private fun launchTransport(reconnect: Boolean) {
+    /** (Re)open the active transport's socket. Both transports re-handshake on every connect() call.
+     *  [force] bypasses the #143 coalescing — for triggers that deliberately tear down a LIVE socket
+     *  (the deaf-link retry, the presence probe's escalation, the user's manual "Try again"). */
+    private fun launchTransport(reconnect: Boolean, force: Boolean = false) {
         if (demoMode.value) return // demo mode never touches the network
+        // #143: five triggers fire this independently (presence edge, foreground return, retry timer,
+        // list-wait, manual retry) and don't know about each other — while an attempt is already in
+        // flight, later triggers inside the window merge into it instead of stacking another socket +
+        // reattach volley into the cross-reconnect outbox.
+        if (shouldCoalesceReconnect(force, reconnect, connectJob?.isActive == true, epochMillis() - lastTransportLaunchAt)) return
+        lastTransportLaunchAt = epochMillis()
+        transportLaunches++
+        presenceProbeJob?.cancel(); presenceProbeJob = null // a full relaunch moots the #145 probe
         connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
         attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
         if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false }
@@ -1073,8 +1109,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 merge(relay.control, direct.control, directE2E.control).collect { handleControl(it) }
             }
         }
-        connectJob?.cancel()
+        val prev = connectJob
         connectJob = scope.launch {
+            // #142: retire the old socket BEFORE dialing. cancel() alone is cooperative — the old
+            // client.webSocket{} body (whose writer drains the shared cross-reconnect outbox) can outlive
+            // it, so the same deviceId briefly runs TWO relay sockets: the relay supersede-kicks the old
+            // one (mutual-kick loop) while both writers split queued frames across the two links. The
+            // join is bounded — a wedged close must not stall reconnecting — and the connection-side
+            // generation guard (connSeq in both E2E connections) fences any straggler past the bound.
+            retireJobBounded(prev, SOCKET_RETIRE_TIMEOUT_MS)
             val result = runCatching {
                 if (useRelay) {
                     val p = paired.value ?: error("not paired")
@@ -1138,6 +1181,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** The socket died. Stay on the current screen; banner + backoff retries take it from here. */
     private fun onTransportDown(err: Throwable?) {
         connected.value = false
+        linkStableJob?.cancel(); linkStableJob = null // #144: this link died — it never (or no longer) counts as stable
+        presenceProbeJob?.cancel(); presenceProbeJob = null // #145: the retry path owns recovery from here
         if (!sessionActive.value) { // an intentional teardown is not a connection failure — don't report it
             status.value = err?.let { StatusMsg(Res.string.status_failed, it.message ?: it::class.simpleName ?: "error") }
                 ?: StatusMsg(Res.string.status_disconnected)
@@ -1170,12 +1215,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** App came to the foreground (iOS suspends sockets in background) — reconnect now, fresh backoff. */
+    /** #144: the ladder above used to reset on any single healthy round-trip (and on every foreground
+     *  return), so a flapping link reconnected at max frequency forever — every drop restarted at 1s and
+     *  each reconnect fed the #142/#145 storm. Now the ladder only resets after the link PROVES stable by
+     *  staying up [stableLinkResetMs]; a link that keeps dying young keeps climbing toward 30s. Armed on
+     *  every attach edge (and, for the dev-direct transport, on its first Directories). */
+    private fun armLinkStableReset() {
+        linkStableJob?.cancel()
+        linkStableJob = scope.launch {
+            delay(stableLinkResetMs)
+            if (sessionActive.value && connected.value && attachedThisSession) retryAttempts = 0
+        }
+    }
+
+    /** App came to the foreground (iOS suspends sockets in background) — reconnect NOW; the backoff
+     *  ladder deliberately survives the return (#144 — resetting it here let a flapping link hammer). */
     fun onAppForeground() {
         if (demoMode.value || pairingInvalid) return
         if (sessionActive.value && !connected.value) {
             retryJob?.cancel()
-            retryAttempts = 0
             if (hadReadyThisSession) startReconnectGrace(restart = true) // fresh Ready-hold on return so a quick reconnect shows no banner (#28)
             launchTransport(reconnect = true)
         } else if (sessionActive.value && connected.value) {
@@ -1186,13 +1244,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** Manual "Try again" from the RelayUnreachable / ComputerOffline screens. */
+    /** Manual "Try again" from the RelayUnreachable / ComputerOffline screens. Human-paced, so the
+     *  explicit backoff reset stays; force = the user's tap must win over the #143 coalescing. */
     fun retryConnection() {
         if (!sessionActive.value || pairingInvalid) return
         retryJob?.cancel()
         retryAttempts = 0
         relayDeadlinePassed = false
-        launchTransport(reconnect = true)
+        launchTransport(reconnect = true, force = true)
     }
 
     /** After the link is back: re-sync whatever page the user is parked on; reattach a live chat. */
@@ -1220,8 +1279,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
-        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel()
-        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null
+        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
+        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
         turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) drop the ack→turn deadline too
         // frames queued for the binding we're leaving must not leak into the next link (both transports
@@ -1550,10 +1609,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         when (f) {
             is Directories -> {
                 replace(directories, f.entries); refreshing.value = false
+                directoriesRev++ // the #145 presence probe checks this to prove the computer answered
                 directoriesLoaded.value = true; daemonOffline = false; listWaitJob?.cancel() // a reply proves the computer is online
                 if (!useRelay) attachedThisSession = true // direct mode: socket + data == attached
                 connected.value = true; relayDeadlinePassed = false
-                retryAttempts = 0 // a healthy round-trip restarts the backoff ladder — otherwise a flapping link climbs to 30s and every reconnect crawls
+                // #144: deliberately NOT retryAttempts = 0 here — one healthy round-trip is not a stable
+                // link, and resetting on it kept a flapping link reconnecting at 1s forever. The ladder
+                // resets in armLinkStableReset once the link stays up; dev-direct (no Attached edge)
+                // arms it from here.
+                if (!useRelay && linkStableJob?.isActive != true) armLinkStableReset()
                 if (!hadReadyThisSession) {
                     hadReadyThisSession = true
                     Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
@@ -3006,6 +3070,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
         const val LIST_WAIT_MS = 6_000L       // after Attached, wait this long for the list before "computer offline"
         const val CONNECT_TIMEOUT_MS = 12_000L // no Attached within this → treat the connect as wedged, force a retry
+        const val SOCKET_RETIRE_TIMEOUT_MS = 3_000L // #142: bounded wait for the old socket to really close before dialing anew
+        const val TRANSPORT_COALESCE_MS = 3_000L    // #143: reconnect triggers within this of an in-flight attempt merge into it
+        const val STABLE_LINK_RESET_MS = 60_000L    // #144: the retry ladder resets only after the link stays up this long
+
+        /** #143 (pure, for tests): should this reconnect trigger merge into the attempt already in flight?
+         *  Only non-forced RECONNECT triggers coalesce, and only while an attempt is actually running and
+         *  recent — a long-lived healthy connectJob (isActive for the socket's whole life) must not absorb
+         *  a deliberate later teardown, which is what the time window is for. */
+        fun shouldCoalesceReconnect(force: Boolean, reconnect: Boolean, attemptInFlight: Boolean, sinceLastLaunchMs: Long): Boolean =
+            !force && reconnect && attemptInFlight && sinceLastLaunchMs < TRANSPORT_COALESCE_MS
         const val DIRECT_RETRY_COOLDOWN_MS = 60_000L // after a failed direct probe, stay on the relay this long before re-probing
         const val MAX_IMAGES = 4
         const val IMG_MAX_DIM = 1024 // longest side, true 1× pixels
@@ -3054,3 +3128,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 }
 
 private const val REFRESH_SPINNER_SAFETY_MS = 4_000L // spinner never outlives a lost reply by more than this
+
+/** #142: cancel the previous connection's job and WAIT (bounded) until it has actually finished — its
+ *  socket closed and its writers off the shared outboxes — before the next connection dials. cancel()
+ *  alone is cooperative, which is exactly how the two-socket overlap (relay supersede mutual-kick) was
+ *  born. Bounded so a wedged close can't stall reconnecting; the connection-generation guard inside the
+ *  E2E connections fences any straggler that outlives the bound. */
+internal suspend fun retireJobBounded(prev: Job?, timeoutMs: Long) {
+    prev ?: return
+    prev.cancel()
+    withTimeoutOrNull(timeoutMs) { prev.join() }
+}

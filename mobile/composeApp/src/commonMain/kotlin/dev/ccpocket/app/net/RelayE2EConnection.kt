@@ -17,6 +17,7 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.readText
+import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -53,8 +54,17 @@ class RelayE2EConnection {
     val control = MutableSharedFlow<Frame>(extraBufferCapacity = 16)
     private var nextId = 0L
 
+    // Connection GENERATION (issue #142): bumped once per connect() call. The repo serializes connects
+    // (cancel + bounded join of the previous socket before dialing), but a wedged close can outlive that
+    // bound — a straggler connection that then kept its writer alive would fight the live connection over
+    // the SHARED cross-reconnect outboxes, splitting queued frames across two sockets (and the relay's
+    // per-device supersede kick turns that overlap into a mutual-kick loop). Any coroutine of a stale
+    // generation must therefore stop touching the outboxes / shared flows the moment it notices.
+    @Volatile private var connSeq = 0
+
     /** @param firstTicket the pairing ticket — supplied as PSK only on the very first connect after pairing. */
     suspend fun connect(paired: PairedDaemon, keys: E2ECrypto.KeyPair, firstTicket: String?) = coroutineScope {
+        val gen = ++connSeq
         client.webSocket(urlString = "${paired.relay}/v1/device") {
             // Bound the whole pre-heartbeat prelude: the repo's connect watchdog only guards up to Attached,
             // and the pinger below isn't armed yet — a link that wedges BETWEEN Attached and the Noise
@@ -73,29 +83,45 @@ class RelayE2EConnection {
             } catch (e: TimeoutCancellationException) {
                 throw DeadLinkException()
             }
+            // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
+            if (gen != connSeq) throw DeadLinkException()
+            // a reconnect-trigger burst stacked duplicate list/reattach requests while the link was down;
+            // collapse them before the writer flushes (issue #143)
+            outbox.dedupeBacklog()
 
             val writer = launch {
                 for (f in outbox) {
+                    // superseded mid-drain: hand the frame back to the live connection instead of sending
+                    // it down this dying socket, then die (#142)
+                    if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
                     val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                     sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                 }
             }
             // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
-            val ctrlWriter = launch { for (c in controlOutbox) sendOrDie { outgoing.send(WsFrame.Text(control(c))) } }
+            val ctrlWriter = launch {
+                for (c in controlOutbox) {
+                    if (gen != connSeq) { controlOutbox.send(c); throw DeadLinkException() } // same fencing as the data writer (#142)
+                    sendOrDie { outgoing.send(WsFrame.Text(control(c))) }
+                }
+            }
             // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
             // (network switch / NAT / relay idle-drop) trips the write timeout and reconnects. Ktor's own ping
             // can't catch this — it rides the same outgoing path and wedges too. The relay's ktor auto-pongs it.
             val pinger = launchHeartbeat()
             try {
-                for (frame in incoming) when {
-                    frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
-                        val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
-                        runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
+                for (frame in incoming) {
+                    if (gen != connSeq) break // a stale reader must not emit into the shared inbound/control flows (#142)
+                    when {
+                        frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
+                            val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
+                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
+                        }
+                        // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
+                        frame is WsFrame.Text ->
+                            runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
+                        else -> {}
                     }
-                    // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
-                    frame is WsFrame.Text ->
-                        runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
-                    else -> {}
                 }
             } finally {
                 writer.cancel(); ctrlWriter.cancel(); pinger.cancel()
