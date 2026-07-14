@@ -245,6 +245,8 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
             if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = false, wrap = wrap.diff.value)
             else FileTabBody(
                 repo.viewedFile.value, ext, path = path, wrap = wrap.file.value,
+                // chunked-read progress (issue #134): drives the loading card's determinate bar
+                progress = repo.viewedFileProgress.value,
                 // a path the changed-set refused can still leave through the owner's approval gate
                 // (issue #67 v2 / #79) — dock the request entry / waiting row under the refusal text
                 exportSlot = when {

@@ -309,7 +309,11 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
 
     Box(Modifier.fillMaxSize()) {
         if (diffTab) DiffPaneBody(diff, ext = ext.ifEmpty { null }, dense = true, wrap = wrap.diff.value)
-        else FileTabBody(model.selectedContent, ext, dense = true, path = file.path, wrap = wrap.file.value)
+        else FileTabBody(
+            model.selectedContent, ext, dense = true, path = file.path, wrap = wrap.file.value,
+            // chunked-read progress (issue #134): drives the loading card's determinate bar
+            progress = model.selectedContentProgress,
+        )
     }
 }
 

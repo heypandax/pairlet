@@ -176,6 +176,7 @@ class RepoDesktopModel(
     override val selectedChangedPath: String? get() = repo.viewedFilePath.value
     override val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = repo.viewedFileDiff.value
     override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
+    override val selectedContentProgress: Pair<Long, Long>? get() = repo.viewedFileProgress.value
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
 
     // ── installed skills/plugins browser (issue #132): straight repo pass-throughs ──

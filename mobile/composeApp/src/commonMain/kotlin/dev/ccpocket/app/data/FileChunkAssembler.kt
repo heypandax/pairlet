@@ -21,6 +21,7 @@ import dev.ccpocket.protocol.FileContentChunk
 class FileChunkAssembler {
     private var key: Triple<String, String, String>? = null
     private var nextIdx = 0
+    private var totalBytes = 0L
     private val base64 = StringBuilder()
 
     /** Feed one chunk; returns the fully assembled [FileContent] when [FileContentChunk.last] closes a
@@ -34,6 +35,7 @@ class FileChunkAssembler {
         }
         base64.append(c.base64)
         nextIdx = c.idx + 1
+        totalBytes = c.totalBytes
         if (!c.last) return null
         val whole = base64.toString()
         val done = FileContent(
@@ -47,10 +49,18 @@ class FileChunkAssembler {
     /** Whether a stream is mid-assembly (used to keep the viewer's loading state honest). */
     val assembling: Boolean get() = key != null
 
+    /** Received/total bytes of the in-flight stream — the loading card's determinate progress bar
+     *  (issue #134 · 0714 chat-components handoff A1). Non-final chunks encode a multiple-of-3 byte
+     *  count, so the accumulated base64 length maps EXACTLY back to raw bytes (len/4·3) with no
+     *  decode. Null while nothing is assembling or the daemon didn't declare a total. */
+    val progress: Pair<Long, Long>?
+        get() = if (key != null && totalBytes > 0) (base64.length.toLong() / 4 * 3) to totalBytes else null
+
     /** Drop any partial state — a fresh read, a final [FileContent] reply, or a closed viewer. */
     fun reset() {
         key = null
         nextIdx = 0
+        totalBytes = 0
         base64.setLength(0)
     }
 }

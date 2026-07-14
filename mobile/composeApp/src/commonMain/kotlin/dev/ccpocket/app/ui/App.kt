@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1355,11 +1356,15 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                 val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
                 // older-history lazy load (issue #147): a prepended page shifts every index — scroll by
                 // the prepend count (+ the loader row when it stays) so the viewport keeps the row the
-                // user was reading instead of jumping to the newly loaded region
+                // user was reading instead of jumping to the newly loaded region. Visuals per the 0714
+                // chat-components handoff (B): the loader lingers through its silent-failure fade, and
+                // a landed page marks the seam above the re-anchored row for a beat.
+                val historyLoaderVisible = rememberEarlierLoaderVisible(repo.historyHasMore.value)
+                val historySeamAt = rememberHistorySeam(repo.historyPrependGen.value, repo.lastHistoryPrependCount)
                 LaunchedEffect(repo.historyPrependGen.value) {
                     val n = repo.lastHistoryPrependCount
                     if (repo.historyPrependGen.value > 0 && n > 0) {
-                        listState.scrollToItem(n + (if (repo.historyHasMore.value) 1 else 0))
+                        listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
                     }
                 }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value) {
@@ -1370,26 +1375,23 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     contentPadding = PaddingValues(bottom = bottomGutter),
                 ) {
                     // scroll-to-top loader (issue #147): the row only composes once scrolled into view —
-                    // exactly "reached the top of the loaded window" — and then asks for one older page
-                    if (repo.historyHasMore.value) item(key = "history-loader") {
-                        LaunchedEffect(Unit) { repo.loadOlderHistory() }
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            PulseDot(Tok.muted, size = 5.dp)
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(Res.string.history_loading_earlier), color = Tok.muted, fontSize = 11.sp)
-                        }
+                    // exactly "reached the top of the loaded window" — and then asks for one older page.
+                    // An ambient status line, never a button (0714 handoff B1); a dead request fades it
+                    // out silently instead of snapping it away (B2).
+                    if (historyLoaderVisible) item(key = "history-loader") {
+                        if (repo.historyHasMore.value) LaunchedEffect(Unit) { repo.loadOlderHistory() }
+                        LoadEarlierRow(fading = !repo.historyHasMore.value)
                     }
-                    items(repo.messages) { m ->
+                    itemsIndexed(repo.messages) { mi, m ->
                         // a prompt the daemon hasn't acknowledged while the link is down — or while the link
                         // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // seam (0714 handoff B3): for a beat after a page of older history lands,
+                            // mark where the old window began so the reader keeps their place
+                            if (mi == historySeamAt) EarlierMessagesSeam(repo.historyPrependGen.value)
                             MessageItem(
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
