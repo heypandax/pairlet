@@ -35,6 +35,7 @@ import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchHistoryPage
 import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.FileChunk
@@ -215,6 +216,9 @@ class RequestRouter(
             // workflow detail sheet (issue #106): read one agent's full prompt/return off disk —
             // a transcript parse, so off the inbound loop like FetchUsage
             is GetWorkflowAgentDetail -> scope.launch { registry.fetchWorkflowAgentDetail(frame) }
+            // older-history page (issue #147): a transcript parse → off the inbound pump; answered to
+            // the requesting sink only (never fanned out to other attached clients)
+            is FetchHistoryPage -> scope.launch { registry.fetchHistoryPage(frame, sink) }
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)

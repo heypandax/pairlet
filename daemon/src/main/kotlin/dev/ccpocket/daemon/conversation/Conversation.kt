@@ -20,6 +20,7 @@ import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.provenWindow
 import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.ConvoHistoryPage
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
@@ -113,6 +114,11 @@ class Conversation(
 
     // every existing emit site goes through this fan-out; one failing transport must not break the rest
     private val sink: OutboundSink = OutboundSink { f -> sinks.values.forEach { s -> runCatching { s.emit(f) } } }
+
+    // the OPENER's own view — open()'s DELTA replay goes here, never the fan-out: the delta continues
+    // the opener's cursor specifically, and a second (possibly OLD) client reattaching inside open()'s
+    // launch window must not receive a frame it would misread as a full window (issue #147).
+    private val openerSink: OutboundSink = initialSink
 
     /** Wall-clock of the last agent activity — drives the daemon's idle reaper. */
     @Volatile
@@ -386,7 +392,7 @@ class Conversation(
      *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
     val resumeAnchor: String? get() = openedResumeId
 
-    suspend fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false, takeOver: Boolean = false) {
+    suspend fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false, takeOver: Boolean = false, sinceSeq: Long? = null) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
@@ -438,12 +444,32 @@ class Conversation(
             }
             sink.emit(live(resumeId))
             if (resumeId != null) {
-                val history = backend.replayHistory(workdir.toString(), resumeId)
-                if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
+                // incremental reattach (issue #147): a client that still holds the transcript sends its
+                // cursor and gets only the delta; anything un-honorable falls back to the full window
+                // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
+                // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
+                // sink only (it continues that client's cursor); the full window keeps the fan-out.
+                val slice = backend.replaySlice(workdir.toString(), resumeId, sinceSeq)
+                if (slice.messages.isNotEmpty()) (if (slice.delta) openerSink else sink).emit(historyFrame(slice))
                 replayWorkflowRuns(resumeId, sink)
             }
             emitCommands()
         }
+    }
+
+    /** One replayed window/delta as a wire frame — the single place the #147 cursor fields are stamped. */
+    private fun historyFrame(slice: dev.ccpocket.daemon.disk.ReplaySlice) = ConvoHistory(
+        convoId, slice.messages,
+        lastSeq = slice.lastSeq, firstSeq = slice.firstSeq, delta = slice.delta, hasMore = slice.hasMore,
+    )
+
+    /** The phone scrolled to the top of its first-screen window — serve one page of OLDER history
+     *  (issue #147). Answered to the REQUESTING sink only: other attached clients didn't ask and
+     *  would prepend rows they may already hold. */
+    suspend fun fetchHistoryPage(beforeSeq: Long, limit: Int, to: OutboundSink) {
+        val sid = sessionId ?: openedResumeId ?: return
+        val slice = backend.replayPage(workdir.toString(), sid, beforeSeq, limit.coerceIn(1, 200))
+        to.emit(ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
     /** Tell the phone which slash commands its composer can autocomplete (workdir-dependent). */
@@ -790,8 +816,8 @@ class Conversation(
                             sink.emit(live(sessionId))
                             pendingResumeId?.let { rid ->
                                 pendingResumeId = null
-                                val history = backend.replayHistory(workdir.toString(), rid)
-                                if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
+                                val slice = backend.replaySlice(workdir.toString(), rid)
+                                if (slice.messages.isNotEmpty()) sink.emit(historyFrame(slice))
                             }
                         } else if (reemitLive && sessionId != null) {
                             reemitLive = false // mode switch relaunch landed — refresh the phone's sessionId
@@ -1026,8 +1052,9 @@ class Conversation(
     }
 
     /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
-     *  replaying the transcript so far to the newcomer only. */
-    suspend fun reattach(newSink: OutboundSink) {
+     *  replaying the transcript so far to the newcomer only. [sinceSeq] = the newcomer's transcript
+     *  cursor (issue #147): only the delta past it is replayed when it can be honored. */
+    suspend fun reattach(newSink: OutboundSink, sinceSeq: Long? = null) {
         sinks[sinkKey(newSink)] = newSink
         lastActivityMs = System.currentTimeMillis()
         // pre-first-turn the agent hasn't minted a sessionId yet — anchor on the resume id (same trick
@@ -1035,8 +1062,8 @@ class Conversation(
         val sid = sessionId ?: resumeAnchor ?: return
         // executing rights the phone's stale ■: a turn that finished (or started) while it was away
         newSink.emit(live(sid))
-        val history = backend.replayHistory(workdir.toString(), sid)
-        if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
+        val slice = backend.replaySlice(workdir.toString(), sid, sinceSeq)
+        if (slice.messages.isNotEmpty()) newSink.emit(historyFrame(slice))
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
         // re-show workflow runs: live (in-memory) ones first, then finished manifests off disk (#106)

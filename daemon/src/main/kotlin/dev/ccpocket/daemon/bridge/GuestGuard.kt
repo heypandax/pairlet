@@ -6,6 +6,7 @@ import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
+import dev.ccpocket.protocol.FetchHistoryPage
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
 import dev.ccpocket.protocol.ListPathEntries
@@ -83,6 +84,8 @@ class GuestGuard(
             is StopBackgroundJob -> ownedOr(frame.convoId, frame)
             is AudioChunk -> ownedOr(frame.convoId, frame)
             is AudioCancel -> ownedOr(frame.convoId, frame)
+            // older-history paging (issue #147): reads only the guest's OWN conversation's transcript
+            is FetchHistoryPage -> ownedOr(frame.convoId, frame)
             // scoped browse/read surfaces — the response is additionally filtered by the router (own sessions)
             is ListDirectories -> BridgeVerdict.Allow(frame) // router returns ONLY the shared root
             is ListSessions -> if (underScope(frame.workdir)) BridgeVerdict.Allow(frame) else badWorkdir()

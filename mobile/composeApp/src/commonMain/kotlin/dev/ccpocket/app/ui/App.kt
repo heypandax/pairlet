@@ -1352,6 +1352,15 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                 val density = LocalDensity.current
                 var pillHeightPx by remember { mutableStateOf(0) }
                 val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
+                // older-history lazy load (issue #147): a prepended page shifts every index — scroll by
+                // the prepend count (+ the loader row when it stays) so the viewport keeps the row the
+                // user was reading instead of jumping to the newly loaded region
+                LaunchedEffect(repo.historyPrependGen.value) {
+                    val n = repo.lastHistoryPrependCount
+                    if (repo.historyPrependGen.value > 0 && n > 0) {
+                        listState.scrollToItem(n + (if (repo.historyHasMore.value) 1 else 0))
+                    }
+                }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value) {
                 LazyColumn(
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
@@ -1359,6 +1368,20 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = bottomGutter),
                 ) {
+                    // scroll-to-top loader (issue #147): the row only composes once scrolled into view —
+                    // exactly "reached the top of the loaded window" — and then asks for one older page
+                    if (repo.historyHasMore.value) item(key = "history-loader") {
+                        LaunchedEffect(Unit) { repo.loadOlderHistory() }
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            PulseDot(Tok.muted, size = 5.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(Res.string.history_loading_earlier), color = Tok.muted, fontSize = 11.sp)
+                        }
+                    }
                     items(repo.messages) { m ->
                         // a prompt the daemon hasn't acknowledged while the link is down — or while the link
                         // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):

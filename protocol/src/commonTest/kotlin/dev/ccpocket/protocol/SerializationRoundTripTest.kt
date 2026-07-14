@@ -318,6 +318,72 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun openSession_lastEventSeq_is_a_trailing_optional() {
+        // issue #147: a NEW client sends its transcript cursor; the field rides along and round-trips
+        val req = Envelope(id = "iq1", ts = 0, body = OpenSession("/w", resumeId = "sid", lastEventSeq = 1234))
+        val json = PocketJson.encodeToString(req)
+        assertTrue("\"lastEventSeq\":1234" in json, json)
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD client's frame (no key) decodes with null — the daemon replays in full, exactly today
+        // (and an OLD daemon skips the unknown key via ignoreUnknownKeys — unknown_keys_are_tolerated)
+        val old = """{"id":"iq2","ts":0,"to":"PEER","body":{"t":"pocket/session.open","workdir":"/w","resumeId":"sid"}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as OpenSession
+        assertEquals(null, back.lastEventSeq)
+        // explicitNulls=false byte-identity: a cursor-less open encodes WITHOUT the key — on the wire
+        // it is indistinguishable from a pre-#147 client's frame
+        val noCursor = PocketJson.encodeToString(Envelope(id = "iq3", ts = 0, body = OpenSession("/w", resumeId = "sid")))
+        assertFalse("lastEventSeq" in noCursor, noCursor)
+    }
+
+    @Test
+    fun convoHistory_147_cursor_fields_are_trailing_optionals() {
+        // a NEW daemon's delta frame round-trips with all four fields
+        val delta = Envelope(
+            id = "ih1", ts = 0,
+            body = ConvoHistory("c1", listOf(HistoryMessage(ChatRole.ASSISTANT, "tail")), lastSeq = 40, firstSeq = 38, delta = true, hasMore = false),
+        )
+        val json = PocketJson.encodeToString(delta)
+        assertTrue("\"delta\":true" in json, json)
+        assertEquals(delta, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's frame (pre-#147 shape) decodes with the wire-safe defaults: no cursor
+        // (the client never asks for a delta), not a delta (full-replace semantics), no paging
+        val old = """{"id":"ih2","ts":0,"to":"PEER","body":{"t":"pocket/history","convoId":"c1","messages":[{"role":"user","text":"hi"}]}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as ConvoHistory
+        assertEquals(null, back.lastSeq)
+        assertEquals(null, back.firstSeq)
+        assertFalse(back.delta)
+        assertFalse(back.hasMore)
+        // explicitNulls=false: null cursors are OMITTED (the booleans ride via encodeDefaults, ~30B)
+        val bare = PocketJson.encodeToString(Envelope(id = "ih3", ts = 0, body = ConvoHistory("c1", emptyList())))
+        assertFalse("lastSeq" in bare, bare)
+        assertFalse("firstSeq" in bare, bare)
+        assertTrue("\"delta\":false" in bare, bare)
+    }
+
+    @Test
+    fun fetchHistoryPage_and_convoHistoryPage_roundtrip() {
+        // issue #147 paging pair: BRAND-NEW message types, so an old peer DROPS them (undecodable
+        // discriminator, same contract unknown_frame_discriminator_throws pins) instead of mis-acting
+        val req = Envelope(id = "hp1", ts = 0, body = FetchHistoryPage("c1", beforeSeq = 38))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/history.page\"" in reqJson, reqJson)
+        assertTrue("\"limit\":100" in reqJson, reqJson) // encodeDefaults: the daemon-side clamp still applies
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+        val page = Envelope(
+            id = "hp2", ts = 0,
+            body = ConvoHistoryPage("c1", listOf(HistoryMessage(ChatRole.USER, "older")), firstSeq = 12, hasMore = true),
+        )
+        val pageJson = PocketJson.encodeToString(page)
+        assertTrue("\"t\":\"pocket/history.older\"" in pageJson, pageJson)
+        assertEquals(page, PocketJson.decodeFromString<Envelope>(pageJson))
+        // a minimal page (empty tail) decodes with wire-safe defaults
+        val minimal = """{"id":"hp3","ts":0,"to":"PEER","body":{"t":"pocket/history.older","convoId":"c1","messages":[]}}"""
+        val backPage = PocketJson.decodeFromString<Envelope>(minimal).body as ConvoHistoryPage
+        assertEquals(null, backPage.firstSeq)
+        assertFalse(backPage.hasMore)
+    }
+
+    @Test
     fun fileContentChunk_roundtrips_with_stateless_defaults_and_a_concatenable_chunk_size() {
         // issue #134: the read-direction chunk stream. Full form round-trips…
         val chunk = Envelope(

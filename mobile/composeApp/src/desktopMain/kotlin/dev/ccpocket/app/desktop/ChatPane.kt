@@ -219,6 +219,14 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             LaunchedEffect(model.messages.size, model.streaming, model.ask?.askId) {
                 if (pinned && model.messages.isNotEmpty()) listState.scrollToItem(model.messages.lastIndex + 1, Int.MAX_VALUE)
             }
+            // older-history lazy load (issue #147): a prepended page shifts every index — scroll by the
+            // prepend count (+ the loader row when it stays) so the viewport keeps the row being read
+            LaunchedEffect(model.historyPrependGen) {
+                val n = model.lastHistoryPrependCount
+                if (model.historyPrependGen > 0 && n > 0 && !pinned) {
+                    listState.scrollToItem(n + (if (model.historyHasMore) 1 else 0))
+                }
+            }
             // one SelectionContainer around the whole stream: desktop text is expected to mouse-drag-select,
             // and Compose Text is inert by default — a single container (not per-message) keeps a drag
             // flowing across message boundaries. Buttons/toggles inside stay clickable (selection only
@@ -230,6 +238,17 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
+                    // scroll-to-top loader (issue #147): composes only once scrolled into view — exactly
+                    // "reached the top of the loaded window" — and then asks for one older page
+                    if (model.historyHasMore) item(key = "history-loader") {
+                        LaunchedEffect(Unit) { model.loadOlderHistory() }
+                        CenteredStreamRow {
+                            Text(
+                                "Loading earlier messages…", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+                                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
                     itemsIndexed(model.messages) { i, m ->
                         CenteredStreamRow {
                             MessageRow(

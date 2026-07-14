@@ -337,6 +337,16 @@ interface DesktopModel {
     val chatMode: PermissionMode
     val chatEffort: String? get() = null
     val messages: List<ChatItem>
+    // ── older-history lazy load (issue #147) — defaults keep Seed/test fakes compiling ──
+    /** Rows older than the loaded window exist on the daemon — the top-of-list loader shows. */
+    val historyHasMore: Boolean get() = false
+    /** True while a page request is in flight (the loader row pulses). */
+    val historyLoadingOlder: Boolean get() = false
+    /** Bumped when a page PREPENDED rows; [lastHistoryPrependCount] says how many — the list scrolls
+     *  by that to keep the viewport anchored. */
+    val historyPrependGen: Int get() = 0
+    val lastHistoryPrependCount: Int get() = 0
+    fun loadOlderHistory() {}
     val streaming: Boolean
     /** True when a sent prompt can't be confirmed delivered — the link is down, or it claims healthy but
      *  the delivery receipt stalled past its deadline (issue #78, common with several computers connected).

@@ -170,6 +170,13 @@ class ClaudeBackend(
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         TranscriptReplay.read(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 
+    // incremental reattach + older-history paging (issue #147) — seq = the transcript's source line
+    override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): dev.ccpocket.daemon.disk.ReplaySlice =
+        TranscriptReplay.slice(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"), sinceSeq)
+
+    override fun replayPage(workdir: String, sessionId: String, beforeSeq: Long, limit: Int): dev.ccpocket.daemon.disk.ReplaySlice =
+        TranscriptReplay.page(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"), beforeSeq, limit)
+
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
         TranscriptScanner.lastContextTokens(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 

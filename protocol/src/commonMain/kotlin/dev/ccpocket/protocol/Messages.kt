@@ -61,6 +61,21 @@ data class OpenSession(
     val effort: String? = null, // reasoning effort to relaunch under; restores the session's last setting on reopen
     val takeOver: Boolean = false, // true = resume/control even a session live in a terminal (vs observe)
     val agent: AgentKind = AgentKind.CLAUDE, // which backend to drive; default keeps older Apps (no field) on Claude
+    /**
+     * Incremental reattach (issue #147): the transcript cursor ([ConvoHistory.lastSeq]) this client is
+     * already caught up to for [resumeId]'s transcript — the daemon then replays only the DELTA past it
+     * (a [ConvoHistory] with `delta = true`) instead of the full tail window, turning a reconnect's
+     * ~550KB replay into a few KB. Null (the default) = "replay in full": a first open, a client that
+     * dropped its transcript, or an OLD client that predates the field. 0 = also "replay in full" BUT
+     * declares the client understands `delta = true` frames — an observe view then tails with deltas
+     * instead of re-sending the whole window on every write. The daemon safely falls back to
+     * a FULL replay whenever the cursor can't be honored (seq older than / past the on-disk transcript,
+     * a /clear'd or forked session, a late patch that mutated already-delivered rows). Mixed versions:
+     * an OLD daemon ignores the unknown key (ignoreUnknownKeys) and replays in full — exactly today's
+     * behavior; an OLD client never sends it. The reconnect outbox dedupe (keep only the NEWEST
+     * OpenSession per (workdir, resumeId)) stays correct: the newest open carries the freshest cursor.
+     */
+    val lastEventSeq: Long? = null,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -746,10 +761,66 @@ data class HistoryMessage(
     val workflowRunId: String? = null,
 )
 
-/** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
+/**
+ * daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive].
+ *
+ * Incremental reattach (issue #147) rides four TRAILING OPTIONALS — an old daemon omits them (a plain
+ * full replay, exactly today's frame) and an old phone ignores them (and, since it never sends
+ * [OpenSession.lastEventSeq], never receives a `delta = true` frame it couldn't interpret):
+ *  - [lastSeq]: the daemon's transcript cursor after this replay (the source `.jsonl` line count at
+ *    read time). The client stores it per session and echoes it back as [OpenSession.lastEventSeq] on
+ *    the next reattach. Null = the daemon predates #147 (the client then never asks for a delta).
+ *  - [firstSeq]: the cursor of the FIRST included message — the `beforeSeq` anchor a
+ *    [FetchHistoryPage] uses to lazy-load older history. Null when the replay is empty.
+ *  - [delta]: true = [messages] CONTINUE the client's transcript after the cursor it sent (append/merge
+ *    at the tail — never a wipe/replace). Only ever true in reply to an open that carried a honorable
+ *    lastEventSeq. false (default) keeps today's semantics: a full window that replaces/merges
+ *    wholesale, and an EMPTY non-delta replay is still the daemon's explicit /clear wipe.
+ *  - [hasMore]: messages older than [firstSeq] exist on disk — the client may offer "load earlier".
+ */
 @Serializable
 @SerialName("pocket/history")
-data class ConvoHistory(val convoId: String, val messages: List<HistoryMessage>) : ToPhone
+data class ConvoHistory(
+    val convoId: String,
+    val messages: List<HistoryMessage>,
+    val lastSeq: Long? = null,
+    val firstSeq: Long? = null,
+    val delta: Boolean = false,
+    val hasMore: Boolean = false,
+) : ToPhone
+
+/**
+ * phone -> daemon: lazy-load one page of history OLDER than [beforeSeq] (a [ConvoHistory.firstSeq] /
+ * [ConvoHistoryPage.firstSeq] the client already holds) for a live conversation — the scroll-to-top
+ * pagination behind the first screen's ~100-row window (issue #147). The reply is one
+ * [ConvoHistoryPage], sent ONLY to the requesting client (never fanned out — other attached clients
+ * didn't ask and would prepend rows they may already have). A daemon that predates this drops the
+ * unknown frame (runCatching-at-decode); the client arms a reply deadline and stops offering the
+ * load-earlier affordance. An old phone never sends it.
+ */
+@Serializable
+@SerialName("pocket/history.page")
+data class FetchHistoryPage(
+    val convoId: String,
+    val beforeSeq: Long,
+    val limit: Int = 100,
+) : ToDaemon
+
+/**
+ * daemon -> phone: one page of older history — [FetchHistoryPage]'s single reply. [messages] are the
+ * newest `limit` rows strictly BEFORE the requested seq, in chronological order — the client PREPENDS
+ * them. [firstSeq] anchors the next page; [hasMore] = rows older than that still exist. Same
+ * frame-budget guard as [ConvoHistory] (a page can never blow the relay cap). An old phone drops the
+ * unknown frame harmlessly; an old daemon never sends it.
+ */
+@Serializable
+@SerialName("pocket/history.older")
+data class ConvoHistoryPage(
+    val convoId: String,
+    val messages: List<HistoryMessage>,
+    val firstSeq: Long? = null,
+    val hasMore: Boolean = false,
+) : ToPhone
 
 /** One slash command the composer can offer. [name] has no leading "/". */
 @Serializable

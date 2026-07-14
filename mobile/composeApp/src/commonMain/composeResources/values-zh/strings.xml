@@ -50,6 +50,7 @@
     <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
     <string name="conn_connecting_banner">正在连接电脑…</string>
     <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
+    <string name="history_loading_earlier">正在加载更早的消息…</string>
     <string name="msg_sending">发送中…</string>
     <string name="msg_delivered">已送达电脑</string>
     <string name="msg_no_response">还没有响应——点此重发</string>
