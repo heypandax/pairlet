@@ -2,73 +2,70 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>$(DEVELOPMENT_LANGUAGE)</string>
-    <key>CFBundleLocalizations</key>
-    <array>
-        <string>en</string>
-        <string>zh</string>
-    </array>
-    <key>CFBundleDisplayName</key>
-    <string>CC Pocket</string>
-    <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.3.5</string>
-    <key>CFBundleVersion</key>
-    <string>12</string>
-    <!-- Export compliance: the app uses only standard, published crypto (TLS + Noise/X25519/AES-GCM),
-         which qualifies for the export exemption — so App Store Connect skips the per-build encryption
-         prompt and no compliance docs are required. -->
-    <key>ITSAppUsesNonExemptEncryption</key>
-    <false/>
-    <key>LSRequiresIPhoneOS</key>
-    <true/>
-    <key>UILaunchStoryboardName</key>
-    <string>LaunchScreen</string>
-    <key>UISupportedInterfaceOrientations</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-    </array>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-    </dict>
-    <key>CADisableMinimumFrameDurationOnPhone</key>
-    <true/>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>cc-pocket connects to the daemon running on your computer over the local network.</string>
-    <key>NSCameraUsageDescription</key>
-    <string>cc-pocket uses the camera to scan the pairing QR code shown by cc-pocket pair on your computer.</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
-    <key>NSSpeechRecognitionUsageDescription</key>
-    <string>cc-pocket transcribes your dictation on-device so you can speak prompts instead of typing them.</string>
-    <key>NSFaceIDUsageDescription</key>
-    <string>cc-pocket uses Face ID to lock the app, so only you can open your sessions and approve tool actions.</string>
-    <key>NSBonjourServices</key>
-    <array>
-        <string>_ccpocket._tcp</string>
-    </array>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>dev.ccpocket.pair</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>ccpocket</string>
-            </array>
-        </dict>
-    </array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>CC Pocket</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh</string>
+	</array>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.3.6</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.ccpocket.pair</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ccpocket</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>12</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ccpocket._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>cc-pocket uses the camera to scan the pairing QR code shown by cc-pocket pair on your computer.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>cc-pocket uses Face ID to lock the app, so only you can open your sessions and approve tool actions.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>cc-pocket connects to the daemon running on your computer over the local network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>cc-pocket transcribes your dictation on-device so you can speak prompts instead of typing them.</string>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>

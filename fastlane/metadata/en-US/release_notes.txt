@@ -1,16 +1,19 @@
-What's new in 1.3.5
+What's new in 1.3.6
 
 New
-• Session groups: organize a project's sessions into your own groups (workstream / direction / phase), collapsible and synced across phone and desktop
-• Folder sharing: grant someone a single folder on your computer to run agents in, fenced off from the rest
-• File & video upload: send files or videos straight from your phone to the computer
-• Face ID lock: optional biometric unlock for the app
+• Scheduled prompts: long-press send to queue a prompt for later (one-off or daily) — great for bedtime tasks. Manage them under Settings.
+• Auto-continue after a usage limit: when a turn hits your limit, one tap schedules "continue" for the moment the window resets
+• Gateway model presets: one-tap DeepSeek / GLM / Kimi / Qwen / MiniMax when you run Claude Code through a third-party gateway
+• Skills & plugins browser on desktop: see what's installed on the computer, with each one's description and details
+• View more files: open any file in the working directory from your phone, and larger Office files (xlsx / docx / pptx)
 
 Fixes & improvements
-• Prompts occasionally getting swallowed / needing a resend
-• Question cards freezing so you couldn't scroll to the options, and custom input hidden behind the keyboard
-• Push notifications not arriving (device token is now re-registered)
-• Streaming output lost after a reconnect is now backfilled
-• Hover a path / link to see its full value and copy it in one tap
+• Big reconnect-stability overhaul for weak and cross-border links: far fewer drops, and reconnects are near-instant instead of replaying the whole history
+• Get notified when a turn is waiting for your approval, hits an error, or runs out of usage — not just when it finishes
+• Frozen streaming after a mid-turn reconnect now recovers on its own
+• iOS "add video" now reads your photo library instead of Files
+• Desktop question card no longer shows up empty
+• "Load earlier messages" no longer gives up on a slow connection
+• /clear now resets the context % badge
 
-Note: some fixes need the computer-side cc-pocket-daemon on 1.3.5 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
+Note: some features need the computer-side cc-pocket-daemon on 1.3.6 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
