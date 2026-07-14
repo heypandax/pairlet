@@ -162,25 +162,29 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.handleDaemon() {
         val ip = call.clientIp()
-        if (!limiter.check("ws:ip:$ip", 10, 60_000)) return closeWith("rate_limited")
+        if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
-        val hello = receiveControl<DaemonHello>() ?: return closeWith("expected_hello")
+        val hello = receiveControl<DaemonHello>() ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
         val challenge = daemonAuth.issueChallenge()
         sendControl(challenge)
-        val auth = receiveControl<DaemonAuth>() ?: return closeWith("expected_auth")
+        val auth = receiveControl<DaemonAuth>() ?: run { logConn("expected_auth", ip, account = hello.accountId); return closeWith("expected_auth") }
 
         val account = when (val r = daemonAuth.verify(hello, auth, challenge.nonce)) {
             is DaemonAuthenticator.Result.Err -> {
                 limiter.check("auth:ip:$ip", 5, 60_000, lockoutOnBreach = true)
                 limiter.check("auth:acct:${hello.accountId}", 5, 60_000, lockoutOnBreach = true)
                 sendControl(AuthError(r.code))
+                logConn("auth_failed:${r.code}", ip, account = hello.accountId)
                 return closeWith("auth_failed")
             }
             is DaemonAuthenticator.Result.Ok -> r.accountId
         }
 
         val conn = conn(account, Role.DAEMON, null, daemonProtoV = hello.protoV)
-        broker.attachDaemon(conn)?.let { old -> runCatching { old.close("superseded") } }
+        broker.attachDaemon(conn)?.let { old ->
+            logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
+            runCatching { old.close("superseded") }
+        }
         sendControl(Attached(Role.DAEMON, account))
         // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
         // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
@@ -203,7 +207,10 @@ class RelayServer(
             // late exit (the daemon reconnected before we noticed the old link die, e.g. after sleep/wake)
             // arrives AFTER the successor's PeerPresence(true); broadcasting false then would flip every
             // device to "computer offline" with no later true to recover on (mirrors the device-side guard)
-            if (broker.detachDaemon(conn)) broker.controlToDevices(account, controlText(PeerPresence(false)))
+            if (broker.detachDaemon(conn)) {
+                logConn("detached", conn.ip, account = account)
+                broker.controlToDevices(account, controlText(PeerPresence(false)))
+            }
         }
     }
 
@@ -224,7 +231,9 @@ class RelayServer(
                 }
             }
             is RevokeDevice -> if (store.revokeDevice(account, body.deviceId)) {
-                broker.closeDevice(account, body.deviceId)
+                broker.closeDevice(account, body.deviceId).forEach {
+                    logConn("revoked", it.ip, account = it.account, deviceId = it.deviceId, headless = it.headless)
+                }
                 // tell the daemon NOW: it must prune the key from its local allow-list, or its direct-LAN
                 // gate keeps accepting the revoked device until the next attach-replay reconcile
                 broker.controlToDaemon(account, controlText(DeviceRevoked(body.deviceId)))
@@ -261,13 +270,14 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.handleDevice() {
         val ip = call.clientIp()
-        if (!limiter.check("ws:ip:$ip", 10, 60_000)) return closeWith("rate_limited")
+        if (!limiter.check("ws:ip:$ip", 10, 60_000)) { logConn("rate_limited", ip); return closeWith("rate_limited") }
 
-        val hello = receiveControl<DeviceHello>() ?: return closeWith("expected_hello")
+        val hello = receiveControl<DeviceHello>() ?: run { logConn("expected_hello", ip); return closeWith("expected_hello") }
         val account = when (val r = deviceAuth.verify(hello)) {
             is DeviceAuthenticator.Result.Err -> {
                 limiter.check("auth:ip:$ip", 5, 60_000, lockoutOnBreach = true)
                 sendControl(AuthError(r.code))
+                logConn("auth_failed:${r.code}", ip, deviceId = hello.deviceId)
                 return closeWith("auth_failed")
             }
             is DeviceAuthenticator.Result.Ok -> r.accountId
@@ -280,14 +290,19 @@ class RelayServer(
             if (headless) broker.headlessDeviceCount(account) >= MAX_LIVE_HEADLESS
             else broker.interactiveDeviceCount(account) >= MAX_LIVE_DEVICES
         if (overCap) {
-            sendControl(AuthError("too_many_connections")); return closeWith("too_many_connections")
+            sendControl(AuthError("too_many_connections"))
+            logConn("too_many_connections", ip, account = account, deviceId = hello.deviceId, headless = headless)
+            return closeWith("too_many_connections")
         }
 
         val conn = conn(account, Role.DEVICE, hello.deviceId, headless = headless)
         // newest socket per device wins (mirrors attachDaemon): a lingering older socket of the same device
         // (reconnect overlap, machine-switch race) would otherwise fight this one over the daemon's single
         // per-device E2E session and deafen it
-        broker.attachDevice(conn)?.let { runCatching { it.close("superseded") } }
+        broker.attachDevice(conn)?.let { old ->
+            logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
+            runCatching { old.close("superseded") }
+        }
         sendControl(Attached(Role.DEVICE, account))
         if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true)))
         try {
@@ -298,6 +313,7 @@ class RelayServer(
             }
         } finally {
             broker.detachDevice(conn)
+            logConn("detached", conn.ip, account = account, deviceId = hello.deviceId, headless = headless)
             // "peer offline" only when the LAST INTERACTIVE socket left — a superseded/overlapping socket's
             // exit while another is live must not arm the daemon's idle reaper against a watched
             // conversation, and a bridge coming or going never moves presence at all
@@ -322,6 +338,7 @@ class RelayServer(
         close = { reason -> runCatching { close(CloseReason(CloseReason.Codes.NORMAL, reason)) } },
         headless = headless,
         daemonProtoV = daemonProtoV,
+        ip = call.clientIp(),
     )
 
     private fun controlText(frame: PocketFrame): String =
@@ -340,6 +357,23 @@ class RelayServer(
 
     private suspend fun DefaultWebSocketServerSession.closeWith(reason: String) =
         close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, reason))
+
+    // issue #141: every relay-initiated disconnect/reject used to be silent, so journalctl couldn't tell a
+    // supersede "互踢" from a pinger-timeout drop (the ping-timeout close surfaces here as a "detached" line).
+    // One greppable structured line per close/reject point. IDs are truncated to the first 8 chars like the
+    // [push] logs; NEVER emit tokens / keys / nonces / signatures / opaque payload.
+    private fun logConn(
+        reason: String,
+        ip: String,
+        account: String? = null,
+        deviceId: String? = null,
+        headless: Boolean? = null,
+    ) {
+        val acct = account?.take(8) ?: "-"
+        val dev = deviceId?.take(8) ?: "-"
+        val hl = if (headless != null) " headless=$headless" else ""
+        println("[conn] reason=$reason account=$acct device=$dev ip=$ip$hl")
+    }
 
     private companion object {
         // raised 256KB->4MB so phone image / large E2E frames aren't killed (FrameTooBigException);
