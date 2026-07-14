@@ -112,6 +112,7 @@ class RepoDesktopModel(
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
+    override var showSkills by mutableStateOf(false)
     override val composerState = ComposerState()
 
     // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
@@ -176,6 +177,12 @@ class RepoDesktopModel(
     override val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = repo.viewedFileDiff.value
     override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
+
+    // ── installed skills/plugins browser (issue #132): straight repo pass-throughs ──
+    override val skillCatalog: dev.ccpocket.protocol.SkillCatalog? get() = repo.skillCatalog.value
+    override val skillCatalogLoading: Boolean get() = repo.skillCatalogLoading.value
+    override val skillCatalogStale: Boolean get() = repo.skillCatalogUnavailable.value
+    override fun fetchSkillCatalog() = repo.fetchSkillCatalog()
 
     override val connected: Boolean get() = repo.sessionActive.value
     override val connGen: Int get() = repo.connGen.value

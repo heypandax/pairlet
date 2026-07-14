@@ -181,17 +181,18 @@ interface DesktopModel {
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
     var showQuickActions: Boolean // chat-header ⋯ popover: model/effort/mode + compact/clear (mirrors mobile's sheet)
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
+    var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
 
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges || showSkills
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false; showSkills = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -398,6 +399,16 @@ interface DesktopModel {
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles() }
+
+    // installed skills/plugins browser (issue #132): the machine's ~/.claude catalog, plus the open
+    // project's `.claude/skills` when a chat is live. Defaults keep seed/preview models inert.
+    val skillCatalog: dev.ccpocket.protocol.SkillCatalog? get() = null
+    val skillCatalogLoading: Boolean get() = false
+    /** No reply — the daemon predates pocket/skills.*; the browser shows its "update the daemon" state. */
+    val skillCatalogStale: Boolean get() = false
+    fun fetchSkillCatalog() {}
+    /** Open the browser: flip the flag and re-pull the catalog (cheap daemon-side disk scan). */
+    fun openSkills() { showSkills = true; fetchSkillCatalog() }
 
     // composer image attachments (⌘V paste / attach icon → file picker); ride the next send
     val pendingImages: List<dev.ccpocket.app.data.PendingImage>

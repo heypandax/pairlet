@@ -1308,4 +1308,65 @@ class SerializationRoundTripTest {
         assertFalse("groupId" in uj, uj)
         assertEquals(unassign, PocketJson.decodeFromString<GroupAssign>(uj))
     }
+
+    @Test
+    fun fetchSkillCatalog_roundtrips_and_omits_null_workdir() {
+        // issue #132: a brand-new message type — new↔new round-trip; an old daemon doesn't know the
+        // discriminator and silently drops the frame (runCatching decode), never a crash or a reply.
+        val env = Envelope(id = "sk1", ts = 0, body = FetchSkillCatalog("/w"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/skills.fetch\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        val bare = PocketJson.encodeToString(Envelope(id = "sk2", ts = 0, body = FetchSkillCatalog()))
+        assertFalse("workdir" in bare, bare) // explicitNulls=false
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(bare).body as FetchSkillCatalog).workdir)
+    }
+
+    @Test
+    fun skillCatalog_roundtrips_with_full_detail() {
+        val env = Envelope(
+            id = "sk3", ts = 0,
+            body = SkillCatalog(
+                skills = listOf(
+                    SkillInfo(
+                        name = "brain", description = "knowledge base", scope = SkillScope.PROJECT,
+                        meta = mapOf("argument-hint" to "<topic>", "license" to "MIT"),
+                        excerpt = "# Brain\nbody…", truncated = true, path = "/h/.claude/skills/brain",
+                    ),
+                ),
+                plugins = listOf(
+                    PluginInfo(
+                        name = "claude-hud", description = "statusline HUD", version = "0.0.10",
+                        marketplace = "claude-hud", scope = "user", author = "Jarrod",
+                        homepage = "https://x", commands = listOf("setup", "configure"),
+                        excerpt = "readme…", truncated = false, path = "/h/.claude/plugins/cache/claude-hud",
+                    ),
+                ),
+            ),
+        )
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/skills\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun skillCatalog_minimal_payload_decodes_with_defaults() {
+        // a future (or degraded) daemon may send only names — every other field must default cleanly,
+        // and unknown extra keys (a NEWER daemon's additions) must be skipped, not fatal
+        val minimal = """{"id":"sk4","ts":0,"to":"PEER","body":{"t":"pocket/skills",
+            "skills":[{"name":"x","futureField":123}],"plugins":[{"name":"p","futureField":{"a":1}}]}}"""
+        val back = PocketJson.decodeFromString<Envelope>(minimal).body as SkillCatalog
+        val s = back.skills.single()
+        assertEquals("x", s.name)
+        assertEquals("", s.description)
+        assertEquals(SkillScope.USER, s.scope)
+        assertTrue(s.meta.isEmpty())
+        assertEquals(false, s.truncated)
+        assertEquals(null, s.path)
+        val p = back.plugins.single()
+        assertEquals("p", p.name)
+        assertEquals(null, p.version)
+        assertTrue(p.commands.isEmpty())
+    }
 }

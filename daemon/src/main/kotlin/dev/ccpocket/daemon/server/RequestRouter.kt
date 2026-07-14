@@ -10,6 +10,7 @@ import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.SessionGroups
+import dev.ccpocket.daemon.disk.SkillCatalogService
 import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -34,6 +35,7 @@ import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileUploadCancel
@@ -114,6 +116,12 @@ class RequestRouter(
 
             // heavy transcript scan → off the inbound pump so it can't wedge the socket
             is FetchUsage -> scope.launch { sink.emit(UsageService.aggregate(frame.days)) }
+
+            // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
+            // FetchUsage. Guests never reach here (GuestCaps denies the frame type at the choke point).
+            is FetchSkillCatalog -> scope.launch {
+                sink.emit(SkillCatalogService.build(frame.workdir?.let { dirs.validateWorkdir(it) }))
+            }
 
             // both re-scan the transcript from disk (issue #36) → same off-pump rule as FetchUsage
             is ListSessionFiles -> scope.launch {

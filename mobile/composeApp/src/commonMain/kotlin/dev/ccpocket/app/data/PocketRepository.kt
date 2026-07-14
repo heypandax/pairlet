@@ -101,7 +101,9 @@ import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchPresets
+import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
+import dev.ccpocket.protocol.SkillCatalog
 import dev.ccpocket.protocol.PresetsState
 import dev.ccpocket.protocol.SavePreset
 import dev.ccpocket.protocol.Secret
@@ -1238,6 +1240,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // store it". authState clears for the same reason — the next daemon's account is a fresh fetch.
         authState.value = null
         presetsState.value = null; presetsStateRev.value = 0
+        // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
+        skillCatalogDeadline?.cancel()
+        skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
         convoId.value = null
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
@@ -1561,6 +1566,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 sessionsRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
+            is SkillCatalog -> {
+                skillCatalogDeadline?.cancel()
+                skillCatalog.value = f; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
+            }
             is AuthState -> authState.value = f
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
@@ -2007,6 +2016,28 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun fetchUsage(days: Int = 7) {
         usageLoading.value = true
         scope.launch { send(FetchUsage(days)) }
+    }
+
+    // ── installed skills/plugins catalog (issue #132): the desktop browse page ──
+    val skillCatalog = mutableStateOf<SkillCatalog?>(null)
+    val skillCatalogLoading = mutableStateOf(false)
+    /** No reply — the daemon predates pocket/skills.* (an old daemon silently drops the unknown frame,
+     *  so silence is the only signal) — distinct from an EMPTY catalog. */
+    val skillCatalogUnavailable = mutableStateOf(false)
+    private var skillCatalogDeadline: Job? = null
+
+    /** Ask the daemon for its installed skills + plugins; the reply lands in [skillCatalog]. The open
+     *  chat's workdir (when any) rides along so project-level skills list too. Same stale-daemon
+     *  deadline discipline as [fetchChangedFiles]: better an honest "update the daemon" than a spinner. */
+    fun fetchSkillCatalog() {
+        skillCatalogLoading.value = true
+        skillCatalogUnavailable.value = false
+        skillCatalogDeadline?.cancel()
+        skillCatalogDeadline = scope.launch {
+            delay(8_000)
+            if (skillCatalogLoading.value) { skillCatalogLoading.value = false; skillCatalogUnavailable.value = true }
+        }
+        scope.launch { send(FetchSkillCatalog(workdir.value)) }
     }
 
     // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
