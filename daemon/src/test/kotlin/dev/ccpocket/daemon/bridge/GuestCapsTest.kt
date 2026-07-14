@@ -80,7 +80,7 @@ class GuestCapsTest {
             // interactive additions a scoped guest needs
             "pocket/ask", "pocket/ask.withdrawn", "pocket/commands", "pocket/jobs",
             "pocket/dirs", "pocket/sessions", "pocket/path.entries", "pocket/files",
-            "pocket/file.content", "pocket/diff.content", "pocket/transcript",
+            "pocket/file.content", "pocket/file.content.chunk", "pocket/diff.content", "pocket/transcript",
             // the guest's OWN ending notice — "revoked"/"expired" for its terminal card (#115 follow-up)
             "pocket/share.ended",
         )

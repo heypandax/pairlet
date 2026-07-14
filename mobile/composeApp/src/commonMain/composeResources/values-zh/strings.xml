@@ -327,6 +327,7 @@
     <string name="file_export_waiting">等待批准…</string>
     <string name="file_export_other">导出列表外的文件…</string>
     <string name="file_export_other_hint">项目内路径，如 output/report.xlsx</string>
+    <string name="file_view">查看文件</string>
 
     <!-- ── 子代理卡片（issue #77，chat-cards handoff）──────────── -->
     <string name="subagent_report">报告</string>

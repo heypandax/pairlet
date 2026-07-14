@@ -13,6 +13,7 @@ import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.ListDirectories
@@ -80,7 +81,8 @@ object GuestCaps {
         is Sessions -> true         // scoped to the guest's OWN sessions under the root
         is PathEntries -> true      // @-file completion, anchored to the root
         is SessionFiles -> true     // the guest's own session's changed files
-        is FileContent -> true      // read of a file the guest's session touched (transcript-derived)
+        is FileContent -> true      // read of a project file inside the shared root (or one its session touched)
+        is FileContentChunk -> true // the chunked form of the same read (issue #134) — same scope as FileContent
         is FileDiff -> true
         is Transcript -> true       // voice-capture result for the guest's composer
         is ShareEnded -> true       // the guest's own ending notice ("revoked"/"expired") — issue #115 follow-up.
