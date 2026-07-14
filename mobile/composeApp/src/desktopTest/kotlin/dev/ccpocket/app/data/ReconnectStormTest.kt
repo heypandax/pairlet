@@ -1,5 +1,6 @@
 package dev.ccpocket.app.data
 
+import dev.ccpocket.app.net.RelayE2EConnection
 import dev.ccpocket.app.net.dedupeReconnectBacklog
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.protocol.Attached
@@ -193,6 +194,33 @@ class ReconnectStormTest {
         // no Directories reply: the daemon really restarted (our E2E session died with it) — the probe
         // must escalate to a full re-handshake, or the phone would sit deaf on a "healthy" socket
         awaitCue("the probe escalation") { r.transportLaunches > launches }
+    }
+
+    // ── #146: a live-but-deaf E2E socket forces a mid-turn re-handshake ──────────────────────────
+
+    @Test
+    fun onlyConsecutiveDecryptFailuresTripTheDeafLinkForcedReHandshake() {
+        // a lone stray/reordered frame is noise and must NOT trip it; the Nth CONSECUTIVE failure means the
+        // daemon is sealing under a session this socket can't open (#146 reconnect-overlap) — that trips.
+        assertFalse(RelayE2EConnection.deafTripped(0))
+        assertFalse(RelayE2EConnection.deafTripped(1))
+        assertFalse(RelayE2EConnection.deafTripped(RelayE2EConnection.DEAF_DECRYPT_FAILURES - 1))
+        assertTrue(RelayE2EConnection.deafTripped(RelayE2EConnection.DEAF_DECRYPT_FAILURES))
+        assertTrue(RelayE2EConnection.deafTripped(RelayE2EConnection.DEAF_DECRYPT_FAILURES + 5))
+    }
+
+    @Test
+    fun aMidTurnDeafLinkSignalForcesExactlyOneReHandshake() = runBlocking {
+        val r = repo()
+        r.receiveControlForTest(Attached(Role.DEVICE, "acct-test"))
+        r.receiveForTest(Directories(emptyList()))
+        val launches = r.transportLaunches
+
+        r.receiveDeafForTest() // the transport reader hit the consecutive-failure threshold on a live socket
+
+        // startListWait can't cover this (directoriesLoaded is already true), the presence probe is a
+        // snapshot edge, onTransportDown never fires (the WS still pings) — only this path forces the heal.
+        assertEquals(launches + 1, r.transportLaunches, "a mid-turn deaf-link signal forces a re-handshake (#146)")
     }
 
     @Test

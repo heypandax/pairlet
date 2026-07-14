@@ -345,6 +345,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var retryJob: Job? = null       // scheduled auto-reconnect
     internal var retryAttempts = 0          // internal for tests (#144 — the backoff-ladder reset rule)
     private var controlJob: Job? = null     // collects relay control frames (Attached/PeerPresence/AuthError)
+    private var deafJob: Job? = null        // #146: collects the E2E transports' deaf-link signals (mid-turn force re-handshake)
     private var graceJob: Job? = null       // silent window before showing RelayUnreachable
     private var listWaitJob: Job? = null    // post-attach wait for the first list before assuming the computer is offline
     private var connectWatchdog: Job? = null // forces a retry if a connect wedges pre-attach (no socket error)
@@ -973,6 +974,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    /** An E2E transport reported it went DEAF mid-stream (issue #146): its inbound frames stopped
+     *  decrypting while the socket keeps pinging, so [onTransportDown] never fires and none of the other
+     *  self-heal nets reach it — [startListWait] is connection-period only (guards !directoriesLoaded), the
+     *  #145 presence probe is a snapshot edge, the turn watchdog covers only a locally-issued prompt's ack
+     *  gap. A passive observer of a long turn falls through all of them. Force a re-handshake — the same
+     *  deliberate teardown of a live-but-deaf link the connection-period deaf-link retry uses — so the
+     *  daemon re-keys its outbound onto this socket. The N-consecutive-failure threshold lives in the
+     *  connection (never trips on a lone stray frame); reaching here already means the link is deaf. */
+    private fun onDeafLink() {
+        if (demoMode.value || pairingInvalid || !sessionActive.value) return
+        launchTransport(reconnect = true, force = true)
+    }
+
     /** Is the CURRENT transport demonstrably up? (attached, no observed failure, socket loop still alive) */
     private fun transportHealthy(): Boolean =
         linkHealthOverride?.invoke() ?: (connected.value && attachedThisSession && connectJob?.isActive == true)
@@ -1180,6 +1194,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 merge(relay.control, direct.control, directE2E.control).collect { handleControl(it) }
             }
         }
+        if (deafJob == null) {
+            // #146: a live-but-deaf E2E socket (the daemon's reconnect-overlap flipped its seal onto a
+            // session we can't open) can't self-heal from the passive-observer side — onTransportDown never
+            // fires because the WS still pings. Force a re-handshake so the daemon re-keys onto this socket.
+            deafJob = scope.launch {
+                merge(relay.deaf, directE2E.deaf).collect { onDeafLink() }
+            }
+        }
         val prev = connectJob
         connectJob = scope.launch {
             // #142: retire the old socket BEFORE dialing. cancel() alone is cooperative — the old
@@ -1351,8 +1373,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
-        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
-        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
+        retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
+        retryJob = null; connectJob = null; inboundJob = null; controlJob = null; deafJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
         turnWatchdog?.cancel(); turnWatchdog = null; awaitingTurn = false; turnStalled.value = false; turnQueued.value = false // (issue #104) drop the ack→turn deadline too
         // frames queued for the binding we're leaving must not leak into the next link (both transports
@@ -1679,6 +1701,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
     // the Account pane's fetch re-keys on reconnect.
     internal fun receiveControlForTest(f: Frame) = handleControl(f)
+
+    // #146: drive a deaf-link signal exactly as a transport reader would after N consecutive decrypt
+    // failures, to assert it forces a re-handshake (mid-turn self-heal) without a live daemon.
+    internal fun receiveDeafForTest() = onDeafLink()
 
     private fun handle(f: Frame) {
         when (f) {
