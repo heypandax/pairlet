@@ -5,11 +5,11 @@ import androidx.compose.runtime.Composable
 /**
  * Movie-filtered document picker (issue #98). Returns a launcher; picked files ride the SAME
  * chunk-upload as [rememberFileAttacher] — a video is just a large file that lands in the workspace
- * inbox. The only difference is the picker's type filter (Android video MIME wildcard, iOS movie UTType) so the
+ * inbox. The only difference is the picker (Android video MIME wildcard, iOS photo-library video picker) so the
  * "Video" attach-sheet option surfaces videos instead of every document. Each [PickedFile] also carries
  * a [PickedFile.localUri] so a just-sent video can play back on this device.
  *  - Android: SAF OpenMultipleDocuments filtered to the video MIME wildcard
- *  - iOS: `UIDocumentPickerViewController` opening `UTTypeMovie`
+ *  - iOS: `PHPickerViewController` filtered to videos (photo library, no permission prompt) (#148)
  *  - Desktop: unused no-op — the desktop composer already accepts video via its AWT dialog + drop.
  */
 @Composable
