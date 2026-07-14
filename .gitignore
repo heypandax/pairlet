@@ -12,6 +12,8 @@ captures/
 
 # local agent / IDE state
 .claude/
+.codex/
+.agents/
 
 # Xcode per-user state
 **/xcuserdata/
