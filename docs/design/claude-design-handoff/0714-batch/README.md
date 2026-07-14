@@ -20,7 +20,7 @@
 ## 落地状态
 
 - 生成：2026-07-15 凌晨（Opus 4.8，四轮追加式生成，复用项目内 desktop-core.jsx / ios-frame.jsx / chat-cards.css 词汇）
-- 实现：进行中（见 git log 中引用本目录的 commit）
+- 实现：**已全部落地 main**（skills 浏览页 826bb3f、网关预设 026d09b、聊天状态件 86aae34、预约三件套 efb6a14），desktopTest 强制重跑全绿；loader/seam 淡出与滚轮手感待发版前真机目验
 
 ## 设计要点（实现时别丢）
 
