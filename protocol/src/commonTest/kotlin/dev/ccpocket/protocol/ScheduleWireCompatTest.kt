@@ -46,6 +46,25 @@ class ScheduleWireCompatTest {
     }
 
     @Test
+    fun scheduleCreate_clientId_roundtrips_and_is_a_trailing_optional() {
+        // NEW app → NEW daemon: the client-chosen id rides the create and survives the round-trip
+        val withId = Envelope(
+            id = "c1", ts = 0,
+            body = ScheduleCreate("/w", "Continue", 5, label = "Auto-continue", clientId = "autocont-c-1720"),
+        )
+        val js = PocketJson.encodeToString(withId)
+        assertTrue("\"clientId\":\"autocont-c-1720\"" in js, js)
+        assertEquals(withId, PocketJson.decodeFromString<Envelope>(js))
+
+        // absent by default (explicitNulls=false) — zero cost when a caller doesn't opt in
+        assertFalse("clientId" in PocketJson.encodeToString(Envelope("c2", 0, body = ScheduleCreate("/w", "go", 5))))
+
+        // OLD app → NEW daemon: a pre-A1 payload without the key decodes to null (daemon then mints a UUID)
+        val old = """{"id":"c3","ts":0,"to":"PEER","body":{"t":"pocket/schedule.create","workdir":"/w","prompt":"go","runAtMs":5}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(old).body as ScheduleCreate).clientId)
+    }
+
+    @Test
     fun scheduleList_and_cancel_roundtrip() {
         val list = PocketJson.encodeToString(Envelope(id = "3", ts = 0, body = ScheduleList))
         assertTrue("\"t\":\"pocket/schedule.list\"" in list, list)

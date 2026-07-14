@@ -92,6 +92,42 @@ class ScheduleRepoTest {
     }
 
     @Test
+    fun autoContinueCarriesAClientIdAndUndoCancelsByItBeforeAnyReplyLands() {
+        val sent = CopyOnWriteArrayList<Frame>()
+        val r = repo(sent)
+        r.receiveForTest(TurnDone("c1", error = "usage limit reached|1720000000", usageLimitResetAt = 1_720_000_000_000))
+        assertTrue(r.scheduleAutoContinue())
+        val create = sent.filterIsInstance<ScheduleCreate>().single()
+        val clientId = assertNotNull(create.clientId, "the create carries a client-chosen id")
+        assertEquals(clientId, r.limitConfirmed.value?.autoContinueId, "and the banner holds it for Undo")
+
+        // A1 timing bug: Undo BEFORE any ScheduleState reply arrives (schedules list still empty).
+        // The old signature reverse-lookup found nothing here; the id path cancels regardless.
+        assertTrue(r.schedules.isEmpty())
+        r.undoAutoContinue()
+        assertEquals(clientId, sent.filterIsInstance<ScheduleCancel>().single().id, "cancels by the id we already hold")
+        assertNull(r.limitConfirmed.value, "the banner clears")
+        assertNotNull(r.limitOffer.value, "the offer is restored so the user can re-decide")
+    }
+
+    @Test
+    fun undoCancelsByClientIdEvenAfterTheDaemonClampsTheFireTime() {
+        val sent = CopyOnWriteArrayList<Frame>()
+        val r = repo(sent)
+        r.receiveForTest(TurnDone("c1", error = "usage limit reached|1720000000", usageLimitResetAt = 1_720_000_000_000))
+        assertTrue(r.scheduleAutoContinue())
+        val clientId = assertNotNull(sent.filterIsInstance<ScheduleCreate>().single().clientId)
+        // clamp B: the reset was already past, so the daemon stored nextRunAtMs=now, NOT resetAtMs+margin.
+        // The daemon adopted our clientId as the entry id and echoes it back with the clamped time.
+        r.receiveForTest(
+            ScheduleState(items = listOf(ScheduleInfo(id = clientId, workdir = "/w", prompt = "Continue", label = "Auto-continue", nextRunAtMs = 999))),
+        )
+        r.undoAutoContinue()
+        // exactly one cancel, by the client id — the nextRunAtMs signature mismatch no longer matters
+        assertEquals(listOf(clientId), sent.filterIsInstance<ScheduleCancel>().map { it.id })
+    }
+
+    @Test
     fun ordinaryErrorsOrOldDaemonsNeverArmTheOffer() {
         val r = repo()
         r.receiveForTest(TurnDone("c1", error = "turn failed")) // no reset moment (old daemon / unparseable)

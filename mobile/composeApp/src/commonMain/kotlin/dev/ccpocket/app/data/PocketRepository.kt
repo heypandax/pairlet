@@ -2254,7 +2254,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  limit AND the daemon parsed the reset moment out of the CLI's error text
      *  ([TurnDone.usageLimitResetAt]); the banner offers [scheduleAutoContinue]. Cleared on session
      *  switch and on the next manual send (the user moved on). */
-    data class LimitOffer(val convoId: String, val sessionId: String?, val workdir: String, val resetAtMs: Long)
+    data class LimitOffer(
+        val convoId: String,
+        val sessionId: String?,
+        val workdir: String,
+        val resetAtMs: Long,
+        // A1 (#137): the client-chosen id [scheduleAutoContinue] sent as ScheduleCreate.clientId — the
+        // daemon adopts it as the schedule's id, so [undoAutoContinue] cancels by an id we already hold
+        // (no dependency on the ScheduleState reply having landed, immune to the daemon's runAtMs clamp).
+        val autoContinueId: String? = null,
+    )
     val limitOffer = mutableStateOf<LimitOffer?>(null)
 
     /** The offer [scheduleAutoContinue] just consumed — drives the banner's in-place "confirmed" flip
@@ -2290,6 +2299,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         label: String? = null,
         workdir: String? = null,
         resumeId: String? = null,
+        clientId: String? = null,
     ): Boolean {
         val wd = workdir ?: this.workdir.value ?: return false
         if (prompt.isBlank()) return false
@@ -2300,7 +2310,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 ScheduleCreate(
                     workdir = wd, prompt = prompt, runAtMs = runAtMs, repeat = repeat, resumeId = sid,
                     agent = sessionAgent.value ?: AgentKind.CLAUDE,
-                    model = model.value, mode = mode.value, label = label,
+                    model = model.value, mode = mode.value, label = label, clientId = clientId,
                 ),
             )
         }
@@ -2317,16 +2327,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  after the window resets. Returns false when the offer is gone / has no usable target. */
     fun scheduleAutoContinue(): Boolean {
         val offer = limitOffer.value ?: return false
+        // A stable client id the daemon adopts as the schedule's id (see LimitOffer.autoContinueId).
+        // Unique per (session, reset moment); it's what Undo cancels by.
+        val clientId = "autocont-${offer.convoId}-${offer.resetAtMs}"
         val ok = createSchedule(
             prompt = "Continue",
             runAtMs = offer.resetAtMs + LIMIT_RESUME_MARGIN_MS,
             workdir = offer.workdir.takeIf { it.isNotEmpty() },
             resumeId = offer.sessionId,
             label = "Auto-continue",
+            clientId = clientId,
         )
         if (ok) {
             limitOffer.value = null
-            limitConfirmed.value = offer // the banner flips in place to "Will continue at …" + Undo
+            // the banner flips in place to "Will continue at …" + Undo, holding the id Undo cancels by
+            limitConfirmed.value = offer.copy(autoContinueId = clientId)
             // same raw-English Sys convention as the session-expired notice above
             messages.add(ChatItem.Sys("auto-continue scheduled — this session resumes shortly after the limit resets"))
         }
@@ -2334,14 +2349,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     /** The confirmed banner's Undo: cancel the one-tap schedule and restore the offer so the user can
-     *  re-decide. The created schedule's id only exists daemon-side, so it's found back by its signature
-     *  (label + exact fire time) in the [ScheduleState] reply that followed the create; if that reply
-     *  never landed (stale daemon), the offer is still restored — better an honest re-offer than a
-     *  banner stuck confirmed. */
+     *  re-decide. Cancels by [LimitOffer.autoContinueId] — the client-chosen id a NEW daemon adopted as
+     *  the schedule's id — so it works the instant the banner is confirmed (no wait for the ScheduleState
+     *  reply) and survives the daemon's runAtMs clamp (which broke the old nextRunAtMs signature match).
+     *  A pre-clientId ("old") daemon minted its own id and ignored ours, so we ALSO try the legacy
+     *  signature reverse-lookup as a best-effort fallback (an unknown id is a daemon no-op — sending both
+     *  is safe). Either way the offer is restored — better an honest re-offer than a banner stuck
+     *  confirmed. */
     fun undoAutoContinue() {
         val offer = limitConfirmed.value ?: return
+        val id = offer.autoContinueId
+        if (id != null) cancelSchedule(id) // NEW daemon adopted this as the schedule's id
+        // legacy fallback: a daemon that ignored clientId listed the entry under its own id — match it
+        // back by label (best-effort; the reply must have landed and the clamp not have moved nextRunAtMs)
         schedules.firstOrNull {
-            it.label == "Auto-continue" && it.nextRunAtMs == offer.resetAtMs + LIMIT_RESUME_MARGIN_MS
+            it.label == "Auto-continue" && it.id != id &&
+                it.nextRunAtMs == offer.resetAtMs + LIMIT_RESUME_MARGIN_MS
         }?.let { cancelSchedule(it.id) }
         limitConfirmed.value = null
         limitOffer.value = offer

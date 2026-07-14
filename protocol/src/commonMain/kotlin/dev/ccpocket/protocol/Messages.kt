@@ -1228,6 +1228,12 @@ data class ScheduleCreate(
     val model: String? = null,
     val mode: PermissionMode = PermissionMode.DEFAULT,
     val label: String? = null, // short display name; null = the client renders the prompt preview
+    // A1 (#137): a client-chosen id. When set (and free), the daemon ADOPTS it as the new schedule's
+    // id, so the client can later cancel by an id it already holds — no wait for the ScheduleState
+    // reply, no fragile "reverse-lookup by label + nextRunAtMs" (which the daemon's runAtMs=maxOf(...,now)
+    // clamp breaks once the reset moment is in the past). Tail-optional: an OLD daemon ignores it and
+    // mints its own UUID; an OLD app never sends it.
+    val clientId: String? = null,
 ) : ToDaemon
 
 /** client -> daemon: list this machine's schedules. Reply: one [ScheduleState]. */
