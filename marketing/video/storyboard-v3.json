@@ -35,7 +35,7 @@
           "type": "html",
           "file": "terminal.html",
           "minMs": 2000,
-          "caption": "但普通会话，<em>照样接管</em>",
+          "caption": "但普通会话，<em>随时能接上</em>",
           "params": {
             "warm": 1
           }
@@ -44,7 +44,7 @@
     },
     {
       "id": "takeover",
-      "vo": "按理说，没提前设置，出门就只能干等。但 CC Pocket 不用你未卜先知。手机点一下 Continue here，普通会话直接接着干，上下文一字不丢。回到电脑，再用 claude --resume 选中这条，就能继续写。",
+      "vo": "按理说，没提前设置，出门就只能干等。但 CC Pocket 不用你未卜先知。手机点一下 Continue here，你自己的会话直接接着干，上下文一字不丢。回到电脑，再用 claude --resume 选中这条，就能继续写。",
       "shots": [
         {
           "type": "frames",
