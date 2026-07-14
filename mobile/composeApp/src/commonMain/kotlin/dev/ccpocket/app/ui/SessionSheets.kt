@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
@@ -277,8 +278,15 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
     // model routing doesn't go through ANTHROPIC_BASE_URL.
     val gatewayUrl = if (codex) null else repo.gatewayBaseUrl.value
     val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
-    if (gatewayUrl != null) GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset)
-    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    if (gatewayUrl != null) {
+        GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset)
+        // the alias list becomes the picker's second group, so it earns a divider + its own label (0714 design)
+        Column(Modifier.padding(top = 14.dp)) {
+            Hairline()
+            SectionLabel(stringResource(Res.string.model_section_anthropic), Modifier.padding(top = 12.dp))
+        }
+    }
+    Column(Modifier.padding(top = if (gatewayUrl != null) 8.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         choices.forEach { c ->
             val isSel = c.pick.equals(selected, ignoreCase = true)
             val isSwitching = switchingTo?.equals(c.pick, ignoreCase = true) == true
@@ -318,23 +326,6 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
             }
         }
     }
-    // no gateway detected: the same preset rows stay reachable behind a quiet toggle (issue #139)
-    if (!codex && gatewayUrl == null) {
-        var showGateway by remember { mutableStateOf(false) }
-        Row(
-            Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                .clickable(enabled = switchingTo == null) { showGateway = !showGateway }
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                stringResource(Res.string.model_gateway_show), color = Tok.muted, fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
-            )
-            Text(if (showGateway) "⌃" else "›", color = Tok.muted, fontSize = 14.sp)
-        }
-        if (showGateway) GatewayPresetSection(repo, gatewayUrl = null, switchingTo = switchingTo, onPick = pickPreset)
-    }
     // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
     // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
     // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
@@ -367,6 +358,25 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
             }
         }
     }
+    // no gateway detected: the same preset rows wait behind ONE quiet disclosure row at the very end
+    // (0714 design) — official-endpoint users keep today's picker, no gateway chrome above it
+    if (!codex && gatewayUrl == null) {
+        var showGateway by remember { mutableStateOf(false) }
+        Column(Modifier.padding(top = 14.dp)) {
+            Hairline()
+            Row(
+                Modifier.padding(top = 2.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .clickable(enabled = switchingTo == null) { showGateway = !showGateway }
+                    .padding(horizontal = 12.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(Res.string.model_gateway_show), color = Tok.tx2, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text(if (showGateway) "⌃" else "›", color = Tok.muted, fontSize = 14.sp)
+            }
+            // expanded: same rows, no host pill ([gatewayUrl] null keeps the header pill + ticks away)
+            if (showGateway) GatewayPresetSection(repo, gatewayUrl = null, switchingTo = switchingTo, onPick = pickPreset)
+        }
+    }
     Column(Modifier.padding(top = 14.dp)) {
         Hairline()
         Box(Modifier.padding(top = 12.dp)) {
@@ -387,38 +397,41 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
  */
 @Composable
 private fun GatewayPresetSection(repo: PocketRepository, gatewayUrl: String?, switchingTo: String?, onPick: (String) -> Unit) {
-    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            stringResource(Res.string.model_gateway_section), color = Tok.muted, fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
-        )
-        gatewayHostLabel(gatewayUrl)?.let { host ->
-            Spacer(Modifier.width(8.dp))
-            Text(
-                stringResource(Res.string.model_gateway_via, host), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
-                maxLines = 1,
-                modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 8.dp, vertical = 1.dp),
-            )
-        }
+    Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        SectionLabel(stringResource(Res.string.model_gateway_section))
+        Spacer(Modifier.weight(1f)) // pill sits flush right (0714 design)
+        gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
     }
     Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         recommendedGatewayPresets(gatewayUrl).forEach { p ->
             val isSel = p.id.equals(repo.model.value, ignoreCase = true)
             val isSwitching = switchingTo?.equals(p.id, ignoreCase = true) == true
+            val raised = isSel || isSwitching
             val dimmed = switchingTo != null && !isSwitching
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                    .background(if (isSel || isSwitching) Tok.raised else Tok.surface)
-                    .then(if (isSel || isSwitching) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(10.dp)) else Modifier)
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                    .background(if (raised) Tok.raised else Color.Transparent)
+                    .then(if (raised) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(12.dp)) else Modifier)
                     .clickable(enabled = switchingTo == null) { onPick(p.id) }
                     .alpha(if (dimmed) 0.45f else 1f)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(p.vendor, color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.width(10.dp))
-                Text(p.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                GatewayVendorMonogram(p, 32.dp)
+                Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.vendor, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                        // host names this vendor → terracotta "suggested" tick (accent stays reserved
+                        // for this + the selected check; the monograms never wear it)
+                        if (p.matchesGatewayHost(gatewayUrl)) {
+                            Spacer(Modifier.width(8.dp))
+                            Text("✓", color = Tok.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(3.dp))
+                            Text(stringResource(Res.string.model_gateway_suggested), color = Tok.accent, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Text(p.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+                }
                 Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
                     when {
                         isSwitching -> CircularProgressIndicator(Modifier.size(15.dp), color = Tok.accent, strokeWidth = 2.dp)
@@ -427,7 +440,41 @@ private fun GatewayPresetSection(repo: PocketRepository, gatewayUrl: String?, sw
                 }
             }
         }
-        Text(stringResource(Res.string.model_gateway_note), color = Tok.muted, fontSize = 10.5.sp, lineHeight = 15.sp)
+        Text(stringResource(Res.string.model_gateway_note), color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
+    }
+}
+
+/** Uppercase micro section header (0714 design: 10.5sp bold, wide tracking, muted). */
+@Composable
+private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(text.uppercase(), color = Tok.muted, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, modifier = modifier)
+}
+
+/** Mono "via host" pill with a live-green dot, on the gateway section header's right edge (0714 design). */
+@Composable
+private fun GatewayHostPill(host: String) {
+    Row(
+        Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+            .padding(horizontal = 9.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(5.dp).clip(CircleShape).background(Tok.ok))
+        Spacer(Modifier.width(5.dp))
+        Text(stringResource(Res.string.model_gateway_via, host), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, maxLines = 1)
+    }
+}
+
+/** Two-letter vendor lettermark in its semantic tint (0714 design): low-alpha tint fill + tint border,
+ *  mono bold letters — never a logo. Shared by both shells; 32dp on mobile rows, 24dp in the desktop popover. */
+@Composable
+internal fun GatewayVendorMonogram(preset: GatewayModelPreset, size: Dp) {
+    val tint = preset.tint.color()
+    val shape = RoundedCornerShape(size * 0.28f)
+    Box(
+        Modifier.size(size).clip(shape).background(tint.copy(alpha = 0.13f)).border(1.dp, tint.copy(alpha = 0.33f), shape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(preset.monogram, color = tint, fontFamily = FontFamily.Monospace, fontSize = (size.value * 0.4f).sp, fontWeight = FontWeight.Bold, letterSpacing = 0.2.sp)
     }
 }
 

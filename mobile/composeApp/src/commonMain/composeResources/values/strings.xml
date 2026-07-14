@@ -272,7 +272,9 @@
     <string name="model_gateway_section">Gateway models</string>
     <string name="model_gateway_via">via %1$s</string>
     <string name="model_gateway_show">Gateway model presets</string>
-    <string name="model_gateway_note">Ids follow each provider\'s Claude-compatible endpoint — your gateway decides the routing.</string>
+    <string name="model_gateway_note">Which model an id reaches is decided by your gateway.</string>
+    <string name="model_gateway_suggested">suggested</string>
+    <string name="model_section_anthropic">Anthropic API</string>
     <string name="af_show_from">Show sessions from</string>
     <string name="af_both">Both</string>
     <string name="af_claude_only">Claude only</string>

@@ -14,6 +14,8 @@ class GatewayModelPresetsTest {
         GATEWAY_MODEL_PRESETS.forEach {
             assertTrue(it.vendor.isNotBlank() && it.id.isNotBlank(), "blank entry: $it")
             assertTrue(it.id.trim() == it.id, "id has stray whitespace: '${it.id}'")
+            // 0714 design: the avatar is a two-letter uppercase lettermark, never a logo
+            assertTrue(it.monogram.length == 2 && it.monogram == it.monogram.uppercase(), "bad monogram: '${it.monogram}'")
         }
         assertEquals(GATEWAY_MODEL_PRESETS.size, GATEWAY_MODEL_PRESETS.map { it.id.lowercase() }.toSet().size, "duplicate ids")
     }
