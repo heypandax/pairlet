@@ -40,6 +40,8 @@ class GuestCapsTest {
             "pocket/verdict", "pocket/mode.switch", "pocket/rule.clear", "pocket/job.stop",
             "pocket/dirs.list", "pocket/sessions.list", "pocket/path.list", "pocket/files.list",
             "pocket/file.read", "pocket/diff.read", "pocket/audio.chunk", "pocket/audio.cancel",
+            // older-history paging of the guest's OWN conversation (issue #147, GuestGuard-gated)
+            "pocket/history.page",
         )
         val toDaemon = leaves(ToDaemon::class)
         assertTrue(toDaemon.size >= 20, "sanity: found ${toDaemon.size} ToDaemon leaves — reflection wired up")
@@ -77,6 +79,8 @@ class GuestCapsTest {
             // the eight data-plane frames
             "pocket/session.live", "pocket/history", "pocket/chunk", "pocket/tool",
             "pocket/turn.done", "pocket/prompt.ack", "pocket/error", "pocket/session.gone",
+            // the guest's own older-history page (issue #147; request gated on convo ownership)
+            "pocket/history.older",
             // interactive additions a scoped guest needs
             "pocket/ask", "pocket/ask.withdrawn", "pocket/commands", "pocket/jobs",
             "pocket/dirs", "pocket/sessions", "pocket/path.entries", "pocket/files",

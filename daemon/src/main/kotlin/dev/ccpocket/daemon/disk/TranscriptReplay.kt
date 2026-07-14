@@ -25,14 +25,50 @@ object TranscriptReplay {
     private const val MAX_TOOL_TEXT = 1000 // tool label / input preview cap (display-on-tap, not the reply body)
 
     /** Count-capped, then byte-budgeted (issue #81) so one ConvoHistory frame stays under the relay's 4 MiB cap. */
-    fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
-        if (!file.exists()) return emptyList()
-        val out = ArrayList<HistoryMessage>()
+    fun read(file: Path, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> =
+        slice(file, sinceSeq = null, maxMessages = maxMessages, maxFrameTextBytes = maxFrameTextBytes).messages
+
+    /** The (re)open replay with cursor metadata (issue #147): a DELTA past [sinceSeq] when it can be
+     *  honored, else the same full tail window as [read] — see [ReplaySlicer.slice] for the fallbacks. */
+    fun slice(
+        file: Path,
+        sinceSeq: Long?,
+        maxMessages: Int = 100,
+        maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
+    ): ReplaySlice {
+        val (rows, cursor) = parse(file)
+        return ReplaySlicer.slice(rows, cursor, sinceSeq, maxMessages, maxFrameTextBytes)
+    }
+
+    /** One page of history OLDER than [beforeSeq] — the scroll-to-top lazy load (issue #147). */
+    fun page(
+        file: Path,
+        beforeSeq: Long,
+        limit: Int = 100,
+        maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES,
+    ): ReplaySlice {
+        val (rows, _) = parse(file)
+        return ReplaySlicer.page(rows, beforeSeq, limit, maxFrameTextBytes)
+    }
+
+    /** A parsed row still open to patching, finalized into [ReplaySlicer.Row] once the file is read. */
+    private class MutableRow(var msg: HistoryMessage, val line: Long) {
+        var patchLine: Long = 0L
+    }
+
+    /** Parse the whole transcript into rows tagged with their source line (the #147 seq) + the total
+     *  line count (the cursor). Every raw line — noise included — advances the cursor, so it equals
+     *  the file's line count and stays stable under append-only growth. */
+    private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> {
+        if (!file.exists()) return emptyList<ReplaySlicer.Row>() to 0L
+        val out = ArrayList<MutableRow>()
         val taskIdx = HashMap<String, Int>() // sub-agent tool_use id -> its card's index in `out` (issue #77)
         val questionIdx = HashMap<String, Int>() // AskUserQuestion tool_use id -> its row's index (issue #110)
+        var lineNo = 0L
         runCatching {
             file.bufferedReader().useLines { lines ->
                 for (raw in lines) {
+                    lineNo += 1
                     val line = raw.trim()
                     if (line.isEmpty()) continue
                     val obj = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: continue
@@ -43,24 +79,23 @@ object TranscriptReplay {
                         // drop harness plumbing (standalone task-notifications, the resume nudge) so the
                         // phone replays the real conversation, not background-shell chatter
                         "user" -> {
-                            attachSubagentResults(obj, out, taskIdx)
-                            attachQuestionAnswers(obj, out, questionIdx)
+                            attachSubagentResults(obj, out, taskIdx, lineNo)
+                            attachQuestionAnswers(obj, out, questionIdx, lineNo)
                             if (isRealUserTurn(obj)) userText(obj)
                                 .takeIf { it.isNotBlank() && !TranscriptNoise.isNoiseUserText(it) }
-                                ?.let { out += HistoryMessage(ChatRole.USER, it) }
+                                ?.let { out += MutableRow(HistoryMessage(ChatRole.USER, it), lineNo) }
                         }
                         // the id keys the AskUserQuestion row (issue #110) or the sub-agent card (issue #77);
                         // the tool name says which map so its later tool_result patches the right one
                         "assistant" -> assistantBlocks(obj).forEach { (msg, id) ->
                             id?.let { (if (msg.tool == ASK_TOOL) questionIdx else taskIdx)[it] = out.size }
-                            out += msg
+                            out += MutableRow(msg, lineNo)
                         }
                     }
                 }
             }
         }
-        val capped = if (out.size > maxMessages) out.takeLast(maxMessages) else out
-        return ReplayBudget.fit(capped, maxFrameTextBytes)
+        return out.map { ReplaySlicer.Row(it.msg, it.line, it.patchLine) } to lineNo
     }
 
     /** One history row + (for a sub-agent tool_use) its tool_use id, so the reader can key the card. */
@@ -119,8 +154,9 @@ object TranscriptReplay {
 
     /** Patch a sub-agent/workflow card with its outcome when the main-chain tool_result shows up.
      *  A Workflow launch's record also carries a root-level `toolUseResult {taskType:"local_workflow",
-     *  runId}` — that run id binds the card to its separately-replayed [WorkflowFiles] run (#106). */
-    private fun attachSubagentResults(obj: JsonObject, out: ArrayList<HistoryMessage>, taskIdx: HashMap<String, Int>) {
+     *  runId}` — that run id binds the card to its separately-replayed [WorkflowFiles] run (#106).
+     *  Stamps [MutableRow.patchLine] so a delta read knows the mutation's source line (issue #147). */
+    private fun attachSubagentResults(obj: JsonObject, out: ArrayList<MutableRow>, taskIdx: HashMap<String, Int>, lineNo: Long) {
         if (taskIdx.isEmpty()) return
         val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
         val workflowRunId = (obj["toolUseResult"] as? JsonObject)
@@ -129,27 +165,29 @@ object TranscriptReplay {
             val block = el as? JsonObject ?: continue
             if (block.str("type") != "tool_result") continue
             val idx = block.str("tool_use_id")?.let(taskIdx::remove) ?: continue
-            val prev = out.getOrNull(idx) ?: continue
-            out[idx] = prev.copy(
+            val row = out.getOrNull(idx) ?: continue
+            row.msg = row.msg.copy(
                 ok = (block["is_error"] as? JsonPrimitive)?.booleanOrNull != true,
                 output = subagentReport(toolResultText(block["content"])),
-                workflowRunId = workflowRunId ?: prev.workflowRunId,
+                workflowRunId = workflowRunId ?: row.msg.workflowRunId,
             )
+            row.patchLine = lineNo
         }
     }
 
     /** Patch an AskUserQuestion row with the user's picks when its main-chain tool_result shows up
      *  (issue #110) — the mirror of [attachSubagentResults] for the question card. */
-    private fun attachQuestionAnswers(obj: JsonObject, out: ArrayList<HistoryMessage>, questionIdx: HashMap<String, Int>) {
+    private fun attachQuestionAnswers(obj: JsonObject, out: ArrayList<MutableRow>, questionIdx: HashMap<String, Int>, lineNo: Long) {
         if (questionIdx.isEmpty()) return
         val content = (obj["message"] as? JsonObject)?.get("content") as? JsonArray ?: return
         for (el in content) {
             val block = el as? JsonObject ?: continue
             if (block.str("type") != "tool_result") continue
             val idx = block.str("tool_use_id")?.let(questionIdx::remove) ?: continue
-            val prev = out.getOrNull(idx) ?: continue
+            val row = out.getOrNull(idx) ?: continue
             val answers = parseAnswers(toolResultText(block["content"])) ?: continue
-            out[idx] = prev.copy(answers = answers)
+            row.msg = row.msg.copy(answers = answers)
+            row.patchLine = lineNo
         }
     }
 

@@ -51,6 +51,8 @@ import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.ConvoHistoryPage
+import dev.ccpocket.protocol.FetchHistoryPage
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
@@ -615,6 +617,55 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
     private var currentSessionId: String? = null
+
+    // ── incremental reattach + older-history paging (issue #147) ─────────────────────────────────────
+    // The transcript cursor the last full/delta ConvoHistory left us at, and which session it belongs
+    // to — echoed back as OpenSession.lastEventSeq on reconnect re-opens so the daemon replays only the
+    // delta. In-memory only, by design: a delta is only meaningful while `messages` still holds the
+    // transcript it continues; a fresh open always replays in full.
+    private var historySeq: Long? = null
+    private var historySeqSession: String? = null
+    // older-history paging: the on-screen window's oldest cursor + whether more exists on disk
+    private var historyFirstSeq: Long? = null
+    val historyHasMore = mutableStateOf(false)
+    val historyLoadingOlder = mutableStateOf(false)
+    private var historyPageDeadline: Job? = null
+    /** How many rows the last page PREPENDED (read with [historyPrependGen]) — the chat list scrolls
+     *  by this to keep the viewport anchored on the row the user was reading. */
+    var lastHistoryPrependCount = 0
+        private set
+    val historyPrependGen = mutableStateOf(0)
+
+    /** The cursor to ride an [OpenSession] re-open (issue #147): the stored seq only when the target
+     *  session still matches the one it was recorded for AND we still hold its transcript; else 0 =
+     *  "replay in full, but this client understands delta frames" (arms the observe tail's deltas).
+     *  Never null from a new client — null is how an OLD client looks on the wire. */
+    private fun lastEventSeqFor(sid: String?): Long =
+        historySeq?.takeIf { sid != null && historySeqSession == sid && messages.isNotEmpty() } ?: 0L
+
+    /** Forget the #147 cursors/paging — every place the transcript itself is dropped must call this,
+     *  or a stale cursor would ask the daemon to continue a transcript we no longer hold. */
+    private fun resetHistoryPaging() {
+        historySeq = null; historySeqSession = null; historyFirstSeq = null
+        historyHasMore.value = false; historyLoadingOlder.value = false
+        historyPageDeadline?.cancel(); historyPageDeadline = null
+        lastHistoryPrependCount = 0
+    }
+
+    /** Scrolled to the top of the loaded window — fetch one page of OLDER history (issue #147). The
+     *  deadline covers a daemon that predates paging (it silently drops the frame): stop offering. */
+    fun loadOlderHistory() {
+        val convo = convoId.value ?: return
+        val before = historyFirstSeq ?: return
+        if (!historyHasMore.value || historyLoadingOlder.value) return
+        historyLoadingOlder.value = true
+        scope.launch { send(FetchHistoryPage(convo, beforeSeq = before)) }
+        historyPageDeadline?.cancel()
+        historyPageDeadline = scope.launch {
+            delay(10_000)
+            if (historyLoadingOlder.value) { historyLoadingOlder.value = false; historyHasMore.value = false }
+        }
+    }
 
     /** The last prompt sent that the daemon hasn't visibly started processing (no chunk/tool/done yet).
      *  If the daemon answers [SessionGone] (convo idle-reaped while the link was down), we auto-reopen the
@@ -1269,7 +1320,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // sink revives with this reconnected device, and an old daemon would keep BOTH observers
                 // tailing — two SessionLive/ConvoHistory streams ping-ponging the phone between convoIds.
                 if (observing.value) send(CloseSession(convo))
-                send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE))
+                // lastEventSeq (issue #147): we still hold this session's transcript — ask for the delta
+                send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid)))
             }
             dir != null -> send(ListSessions(dir))
             else -> {} // directory list already refreshed by launchTransport
@@ -1308,6 +1360,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         pendingAsk.value = null
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
+        resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
         demoMode.value = false // leaving the demo returns to real pairing
         demoConnecting.value = false
         abandonVoice()
@@ -1422,6 +1475,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         autoFocusComposer.value = false
         pendingAsk.value = null
         messages.clear(); pendingImages.clear()
+        resetHistoryPaging() // #147
         terminalEntries.clear(); terminalBusy.value = false
         changedFiles.clear(); changedFilesLoading.value = false; changedFilesUnavailable.value = false
         closeFileViewer()
@@ -1798,7 +1852,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     val wd = workdir.value
                     if (promptRetry != null && !promptResendArmed && sid != null && wd != null) {
                         promptResendArmed = true
-                        scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE)) }
+                        // lastEventSeq (issue #147): the transcript is still on screen — delta reattach
+                        scope.launch { send(OpenSession(wd, sid, mode = mode.value, agent = sessionAgent.value ?: AgentKind.CLAUDE, lastEventSeq = lastEventSeqFor(sid))) }
                     } else {
                         promptEvidence(); promptResendArmed = false
                         finishThinking(); streaming.value = false
@@ -1812,17 +1867,49 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
             // reconciles without flashing, duplicating, or reordering.
             is ConvoHistory -> if (f.convoId == convoId.value) {
-                // an EMPTY replay is only ever the daemon's explicit /clear wipe (every other emit site
-                // guards isNotEmpty) — the fresh session's window is empty, so the "Context NN%" statusline
-                // resets and hides until the first new turn reports usage (issue #149). Without this a
-                // composer-typed /clear pinned the badge at the wiped session's % forever: TurnDone
-                // deliberately ignores zero-usage frames, and the menu path's optimistic reset
-                // (clearConversation) never runs for a typed command.
-                if (f.messages.isEmpty()) contextUsed.value = null
-                val localRows = messages.toList()
-                val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
-                if (merged != localRows) replace(messages, merged)
-                replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
+                if (f.delta) {
+                    // incremental reattach (issue #147): only the rows past the cursor we sent — merged at
+                    // the tail (or into the live-received overlap), NEVER a wipe/replace. An empty delta
+                    // means "already caught up" (the daemon normally doesn't even send one).
+                    if (f.messages.isNotEmpty()) {
+                        val localRows = messages.toList()
+                        val merged = TranscriptMerge.mergeDelta(localRows, f.messages.map(::historyItem))
+                        if (merged != localRows) replace(messages, merged)
+                        replayEcho = true // same replay/stream race as the full path
+                    }
+                    f.lastSeq?.let { historySeq = it; historySeqSession = currentSessionId }
+                } else {
+                    // an EMPTY full replay is only ever the daemon's explicit /clear wipe (every other emit
+                    // site guards isNotEmpty) — the fresh session's window is empty, so the "Context NN%"
+                    // statusline resets and hides until the first new turn reports usage (issue #149).
+                    // Without this a composer-typed /clear pinned the badge at the wiped session's % forever:
+                    // TurnDone deliberately ignores zero-usage frames, and the menu path's optimistic reset
+                    // (clearConversation) never runs for a typed command.
+                    if (f.messages.isEmpty()) contextUsed.value = null
+                    val localRows = messages.toList()
+                    val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
+                    if (merged != localRows) replace(messages, merged)
+                    replayEcho = true // arm the one-shot live-stream dedupe for the replay/stream race
+                    // reattach cursor + paging anchors (issue #147); null fields = a pre-#147 daemon
+                    historySeq = f.lastSeq
+                    historySeqSession = if (f.lastSeq != null) currentSessionId else null
+                    historyFirstSeq = f.firstSeq
+                    historyHasMore.value = f.hasMore && f.firstSeq != null
+                }
+            }
+            // one page of OLDER history (issue #147) — prepended above the current window. Gated on the
+            // in-flight flag: a page fanned to a client that never asked must not double-prepend.
+            is ConvoHistoryPage -> if (f.convoId == convoId.value && historyLoadingOlder.value) {
+                historyPageDeadline?.cancel(); historyPageDeadline = null
+                historyLoadingOlder.value = false
+                val older = f.messages.map(::historyItem)
+                if (older.isNotEmpty()) {
+                    messages.addAll(0, older)
+                    lastHistoryPrependCount = older.size
+                    historyPrependGen.value++
+                }
+                historyFirstSeq = f.firstSeq ?: historyFirstSeq
+                historyHasMore.value = f.hasMore && f.firstSeq != null
             }
             is CommandList -> if (f.convoId == convoId.value) replace(slashCommands, f.commands)
             is Transcript -> onTranscript(f)
@@ -2218,6 +2305,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
         messages.clear(); convoId.value = null; replayEcho = false
+        resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
         composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
@@ -2245,7 +2333,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
-        send(OpenSession(wd, resumeId, model = openModel, mode = openMode, effort = openEffort, agent = openAgent))
+        // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
+        // declares this client delta-capable so an observe view tails with deltas (issue #147)
+        send(OpenSession(wd, resumeId, model = openModel, mode = openMode, effort = openEffort, agent = openAgent, lastEventSeq = lastEventSeqFor(resumeId)))
         delay(8000) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
             opening.value = false
@@ -2967,6 +3057,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun clearConversation() {
         val c = convoId.value ?: return
         messages.clear(); chatTitle.value = null; contextUsed.value = null
+        resetHistoryPaging() // #147: the wiped transcript's cursor dies with it
         clearBackgroundJobs()
         scope.launch { send(SendPrompt(c, "/clear")) }
     }
@@ -3015,6 +3106,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         convoId.value = null
         chatTitle.value = null
         messages.clear()
+        resetHistoryPaging() // #147
         pendingImages.clear()
         clearFileUploads()
         clearBackgroundJobs()
@@ -3037,12 +3129,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch {
             obs?.let { send(CloseSession(it)) }
             messages.clear(); convoId.value = null; observing.value = false
+            resetHistoryPaging() // #147: the take-over open replays in full
             // "Continue here" resumes under the Settings default mode — omitting it fell back to the
             // wire default (ask each step), ignoring the user's chosen mode (issue #50). Model/effort
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
             mode.value = defaultMode.value
-            send(OpenSession(wd, sid, model = saved?.model, mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true))
+            send(OpenSession(wd, sid, model = saved?.model, mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true, lastEventSeq = lastEventSeqFor(sid)))
         }
     }
 
@@ -3053,6 +3146,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         convoId.value = null
         chatTitle.value = null
         messages.clear()
+        resetHistoryPaging() // #147
         pendingImages.clear()
         clearFileUploads()
         clearBackgroundJobs()

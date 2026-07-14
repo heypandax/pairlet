@@ -11,7 +11,9 @@ import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.ConvoHistoryPage
 import dev.ccpocket.protocol.Directories
+import dev.ccpocket.protocol.FetchHistoryPage
 import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.FileDiff
@@ -66,6 +68,7 @@ object GuestCaps {
         // ---- the eight data-plane frames a bridge also gets ----
         is SessionLive -> true
         is ConvoHistory -> true
+        is ConvoHistoryPage -> true // the guest's own older-history page (issue #147, request gated above)
         is AssistantChunk -> true
         is ToolEvent -> true
         is TurnDone -> true
@@ -116,6 +119,9 @@ object GuestCaps {
         // composer voice capture on the guest's own session
         is AudioChunk -> true
         is AudioCancel -> true
+        // older-history paging of the guest's OWN conversation (issue #147) — GuestGuard gates it on
+        // convo ownership like CancelTurn, so it reads no transcript the guest can't already see
+        is FetchHistoryPage -> true
         // DENIED — the management plane a scoped guest must never reach (issue #115 §8):
         //  FetchUsage / FetchAuthStatus / AuthLogin* / AuthLogout (account switching + quota),
         //  SetPushPrefs (owner's global push toggle), RunShellCommand (the standalone terminal power tool),

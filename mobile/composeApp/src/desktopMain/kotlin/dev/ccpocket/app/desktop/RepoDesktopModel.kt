@@ -690,6 +690,12 @@ class RepoDesktopModel(
     override val chatMode: PermissionMode get() = repo.mode.value
     override val chatEffort: String? get() = repo.effort.value
     override val messages: List<ChatItem> get() = repo.messages
+    // older-history lazy load (issue #147) — straight delegation to the shared repository
+    override val historyHasMore: Boolean get() = repo.historyHasMore.value
+    override val historyLoadingOlder: Boolean get() = repo.historyLoadingOlder.value
+    override val historyPrependGen: Int get() = repo.historyPrependGen.value
+    override val lastHistoryPrependCount: Int get() = repo.lastHistoryPrependCount
+    override fun loadOlderHistory() = repo.loadOlderHistory()
     override val streaming: Boolean get() = repo.streaming.value
     // mirrors mobile's under-bubble cue: link not Ready, or receipts stalled on a Ready-looking link (#78)
     override val sendUndelivered: Boolean get() = repo.phase.value != ConnPhase.Ready || repo.sendStalled.value

@@ -109,6 +109,25 @@ object TranscriptMerge {
     }
 
     /**
+     * Merge a DELTA replay (issue #147: `ConvoHistory.delta = true` — only the rows PAST the cursor this
+     * client sent) into [local]. Unlike a full-window [merge], a delta must NEVER replace the transcript
+     * wholesale: everything before the cursor is deliberately absent from it.
+     *  - Overlapping tail (some delta rows were also received live before the drop): the anchored
+     *    [merge] handles it — the anchor lands inside the local tail and older scrollback survives.
+     *  - No overlap (everything in the delta arrived while the link was down — the common reconnect):
+     *    APPEND after the local tail, resolving pending prompt bubbles the delta proves delivered
+     *    (their transcript row replaces them, so input neither vanishes nor duplicates).
+     *  - An empty delta changes nothing (never the /clear wipe an empty FULL replay means).
+     */
+    fun mergeDelta(local: List<ChatItem>, delta: List<ChatItem>): List<ChatItem> {
+        if (delta.isEmpty()) return local
+        if (local.isEmpty()) return delta
+        if (findAnchor(local, delta) != null) return merge(local, delta)
+        val delivered = delta.filterIsInstance<ChatItem.User>().mapTo(HashSet()) { it.text }
+        return local.filterNot { it is ChatItem.User && it.pending && it.text in delivered } + delta
+    }
+
+    /**
      * True when [text], arriving as the FIRST stream event after a merged replay, is already the tail
      * of the last content bubble — i.e. the replay's disk read caught the very block the pump then
      * delivered live (the reattach race). Trailing transcript-invisible rows are skipped so a rescued

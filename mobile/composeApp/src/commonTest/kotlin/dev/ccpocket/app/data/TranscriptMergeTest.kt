@@ -265,4 +265,49 @@ class TranscriptMergeTest {
         val claimed = listOf<ChatItem>(ChatItem.Tool("Bash", "x", taskId = "live-1"))
         assertEquals(-1, TranscriptMerge.echoToolIndex(claimed, "Bash", "x"))
     }
+
+    // ---- issue-147 delta merges: a delta must never wipe/replace the transcript ----
+
+    @Test
+    fun deltaWithNoOverlapAppendsAfterTheLocalTail() {
+        // everything in the delta arrived while the link was down — the common reconnect
+        val local = listOf<ChatItem>(user("q1"), ChatItem.Assistant("a1"))
+        val delta = listOf<ChatItem>(ChatItem.Assistant("a2"), user("q2"))
+        assertEquals(local + delta, TranscriptMerge.mergeDelta(local, delta))
+    }
+
+    @Test
+    fun deltaOverlappingTheLiveTailMergesInsteadOfDuplicating() {
+        // part of the delta was also received live before the drop (the cursor predates those rows)
+        val local = listOf<ChatItem>(user("q1"), ChatItem.Assistant("a1"), user("q2"), ChatItem.Assistant("a2 part"))
+        val delta = listOf<ChatItem>(user("q2"), ChatItem.Assistant("a2 partial reply grown on disk"), ChatItem.Assistant("a3"))
+        val merged = TranscriptMerge.mergeDelta(local, delta)
+        // scrollback before the overlap survives; the overlapping rows pair up (no q2 twice)
+        assertEquals(1, merged.count { it is ChatItem.User && (it as ChatItem.User).text == "q2" })
+        assertEquals(user("q1"), merged.first())
+        assertTrue(merged.any { it is ChatItem.Assistant && (it as ChatItem.Assistant).text == "a3" })
+    }
+
+    @Test
+    fun deltaResolvesPendingBubblesItProvesDelivered() {
+        // the prompt was typed offline (pending bubble), delivered while away — its transcript row
+        // arrives in the delta, so the pending copy must neither vanish nor duplicate nor stay pending
+        val local = listOf<ChatItem>(user("q1"), ChatItem.Assistant("a1"), user("fix the bug", pending = true, promptId = "p1"))
+        val delta = listOf<ChatItem>(user("fix the bug"), ChatItem.Assistant("fixed"))
+        val merged = TranscriptMerge.mergeDelta(local, delta)
+        assertEquals(1, merged.count { it is ChatItem.User && (it as ChatItem.User).text == "fix the bug" })
+        assertFalse(merged.any { it is ChatItem.User && (it as ChatItem.User).pending })
+    }
+
+    @Test
+    fun emptyDeltaChangesNothingNeverAWipe() {
+        val local = listOf<ChatItem>(user("q1"), ChatItem.Assistant("a1"))
+        assertEquals(local, TranscriptMerge.mergeDelta(local, emptyList()))
+    }
+
+    @Test
+    fun deltaIntoEmptyLocalIsJustTheDelta() {
+        val delta = listOf<ChatItem>(user("q1"), ChatItem.Assistant("a1"))
+        assertEquals(delta, TranscriptMerge.mergeDelta(emptyList(), delta))
+    }
 }
