@@ -89,6 +89,12 @@ import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.RegisterPush
 import dev.ccpocket.protocol.RunShellCommand
+import dev.ccpocket.protocol.ScheduleCancel
+import dev.ccpocket.protocol.ScheduleCreate
+import dev.ccpocket.protocol.ScheduleInfo
+import dev.ccpocket.protocol.ScheduleList
+import dev.ccpocket.protocol.ScheduleRepeat
+import dev.ccpocket.protocol.ScheduleState
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.SessionGone
@@ -1691,6 +1697,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 skillCatalog.value = f; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
             }
             is AuthState -> authState.value = f
+            // scheduled tasks (issue #137): the single reply to every pocket/schedule.* request
+            is ScheduleState -> {
+                scheduleDeadline?.cancel()
+                replace(schedules, f.items)
+                schedulesLoaded.value = true; schedulesUnavailable.value = false
+                scheduleError.value = f.error
+            }
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
             is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
@@ -1799,6 +1812,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // a FAILED turn (API error / synthetic placeholder — issue #65): show the error row where
                 // the reply would be; no green ✓ marker for a turn that produced nothing
                 f.error?.let { messages.add(ChatItem.Sys(it)) }
+                // usage-limit hit with a parsed reset moment (issue #137): light the one-tap
+                // "auto-continue after reset" banner. Null (ordinary error / old daemon) = no offer.
+                if (f.error != null) {
+                    f.usageLimitResetAt?.let {
+                        limitOffer.value = LimitOffer(f.convoId, sessionKey.value ?: currentSessionId, workdir.value ?: "", it)
+                    }
+                }
                 if (turnWasLive) {
                     if (f.error == null) messages.add(ChatItem.TurnEnded(turnStartMark?.elapsedNow()?.inWholeSeconds?.toInt()))
                     turnStartMark = null
@@ -2214,6 +2234,96 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(FetchSkillCatalog(workdir.value)) }
     }
 
+    // ── scheduled tasks (issue #137): one-shot & repeat prompt deliveries the daemon fires ──
+    /** The daemon's schedule list — the latest [ScheduleState]. */
+    val schedules = mutableStateListOf<ScheduleInfo>()
+    /** True once the first [ScheduleState] of this session lands — "empty" vs. "still loading". */
+    val schedulesLoaded = mutableStateOf(false)
+    /** No reply — the daemon predates pocket/schedule.* (it silently drops the unknown frame, so
+     *  silence is the only signal) — distinct from an EMPTY list. */
+    val schedulesUnavailable = mutableStateOf(false)
+    /** The last request's user-facing refusal ([ScheduleState.error]); null = the last op succeeded. */
+    val scheduleError = mutableStateOf<String?>(null)
+    private var scheduleDeadline: Job? = null
+
+    /** One-tap "auto-continue when the limit resets" (issue #137): set when a turn failed on a usage
+     *  limit AND the daemon parsed the reset moment out of the CLI's error text
+     *  ([TurnDone.usageLimitResetAt]); the banner offers [scheduleAutoContinue]. Cleared on session
+     *  switch and on the next manual send (the user moved on). */
+    data class LimitOffer(val convoId: String, val sessionId: String?, val workdir: String, val resetAtMs: Long)
+    val limitOffer = mutableStateOf<LimitOffer?>(null)
+
+    private fun armScheduleDeadline() {
+        scheduleError.value = null
+        scheduleDeadline?.cancel()
+        scheduleDeadline = scope.launch {
+            delay(8_000)
+            if (!schedulesLoaded.value) schedulesUnavailable.value = true
+        }
+    }
+
+    /** Pull the daemon's schedule list; the reply lands in [schedules]. Same stale-daemon deadline
+     *  discipline as [fetchSkillCatalog] — better an honest "update the daemon" than a spinner. */
+    fun fetchSchedules() {
+        schedulesUnavailable.value = false
+        armScheduleDeadline()
+        scope.launch { send(ScheduleList) }
+    }
+
+    /**
+     * Create one scheduled delivery: [prompt] fires into [resumeId] (default: the OPEN session) under
+     * [workdir] (default: the open session's cwd) at [runAtMs]. Returns false when no target workdir is
+     * known (nothing sent). The daemon answers with the updated [ScheduleState].
+     */
+    fun createSchedule(
+        prompt: String,
+        runAtMs: Long,
+        repeat: ScheduleRepeat? = null,
+        label: String? = null,
+        workdir: String? = null,
+        resumeId: String? = null,
+    ): Boolean {
+        val wd = workdir ?: this.workdir.value ?: return false
+        if (prompt.isBlank()) return false
+        val sid = resumeId ?: sessionKey.value ?: currentSessionId
+        armScheduleDeadline()
+        scope.launch {
+            send(
+                ScheduleCreate(
+                    workdir = wd, prompt = prompt, runAtMs = runAtMs, repeat = repeat, resumeId = sid,
+                    agent = sessionAgent.value ?: AgentKind.CLAUDE,
+                    model = model.value, mode = mode.value, label = label,
+                ),
+            )
+        }
+        return true
+    }
+
+    /** Remove one schedule; the daemon replies with the updated list. */
+    fun cancelSchedule(id: String) {
+        armScheduleDeadline()
+        scope.launch { send(ScheduleCancel(id)) }
+    }
+
+    /** The limit-reset one-tap (issue #137): schedule a "Continue" back into the limited session shortly
+     *  after the window resets. Returns false when the offer is gone / has no usable target. */
+    fun scheduleAutoContinue(): Boolean {
+        val offer = limitOffer.value ?: return false
+        val ok = createSchedule(
+            prompt = "Continue",
+            runAtMs = offer.resetAtMs + LIMIT_RESUME_MARGIN_MS,
+            workdir = offer.workdir.takeIf { it.isNotEmpty() },
+            resumeId = offer.sessionId,
+            label = "Auto-continue",
+        )
+        if (ok) {
+            limitOffer.value = null
+            // same raw-English Sys convention as the session-expired notice above
+            messages.add(ChatItem.Sys("auto-continue scheduled — this session resumes shortly after the limit resets"))
+        }
+        return ok
+    }
+
     // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
     /** Folders I've shared out (the management page) — the latest [ShareListing]. */
     val shares = mutableStateListOf<ShareInfo>()
@@ -2324,6 +2434,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         pendingAsk.value = null
+        limitOffer.value = null // the auto-continue offer belongs to the session that hit the limit (#137)
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
         // restore the session's last-known launch flags: shows the right badge immediately (no default flash)
@@ -2574,6 +2685,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
+        limitOffer.value = null // a manual send supersedes the auto-continue offer (#137)
         workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
         scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
@@ -3229,6 +3341,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)
+        // auto-continue fires this long AFTER the parsed limit reset (issue #137) — absorbs clock skew
+        // between the CLI's reported epoch and the account's actual window flip
+        const val LIMIT_RESUME_MARGIN_MS = 90_000L
     }
 }
 

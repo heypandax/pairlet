@@ -1216,6 +1216,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
+    var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
     if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
@@ -1516,6 +1517,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     if (atToken == null || atListing?.subPath != atDir) emptyList() else atMatches(atListing.entries, atLeaf)
                 }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
+                    LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     LaunchedEffect(capturing) { if (capturing) attachSheet = false }
@@ -1619,6 +1621,9 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                                             if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
+                                        // long-press → schedule this message for later (issue #137). Text-only:
+                                        // images/files can't ride a schedule (nothing is uploaded at fire time).
+                                        onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
                                 }
                                 // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
@@ -1650,6 +1655,21 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                 onSelect = { repo.switchMode(it) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },
+            )
+        }
+        if (showScheduleSheet) {
+            // schedule send (issue #137): fires the composer text into THIS session later
+            val scheduledNote = stringResource(Res.string.schedule_created_note)
+            ScheduleSendSheet(
+                text = composer.text.trim(),
+                onSchedule = { runAtMs, repeat ->
+                    val t = composer.text.trim()
+                    if (t.isNotBlank() && repo.createSchedule(t, runAtMs, repeat = repeat)) {
+                        composer.clear(); repo.clearDraft(draftKey)
+                        repo.messages.add(dev.ccpocket.app.data.ChatItem.Sys(scheduledNote))
+                    }
+                },
+                onDismiss = { showScheduleSheet = false },
             )
         }
         if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }

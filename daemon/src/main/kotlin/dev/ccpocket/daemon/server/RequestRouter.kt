@@ -13,6 +13,7 @@ import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SkillCatalogService
 import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.presets.PresetService
+import dev.ccpocket.daemon.schedule.SchedulerService
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
@@ -58,6 +59,9 @@ import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.RunShellCommand
+import dev.ccpocket.protocol.ScheduleCancel
+import dev.ccpocket.protocol.ScheduleCreate
+import dev.ccpocket.protocol.ScheduleList
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
@@ -81,6 +85,7 @@ class RequestRouter(
     private val auth: AuthService,
     private val prefs: DaemonPrefs,
     private val presets: PresetService,
+    private val scheduler: SchedulerService,
 ) {
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
@@ -242,6 +247,13 @@ class RequestRouter(
             is SavePreset -> scope.launch { presets.save(frame, sink::emit) }
             is DeletePreset -> scope.launch { presets.delete(frame, sink::emit) }
             is ActivatePreset -> scope.launch { presets.activate(frame.id, frame.force, sink::emit) }
+
+            // scheduled tasks (issue #137): quick store ops; each answers with the full ScheduleState
+            // truth (same single-reply contract as pocket/presets.*). Guests/bridges never reach here —
+            // their capability whitelists deny the frame type at the choke point (default-deny).
+            is ScheduleCreate -> sink.emit(scheduler.create(frame, dirs.validateWorkdir(frame.workdir)?.toString()))
+            is ScheduleList -> sink.emit(scheduler.state())
+            is ScheduleCancel -> sink.emit(scheduler.cancel(frame.id))
 
             // phone-push switch: null enabled = query only; either way the daemon's truth is the reply
             is SetPushPrefs -> {

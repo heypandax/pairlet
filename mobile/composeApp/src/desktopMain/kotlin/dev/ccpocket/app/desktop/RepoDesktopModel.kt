@@ -860,6 +860,13 @@ class RepoDesktopModel(
         repo.cancelTurn()
     }
 
+    // ── scheduled tasks (issue #137): the management list, straight off the repo ──
+    override val schedules get() = repo.schedules.toList()
+    override val schedulesLoaded get() = repo.schedulesLoaded.value
+    override val schedulesStale get() = repo.schedulesUnavailable.value
+    override fun refreshSchedules() { repo.fetchSchedules() }
+    override fun cancelSchedule(id: String) { repo.cancelSchedule(id) }
+
     override val authState: dev.ccpocket.protocol.AuthState? get() = repo.authState.value
     override fun refreshAuth() { repo.fetchAuthStatus() }
     override fun switchAccount(force: Boolean) { repo.authLogin(force) }

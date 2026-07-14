@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class) // combinedClickable (send long-press, #137)
+
 package dev.ccpocket.app.ui
 
 import androidx.compose.animation.core.Animatable
@@ -10,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -89,12 +92,23 @@ fun ComposerField(
 
 /** 44dp round action button: filled terracotta (send/done) or hairline outline (mic). */
 @Composable
-fun RoundActionButton(onClick: () -> Unit, filled: Boolean, enabled: Boolean = true, contentDescription: String?, content: @Composable () -> Unit) {
+fun RoundActionButton(
+    onClick: () -> Unit,
+    filled: Boolean,
+    enabled: Boolean = true,
+    contentDescription: String?,
+    onLongClick: (() -> Unit)? = null, // e.g. the send button's "schedule send" (issue #137)
+    content: @Composable () -> Unit,
+) {
     Box(
         Modifier.size(44.dp).clip(CircleShape)
             .background(if (filled) Tok.accent else Tok.base)
             .let { if (filled) it else it.border(1.dp, Tok.hair, CircleShape) }
-            .clickable(enabled = enabled, onClick = onClick)
+            .let {
+                if (onLongClick != null) {
+                    it.combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+                } else it.clickable(enabled = enabled, onClick = onClick)
+            }
             .graphicsLayer { alpha = if (enabled) 1f else 0.5f },
         contentAlignment = Alignment.Center,
     ) { content() }

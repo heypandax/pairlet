@@ -663,7 +663,15 @@ data class AskWithdrawn(
  *  [error] non-null = the turn FAILED and finalText (if any) is not a real answer: the CLI reported
  *  is_error, or every API call failed and it wrote a `<synthetic>` placeholder reply (issue #65 —
  *  previously swallowed, rendering as a normal-looking bubble). Clients show it as an error row;
- *  old clients ignore the field and keep today's behavior. */
+ *  old clients ignore the field and keep today's behavior.
+ *
+ *  [usageLimitResetAt] (issue #137, riding #138's usage-limit detection): when [error] reads as a
+ *  usage/rate-limit refusal AND the CLI's error text carries the window's reset moment (the
+ *  `…usage limit reached|<unix-epoch>` wording), this is that moment as EPOCH MILLIS — the client
+ *  then offers one-tap "auto-continue when the limit resets" (a [ScheduleCreate] one-shot back at
+ *  this session). Null whenever the error isn't a limit hit or no epoch could be parsed — the
+ *  client shows no button then (graceful degrade). A trailing optional both ways: an old daemon
+ *  omits it (null — no button), an old phone ignores the unknown key (ignoreUnknownKeys). */
 @Serializable
 @SerialName("pocket/turn.done")
 data class TurnDone(
@@ -671,6 +679,7 @@ data class TurnDone(
     val finalText: String? = null,
     val usage: TokenUsage? = null,
     val error: String? = null,
+    val usageLimitResetAt: Long? = null,
 ) : ToPhone
 
 /** daemon -> phone: delivery receipt for a [SendPrompt] that carried a promptId — emitted the moment
@@ -1170,6 +1179,100 @@ data class ShareEnded(
         const val REASON_EXPIRED = "expired"
     }
 }
+
+// ── scheduled tasks (issue #137): one-shot & simple-repeat prompts the daemon fires on its own clock ──
+// Wire compat, all four directions:
+//  - NEW app → OLD daemon: the daemon can't decode the unknown "t" and silently DROPS the frame (its
+//    inbound decodes are runCatching-wrapped; no reply ever comes) — the client arms a reply deadline
+//    and shows its "update the computer's cc-pocket" state instead of a spinner.
+//  - OLD app → NEW daemon: an old app never sends pocket/schedule.*, so nothing changes for it.
+//  - NEW daemon → OLD app: [ScheduleState] is only ever sent in reply to a schedule request, which an
+//    old app never makes; if one ever leaks, the unknown frame is dropped harmlessly (tolerant decode).
+//  - OLD daemon → NEW app: never sends these — silence is the client's only signal (the deadline above).
+// Management plane: NOT admitted for restricted credentials — GuestCaps/BridgeCaps are whitelists, so
+// every pocket/schedule.* frame is denied-by-default for a guest/bridge (pinned by their exhaustive tests).
+
+/**
+ * How a schedule repeats. Exactly ONE of the two fields is set (both null = one-shot, expressed by
+ * [ScheduleCreate.repeat] being null instead):
+ *  - [intervalMs]: fixed interval from the previous planned fire time (e.g. 24h = "daily at roughly
+ *    the first run's time"), floor-guarded daemon-side ([MIN_SCHEDULE_INTERVAL_MS]);
+ *  - [dailyAtMinute]: every day at this minute-of-day (0..1439) in the DAEMON HOST's local timezone —
+ *    the daemon is the machine that fires, so its wall clock is the one that means anything.
+ */
+@Serializable
+data class ScheduleRepeat(
+    val intervalMs: Long? = null,
+    val dailyAtMinute: Int? = null,
+)
+
+/**
+ * client -> daemon: create one scheduled prompt delivery (issue #137). At [runAtMs] (epoch millis,
+ * the FIRST fire for a repeating schedule) the daemon injects [prompt] into the target session —
+ * resuming [resumeId] under [workdir] when set (the "限额重置后自动继续" case), else starting a fresh
+ * session there — through the SAME open/queue path an interactive prompt takes (mid-turn sends queue
+ * into the running turn; a session live in an outside terminal refuses and the miss is recorded).
+ * The reply is one [ScheduleState] carrying the full updated list. Persisted on the daemon
+ * (~/.cc-pocket/schedules.json): survives restarts; a fire missed while the daemon was down runs
+ * late within its grace window, else is marked missed (one-shot) / skipped forward (repeat).
+ */
+@Serializable
+@SerialName("pocket/schedule.create")
+data class ScheduleCreate(
+    val workdir: String,
+    val prompt: String,
+    val runAtMs: Long,
+    val repeat: ScheduleRepeat? = null,
+    val resumeId: String? = null,
+    val agent: AgentKind = AgentKind.CLAUDE,
+    val model: String? = null,
+    val mode: PermissionMode = PermissionMode.DEFAULT,
+    val label: String? = null, // short display name; null = the client renders the prompt preview
+) : ToDaemon
+
+/** client -> daemon: list this machine's schedules. Reply: one [ScheduleState]. */
+@Serializable
+@SerialName("pocket/schedule.list")
+data object ScheduleList : ToDaemon
+
+/** client -> daemon: delete schedule [id] (one-shot or repeating; a settled one-shot may also be
+ *  cleared this way). Unknown ids are a no-op. Reply: one [ScheduleState] (the updated list). */
+@Serializable
+@SerialName("pocket/schedule.cancel")
+data class ScheduleCancel(val id: String) : ToDaemon
+
+/** One schedule as the client sees it. [nextRunAtMs] is the daemon's computed next fire (null = a
+ *  one-shot that already settled — [lastOutcome] says how). [lastOutcome] is "ok", "missed", or a
+ *  short user-facing error from the last fire attempt; null = never fired yet. Fields beyond [id]
+ *  default so the shape can grow tail-first without breaking older peers. */
+@Serializable
+data class ScheduleInfo(
+    val id: String,
+    val workdir: String = "",
+    val prompt: String = "",
+    val repeat: ScheduleRepeat? = null,
+    val resumeId: String? = null,
+    val agent: AgentKind = AgentKind.CLAUDE,
+    val label: String? = null,
+    val nextRunAtMs: Long? = null,
+    val lastRunAtMs: Long? = null,
+    val lastOutcome: String? = null,
+)
+
+/** daemon -> client: the schedules truth — the single reply to every pocket/schedule.* request.
+ *  [error] is a user-facing refusal of the request that prompted this reply (validation, bad
+ *  workdir); the list still reflects the actual stored state alongside it (same contract as
+ *  [PresetsState]). Never pushed unsolicited, so an old app can only ever see it by asking. */
+@Serializable
+@SerialName("pocket/schedule.state")
+data class ScheduleState(
+    val items: List<ScheduleInfo> = emptyList(),
+    val error: String? = null,
+) : ToPhone
+
+/** Floor for [ScheduleRepeat.intervalMs], enforced daemon-side and mirrored by client forms so the
+ *  two can't drift — a runaway sub-minute repeat would hammer sessions in a loop. */
+const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)

@@ -36,6 +36,24 @@ object PushPolicy {
     fun isUsageLimit(error: String?): Boolean =
         error != null && USAGE_LIMIT_PATTERNS.any { it.containsMatchIn(error) }
 
+    // "Claude AI usage limit reached|1751990400" — the CLI appends the window's reset moment as a
+    // pipe-separated unix epoch (seconds). 10–11 digits = seconds (through year ~5138); 12–13 = a
+    // peer that already sends millis. Anchored to '|' so an ordinary number in prose never matches.
+    private val RESET_EPOCH = Regex("""\|(\d{10,13})\b""")
+
+    /**
+     * The usage-limit window's reset moment as EPOCH MILLIS, parsed from a turn-error text — what
+     * [dev.ccpocket.protocol.TurnDone.usageLimitResetAt] carries so the client can offer "auto-continue
+     * when the limit resets" (issue #137). Null when [error] isn't a usage-limit hit, or the CLI's
+     * wording carries no parseable epoch (newer banner wordings like "resets 3am" don't) — the client
+     * simply shows no button then.
+     */
+    fun usageLimitResetAtMs(error: String?): Long? {
+        if (!isUsageLimit(error)) return null
+        val raw = RESET_EPOCH.find(error!!)?.groupValues?.get(1)?.toLongOrNull() ?: return null
+        return if (raw < 1_000_000_000_000L) raw * 1000 else raw
+    }
+
     /**
      * The push for a finished turn. [error] non-null = the turn ended abnormally (error result,
      * synthetic placeholder, or the agent process dying — see [dev.ccpocket.daemon.conversation.PushHook]):
