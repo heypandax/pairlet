@@ -55,7 +55,7 @@ class SchedulerService(
         // cancel by an id it already holds (no reply-race, no signature reverse-lookup). Falls back to a
         // fresh UUID for the (legacy / colliding) empty-or-taken case — the entry.id uniqueness that
         // update()/remove() rely on is preserved either way.
-        val clientId = req.clientId?.trim()?.takeIf { it.isNotEmpty() && store.byId(it) == null }
+        val clientId = req.clientId?.trim()?.takeIf { it.isNotEmpty() }
         val entry = ScheduleEntry(
             id = clientId ?: UUID.randomUUID().toString(),
             workdir = canonicalWorkdir!!,
@@ -72,8 +72,10 @@ class SchedulerService(
             // covers client clock skew and "in 0 minutes" gestures
             nextRunAtMs = maxOf(req.runAtMs, now),
         )
-        store.add(entry)
-        log.info("schedule ${entry.id.take(8)}… created (next ${entry.nextRunAtMs}, repeat=${entry.repeating})")
+        // atomic check-and-add: a client id that's already taken (or lost the race to a same-id
+        // double-tap) falls back to a fresh UUID, so two entries can never share one id (#137/A1).
+        val landed = if (store.addIfAbsent(entry)) entry else entry.copy(id = UUID.randomUUID().toString()).also { store.add(it) }
+        log.info("schedule ${landed.id.take(8)}… created (next ${landed.nextRunAtMs}, repeat=${landed.repeating})")
         return state()
     }
 

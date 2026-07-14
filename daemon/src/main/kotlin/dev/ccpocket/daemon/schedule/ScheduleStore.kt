@@ -58,6 +58,16 @@ class ScheduleStore private constructor(private val path: File) {
         persist()
     }
 
+    /** Add [entry] only if its id is free — the check and the append happen under ONE lock so two
+     *  concurrent creates carrying the same client-chosen id (a rapid auto-continue double-tap, #137/A1)
+     *  can't both observe "free" and land two entries under one id. Returns false when the id was taken. */
+    fun addIfAbsent(entry: ScheduleEntry): Boolean = synchronized(lock) {
+        if (state.entries.any { it.id == entry.id }) return@synchronized false
+        state = state.copy(entries = state.entries + entry)
+        persist()
+        true
+    }
+
     /** Replace the entry with [entry]'s id (no-op when it was removed concurrently). */
     fun update(entry: ScheduleEntry) = synchronized(lock) {
         if (state.entries.none { it.id == entry.id }) return@synchronized
