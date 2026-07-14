@@ -72,7 +72,9 @@ class DaemonCore(
     val scheduler = SchedulerService(
         scheduleStore,
         executor = ScheduleExecutor { entry ->
-            val sink = KeyedSink("scheduler", OutboundSink { /* headless fire — no client is attached */ })
+            // watching=false: this sink is a black hole (headless fire, no client attached). Counting it
+            // as a watcher would suppress the owner ask-push while nobody can see/answer the card (C1).
+            val sink = KeyedSink("scheduler", OutboundSink { /* headless fire — no client is attached */ }, watching = false)
             val wd = dirs.validateWorkdir(entry.workdir)
                 ?: return@ScheduleExecutor "not a readable directory: ${entry.workdir}"
             val convoId = registry.open(

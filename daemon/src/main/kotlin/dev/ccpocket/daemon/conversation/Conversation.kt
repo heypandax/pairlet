@@ -777,7 +777,10 @@ class Conversation(
         if (now - prev < askPushCoalesceMs) return
         lastAskPushMs = now
         val label = f.title.ifBlank { f.tool }
-        val watched = sinks.isNotEmpty() // someone received the ask frame on the data plane just now
+        // a REAL client must have the ask frame on the data plane — the scheduler's headless fire sink
+        // is a black hole (issue #137/C1): counting it as "watched" suppressed the owner-ask push while
+        // nobody could actually see or answer the card, timing the ask out to a safe deny.
+        val watched = sinks.values.any { it.isWatching() }
         // off the pump: a control-plane push must never stall stdout parsing
         scope.launch {
             val pushed = runCatching { hook.onAskPending(workdir, sessionId, origin, label, watched) }.getOrDefault(false)

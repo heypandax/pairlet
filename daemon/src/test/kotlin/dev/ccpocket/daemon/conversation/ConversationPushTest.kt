@@ -97,6 +97,7 @@ class ConversationPushTest {
         dyingStderr: String? = null,
         origin: String? = null,
         pathScope: List<String>? = null,
+        headlessSink: Boolean = false, // the sole sink is the scheduler's non-watching black hole (C1)
         askPushResult: () -> Boolean = { true },
         body: suspend Harness.() -> Unit,
     ) = runBlocking {
@@ -111,7 +112,11 @@ class ConversationPushTest {
         val convo = Conversation(
             convoId = "cPush", initialWorkdir = Files.createTempDirectory("ccp-push"),
             initialMode = PermissionMode.DEFAULT,
-            initialSink = { f -> synchronized(frames) { frames.add(f) } },
+            initialSink = if (headlessSink) {
+                KeyedSink("scheduler", { f -> synchronized(frames) { frames.add(f) } }, watching = false)
+            } else {
+                OutboundSink { f -> synchronized(frames) { frames.add(f) } }
+            },
             parentScope = scope, backend = ScriptedBackend(files, thenExit, dyingStderr),
             pushHookProvider = {
                 PushHook { _, _, finalText, error -> turnCalls.add(TurnCall(finalText, error)) }
@@ -152,6 +157,20 @@ class ConversationPushTest {
             assertTrue(call.watched, "the initial sink is attached — the ask had a watcher")
             assertTrue(call.tool.isNotBlank())
             assertEquals(1, askFrames().size, "the ask frame itself still fans out to the sink")
+        }
+    }
+
+    @Test
+    fun a_headless_scheduler_sink_does_not_count_as_a_watcher() {
+        if (isWindows()) return
+        // issue #137/C1: a scheduled task opens the session with a non-watching black-hole sink. It must
+        // NOT be counted as "someone is watching" — otherwise the owner ask-push is suppressed while
+        // nobody can see or answer the card, and the ask times out to a safe deny (the task silently fails).
+        harness(stages = listOf(listOf(init, controlRequest("r1"))), headlessSink = true) {
+            await("ask push hook") { askCalls.size == 1 }
+            val call = askCalls.single()
+            assertNull(call.origin, "still an owner session (origin=null)")
+            assertFalse(call.watched, "the headless scheduler sink is a black hole — not a watcher")
         }
     }
 
