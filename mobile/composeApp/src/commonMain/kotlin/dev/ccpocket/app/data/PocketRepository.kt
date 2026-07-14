@@ -2253,6 +2253,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     data class LimitOffer(val convoId: String, val sessionId: String?, val workdir: String, val resetAtMs: Long)
     val limitOffer = mutableStateOf<LimitOffer?>(null)
 
+    /** The offer [scheduleAutoContinue] just consumed — drives the banner's in-place "confirmed" flip
+     *  (design: scheduled-prompts.jsx C2) with its Undo. Cleared wherever [limitOffer] is. */
+    val limitConfirmed = mutableStateOf<LimitOffer?>(null)
+
     private fun armScheduleDeadline() {
         scheduleError.value = null
         scheduleDeadline?.cancel()
@@ -2318,10 +2322,25 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         )
         if (ok) {
             limitOffer.value = null
+            limitConfirmed.value = offer // the banner flips in place to "Will continue at …" + Undo
             // same raw-English Sys convention as the session-expired notice above
             messages.add(ChatItem.Sys("auto-continue scheduled — this session resumes shortly after the limit resets"))
         }
         return ok
+    }
+
+    /** The confirmed banner's Undo: cancel the one-tap schedule and restore the offer so the user can
+     *  re-decide. The created schedule's id only exists daemon-side, so it's found back by its signature
+     *  (label + exact fire time) in the [ScheduleState] reply that followed the create; if that reply
+     *  never landed (stale daemon), the offer is still restored — better an honest re-offer than a
+     *  banner stuck confirmed. */
+    fun undoAutoContinue() {
+        val offer = limitConfirmed.value ?: return
+        schedules.firstOrNull {
+            it.label == "Auto-continue" && it.nextRunAtMs == offer.resetAtMs + LIMIT_RESUME_MARGIN_MS
+        }?.let { cancelSchedule(it.id) }
+        limitConfirmed.value = null
+        limitOffer.value = offer
     }
 
     // ── folder-share (issue #115): OWNER control plane + GUEST redeem ──
@@ -2434,7 +2453,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
         pendingAsk.value = null
-        limitOffer.value = null // the auto-continue offer belongs to the session that hit the limit (#137)
+        limitOffer.value = null; limitConfirmed.value = null // the auto-continue offer belongs to the session that hit the limit (#137)
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
         // restore the session's last-known launch flags: shows the right badge immediately (no default flash)
@@ -2685,7 +2704,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
         streaming.value = true
-        limitOffer.value = null // a manual send supersedes the auto-continue offer (#137)
+        limitOffer.value = null; limitConfirmed.value = null // a manual send supersedes the auto-continue offer (#137)
         workdir.value?.let { promptRetry = PromptRetry(outText, images, it, promptId); promptResendArmed = false }
         Telemetry.track(TelEvent.PromptSent)
         scope.launch { send(SendPrompt(c, outText, images, promptId = promptId)) }
