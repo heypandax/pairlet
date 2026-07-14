@@ -69,8 +69,12 @@ class Conversation(
      *  every interactive owner client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens
      *  the ask timeout (nobody is watching the sheet live), and arms the ask push below. */
     val origin: String? = null,
-    // how a bridge conversation's permission ask reaches the OWNER (the bridge never gets the frame)
+    // how a pending permission ask reaches a human who isn't watching: a bridge conversation's owner
+    // (issue #91 — the bridge never gets the frame) or an owner session's locked/away phone (issue #138)
     private val askPushHookProvider: () -> AskPushHook? = { null },
+    // per-conversation window between ask pushes (see [lastAskPushMs]); a knob only so tests can
+    // exercise the coalescing without waiting a minute
+    private val askPushCoalesceMs: Long = ASK_PUSH_COALESCE_MS,
     /** GUEST folder-share scope (issue #115): the canonical shared roots this conversation is confined to.
      *  Non-null → the PermissionBridge hard-denies any Read/Write/Edit whose target escapes them, BEFORE
      *  the guest is even asked. Null = an unrestricted owner conversation (no path guard). */
@@ -166,8 +170,9 @@ class Conversation(
     @Volatile
     private var intentionalStop = false
 
-    // last time an urgent bridge-approval push fired for this conversation — coalesces a burst of asks
-    // into one owner alert (issue #91). Touched only from the single permission-bridge emit path.
+    // last time an approval push fired for this conversation (bridge #91 / owner session #138) —
+    // coalesces a burst of asks into one alert. Stamped on the single permission-bridge emit path;
+    // rolled back from the hook coroutine when no push actually went out (see [maybePushAsk]).
     @Volatile
     private var lastAskPushMs = 0L
 
@@ -660,34 +665,22 @@ class Conversation(
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
-        // Bridge-origin conversations (issue #91): the ask frame fans out normally (the bridge's egress
-        // filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
-        // the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
-        // is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
-        // A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally, and the
-        // owner must NOT be push-nudged for it (that inbox is the guest's, per the design's "requests go to
-        // <guest>"). Only a headless BRIDGE (origin set, no pathScope) — which can neither see nor answer the
-        // ask — nudges the owner (issue #115 crypto review L2).
-        val bridgeAskPush = origin != null && pathScope == null
+        // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
+        //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
+        //    filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
+        //    the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
+        //    is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
+        //  - OWNER sessions (origin == null, issue #138): the ask fans out to attached clients as always,
+        //    but with the phone locked/offline (or nobody attached) the card goes unseen and the ask
+        //    times out to a safe deny — the hook (presence-gated in the relay client) wakes the phone.
+        //  - A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally,
+        //    and the owner must NOT be push-nudged for it (that inbox is the guest's, per the design's
+        //    "requests go to <guest>" — issue #115 crypto review L2). Never hooked.
         val emitWithAskPush: suspend (dev.ccpocket.protocol.Frame) -> Unit =
-            if (!bridgeAskPush) { f -> sink.emit(f) }
+            if (pathScope != null) { f -> sink.emit(f) }
             else { f ->
                 sink.emit(f)
-                if (f is dev.ccpocket.protocol.PermissionAsk) {
-                    askPushHookProvider()?.let { hook ->
-                        // COALESCE (issue #91 LOW): a turn can raise several asks in quick succession; at
-                        // most one urgent approval push per conversation per window so a burst can't spam
-                        // the owner's lock screen. The push is a "come look" nudge — reattach + resurface
-                        // shows every pending card, so one alert covers the batch.
-                        val now = System.currentTimeMillis()
-                        if (now - lastAskPushMs >= ASK_PUSH_COALESCE_MS) {
-                            lastAskPushMs = now
-                            val label = f.title.ifBlank { f.tool }
-                            // off the pump: a control-plane push must never stall stdout parsing
-                            scope.launch { runCatching { hook.onAskPending(workdir, sessionId, origin, label) } }
-                        }
-                    }
-                }
+                if (f is dev.ccpocket.protocol.PermissionAsk) maybePushAsk(f)
             }
         val b = PermissionBridge(
             convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
@@ -738,6 +731,31 @@ class Conversation(
         if (armExecuting) executing = true
         scope.launch(CoroutineName("pump-$convoId")) {
             pump(p, b)
+        }
+    }
+
+    /**
+     * Fire the ask-push hook for a just-emitted [dev.ccpocket.protocol.PermissionAsk] (issues #91/#138).
+     *
+     * COALESCE (issue #91 LOW): a turn can raise several asks in quick succession; at most one approval
+     * push per conversation per window so a burst can't spam the lock screen. The push is a "come look"
+     * nudge — reattach + resurface shows every pending card, so one alert covers the batch. The stamp is
+     * taken OPTIMISTICALLY (burst-safe: the pump thread sees it before the next ask parses) and rolled
+     * back when the hook reports it didn't push (issue #138: an owner ask suppressed because the phone
+     * was watching must not mute the next ask's push after the user walks away).
+     */
+    private fun maybePushAsk(f: dev.ccpocket.protocol.PermissionAsk) {
+        val hook = askPushHookProvider() ?: return
+        val now = System.currentTimeMillis()
+        val prev = lastAskPushMs
+        if (now - prev < askPushCoalesceMs) return
+        lastAskPushMs = now
+        val label = f.title.ifBlank { f.tool }
+        val watched = sinks.isNotEmpty() // someone received the ask frame on the data plane just now
+        // off the pump: a control-plane push must never stall stdout parsing
+        scope.launch {
+            val pushed = runCatching { hook.onAskPending(workdir, sessionId, origin, label, watched) }.getOrDefault(false)
+            if (!pushed) lastAskPushMs = prev
         }
     }
 
@@ -917,9 +935,10 @@ class Conversation(
                         failedTurnStreak = if (synthetic) failedTurnStreak + 1 else 0
                         if (degraded() != wasDegraded) sink.emit(live(sessionId))
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
-                        // so a control-plane send never stalls stdout parsing. A failed turn pushes the error,
-                        // not the placeholder text.
-                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, error ?: ev.finalText) } }
+                        // so a control-plane send never stalls stdout parsing. A failed turn carries [error]
+                        // separately so the push is worded as a failure (usage-limit hits included — #138),
+                        // never as a normal turn-complete.
+                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText, error) } }
                     }
                     is AgentEvent.ControlRequest -> b.onControlRequest(ev)
                     is AgentEvent.ControlCancel -> b.onCancel(ev)
@@ -954,7 +973,16 @@ class Conversation(
             // carry the exit code + the agent's last stderr line: a --resume that dies before its first
             // init (bad session id, context overflow) used to surface as a bare "agent process ended"
             val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
-            sink.emit(PocketError("process_exited", "agent process ended (exit ${p.exitCode() ?: "?"})$why", convoId))
+            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why"
+            sink.emit(PocketError("process_exited", summary, convoId))
+            // an UNEXPECTED death is exactly what a locked phone must hear about (issue #138): the
+            // session died with no TurnDone push coming. Same hook + presence gate as a failed turn;
+            // stderr rides as the error summary (a usage-limit refusal printed there words the push).
+            // NOT within [DEATH_PUSH_QUIET_MS] of a TurnResult: a fatal turn error routinely kills the
+            // process right after its result — that failure was already pushed, don't alert it twice.
+            if (System.currentTimeMillis() - lastTurnEndedMs > DEATH_PUSH_QUIET_MS) {
+                pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, null, summary) } }
+            }
         }
     }
 
@@ -1389,8 +1417,13 @@ class Conversation(
         // DELAYS a reap when the continuation never comes at all.
         const val CONTINUATION_GRACE_MS = 5 * 60 * 1000L
 
-        // at most one urgent bridge-approval push per conversation per this window (issue #91). The verdict
-        // windows themselves are unified under agent.ApprovalTimeout.ms (issue #100) — see PermissionBridge.
+        // at most one approval push per conversation per this window (issue #91 bridge, #138 owner). The
+        // verdict windows themselves are unified under agent.ApprovalTimeout.ms (issue #100) — see
+        // PermissionBridge. Only a push that actually went out spends the window (see [maybePushAsk]).
         const val ASK_PUSH_COALESCE_MS = 60_000L
+
+        // a process death this soon after a TurnResult is the SAME failure the turn's push already
+        // reported (a fatal error result is often followed by the CLI exiting) — no second alert (#138)
+        const val DEATH_PUSH_QUIET_MS = 10_000L
     }
 }

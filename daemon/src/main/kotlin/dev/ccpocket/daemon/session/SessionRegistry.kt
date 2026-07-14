@@ -118,8 +118,9 @@ class SessionRegistry(
     @Volatile
     var pushHook: PushHook? = null
 
-    /** Installed by the relay client (issue #91): how a BRIDGE conversation's permission ask reaches
-     *  the owner — the ask frame itself never goes to the bridge. Null in local-server mode. */
+    /** Installed by the relay client: how a pending permission ask reaches a human who isn't watching —
+     *  a BRIDGE conversation's owner (issue #91: the ask frame never goes to the bridge) or an owner
+     *  session's locked/away phone (issue #138). Null in local-server mode. */
     @Volatile
     var askPushHook: AskPushHook? = null
 
