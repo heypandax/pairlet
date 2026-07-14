@@ -765,6 +765,74 @@ enum class CommandSource {
 @SerialName("pocket/commands")
 data class CommandList(val convoId: String, val commands: List<SlashCommand>) : ToPhone
 
+// ── installed skills/plugins catalog (issue #132): the desktop browse page ──────────────────────
+
+/**
+ * phone -> daemon: request this machine's installed skills + plugins for the browse page (issue #132).
+ * [workdir] additionally scans that project's `.claude/skills`; null = the user-level catalog only.
+ * A NEW message type — wire-safe both ways: an old daemon can't decode the unknown discriminator and
+ * silently DROPS the frame (its inbound decodes are runCatching-wrapped; no reply ever comes), so the
+ * client arms a reply deadline and shows an "update the daemon" state; an old phone never sends it.
+ */
+@Serializable
+@SerialName("pocket/skills.fetch")
+data class FetchSkillCatalog(val workdir: String? = null) : ToDaemon
+
+/** Where an installed skill was discovered. */
+@Serializable
+enum class SkillScope {
+    @SerialName("user") USER,       // ~/.claude/skills/<name>/
+    @SerialName("project") PROJECT, // <workdir>/.claude/skills/<name>/
+}
+
+/** One installed skill with browse-page detail — the composer autocomplete keeps the lighter
+ *  [SlashCommand]. Every field beyond [name] is optional-with-default so the shape can grow
+ *  tail-first without breaking older peers. */
+@Serializable
+data class SkillInfo(
+    val name: String,
+    val description: String = "",
+    val scope: SkillScope = SkillScope.USER,
+    /** The remaining top-level frontmatter scalars (argument-hint, allowed-tools, license, …) —
+     *  [description] is surfaced separately and excluded here. */
+    val meta: Map<String, String> = emptyMap(),
+    /** SKILL.md body after the frontmatter, capped daemon-side (~4KB); [truncated] marks a longer original. */
+    val excerpt: String = "",
+    val truncated: Boolean = false,
+    /** Absolute path of the skill directory on the daemon's machine (display only). */
+    val path: String? = null,
+)
+
+/** One installed Claude Code plugin (`~/.claude/plugins`), manifest-derived. Everything beyond
+ *  [name] is optional so a plugin with a missing or partial manifest still lists. */
+@Serializable
+data class PluginInfo(
+    val name: String,
+    val description: String = "",
+    val version: String? = null,
+    /** The marketplace half of the install ledger's "name@marketplace" key. */
+    val marketplace: String? = null,
+    /** The ledger's install scope, raw ("user" / "project"). */
+    val scope: String? = null,
+    val author: String? = null,
+    val homepage: String? = null,
+    /** Command names the plugin ships (manifest `commands`), no leading "/". */
+    val commands: List<String> = emptyList(),
+    /** README.md excerpt, capped like [SkillInfo.excerpt]. */
+    val excerpt: String = "",
+    val truncated: Boolean = false,
+    /** The plugin's install directory on the daemon's machine (display only). */
+    val path: String? = null,
+)
+
+/** daemon -> phone: the machine's installed skills + plugins — [FetchSkillCatalog]'s single reply. */
+@Serializable
+@SerialName("pocket/skills")
+data class SkillCatalog(
+    val skills: List<SkillInfo> = emptyList(),
+    val plugins: List<PluginInfo> = emptyList(),
+) : ToPhone
+
 /**
  * daemon -> phone: the conversation's background jobs (backgrounded shells, sub-agents, monitors),
  * pushed whenever the set or any status changes. An empty list clears the in-chat indicator.

@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Shield
@@ -106,6 +107,8 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
     model.activeComputer?.let { c ->
         val where = model.newSessionDir?.let { tilde(it) } ?: "" // the dir it will actually start in
         add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, false) { model.openNewSession() })
+        // the installed skills/plugins browser (issue #132) — a machine fact, so it rides the active computer
+        add(PItem(PKind.ACTION, "Browse skills & plugins", "on ${c.name}", Icons.Outlined.AutoAwesome, false) { model.openSkills() })
     }
     model.attention.forEach { a ->
         add(

@@ -126,6 +126,12 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 ChangesOverlay(model) { model.showChanges = false }
             }
         }
+        if (model.showSkills) {
+            // the installed skills/plugins browser (issue #132) — same centered-scrim language as Changes
+            Overlay(onDismiss = { model.showSkills = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                SkillsOverlay(model) { model.showSkills = false }
+            }
+        }
         if (model.showSettings) {
             Overlay(onDismiss = { model.showSettings = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
                 SettingsModal(model) { model.showSettings = false }

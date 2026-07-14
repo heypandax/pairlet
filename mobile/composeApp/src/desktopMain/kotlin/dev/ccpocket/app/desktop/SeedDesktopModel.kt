@@ -167,6 +167,7 @@ class SeedDesktopModel : DesktopModel {
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
+    override var showSkills by mutableStateOf(false)
 
     override val appVersion = "1.3.5"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
