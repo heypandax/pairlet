@@ -124,6 +124,37 @@ class DeviceSessionsOverlapTest {
     }
 
     @Test
+    fun a_purely_passive_live_socket_goes_deaf_after_a_late_flip_and_only_a_re_handshake_heals_it() = runBlocking {
+        // BLIND-SPOT (issue #146 A5): every other overlap test sends an INBOUND frame right after the flip,
+        // which promotes the fallback back. But a phone that finished reconnecting and is now PASSIVELY
+        // watching a long turn sends nothing — so the dying socket's late handshake leaves `active` pointed
+        // at ITS session and every outbound frame of that turn seals where the live socket can't open it.
+        // Nothing self-heals until the phone's own decrypt-failure detector forces a re-handshake.
+        val h = Harness(dir)
+        val keys = pairedDevice(h, "devD", "ticket-d")
+        val live = handshake(h, "devD", keys, "ticket-d") // the socket that stays alive
+        roundTrip(h, "devD", live, "ghost-1")             // first contact confirmed (PSK consumed)
+
+        // the dying socket's LATE handshake flips `active` onto its own session (fallback = live). Drive it
+        // by hand so we can grab the DaemonInfo the daemon seals right after — an OUTBOUND frame under the
+        // new `active`, with the live socket having sent NOTHING since (pure passive, zero inbound).
+        val dyingInit = E2ESession.initiator(keys.privateRaw, keys.publicRaw, h.identity.e2ePubRaw, ByteArray(0))
+        h.sessions.onFrame("devD", Wire.payload(Wire.HANDSHAKE, dyingInit.ephPublic))
+        val dying = dyingInit.finish(Wire.payloadBody(h.outbound.receive().second)) // the HANDSHAKE reply
+        val passiveFrame = h.outbound.receive().second                              // DaemonInfo, sealed under `active`
+
+        // the live socket is DEAF: it cannot open what the daemon now sends, and no inbound frame exists to
+        // promote it back — the exact freeze A5 describes.
+        assertTrue(live.open(Wire.payloadBody(passiveFrame)) == null, "the passive live socket cannot decrypt the post-flip outbound")
+        assertTrue(dying.open(Wire.payloadBody(passiveFrame)) != null, "the outbound sealed under the late (dying) session instead")
+
+        // the phone's self-heal (RelayE2EConnection deaf-link → forced re-handshake): a fresh handshake from
+        // the live socket re-keys `active`, and the very next outbound decrypts again — the loop is closed.
+        val healed = handshake(h, "devD", keys, null) // helper asserts its DaemonInfo seals under `healed`
+        roundTrip(h, "devD", healed, "ghost-2")
+    }
+
+    @Test
     fun at_most_the_two_newest_handshakes_stay_live() = runBlocking {
         val h = Harness(dir)
         val keys = pairedDevice(h, "devC", "ticket-c")

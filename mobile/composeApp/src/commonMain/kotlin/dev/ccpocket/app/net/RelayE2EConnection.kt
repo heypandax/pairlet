@@ -52,6 +52,12 @@ class RelayE2EConnection {
     /** Relay control-plane frames (Attached, AuthError, PeerPresence) — NOT E2E daemon traffic. The
      *  repository reads this to drive an honest connection state (e.g. "computer offline"). */
     val control = MutableSharedFlow<Frame>(extraBufferCapacity = 16)
+    /** Signals the repo that this LIVE socket has gone DEAF: [DEAF_DECRYPT_FAILURES] inbound transport
+     *  frames in a row wouldn't decrypt (issue #146 — the daemon's reconnect-overlap flipped its outbound
+     *  seal onto a session this socket can't open, while the WS keeps pinging so nothing else notices).
+     *  The repo answers with a forced re-handshake, extending the connection-period deaf-link upgrade
+     *  (startListWait) into the middle of a passively-observed turn. */
+    val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
 
     // Connection GENERATION (issue #142): bumped once per connect() call. The repo serializes connects
@@ -109,12 +115,21 @@ class RelayE2EConnection {
             // (network switch / NAT / relay idle-drop) trips the write timeout and reconnects. Ktor's own ping
             // can't catch this — it rides the same outgoing path and wedges too. The relay's ktor auto-pongs it.
             val pinger = launchHeartbeat()
+            var deafRun = 0 // consecutive inbound frames that wouldn't decrypt (#146 deaf-link detection)
             try {
                 for (frame in incoming) {
                     if (gen != connSeq) break // a stale reader must not emit into the shared inbound/control flows (#142)
                     when {
                         frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
-                            val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
+                            val pt = session.open(Wire.payloadBody(frame.data))
+                            if (pt == null) {
+                                // A lone stray/reordered frame is noise; CONSECUTIVE failures mean the daemon
+                                // is sealing under a session this live socket can't open (#146) — signal the
+                                // repo to force a re-handshake, then reset so the heal attempt starts clean.
+                                if (deafTripped(++deafRun)) { deaf.emit(Unit); deafRun = 0 }
+                                continue
+                            }
+                            deafRun = 0 // a good decrypt proves the link is not deaf
                             runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
                         }
                         // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
@@ -159,6 +174,17 @@ class RelayE2EConnection {
 
     private fun control(frame: dev.ccpocket.protocol.ToRelay): String =
         PocketJson.encodeToString(Envelope("h", 0L, to = Route.RELAY, body = frame))
+
+    companion object {
+        // #146: how many inbound transport frames must fail to decrypt back-to-back before we treat the
+        // socket as deaf and force a re-handshake. >1 so a single stray/reordered frame never trips it;
+        // small so a passively-observed long turn heals within a few frames.
+        const val DEAF_DECRYPT_FAILURES = 3
+
+        /** Pure (for tests): a live socket is DEAF once this many inbound transport frames fail to decrypt
+         *  consecutively — a re-keyed/overwritten daemon session (#146), not a lone stray frame. */
+        fun deafTripped(consecutiveFailures: Int): Boolean = consecutiveFailures >= DEAF_DECRYPT_FAILURES
+    }
 }
 
 /** The relay rejected our device credential — re-pairing is required (not a transient network error). */
