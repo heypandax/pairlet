@@ -23,6 +23,9 @@ class Conn(
     // daemons only: the protoV from DaemonHello — gates whether headless DevicePaired rows are
     // replayed to this daemon (an older daemon would file them as full-power devices).
     val daemonProtoV: Int = 1,
+    // remote client ip (via Caddy's X-Forwarded-For; see net/clientIp) — carried purely so a
+    // disconnect/supersede/revoke can log WHO was dropped (issue #141). Advisory, never a capability.
+    val ip: String = "",
 )
 
 /**
@@ -103,9 +106,10 @@ class Broker {
         ds.forEach { runCatching { it.sendText(text) } }
     }
 
-    /** Force-close every live socket of a just-revoked device. */
-    suspend fun closeDevice(account: String, deviceId: String) {
+    /** Force-close every live socket of a just-revoked device; returns them so the caller can log the kick. */
+    suspend fun closeDevice(account: String, deviceId: String): List<Conn> {
         val ds = mutex.withLock { devices[account]?.filter { it.deviceId == deviceId }.orEmpty() }
         ds.forEach { runCatching { it.close("revoked") } }
+        return ds
     }
 }
