@@ -119,8 +119,10 @@ class RequestRouter(
             is ListSessionFiles -> scope.launch {
                 sink.emit(SessionFiles(frame.workdir, frame.sessionId, SessionFilesService.changedFiles(frame.agent, frame.workdir, frame.sessionId)))
             }
+            // serves any path canonically inside the workdir (issue #133) and, for a client that opted in,
+            // streams over-cap binaries as FileContentChunk frames (issue #134)
             is ReadFile -> scope.launch {
-                sink.emit(SessionFilesService.readFile(frame.agent, frame.workdir, frame.sessionId, frame.path))
+                SessionFilesService.streamFile(frame.agent, frame.workdir, frame.sessionId, frame.path, frame.allowChunks, sink::emit)
             }
             is ReadFileDiff -> scope.launch {
                 sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))

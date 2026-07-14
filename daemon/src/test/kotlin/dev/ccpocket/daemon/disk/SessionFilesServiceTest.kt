@@ -1,10 +1,16 @@
 package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileContentChunk
+import dev.ccpocket.protocol.Frame
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
@@ -264,6 +270,87 @@ class SessionFilesServiceTest {
         assertTrue(diff.truncated)
         assertTrue(diff.diff!!.length <= SessionFilesService.DIFF_CAP_BYTES)
         assertTrue(diff.diff!!.endsWith("\n")) // cut on a whole-line boundary, not mid-line
+    }
+
+    // ── chunked reads (issue #134) ────────────────────────────────────────────
+
+    /** Collect every frame [SessionFilesService.streamFileIn] emits for [path]. */
+    private fun streamFrames(
+        transcript: Path,
+        workdir: String,
+        path: String,
+        allowChunks: Boolean,
+        chunkRawBytes: Int = 300_000, // multiple of 3, small enough for multi-chunk tests
+        maxChunkedBytes: Long = dev.ccpocket.protocol.MAX_CHUNKED_READ_BYTES,
+    ): List<Frame> = runBlocking {
+        buildList {
+            SessionFilesService.streamFileIn(
+                AgentKind.CLAUDE, transcript, workdir, "s", path, allowChunks,
+                chunkRawBytes = chunkRawBytes, maxChunkedBytes = maxChunkedBytes,
+            ) { add(it) }
+        }
+    }
+
+    @Test
+    fun chunked_read_streams_an_oversized_document_and_the_pieces_reassemble_exactly() {
+        val bytes = ByteArray(SessionFilesService.BINARY_CAP_BYTES + 50_000) { (it % 251).toByte() }
+        val doc = tmp.resolve("big.docx").also { Files.write(it, bytes) }
+        val t = claudeTranscript("Write" to doc.toString())
+
+        val frames = streamFrames(t, tmp.toString(), doc.toString(), allowChunks = true)
+        val chunks = frames.map { it as FileContentChunk }
+        assertTrue(chunks.size > 1, "expected a multi-chunk stream, got ${chunks.size}")
+        assertEquals(chunks.indices.toList(), chunks.map { it.idx })      // contiguous, in order
+        assertTrue(chunks.last().last)
+        assertTrue(chunks.dropLast(1).none { it.last })
+        assertTrue(chunks.all { it.mediaType!!.startsWith("application/vnd.openxmlformats") })
+        assertTrue(chunks.all { it.totalBytes == bytes.size.toLong() })   // stateless: identity on every piece
+        // the concat-without-decode contract: joined base64 IS the whole file
+        val whole = Base64.getDecoder().decode(chunks.joinToString("") { it.base64 })
+        assertContentEquals(bytes, whole)
+    }
+
+    @Test
+    fun chunked_read_without_opt_in_keeps_the_single_frame_too_large_refusal() {
+        val doc = tmp.resolve("big.pdf").also { Files.write(it, ByteArray(SessionFilesService.BINARY_CAP_BYTES + 1)) }
+        val t = claudeTranscript("Write" to doc.toString())
+        val only = streamFrames(t, tmp.toString(), doc.toString(), allowChunks = false).single() as FileContent
+        assertFalse(only.ok)
+        assertTrue("too large" in only.error!!, only.error)
+    }
+
+    @Test
+    fun chunked_read_refuses_files_over_the_chunked_cap_with_the_new_limit() {
+        val doc = tmp.resolve("huge.pdf").also { Files.write(it, ByteArray(SessionFilesService.BINARY_CAP_BYTES + 200_001)) }
+        val t = claudeTranscript("Write" to doc.toString())
+        val only = streamFrames(
+            t, tmp.toString(), doc.toString(), allowChunks = true,
+            maxChunkedBytes = (SessionFilesService.BINARY_CAP_BYTES + 200_000).toLong(),
+        ).single() as FileContent
+        assertFalse(only.ok)
+        assertTrue("too large" in only.error!!, only.error)
+        assertTrue("${(SessionFilesService.BINARY_CAP_BYTES + 200_000) / 1024} KB" in only.error!!, only.error)
+    }
+
+    @Test
+    fun chunked_read_leaves_oversized_text_on_the_capped_single_frame_path() {
+        // text never chunks: the capped prefix is useful (unlike a truncated docx), so opt-in changes nothing
+        val txt = tmp.resolve("big.log").also { Files.writeString(it, "y".repeat(SessionFilesService.BINARY_CAP_BYTES + 10)) }
+        val t = claudeTranscript("Write" to txt.toString())
+        val only = streamFrames(t, tmp.toString(), txt.toString(), allowChunks = true).single() as FileContent
+        assertTrue(only.ok)
+        assertTrue(only.truncated)
+        assertEquals(SessionFilesService.TEXT_CAP_BYTES, only.text!!.length)
+    }
+
+    @Test
+    fun chunked_read_still_enforces_the_containment_gate() {
+        val proj = Files.createDirectories(tmp.resolve("proj"))
+        Files.write(tmp.resolve("outside.docx"), ByteArray(SessionFilesService.BINARY_CAP_BYTES + 10))
+        val t = claudeTranscript("Write" to proj.resolve("a.md").toString())
+        val only = streamFrames(t, proj.toString(), "../outside.docx", allowChunks = true).single() as FileContent
+        assertFalse(only.ok)
+        assertTrue("outside" in only.error!!, only.error)
     }
 
     // ── export containment (issue #67 v2 / #79) — the "no arbitrary-path read" red line ──────

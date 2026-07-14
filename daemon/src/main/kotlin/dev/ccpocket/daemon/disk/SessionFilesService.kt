@@ -4,7 +4,11 @@ import dev.ccpocket.daemon.codex.CodexPaths
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.FileDiff
+import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.MAX_CHUNKED_READ_BYTES
+import dev.ccpocket.protocol.READ_CHUNK_RAW_BYTES
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -93,7 +97,110 @@ object SessionFilesService {
             is ReadGate.Refuse -> FileContent(workdir, sessionId, path, ok = false, error = gate.error)
         }
 
-    /** Resolution of a [readFile] target — see the class doc's serve rule (issue #133). */
+    /**
+     * [readFile]'s streaming variant — the [dev.ccpocket.protocol.ReadFile] entry point. Emits either
+     * one [FileContent] (exactly [readFile]'s answer) or, when [allowChunks] and the target is a binary
+     * payload over [BINARY_CAP_BYTES] (issue #134), an in-order [FileContentChunk] stream up to
+     * [maxChunkedBytes]. Never throws; a mid-stream IO failure settles as an ok=false [FileContent]
+     * that supersedes the partial on the client.
+     */
+    suspend fun streamFile(
+        agent: AgentKind,
+        workdir: String,
+        sessionId: String,
+        path: String,
+        allowChunks: Boolean,
+        emit: suspend (Frame) -> Unit,
+    ) {
+        val transcript = transcriptFor(agent, workdir, sessionId)
+        if (transcript == null) {
+            emit(FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found"))
+            return
+        }
+        streamFileIn(agent, transcript, workdir, sessionId, path, allowChunks, emit = emit)
+    }
+
+    /** [streamFile] against an explicit transcript + injectable caps — testable without `$HOME`/50 MB files. */
+    internal suspend fun streamFileIn(
+        agent: AgentKind,
+        transcript: Path,
+        workdir: String,
+        sessionId: String,
+        path: String,
+        allowChunks: Boolean,
+        chunkRawBytes: Int = READ_CHUNK_RAW_BYTES,
+        maxChunkedBytes: Long = MAX_CHUNKED_READ_BYTES,
+        emit: suspend (Frame) -> Unit,
+    ) {
+        require(chunkRawBytes > 0 && chunkRawBytes % 3 == 0) { "chunkRawBytes must be a positive multiple of 3" }
+        val file = when (val gate = readGate(agent, transcript, workdir, path)) {
+            is ReadGate.Serve -> gate.file
+            is ReadGate.Refuse -> {
+                emit(FileContent(workdir, sessionId, path, ok = false, error = gate.error))
+                return
+            }
+        }
+        if (allowChunks && file.isRegularFile()) {
+            val total = runCatching { file.fileSize() }.getOrDefault(0L)
+            if (total > BINARY_CAP_BYTES) {
+                val media = binaryMediaTypeOf(file)
+                if (media != null) { // text stays a capped single frame — only whole-or-nothing binaries chunk
+                    if (total > maxChunkedBytes) {
+                        emit(
+                            FileContent(
+                                workdir, sessionId, path, ok = false,
+                                error = "file too large to send (${total / 1024} KB — the link caps transfers at ${maxChunkedBytes / 1024} KB)",
+                            ),
+                        )
+                        return
+                    }
+                    emitChunks(file, workdir, sessionId, path, media, total, chunkRawBytes, emit)
+                    return
+                }
+            }
+        }
+        emit(serveAt(file, workdir, sessionId, path))
+    }
+
+    /** The chunk pump: each piece base64-encoded independently ([chunkRawBytes] is a multiple of 3, so
+     *  the strings concatenate into valid base64 of the whole file). Last flag comes from a one-chunk
+     *  read-ahead, so a file that shrank mid-stream still terminates cleanly. */
+    private suspend fun emitChunks(
+        file: Path,
+        workdir: String,
+        sessionId: String,
+        path: String,
+        mediaType: String,
+        total: Long,
+        chunkRawBytes: Int,
+        emit: suspend (Frame) -> Unit,
+    ) {
+        val result = runCatching {
+            java.nio.file.Files.newInputStream(file).use { ins ->
+                var cur = ins.readNBytes(chunkRawBytes)
+                var idx = 0
+                while (true) {
+                    val next = ins.readNBytes(chunkRawBytes)
+                    val last = next.isEmpty()
+                    emit(
+                        FileContentChunk(
+                            workdir, sessionId, path, idx = idx, last = last,
+                            base64 = Base64.getEncoder().encodeToString(cur),
+                            mediaType = mediaType, totalBytes = total,
+                        ),
+                    )
+                    if (last) return@runCatching
+                    cur = next
+                    idx += 1
+                }
+            }
+        }
+        if (result.isFailure) { // settle the stream: the error frame supersedes any partial client-side
+            emit(FileContent(workdir, sessionId, path, ok = false, error = "unreadable: ${result.exceptionOrNull()?.message}"))
+        }
+    }
+
+    /** Resolution of a [readFile]/[streamFile] target — see the class doc's serve rule (issue #133). */
     private sealed interface ReadGate {
         data class Serve(val file: Path) : ReadGate
         data class Refuse(val error: String) : ReadGate
@@ -115,6 +222,18 @@ object SessionFilesService {
             if (containedForExport(workdir, path) == ExportGate.Missing) "that file no longer exists on the computer"
             else "that path is outside this session's project folder",
         )
+    }
+
+    /** The media type [serveAt] would serve [file] as base64 with, or null when it reads as UTF-8 text:
+     *  known image/document extensions first, then the same NUL sniff over the first 8 KiB. */
+    private fun binaryMediaTypeOf(file: Path): String? {
+        val ext = file.toString().substringAfterLast('.', "").lowercase()
+        imageTypes[ext]?.let { return it }
+        documentTypes[ext]?.let { return it }
+        val head = runCatching {
+            java.nio.file.Files.newInputStream(file).use { it.readNBytes(8192) }
+        }.getOrElse { return null } // unreadable: let serveAt produce the readable failure
+        return if (head.any { it == 0.toByte() }) "application/octet-stream" else null
     }
 
     /**

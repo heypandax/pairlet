@@ -62,6 +62,7 @@ import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.FileDiff
 import dev.ccpocket.protocol.FileUploadCancel
 import dev.ccpocket.protocol.FileUploaded
@@ -1768,9 +1769,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // no deadline cancel here: the ONE viewer deadline serves both replies and no-ops per
             // side once its value landed — canceling on the first arrival would strand the other
             is FileContent -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
+                fileChunks.reset() // a whole-frame reply (incl. a mid-stream failure) supersedes any partial stream
                 viewedFile.value = f
                 // an ExportFile reply rides the same channel + identity — settle the waiting state either way
                 if (exportWaiting.value) { exportWaiting.value = false; exportDeadline?.cancel() }
+            }
+            // chunked ReadFile reply (issue #134): same identity match as FileContent; each piece re-arms
+            // the viewer deadline (it now bounds the inter-chunk gap), the last one lands the whole file
+            is FileContentChunk -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
+                if (viewedFile.value == null) { // stop re-arming once something (even an error) landed
+                    // the deadline is NOT cancelled on completion: it still owes the FileDiff side its
+                    // honest fallback (same one-deadline-serves-both rule as the FileContent path)
+                    armViewedFileDeadline(f.path, f.workdir, f.sessionId, wantDiff = !isImageFile(f.path))
+                    fileChunks.add(f)?.let { whole -> viewedFile.value = whole }
+                }
             }
             is FileDiff -> if (f.path == viewedFilePath.value && f.workdir == workdir.value && f.sessionId == (sessionKey.value ?: currentSessionId)) {
                 viewedFileDiff.value = f
@@ -2464,6 +2476,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var changedFilesDeadline: Job? = null
     private var viewedFileDeadline: Job? = null
     private var exportDeadline: Job? = null // separate: approval can take the daemon's whole 30s window
+    private val fileChunks = FileChunkAssembler() // reassembles a chunked ReadFile reply (issue #134)
 
     /** Ask the daemon for the files this session touched (issue #36); the reply lands in [changedFiles].
      *  Needs the persistent sessionId — pre-first-turn sessions have nothing to list anyway. */
@@ -2480,11 +2493,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(ListSessionFiles(wd, sid, sessionAgent.value ?: AgentKind.CLAUDE)) }
     }
 
-    /** Open one changed file in the viewer; the daemon replies with a capped [FileContent] and,
-     *  when its transcript has line-level data, a [FileDiff] — both requested up front because the
-     *  viewer's default tab is the diff and the flip to full content should be instant. Images get
-     *  no [ReadFileDiff]: there is no text diff, and the request would cost the daemon a full
-     *  transcript re-scan just to say so. */
+    /** Open one project file in the viewer (changed-files list, @-completion, typed path — issue #133);
+     *  the daemon replies with a capped [FileContent] (or a [FileContentChunk] stream for over-cap
+     *  binaries, issue #134) and, when its transcript has line-level data, a [FileDiff] — both requested
+     *  up front because the viewer's default tab is the diff and the flip to full content should be
+     *  instant. Images get no [ReadFileDiff]: there is no text diff, and the request would cost the
+     *  daemon a full transcript re-scan just to say so. */
     fun openChangedFile(path: String) {
         val wd = workdir.value ?: return
         val sid = sessionKey.value ?: currentSessionId ?: return
@@ -2492,30 +2506,39 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         viewedFilePath.value = path
         viewedFile.value = null // show the loading state, not the previous file
         viewedFileDiff.value = null
+        fileChunks.reset() // a fresh read owes nothing to a prior chunk stream
         exportWaiting.value = false; exportDeadline?.cancel() // a fresh file owes nothing to a prior export
-        // ONE deadline arms both replies; each check no-ops once its reply landed, so a daemon that
-        // answers ReadFile but predates ReadFileDiff still gets the honest "needs a newer daemon" state.
+        armViewedFileDeadline(path, wd, sid, wantDiff)
+        val agent = sessionAgent.value ?: AgentKind.CLAUDE
+        scope.launch {
+            send(ReadFile(wd, sid, path, agent, allowChunks = true)) // we can reassemble chunked binaries (issue #134)
+            if (wantDiff) send(ReadFileDiff(wd, sid, path, agent))
+        }
+    }
+
+    /** ONE deadline arms both viewer replies; each check no-ops once its reply landed, so a daemon that
+     *  answers ReadFile but predates ReadFileDiff still gets the honest "needs a newer daemon" state.
+     *  Re-armed on every [FileContentChunk] so a long transfer isn't misread as silence — [ms] then
+     *  bounds the INTER-chunk gap, not the whole stream. */
+    private fun armViewedFileDeadline(path: String, wd: String, sid: String, wantDiff: Boolean, ms: Long = 8_000) {
         viewedFileDeadline?.cancel()
         viewedFileDeadline = scope.launch {
-            delay(8_000)
+            delay(ms)
             if (viewedFilePath.value != path) return@launch
             if (viewedFile.value == null) {
+                fileChunks.reset() // a stalled chunk stream is dead — don't let a late stray revive it
                 viewedFile.value = FileContent(wd, sid, path, ok = false, error = "no reply from the computer — the daemon may be too old for this")
             }
             if (wantDiff && viewedFileDiff.value == null) {
                 viewedFileDiff.value = FileDiff(wd, sid, path, ok = false, error = DIFF_ERROR_STALE_DAEMON)
             }
         }
-        val agent = sessionAgent.value ?: AgentKind.CLAUDE
-        scope.launch {
-            send(ReadFile(wd, sid, path, agent))
-            if (wantDiff) send(ReadFileDiff(wd, sid, path, agent))
-        }
     }
 
     fun closeFileViewer() {
         viewedFileDeadline?.cancel()
         exportDeadline?.cancel(); exportWaiting.value = false
+        fileChunks.reset()
         viewedFilePath.value = null; viewedFile.value = null; viewedFileDiff.value = null
     }
 

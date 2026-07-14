@@ -222,7 +222,11 @@ data class ListSessionFiles(
  *   - paths OUTSIDE the tree only when the session's own transcript shows this session changed
  *     them (the pre-#133 changed-set gate, kept for absolute-path edits) — never an arbitrary read.
  * The (workdir, sessionId) pair must still name a real transcript, anchoring the read to a session
- * the client can already see. Reply is one [FileContent].
+ * the client can already see. Reply is one [FileContent] — unless [allowChunks] (issue #134):
+ * a NEW client sets it true to declare it can reassemble a [FileContentChunk] stream, letting
+ * binaries over the single-frame cap through (up to [MAX_CHUNKED_READ_BYTES]). A trailing
+ * optional: an OLD daemon ignores the unknown key (single-frame behavior, oversized files still
+ * refuse), an OLD client omits it (a new daemon never chunks at it — its one-frame world stands).
  */
 @Serializable
 @SerialName("pocket/file.read")
@@ -231,6 +235,7 @@ data class ReadFile(
     val sessionId: String,
     val path: String,
     val agent: AgentKind = AgentKind.CLAUDE,
+    val allowChunks: Boolean = false,
 ) : ToDaemon
 
 /**
@@ -914,6 +919,42 @@ data class FileContent(
     val truncated: Boolean = false,
     val totalBytes: Long = 0,
 ) : ToPhone
+
+/**
+ * daemon -> phone: one piece of a chunked [ReadFile] reply (issue #134) — the read-direction mirror
+ * of [FileChunk]. Sent ONLY when the request carried [ReadFile.allowChunks] and the file is a binary
+ * payload (image/document/unknown-binary) over the single-frame cap; text stays capped single-frame
+ * and small binaries keep riding one [FileContent]. Chunks arrive IN ORDER on the E2E channel,
+ * identity-keyed like [FileContent] (workdir, sessionId, path); [mediaType]/[totalBytes] ride EVERY
+ * chunk so reassembly stays stateless. Every chunk's [base64] encodes [READ_CHUNK_RAW_BYTES] raw
+ * bytes (a multiple of 3) except the last, so the CONCATENATION of the base64 strings in idx order
+ * is itself valid base64 of the whole file — the client needs no per-chunk decode. A failure
+ * mid-stream arrives as a plain ok=false [FileContent] for the same identity, superseding the
+ * partial. An OLD phone never receives these (it never sets allowChunks); if one ever leaks, the
+ * unknown frame is dropped harmlessly.
+ */
+@Serializable
+@SerialName("pocket/file.content.chunk")
+data class FileContentChunk(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val idx: Int,            // 0-based, contiguous
+    val last: Boolean,       // true on the final chunk -> the client assembles + renders
+    val base64: String,
+    val mediaType: String? = null,
+    val totalBytes: Long = 0,
+) : ToPhone
+
+/** Hard total cap for a chunked [ReadFile] (issue #134) — generous for office documents while still
+ *  bounding what one tap can pull across the relay. One shared constant so the daemon's refusal and
+ *  any client-side caption can't drift. */
+const val MAX_CHUNKED_READ_BYTES: Long = 50L * 1024 * 1024
+
+/** Raw bytes per [FileContentChunk] (384 KiB -> 512 KiB of base64 per frame, comfortable margin under
+ *  the relay's 4 MiB frame cap with JSON + E2E overhead). MUST stay a multiple of 3: that's what makes
+ *  the per-chunk base64 strings concatenable without a decode (see [FileContentChunk]). */
+const val READ_CHUNK_RAW_BYTES: Int = 384 * 1024
 
 /**
  * daemon -> phone: reply to [ReadFileDiff]. [diff] is unified-diff text: `@@ -a,b +c,d @@` hunk

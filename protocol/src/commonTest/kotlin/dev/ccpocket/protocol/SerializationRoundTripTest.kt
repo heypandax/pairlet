@@ -302,6 +302,43 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun readFile_allowChunks_is_a_trailing_optional() {
+        // issue #134: a NEW client opts into chunked replies; the flag rides along and round-trips
+        val req = Envelope(id = "rc1", ts = 0, body = ReadFile("/w", "sid", "/w/report.xlsx", allowChunks = true))
+        val json = PocketJson.encodeToString(req)
+        assertTrue("\"allowChunks\":true" in json, json)
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD client's frame (no key) decodes with false — the daemon stays single-frame for it
+        // (and an OLD daemon skips the unknown key via ignoreUnknownKeys — the generic contract
+        // unknown_keys_are_tolerated pins)
+        val old = """{"id":"rc2","ts":0,"to":"PEER","body":{"t":"pocket/file.read","workdir":"/w","sessionId":"sid","path":"/w/a.md"}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as ReadFile
+        assertFalse(back.allowChunks)
+        assertEquals(AgentKind.CLAUDE, back.agent)
+    }
+
+    @Test
+    fun fileContentChunk_roundtrips_with_stateless_defaults_and_a_concatenable_chunk_size() {
+        // issue #134: the read-direction chunk stream. Full form round-trips…
+        val chunk = Envelope(
+            id = "cc1", ts = 0,
+            body = FileContentChunk("/w", "sid", "/w/report.xlsx", idx = 2, last = true, base64 = "UEsD", mediaType = "application/zip", totalBytes = 2_000_000),
+        )
+        val json = PocketJson.encodeToString(chunk)
+        assertTrue("\"t\":\"pocket/file.content.chunk\"" in json, json)
+        assertEquals(chunk, PocketJson.decodeFromString<Envelope>(json))
+        // …and a minimal frame decodes with the wire-safe defaults stateless reassembly relies on
+        val minimal = """{"id":"cc2","ts":0,"to":"PEER","body":{"t":"pocket/file.content.chunk","workdir":"/w","sessionId":"sid","path":"/w/a.bin","idx":0,"last":false,"base64":"QQ=="}}"""
+        val back = PocketJson.decodeFromString<Envelope>(minimal).body as FileContentChunk
+        assertEquals(null, back.mediaType)
+        assertEquals(0L, back.totalBytes)
+        // the concat-without-decode contract: the shared raw chunk size must stay a multiple of 3
+        // (base64 of every non-final chunk then carries no padding), and the caps must stay ordered
+        assertEquals(0, READ_CHUNK_RAW_BYTES % 3)
+        assertTrue(MAX_CHUNKED_READ_BYTES > READ_CHUNK_RAW_BYTES.toLong())
+    }
+
+    @Test
     fun exportFile_roundtrips_carries_convoId_and_defaults_agent() {
         // issue #67 v2 / #79: the approval-gated export of a non-changed file. Distinct discriminator from
         // ReadFile so an old daemon DROPS it (can't serve past the changed-set) instead of mis-serving.
