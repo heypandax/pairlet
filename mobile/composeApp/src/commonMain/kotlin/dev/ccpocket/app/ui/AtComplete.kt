@@ -37,10 +37,11 @@ fun atDirOf(query: String, sep: Char): String = query.substringBeforeLast(sep, "
 /** The leaf being typed in an @-query (everything after the last [sep]) — the client-side filter. */
 fun atLeafOf(query: String, sep: Char): String = query.substringAfterLast(sep)
 
-/** The children of [dir] matching the typed [leaf] (case-insensitive prefix; empty leaf = all). The
- *  daemon already returns dirs-first, name-sorted, so order is preserved. */
+/** The children of [dir] matching the typed [leaf] (case-insensitive substring, so "abc" also hits
+ *  "my-abc.txt" — issue #135; empty leaf = all). The daemon already returns dirs-first, name-sorted,
+ *  so order is preserved. */
 fun atMatches(entries: List<PathEntry>, leaf: String): List<PathEntry> =
-    if (leaf.isEmpty()) entries else entries.filter { it.name.startsWith(leaf, ignoreCase = true) }
+    if (leaf.isEmpty()) entries else entries.filter { it.name.contains(leaf, ignoreCase = true) }
 
 /**
  * The text an entry pick inserts in place of the current @-query. Picking a directory appends a
