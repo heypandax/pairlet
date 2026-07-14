@@ -55,7 +55,10 @@ import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
 import dev.ccpocket.app.ui.EFFORT_OPTIONS
+import dev.ccpocket.app.ui.GatewayModelPreset
+import dev.ccpocket.app.ui.GatewayVendorMonogram
 import dev.ccpocket.app.ui.gatewayHostLabel
+import dev.ccpocket.app.ui.matchesGatewayHost
 import dev.ccpocket.app.ui.recommendedGatewayPresets
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentTintBorder
@@ -188,12 +191,22 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 val gatewayUrl = if (model.chatAgent == AgentKind.CODEX) null else model.gatewayBaseUrl
                 @Composable
                 fun gatewayRows() = recommendedGatewayPresets(gatewayUrl).forEach { p ->
-                    QaOption(p.vendor, isActive(p.id), token = p.id) { model.switchModel(p.id); onDismiss() }
+                    GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
                 }
                 if (gatewayUrl != null) {
-                    PopoverLabel("Gateway · ${gatewayHostLabel(gatewayUrl) ?: "?"}")
+                    // "GATEWAY · host" section header with a live-green dot flush right (0714 design)
+                    Row(Modifier.fillMaxWidth().padding(bottom = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("GATEWAY", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+                        Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                        Spacer(Modifier.weight(1f))
+                        Dot(Tok.ok, 5.dp)
+                    }
                     gatewayRows()
-                    PopoverLabel("Claude")
+                    Text(
+                        "Which model an id reaches is decided by your gateway.",
+                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    PopoverLabel("Anthropic API")
                 }
                 options.forEach { (label, pick) ->
                     QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
@@ -290,6 +303,29 @@ private fun QaOption(label: String, selected: Boolean, dot: Color? = null, dange
         Spacer(Modifier.weight(1f))
         token?.let { Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp) }
         if (selected && token == null) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp)
+    }
+}
+
+/** Gateway preset row (0714 design): 24dp tinted vendor monogram, name with an optional terracotta
+ *  "suggested" tick (host names that vendor), mono id underneath, accent ✓ when active. */
+@Composable
+private fun GatewayPresetRow(p: GatewayModelPreset, active: Boolean, suggested: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 4.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (active) Tok.surface else Color.Transparent)
+            .then(if (active) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(8.dp)) else Modifier)
+            .clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        GatewayVendorMonogram(p, 24.dp)
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(p.vendor, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                if (suggested) Text("✓ suggested", color = Tok.accent, fontFamily = Dk.ui, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text(p.id, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+        }
+        if (active) Text("✓", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp)
     }
 }
 
