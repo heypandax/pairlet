@@ -1190,6 +1190,10 @@ class Conversation(
         backfilledModel = null
         failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
         sawSyntheticThisTurn = false
+        // fresh window — the live(null) below (and the init backfill announce) must not carry the wiped
+        // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
+        resumeContextUsed = null
+        lastCallUsage = null // nor may a killed mid-flight turn's usage leak into the fresh session's first TurnDone
         launchProcess(AgentSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
