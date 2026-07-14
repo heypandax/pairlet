@@ -1,6 +1,13 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
@@ -78,6 +85,41 @@ class QuestionCardUiTest {
         onAllNodes(hasText(answerLabel)).onFirst().performClick()
         assertNull(gotAnswers)
         assertEquals("随便选个快的", gotResponse)
+    }
+
+    // #150: 桌面端把卡片放在 LazyColumn 的 tail item 里（无限高约束）。#125 的 weighted 中段在
+    // 无界约束下按 minHeight=0 测量，被压成 0 高 → 只剩标题和按钮的空壳。这里在无限高宿主中
+    // 渲染，断言问题文本与选项真实可见、且整条回答链路仍然可走通。
+    @Test
+    fun unboundedHeight_lazyColumn_item_still_shows_question_and_options() = runComposeUiTest {
+        var got: Map<String, String>? = null
+        setContent {
+            PocketTheme {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    item(key = "tail") { QuestionCard(ask(color), onAnswer = { a, _ -> got = a }, onSkip = {}) }
+                }
+            }
+        }
+        onAllNodes(hasText("Which color?")).onFirst().assertIsDisplayed()
+        onAllNodes(hasText("Red")).onFirst().assertIsDisplayed()
+        onAllNodes(hasText("Blue")).onFirst().assertIsDisplayed()
+        onAllNodes(hasText("Red")).onFirst().performClick()
+        val answerLabel = runBlocking { getString(Res.string.question_answer) }
+        onAllNodes(hasText(answerLabel)).onFirst().performClick()
+        assertEquals(mapOf("Which color?" to "Red"), got)
+    }
+
+    @Test
+    fun unboundedHeight_verticalScroll_host_still_shows_question_and_options() = runComposeUiTest {
+        setContent {
+            PocketTheme {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    QuestionCard(ask(color), onAnswer = { _, _ -> }, onSkip = {})
+                }
+            }
+        }
+        onAllNodes(hasText("Which color?")).onFirst().assertIsDisplayed()
+        onAllNodes(hasText("Red")).onFirst().assertIsDisplayed()
     }
 
     @Test
