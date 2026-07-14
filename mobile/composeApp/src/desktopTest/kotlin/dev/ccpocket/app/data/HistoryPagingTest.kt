@@ -93,6 +93,49 @@ class HistoryPagingTest {
         assertEquals(1, r.historyPrependGen.value)
     }
 
+    private fun texts(r: PocketRepository) = r.messages.map {
+        when (it) {
+            is ChatItem.User -> it.text
+            is ChatItem.Assistant -> it.text
+            else -> "?"
+        }
+    }
+
+    @Test
+    fun aSlowPageLandingAfterTheDeadlineIsStillAcceptedAndPagingSurvives() {
+        // the CONFIRMED bug (#147): on a slow cross-border link the page reply can take >10s; the reply
+        // deadline fired first, permanently disabled paging, and the late page was then dropped.
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", listOf(u("q5"), a("a5")), lastSeq = 40, firstSeq = 20, hasMore = true))
+        r.loadOlderHistory()
+        assertTrue(r.historyLoadingOlder.value)
+
+        // simulate the 10s deadline firing: it collapses the spinner ONLY — the affordance stays.
+        r.historyLoadingOlder.value = false
+        assertTrue(r.historyHasMore.value, "the deadline must NOT retire the load-earlier affordance")
+
+        // the genuine page arrives late — still accepted, prepended, anchor advanced.
+        r.receiveForTest(ConvoHistoryPage("c1", listOf(u("q1"), a("a1")), firstSeq = 5, hasMore = false))
+        assertEquals(listOf("q1", "a1", "q5", "a5"), texts(r), "the late page is accepted, not dropped")
+        assertEquals(2, r.lastHistoryPrependCount)
+        assertEquals(1, r.historyPrependGen.value)
+        assertFalse(r.historyHasMore.value, "only once the LAST page lands does the affordance retire")
+    }
+
+    @Test
+    fun aDuplicateLatePageIsDroppedAfterTheFirstLands() {
+        // accepting a page clears the outstanding request, so a duplicate late fan-out can't double-prepend.
+        val r = repo()
+        r.receiveForTest(ConvoHistory("c1", listOf(u("q5")), lastSeq = 40, firstSeq = 20, hasMore = true))
+        r.loadOlderHistory()
+
+        r.receiveForTest(ConvoHistoryPage("c1", listOf(u("q1"), a("a1")), firstSeq = 5, hasMore = true))
+        assertEquals(listOf("q1", "a1", "q5"), texts(r))
+
+        r.receiveForTest(ConvoHistoryPage("c1", listOf(u("q1"), a("a1")), firstSeq = 5, hasMore = true)) // dup
+        assertEquals(listOf("q1", "a1", "q5"), texts(r), "the duplicate late page must not prepend again")
+    }
+
     @Test
     fun anUnsolicitedPageIsDropped() {
         // a page fanned out to a client that never asked (or a stale late reply) must not double-prepend
