@@ -6,7 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /** Locks the composer @-file token/path math (issue #75): token boundaries, dir/leaf split (Windows-safe),
- *  prefix filter, and the drill-in-vs-file insertion. */
+ *  substring filter (#135), and the drill-in-vs-file insertion. */
 class AtCompleteTest {
 
     @Test
@@ -41,9 +41,12 @@ class AtCompleteTest {
     }
 
     @Test
-    fun matches_are_a_case_insensitive_prefix_filter() {
+    fun matches_are_a_case_insensitive_substring_filter() {
         val entries = listOf(PathEntry("Main.kt", false), PathEntry("main", true), PathEntry("README.md", false))
         assertEquals(listOf("Main.kt", "main"), atMatches(entries, "ma").map { it.name })
+        // #135: a keyword anywhere in the name hits, not just at the start
+        assertEquals(listOf("Main.kt", "main"), atMatches(entries, "ain").map { it.name })
+        assertEquals(listOf("README.md"), atMatches(entries, "adme").map { it.name })
         assertEquals(entries, atMatches(entries, "")) // empty leaf = everything
     }
 
