@@ -1014,7 +1014,14 @@ class Conversation(
             // NOT within [DEATH_PUSH_QUIET_MS] of a TurnResult: a fatal turn error routinely kills the
             // process right after its result — that failure was already pushed, don't alert it twice.
             if (System.currentTimeMillis() - lastTurnEndedMs > DEATH_PUSH_QUIET_MS) {
-                pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, null, summary) } }
+                // the cleartext relay push must NOT carry raw process stderr (stack traces / absolute
+                // paths / a value the CLI echoed into an error): NotifyPush rides the TEXT plane
+                // unsealed. Keep the usage-limit wording — it reads as the limit refusal and carries the
+                // reset epoch the phone needs (issue #137) — but for any other death send a generic
+                // reason. The full stderr already rode the E2E PocketError above (security review 07-15).
+                val pushReason = if (dev.ccpocket.daemon.relay.PushPolicy.isUsageLimit(summary)) summary
+                    else "agent process ended (exit ${p.exitCode() ?: "?"})"
+                pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, null, pushReason) } }
             }
         }
     }

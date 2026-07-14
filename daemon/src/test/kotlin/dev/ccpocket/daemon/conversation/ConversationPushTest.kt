@@ -28,6 +28,7 @@ import kotlin.io.path.absolutePathString
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -52,12 +53,15 @@ class ConversationPushTest {
         """{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached|1720000000"}"""
 
     /** Plays [stages] one script file per prompt: each `read` gates the next stage on a sendPrompt. */
-    private class ScriptedBackend(private val stages: List<Path>, private val thenExit: Boolean) : AgentBackend {
+    private class ScriptedBackend(
+        private val stages: List<Path>, private val thenExit: Boolean, private val dyingStderr: String? = null,
+    ) : AgentBackend {
         override val kind = AgentKind.CLAUDE
         private var io: AgentIo? = null
         override fun processBuilder(spec: AgentSpec): ProcessBuilder {
             val cats = stages.joinToString("; ") { "read go; cat '${it.absolutePathString()}'" }
-            return ProcessBuilder("sh", "-c", if (thenExit) cats else "$cats; sleep 30")
+            val die = dyingStderr?.let { "; echo '$it' >&2" } ?: "" // last stderr line before an unexpected exit
+            return ProcessBuilder("sh", "-c", if (thenExit) "$cats$die" else "$cats; sleep 30")
         }
         override suspend fun attach(io: AgentIo, spec: AgentSpec) { this.io = io }
         override suspend fun parse(line: String): List<AgentEvent> = StreamParser.parse(line)
@@ -90,6 +94,7 @@ class ConversationPushTest {
     private fun harness(
         stages: List<List<String>>,
         thenExit: Boolean = false,
+        dyingStderr: String? = null,
         origin: String? = null,
         pathScope: List<String>? = null,
         askPushResult: () -> Boolean = { true },
@@ -107,7 +112,7 @@ class ConversationPushTest {
             convoId = "cPush", initialWorkdir = Files.createTempDirectory("ccp-push"),
             initialMode = PermissionMode.DEFAULT,
             initialSink = { f -> synchronized(frames) { frames.add(f) } },
-            parentScope = scope, backend = ScriptedBackend(files, thenExit),
+            parentScope = scope, backend = ScriptedBackend(files, thenExit, dyingStderr),
             pushHookProvider = {
                 PushHook { _, _, finalText, error -> turnCalls.add(TurnCall(finalText, error)) }
             },
@@ -250,6 +255,26 @@ class ConversationPushTest {
             assertTrue(call.error?.startsWith("agent process ended") == true, "got: ${call.error}")
             // and no TurnDone was fabricated for the dead turn
             assertTrue(synchronized(frames) { frames.none { it is TurnDone } })
+        }
+    }
+
+    @Test
+    fun a_non_usage_limit_death_keeps_stderr_out_of_the_cleartext_push() {
+        if (isWindows()) return
+        // security review 07-15: raw process stderr (paths / stack traces) must ride ONLY the E2E
+        // PocketError, never the NotifyPush body that transits the relay in cleartext. A non-usage-limit
+        // death's push reason is genericized; the full stderr still reaches the phone over the E2E frame.
+        val secret = "Traceback /Users/panda/.secrets/key.pem line 42"
+        harness(stages = listOf(listOf(init)), thenExit = true, dyingStderr = secret) {
+            await("process_exited error") { synchronized(frames) { frames.any { it is PocketError } } }
+            await("death push") { turnCalls.isNotEmpty() }
+            // E2E frame carries the full stderr for debugging
+            val e2e = synchronized(frames) { frames.filterIsInstance<PocketError>().first { it.code == "process_exited" } }
+            assertTrue(e2e.message.contains(secret), "E2E frame should keep the stderr: ${e2e.message}")
+            // the cleartext push must NOT
+            val pushed = turnCalls.first().error
+            assertFalse(pushed?.contains(secret) == true, "stderr leaked into the push body: $pushed")
+            assertTrue(pushed?.startsWith("agent process ended") == true, "got: $pushed")
         }
     }
 }
