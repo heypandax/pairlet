@@ -1738,6 +1738,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
             // reconciles without flashing, duplicating, or reordering.
             is ConvoHistory -> if (f.convoId == convoId.value) {
+                // an EMPTY replay is only ever the daemon's explicit /clear wipe (every other emit site
+                // guards isNotEmpty) — the fresh session's window is empty, so the "Context NN%" statusline
+                // resets and hides until the first new turn reports usage (issue #149). Without this a
+                // composer-typed /clear pinned the badge at the wiped session's % forever: TurnDone
+                // deliberately ignores zero-usage frames, and the menu path's optimistic reset
+                // (clearConversation) never runs for a typed command.
+                if (f.messages.isEmpty()) contextUsed.value = null
                 val localRows = messages.toList()
                 val merged = TranscriptMerge.merge(localRows, f.messages.map(::historyItem))
                 if (merged != localRows) replace(messages, merged)
