@@ -269,6 +269,10 @@
     <string name="model_custom_hint">输入传给 --model 的模型 id</string>
     <string name="model_switching">正在重启会话……历史保留。</string>
     <string name="model_not_installed">未安装</string>
+    <string name="model_gateway_section">网关模型</string>
+    <string name="model_gateway_via">经 %1$s</string>
+    <string name="model_gateway_show">网关模型预设</string>
+    <string name="model_gateway_note">模型 id 以各家 Claude 兼容端点为准——实际路由由你的网关决定。</string>
     <string name="af_show_from">显示哪个 agent 的会话</string>
     <string name="af_both">全部</string>
     <string name="af_claude_only">仅 Claude</string>

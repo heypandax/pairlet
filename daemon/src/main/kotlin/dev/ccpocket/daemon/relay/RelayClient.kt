@@ -58,6 +58,7 @@ class RelayClient(
     private val core: DaemonCore,
     private val lanUrl: () -> String? = { null }, // direct-listener address advertised to devices (DaemonInfo)
     private val hostname: () -> String? = { null }, // OS computer name advertised to devices (DaemonInfo; lazy — first use may resolve DNS)
+    private val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL advertised to devices (DaemonInfo, issue #139)
 ) {
     private val log = logger("RelayClient")
 
@@ -90,7 +91,7 @@ class RelayClient(
     @Volatile private var peerOnline = false
     @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness; baselined at attach)
     @Volatile private var sawPong = false  // logging only: notes when this relay first proves it speaks Pong
-    private val sessions = DeviceSessions(core, identity, lanUrl = lanUrl, hostname = hostname) { deviceId, payload ->
+    private val sessions = DeviceSessions(core, identity, lanUrl = lanUrl, hostname = hostname, gatewayBaseUrl = gatewayBaseUrl) { deviceId, payload ->
         dataOut?.send(Wire.wrapDevice(deviceId, payload))
     }
 

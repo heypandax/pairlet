@@ -336,6 +336,9 @@ interface DesktopModel {
     val chatModelId: String get() = chatModel
     val chatMode: PermissionMode
     val chatEffort: String? get() = null
+    /** The daemon's third-party ANTHROPIC_BASE_URL (issue #139) — non-null puts the gateway model
+     *  presets first in the ⋯ model picker. Default null keeps Seed/test fakes compiling. */
+    val gatewayBaseUrl: String? get() = null
     val messages: List<ChatItem>
     // ── older-history lazy load (issue #147) — defaults keep Seed/test fakes compiling ──
     /** Rows older than the loaded window exist on the daemon — the top-of-list loader shows. */

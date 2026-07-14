@@ -718,10 +718,16 @@ data class LanHello(val deviceId: String) : ToDaemon
  * [hostname] is the daemon host's OS computer name — the client adopts it as the binding's default
  * display name until the user sets a nickname (so a computer reads as "Pandas-MacBook-Pro", not a
  * truncated account-id hash — issue #62). Null when unresolved or from a daemon that predates it.
+ * [gatewayBaseUrl] is the third-party `ANTHROPIC_BASE_URL` the daemon's claude launches would use
+ * (active preset → process env → user settings.json), null when unset or pointing at the official
+ * `api.anthropic.com` (issue #139) — the client then surfaces the gateway model presets first in its
+ * model picker. Trailing optional both ways: an old daemon omits it (no gateway hint, presets stay
+ * collapsed), an old app ignores it. Re-evaluated per handshake, so activating a preset shows up on
+ * the next connect.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
-data class DaemonInfo(val lanUrl: String? = null, val hostname: String? = null) : ToPhone
+data class DaemonInfo(val lanUrl: String? = null, val hostname: String? = null, val gatewayBaseUrl: String? = null) : ToPhone
 
 @Serializable
 enum class ChatRole {

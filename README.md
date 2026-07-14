@@ -52,6 +52,10 @@ The **daemon** runs on your computer and drives the `claude` or `codex` CLI as a
 
 **[Full feature list →](https://heypandax.github.io/cc-pocket/features.html)**
 
+### Works with third-party gateways
+
+If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_URL`), the official Remote Control [is disabled as of v2.1.196](https://code.claude.com/docs/en/remote-control) — it requires talking to `api.anthropic.com` directly. CC Pocket drives the CLI over stdio on your machine, so the endpoint doesn't matter: gateway setups (cc-switch and friends, or a vendor's Anthropic-compatible endpoint) work as-is. The daemon detects a gateway `ANTHROPIC_BASE_URL` and the model picker leads with one-tap presets for common vendor ids (DeepSeek, GLM, Kimi, Qwen, MiniMax) alongside the free-form custom id field. Which model an id actually reaches is decided by your gateway.
+
 ## Install
 
 Two pieces: the **app** ([Get it](#get-it) above) and the **daemon** on the computer that runs the agent — the relay is hosted for you.

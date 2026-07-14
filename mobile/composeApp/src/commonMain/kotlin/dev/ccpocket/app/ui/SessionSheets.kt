@@ -270,6 +270,14 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
         Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
         Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
     }
+    // Gateway model presets (issue #139): one-tap vendor ids for third-party gateway users. When the
+    // daemon reports a gateway ANTHROPIC_BASE_URL (DaemonInfo) the section LEADS the picker — those
+    // users pick vendor ids, not Claude aliases. On the official endpoint it sits behind a collapsed
+    // toggle below, so the sheet keeps today's size for everyone else. Claude sessions only: Codex
+    // model routing doesn't go through ANTHROPIC_BASE_URL.
+    val gatewayUrl = if (codex) null else repo.gatewayBaseUrl.value
+    val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
+    if (gatewayUrl != null) GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset)
     Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         choices.forEach { c ->
             val isSel = c.pick.equals(selected, ignoreCase = true)
@@ -309,6 +317,23 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
                 }
             }
         }
+    }
+    // no gateway detected: the same preset rows stay reachable behind a quiet toggle (issue #139)
+    if (!codex && gatewayUrl == null) {
+        var showGateway by remember { mutableStateOf(false) }
+        Row(
+            Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                .clickable(enabled = switchingTo == null) { showGateway = !showGateway }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(Res.string.model_gateway_show), color = Tok.muted, fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+            )
+            Text(if (showGateway) "⌃" else "›", color = Tok.muted, fontSize = 14.sp)
+        }
+        if (showGateway) GatewayPresetSection(repo, gatewayUrl = null, switchingTo = switchingTo, onPick = pickPreset)
     }
     // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
     // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
@@ -351,6 +376,58 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
                 Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
             } else Text(stringResource(Res.string.model_switch_hint), color = Tok.muted, fontSize = 12.5.sp)
         }
+    }
+}
+
+/**
+ * The gateway model preset rows (issue #139), fed by the shared [GATEWAY_MODEL_PRESETS] table.
+ * [gatewayUrl] non-null = the daemon reported a third-party ANTHROPIC_BASE_URL: the header carries
+ * a "via host" pill and [recommendedGatewayPresets] ranks that vendor's ids first. Ids route through
+ * whatever the user's gateway maps them to — the note row says exactly that instead of promising.
+ */
+@Composable
+private fun GatewayPresetSection(repo: PocketRepository, gatewayUrl: String?, switchingTo: String?, onPick: (String) -> Unit) {
+    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            stringResource(Res.string.model_gateway_section), color = Tok.muted, fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
+        )
+        gatewayHostLabel(gatewayUrl)?.let { host ->
+            Spacer(Modifier.width(8.dp))
+            Text(
+                stringResource(Res.string.model_gateway_via, host), color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
+                maxLines = 1,
+                modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 1.dp),
+            )
+        }
+    }
+    Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        recommendedGatewayPresets(gatewayUrl).forEach { p ->
+            val isSel = p.id.equals(repo.model.value, ignoreCase = true)
+            val isSwitching = switchingTo?.equals(p.id, ignoreCase = true) == true
+            val dimmed = switchingTo != null && !isSwitching
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(if (isSel || isSwitching) Tok.raised else Tok.surface)
+                    .then(if (isSel || isSwitching) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(10.dp)) else Modifier)
+                    .clickable(enabled = switchingTo == null) { onPick(p.id) }
+                    .alpha(if (dimmed) 0.45f else 1f)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(p.vendor, color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.width(10.dp))
+                Text(p.id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        isSwitching -> CircularProgressIndicator(Modifier.size(15.dp), color = Tok.accent, strokeWidth = 2.dp)
+                        isSel -> Text("✓", color = Tok.accent, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+        Text(stringResource(Res.string.model_gateway_note), color = Tok.muted, fontSize = 10.5.sp, lineHeight = 15.sp)
     }
 }
 
