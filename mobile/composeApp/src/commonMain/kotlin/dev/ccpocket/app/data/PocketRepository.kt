@@ -637,6 +637,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val historyHasMore = mutableStateOf(false)
     val historyLoadingOlder = mutableStateOf(false)
     private var historyPageDeadline: Job? = null
+    /** The anchor (beforeSeq) of an outstanding older-history request, or null when none is in flight
+     *  (issue #147). This — NOT [historyLoadingOlder] — is what gates an incoming [ConvoHistoryPage]:
+     *  on a slow cross-border link the reply deadline may already have collapsed the spinner, yet the
+     *  page is still a valid reply we must ACCEPT, not drop (the old bug: a page that took >10s was
+     *  discarded and paging was permanently disabled). Cleared the moment a page lands (which dedupes a
+     *  duplicate late fan-out) or the transcript/anchor is reset out from under it. An unsolicited page
+     *  (null here) is dropped — the old `historyLoadingOlder` guard's role, now anchored on the request. */
+    private var historyPageAnchor: Long? = null
     /** How many rows the last page PREPENDED (read with [historyPrependGen]) — the chat list scrolls
      *  by this to keep the viewport anchored on the row the user was reading. */
     var lastHistoryPrependCount = 0
@@ -656,21 +664,26 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         historySeq = null; historySeqSession = null; historyFirstSeq = null
         historyHasMore.value = false; historyLoadingOlder.value = false
         historyPageDeadline?.cancel(); historyPageDeadline = null
+        historyPageAnchor = null
         lastHistoryPrependCount = 0
     }
 
     /** Scrolled to the top of the loaded window — fetch one page of OLDER history (issue #147). The
-     *  deadline covers a daemon that predates paging (it silently drops the frame): stop offering. */
+     *  deadline only COLLAPSES THE SPINNER (a stuck link shouldn't spin forever), it no longer disables
+     *  paging: a daemon that predates paging silently drops the frame, but the affordance stays so the
+     *  user can retry — while a slow cross-border reply that lands after the deadline is still accepted
+     *  (gated on [historyPageAnchor], not the spinner) and prepended normally. */
     fun loadOlderHistory() {
         val convo = convoId.value ?: return
         val before = historyFirstSeq ?: return
         if (!historyHasMore.value || historyLoadingOlder.value) return
         historyLoadingOlder.value = true
+        historyPageAnchor = before // the request is outstanding until a page lands, even past the deadline
         scope.launch { send(FetchHistoryPage(convo, beforeSeq = before)) }
         historyPageDeadline?.cancel()
         historyPageDeadline = scope.launch {
             delay(10_000)
-            if (historyLoadingOlder.value) { historyLoadingOlder.value = false; historyHasMore.value = false }
+            if (historyLoadingOlder.value) historyLoadingOlder.value = false // stop the spinner; keep the affordance + the outstanding request
         }
     }
 
@@ -1922,11 +1935,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     historySeqSession = if (f.lastSeq != null) currentSessionId else null
                     historyFirstSeq = f.firstSeq
                     historyHasMore.value = f.hasMore && f.firstSeq != null
+                    // a full replay re-anchors the window; a page still in flight against the OLD anchor
+                    // would prepend misaligned rows, so retire that outstanding request.
+                    historyPageAnchor = null; historyPageDeadline?.cancel(); historyPageDeadline = null
+                    historyLoadingOlder.value = false
                 }
             }
-            // one page of OLDER history (issue #147) — prepended above the current window. Gated on the
-            // in-flight flag: a page fanned to a client that never asked must not double-prepend.
-            is ConvoHistoryPage -> if (f.convoId == convoId.value && historyLoadingOlder.value) {
+            // one page of OLDER history (issue #147) — prepended above the current window. Gated on an
+            // OUTSTANDING request ([historyPageAnchor]), NOT the spinner: a page that lands after the slow-
+            // link deadline collapsed the spinner is still a valid reply and must be accepted (the fixed
+            // bug). Clearing the anchor here dedupes a duplicate late fan-out; a page for a client that
+            // never asked (anchor null) is dropped.
+            is ConvoHistoryPage -> if (f.convoId == convoId.value && historyPageAnchor != null) {
+                historyPageAnchor = null
                 historyPageDeadline?.cancel(); historyPageDeadline = null
                 historyLoadingOlder.value = false
                 val older = f.messages.map(::historyItem)
