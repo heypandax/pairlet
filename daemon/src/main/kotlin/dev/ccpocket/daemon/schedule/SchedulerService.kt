@@ -51,8 +51,13 @@ class SchedulerService(
         val err = validate(req, canonicalWorkdir)
         if (err != null) return state().copy(error = err)
         val now = clock()
+        // A1 (#137): adopt the client's chosen id when present and not already taken, so the client can
+        // cancel by an id it already holds (no reply-race, no signature reverse-lookup). Falls back to a
+        // fresh UUID for the (legacy / colliding) empty-or-taken case — the entry.id uniqueness that
+        // update()/remove() rely on is preserved either way.
+        val clientId = req.clientId?.trim()?.takeIf { it.isNotEmpty() && store.byId(it) == null }
         val entry = ScheduleEntry(
-            id = UUID.randomUUID().toString(),
+            id = clientId ?: UUID.randomUUID().toString(),
             workdir = canonicalWorkdir!!,
             prompt = req.prompt.trim(),
             runAtMs = req.runAtMs,

@@ -163,6 +163,34 @@ class SchedulerServiceTest {
         assertTrue(h.svc.state().items.isEmpty(), "nothing was stored by the refused creates")
     }
 
+    // ---- A1 (#137): client-chosen id lets Undo cancel by an id it already holds ----
+
+    @Test
+    fun a_client_id_is_adopted_as_the_schedule_id_and_cancellable_even_after_the_runtime_clamp() {
+        val h = Harness(grace = 10 * 60_000)
+        // the auto-continue case that broke the old signature match: the reset moment is already in the
+        // past, so create() clamps nextRunAtMs to `now` — the entry's fire time no longer equals runAtMs.
+        h.svc.create(
+            ScheduleCreate("/w", "Continue", runAtMs = h.now - 120_000, label = "Auto-continue", clientId = "autocont-c-42"),
+            canonicalWorkdir = "/w",
+        )
+        val stored = h.svc.state().items.single()
+        assertEquals("autocont-c-42", stored.id, "clientId adopted as the schedule's id")
+        assertEquals(h.now, stored.nextRunAtMs, "clamped past the old signature — id is the only stable handle")
+        // Undo cancels by the id the client already holds — no reverse-lookup needed
+        assertTrue(h.svc.cancel("autocont-c-42").items.isEmpty())
+    }
+
+    @Test
+    fun a_taken_or_blank_client_id_falls_back_to_a_fresh_uuid() {
+        val h = Harness()
+        h.svc.create(ScheduleCreate("/w", "a", h.now + 1000, clientId = "dup"), canonicalWorkdir = "/w")
+        h.svc.create(ScheduleCreate("/w", "b", h.now + 2000, clientId = "dup"), canonicalWorkdir = "/w")
+        val ids = h.svc.state().items.map { it.id }.toSet()
+        assertEquals(2, ids.size, "the second create must not reuse the taken id — entry ids stay unique")
+        assertTrue("dup" in ids)
+    }
+
     @Test
     fun a_run_time_already_past_fires_on_the_next_tick_instead_of_insta_missing() = runBlocking {
         val h = Harness(grace = 10 * 60_000)
