@@ -26,8 +26,11 @@ object OpenCodeTranscriptScanner {
             val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.toFile().absolutePath}")
             conn.use {
                 val stmt = it.prepareStatement(
-                    "SELECT id, title, directory, model, cost, tokens_input, tokens_output, time_created, time_updated " +
-                    "FROM session WHERE time_archived IS NULL ORDER BY time_updated DESC LIMIT 200"
+                    "SELECT s.id, s.title, s.directory, s.model, s.cost, " +
+                    "s.tokens_input, s.tokens_output, s.time_created, s.time_updated, " +
+                    "COUNT(m.id) AS msg_count " +
+                    "FROM session s LEFT JOIN message m ON m.session_id = s.id " +
+                    "WHERE s.time_archived IS NULL GROUP BY s.id ORDER BY s.time_updated DESC LIMIT 200"
                 )
                 val rs = stmt.executeQuery()
                 val out = mutableListOf<SessionSummary>()
@@ -38,6 +41,7 @@ object OpenCodeTranscriptScanner {
                     val model = rs.getString("model")
                     val timeUpdated = rs.getLong("time_updated")
                     val timeCreated = rs.getLong("time_created")
+                    val msgCount = rs.getInt("msg_count")
                     if (workdir.isNotBlank() && directory.isNotBlank()) {
                         if (ProjectPaths.normCwd(directory) != ProjectPaths.normCwd(workdir)) continue
                     }
@@ -45,7 +49,7 @@ object OpenCodeTranscriptScanner {
                         sessionId = sid,
                         title = title.takeIf { it.isNotBlank() } ?: sid,
                         firstPrompt = title,
-                        messageCount = 0, // not easily countable without N+1 query
+                        messageCount = msgCount,
                         cwd = directory,
                         lastModified = timeUpdated,
                         version = null,

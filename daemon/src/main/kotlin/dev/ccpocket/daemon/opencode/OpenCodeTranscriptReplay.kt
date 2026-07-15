@@ -17,6 +17,10 @@ import java.nio.file.Path
 object OpenCodeTranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    // Per-message char cap applied before ReplayBudget's frame-level limit (4000 chars ≈ 8KB in
+    // multi-byte UTF-8). Keeps a single large tool output from dominating the history frame.
+    private const val MAX_TEXT_PER_MESSAGE = 4000
+
     fun read(sessionId: String, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
         val dbPath = OpenCodePaths.database()
         if (!dbPath.toFile().exists()) return emptyList()
@@ -76,6 +80,6 @@ object OpenCodeTranscriptReplay {
                 }
             }
         }
-        return parts.joinToString("\n").take(4000) // cap per-message
+        return parts.joinToString("\n").take(MAX_TEXT_PER_MESSAGE) // cap per-message
     }
 }

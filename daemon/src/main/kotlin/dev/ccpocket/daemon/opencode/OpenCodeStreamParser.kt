@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.opencode
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.protocol.TokenUsage
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -85,10 +86,13 @@ object OpenCodeStreamParser {
         return events
     }
 
-    /** Map OpenCode tool input shapes to Claude-shaped input for ToolMetadata. */
+    /** Map OpenCode tool input shapes to Claude-shaped input for ToolMetadata.
+     *  Keys match OpenCode's lowercase field names; the mapped shape matches what Claude's
+     *  ToolMetadata layer expects for each tool so the phone UI renders parameters correctly. */
     private fun buildToolInput(toolRaw: String, input: JsonObject?): JsonObject? {
         input ?: return null
-        return when (toolRaw.lowercase()) {
+        val normalized = toolRaw.lowercase()
+        return when (normalized) {
             "bash" -> buildJsonObject {
                 input["command"]?.jsonPrimitive?.contentOrNull?.let { put("command", it) }
                 input["description"]?.jsonPrimitive?.contentOrNull?.let { put("description", it) }
@@ -102,7 +106,35 @@ object OpenCodeStreamParser {
             "edit" -> buildJsonObject {
                 input["file_path"]?.jsonPrimitive?.contentOrNull?.let { put("file_path", it) }
             }
-            else -> input // pass through for unknown tools
+            "glob" -> buildJsonObject {
+                input["pattern"]?.jsonPrimitive?.contentOrNull?.let { put("pattern", it) }
+                input["description"]?.jsonPrimitive?.contentOrNull?.let { put("description", it) }
+            }
+            "grep" -> buildJsonObject {
+                input["pattern"]?.jsonPrimitive?.contentOrNull?.let { put("pattern", it) }
+                input["description"]?.jsonPrimitive?.contentOrNull?.let { put("description", it) }
+            }
+            "webfetch" -> buildJsonObject {
+                input["url"]?.jsonPrimitive?.contentOrNull?.let { put("url", it) }
+            }
+            "websearch" -> buildJsonObject {
+                input["query"]?.jsonPrimitive?.contentOrNull?.let { put("query", it) }
+                input["description"]?.jsonPrimitive?.contentOrNull?.let { put("description", it) }
+            }
+            "task" -> buildJsonObject {
+                input["task"]?.jsonPrimitive?.contentOrNull?.let { put("task", it) }
+                input["context"]?.jsonPrimitive?.contentOrNull?.let { put("context", it) }
+            }
+            else -> {
+                // Unknown tool — pass through raw input with first-letter-uppercased keys
+                // for consistency with the ToolMetadata layer
+                buildJsonObject {
+                    input.forEach { (k, v) ->
+                        val key = k.replaceFirstChar { it.uppercase() }
+                        put(key, v)
+                    }
+                }
+            }
         }
     }
 

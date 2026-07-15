@@ -106,9 +106,9 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
     // ACTIONS — start work on a machine / clear what's waiting, straight from the keyboard
     model.activeComputer?.let { c ->
         val where = model.newSessionDir?.let { tilde(it) } ?: "" // the dir it will actually start in
-        add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, false) { model.openNewSession() })
+        add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, null) { model.openNewSession() })
         // the installed skills/plugins browser (issue #132) — a machine fact, so it rides the active computer
-        add(PItem(PKind.ACTION, "Browse skills & plugins", "on ${c.name}", Icons.Outlined.AutoAwesome, false) { model.openSkills() })
+        add(PItem(PKind.ACTION, "Browse skills & plugins", "on ${c.name}", Icons.Outlined.AutoAwesome, null) { model.openSkills() })
     }
     model.attention.forEach { a ->
         add(

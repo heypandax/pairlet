@@ -55,6 +55,8 @@ import org.jetbrains.compose.resources.stringResource
 
 // ── model + effort option sets (what `--model` / `--effort` accept) ──
 internal val CODEX_MODEL_OPTIONS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex") // Codex sessions get Codex models; shared with the desktop ⋯ popover
+// OpenCode model picker options. Update this list when upstream OpenCode adds/removes models.
+// Also update OpenCodeLauncher.kt's model validation if the naming convention changes.
 internal val OPENCODE_MODEL_OPTIONS = listOf(
     "opencode/deepseek-v4-flash-free",
     "opencode/hy3-free",

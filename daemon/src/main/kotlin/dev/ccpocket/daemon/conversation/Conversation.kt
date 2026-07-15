@@ -136,6 +136,7 @@ class Conversation(
     @Volatile
     private var proc: AgentProcess? = null
     private var bridge: PermissionBridge? = null
+    private val transcriptWriter = backend.createTranscriptWriter()
     private val seq = AtomicLong(0)
 
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
@@ -830,6 +831,7 @@ class Conversation(
             for (ev in backend.parse(line)) {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
+                        transcriptWriter?.append(ev, sessionId)
                         val firstTime = sessionId == null
                         val prevSid = sessionId
                         ev.sessionId?.let { newSid ->
@@ -872,11 +874,17 @@ class Conversation(
                     // folds into the Task card instead (issue #77)
                     is AgentEvent.AssistantText -> {
                         executing = true
-                        if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
+                        if (ev.parentId == null) {
+                            sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
+                            transcriptWriter?.append(ev, sessionId)
+                        }
                     }
                     is AgentEvent.AssistantThinking -> {
                         executing = true
-                        if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
+                        if (ev.parentId == null) {
+                            sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
+                            transcriptWriter?.append(ev, sessionId)
+                        }
                     }
                     is AgentEvent.AssistantToolUse -> {
                         executing = true
@@ -902,9 +910,13 @@ class Conversation(
                             ),
                         )
                         if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
+                        if (ev.parentId == null) transcriptWriter?.append(ev, sessionId)
                     }
                     is AgentEvent.ToolResult -> {
-                        if (ev.parentId == null) finishSubagentFromResult(ev)
+                        if (ev.parentId == null) {
+                            finishSubagentFromResult(ev)
+                            transcriptWriter?.append(ev, sessionId)
+                        }
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
                     }
                     is AgentEvent.BackgroundTaskStarted -> {
@@ -947,6 +959,7 @@ class Conversation(
                         sawSyntheticThisTurn = true
                     }
                     is AgentEvent.TurnResult -> {
+                        transcriptWriter?.append(ev, sessionId)
                         executing = false
                         // relaunch continuation grace anchor (issue #122 ⑤): this result may be a phantom
                         // (fable early result/fallback) — for RELAUNCH_GRACE ms after it, sendPrompt must
@@ -1233,6 +1246,7 @@ class Conversation(
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
         backend.sendPrompt(text, images)
+        transcriptWriter?.onUserPrompt(text, sessionId)
         promptId?.let {
             sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
             // (issue #104) an ack is NOT a started turn. If the client later reports turnStalled for this prompt,

@@ -5,6 +5,8 @@ import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
+import dev.ccpocket.daemon.transcript.OpenCodeTranscriptWriter
+import dev.ccpocket.daemon.transcript.TranscriptWriter
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.HistoryMessage
@@ -142,6 +144,8 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     }
 
     override suspend fun onProcessEnded(sessionId: String?) {}
+
+    override fun createTranscriptWriter(): TranscriptWriter? = OpenCodeTranscriptWriter()
 
     // ---- disk: transcript scanning + replay ----
 
