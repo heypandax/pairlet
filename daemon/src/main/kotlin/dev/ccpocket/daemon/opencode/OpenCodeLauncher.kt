@@ -58,15 +58,17 @@ object OpenCodeLauncher {
         return ProcessBuilder(argv).apply {
             directory(spec.workdir.toFile())
             redirectErrorStream(false) // keep stderr off the stdout JSON stream
-            // No explicit stdin redirect → default PIPE mode. AgentProcess writes prompts to
-            // the child's stdin via process.outputStream, so sendPrompt() can deliver follow-up
-            // messages without relaunching. For the initial launch the prompt is already in argv.
+            redirectInput(ProcessBuilder.Redirect.from(File(if (isWindows) "NUL" else "/dev/null")))
             // Under launchd the daemon inherits a stripped environment — opencode (Node.js) needs
             // these to locate its state DB and config. Without them it may block on init.
             val env = environment()
             val home = System.getProperty("user.home")
-            env.putIfAbsent("XDG_STATE_HOME", "$home/Library/Application Support/ai.opencode.desktop")
-            env.putIfAbsent("XDG_DATA_HOME", "$home/Library/Application Support/ai.opencode.desktop")
+            // Point to the standard XDG data dir so OpenCode CLI reads the SAME database
+            // as OpenCodePaths.dataRoot() / OpenCodeTranscriptWriter (default: ~/.local/share/opencode/).
+            // Under launchd the daemon inherits a stripped environment — the XDG vars ensure
+            // OpenCode (Node.js) can locate its state DB; without them init may block.
+            env.putIfAbsent("XDG_DATA_HOME", "$home/.local/share")
+            env.putIfAbsent("XDG_STATE_HOME", "$home/.local/share")
             env.putIfAbsent("LANG", "C.UTF-8")
         }
     }

@@ -136,7 +136,7 @@ class Conversation(
     @Volatile
     private var proc: AgentProcess? = null
     private var bridge: PermissionBridge? = null
-    private val transcriptWriter = backend.createTranscriptWriter()
+    private val transcriptWriter = backend.createTranscriptWriter(workdir.toString())
     private val seq = AtomicLong(0)
 
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
@@ -694,9 +694,12 @@ class Conversation(
         }
         val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
-        pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
-        processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
-        val p = AgentProcess.start(backend.processBuilder(spec), scope)
+        pendingRelaunch = false
+        processGeneration += 1
+        log.info("$convoId launchProcess: kind=${backend.kind} workdir=$workdir resumeId=${spec.resumeId?.take(12)} initialPrompt=${spec.initialPrompt?.take(40)}")
+        val pb = backend.processBuilder(spec)
+        log.info("$convoId launchProcess: pb.cmd=${pb.command().joinToString(" ") { if (it.length > 40) it.take(20) + "…" else it }} pb.dir=${pb.directory()}")
+        val p = AgentProcess.start(pb, scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
         // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
         //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
@@ -1194,6 +1197,7 @@ class Conversation(
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
+        log.info("$convoId sendPrompt: text=${text.take(40)} procNull=${proc == null} executing=$executing pendingRelaunch=$pendingRelaunch promptId=${promptId?.take(8)}")
         val relaunching = proc != null && !executing && pendingRelaunch && relaunchGraceElapsed() && !continuationExpected()
         // `executing` must be armed with a happens-before edge to the new pump: a process that dies
         // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
@@ -1225,22 +1229,20 @@ class Conversation(
             // originally-resumed one), resumed in place — its own id is never a foreign id to fork off.
             val anchor = sessionId ?: openedResumeId
             val fork = if (sessionId == null) openedWithFork else false
+            log.info("$convoId sendPrompt proc==null: anchor=$anchor model=$model mode=$mode effort=$effort initialPrompt=${text.take(40)}")
             val launched = runCatching {
                 launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork, initialPrompt = text), armExecuting = true, initialSend = initialSend)
             }
             if (launched.isFailure) {
-                executing = false // the spawn never started a turn
-                // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
+                executing = false
+                log.warn("$convoId agent failed to start: ${launched.exceptionOrNull()?.message}")
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
                 return
             }
         } else {
-            // queued send onto the already-live process (mid-turn queue, or a steady-state next turn):
-            // no new pump is starting, so there is no death-branch to race — arm executing directly, and
-            // ledger BEFORE the write (issue #122 ③): even a write that dies inside the backend leaves the
-            // prompt recorded, and only the CLI's consumption replay settles it (ack ≠ consumed).
-            executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
+            log.info("$convoId sendPrompt queued-send: proc!=null backend=${backend.kind}")
+            executing = true
             recordPromptWritten(promptId, text, images)
         }
         lastActivityMs = System.currentTimeMillis()

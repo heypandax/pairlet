@@ -10,6 +10,7 @@ object OpenCodePaths {
     fun dataRoot(): Path =
         System.getenv("OPENCODE_DATA_DIR")?.let { Path.of(it) }
             ?: System.getenv("XDG_DATA_HOME")?.let { Path.of(it, "opencode") }
+            ?: System.getenv("XDG_STATE_HOME")?.let { Path.of(it, "opencode") }
             ?: Path.of(System.getProperty("user.home"), ".local", "share", "opencode")
 
     fun configRoot(): Path =

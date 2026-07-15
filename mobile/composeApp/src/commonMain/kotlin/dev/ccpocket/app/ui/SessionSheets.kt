@@ -265,8 +265,19 @@ private fun CtxPill(ctx: String, big: Boolean) {
 internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
     val codex = repo.sessionAgent.value == AgentKind.CODEX
     val opencode = repo.sessionAgent.value == AgentKind.OPENCODE
+    // fetch dynamic model list from the daemon when OpenCode picker opens
+    LaunchedEffect(opencode) { if (opencode) repo.fetchOpenCodeModels() }
+    val opencodeModels = repo.openCodeModels.value
     val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
-    else if (opencode) OPENCODE_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
+    else if (opencode) {
+        val models = opencodeModels?.models
+        if (models != null && opencodeModels?.error == null) {
+            val grouped = models.groupBy { it.substringBefore("/") + "/*" }
+            models.map { m -> ModelChoice(m, m, m, "", false, unavailable = false) }
+        } else {
+            emptyList()
+        }
+    }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     else CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
         val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW

@@ -1280,6 +1280,24 @@ data class ScheduleState(
  *  two can't drift — a runaway sub-minute repeat would hammer sessions in a loop. */
 const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 
+// ── opencode model listing ──────────────────────────────────────────────
+
+/** client -> daemon: fetch the model list from `opencode models`. */
+@Serializable
+@SerialName("pocket/models.fetch")
+data object FetchModels : ToDaemon
+
+/** daemon -> client: the model list from `opencode models`, grouped by provider prefix.
+ *  [models] is the raw output (one per line, "provider/model"), sorted with opencode/
+ *  free models first, then third-party providers in alphabetical order.
+ *  [error] is set when the daemon couldn't run `opencode models` (binary not found etc.). */
+@Serializable
+@SerialName("pocket/models.list")
+data class ModelsList(
+    val models: List<String> = emptyList(),
+    val error: String? = null,
+) : ToPhone
+
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)
 //

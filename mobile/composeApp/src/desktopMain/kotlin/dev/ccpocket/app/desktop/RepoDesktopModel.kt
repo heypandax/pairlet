@@ -710,6 +710,8 @@ class RepoDesktopModel(
     override fun switchModel(name: String) = repo.switchModel(name)
     override fun switchEffort(level: String) = repo.switchEffort(level)
     override fun compactConversation() { repo.sendPrompt("/compact") }
+    override val openCodeModels: List<String> get() = repo.openCodeModels.value?.models ?: emptyList()
+    override fun fetchOpenCodeModels() = repo.fetchOpenCodeModels()
     override fun clearConversation() = repo.clearConversation()
 
     override fun send(text: String) {

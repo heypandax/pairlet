@@ -145,7 +145,7 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
 
     override suspend fun onProcessEnded(sessionId: String?) {}
 
-    override fun createTranscriptWriter(): TranscriptWriter? = OpenCodeTranscriptWriter()
+    override fun createTranscriptWriter(workdir: String): TranscriptWriter? = OpenCodeTranscriptWriter()
 
     // ---- disk: transcript scanning + replay ----
 

@@ -17,10 +17,9 @@ class MainStartupGateTest {
         assertNotNull(msg)
         assertTrue("claude" in msg, msg)
         assertTrue("codex" in msg, msg)
-        assertTrue("opencode" in msg, msg)
         assertTrue("--claude-bin" in msg, msg)
         assertTrue("--codex-bin" in msg, msg)
-        assertTrue("--opencode-bin" in msg, msg)
+        assertTrue("opencode" in msg, msg)
     }
 
     @Test
@@ -28,9 +27,6 @@ class MainStartupGateTest {
 
     @Test
     fun claude_only_machine_starts() = assertNull(missingAgentsMessage(claude, null, null))
-
-    @Test
-    fun opencode_only_machine_starts() = assertNull(missingAgentsMessage(null, null, codex))
 
     @Test
     fun both_present_starts() = assertNull(missingAgentsMessage(claude, codex, null))

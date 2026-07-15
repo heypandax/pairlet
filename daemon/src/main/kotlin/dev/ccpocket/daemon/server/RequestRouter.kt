@@ -28,7 +28,9 @@ import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.DeletePreset
+import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.FetchPresets
+import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.SavePreset
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
@@ -259,6 +261,27 @@ class RequestRouter(
             is SetPushPrefs -> {
                 frame.enabled?.let(prefs::setPushEnabled)
                 sink.emit(PushPrefs(prefs.pushEnabled))
+            }
+
+            // opencode model listing: runs `opencode models` on the daemon host and returns the list
+            is FetchModels -> {
+                try {
+                    val exe = dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable()
+                    val pb = ProcessBuilder(exe.toString(), "models")
+                    val proc = pb.start()
+                    val out = proc.inputStream.bufferedReader().readText().trim()
+                    val exit = proc.waitFor()
+                    if (exit != 0) {
+                        val err = proc.errorStream.bufferedReader().readText().trim()
+                        sink.emit(ModelsList(error = "opencode models exited $exit: $err"))
+                    } else {
+                        val models = out.lines().filter { it.isNotBlank() }
+                            .sortedBy { if (it.startsWith("opencode/")) "0$it" else "1$it" }
+                        sink.emit(ModelsList(models = models))
+                    }
+                } catch (e: Exception) {
+                    sink.emit(ModelsList(error = "Failed to list models: ${e.message ?: e.javaClass.simpleName}"))
+                }
             }
 
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))

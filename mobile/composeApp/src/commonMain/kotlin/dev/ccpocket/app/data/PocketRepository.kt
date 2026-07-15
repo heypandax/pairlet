@@ -109,7 +109,9 @@ import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.FetchPresets
+import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.SkillCatalog
@@ -1747,6 +1749,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
             is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
+            is ModelsList -> openCodeModels.value = f
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
@@ -2213,6 +2216,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val gatewayBaseUrl = mutableStateOf<String?>(null)
 
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
+
+    /** OpenCode model list — fetched from the daemon via [fetchOpenCodeModels]; shows the same models
+     *  `opencode models` returns on the Mac. Null until first fetch. */
+    val openCodeModels = mutableStateOf<ModelsList?>(null)
+
+    fun fetchOpenCodeModels() { scope.launch { runCatching { send(FetchModels) } } }
 
     /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
      *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */

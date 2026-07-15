@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Settings
@@ -54,7 +55,6 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
-import dev.ccpocket.app.ui.OPENCODE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.EFFORT_OPTIONS
 import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
@@ -186,9 +186,10 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
             }
             QaPage.MODEL -> {
                 QaBack("Model") { page = QaPage.MAIN }
+                LaunchedEffect(model.chatAgent) { if (model.chatAgent == AgentKind.OPENCODE) model.fetchOpenCodeModels() }
                 val options = when (model.chatAgent) {
                     AgentKind.CODEX -> CODEX_MODEL_OPTIONS.map { m -> m to m }
-                    AgentKind.OPENCODE -> OPENCODE_MODEL_OPTIONS.map { m -> m to m }
+                    AgentKind.OPENCODE -> model.openCodeModels.map { m -> m to m }
                     else -> CLAUDE_MODEL_OPTIONS
                 }
                 fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
