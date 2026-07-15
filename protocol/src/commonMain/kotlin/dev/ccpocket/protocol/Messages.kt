@@ -61,6 +61,21 @@ data class OpenSession(
     val effort: String? = null, // reasoning effort to relaunch under; restores the session's last setting on reopen
     val takeOver: Boolean = false, // true = resume/control even a session live in a terminal (vs observe)
     val agent: AgentKind = AgentKind.CLAUDE, // which backend to drive; default keeps older Apps (no field) on Claude
+    /**
+     * Incremental reattach (issue #147): the transcript cursor ([ConvoHistory.lastSeq]) this client is
+     * already caught up to for [resumeId]'s transcript — the daemon then replays only the DELTA past it
+     * (a [ConvoHistory] with `delta = true`) instead of the full tail window, turning a reconnect's
+     * ~550KB replay into a few KB. Null (the default) = "replay in full": a first open, a client that
+     * dropped its transcript, or an OLD client that predates the field. 0 = also "replay in full" BUT
+     * declares the client understands `delta = true` frames — an observe view then tails with deltas
+     * instead of re-sending the whole window on every write. The daemon safely falls back to
+     * a FULL replay whenever the cursor can't be honored (seq older than / past the on-disk transcript,
+     * a /clear'd or forked session, a late patch that mutated already-delivered rows). Mixed versions:
+     * an OLD daemon ignores the unknown key (ignoreUnknownKeys) and replays in full — exactly today's
+     * behavior; an OLD client never sends it. The reconnect outbox dedupe (keep only the NEWEST
+     * OpenSession per (workdir, resumeId)) stays correct: the newest open carries the freshest cursor.
+     */
+    val lastEventSeq: Long? = null,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -215,10 +230,18 @@ data class ListSessionFiles(
 ) : ToDaemon
 
 /**
- * phone -> daemon: read one file the session touched. The daemon re-derives the session's
- * changed-file set from the transcript and ONLY serves paths in it — the phone can already see
- * these files' contents through the transcript/diffs, so this adds no new read surface (unlike an
- * arbitrary-path read, which would bypass the approval firewall). Reply is one [FileContent].
+ * phone -> daemon: read one file of the session's project. The daemon serves (issue #133):
+ *   - any path sitting canonically INSIDE [workdir] (`..`/symlink escapes are refused — the same
+ *     containment red line as [ExportFile]), so the files the composer's `@`-completion can name
+ *     are also viewable; and
+ *   - paths OUTSIDE the tree only when the session's own transcript shows this session changed
+ *     them (the pre-#133 changed-set gate, kept for absolute-path edits) — never an arbitrary read.
+ * The (workdir, sessionId) pair must still name a real transcript, anchoring the read to a session
+ * the client can already see. Reply is one [FileContent] — unless [allowChunks] (issue #134):
+ * a NEW client sets it true to declare it can reassemble a [FileContentChunk] stream, letting
+ * binaries over the single-frame cap through (up to [MAX_CHUNKED_READ_BYTES]). A trailing
+ * optional: an OLD daemon ignores the unknown key (single-frame behavior, oversized files still
+ * refuse), an OLD client omits it (a new daemon never chunks at it — its one-frame world stands).
  */
 @Serializable
 @SerialName("pocket/file.read")
@@ -227,6 +250,7 @@ data class ReadFile(
     val sessionId: String,
     val path: String,
     val agent: AgentKind = AgentKind.CLAUDE,
+    val allowChunks: Boolean = false,
 ) : ToDaemon
 
 /**
@@ -639,7 +663,15 @@ data class AskWithdrawn(
  *  [error] non-null = the turn FAILED and finalText (if any) is not a real answer: the CLI reported
  *  is_error, or every API call failed and it wrote a `<synthetic>` placeholder reply (issue #65 —
  *  previously swallowed, rendering as a normal-looking bubble). Clients show it as an error row;
- *  old clients ignore the field and keep today's behavior. */
+ *  old clients ignore the field and keep today's behavior.
+ *
+ *  [usageLimitResetAt] (issue #137, riding #138's usage-limit detection): when [error] reads as a
+ *  usage/rate-limit refusal AND the CLI's error text carries the window's reset moment (the
+ *  `…usage limit reached|<unix-epoch>` wording), this is that moment as EPOCH MILLIS — the client
+ *  then offers one-tap "auto-continue when the limit resets" (a [ScheduleCreate] one-shot back at
+ *  this session). Null whenever the error isn't a limit hit or no epoch could be parsed — the
+ *  client shows no button then (graceful degrade). A trailing optional both ways: an old daemon
+ *  omits it (null — no button), an old phone ignores the unknown key (ignoreUnknownKeys). */
 @Serializable
 @SerialName("pocket/turn.done")
 data class TurnDone(
@@ -647,6 +679,7 @@ data class TurnDone(
     val finalText: String? = null,
     val usage: TokenUsage? = null,
     val error: String? = null,
+    val usageLimitResetAt: Long? = null,
 ) : ToPhone
 
 /** daemon -> phone: delivery receipt for a [SendPrompt] that carried a promptId — emitted the moment
@@ -694,10 +727,16 @@ data class LanHello(val deviceId: String) : ToDaemon
  * [hostname] is the daemon host's OS computer name — the client adopts it as the binding's default
  * display name until the user sets a nickname (so a computer reads as "Pandas-MacBook-Pro", not a
  * truncated account-id hash — issue #62). Null when unresolved or from a daemon that predates it.
+ * [gatewayBaseUrl] is the third-party `ANTHROPIC_BASE_URL` the daemon's claude launches would use
+ * (active preset → process env → user settings.json), null when unset or pointing at the official
+ * `api.anthropic.com` (issue #139) — the client then surfaces the gateway model presets first in its
+ * model picker. Trailing optional both ways: an old daemon omits it (no gateway hint, presets stay
+ * collapsed), an old app ignores it. Re-evaluated per handshake, so activating a preset shows up on
+ * the next connect.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
-data class DaemonInfo(val lanUrl: String? = null, val hostname: String? = null) : ToPhone
+data class DaemonInfo(val lanUrl: String? = null, val hostname: String? = null, val gatewayBaseUrl: String? = null) : ToPhone
 
 @Serializable
 enum class ChatRole {
@@ -737,10 +776,66 @@ data class HistoryMessage(
     val workflowRunId: String? = null,
 )
 
-/** daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive]. */
+/**
+ * daemon -> phone: the prior transcript of a resumed session, sent once after [SessionLive].
+ *
+ * Incremental reattach (issue #147) rides four TRAILING OPTIONALS — an old daemon omits them (a plain
+ * full replay, exactly today's frame) and an old phone ignores them (and, since it never sends
+ * [OpenSession.lastEventSeq], never receives a `delta = true` frame it couldn't interpret):
+ *  - [lastSeq]: the daemon's transcript cursor after this replay (the source `.jsonl` line count at
+ *    read time). The client stores it per session and echoes it back as [OpenSession.lastEventSeq] on
+ *    the next reattach. Null = the daemon predates #147 (the client then never asks for a delta).
+ *  - [firstSeq]: the cursor of the FIRST included message — the `beforeSeq` anchor a
+ *    [FetchHistoryPage] uses to lazy-load older history. Null when the replay is empty.
+ *  - [delta]: true = [messages] CONTINUE the client's transcript after the cursor it sent (append/merge
+ *    at the tail — never a wipe/replace). Only ever true in reply to an open that carried a honorable
+ *    lastEventSeq. false (default) keeps today's semantics: a full window that replaces/merges
+ *    wholesale, and an EMPTY non-delta replay is still the daemon's explicit /clear wipe.
+ *  - [hasMore]: messages older than [firstSeq] exist on disk — the client may offer "load earlier".
+ */
 @Serializable
 @SerialName("pocket/history")
-data class ConvoHistory(val convoId: String, val messages: List<HistoryMessage>) : ToPhone
+data class ConvoHistory(
+    val convoId: String,
+    val messages: List<HistoryMessage>,
+    val lastSeq: Long? = null,
+    val firstSeq: Long? = null,
+    val delta: Boolean = false,
+    val hasMore: Boolean = false,
+) : ToPhone
+
+/**
+ * phone -> daemon: lazy-load one page of history OLDER than [beforeSeq] (a [ConvoHistory.firstSeq] /
+ * [ConvoHistoryPage.firstSeq] the client already holds) for a live conversation — the scroll-to-top
+ * pagination behind the first screen's ~100-row window (issue #147). The reply is one
+ * [ConvoHistoryPage], sent ONLY to the requesting client (never fanned out — other attached clients
+ * didn't ask and would prepend rows they may already have). A daemon that predates this drops the
+ * unknown frame (runCatching-at-decode); the client arms a reply deadline and stops offering the
+ * load-earlier affordance. An old phone never sends it.
+ */
+@Serializable
+@SerialName("pocket/history.page")
+data class FetchHistoryPage(
+    val convoId: String,
+    val beforeSeq: Long,
+    val limit: Int = 100,
+) : ToDaemon
+
+/**
+ * daemon -> phone: one page of older history — [FetchHistoryPage]'s single reply. [messages] are the
+ * newest `limit` rows strictly BEFORE the requested seq, in chronological order — the client PREPENDS
+ * them. [firstSeq] anchors the next page; [hasMore] = rows older than that still exist. Same
+ * frame-budget guard as [ConvoHistory] (a page can never blow the relay cap). An old phone drops the
+ * unknown frame harmlessly; an old daemon never sends it.
+ */
+@Serializable
+@SerialName("pocket/history.older")
+data class ConvoHistoryPage(
+    val convoId: String,
+    val messages: List<HistoryMessage>,
+    val firstSeq: Long? = null,
+    val hasMore: Boolean = false,
+) : ToPhone
 
 /** One slash command the composer can offer. [name] has no leading "/". */
 @Serializable
@@ -764,6 +859,74 @@ enum class CommandSource {
 @Serializable
 @SerialName("pocket/commands")
 data class CommandList(val convoId: String, val commands: List<SlashCommand>) : ToPhone
+
+// ── installed skills/plugins catalog (issue #132): the desktop browse page ──────────────────────
+
+/**
+ * phone -> daemon: request this machine's installed skills + plugins for the browse page (issue #132).
+ * [workdir] additionally scans that project's `.claude/skills`; null = the user-level catalog only.
+ * A NEW message type — wire-safe both ways: an old daemon can't decode the unknown discriminator and
+ * silently DROPS the frame (its inbound decodes are runCatching-wrapped; no reply ever comes), so the
+ * client arms a reply deadline and shows an "update the daemon" state; an old phone never sends it.
+ */
+@Serializable
+@SerialName("pocket/skills.fetch")
+data class FetchSkillCatalog(val workdir: String? = null) : ToDaemon
+
+/** Where an installed skill was discovered. */
+@Serializable
+enum class SkillScope {
+    @SerialName("user") USER,       // ~/.claude/skills/<name>/
+    @SerialName("project") PROJECT, // <workdir>/.claude/skills/<name>/
+}
+
+/** One installed skill with browse-page detail — the composer autocomplete keeps the lighter
+ *  [SlashCommand]. Every field beyond [name] is optional-with-default so the shape can grow
+ *  tail-first without breaking older peers. */
+@Serializable
+data class SkillInfo(
+    val name: String,
+    val description: String = "",
+    val scope: SkillScope = SkillScope.USER,
+    /** The remaining top-level frontmatter scalars (argument-hint, allowed-tools, license, …) —
+     *  [description] is surfaced separately and excluded here. */
+    val meta: Map<String, String> = emptyMap(),
+    /** SKILL.md body after the frontmatter, capped daemon-side (~4KB); [truncated] marks a longer original. */
+    val excerpt: String = "",
+    val truncated: Boolean = false,
+    /** Absolute path of the skill directory on the daemon's machine (display only). */
+    val path: String? = null,
+)
+
+/** One installed Claude Code plugin (`~/.claude/plugins`), manifest-derived. Everything beyond
+ *  [name] is optional so a plugin with a missing or partial manifest still lists. */
+@Serializable
+data class PluginInfo(
+    val name: String,
+    val description: String = "",
+    val version: String? = null,
+    /** The marketplace half of the install ledger's "name@marketplace" key. */
+    val marketplace: String? = null,
+    /** The ledger's install scope, raw ("user" / "project"). */
+    val scope: String? = null,
+    val author: String? = null,
+    val homepage: String? = null,
+    /** Command names the plugin ships (manifest `commands`), no leading "/". */
+    val commands: List<String> = emptyList(),
+    /** README.md excerpt, capped like [SkillInfo.excerpt]. */
+    val excerpt: String = "",
+    val truncated: Boolean = false,
+    /** The plugin's install directory on the daemon's machine (display only). */
+    val path: String? = null,
+)
+
+/** daemon -> phone: the machine's installed skills + plugins — [FetchSkillCatalog]'s single reply. */
+@Serializable
+@SerialName("pocket/skills")
+data class SkillCatalog(
+    val skills: List<SkillInfo> = emptyList(),
+    val plugins: List<PluginInfo> = emptyList(),
+) : ToPhone
 
 /**
  * daemon -> phone: the conversation's background jobs (backgrounded shells, sub-agents, monitors),
@@ -912,6 +1075,42 @@ data class FileContent(
 ) : ToPhone
 
 /**
+ * daemon -> phone: one piece of a chunked [ReadFile] reply (issue #134) — the read-direction mirror
+ * of [FileChunk]. Sent ONLY when the request carried [ReadFile.allowChunks] and the file is a binary
+ * payload (image/document/unknown-binary) over the single-frame cap; text stays capped single-frame
+ * and small binaries keep riding one [FileContent]. Chunks arrive IN ORDER on the E2E channel,
+ * identity-keyed like [FileContent] (workdir, sessionId, path); [mediaType]/[totalBytes] ride EVERY
+ * chunk so reassembly stays stateless. Every chunk's [base64] encodes [READ_CHUNK_RAW_BYTES] raw
+ * bytes (a multiple of 3) except the last, so the CONCATENATION of the base64 strings in idx order
+ * is itself valid base64 of the whole file — the client needs no per-chunk decode. A failure
+ * mid-stream arrives as a plain ok=false [FileContent] for the same identity, superseding the
+ * partial. An OLD phone never receives these (it never sets allowChunks); if one ever leaks, the
+ * unknown frame is dropped harmlessly.
+ */
+@Serializable
+@SerialName("pocket/file.content.chunk")
+data class FileContentChunk(
+    val workdir: String,
+    val sessionId: String,
+    val path: String,
+    val idx: Int,            // 0-based, contiguous
+    val last: Boolean,       // true on the final chunk -> the client assembles + renders
+    val base64: String,
+    val mediaType: String? = null,
+    val totalBytes: Long = 0,
+) : ToPhone
+
+/** Hard total cap for a chunked [ReadFile] (issue #134) — generous for office documents while still
+ *  bounding what one tap can pull across the relay. One shared constant so the daemon's refusal and
+ *  any client-side caption can't drift. */
+const val MAX_CHUNKED_READ_BYTES: Long = 50L * 1024 * 1024
+
+/** Raw bytes per [FileContentChunk] (384 KiB -> 512 KiB of base64 per frame, comfortable margin under
+ *  the relay's 4 MiB frame cap with JSON + E2E overhead). MUST stay a multiple of 3: that's what makes
+ *  the per-chunk base64 strings concatenable without a decode (see [FileContentChunk]). */
+const val READ_CHUNK_RAW_BYTES: Int = 384 * 1024
+
+/**
  * daemon -> phone: reply to [ReadFileDiff]. [diff] is unified-diff text: `@@ -a,b +c,d @@` hunk
  * headers followed by ` `/`+`/`-`-prefixed lines, one hunk group per tool call in transcript
  * order (line numbers are as-of-that-edit; hunks are NOT merged across calls). Codex hunks may
@@ -980,6 +1179,106 @@ data class ShareEnded(
         const val REASON_EXPIRED = "expired"
     }
 }
+
+// ── scheduled tasks (issue #137): one-shot & simple-repeat prompts the daemon fires on its own clock ──
+// Wire compat, all four directions:
+//  - NEW app → OLD daemon: the daemon can't decode the unknown "t" and silently DROPS the frame (its
+//    inbound decodes are runCatching-wrapped; no reply ever comes) — the client arms a reply deadline
+//    and shows its "update the computer's cc-pocket" state instead of a spinner.
+//  - OLD app → NEW daemon: an old app never sends pocket/schedule.*, so nothing changes for it.
+//  - NEW daemon → OLD app: [ScheduleState] is only ever sent in reply to a schedule request, which an
+//    old app never makes; if one ever leaks, the unknown frame is dropped harmlessly (tolerant decode).
+//  - OLD daemon → NEW app: never sends these — silence is the client's only signal (the deadline above).
+// Management plane: NOT admitted for restricted credentials — GuestCaps/BridgeCaps are whitelists, so
+// every pocket/schedule.* frame is denied-by-default for a guest/bridge (pinned by their exhaustive tests).
+
+/**
+ * How a schedule repeats. Exactly ONE of the two fields is set (both null = one-shot, expressed by
+ * [ScheduleCreate.repeat] being null instead):
+ *  - [intervalMs]: fixed interval from the previous planned fire time (e.g. 24h = "daily at roughly
+ *    the first run's time"), floor-guarded daemon-side ([MIN_SCHEDULE_INTERVAL_MS]);
+ *  - [dailyAtMinute]: every day at this minute-of-day (0..1439) in the DAEMON HOST's local timezone —
+ *    the daemon is the machine that fires, so its wall clock is the one that means anything.
+ */
+@Serializable
+data class ScheduleRepeat(
+    val intervalMs: Long? = null,
+    val dailyAtMinute: Int? = null,
+)
+
+/**
+ * client -> daemon: create one scheduled prompt delivery (issue #137). At [runAtMs] (epoch millis,
+ * the FIRST fire for a repeating schedule) the daemon injects [prompt] into the target session —
+ * resuming [resumeId] under [workdir] when set (the "限额重置后自动继续" case), else starting a fresh
+ * session there — through the SAME open/queue path an interactive prompt takes (mid-turn sends queue
+ * into the running turn; a session live in an outside terminal refuses and the miss is recorded).
+ * The reply is one [ScheduleState] carrying the full updated list. Persisted on the daemon
+ * (~/.cc-pocket/schedules.json): survives restarts; a fire missed while the daemon was down runs
+ * late within its grace window, else is marked missed (one-shot) / skipped forward (repeat).
+ */
+@Serializable
+@SerialName("pocket/schedule.create")
+data class ScheduleCreate(
+    val workdir: String,
+    val prompt: String,
+    val runAtMs: Long,
+    val repeat: ScheduleRepeat? = null,
+    val resumeId: String? = null,
+    val agent: AgentKind = AgentKind.CLAUDE,
+    val model: String? = null,
+    val mode: PermissionMode = PermissionMode.DEFAULT,
+    val label: String? = null, // short display name; null = the client renders the prompt preview
+    // A1 (#137): a client-chosen id. When set (and free), the daemon ADOPTS it as the new schedule's
+    // id, so the client can later cancel by an id it already holds — no wait for the ScheduleState
+    // reply, no fragile "reverse-lookup by label + nextRunAtMs" (which the daemon's runAtMs=maxOf(...,now)
+    // clamp breaks once the reset moment is in the past). Tail-optional: an OLD daemon ignores it and
+    // mints its own UUID; an OLD app never sends it.
+    val clientId: String? = null,
+) : ToDaemon
+
+/** client -> daemon: list this machine's schedules. Reply: one [ScheduleState]. */
+@Serializable
+@SerialName("pocket/schedule.list")
+data object ScheduleList : ToDaemon
+
+/** client -> daemon: delete schedule [id] (one-shot or repeating; a settled one-shot may also be
+ *  cleared this way). Unknown ids are a no-op. Reply: one [ScheduleState] (the updated list). */
+@Serializable
+@SerialName("pocket/schedule.cancel")
+data class ScheduleCancel(val id: String) : ToDaemon
+
+/** One schedule as the client sees it. [nextRunAtMs] is the daemon's computed next fire (null = a
+ *  one-shot that already settled — [lastOutcome] says how). [lastOutcome] is "ok", "missed", or a
+ *  short user-facing error from the last fire attempt; null = never fired yet. Fields beyond [id]
+ *  default so the shape can grow tail-first without breaking older peers. */
+@Serializable
+data class ScheduleInfo(
+    val id: String,
+    val workdir: String = "",
+    val prompt: String = "",
+    val repeat: ScheduleRepeat? = null,
+    val resumeId: String? = null,
+    val agent: AgentKind = AgentKind.CLAUDE,
+    val label: String? = null,
+    val nextRunAtMs: Long? = null,
+    val lastRunAtMs: Long? = null,
+    val lastOutcome: String? = null,
+)
+
+/** daemon -> client: the schedules truth — the single reply to every pocket/schedule.* request.
+ *  [error] is a user-facing refusal of the request that prompted this reply (validation, bad
+ *  workdir); the list still reflects the actual stored state alongside it (same contract as
+ *  [PresetsState]). Never pushed unsolicited, so an old app can only ever see it by asking. */
+@Serializable
+@SerialName("pocket/schedule.state")
+data class ScheduleState(
+    val items: List<ScheduleInfo> = emptyList(),
+    val error: String? = null,
+) : ToPhone
+
+/** Floor for [ScheduleRepeat.intervalMs], enforced daemon-side and mirrored by client forms so the
+ *  two can't drift — a runaway sub-minute repeat would hammer sessions in a loop. */
+const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)

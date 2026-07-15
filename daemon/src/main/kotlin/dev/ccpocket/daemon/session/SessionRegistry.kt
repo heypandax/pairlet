@@ -118,8 +118,9 @@ class SessionRegistry(
     @Volatile
     var pushHook: PushHook? = null
 
-    /** Installed by the relay client (issue #91): how a BRIDGE conversation's permission ask reaches
-     *  the owner — the ask frame itself never goes to the bridge. Null in local-server mode. */
+    /** Installed by the relay client: how a pending permission ask reaches a human who isn't watching —
+     *  a BRIDGE conversation's owner (issue #91: the ask frame never goes to the bridge) or an owner
+     *  session's locked/away phone (issue #138). Null in local-server mode. */
     @Volatile
     var askPushHook: AskPushHook? = null
 
@@ -138,7 +139,7 @@ class SessionRegistry(
             }
             if (live != null) {
                 log.info("open ${resume.take(8)}… → reattach ${live.convoId.take(8)}…")
-                cancelPendingClose(live.convoId); live.reattach(sink); return live.convoId
+                cancelPendingClose(live.convoId); live.reattach(sink, open.lastEventSeq); return live.convoId
             }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
             // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
@@ -170,7 +171,7 @@ class SessionRegistry(
                     }
                     val convoId = UUID.randomUUID().toString()
                     log.info("open ${resume.take(8)}… → OBSERVE ${convoId.take(8)}… (live foreign writer)")
-                    val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope)
+                    val obs = ObserveSession(convoId, open.workdir, resume, file, sink, scope, sinceSeq = open.lastEventSeq)
                     mutex.withLock { observes[convoId] = obs }
                     obs.start()
                     return convoId
@@ -207,7 +208,7 @@ class SessionRegistry(
         )
         // takeOver → Conversation.open spawns EAGERLY (seize the session now); a plain open starts lazily on the
         // first prompt (issue #61) so merely previewing a session never holds/occupies it for the desktop.
-        val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver, takeOver = open.takeOver) }
+        val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver, takeOver = open.takeOver, sinceSeq = open.lastEventSeq) }
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
             runCatching { c.close() }
@@ -375,6 +376,13 @@ class SessionRegistry(
     /** A workflow agent's detail sheet opened — the conversation reads the full prompt/return off disk (#106). */
     suspend fun fetchWorkflowAgentDetail(f: GetWorkflowAgentDetail) =
         get(f.convoId)?.fetchWorkflowAgentDetail(f.runId, f.agentIndex, f.agentId) ?: Unit
+
+    /** Older-history page (issue #147): a transcript parse answered to the REQUESTING sink only —
+     *  works for both live conversations and read-only observe views. */
+    suspend fun fetchHistoryPage(f: dev.ccpocket.protocol.FetchHistoryPage, sink: OutboundSink) {
+        get(f.convoId)?.let { it.fetchHistoryPage(f.beforeSeq, f.limit, sink); return }
+        mutex.withLock { observes[f.convoId] }?.fetchHistoryPage(f.beforeSeq, f.limit, sink)
+    }
 
     /** Workdir of a live conversation — used by voice transcription for term injection. */
     suspend fun workdirOf(convoId: String): Path? = get(convoId)?.workdir

@@ -17,6 +17,7 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.readText
+import kotlin.concurrent.Volatile // commonMain: JVM resolves kotlin.jvm.Volatile implicitly, Kotlin/Native (iOS) does not
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -51,10 +52,25 @@ class RelayE2EConnection {
     /** Relay control-plane frames (Attached, AuthError, PeerPresence) — NOT E2E daemon traffic. The
      *  repository reads this to drive an honest connection state (e.g. "computer offline"). */
     val control = MutableSharedFlow<Frame>(extraBufferCapacity = 16)
+    /** Signals the repo that this LIVE socket has gone DEAF: [DEAF_DECRYPT_FAILURES] inbound transport
+     *  frames in a row wouldn't decrypt (issue #146 — the daemon's reconnect-overlap flipped its outbound
+     *  seal onto a session this socket can't open, while the WS keeps pinging so nothing else notices).
+     *  The repo answers with a forced re-handshake, extending the connection-period deaf-link upgrade
+     *  (startListWait) into the middle of a passively-observed turn. */
+    val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
+
+    // Connection GENERATION (issue #142): bumped once per connect() call. The repo serializes connects
+    // (cancel + bounded join of the previous socket before dialing), but a wedged close can outlive that
+    // bound — a straggler connection that then kept its writer alive would fight the live connection over
+    // the SHARED cross-reconnect outboxes, splitting queued frames across two sockets (and the relay's
+    // per-device supersede kick turns that overlap into a mutual-kick loop). Any coroutine of a stale
+    // generation must therefore stop touching the outboxes / shared flows the moment it notices.
+    @Volatile private var connSeq = 0
 
     /** @param firstTicket the pairing ticket — supplied as PSK only on the very first connect after pairing. */
     suspend fun connect(paired: PairedDaemon, keys: E2ECrypto.KeyPair, firstTicket: String?) = coroutineScope {
+        val gen = ++connSeq
         client.webSocket(urlString = "${paired.relay}/v1/device") {
             // Bound the whole pre-heartbeat prelude: the repo's connect watchdog only guards up to Attached,
             // and the pinger below isn't armed yet — a link that wedges BETWEEN Attached and the Noise
@@ -73,29 +89,54 @@ class RelayE2EConnection {
             } catch (e: TimeoutCancellationException) {
                 throw DeadLinkException()
             }
+            // superseded while handshaking — a newer connect() owns the outboxes now; die before touching them (#142)
+            if (gen != connSeq) throw DeadLinkException()
+            // a reconnect-trigger burst stacked duplicate list/reattach requests while the link was down;
+            // collapse them before the writer flushes (issue #143)
+            outbox.dedupeBacklog()
 
             val writer = launch {
                 for (f in outbox) {
+                    // superseded mid-drain: hand the frame back to the live connection instead of sending
+                    // it down this dying socket, then die (#142)
+                    if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
                     val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                     sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                 }
             }
             // control frames (e.g. RegisterPush) ride the TEXT plane in the clear — the relay parses these
-            val ctrlWriter = launch { for (c in controlOutbox) sendOrDie { outgoing.send(WsFrame.Text(control(c))) } }
+            val ctrlWriter = launch {
+                for (c in controlOutbox) {
+                    if (gen != connSeq) { controlOutbox.send(c); throw DeadLinkException() } // same fencing as the data writer (#142)
+                    sendOrDie { outgoing.send(WsFrame.Text(control(c))) }
+                }
+            }
             // Heartbeat (see LinkHealth.launchHeartbeat): an idle-link WS ping under sendOrDie, so a wedged socket
             // (network switch / NAT / relay idle-drop) trips the write timeout and reconnects. Ktor's own ping
             // can't catch this — it rides the same outgoing path and wedges too. The relay's ktor auto-pongs it.
             val pinger = launchHeartbeat()
+            var deafRun = 0 // consecutive inbound frames that wouldn't decrypt (#146 deaf-link detection)
             try {
-                for (frame in incoming) when {
-                    frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
-                        val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
-                        runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
+                for (frame in incoming) {
+                    if (gen != connSeq) break // a stale reader must not emit into the shared inbound/control flows (#142)
+                    when {
+                        frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT -> {
+                            val pt = session.open(Wire.payloadBody(frame.data))
+                            if (pt == null) {
+                                // A lone stray/reordered frame is noise; CONSECUTIVE failures mean the daemon
+                                // is sealing under a session this live socket can't open (#146) — signal the
+                                // repo to force a re-handshake, then reset so the heal attempt starts clean.
+                                if (deafTripped(++deafRun)) { deaf.emit(Unit); deafRun = 0 }
+                                continue
+                            }
+                            deafRun = 0 // a good decrypt proves the link is not deaf
+                            runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
+                        }
+                        // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
+                        frame is WsFrame.Text ->
+                            runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
+                        else -> {}
                     }
-                    // relay control frames ride the TEXT plane after the handshake (e.g. PeerPresence)
-                    frame is WsFrame.Text ->
-                        runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull()?.let { control.emit(it) }
-                    else -> {}
                 }
             } finally {
                 writer.cancel(); ctrlWriter.cancel(); pinger.cancel()
@@ -133,6 +174,17 @@ class RelayE2EConnection {
 
     private fun control(frame: dev.ccpocket.protocol.ToRelay): String =
         PocketJson.encodeToString(Envelope("h", 0L, to = Route.RELAY, body = frame))
+
+    companion object {
+        // #146: how many inbound transport frames must fail to decrypt back-to-back before we treat the
+        // socket as deaf and force a re-handshake. >1 so a single stray/reordered frame never trips it;
+        // small so a passively-observed long turn heals within a few frames.
+        const val DEAF_DECRYPT_FAILURES = 3
+
+        /** Pure (for tests): a live socket is DEAF once this many inbound transport frames fail to decrypt
+         *  consecutively — a re-keyed/overwritten daemon session (#146), not a lone stray frame. */
+        fun deafTripped(consecutiveFailures: Int): Boolean = consecutiveFailures >= DEAF_DECRYPT_FAILURES
+    }
 }
 
 /** The relay rejected our device credential — re-pairing is required (not a transient network error). */

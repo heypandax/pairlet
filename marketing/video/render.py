@@ -36,6 +36,7 @@ RED_LINES = [
     "不用电脑", "同一进程双端同步", "完全隔离", "安全沙箱", "只有你能看到代码",
     "零日志", "军事级加密", "不可破解", "已通过安全审计", "完全匿名",
     "绕过认证", "绕过官方限制", "Secure Enclave", "硬件级密钥保护", "跨机器直接批准",
+    "接管", "入侵",   # 「未授权访问」语感——抖音法规类限流实证
 ]
 
 def sh(cmd, **kw):
@@ -125,7 +126,7 @@ def resolve_timeline(sb: dict, write_lock=True) -> dict:
             "totalMs": t, "segments": segments}
     if write_lock:
         OUTPUT.mkdir(exist_ok=True)
-        (OUTPUT / "timeline.lock.json").write_text(
+        (OUTPUT / f"timeline-{sb['id']}.lock.json").write_text(
             json.dumps(lock, ensure_ascii=False, indent=2))
     return lock
 

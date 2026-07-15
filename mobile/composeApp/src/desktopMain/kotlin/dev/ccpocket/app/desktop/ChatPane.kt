@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -117,6 +118,10 @@ import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.AttachImageIcon
+import dev.ccpocket.app.ui.EarlierMessagesSeam
+import dev.ccpocket.app.ui.LoadEarlierRow
+import dev.ccpocket.app.ui.rememberEarlierLoaderVisible
+import dev.ccpocket.app.ui.rememberHistorySeam
 import dev.ccpocket.app.ui.LocalPathCwd
 import dev.ccpocket.app.ui.LocalPathOpener
 import dev.ccpocket.app.ui.MarkdownText
@@ -205,7 +210,12 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         // Reset per question so a fresh ask doesn't inherit the last card's ownership.
         var questionOwnsInput by remember(model.ask?.askId) { mutableStateOf(false) }
         ChatSubHeader(model)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            // the QuestionCard docks inside the LazyColumn's unbounded tail item — hand it a bound from the
+            // pane's real viewport so its #125 cap+inner-scroll works instead of falling back to full natural
+            // height on a very tall question (#150; the card also self-defends against unbounded hosts).
+            // Full viewport height, not *0.62f: the card applies its own 0.62 cap to a bounded host.
+            val chatViewportHeight = maxHeight
             // VIRTUALIZED, like the phone: a long live transcript (hundreds of markdown messages,
             // still streaming) previously composed in full on the EDT via Column(verticalScroll) and
             // froze the window on every appended chunk. LazyColumn renders the viewport only; while
@@ -214,6 +224,18 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             val pinned by rememberBottomPinned(listState, model.selectedSessionId, userGesturesOnly = false)
             LaunchedEffect(model.messages.size, model.streaming, model.ask?.askId) {
                 if (pinned && model.messages.isNotEmpty()) listState.scrollToItem(model.messages.lastIndex + 1, Int.MAX_VALUE)
+            }
+            // older-history lazy load (issue #147): a prepended page shifts every index — scroll by the
+            // prepend count (+ the loader row when it stays) so the viewport keeps the row being read.
+            // Visuals per the 0714 chat-components handoff (B): the loader lingers through its silent-
+            // failure fade, and a landed page marks the seam above the re-anchored row for a beat.
+            val historyLoaderVisible = rememberEarlierLoaderVisible(model.historyHasMore)
+            val historySeamAt = rememberHistorySeam(model.historyPrependGen, model.lastHistoryPrependCount)
+            LaunchedEffect(model.historyPrependGen) {
+                val n = model.lastHistoryPrependCount
+                if (model.historyPrependGen > 0 && n > 0 && !pinned) {
+                    listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
+                }
             }
             // one SelectionContainer around the whole stream: desktop text is expected to mouse-drag-select,
             // and Compose Text is inert by default — a single container (not per-message) keeps a drag
@@ -226,14 +248,29 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
+                    // scroll-to-top loader (issue #147): composes only once scrolled into view — exactly
+                    // "reached the top of the loaded window" — and then asks for one older page. An
+                    // ambient status line, never a button (0714 handoff B1); a dead request fades it
+                    // out silently instead of snapping it away (B2).
+                    if (historyLoaderVisible) item(key = "history-loader") {
+                        if (model.historyHasMore) LaunchedEffect(Unit) { model.loadOlderHistory() }
+                        CenteredStreamRow {
+                            LoadEarlierRow(fading = !model.historyHasMore, fontFamily = Dk.ui)
+                        }
+                    }
                     itemsIndexed(model.messages) { i, m ->
                         CenteredStreamRow {
-                            MessageRow(
-                                m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
-                                workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
-                                onOpenWorkflow = model::openWorkflowPanel,
-                                onOpenVideo = { model.openWorkspaceFile(it.path) },
-                            )
+                            Column(Modifier.fillMaxWidth()) {
+                                // seam (0714 handoff B3): for a beat after a page of older history lands,
+                                // mark where the old window began so the reader keeps their place
+                                if (i == historySeamAt) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
+                                MessageRow(
+                                    m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                    workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
+                                    onOpenWorkflow = model::openWorkflowPanel,
+                                    onOpenVideo = { model.openWorkspaceFile(it.path) },
+                                )
+                            }
                         }
                     }
                     item(key = "tail") {
@@ -248,12 +285,16 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // swallows their click-to-focus/cursor pointer input — the box looked dead to
                                 // typing (#76). Carving the card out of selection hands the fields their taps.
                                 DisableSelection {
-                                    QuestionCard(
-                                        ask,
-                                        onAnswer = { answers, response -> model.answerQuestions(answers, response) },
-                                        onSkip = { model.skipQuestions("User skipped the questions") },
-                                        onOwnsInput = { questionOwnsInput = it },
-                                    )
+                                    // heightIn(max) turns the item's infinite height into a bounded constraint,
+                                    // so the card keeps its #125 cap + inner scroll on desktop too (#150).
+                                    Box(Modifier.heightIn(max = chatViewportHeight)) {
+                                        QuestionCard(
+                                            ask,
+                                            onAnswer = { answers, response -> model.answerQuestions(answers, response) },
+                                            onSkip = { model.skipQuestions("User skipped the questions") },
+                                            onOwnsInput = { questionOwnsInput = it },
+                                        )
+                                    }
                                 }
                             } else if (ask != null) {
                                 // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal

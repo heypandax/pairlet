@@ -4,7 +4,11 @@ import dev.ccpocket.daemon.codex.CodexPaths
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.ChangedFile
 import dev.ccpocket.protocol.FileContent
+import dev.ccpocket.protocol.FileContentChunk
 import dev.ccpocket.protocol.FileDiff
+import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.MAX_CHUNKED_READ_BYTES
+import dev.ccpocket.protocol.READ_CHUNK_RAW_BYTES
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -24,9 +28,14 @@ import kotlin.io.path.isRegularFile
  *
  * The changed-file set is re-derived from the session's own transcript on every call (never cached,
  * never phone-supplied): for Claude, `tool_use` inputs of the file-writing tools; for Codex, the
- * `*** Update/Add/Delete File:` envelopes inside apply_patch tool-call arguments. [readFile] serves
- * ONLY paths in that set — the phone already sees these files through the transcript it can replay,
- * so this adds no read surface beyond it (an arbitrary-path read would bypass the approval firewall).
+ * `*** Update/Add/Delete File:` envelopes inside apply_patch tool-call arguments.
+ *
+ * [readFile]'s serve rule (issue #133): any path canonically INSIDE the workdir is served — the same
+ * `..`/symlink containment red line as the export gate ([containedForExport]), scoped to a (workdir,
+ * sessionId) pair that must name a REAL transcript (so the read surface is the project trees of actual
+ * sessions, never an arbitrary root a client makes up). Paths OUTSIDE the tree are served only when
+ * the changed-set scan proves this session touched them (absolute-path edits) — an arbitrary-path
+ * read stays impossible.
  *
  * Line-level data ([ChangedFile.adds]/[dels] and [fileDiff]) rides the same scan: Claude transcripts
  * carry ready-made `structuredPatch` hunks on each Edit/Write `toolUseResult` (a full-file Write
@@ -73,7 +82,8 @@ object SessionFilesService {
         }.asReversed()
     }
 
-    /** One capped read of a file [changedFiles] listed. Never throws; failures ride FileContent.error. */
+    /** One capped read of a project file (see the serve rule in the class doc — issue #133). Never
+     *  throws; failures ride FileContent.error. */
     fun readFile(agent: AgentKind, workdir: String, sessionId: String, path: String): FileContent {
         val transcript = transcriptFor(agent, workdir, sessionId)
             ?: return FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found")
@@ -81,12 +91,149 @@ object SessionFilesService {
     }
 
     /** [readFile] against an explicit transcript [file] — testable without touching `$HOME`. */
-    internal fun readFileIn(agent: AgentKind, transcript: Path, workdir: String, sessionId: String, path: String): FileContent {
+    internal fun readFileIn(agent: AgentKind, transcript: Path, workdir: String, sessionId: String, path: String): FileContent =
+        when (val gate = readGate(agent, transcript, workdir, path)) {
+            is ReadGate.Serve -> serveAt(gate.file, workdir, sessionId, path)
+            is ReadGate.Refuse -> FileContent(workdir, sessionId, path, ok = false, error = gate.error)
+        }
+
+    /**
+     * [readFile]'s streaming variant — the [dev.ccpocket.protocol.ReadFile] entry point. Emits either
+     * one [FileContent] (exactly [readFile]'s answer) or, when [allowChunks] and the target is a binary
+     * payload over [BINARY_CAP_BYTES] (issue #134), an in-order [FileContentChunk] stream up to
+     * [maxChunkedBytes]. Never throws; a mid-stream IO failure settles as an ok=false [FileContent]
+     * that supersedes the partial on the client.
+     */
+    suspend fun streamFile(
+        agent: AgentKind,
+        workdir: String,
+        sessionId: String,
+        path: String,
+        allowChunks: Boolean,
+        emit: suspend (Frame) -> Unit,
+    ) {
+        val transcript = transcriptFor(agent, workdir, sessionId)
+        if (transcript == null) {
+            emit(FileContent(workdir, sessionId, path, ok = false, error = "session transcript not found"))
+            return
+        }
+        streamFileIn(agent, transcript, workdir, sessionId, path, allowChunks, emit = emit)
+    }
+
+    /** [streamFile] against an explicit transcript + injectable caps — testable without `$HOME`/50 MB files. */
+    internal suspend fun streamFileIn(
+        agent: AgentKind,
+        transcript: Path,
+        workdir: String,
+        sessionId: String,
+        path: String,
+        allowChunks: Boolean,
+        chunkRawBytes: Int = READ_CHUNK_RAW_BYTES,
+        maxChunkedBytes: Long = MAX_CHUNKED_READ_BYTES,
+        emit: suspend (Frame) -> Unit,
+    ) {
+        require(chunkRawBytes > 0 && chunkRawBytes % 3 == 0) { "chunkRawBytes must be a positive multiple of 3" }
+        val file = when (val gate = readGate(agent, transcript, workdir, path)) {
+            is ReadGate.Serve -> gate.file
+            is ReadGate.Refuse -> {
+                emit(FileContent(workdir, sessionId, path, ok = false, error = gate.error))
+                return
+            }
+        }
+        if (allowChunks && file.isRegularFile()) {
+            val total = runCatching { file.fileSize() }.getOrDefault(0L)
+            if (total > BINARY_CAP_BYTES) {
+                val media = binaryMediaTypeOf(file)
+                if (media != null) { // text stays a capped single frame — only whole-or-nothing binaries chunk
+                    if (total > maxChunkedBytes) {
+                        emit(
+                            FileContent(
+                                workdir, sessionId, path, ok = false,
+                                error = "file too large to send (${total / 1024} KB — the link caps transfers at ${maxChunkedBytes / 1024} KB)",
+                            ),
+                        )
+                        return
+                    }
+                    emitChunks(file, workdir, sessionId, path, media, total, chunkRawBytes, emit)
+                    return
+                }
+            }
+        }
+        emit(serveAt(file, workdir, sessionId, path))
+    }
+
+    /** The chunk pump: each piece base64-encoded independently ([chunkRawBytes] is a multiple of 3, so
+     *  the strings concatenate into valid base64 of the whole file). Last flag comes from a one-chunk
+     *  read-ahead, so a file that shrank mid-stream still terminates cleanly. */
+    private suspend fun emitChunks(
+        file: Path,
+        workdir: String,
+        sessionId: String,
+        path: String,
+        mediaType: String,
+        total: Long,
+        chunkRawBytes: Int,
+        emit: suspend (Frame) -> Unit,
+    ) {
+        val result = runCatching {
+            java.nio.file.Files.newInputStream(file).use { ins ->
+                var cur = ins.readNBytes(chunkRawBytes)
+                var idx = 0
+                while (true) {
+                    val next = ins.readNBytes(chunkRawBytes)
+                    val last = next.isEmpty()
+                    emit(
+                        FileContentChunk(
+                            workdir, sessionId, path, idx = idx, last = last,
+                            base64 = Base64.getEncoder().encodeToString(cur),
+                            mediaType = mediaType, totalBytes = total,
+                        ),
+                    )
+                    if (last) return@runCatching
+                    cur = next
+                    idx += 1
+                }
+            }
+        }
+        if (result.isFailure) { // settle the stream: the error frame supersedes any partial client-side
+            emit(FileContent(workdir, sessionId, path, ok = false, error = "unreadable: ${result.exceptionOrNull()?.message}"))
+        }
+    }
+
+    /** Resolution of a [readFile]/[streamFile] target — see the class doc's serve rule (issue #133). */
+    private sealed interface ReadGate {
+        data class Serve(val file: Path) : ReadGate
+        data class Refuse(val error: String) : ReadGate
+    }
+
+    private fun readGate(agent: AgentKind, transcript: Path, workdir: String, path: String): ReadGate {
+        val abs = resolve(path, workdir) ?: return ReadGate.Refuse("bad path")
+        // canonically inside the workdir → served without a transcript scan (issue #133): these are the
+        // names ListPathEntries already exposes, and the session's agent can read them anyway
+        when (val gate = containedForExport(workdir, path)) {
+            is ExportGate.Allowed -> return ReadGate.Serve(gate.file)
+            ExportGate.Outside, ExportGate.Missing -> {} // fall through to the changed-set check below
+        }
+        // outside the tree (or gone from it): only what THIS session's transcript proves it changed —
+        // the boundary that keeps this from becoming an arbitrary-path read
         val allowed = scan(agent, transcript, workdir, diffFor = null).keys
-        val abs = resolve(path, workdir)
-            ?: return FileContent(workdir, sessionId, path, ok = false, error = "bad path")
-        if (abs !in allowed) return FileContent(workdir, sessionId, path, ok = false, error = "not a file this session changed")
-        return serveAt(Path.of(abs), workdir, sessionId, path)
+        if (abs in allowed) return ReadGate.Serve(Path.of(abs)) // serveAt reports a deleted one gracefully
+        return ReadGate.Refuse(
+            if (containedForExport(workdir, path) == ExportGate.Missing) "that file no longer exists on the computer"
+            else "that path is outside this session's project folder",
+        )
+    }
+
+    /** The media type [serveAt] would serve [file] as base64 with, or null when it reads as UTF-8 text:
+     *  known image/document extensions first, then the same NUL sniff over the first 8 KiB. */
+    private fun binaryMediaTypeOf(file: Path): String? {
+        val ext = file.toString().substringAfterLast('.', "").lowercase()
+        imageTypes[ext]?.let { return it }
+        documentTypes[ext]?.let { return it }
+        val head = runCatching {
+            java.nio.file.Files.newInputStream(file).use { it.readNBytes(8192) }
+        }.getOrElse { return null } // unreadable: let serveAt produce the readable failure
+        return if (head.any { it == 0.toByte() }) "application/octet-stream" else null
     }
 
     /**
@@ -129,10 +276,11 @@ object SessionFilesService {
     }
 
     // ── approval-gated export of a NON-changed file (issue #67 v2 / #79) ──────────────────────────────
-    // ReadFile is capped to the changed-set; ExportFile widens to any file inside the project tree, but ONLY
-    // behind canonical containment + an owner approval (orchestrated by FileExportService). These three
-    // helpers are the pure, unit-testable pieces of that gate — the containment red line, the changed-set
-    // fast path, and the post-approval serve.
+    // ExportFile serves any file inside the project tree behind canonical containment + an owner approval
+    // (orchestrated by FileExportService). Since #133 ReadFile serves in-tree paths directly, so a NEW
+    // client rarely needs this lane — it remains for old clients and as the approval-gated path. These
+    // three helpers are the pure, unit-testable pieces of that gate — the containment red line, the
+    // changed-set fast path, and the post-approval serve.
 
     /** True iff [path] is in this session's changed-set (the [readFile] allow-set). Lets the gated export
      *  serve a changed file WITHOUT prompting (ReadFile already would) and prompt ONLY for the widening. */
@@ -155,18 +303,21 @@ object SessionFilesService {
     }
 
     /**
-     * Resolve [path] for export against [workdir], enforcing canonical containment: `toRealPath()` collapses
-     * `..` AND follows symlinks, and `startsWith(realWorkdir)` refuses anything landing outside the project
-     * subtree — the same guard [DirectoryService.listPathEntries] uses, and the load-bearing boundary that
-     * keeps ExportFile from becoming an arbitrary-path read. A lexical `..` escape is caught before the file
-     * is stat'd; a symlink escape right after. Missing / non-file → [ExportGate.Missing].
+     * Resolve [path] for a read/export against [workdir], enforcing CANONICAL containment: `toRealPath()`
+     * collapses `..` AND follows symlinks, and `startsWith(realWorkdir)` refuses anything landing outside
+     * the project subtree — the same guard [DirectoryService.listPathEntries] uses, and the load-bearing
+     * boundary that keeps ReadFile/ExportFile from becoming an arbitrary-path read. The canonical form is
+     * the FINAL word both ways: a `..`/symlink escape is refused however it is spelled, and an absolute
+     * in-tree path spelled through a symlinked parent (macOS `/var` → `/private/var`) is still served —
+     * the lexical position only decides whether a nonexistent path reads [ExportGate.Missing] (honest
+     * "no such file" for in-tree names) or [ExportGate.Outside]. Non-files → [ExportGate.Missing].
      */
     fun containedForExport(workdir: String, path: String): ExportGate {
         val root = runCatching { Path.of(workdir).toRealPath() }.getOrNull() ?: return ExportGate.Missing
         val lexical = runCatching { root.resolve(path).normalize() }.getOrNull() ?: return ExportGate.Outside
-        if (!lexical.startsWith(root)) return ExportGate.Outside              // `..` escape — refuse before disk
-        val real = runCatching { lexical.toRealPath() }.getOrNull() ?: return ExportGate.Missing
-        if (!real.startsWith(root)) return ExportGate.Outside                 // symlink escape — refuse
+        val real = runCatching { lexical.toRealPath() }.getOrNull()
+            ?: return if (lexical.startsWith(root)) ExportGate.Missing else ExportGate.Outside
+        if (!real.startsWith(root)) return ExportGate.Outside                 // `..`/symlink escape — refuse
         if (!real.isRegularFile()) return ExportGate.Missing                  // a directory / special file
         return ExportGate.Allowed(real)
     }

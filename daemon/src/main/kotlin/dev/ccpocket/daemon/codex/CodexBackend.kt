@@ -367,6 +367,17 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> =
         CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.read(it) } ?: emptyList()
 
+    // incremental reattach + older-history paging (issue #147) — seq = the rollout's source line
+    override fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long?): dev.ccpocket.daemon.disk.ReplaySlice =
+        CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.slice(it, sinceSeq) }
+            ?: dev.ccpocket.daemon.disk.ReplaySlice.EMPTY
+
+    override fun replayPage(workdir: String, sessionId: String, beforeSeq: Long, limit: Int): dev.ccpocket.daemon.disk.ReplaySlice =
+        CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.page(it, beforeSeq, limit) }
+            ?: dev.ccpocket.daemon.disk.ReplaySlice.EMPTY
+
+    // Codex usage is live-only (thread/tokenUsage/updated) — the rollout carries no per-turn usage
+    // record to read back, so there's nothing to seed the statusline with on resume.
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
     override fun defaultModel(workdir: String): String? = CodexDefaultModel.resolve()

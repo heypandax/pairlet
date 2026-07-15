@@ -1,6 +1,8 @@
 # CC Pocket
 
-> CC Pocket (also written cc-pocket) is an open-source companion app that lets you drive Claude Code — or OpenAI Codex — running on your computer from your phone, tablet, or another computer, from anywhere (not just your LAN). You can resume or start sessions, stream the agent's output live, browse your project folders, and approve or deny the agent's tool-permission requests remotely. All traffic is end-to-end encrypted and routed through a zero-knowledge relay that only ever forwards ciphertext. It is MIT-licensed, requires no account, and is built in clean-room Kotlin Multiplatform.
+> CC Pocket (also written cc-pocket) is an open-source companion app that lets you drive Claude Code — or OpenAI Codex — running on your computer from your phone, tablet, or another computer, from anywhere (not just your LAN). You can resume or start sessions, stream the agent's output live, browse your project folders, and approve or deny the agent's tool-permission requests remotely. All traffic is end-to-end encrypted and routed through a zero-knowledge relay that only ever forwards ciphertext. It is MIT-licensed, requires no CC Pocket account, and is built in clean-room Kotlin Multiplatform.
+
+Last verified: 2026-07-13. Current documented CC Pocket version: 1.3.5. Product availability and third-party plan requirements can change; use the dated, sourced guides below for comparisons.
 
 CC Pocket is a remote control for command-line AI coding agents. The coding agent (Claude Code or OpenAI Codex) keeps running on your own computer; CC Pocket gives you a phone, tablet, or desktop client to watch and steer it from elsewhere — most importantly, to answer the tool-permission prompts the agent raises (run this command? edit this file?) without being at the keyboard.
 
@@ -11,6 +13,12 @@ CC Pocket is a remote control for command-line AI coding agents. The coding agen
 - **Who it's for:** developers who run Claude Code or Codex locally and want to monitor or approve runs while away from their desk.
 - **Cost:** free, open source (MIT). No account or sign-up.
 - **Not** a cloud IDE and **not** a re-host of the model: your code and the agent stay on your machine; CC Pocket only relays encrypted control traffic.
+
+## Differentiation from first-party mobile options
+
+- Anthropic offers Claude Code Remote Control. Its official guide, checked 2026-07-13, documents `/remote-control` and `claude remote-control`, Claude Code 2.1.51+, and Pro / Max / Team / Enterprise eligibility.
+- OpenAI announced Codex in ChatGPT mobile on 2026-05-14. The announcement says iOS and Android, all ChatGPT plans including Free and Go, with files and credentials kept on the computer; consult OpenAI for current rollout details.
+- CC Pocket is the independent option for one client across **both** Claude Code and Codex, MIT-licensed source, optional relay self-hosting, and no CC Pocket account. It is not affiliated with or endorsed by Anthropic or OpenAI.
 
 ## Key features
 
@@ -66,7 +74,14 @@ The architecture is three parts plus the agent:
 ## Links
 
 - [Website](https://heypandax.github.io/cc-pocket/)
+- [中文首页](https://heypandax.github.io/cc-pocket/zh/)
 - [Full feature list](https://heypandax.github.io/cc-pocket/features.html)
+- [Claude Code mobile remote guide](https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html)
+- [OpenAI Codex mobile remote guide](https://heypandax.github.io/cc-pocket/guides/codex-mobile-remote.html)
+- [Remote options comparison](https://heypandax.github.io/cc-pocket/guides/compare-remote-options.html)
+- [Security model and limitations](https://heypandax.github.io/cc-pocket/guides/security.html)
+- [Self-hosting architecture](https://heypandax.github.io/cc-pocket/guides/self-hosting.html)
+- [FAQ](https://heypandax.github.io/cc-pocket/guides/faq.html)
 - [GitHub repository](https://github.com/heypandax/cc-pocket)
 - [README / user guide](https://github.com/heypandax/cc-pocket#readme)
 - [Security model](https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md)

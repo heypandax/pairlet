@@ -29,8 +29,17 @@ class ObserveSession(
     private val file: Path,
     private val sink: OutboundSink,
     parentScope: CoroutineScope,
+    /** The observing client's transcript cursor from its OpenSession (issue #147). NON-NULL also
+     *  DECLARES the client understands delta frames (a new client sends 0 when it holds no transcript
+     *  yet) — an old client omits the field and keeps today's full-window tick behavior: feeding a
+     *  delta to a client that treats every ConvoHistory as a full window would wipe its scrollback. */
+    private val sinceSeq: Long? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob() + CoroutineName("observe-$convoId"))
+
+    // the cursor of the last replay WE sent this observer's client — each tail tick then replays only
+    // the appended delta instead of re-sending the whole 100-row window on every write (issue #147)
+    private var sentCursor: Long? = sinceSeq?.takeIf { it > 0 }
 
     fun start() {
         scope.launch {
@@ -41,12 +50,32 @@ class ObserveSession(
                     if (mtime != lastMtime) {
                         lastMtime = mtime
                         emitLive() // model/window/occupancy move as the observed terminal writes turns
-                        sink.emit(ConvoHistory(convoId, TranscriptReplay.read(file)))
+                        val slice = TranscriptReplay.slice(file, sinceSeq = sentCursor)
+                        // an empty DELTA = the client is already caught up (noise-only appends) — nothing
+                        // to send. An empty FULL still goes out: that's today's "file gone/empty" wipe.
+                        if (slice.messages.isNotEmpty() || !slice.delta) {
+                            sink.emit(
+                                ConvoHistory(
+                                    convoId, slice.messages,
+                                    lastSeq = slice.lastSeq, firstSeq = slice.firstSeq,
+                                    delta = slice.delta, hasMore = slice.hasMore,
+                                ),
+                            )
+                        }
+                        // only a delta-capable client (sinceSeq != null, see above) graduates to delta
+                        // ticks; an old client keeps receiving the full window on every write
+                        if (sinceSeq != null) sentCursor = slice.lastSeq ?: sentCursor
                     }
                     delay(1500)
                 }
             }.onFailure { close() } // any emit/IO failure (e.g. the phone disconnected) -> stop tailing
         }
+    }
+
+    /** Older-history page for an observed session (issue #147) — same shape as Conversation's. */
+    suspend fun fetchHistoryPage(beforeSeq: Long, limit: Int, to: OutboundSink) {
+        val slice = TranscriptReplay.page(file, beforeSeq, limit.coerceIn(1, 200))
+        to.emit(dev.ccpocket.protocol.ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
     /** Announce with whatever the transcript knows (issue #27's observe gap): the last assistant turn's

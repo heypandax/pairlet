@@ -181,17 +181,18 @@ interface DesktopModel {
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
     var showQuickActions: Boolean // chat-header ⋯ popover: model/effort/mode + compact/clear (mirrors mobile's sheet)
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
+    var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
 
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges || showSkills
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false; showSkills = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -335,7 +336,20 @@ interface DesktopModel {
     val chatModelId: String get() = chatModel
     val chatMode: PermissionMode
     val chatEffort: String? get() = null
+    /** The daemon's third-party ANTHROPIC_BASE_URL (issue #139) — non-null puts the gateway model
+     *  presets first in the ⋯ model picker. Default null keeps Seed/test fakes compiling. */
+    val gatewayBaseUrl: String? get() = null
     val messages: List<ChatItem>
+    // ── older-history lazy load (issue #147) — defaults keep Seed/test fakes compiling ──
+    /** Rows older than the loaded window exist on the daemon — the top-of-list loader shows. */
+    val historyHasMore: Boolean get() = false
+    /** True while a page request is in flight (the loader row pulses). */
+    val historyLoadingOlder: Boolean get() = false
+    /** Bumped when a page PREPENDED rows; [lastHistoryPrependCount] says how many — the list scrolls
+     *  by that to keep the viewport anchored. */
+    val historyPrependGen: Int get() = 0
+    val lastHistoryPrependCount: Int get() = 0
+    fun loadOlderHistory() {}
     val streaming: Boolean
     /** True when a sent prompt can't be confirmed delivered — the link is down, or it claims healthy but
      *  the delivery receipt stalled past its deadline (issue #78, common with several computers connected).
@@ -395,9 +409,21 @@ interface DesktopModel {
     val selectedChangedPath: String? get() = null
     val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = null
     val selectedContent: dev.ccpocket.protocol.FileContent? get() = null
+    /** Received/total bytes of an in-flight chunked read (issue #134) — the loading card's determinate bar. */
+    val selectedContentProgress: Pair<Long, Long>? get() = null
     fun selectChangedFile(path: String) {}
     /** Open the browser: flip the flag and refresh both the list and the remembered selection. */
     fun openChanges() { showChanges = true; fetchChangedFiles() }
+
+    // installed skills/plugins browser (issue #132): the machine's ~/.claude catalog, plus the open
+    // project's `.claude/skills` when a chat is live. Defaults keep seed/preview models inert.
+    val skillCatalog: dev.ccpocket.protocol.SkillCatalog? get() = null
+    val skillCatalogLoading: Boolean get() = false
+    /** No reply — the daemon predates pocket/skills.*; the browser shows its "update the daemon" state. */
+    val skillCatalogStale: Boolean get() = false
+    fun fetchSkillCatalog() {}
+    /** Open the browser: flip the flag and re-pull the catalog (cheap daemon-side disk scan). */
+    fun openSkills() { showSkills = true; fetchSkillCatalog() }
 
     // composer image attachments (⌘V paste / attach icon → file picker); ride the next send
     val pendingImages: List<dev.ccpocket.app.data.PendingImage>
@@ -493,6 +519,16 @@ interface DesktopModel {
     fun clearLastShare() {}
     /** Guest: decode + redeem a pasted invite blob; false if it isn't a valid invite. */
     fun redeemShareInvite(blob: String): Boolean = false
+
+    // scheduled tasks (issue #137): the ACTIVE computer's schedule list (management surface — the
+    // creation gesture lives on mobile's composer). Defaults keep seed/preview/test fakes inert;
+    // the live model rides the repo. `schedulesStale` = the daemon predates pocket/schedule.*
+    // (it silently drops the request), distinct from an EMPTY list.
+    val schedules: List<dev.ccpocket.protocol.ScheduleInfo> get() = emptyList()
+    val schedulesLoaded: Boolean get() = false
+    val schedulesStale: Boolean get() = false
+    fun refreshSchedules() {}
+    fun cancelSchedule(id: String) {}
 
     // account (Settings ▸ Account): the ACTIVE computer's Claude CLI login, driven over pocket/auth.*.
     // Null = not fetched yet, or the daemon predates the messages (it silently drops the request).

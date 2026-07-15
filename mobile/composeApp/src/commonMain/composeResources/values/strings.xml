@@ -50,6 +50,8 @@
     <string name="conn_computer_offline_banner">Computer offline — waiting for it to come back…</string>
     <string name="conn_connecting_banner">Connecting to your computer…</string>
     <string name="msg_pending_undelivered">Not delivered yet — will send once connected</string>
+    <string name="history_loading_earlier">Loading earlier messages…</string>
+    <string name="history_earlier_seam">· earlier messages ·</string>
     <string name="msg_sending">Sending…</string>
     <string name="msg_delivered">Delivered to your computer</string>
     <string name="msg_no_response">No response yet — tap to resend</string>
@@ -268,6 +270,12 @@
     <string name="model_custom_hint">model id passed to --model</string>
     <string name="model_switching">Restarting session… history is kept.</string>
     <string name="model_not_installed">not installed</string>
+    <string name="model_gateway_section">Gateway models</string>
+    <string name="model_gateway_via">via %1$s</string>
+    <string name="model_gateway_show">Gateway model presets</string>
+    <string name="model_gateway_note">Which model an id reaches is decided by your gateway.</string>
+    <string name="model_gateway_suggested">suggested</string>
+    <string name="model_section_anthropic">Anthropic API</string>
     <string name="af_show_from">Show sessions from</string>
     <string name="af_both">Both</string>
     <string name="af_claude_only">Claude only</string>
@@ -321,13 +329,15 @@
     <string name="file_open">Open</string>
     <string name="file_preview">Preview</string>
     <string name="file_no_inline_preview">No inline preview for this file type</string>
-    <string name="file_exceeds_cap">exceeds transfer cap</string>
-    <string name="file_too_large_note">Too large to open here — the link caps transfers at %1$s. Grab it from the computer running the daemon.</string>
+    <string name="file_too_large_fetch">too large to fetch remotely</string>
+    <string name="file_open_on_computer">open it on your computer</string>
     <string name="file_transferring">transferring over relay…</string>
+    <string name="file_transfer_progress">%1$s of %2$s</string>
     <string name="file_export_request">Request export (needs approval)</string>
     <string name="file_export_waiting">Waiting for approval…</string>
     <string name="file_export_other">Export a file not in this list…</string>
     <string name="file_export_other_hint">path/in/project.xlsx</string>
+    <string name="file_view">View file</string>
 
     <!-- ── sub-agent card (issue #77, chat-cards handoff) ────────── -->
     <string name="subagent_report">Report</string>
@@ -545,4 +555,45 @@
     <string name="group_delete">Delete group</string>
     <string name="group_delete_confirm">Delete this group? Its sessions move to Ungrouped.</string>
     <string name="group_name_hint">Group name</string>
+
+    <!-- scheduled tasks (issue #137) -->
+    <string name="schedule_tasks_title">Scheduled tasks</string>
+    <string name="schedule_empty">Nothing scheduled</string>
+    <string name="schedule_empty_hint">Long-press send in any chat to queue a prompt for later.</string>
+    <string name="schedule_stale_title">Update cc-pocket on your computer</string>
+    <string name="schedule_stale_body">The daemon is too old to run schedules. Existing tasks are paused.</string>
+    <string name="schedule_next_run">in %1$s</string>
+    <string name="schedule_next_at">next %1$s</string>
+    <string name="schedule_due_now">due now</string>
+    <string name="schedule_done">done</string>
+    <string name="schedule_missed">missed</string>
+    <string name="schedule_repeat_daily">daily</string>
+    <string name="schedule_repeat_every">every %1$s</string>
+    <string name="schedule_last_failed">last run failed · %1$s</string>
+    <string name="schedule_meta_resume">resumes session</string>
+    <string name="schedule_meta_new">new session</string>
+    <string name="schedule_remove">Remove</string>
+    <string name="schedule_send_title">Schedule send</string>
+    <string name="schedule_opt_30m">30m</string>
+    <string name="schedule_opt_1h">1h</string>
+    <string name="schedule_opt_3h">3h</string>
+    <string name="schedule_opt_8h">8h</string>
+    <string name="schedule_custom_time">Custom time…</string>
+    <string name="schedule_repeat_toggle">Repeat daily</string>
+    <string name="schedule_repeat_caption">every day at %1$s</string>
+    <string name="schedule_confirm">Schedule for %1$s</string>
+    <string name="schedule_confirm_daily">Schedule daily at %1$s</string>
+    <string name="schedule_created_note">Scheduled — this message will be sent to the session at the picked time.</string>
+    <string name="schedule_wd_1">Mon</string>
+    <string name="schedule_wd_2">Tue</string>
+    <string name="schedule_wd_3">Wed</string>
+    <string name="schedule_wd_4">Thu</string>
+    <string name="schedule_wd_5">Fri</string>
+    <string name="schedule_wd_6">Sat</string>
+    <string name="schedule_wd_7">Sun</string>
+    <string name="limit_banner">Usage limit hit</string>
+    <string name="limit_resets">— resets %1$s</string>
+    <string name="limit_autocontinue">Auto-continue</string>
+    <string name="limit_confirmed">Will continue at %1$s</string>
+    <string name="limit_undo">Undo</string>
 </resources>

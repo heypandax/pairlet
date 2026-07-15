@@ -18,7 +18,7 @@
 </div>
 <script>
 const Q=new URLSearchParams(location.search);
-const BASE=Q.get('frames'), N=parseInt(Q.get('n')||'1',10), SFPS=parseInt(Q.get('sfps')||'30',10);
+const BASE=Q.get('frames'), N=parseInt(Q.get('n')||'1',10), SFPS=parseInt(Q.get('sfps')||'30',10), OFF=parseInt(Q.get('off')||'0',10);
 const PUSH=Q.get('push')==='1';
 const img=document.getElementById('fr');
 const cache=[]; let loaded=0;
@@ -33,7 +33,7 @@ window.SCENE={frame(t){
   RIG.wipe(RIG.$('.kicker em'),t,960);                 // keyword chip after the line settles
   RIG.enter(RIG.$('#shell'),t,0,{dy:40,dur:640,delay:60,curve:RIG.SHELL,scale:0.96});
   RIG.enter(RIG.$('.subline'),t,0,{dy:16,dur:460,delay:380,curve:RIG.KICK});
-  const idx=Math.min(N-1,Math.floor(t/1000*SFPS));
+  const idx=Math.min(N-1,OFF+Math.floor(t/1000*SFPS));
   img.src=cache[idx].src;
   if(PUSH){
     const drop=RIG.at(0.22), hold=1600, exitAt=drop+520+hold;

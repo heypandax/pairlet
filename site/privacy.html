@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CC Pocket privacy notice</title>
+<meta name="description" content="CC Pocket privacy notice covering end-to-end encrypted session content, relay metadata, device storage, Firebase telemetry, push notifications, and website services." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/privacy.html" /><link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/privacy.html" /><link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/privacy.html" />
+<meta name="robots" content="index, follow, max-snippet:-1" />
+<meta property="og:type" content="article" /><meta property="og:site_name" content="CC Pocket" /><meta property="og:title" content="CC Pocket privacy notice" /><meta property="og:description" content="How CC Pocket handles encrypted content, routing metadata, telemetry, push tokens, and website requests." /><meta property="og:url" content="https://heypandax.github.io/cc-pocket/privacy.html" /><meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" /><meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" /><link rel="preconnect" href="https://fonts.googleapis.com" /><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" /><link rel="stylesheet" href="styles.css" /><link rel="stylesheet" href="article.css" />
+<script type="application/ld+json">{ "@context": "https://schema.org", "@type": "WebPage", "name": "CC Pocket privacy notice", "description": "How CC Pocket handles encrypted content, routing metadata, telemetry, push tokens, and website requests.", "url": "https://heypandax.github.io/cc-pocket/privacy.html", "datePublished": "2026-07-13", "dateModified": "2026-07-13", "inLanguage": "en", "isPartOf": { "@id": "https://heypandax.github.io/cc-pocket/#website" } }</script>
+</head>
+<body>
+<nav class="guide-nav"><div class="wrap"><a class="brand" href="./"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a><div class="guide-links"><a href="guides/security.html">Security</a><a href="guides/faq.html">FAQ</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">Source</a></div></div></nav>
+<header class="guide-hero"><div class="wrap"><div class="breadcrumbs"><a href="./">CC Pocket</a> / Privacy</div><h1>Privacy notice</h1><p class="guide-deck">This notice describes data handling in the open-source CC Pocket clients, daemon, hosted relay, push path, and project website.</p><div class="guide-meta"><span>Effective July 13, 2026</span><span>Version 1.3.5</span></div></div></header>
+<main class="guide-main">
+  <div class="answer-box"><div class="answer-label">Summary</div><p>Prompts, code, transcripts, and tool details sent between a paired client and daemon are end-to-end encrypted. The relay processes routing and connection metadata. App telemetry and push services are separate third-party data paths.</p></div>
+
+  <h2>Session content</h2><p>Claude Code or Codex and your project files run on your computer. When CC Pocket sends session content between the daemon and a paired client, the content is encrypted at the endpoints using the protocol described in the <a href="guides/security.html">security model</a>. The hosted relay forwards encrypted frames and is not designed to receive plaintext prompts, code, transcripts, private keys, or session keys.</p>
+
+  <h2>Relay data and metadata</h2><p>To authenticate devices and route traffic, the relay stores an account identifier derived from a daemon public key, daemon and device public keys, hashes of credentials and pairing tickets, timestamps, and revocation state. It can also observe source IP addresses, online timing, ciphertext size and timing, byte counts, and the account-to-device routing relationship. Operational logs include connection lifecycle, authentication results, and rate-limit events.</p>
+
+  <h2>Data stored on your devices</h2><p>The client and daemon store pairing credentials, public and private key material, preferences, and local session references needed to operate the product. Project content and coding-agent credentials remain under the control of the computer that runs the agent. Unpair or revoke a device when it is lost or no longer trusted.</p>
+
+  <h2>Analytics and crash reporting</h2><p>The distributed mobile apps integrate Firebase Analytics and Crashlytics. The app code emits enumerated usage and diagnostic events such as app launch, connection state, session opened, prompt sent, and approval decision. It is designed not to include prompt text, directory paths, tool inputs, account identifiers, code, or transcript content. Crash reports can include technical diagnostic information. These requests go directly to Google services and do not pass through the CC Pocket relay. Desktop analytics is enabled only when a build is configured with the relevant GA4 credentials.</p>
+
+  <h2>Push notifications</h2><p>On supported platforms, APNs or Firebase Cloud Messaging may process a device push token and notification-delivery metadata. Push payloads are designed to avoid prompt or code content. Opening the app retrieves session details through the encrypted CC Pocket channel.</p>
+
+  <h2>Website requests</h2><p>This static website is hosted by GitHub Pages and loads font files from Google Fonts. Its homepage also loads a QR-code utility from jsDelivr. Those providers receive ordinary web-request information such as IP address, browser headers, and requested resource. The site itself does not provide a CC Pocket account or advertising profile.</p>
+
+  <h2>Self-hosting</h2><p>If you build or self-host CC Pocket components, the operator of that deployment determines the relevant logging, retention, analytics configuration, and infrastructure access. Review and modify the source and deployment files to match your requirements.</p>
+
+  <h2>Changes and questions</h2><p>This notice may change as the product changes. The effective date above identifies the current version. For implementation questions, open a <a href="https://github.com/heypandax/cc-pocket/issues" rel="noopener">GitHub issue</a>. Report security vulnerabilities privately through <a href="https://github.com/heypandax/cc-pocket/security/advisories/new" rel="noopener">GitHub Security Advisories</a>.</p>
+  <section class="sources"><h2>Technical sources</h2><ol><li><a href="https://github.com/heypandax/cc-pocket/blob/main/docs/SECURITY.md" rel="noopener">Security and trust model</a>.</li><li><a href="https://github.com/heypandax/cc-pocket/tree/main/mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/telemetry" rel="noopener">Shared telemetry event definitions</a>.</li><li><a href="https://github.com/heypandax/cc-pocket" rel="noopener">Complete source repository</a>.</li></ol></section>
+</main>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="features.html">Features</a><a href="guides/security.html">Security</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a></span></div></footer>
+</body>
+</html>

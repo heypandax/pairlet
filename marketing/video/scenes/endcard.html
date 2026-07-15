@@ -24,9 +24,15 @@
   <div class="subline"><span data-sub></span></div>
 </div>
 <script>
+const SAFE=new URLSearchParams(location.search).get('safe')==='1';
+if(SAFE){
+  document.querySelector('.e4').style.display='none';
+  document.querySelector('.e3').innerHTML='搜索<br><em>CC Pocket</em>';
+  document.querySelector('.e5').innerHTML='🆓 <b>开源免费</b> · 全平台';
+}
 window.SCENE={frame(t){
   RIG.enter(RIG.$('.brandchip'),t,0,{dy:0,dur:400});
-  ['.e1','.e2','.e3','.e4','.e5'].forEach((s,i)=>RIG.enter(RIG.$(s),t,0,{dy:24,dur:520,delay:120+i*180,curve:RIG.KICK}));
+  ['.e1','.e2','.e3','.e4','.e5'].filter(s=>!SAFE||s!=='.e4').forEach((s,i)=>RIG.enter(RIG.$(s),t,0,{dy:24,dur:520,delay:120+i*180,curve:RIG.KICK}));
   RIG.wipe(RIG.$('.big em'),t,1400);
   RIG.enter(RIG.$('.subline'),t,0,{dy:16,dur:460,delay:380,curve:RIG.KICK});
 }};

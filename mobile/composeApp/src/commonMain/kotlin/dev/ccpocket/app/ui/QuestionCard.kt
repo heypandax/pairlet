@@ -100,10 +100,16 @@ fun QuestionCard(
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         // cap the docked card's height so a tall question (many options / 2+ questions) scrolls INSIDE the
         // card instead of shoving the skip/submit row off the bottom of the screen, unreachable (#125 —
-        // the card docks above the composer with natural height; without a cap Android can't reach its foot)
-        val cardMaxHeight = maxHeight * 0.62f
+        // the card docks above the composer with natural height; without a cap Android can't reach its foot).
+        // Only under a BOUNDED host though: in an unbounded-height host (desktop docks the card in a
+        // LazyColumn tail item) maxHeight is Infinity — the cap can't bind and the weighted middle measures
+        // at minHeight=0, collapsing the card to an empty header+footer shell (#150). Detect that and fall
+        // back to natural height with no inner scroll (the host's own scrolling takes over).
+        val bounded = constraints.hasBoundedHeight
         Box(
-        Modifier.fillMaxWidth().heightIn(max = cardMaxHeight).padding(horizontal = 12.dp, vertical = 6.dp)
+        Modifier.fillMaxWidth()
+            .then(if (bounded) Modifier.heightIn(max = maxHeight * 0.62f) else Modifier)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
             .shadow(14.dp, shape).clip(shape).background(Tok.raised).border(1.dp, Tok.hair, shape),
     ) {
         // the quiet arrival cue: a centered terracotta top-hairline that fades at both ends
@@ -137,8 +143,9 @@ fun QuestionCard(
                 }
             }
             // scrollable middle — header + chip-tabs (above) and skip/submit (below) stay pinned, so a tall
-            // option list / freeform field scrolls HERE instead of overflowing the capped card (#125)
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            // option list / freeform field scrolls HERE instead of overflowing the capped card (#125).
+            // weight() only under a bounded host — with infinite incoming height it measures at 0 (#150).
+            Column(if (bounded) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier) {
             if (freeform) {
                 var focused by remember { mutableStateOf(false) }
                 val ffShape = RoundedCornerShape(12.dp)

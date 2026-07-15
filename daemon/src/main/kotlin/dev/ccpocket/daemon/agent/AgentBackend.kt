@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
@@ -68,6 +69,17 @@ interface AgentBackend {
 
     /** Prior transcript of [sessionId] under [workdir], flattened for replay to the phone. */
     fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage>
+
+    /** [replayHistory] with cursor metadata (issue #147): a DELTA past [sinceSeq] when the backend can
+     *  honor it, else the full tail window. Default wraps [replayHistory] with NO cursor (lastSeq
+     *  null) — a backend that doesn't override simply keeps its clients on full replays. */
+    fun replaySlice(workdir: String, sessionId: String, sinceSeq: Long? = null): ReplaySlice =
+        ReplaySlice(replayHistory(workdir, sessionId))
+
+    /** One page of history OLDER than [beforeSeq] — the scroll-to-top lazy load (issue #147).
+     *  Default: empty, hasMore=false (a backend without paging simply never offers more). */
+    fun replayPage(workdir: String, sessionId: String, beforeSeq: Long, limit: Int): ReplaySlice =
+        ReplaySlice.EMPTY
 
     /** Context tokens the last completed turn of [sessionId] left in the window — seeds the phone's
      *  usage statusline on resume. Null when unknown (no transcript / no usage yet / backend doesn't

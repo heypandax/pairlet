@@ -58,6 +58,7 @@ class RelayClient(
     private val core: DaemonCore,
     private val lanUrl: () -> String? = { null }, // direct-listener address advertised to devices (DaemonInfo)
     private val hostname: () -> String? = { null }, // OS computer name advertised to devices (DaemonInfo; lazy — first use may resolve DNS)
+    private val gatewayBaseUrl: () -> String? = { null }, // third-party ANTHROPIC_BASE_URL advertised to devices (DaemonInfo, issue #139)
 ) {
     private val log = logger("RelayClient")
 
@@ -90,7 +91,7 @@ class RelayClient(
     @Volatile private var peerOnline = false
     @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness; baselined at attach)
     @Volatile private var sawPong = false  // logging only: notes when this relay first proves it speaks Pong
-    private val sessions = DeviceSessions(core, identity, lanUrl = lanUrl, hostname = hostname) { deviceId, payload ->
+    private val sessions = DeviceSessions(core, identity, lanUrl = lanUrl, hostname = hostname, gatewayBaseUrl = gatewayBaseUrl) { deviceId, payload ->
         dataOut?.send(Wire.wrapDevice(deviceId, payload))
     }
 
@@ -137,31 +138,25 @@ class RelayClient(
         // (the #114 follow-up dial): the relay re-checks deviceCount before actually pushing, but it can't
         // see LAN attachment — without this gate every turn watched over the LAN doubles as a lock-screen
         // push. Mirrors the reaper's gate below.
-        core.registry.pushHook = PushHook { workdir, sessionId, finalText ->
-            if (!peerOnline && !core.registry.lanConnected() && core.prefs.pushEnabled) controlOutbox.send(
-                NotifyPush(
-                    title = workdir.fileName?.toString() ?: "CC Pocket",
-                    body = finalText?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()?.take(140) ?: "Turn complete",
-                    workdir = workdir.toString(),
-                    sessionId = sessionId,
-                ),
-            )
+        // The push copy itself (turn complete / turn failed / usage limit hit — issue #138) lives in
+        // PushPolicy so it stays unit-testable; this hook only supplies the presence gate.
+        core.registry.pushHook = PushHook { workdir, sessionId, finalText, error ->
+            if (!peerOnline && !core.registry.lanConnected() && core.prefs.pushEnabled) {
+                controlOutbox.send(PushPolicy.turnPush(workdir, sessionId, finalText, error))
+            }
         }
-        // issue #91: a BRIDGE conversation's permission ask can't reach the bridge (egress whitelist) —
-        // push the owner instead. Deliberately NOT gated on peerOnline: the phone being online does not
-        // mean it is attached to the bridge's conversation (unlike TurnDone, which an attached client
-        // already received on the data plane). The relay still suppresses the push while any interactive
-        // device socket is live, so an in-app owner isn't double-alerted.
-        core.registry.askPushHook = AskPushHook { workdir, sessionId, origin, tool ->
-            if (core.prefs.pushEnabled) controlOutbox.send(
-                NotifyPush(
-                    title = "Approval needed — $origin",
-                    body = "${workdir.fileName ?: "session"}: $tool is waiting for your decision",
-                    workdir = workdir.toString(),
-                    sessionId = sessionId,
-                    urgent = true, // deliver even if a phone is attached elsewhere — the ask isn't on its data plane
-                ),
-            )
+        // Permission-ask pushes. Bridge asks (issue #91, origin != null) can't reach the bridge at all
+        // (egress whitelist) — always pushed, urgent. OWNER-session asks (issue #138, origin == null)
+        // push only when the card provably has no live viewer: nobody attached to the conversation, or
+        // the phone gone everywhere (locked/offline). The relay's "interactive socket live" suppression
+        // remains the second gate on the non-urgent path, so an in-app owner isn't double-alerted.
+        // Returns whether a push was queued — the conversation's coalesce window only counts real pushes.
+        core.registry.askPushHook = AskPushHook { workdir, sessionId, origin, tool, watched ->
+            val push = if (core.prefs.pushEnabled) {
+                PushPolicy.askPush(workdir, sessionId, origin, tool, watched, peerOnline, core.registry.lanConnected())
+            } else null
+            push?.let { controlOutbox.send(it) }
+            push != null
         }
         // issue #115: the OWNER folder-share control plane. Installed on the relay path (minting needs the
         // relay link; the LAN path can't mint). DeviceSessions dispatches CreateShare/ListShares/RevokeShare

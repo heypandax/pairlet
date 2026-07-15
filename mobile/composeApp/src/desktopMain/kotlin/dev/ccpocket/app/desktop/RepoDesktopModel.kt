@@ -112,6 +112,7 @@ class RepoDesktopModel(
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
+    override var showSkills by mutableStateOf(false)
     override val composerState = ComposerState()
 
     // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
@@ -175,7 +176,14 @@ class RepoDesktopModel(
     override val selectedChangedPath: String? get() = repo.viewedFilePath.value
     override val selectedDiff: dev.ccpocket.protocol.FileDiff? get() = repo.viewedFileDiff.value
     override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
+    override val selectedContentProgress: Pair<Long, Long>? get() = repo.viewedFileProgress.value
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
+
+    // ── installed skills/plugins browser (issue #132): straight repo pass-throughs ──
+    override val skillCatalog: dev.ccpocket.protocol.SkillCatalog? get() = repo.skillCatalog.value
+    override val skillCatalogLoading: Boolean get() = repo.skillCatalogLoading.value
+    override val skillCatalogStale: Boolean get() = repo.skillCatalogUnavailable.value
+    override fun fetchSkillCatalog() = repo.fetchSkillCatalog()
 
     override val connected: Boolean get() = repo.sessionActive.value
     override val connGen: Int get() = repo.connGen.value
@@ -682,7 +690,14 @@ class RepoDesktopModel(
     override val chatModelId: String get() = repo.model.value ?: ""
     override val chatMode: PermissionMode get() = repo.mode.value
     override val chatEffort: String? get() = repo.effort.value
+    override val gatewayBaseUrl: String? get() = repo.gatewayBaseUrl.value // issue #139: DaemonInfo's gateway hint
     override val messages: List<ChatItem> get() = repo.messages
+    // older-history lazy load (issue #147) — straight delegation to the shared repository
+    override val historyHasMore: Boolean get() = repo.historyHasMore.value
+    override val historyLoadingOlder: Boolean get() = repo.historyLoadingOlder.value
+    override val historyPrependGen: Int get() = repo.historyPrependGen.value
+    override val lastHistoryPrependCount: Int get() = repo.lastHistoryPrependCount
+    override fun loadOlderHistory() = repo.loadOlderHistory()
     override val streaming: Boolean get() = repo.streaming.value
     // mirrors mobile's under-bubble cue: link not Ready, or receipts stalled on a Ready-looking link (#78)
     override val sendUndelivered: Boolean get() = repo.phase.value != ConnPhase.Ready || repo.sendStalled.value
@@ -845,6 +860,13 @@ class RepoDesktopModel(
         }
         repo.cancelTurn()
     }
+
+    // ── scheduled tasks (issue #137): the management list, straight off the repo ──
+    override val schedules get() = repo.schedules.toList()
+    override val schedulesLoaded get() = repo.schedulesLoaded.value
+    override val schedulesStale get() = repo.schedulesUnavailable.value
+    override fun refreshSchedules() { repo.fetchSchedules() }
+    override fun cancelSchedule(id: String) { repo.cancelSchedule(id) }
 
     override val authState: dev.ccpocket.protocol.AuthState? get() = repo.authState.value
     override fun refreshAuth() { repo.fetchAuthStatus() }

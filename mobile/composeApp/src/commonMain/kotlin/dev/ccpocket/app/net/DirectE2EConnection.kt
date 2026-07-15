@@ -59,6 +59,10 @@ class DirectE2EConnection {
     /** Mirrors the relay's control plane just enough for the repo's state machine: a synthetic [Attached]
      *  after the Noise handshake (the daemon IS the peer — no separate presence signal exists or is needed). */
     val control = MutableSharedFlow<Frame>(extraBufferCapacity = 16)
+    /** Deaf-link signal, symmetric with [RelayE2EConnection.deaf] (issue #146): the daemon keeps ONE
+     *  active session per device across BOTH legs, so a fleet satellite's relay handshake can flip that
+     *  session out from under this direct socket too. Consecutive undecryptable frames → force re-handshake. */
+    val deaf = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private var nextId = 0L
 
     /** True between handshake completion and socket teardown — the repo routes sends here while it holds. */
@@ -71,12 +75,17 @@ class DirectE2EConnection {
     @Volatile var account: String? = null
         private set
 
+    // connection generation (issue #142) — mirrors RelayE2EConnection: a superseded connect() must stop
+    // touching the shared cross-reconnect outbox / inbound flows the moment a newer one takes over
+    @Volatile private var connSeq = 0
+
     /**
      * Dial + handshake, then serve for the life of the socket. Failure BEFORE the handshake completes
      * (refused/unreachable/timeout/bad handshake) throws [DirectUnreachableException] so the caller falls
      * back to the relay in the same connect attempt; a drop AFTER is a normal transport death (reconnect path).
      */
     suspend fun connect(url: String, paired: PairedDaemon, keys: E2ECrypto.KeyPair) = coroutineScope {
+        val gen = ++connSeq
         account = paired.accountId
         var handshaken = false
         try {
@@ -94,21 +103,32 @@ class DirectE2EConnection {
                 } catch (e: TimeoutCancellationException) {
                     throw DirectUnreachableException("handshake/key-confirmation timeout")
                 }
+                if (gen != connSeq) throw DeadLinkException() // superseded while handshaking — never touch the shared outbox (#142)
                 handshaken = true
                 connected = true
                 control.emit(Attached(Role.DEVICE, paired.accountId))
                 firstFrame?.let { inbound.emit(it) } // don't drop the confirming frame (usually DaemonInfo)
+                outbox.dedupeBacklog() // collapse the reconnect-burst duplicates queued while the link was down (#143)
                 val writer = launch {
                     for (f in outbox) {
+                        // superseded mid-drain: hand the frame back to the live connection, then die (#142)
+                        if (gen != connSeq) { outbox.send(f); throw DeadLinkException() }
                         val json = PocketJson.encodeToString(Envelope((nextId++).toString(), 0L, body = f))
                         sendOrDie { outgoing.send(WsFrame.Binary(true, Wire.payload(Wire.TRANSPORT, session.seal(json.encodeToByteArray())))) }
                     }
                 }
                 val pinger = launchHeartbeat() // WS ping under sendOrDie — a wedged LAN link dies in ≤10s, not minutes
+                var deafRun = 0 // consecutive undecryptable inbound frames (#146 deaf-link detection)
                 try {
                     for (frame in incoming) {
+                        if (gen != connSeq) break // a stale reader must not emit into the shared inbound flow (#142)
                         if (frame is WsFrame.Binary && Wire.payloadType(frame.data) == Wire.TRANSPORT) {
-                            val pt = session.open(Wire.payloadBody(frame.data)) ?: continue
+                            val pt = session.open(Wire.payloadBody(frame.data))
+                            if (pt == null) {
+                                if (RelayE2EConnection.deafTripped(++deafRun)) { deaf.emit(Unit); deafRun = 0 }
+                                continue
+                            }
+                            deafRun = 0
                             runCatching { PocketJson.decodeFromString<Envelope>(pt.decodeToString()) }.getOrNull()?.let { inbound.emit(it.body) }
                         }
                     }

@@ -10,8 +10,10 @@ import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.SessionGroups
+import dev.ccpocket.daemon.disk.SkillCatalogService
 import dev.ccpocket.daemon.disk.UsageService
 import dev.ccpocket.daemon.presets.PresetService
+import dev.ccpocket.daemon.schedule.SchedulerService
 import dev.ccpocket.daemon.session.SessionRegistry
 import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
@@ -34,6 +36,8 @@ import dev.ccpocket.protocol.Directories
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchHistoryPage
+import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.FileChunk
 import dev.ccpocket.protocol.FileUploadCancel
@@ -55,6 +59,9 @@ import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.RunShellCommand
+import dev.ccpocket.protocol.ScheduleCancel
+import dev.ccpocket.protocol.ScheduleCreate
+import dev.ccpocket.protocol.ScheduleList
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
@@ -78,6 +85,7 @@ class RequestRouter(
     private val auth: AuthService,
     private val prefs: DaemonPrefs,
     private val presets: PresetService,
+    private val scheduler: SchedulerService,
 ) {
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
@@ -115,12 +123,20 @@ class RequestRouter(
             // heavy transcript scan → off the inbound pump so it can't wedge the socket
             is FetchUsage -> scope.launch { sink.emit(UsageService.aggregate(frame.days)) }
 
+            // installed skills/plugins browse page (issue #132): a disk scan → off the inbound pump like
+            // FetchUsage. Guests never reach here (GuestCaps denies the frame type at the choke point).
+            is FetchSkillCatalog -> scope.launch {
+                sink.emit(SkillCatalogService.build(frame.workdir?.let { dirs.validateWorkdir(it) }))
+            }
+
             // both re-scan the transcript from disk (issue #36) → same off-pump rule as FetchUsage
             is ListSessionFiles -> scope.launch {
                 sink.emit(SessionFiles(frame.workdir, frame.sessionId, SessionFilesService.changedFiles(frame.agent, frame.workdir, frame.sessionId)))
             }
+            // serves any path canonically inside the workdir (issue #133) and, for a client that opted in,
+            // streams over-cap binaries as FileContentChunk frames (issue #134)
             is ReadFile -> scope.launch {
-                sink.emit(SessionFilesService.readFile(frame.agent, frame.workdir, frame.sessionId, frame.path))
+                SessionFilesService.streamFile(frame.agent, frame.workdir, frame.sessionId, frame.path, frame.allowChunks, sink::emit)
             }
             is ReadFileDiff -> scope.launch {
                 sink.emit(SessionFilesService.fileDiff(frame.agent, frame.workdir, frame.sessionId, frame.path))
@@ -205,6 +221,9 @@ class RequestRouter(
             // workflow detail sheet (issue #106): read one agent's full prompt/return off disk —
             // a transcript parse, so off the inbound loop like FetchUsage
             is GetWorkflowAgentDetail -> scope.launch { registry.fetchWorkflowAgentDetail(frame) }
+            // older-history page (issue #147): a transcript parse → off the inbound pump; answered to
+            // the requesting sink only (never fanned out to other attached clients)
+            is FetchHistoryPage -> scope.launch { registry.fetchHistoryPage(frame, sink) }
 
             // voice capture: buffer fast here; whisper runs on the service's own scope
             is AudioChunk -> transcribe.onChunk(frame, sink)
@@ -228,6 +247,13 @@ class RequestRouter(
             is SavePreset -> scope.launch { presets.save(frame, sink::emit) }
             is DeletePreset -> scope.launch { presets.delete(frame, sink::emit) }
             is ActivatePreset -> scope.launch { presets.activate(frame.id, frame.force, sink::emit) }
+
+            // scheduled tasks (issue #137): quick store ops; each answers with the full ScheduleState
+            // truth (same single-reply contract as pocket/presets.*). Guests/bridges never reach here —
+            // their capability whitelists deny the frame type at the choke point (default-deny).
+            is ScheduleCreate -> sink.emit(scheduler.create(frame, dirs.validateWorkdir(frame.workdir)?.toString()))
+            is ScheduleList -> sink.emit(scheduler.state())
+            is ScheduleCancel -> sink.emit(scheduler.cancel(frame.id))
 
             // phone-push switch: null enabled = query only; either way the daemon's truth is the reply
             is SetPushPrefs -> {

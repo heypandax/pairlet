@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How to use Claude Code from your phone — CC Pocket guide</title>
+<meta name="description" content="A sourced guide to using Claude Code from a phone: compare Claude Remote Control with the open-source CC Pocket client, setup, security, and limitations." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/zh/claude-code-mobile-remote.html" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="How to use Claude Code from your phone" />
+<meta property="og:description" content="Compare official Claude Remote Control with the open-source CC Pocket workflow." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<meta property="og:image:alt" content="CC Pocket remote control for Claude Code and OpenAI Codex." />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How to use Claude Code from your phone" />
+<meta name="twitter:description" content="A sourced guide to official Claude Remote Control and open-source CC Pocket." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/og-image.png" />
+<link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../styles.css" />
+<link rel="stylesheet" href="../article.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "How to use Claude Code from your phone",
+      "description": "A sourced guide to official Claude Remote Control and the open-source CC Pocket workflow.",
+      "url": "https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html",
+      "datePublished": "2026-07-13",
+      "dateModified": "2026-07-13",
+      "inLanguage": "en",
+      "image": "https://heypandax.github.io/cc-pocket/og-image.png",
+      "author": { "@type": "Organization", "name": "CC Pocket contributors", "url": "https://github.com/heypandax/cc-pocket" },
+      "about": ["Claude Code", "remote coding", "CC Pocket"],
+      "citation": [
+        "https://support.claude.com/en/articles/14554000-claude-code-power-user-tips",
+        "https://github.com/heypandax/cc-pocket"
+      ]
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "CC Pocket", "item": "https://heypandax.github.io/cc-pocket/" },
+        { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://heypandax.github.io/cc-pocket/#guides" },
+        { "@type": "ListItem", "position": 3, "name": "Claude Code on your phone", "item": "https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html" }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+<nav class="guide-nav"><div class="wrap"><a class="brand" href="../"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a><div class="guide-links"><a href="compare-remote-options.html">Compare</a><a href="security.html">Security</a><a href="faq.html">FAQ</a><a class="lang-link" href="../zh/claude-code-mobile-remote.html" lang="zh-CN" hreflang="zh-CN">中文</a></div></div></nav>
+<header class="guide-hero"><div class="wrap">
+  <div class="breadcrumbs"><a href="../">CC Pocket</a> / Guides / Claude Code mobile remote</div>
+  <h1>How to use Claude Code from your phone</h1>
+  <p class="guide-deck">There are now two practical paths: Anthropic's official Remote Control and CC Pocket, an independent open-source client that also supports OpenAI Codex.</p>
+  <div class="guide-meta"><span>Last verified July 13, 2026</span><span>6 minute read</span><span>Official sources cited</span></div>
+</div></header>
+<main class="guide-main">
+  <div class="answer-box"><div class="answer-label">Short answer</div><p>Use Claude's official <strong>Remote Control</strong> for the most direct first-party workflow. Choose <strong>CC Pocket</strong> when you want one open-source, self-hostable remote for both Claude Code and Codex, with no CC Pocket account.</p></div>
+
+  <dl class="fact-grid">
+    <div class="fact"><dt>Runs where?</dt><dd>Claude Code stays on your computer</dd></div>
+    <div class="fact"><dt>CC Pocket license</dt><dd>MIT open source</dd></div>
+    <div class="fact"><dt>CC Pocket agents</dt><dd>Claude Code + Codex</dd></div>
+  </dl>
+
+  <h2 id="official">Option 1: Claude Remote Control</h2>
+  <p>Anthropic documents two entry points: run <code>/remote-control</code> inside an existing Claude Code session, or start with <code>claude remote-control</code>. The official guide says Remote Control requires Claude Code 2.1.51 or later and is available on Pro, Max, Team, and Enterprise plans.</p>
+  <p>This is the first-party route. If you already use a supported Claude plan and only need Claude Code, it is the simplest place to start.</p>
+
+  <h2 id="cc-pocket">Option 2: CC Pocket</h2>
+  <p>CC Pocket installs a daemon on your computer and pairs it with the mobile or desktop client. The daemon launches or resumes the local Claude Code CLI; the client lets you read streaming output, send messages, inspect changes, and approve or deny tool requests.</p>
+  <ol>
+    <li>Install CC Pocket on iOS, Android, macOS, Windows, or Linux.</li>
+    <li>Install the CC Pocket daemon on the computer that runs Claude Code.</li>
+    <li>Pair the devices, choose a project, then start or resume a Claude session.</li>
+  </ol>
+  <p>The <a href="https://github.com/heypandax/cc-pocket#readme" rel="noopener">project README</a> contains current install commands and release links.</p>
+
+  <figure class="product-figure"><img src="../og-image.png" width="1200" height="630" alt="CC Pocket showing a remote coding-agent permission workflow" /><figcaption>CC Pocket is a remote client; Claude Code and the project files remain on the paired computer.</figcaption></figure>
+
+  <h2 id="differences">What is different?</h2>
+  <div class="guide-table-wrap"><table class="guide-table"><thead><tr><th>Question</th><th>Claude Remote Control</th><th>CC Pocket</th></tr></thead><tbody>
+    <tr><td>Provider</td><td>Anthropic, first party</td><td>Independent open-source project</td></tr>
+    <tr><td>Agent support</td><td>Claude Code</td><td>Claude Code and OpenAI Codex</td></tr>
+    <tr><td>Source / hosting</td><td>Use Anthropic's service</td><td>MIT source; relay can be self-hosted</td></tr>
+    <tr><td>CC Pocket account</td><td>Not applicable</td><td>Not required; devices pair directly</td></tr>
+    <tr><td>Best fit</td><td>Official Claude-only workflow</td><td>One cross-agent remote and inspectable deployment</td></tr>
+  </tbody></table></div>
+  <div class="callout"><p><strong>These are complementary choices.</strong> CC Pocket is not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic.</p></div>
+
+  <h2 id="security">Security and limits</h2>
+  <p>CC Pocket encrypts client-to-daemon traffic with P-256 ECDH, HKDF, and AES-256-GCM. Its relay forwards ciphertext and does not hold the endpoint private keys. You can inspect the <a href="security.html">security and trust-boundary guide</a> before pairing.</p>
+  <div class="callout limitations"><p><strong>Important:</strong> encryption does not sandbox the local daemon. It controls the coding agent with the permissions of your operating-system user. Keep approval prompts enabled for commands you do not want executed automatically, and keep your computer online for remote access.</p></div>
+
+  <section class="sources"><h2>Sources</h2><ol>
+    <li><a href="https://support.claude.com/en/articles/14554000-claude-code-power-user-tips" rel="noopener">Anthropic Help Center — Claude Code power user tips</a> (official Remote Control commands, version, and plan eligibility).</li>
+    <li><a href="https://github.com/heypandax/cc-pocket" rel="noopener">CC Pocket source repository</a> (license, architecture, installation, and supported agents).</li>
+  </ol><p class="source-note">Product availability can change. Facts above were checked against the linked sources on July 13, 2026.</p></section>
+
+  <section class="related"><h2>Related guides</h2><div class="related-grid"><a class="related-card" href="compare-remote-options.html"><strong>Compare all remote options</strong><span>Agent support, accounts, hosting, and encryption.</span></a><a class="related-card" href="codex-mobile-remote.html"><strong>Use Codex from your phone</strong><span>CC Pocket and OpenAI's official mobile experience.</span></a></div></section>
+</main>
+<footer class="guide-footer"><div class="wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a><a href="../privacy.html">Privacy</a></span></div></footer>
+</body>
+</html>

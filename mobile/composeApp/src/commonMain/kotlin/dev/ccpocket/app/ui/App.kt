@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
@@ -1216,6 +1218,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
+    var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
     if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
@@ -1352,6 +1355,19 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                 val density = LocalDensity.current
                 var pillHeightPx by remember { mutableStateOf(0) }
                 val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
+                // older-history lazy load (issue #147): a prepended page shifts every index — scroll by
+                // the prepend count (+ the loader row when it stays) so the viewport keeps the row the
+                // user was reading instead of jumping to the newly loaded region. Visuals per the 0714
+                // chat-components handoff (B): the loader lingers through its silent-failure fade, and
+                // a landed page marks the seam above the re-anchored row for a beat.
+                val historyLoaderVisible = rememberEarlierLoaderVisible(repo.historyHasMore.value)
+                val historySeamAt = rememberHistorySeam(repo.historyPrependGen.value, repo.lastHistoryPrependCount)
+                LaunchedEffect(repo.historyPrependGen.value) {
+                    val n = repo.lastHistoryPrependCount
+                    if (repo.historyPrependGen.value > 0 && n > 0) {
+                        listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
+                    }
+                }
                 CompositionLocalProvider(LocalPathCwd provides repo.workdir.value) {
                 LazyColumn(
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
@@ -1359,13 +1375,24 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = bottomGutter),
                 ) {
-                    items(repo.messages) { m ->
+                    // scroll-to-top loader (issue #147): the row only composes once scrolled into view —
+                    // exactly "reached the top of the loaded window" — and then asks for one older page.
+                    // An ambient status line, never a button (0714 handoff B1); a dead request fades it
+                    // out silently instead of snapping it away (B2).
+                    if (historyLoaderVisible) item(key = "history-loader") {
+                        if (repo.historyHasMore.value) LaunchedEffect(Unit) { repo.loadOlderHistory() }
+                        LoadEarlierRow(fading = !repo.historyHasMore.value)
+                    }
+                    itemsIndexed(repo.messages) { mi, m ->
                         // a prompt the daemon hasn't acknowledged while the link is down — or while the link
                         // CLAIMS up but receipts stalled past the deadline (issue #78, multi-computer links):
                         // say so under the bubble instead of letting it look sent (issue #41 — frames queue
                         // silently offline)
                         val undelivered = m is ChatItem.User && m.pending && (repo.phase.value != ConnPhase.Ready || repo.sendStalled.value)
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // seam (0714 handoff B3): for a beat after a page of older history lands,
+                            // mark where the old window began so the reader keeps their place
+                            if (mi == historySeamAt) EarlierMessagesSeam(repo.historyPrependGen.value)
                             MessageItem(
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
@@ -1493,13 +1520,19 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     if (atToken == null || atListing?.subPath != atDir) emptyList() else atMatches(atListing.entries, atLeaf)
                 }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
+                    LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
                     BackgroundJobsStrip(repo.backgroundJobs) { showBgJobs = true } // ≥1 running bg task → tap to expand
                     val capturing = voiceState is VoiceState.Recording || voiceState is VoiceState.Transcribing
                     LaunchedEffect(capturing) { if (capturing) attachSheet = false }
                     if (suggestions.isNotEmpty() && !capturing) {
                         SlashCommandMenu(suggestions) { cmd -> composer.setText(cmd.completion()) }
                     } else if (atFileMatches.isNotEmpty() && !capturing) {
-                        FileCompletionMenu(atFileMatches, atDir, atSep) { entry ->
+                        FileCompletionMenu(
+                            atFileMatches, atDir, atSep,
+                            // issue #133: the quiet eye on a file row opens it in the viewer (the daemon
+                            // now serves any path inside the session's project tree, not just changed ones)
+                            onView = { entry -> repo.openChangedFile((if (atDir.isEmpty()) "" else atDir + atSep) + entry.name) },
+                        ) { entry ->
                             atToken?.let { composer.setText(input.substring(0, it.at + 1) + atInsertText(atDir, entry, atSep) + input.substring(it.end)) }
                         }
                     }
@@ -1591,6 +1624,9 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                                             if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
                                         },
                                         filled = true, contentDescription = sendLabel,
+                                        // long-press → schedule this message for later (issue #137). Text-only:
+                                        // images/files can't ride a schedule (nothing is uploaded at fire time).
+                                        onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
                                     ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
                                 }
                                 // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
@@ -1622,6 +1658,21 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                 onSelect = { repo.switchMode(it) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },
+            )
+        }
+        if (showScheduleSheet) {
+            // schedule send (issue #137): fires the composer text into THIS session later
+            val scheduledNote = stringResource(Res.string.schedule_created_note)
+            ScheduleSendSheet(
+                text = composer.text.trim(),
+                onSchedule = { runAtMs, repeat ->
+                    val t = composer.text.trim()
+                    if (t.isNotBlank() && repo.createSchedule(t, runAtMs, repeat = repeat)) {
+                        composer.clear(); repo.clearDraft(draftKey)
+                        repo.messages.add(dev.ccpocket.app.data.ChatItem.Sys(scheduledNote))
+                    }
+                },
+                onDismiss = { showScheduleSheet = false },
             )
         }
         if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }
@@ -1675,12 +1726,14 @@ private fun SlashCommandMenu(commands: List<SlashCommand>, onPick: (SlashCommand
 }
 
 /** The composer's "@file" completion panel (issue #75): tap a row to insert its relative path — a folder
- *  drills in (trailing separator, the daemon re-lists it), a file completes the reference. */
+ *  drills in (trailing separator, the daemon re-lists it), a file completes the reference. [onView]
+ *  (issue #133) docks a quiet eye at a file row's end that opens the file in the viewer instead. */
 @Composable
 private fun FileCompletionMenu(
     entries: List<dev.ccpocket.protocol.PathEntry>,
     dir: String,
     sep: Char,
+    onView: ((dev.ccpocket.protocol.PathEntry) -> Unit)? = null,
     onPick: (dev.ccpocket.protocol.PathEntry) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().background(Tok.raised)) {
@@ -1693,7 +1746,7 @@ private fun FileCompletionMenu(
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp).padding(bottom = 4.dp)) {
             items(entries) { entry ->
                 Row(
-                    Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(horizontal = 16.dp, vertical = 9.dp),
+                    Modifier.fillMaxWidth().clickable { onPick(entry) }.padding(start = 16.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -1706,7 +1759,16 @@ private fun FileCompletionMenu(
                         fontFamily = FontFamily.Monospace, fontSize = 13.sp,
                         fontWeight = if (entry.isDir) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(vertical = 9.dp),
                     )
+                    if (!entry.isDir && onView != null) {
+                        IconButton(onClick = { onView(entry) }, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                Icons.Rounded.Visibility, stringResource(Res.string.file_view),
+                                tint = Tok.muted, modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
                 }
             }
         }

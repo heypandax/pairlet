@@ -50,6 +50,8 @@
     <string name="conn_computer_offline_banner">电脑已离线，正在等待恢复…</string>
     <string name="conn_connecting_banner">正在连接电脑…</string>
     <string name="msg_pending_undelivered">尚未送达——连接恢复后将自动发送</string>
+    <string name="history_loading_earlier">正在加载更早的消息…</string>
+    <string name="history_earlier_seam">· 更早的消息 ·</string>
     <string name="msg_sending">发送中…</string>
     <string name="msg_delivered">已送达电脑</string>
     <string name="msg_no_response">还没有响应——点此重发</string>
@@ -268,6 +270,12 @@
     <string name="model_custom_hint">输入传给 --model 的模型 id</string>
     <string name="model_switching">正在重启会话……历史保留。</string>
     <string name="model_not_installed">未安装</string>
+    <string name="model_gateway_section">网关模型</string>
+    <string name="model_gateway_via">经 %1$s</string>
+    <string name="model_gateway_show">网关模型预设</string>
+    <string name="model_gateway_note">同一个 id 实际打到哪个模型，由你的网关决定。</string>
+    <string name="model_gateway_suggested">推荐</string>
+    <string name="model_section_anthropic">Anthropic API</string>
     <string name="af_show_from">显示哪个 agent 的会话</string>
     <string name="af_both">全部</string>
     <string name="af_claude_only">仅 Claude</string>
@@ -321,13 +329,15 @@
     <string name="file_open">打开</string>
     <string name="file_preview">预览</string>
     <string name="file_no_inline_preview">此文件类型无法内嵌预览</string>
-    <string name="file_exceeds_cap">超出传输上限</string>
-    <string name="file_too_large_note">文件太大，无法在这里打开——链路传输上限为 %1$s，请到运行 daemon 的电脑上获取。</string>
+    <string name="file_too_large_fetch">过大，无法远程拉取</string>
+    <string name="file_open_on_computer">请在电脑上打开</string>
     <string name="file_transferring">正在通过中转传输…</string>
+    <string name="file_transfer_progress">%1$s / 共 %2$s</string>
     <string name="file_export_request">请求导出（需批准）</string>
     <string name="file_export_waiting">等待批准…</string>
     <string name="file_export_other">导出列表外的文件…</string>
     <string name="file_export_other_hint">项目内路径，如 output/report.xlsx</string>
+    <string name="file_view">查看文件</string>
 
     <!-- ── 子代理卡片（issue #77，chat-cards handoff）──────────── -->
     <string name="subagent_report">报告</string>
@@ -545,4 +555,45 @@
     <string name="group_delete">删除分组</string>
     <string name="group_delete_confirm">删除该分组？组内会话将回落到未分组。</string>
     <string name="group_name_hint">分组名称</string>
+
+    <!-- scheduled tasks (issue #137) -->
+    <string name="schedule_tasks_title">定时任务</string>
+    <string name="schedule_empty">暂无定时任务</string>
+    <string name="schedule_empty_hint">在任意会话长按发送键，即可把消息排到以后自动发送。</string>
+    <string name="schedule_stale_title">请更新电脑上的 cc-pocket</string>
+    <string name="schedule_stale_body">电脑端版本过旧，无法执行定时任务；现有任务已暂停。</string>
+    <string name="schedule_next_run">%1$s 后</string>
+    <string name="schedule_next_at">下次 %1$s</string>
+    <string name="schedule_due_now">即将触发</string>
+    <string name="schedule_done">已完成</string>
+    <string name="schedule_missed">已错过</string>
+    <string name="schedule_repeat_daily">每天</string>
+    <string name="schedule_repeat_every">每 %1$s</string>
+    <string name="schedule_last_failed">上次执行失败 · %1$s</string>
+    <string name="schedule_meta_resume">接续会话</string>
+    <string name="schedule_meta_new">新会话</string>
+    <string name="schedule_remove">删除</string>
+    <string name="schedule_send_title">预约发送</string>
+    <string name="schedule_opt_30m">30 分钟</string>
+    <string name="schedule_opt_1h">1 小时</string>
+    <string name="schedule_opt_3h">3 小时</string>
+    <string name="schedule_opt_8h">8 小时</string>
+    <string name="schedule_custom_time">自定义时间…</string>
+    <string name="schedule_repeat_toggle">每天重复</string>
+    <string name="schedule_repeat_caption">每天 %1$s</string>
+    <string name="schedule_confirm">%1$s 发送</string>
+    <string name="schedule_confirm_daily">每天 %1$s 发送</string>
+    <string name="schedule_created_note">已预约——将在设定时间自动发送到此会话。</string>
+    <string name="schedule_wd_1">周一</string>
+    <string name="schedule_wd_2">周二</string>
+    <string name="schedule_wd_3">周三</string>
+    <string name="schedule_wd_4">周四</string>
+    <string name="schedule_wd_5">周五</string>
+    <string name="schedule_wd_6">周六</string>
+    <string name="schedule_wd_7">周日</string>
+    <string name="limit_banner">已达用量限额</string>
+    <string name="limit_resets">——%1$s 重置</string>
+    <string name="limit_autocontinue">自动继续</string>
+    <string name="limit_confirmed">将于 %1$s 自动继续</string>
+    <string name="limit_undo">撤销</string>
 </resources>

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Visibility
@@ -95,6 +96,7 @@ private enum class SettingsTab(val label: String, val icon: ImageVector) {
     GENERAL("General", Icons.Outlined.Tune),
     ACCOUNT("Account", Icons.Rounded.Person),
     COMPUTERS("Computers", Icons.Rounded.Devices),
+    SCHEDULES("Schedules", Icons.Rounded.Schedule),
     SHARES("Shared", Icons.Rounded.Share),
     SHORTCUTS("Shortcuts", Icons.Rounded.Keyboard),
     ABOUT("About", Icons.Outlined.Info),
@@ -126,6 +128,7 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
                     SettingsTab.GENERAL -> GeneralPane(model)
                     SettingsTab.ACCOUNT -> AccountPane(model)
                     SettingsTab.COMPUTERS -> ComputersPane(model)
+                    SettingsTab.SCHEDULES -> SchedulesPane(model)
                     SettingsTab.SHARES -> SharesPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
                     SettingsTab.ABOUT -> AboutPane(model)
@@ -1149,6 +1152,63 @@ private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, on
 }
 
 // ── folder-share (issue #115): the desktop owner management + invite pane ──
+
+@Composable
+private fun SchedulesPane(model: DesktopModel) {
+    // scheduled tasks (issue #137): the management list — cancel here; the creation gesture lives on
+    // mobile's composer long-press (and the chat's usage-limit auto-continue banner).
+    LaunchedEffect(Unit) { model.refreshSchedules() }
+    val now = epochMillis()
+    Column {
+        Text("Scheduled tasks", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
+        when {
+            model.schedulesStale -> Text(
+                "Update the computer's cc-pocket to use scheduled tasks.",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+            )
+            model.schedulesLoaded && model.schedules.isEmpty() -> Text(
+                "No scheduled tasks. Schedule one from the phone composer (long-press send).",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+            )
+            else -> model.schedules.forEach { s ->
+                val next = s.nextRunAtMs
+                val status = when {
+                    next != null && next <= now -> "due now"
+                    next != null -> "next in " + dev.ccpocket.app.ui.etaShort(next - now)
+                    s.lastOutcome == "missed" -> "missed"
+                    s.lastOutcome != null && s.lastOutcome != "ok" -> s.lastOutcome!!
+                    else -> "done"
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp))
+                        .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                s.label ?: s.prompt, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                            if (s.repeat != null) {
+                                Text("  ·  repeats", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                            }
+                        }
+                        Text(
+                            s.workdir.substringAfterLast('/').ifEmpty { s.workdir } + "  ·  " + status,
+                            color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1,
+                        )
+                    }
+                    Text(
+                        "Remove", color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.cancelSchedule(s.id) }.padding(6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun SharesPane(model: DesktopModel) {

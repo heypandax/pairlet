@@ -20,6 +20,7 @@ import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.provenWindow
 import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.ConvoHistoryPage
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
@@ -69,8 +70,12 @@ class Conversation(
      *  every interactive owner client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens
      *  the ask timeout (nobody is watching the sheet live), and arms the ask push below. */
     val origin: String? = null,
-    // how a bridge conversation's permission ask reaches the OWNER (the bridge never gets the frame)
+    // how a pending permission ask reaches a human who isn't watching: a bridge conversation's owner
+    // (issue #91 — the bridge never gets the frame) or an owner session's locked/away phone (issue #138)
     private val askPushHookProvider: () -> AskPushHook? = { null },
+    // per-conversation window between ask pushes (see [lastAskPushMs]); a knob only so tests can
+    // exercise the coalescing without waiting a minute
+    private val askPushCoalesceMs: Long = ASK_PUSH_COALESCE_MS,
     /** GUEST folder-share scope (issue #115): the canonical shared roots this conversation is confined to.
      *  Non-null → the PermissionBridge hard-denies any Read/Write/Edit whose target escapes them, BEFORE
      *  the guest is even asked. Null = an unrestricted owner conversation (no path guard). */
@@ -109,6 +114,11 @@ class Conversation(
 
     // every existing emit site goes through this fan-out; one failing transport must not break the rest
     private val sink: OutboundSink = OutboundSink { f -> sinks.values.forEach { s -> runCatching { s.emit(f) } } }
+
+    // the OPENER's own view — open()'s DELTA replay goes here, never the fan-out: the delta continues
+    // the opener's cursor specifically, and a second (possibly OLD) client reattaching inside open()'s
+    // launch window must not receive a frame it would misread as a full window (issue #147).
+    private val openerSink: OutboundSink = initialSink
 
     /** Wall-clock of the last agent activity — drives the daemon's idle reaper. */
     @Volatile
@@ -166,8 +176,9 @@ class Conversation(
     @Volatile
     private var intentionalStop = false
 
-    // last time an urgent bridge-approval push fired for this conversation — coalesces a burst of asks
-    // into one owner alert (issue #91). Touched only from the single permission-bridge emit path.
+    // last time an approval push fired for this conversation (bridge #91 / owner session #138) —
+    // coalesces a burst of asks into one alert. Stamped on the single permission-bridge emit path;
+    // rolled back from the hook coroutine when no push actually went out (see [maybePushAsk]).
     @Volatile
     private var lastAskPushMs = 0L
 
@@ -381,7 +392,7 @@ class Conversation(
      *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
     val resumeAnchor: String? get() = openedResumeId
 
-    suspend fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false, takeOver: Boolean = false) {
+    suspend fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false, takeOver: Boolean = false, sinceSeq: Long? = null) {
         this.model = model
         this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
         this.openedResumeId = resumeId
@@ -433,12 +444,32 @@ class Conversation(
             }
             sink.emit(live(resumeId))
             if (resumeId != null) {
-                val history = backend.replayHistory(workdir.toString(), resumeId)
-                if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
+                // incremental reattach (issue #147): a client that still holds the transcript sends its
+                // cursor and gets only the delta; anything un-honorable falls back to the full window
+                // inside replaySlice. An EMPTY delta is never emitted — the client is already caught up,
+                // and an empty non-delta ConvoHistory means /clear to it. A DELTA goes to the OPENER's
+                // sink only (it continues that client's cursor); the full window keeps the fan-out.
+                val slice = backend.replaySlice(workdir.toString(), resumeId, sinceSeq)
+                if (slice.messages.isNotEmpty()) (if (slice.delta) openerSink else sink).emit(historyFrame(slice))
                 replayWorkflowRuns(resumeId, sink)
             }
             emitCommands()
         }
+    }
+
+    /** One replayed window/delta as a wire frame — the single place the #147 cursor fields are stamped. */
+    private fun historyFrame(slice: dev.ccpocket.daemon.disk.ReplaySlice) = ConvoHistory(
+        convoId, slice.messages,
+        lastSeq = slice.lastSeq, firstSeq = slice.firstSeq, delta = slice.delta, hasMore = slice.hasMore,
+    )
+
+    /** The phone scrolled to the top of its first-screen window — serve one page of OLDER history
+     *  (issue #147). Answered to the REQUESTING sink only: other attached clients didn't ask and
+     *  would prepend rows they may already hold. */
+    suspend fun fetchHistoryPage(beforeSeq: Long, limit: Int, to: OutboundSink) {
+        val sid = sessionId ?: openedResumeId ?: return
+        val slice = backend.replayPage(workdir.toString(), sid, beforeSeq, limit.coerceIn(1, 200))
+        to.emit(ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
     /** Tell the phone which slash commands its composer can autocomplete (workdir-dependent). */
@@ -666,34 +697,22 @@ class Conversation(
         processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
         val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
-        // Bridge-origin conversations (issue #91): the ask frame fans out normally (the bridge's egress
-        // filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
-        // the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
-        // is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
-        // A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally, and the
-        // owner must NOT be push-nudged for it (that inbox is the guest's, per the design's "requests go to
-        // <guest>"). Only a headless BRIDGE (origin set, no pathScope) — which can neither see nor answer the
-        // ask — nudges the owner (issue #115 crypto review L2).
-        val bridgeAskPush = origin != null && pathScope == null
+        // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
+        //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
+        //    filter drops it; any interactive device that reattached sees it), AND the ask-push hook tells
+        //    the owner's phone — the bridge itself can neither see nor answer the ask. The verdict window
+        //    is stretched: nobody is watching an approval sheet live, the owner has to arrive via push.
+        //  - OWNER sessions (origin == null, issue #138): the ask fans out to attached clients as always,
+        //    but with the phone locked/offline (or nobody attached) the card goes unseen and the ask
+        //    times out to a safe deny — the hook (presence-gated in the relay client) wakes the phone.
+        //  - A GUEST (pathScope != null) answers its OWN asks — the ask fans out to the guest normally,
+        //    and the owner must NOT be push-nudged for it (that inbox is the guest's, per the design's
+        //    "requests go to <guest>" — issue #115 crypto review L2). Never hooked.
         val emitWithAskPush: suspend (dev.ccpocket.protocol.Frame) -> Unit =
-            if (!bridgeAskPush) { f -> sink.emit(f) }
+            if (pathScope != null) { f -> sink.emit(f) }
             else { f ->
                 sink.emit(f)
-                if (f is dev.ccpocket.protocol.PermissionAsk) {
-                    askPushHookProvider()?.let { hook ->
-                        // COALESCE (issue #91 LOW): a turn can raise several asks in quick succession; at
-                        // most one urgent approval push per conversation per window so a burst can't spam
-                        // the owner's lock screen. The push is a "come look" nudge — reattach + resurface
-                        // shows every pending card, so one alert covers the batch.
-                        val now = System.currentTimeMillis()
-                        if (now - lastAskPushMs >= ASK_PUSH_COALESCE_MS) {
-                            lastAskPushMs = now
-                            val label = f.title.ifBlank { f.tool }
-                            // off the pump: a control-plane push must never stall stdout parsing
-                            scope.launch { runCatching { hook.onAskPending(workdir, sessionId, origin, label) } }
-                        }
-                    }
-                }
+                if (f is dev.ccpocket.protocol.PermissionAsk) maybePushAsk(f)
             }
         val b = PermissionBridge(
             convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
@@ -777,6 +796,34 @@ class Conversation(
         }
     }
 
+    /**
+     * Fire the ask-push hook for a just-emitted [dev.ccpocket.protocol.PermissionAsk] (issues #91/#138).
+     *
+     * COALESCE (issue #91 LOW): a turn can raise several asks in quick succession; at most one approval
+     * push per conversation per window so a burst can't spam the lock screen. The push is a "come look"
+     * nudge — reattach + resurface shows every pending card, so one alert covers the batch. The stamp is
+     * taken OPTIMISTICALLY (burst-safe: the pump thread sees it before the next ask parses) and rolled
+     * back when the hook reports it didn't push (issue #138: an owner ask suppressed because the phone
+     * was watching must not mute the next ask's push after the user walks away).
+     */
+    private fun maybePushAsk(f: dev.ccpocket.protocol.PermissionAsk) {
+        val hook = askPushHookProvider() ?: return
+        val now = System.currentTimeMillis()
+        val prev = lastAskPushMs
+        if (now - prev < askPushCoalesceMs) return
+        lastAskPushMs = now
+        val label = f.title.ifBlank { f.tool }
+        // a REAL client must have the ask frame on the data plane — the scheduler's headless fire sink
+        // is a black hole (issue #137/C1): counting it as "watched" suppressed the owner-ask push while
+        // nobody could actually see or answer the card, timing the ask out to a safe deny.
+        val watched = sinks.values.any { it.isWatching() }
+        // off the pump: a control-plane push must never stall stdout parsing
+        scope.launch {
+            val pushed = runCatching { hook.onAskPending(workdir, sessionId, origin, label, watched) }.getOrDefault(false)
+            if (!pushed) lastAskPushMs = prev
+        }
+    }
+
     private suspend fun pump(p: AgentProcess, b: PermissionBridge) {
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
@@ -808,8 +855,8 @@ class Conversation(
                             sink.emit(live(sessionId))
                             pendingResumeId?.let { rid ->
                                 pendingResumeId = null
-                                val history = backend.replayHistory(workdir.toString(), rid)
-                                if (history.isNotEmpty()) sink.emit(ConvoHistory(convoId, history))
+                                val slice = backend.replaySlice(workdir.toString(), rid)
+                                if (slice.messages.isNotEmpty()) sink.emit(historyFrame(slice))
                             }
                         } else if (reemitLive && sessionId != null) {
                             reemitLive = false // mode switch relaunch landed — refresh the phone's sessionId
@@ -946,16 +993,24 @@ class Conversation(
                             ev.isError && !interrupted -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
                             else -> null
                         }
-                        sink.emit(TurnDone(convoId, ev.finalText, usage, error = error))
+                        // usage-limit reset moment (issue #137): parsed daemon-side so the phone can
+                        // offer one-tap "auto-continue when the limit resets"; null for ordinary errors
+                        sink.emit(
+                            TurnDone(
+                                convoId, ev.finalText, usage, error = error,
+                                usageLimitResetAt = dev.ccpocket.daemon.relay.PushPolicy.usageLimitResetAtMs(error),
+                            ),
+                        )
                         // degraded tracking: consecutive placeholder-only turns mark the session as likely
                         // context-dead; announce transitions so clients warn + gate the next send (issue #65)
                         val wasDegraded = degraded()
                         failedTurnStreak = if (synthetic) failedTurnStreak + 1 else 0
                         if (degraded() != wasDegraded) sink.emit(live(sessionId))
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
-                        // so a control-plane send never stalls stdout parsing. A failed turn pushes the error,
-                        // not the placeholder text.
-                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, error ?: ev.finalText) } }
+                        // so a control-plane send never stalls stdout parsing. A failed turn carries [error]
+                        // separately so the push is worded as a failure (usage-limit hits included — #138),
+                        // never as a normal turn-complete.
+                        pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText, error) } }
                     }
                     is AgentEvent.ControlRequest -> b.onControlRequest(ev)
                     is AgentEvent.ControlCancel -> b.onCancel(ev)
@@ -997,7 +1052,23 @@ class Conversation(
             // carry the exit code + the agent's last stderr line: a --resume that dies before its first
             // init (bad session id, context overflow) used to surface as a bare "agent process ended"
             val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
-            sink.emit(PocketError("process_exited", "agent process ended (exit ${p.exitCode() ?: "?"})$why", convoId))
+            val summary = "agent process ended (exit ${p.exitCode() ?: "?"})$why"
+            sink.emit(PocketError("process_exited", summary, convoId))
+            // an UNEXPECTED death is exactly what a locked phone must hear about (issue #138): the
+            // session died with no TurnDone push coming. Same hook + presence gate as a failed turn;
+            // stderr rides as the error summary (a usage-limit refusal printed there words the push).
+            // NOT within [DEATH_PUSH_QUIET_MS] of a TurnResult: a fatal turn error routinely kills the
+            // process right after its result — that failure was already pushed, don't alert it twice.
+            if (System.currentTimeMillis() - lastTurnEndedMs > DEATH_PUSH_QUIET_MS) {
+                // the cleartext relay push must NOT carry raw process stderr (stack traces / absolute
+                // paths / a value the CLI echoed into an error): NotifyPush rides the TEXT plane
+                // unsealed. Keep the usage-limit wording — it reads as the limit refusal and carries the
+                // reset epoch the phone needs (issue #137) — but for any other death send a generic
+                // reason. The full stderr already rode the E2E PocketError above (security review 07-15).
+                val pushReason = if (dev.ccpocket.daemon.relay.PushPolicy.isUsageLimit(summary)) summary
+                    else "agent process ended (exit ${p.exitCode() ?: "?"})"
+                pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, null, pushReason) } }
+            }
         }
     }
 
@@ -1041,8 +1112,9 @@ class Conversation(
     }
 
     /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
-     *  replaying the transcript so far to the newcomer only. */
-    suspend fun reattach(newSink: OutboundSink) {
+     *  replaying the transcript so far to the newcomer only. [sinceSeq] = the newcomer's transcript
+     *  cursor (issue #147): only the delta past it is replayed when it can be honored. */
+    suspend fun reattach(newSink: OutboundSink, sinceSeq: Long? = null) {
         sinks[sinkKey(newSink)] = newSink
         lastActivityMs = System.currentTimeMillis()
         // pre-first-turn the agent hasn't minted a sessionId yet — anchor on the resume id (same trick
@@ -1050,8 +1122,8 @@ class Conversation(
         val sid = sessionId ?: resumeAnchor ?: return
         // executing rights the phone's stale ■: a turn that finished (or started) while it was away
         newSink.emit(live(sid))
-        val history = backend.replayHistory(workdir.toString(), sid)
-        if (history.isNotEmpty()) newSink.emit(ConvoHistory(convoId, history))
+        val slice = backend.replaySlice(workdir.toString(), sid, sinceSeq)
+        if (slice.messages.isNotEmpty()) newSink.emit(historyFrame(slice))
         emitCommands()
         newSink.emit(BackgroundJobs(convoId, jobs.snapshot())) // a re-opened live session re-shows its running jobs
         // re-show workflow runs: live (in-memory) ones first, then finished manifests off disk (#106)
@@ -1233,6 +1305,10 @@ class Conversation(
         backfilledModel = null
         failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
         sawSyntheticThisTurn = false
+        // fresh window — the live(null) below (and the init backfill announce) must not carry the wiped
+        // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
+        resumeContextUsed = null
+        lastCallUsage = null // nor may a killed mid-flight turn's usage leak into the fresh session's first TurnDone
         launchProcess(AgentSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
@@ -1433,13 +1509,18 @@ class Conversation(
         // DELAYS a reap when the continuation never comes at all.
         const val CONTINUATION_GRACE_MS = 5 * 60 * 1000L
 
-        // at most one urgent bridge-approval push per conversation per this window (issue #91). The verdict
-        // windows themselves are unified under agent.ApprovalTimeout.ms (issue #100) — see PermissionBridge.
+        // at most one approval push per conversation per this window (issue #91 bridge, #138 owner). The
+        // verdict windows themselves are unified under agent.ApprovalTimeout.ms (issue #100) — see
+        // PermissionBridge. Only a push that actually went out spends the window (see [maybePushAsk]).
         const val ASK_PUSH_COALESCE_MS = 60_000L
 
         // OpenCode: max time to wait for first stdout after process launch before declaring it hung.
         // opencode run with an invalid --model on a resumed session hangs silently (no stdout, no stderr,
         // no exit) — the pump would block forever without this watchdog.
         const val OPENCODE_STARTUP_TIMEOUT_MS = 45_000L
+
+        // a process death this soon after a TurnResult is the SAME failure the turn's push already
+        // reported (a fatal error result is often followed by the CLI exiting) — no second alert (#138)
+        const val DEATH_PUSH_QUIET_MS = 10_000L
     }
 }

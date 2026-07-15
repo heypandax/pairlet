@@ -167,10 +167,15 @@ class DeviceSessionsGuestTest {
         send(h, "devGuest2", session2, OpenSession(root.path)) // FIRST transport frame → confirmed
         h.outbound.receive()                                   // consume its routed error
         assertTrue(h.bridges.isGuest("devGuest2"))
-        h.sessions.onDisconnect()                              // the link died — E2E sessions cleared
-        val offlineNoticed = h.sessions.onDeviceRevoked("devGuest2")
+        // NOTE (#145/#146): onDisconnect no longer clears E2E sessions — they bind to the device
+        // handshake, not the daemon's relay leg — so a session-less guest is one from BEFORE a daemon
+        // RESTART: a fresh DeviceSessions over the same stores reloads the confirmed guest (guests.json)
+        // but holds no live session, and its revoke can seal nothing.
+        val restarted = Harness(dir)
+        assertTrue(restarted.bridges.isGuest("devGuest2"))
+        val offlineNoticed = restarted.sessions.onDeviceRevoked("devGuest2")
         assertTrue(!offlineNoticed)
-        assertTrue(h.outbound.tryReceive().isFailure) // nothing was (or could be) sealed toward it
+        assertTrue(restarted.outbound.tryReceive().isFailure) // nothing was (or could be) sealed toward it
     }
 
     @Test

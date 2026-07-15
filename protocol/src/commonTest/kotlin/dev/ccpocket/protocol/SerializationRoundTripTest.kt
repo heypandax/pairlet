@@ -302,6 +302,109 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun readFile_allowChunks_is_a_trailing_optional() {
+        // issue #134: a NEW client opts into chunked replies; the flag rides along and round-trips
+        val req = Envelope(id = "rc1", ts = 0, body = ReadFile("/w", "sid", "/w/report.xlsx", allowChunks = true))
+        val json = PocketJson.encodeToString(req)
+        assertTrue("\"allowChunks\":true" in json, json)
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD client's frame (no key) decodes with false — the daemon stays single-frame for it
+        // (and an OLD daemon skips the unknown key via ignoreUnknownKeys — the generic contract
+        // unknown_keys_are_tolerated pins)
+        val old = """{"id":"rc2","ts":0,"to":"PEER","body":{"t":"pocket/file.read","workdir":"/w","sessionId":"sid","path":"/w/a.md"}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as ReadFile
+        assertFalse(back.allowChunks)
+        assertEquals(AgentKind.CLAUDE, back.agent)
+    }
+
+    @Test
+    fun openSession_lastEventSeq_is_a_trailing_optional() {
+        // issue #147: a NEW client sends its transcript cursor; the field rides along and round-trips
+        val req = Envelope(id = "iq1", ts = 0, body = OpenSession("/w", resumeId = "sid", lastEventSeq = 1234))
+        val json = PocketJson.encodeToString(req)
+        assertTrue("\"lastEventSeq\":1234" in json, json)
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD client's frame (no key) decodes with null — the daemon replays in full, exactly today
+        // (and an OLD daemon skips the unknown key via ignoreUnknownKeys — unknown_keys_are_tolerated)
+        val old = """{"id":"iq2","ts":0,"to":"PEER","body":{"t":"pocket/session.open","workdir":"/w","resumeId":"sid"}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as OpenSession
+        assertEquals(null, back.lastEventSeq)
+        // explicitNulls=false byte-identity: a cursor-less open encodes WITHOUT the key — on the wire
+        // it is indistinguishable from a pre-#147 client's frame
+        val noCursor = PocketJson.encodeToString(Envelope(id = "iq3", ts = 0, body = OpenSession("/w", resumeId = "sid")))
+        assertFalse("lastEventSeq" in noCursor, noCursor)
+    }
+
+    @Test
+    fun convoHistory_147_cursor_fields_are_trailing_optionals() {
+        // a NEW daemon's delta frame round-trips with all four fields
+        val delta = Envelope(
+            id = "ih1", ts = 0,
+            body = ConvoHistory("c1", listOf(HistoryMessage(ChatRole.ASSISTANT, "tail")), lastSeq = 40, firstSeq = 38, delta = true, hasMore = false),
+        )
+        val json = PocketJson.encodeToString(delta)
+        assertTrue("\"delta\":true" in json, json)
+        assertEquals(delta, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's frame (pre-#147 shape) decodes with the wire-safe defaults: no cursor
+        // (the client never asks for a delta), not a delta (full-replace semantics), no paging
+        val old = """{"id":"ih2","ts":0,"to":"PEER","body":{"t":"pocket/history","convoId":"c1","messages":[{"role":"user","text":"hi"}]}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as ConvoHistory
+        assertEquals(null, back.lastSeq)
+        assertEquals(null, back.firstSeq)
+        assertFalse(back.delta)
+        assertFalse(back.hasMore)
+        // explicitNulls=false: null cursors are OMITTED (the booleans ride via encodeDefaults, ~30B)
+        val bare = PocketJson.encodeToString(Envelope(id = "ih3", ts = 0, body = ConvoHistory("c1", emptyList())))
+        assertFalse("lastSeq" in bare, bare)
+        assertFalse("firstSeq" in bare, bare)
+        assertTrue("\"delta\":false" in bare, bare)
+    }
+
+    @Test
+    fun fetchHistoryPage_and_convoHistoryPage_roundtrip() {
+        // issue #147 paging pair: BRAND-NEW message types, so an old peer DROPS them (undecodable
+        // discriminator, same contract unknown_frame_discriminator_throws pins) instead of mis-acting
+        val req = Envelope(id = "hp1", ts = 0, body = FetchHistoryPage("c1", beforeSeq = 38))
+        val reqJson = PocketJson.encodeToString(req)
+        assertTrue("\"t\":\"pocket/history.page\"" in reqJson, reqJson)
+        assertTrue("\"limit\":100" in reqJson, reqJson) // encodeDefaults: the daemon-side clamp still applies
+        assertEquals(req, PocketJson.decodeFromString<Envelope>(reqJson))
+        val page = Envelope(
+            id = "hp2", ts = 0,
+            body = ConvoHistoryPage("c1", listOf(HistoryMessage(ChatRole.USER, "older")), firstSeq = 12, hasMore = true),
+        )
+        val pageJson = PocketJson.encodeToString(page)
+        assertTrue("\"t\":\"pocket/history.older\"" in pageJson, pageJson)
+        assertEquals(page, PocketJson.decodeFromString<Envelope>(pageJson))
+        // a minimal page (empty tail) decodes with wire-safe defaults
+        val minimal = """{"id":"hp3","ts":0,"to":"PEER","body":{"t":"pocket/history.older","convoId":"c1","messages":[]}}"""
+        val backPage = PocketJson.decodeFromString<Envelope>(minimal).body as ConvoHistoryPage
+        assertEquals(null, backPage.firstSeq)
+        assertFalse(backPage.hasMore)
+    }
+
+    @Test
+    fun fileContentChunk_roundtrips_with_stateless_defaults_and_a_concatenable_chunk_size() {
+        // issue #134: the read-direction chunk stream. Full form round-trips…
+        val chunk = Envelope(
+            id = "cc1", ts = 0,
+            body = FileContentChunk("/w", "sid", "/w/report.xlsx", idx = 2, last = true, base64 = "UEsD", mediaType = "application/zip", totalBytes = 2_000_000),
+        )
+        val json = PocketJson.encodeToString(chunk)
+        assertTrue("\"t\":\"pocket/file.content.chunk\"" in json, json)
+        assertEquals(chunk, PocketJson.decodeFromString<Envelope>(json))
+        // …and a minimal frame decodes with the wire-safe defaults stateless reassembly relies on
+        val minimal = """{"id":"cc2","ts":0,"to":"PEER","body":{"t":"pocket/file.content.chunk","workdir":"/w","sessionId":"sid","path":"/w/a.bin","idx":0,"last":false,"base64":"QQ=="}}"""
+        val back = PocketJson.decodeFromString<Envelope>(minimal).body as FileContentChunk
+        assertEquals(null, back.mediaType)
+        assertEquals(0L, back.totalBytes)
+        // the concat-without-decode contract: the shared raw chunk size must stay a multiple of 3
+        // (base64 of every non-final chunk then carries no padding), and the caps must stay ordered
+        assertEquals(0, READ_CHUNK_RAW_BYTES % 3)
+        assertTrue(MAX_CHUNKED_READ_BYTES > READ_CHUNK_RAW_BYTES.toLong())
+    }
+
+    @Test
     fun exportFile_roundtrips_carries_convoId_and_defaults_agent() {
         // issue #67 v2 / #79: the approval-gated export of a non-changed file. Distinct discriminator from
         // ReadFile so an old daemon DROPS it (can't serve past the changed-set) instead of mis-serving.
@@ -380,6 +483,22 @@ class SerializationRoundTripTest {
         // an old daemon's frame (no hostname key) decodes to a null hostname — the accountId-hash name stands
         val legacy = """{"id":"9","ts":0,"to":"PEER","body":{"t":"pocket/daemon.info","lanUrl":"ws://x/v1/ws"}}"""
         assertEquals(DaemonInfo("ws://x/v1/ws", null), PocketJson.decodeFromString<Envelope>(legacy).body)
+    }
+
+    @Test
+    fun daemonInfo_gatewayBaseUrl_is_optional_and_back_compatible() {
+        // gatewayBaseUrl (issue #139) is a trailing optional field with the same four-direction
+        // wire-compat contract as hostname: round-trips when set, omitted when null (byte-identical
+        // to the pre-#139 shape), and an old daemon's frame decodes to null (no throw).
+        val gw = Envelope(id = "g1", ts = 0, body = DaemonInfo("ws://x/v1/ws", "Host", "https://gw.example.com/api"))
+        val json = PocketJson.encodeToString(gw)
+        assertTrue("\"gatewayBaseUrl\":\"https://gw.example.com/api\"" in json, json)
+        assertEquals(gw, PocketJson.decodeFromString<Envelope>(json))
+        // null is omitted on the wire — an OLD app sees exactly the frame it always saw
+        assertFalse("gatewayBaseUrl" in PocketJson.encodeToString(Envelope(id = "g2", ts = 0, body = DaemonInfo("ws://x/v1/ws", "Host"))))
+        // an OLD daemon's frame (no gatewayBaseUrl key) decodes to null — the app shows no gateway hint
+        val legacy = """{"id":"g3","ts":0,"to":"PEER","body":{"t":"pocket/daemon.info","lanUrl":"ws://x/v1/ws","hostname":"Host"}}"""
+        assertEquals(DaemonInfo("ws://x/v1/ws", "Host", null), PocketJson.decodeFromString<Envelope>(legacy).body)
     }
 
     @Test
@@ -1307,5 +1426,66 @@ class SerializationRoundTripTest {
         val uj = PocketJson.encodeToString(unassign)
         assertFalse("groupId" in uj, uj)
         assertEquals(unassign, PocketJson.decodeFromString<GroupAssign>(uj))
+    }
+
+    @Test
+    fun fetchSkillCatalog_roundtrips_and_omits_null_workdir() {
+        // issue #132: a brand-new message type — new↔new round-trip; an old daemon doesn't know the
+        // discriminator and silently drops the frame (runCatching decode), never a crash or a reply.
+        val env = Envelope(id = "sk1", ts = 0, body = FetchSkillCatalog("/w"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/skills.fetch\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        val bare = PocketJson.encodeToString(Envelope(id = "sk2", ts = 0, body = FetchSkillCatalog()))
+        assertFalse("workdir" in bare, bare) // explicitNulls=false
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(bare).body as FetchSkillCatalog).workdir)
+    }
+
+    @Test
+    fun skillCatalog_roundtrips_with_full_detail() {
+        val env = Envelope(
+            id = "sk3", ts = 0,
+            body = SkillCatalog(
+                skills = listOf(
+                    SkillInfo(
+                        name = "brain", description = "knowledge base", scope = SkillScope.PROJECT,
+                        meta = mapOf("argument-hint" to "<topic>", "license" to "MIT"),
+                        excerpt = "# Brain\nbody…", truncated = true, path = "/h/.claude/skills/brain",
+                    ),
+                ),
+                plugins = listOf(
+                    PluginInfo(
+                        name = "claude-hud", description = "statusline HUD", version = "0.0.10",
+                        marketplace = "claude-hud", scope = "user", author = "Jarrod",
+                        homepage = "https://x", commands = listOf("setup", "configure"),
+                        excerpt = "readme…", truncated = false, path = "/h/.claude/plugins/cache/claude-hud",
+                    ),
+                ),
+            ),
+        )
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/skills\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun skillCatalog_minimal_payload_decodes_with_defaults() {
+        // a future (or degraded) daemon may send only names — every other field must default cleanly,
+        // and unknown extra keys (a NEWER daemon's additions) must be skipped, not fatal
+        val minimal = """{"id":"sk4","ts":0,"to":"PEER","body":{"t":"pocket/skills",
+            "skills":[{"name":"x","futureField":123}],"plugins":[{"name":"p","futureField":{"a":1}}]}}"""
+        val back = PocketJson.decodeFromString<Envelope>(minimal).body as SkillCatalog
+        val s = back.skills.single()
+        assertEquals("x", s.name)
+        assertEquals("", s.description)
+        assertEquals(SkillScope.USER, s.scope)
+        assertTrue(s.meta.isEmpty())
+        assertEquals(false, s.truncated)
+        assertEquals(null, s.path)
+        val p = back.plugins.single()
+        assertEquals("p", p.name)
+        assertEquals(null, p.version)
+        assertTrue(p.commands.isEmpty())
     }
 }

@@ -71,6 +71,9 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) { UsageScreen(repo, onBack = { showUsage = false }); return } // full-screen usage dashboard (#26)
+    // scheduled tasks (issue #137): list + cancel, full-screen like usage
+    var showSchedules by remember { mutableStateOf(false) }
+    if (showSchedules) { ScheduleScreen(repo, onBack = { showSchedules = false }); return }
     // folder-share (issue #115): owner management + guest redeem, each full-screen like usage
     var showShares by remember { mutableStateOf(false) }
     if (showShares) { SharedFoldersScreen(repo, onBack = { showShares = false }); return }
@@ -100,6 +103,15 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(stringResource(Res.string.settings_usage), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                Text("›", color = Tok.muted, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .clickable { showSchedules = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(Res.string.schedule_tasks_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 Text("›", color = Tok.muted, fontSize = 16.sp)
             }
             Spacer(Modifier.height(8.dp))
