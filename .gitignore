@@ -59,8 +59,7 @@ scripts/__pycache__/
 
 # local dev artifacts (not shared until needed)
 node_modules/
-.opencode/node_modules/
-.opencode/plans/
+.opencode/
 .vscode/
 **/bin/
 TOOLKIT-CHINESE.md
