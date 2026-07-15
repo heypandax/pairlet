@@ -2124,7 +2124,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
         // new Claude sessions seed from the persisted default model; resumed keep their own, and a Codex launch
-        // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend
+        // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend.
+        // OpenCode sessions get a model from the daemon-side default (model picker selection) — sending
+        // the Claude default to opencode would break the session.
         val openModel = saved?.model ?: defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
         mode.value = openMode; allowRules.clear()
         model.value = openModel; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive

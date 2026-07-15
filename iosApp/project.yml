@@ -1,6 +1,6 @@
 name: iosApp
 options:
-  bundleIdPrefix: com.panda
+  bundleIdPrefix: com.JerseyBro
   deploymentTarget:
     iOS: "15.0"
 packages:
@@ -21,10 +21,9 @@ targets:
     settings:
       base:
         # dev.ccpocket.app 被旧 Apple 账号占用（bundle ID 跨 team 全局唯一），换账号后改用此 ID
-        PRODUCT_BUNDLE_IDENTIFIER: com.panda.ccpocket
+        PRODUCT_BUNDLE_IDENTIFIER: com.JerseyBro.ccpocket
         PRODUCT_NAME: cc-pocket
         CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: SC9S2SJ42G  # 当前账号 team；写进来让 xcodegen generate 后不用重选
         INFOPLIST_FILE: iosApp/Info.plist
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: NO
@@ -46,7 +45,25 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          # Xcode 的构建环境 PATH 里通常没有 java；显式指定，避免 gradlew 启动失败
-          export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
+          # Xcode 的构建环境里常见两个问题：
+          # 1) JAVA_HOME 为空或指向不存在的 JDK；
+          # 2) 本机只装了 21，没有 17。
+          # 这里优先复用有效的 JAVA_HOME，再自动探测可用 JDK。
+          if [ -z "${JAVA_HOME:-}" ] || [ ! -d "$JAVA_HOME" ]; then
+            JAVA_HOME="$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home -v 17 2>/dev/null || true)"
+            if [ -z "${JAVA_HOME:-}" ] || [ ! -d "$JAVA_HOME" ]; then
+              for candidate in /opt/homebrew/opt/openjdk@21 /opt/homebrew/opt/openjdk@17; do
+                if [ -d "$candidate" ]; then
+                  JAVA_HOME="$candidate"
+                  break
+                fi
+              done
+            fi
+          fi
+          if [ -z "${JAVA_HOME:-}" ] || [ ! -d "$JAVA_HOME" ]; then
+            echo "ERROR: No valid JDK found. Install JDK 21 or 17, or set JAVA_HOME."
+            exit 1
+          fi
+          export JAVA_HOME
           cd "$SRCROOT/.."
           ./gradlew :mobile:composeApp:embedAndSignAppleFrameworkForXcode

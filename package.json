@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "ecc-universal": "^2.0.0"
+  }
+}

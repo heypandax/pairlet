@@ -209,6 +209,7 @@ fun StartSessionModeSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     AgentOption(AgentKind.CLAUDE, chosenAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { chosenAgent = AgentKind.CLAUDE }
                     AgentOption(AgentKind.CODEX, chosenAgent == AgentKind.CODEX, Modifier.weight(1f)) { chosenAgent = AgentKind.CODEX }
+                    AgentOption(AgentKind.OPENCODE, chosenAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { chosenAgent = AgentKind.OPENCODE }
                 }
                 SectionLabel(stringResource(Res.string.label_mode))
                 if (chosenAgent == AgentKind.CLAUDE) {
@@ -216,6 +217,14 @@ fun StartSessionModeSheet(
                         MODES.forEach { m ->
                             ModeRow(m, selected = m.key == selected, enabled = true) {
                                 if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true else onPick(m.key, AgentKind.CLAUDE)
+                            }
+                        }
+                    }
+                } else if (chosenAgent == AgentKind.OPENCODE) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        MODES.forEach { m ->
+                            ModeRow(m, selected = m.key == selected, enabled = true) {
+                                if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true else onPick(m.key, AgentKind.OPENCODE)
                             }
                         }
                     }

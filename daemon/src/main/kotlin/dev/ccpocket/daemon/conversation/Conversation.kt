@@ -594,7 +594,7 @@ class Conversation(
         stopProcess() // clears executing — the fresh launch re-arms it (armExecuting) with the right ordering
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
-            AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = fork),
+            AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = fork, initialPrompt = initialSend?.text),
             armExecuting = armExecuting,
             initialSend = initialSend,
         )
@@ -654,6 +654,12 @@ class Conversation(
     private val cleanRoom: Boolean = pathScope != null
 
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
+        // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
+        // Defer to sendPrompt() which always provides initialPrompt.
+        if (backend.kind == AgentKind.OPENCODE && rawSpec.initialPrompt == null) {
+            log.info("$convoId skip launch (OpenCode needs a prompt — deferring to sendPrompt)")
+            return
+        }
         val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
         pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
@@ -736,6 +742,36 @@ class Conversation(
         // this write, so an instant startup death always wins and can't be resurrected by a late arm on the
         // caller thread (the reap-flake / stranded-■ race). Ordered last so it also covers re-injection.
         if (armExecuting) executing = true
+        // OpenCode startup watchdog: if the process hangs on launch (bad model, resume failure, etc.)
+        // with zero stdout for OPENCODE_STARTUP_TIMEOUT_MS, kill it and surface an error — the pump
+        // would otherwise block on `for (line in p.stdout)` forever (issue: opencode run with an
+        // invalid --model on a resumed session exits neither stdout nor stderr, just hangs).
+        if (backend.kind == AgentKind.OPENCODE) {
+            scope.launch(CoroutineName("opencode-watchdog-$convoId")) {
+                delay(OPENCODE_STARTUP_TIMEOUT_MS)
+                // still the same process? (a relaunch already replaced it → no-op)
+                if (proc === p && p.isAlive()) {
+                    log.warn("$convoId OpenCode watchdog: no stdout in ${OPENCODE_STARTUP_TIMEOUT_MS}ms, killing process ${p.pid}")
+                    intentionalStop = true
+                    p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
+                    p.awaitExit()
+                    // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
+                    // (without this, subsequent prompts would write into the dead stdin and be lost)
+                    proc = null
+                    executing = false
+                    bridge?.cancelAll()
+                    bridge = null
+                    // Surface the last stderr (often the real cause) + a clear message
+                    val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
+                    sink.emit(PocketError(
+                        "opencode_startup_timeout",
+                        "OpenCode did not produce any output within ${OPENCODE_STARTUP_TIMEOUT_MS / 1000}s ($why). " +
+                            "The model may be invalid or the session may be corrupted. Try a new session or a different model.",
+                        convoId,
+                    ))
+                }
+            }
+        }
         scope.launch(CoroutineName("pump-$convoId")) {
             pump(p, b)
         }
@@ -945,6 +981,13 @@ class Conversation(
             for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
             backend.onProcessEnded(sessionId)
             if (healSessionLock(p)) return
+            // opencode "Session not found" after state DB relocation or stale resume id
+            // (e.g. XDG_STATE_HOME change): clear the resume lineage so the next spawn creates a
+            // fresh session instead of looping on an id the agent can no longer locate.
+            if (p.lastStderr?.contains(SESSION_NOT_FOUND) == true) {
+                log.warn("$convoId opencode: session not found — clearing stale resumeId, fresh session on next prompt")
+                sessionId = null; openedResumeId = null
+            }
             // drop the dead handle (issue #122): the process took its stdin queue with it — with `proc`
             // still set, every later prompt would be written into a dead pipe and hollow-acked. Nulling
             // it makes the NEXT prompt lazy-respawn, and that spawn re-injects the unconsumed ledger.
@@ -1098,7 +1141,7 @@ class Conversation(
             val anchor = sessionId ?: openedResumeId
             val fork = if (sessionId == null) openedWithFork else false
             val launched = runCatching {
-                launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork), armExecuting = true, initialSend = initialSend)
+                launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork, initialPrompt = text), armExecuting = true, initialSend = initialSend)
             }
             if (launched.isFailure) {
                 executing = false // the spawn never started a turn
@@ -1348,6 +1391,11 @@ class Conversation(
         // `lock` scenario guards the wording against CLI drift.
         const val SESSION_LOCK_MARKER = "is currently running as a background agent"
 
+        // opencode emits this on stderr when the --session id is not in its state DB (state DB
+        // was relocated or the id never existed). The daemon must clear its resume lineage on
+        // this error so subsequent spawns start fresh instead of repeating the same failure.
+        const val SESSION_NOT_FOUND = "Session not found"
+
         // prepended to the healed turn so the fork isn't silent — the user sees why a new session
         // id appears in their list instead of suspecting the "duplicate sessions" bug class
         const val FORK_NOTICE = "⑂ This session is held by another running claude (`claude agents`), " +
@@ -1388,5 +1436,10 @@ class Conversation(
         // at most one urgent bridge-approval push per conversation per this window (issue #91). The verdict
         // windows themselves are unified under agent.ApprovalTimeout.ms (issue #100) — see PermissionBridge.
         const val ASK_PUSH_COALESCE_MS = 60_000L
+
+        // OpenCode: max time to wait for first stdout after process launch before declaring it hung.
+        // opencode run with an invalid --model on a resumed session hangs silently (no stdout, no stderr,
+        // no exit) — the pump would block forever without this watchdog.
+        const val OPENCODE_STARTUP_TIMEOUT_MS = 45_000L
     }
 }

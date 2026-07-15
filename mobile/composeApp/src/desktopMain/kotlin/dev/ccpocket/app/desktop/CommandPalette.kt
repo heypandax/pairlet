@@ -69,7 +69,7 @@ private class PItem(
     val label: String,
     val detail: String,
     val icon: ImageVector,
-    val codex: Boolean,
+    val agent: AgentKind? = null,
     val hint: String? = null,   // right-aligned keycap ("⌘2")
     val badge: Int = 0,         // AttentionBadge count (approvals waiting on that machine)
     val accent: Boolean = false, // terracotta label — the "needs you" verbs
@@ -79,11 +79,11 @@ private class PItem(
 
 /** Flatten the model into palette rows: machine verbs lead (Fleet ⑧), then projects and sessions. */
 private fun buildItems(model: DesktopModel): List<PItem> = buildList {
-    fun projectItem(p: DkProject) = PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder, false) { model.openProject(p) }
+    fun projectItem(p: DkProject) = PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder) { model.openProject(p) }
     // scoped mode ("All projects…"): the full project list plus the type-any-path entry, nothing else
     if (model.palette == PaletteScope.PROJECTS) {
         // type any path — the daemon creates a missing leaf folder
-        add(PItem(PKind.ACTION, "New session at path…", "~/", Icons.Outlined.Folder, false) { model.openNewSession("~/") })
+        add(PItem(PKind.ACTION, "New session at path…", "~/", Icons.Outlined.Folder) { model.openNewSession("~/") })
         model.projects.forEach { add(projectItem(it)) }
         return@buildList
     }
@@ -97,7 +97,7 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
         }
         add(
             PItem(
-                PKind.MACHINE, "Switch to ${c.name}", detail, osIcon(c.os), false,
+                PKind.MACHINE, "Switch to ${c.name}", detail, osIcon(c.os),
                 hint = if (i < 9) "⌘0 ${i + 1}" else null, badge = m.pending, id = c.accountId,
             ) { model.selectComputer(c) },
         )
@@ -105,18 +105,18 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
     // ACTIONS — start work on a machine / clear what's waiting, straight from the keyboard
     model.activeComputer?.let { c ->
         val where = model.newSessionDir?.let { tilde(it) } ?: "" // the dir it will actually start in
-        add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, false) { model.openNewSession() })
+        add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder) { model.openNewSession() })
     }
     model.attention.forEach { a ->
         add(
             PItem(
-                PKind.ACTION, "Approve pending on ${a.machine}", "${a.tool} · ${a.preview}", Icons.Outlined.Shield, false,
+                PKind.ACTION, "Approve pending on ${a.machine}", "${a.tool} · ${a.preview}", Icons.Outlined.Shield,
                 hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.id}",
             ) { model.showAttention = true },
         )
     }
     model.projects.forEach { add(projectItem(it)) }
-    model.sessions.forEach { s -> add(PItem(PKind.SESSION, s.title, tilde(s.cwd), Icons.Outlined.ChatBubbleOutline, s.agent == AgentKind.CODEX, id = s.sessionId) { model.selectSession(s) }) }
+    model.sessions.forEach { s -> add(PItem(PKind.SESSION, s.title, tilde(s.cwd), Icons.Outlined.ChatBubbleOutline, agent = s.agent, id = s.sessionId) { model.selectSession(s) }) }
 }
 
 /** Case-insensitive rank: label-prefix > label-substring > detail-substring; 0 filters the row out. */
@@ -238,7 +238,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
                 color = if (item.accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            if (item.codex) AgentTag(AgentKind.CODEX)
+            if (item.agent != null && item.agent != AgentKind.CLAUDE) AgentTag(item.agent)
             Text(
                 item.detail, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),

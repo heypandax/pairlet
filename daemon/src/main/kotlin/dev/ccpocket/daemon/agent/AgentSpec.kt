@@ -29,4 +29,7 @@ data class AgentSpec(
     //     system prompt (vectors #2/#5 — the owner's private memory + shell env don't bleed into replies).
     // Credentials/auth are NOT a setting source, so the guest still bills the owner's account (billing intact).
     val cleanRoom: Boolean = false,
+    // OpenCode only: the initial prompt text, passed as a CLI positional arg to `opencode run`.
+    // Needed because `opencode run [message]` takes the message as a CLI arg, not stdin.
+    val initialPrompt: String? = null,
 )

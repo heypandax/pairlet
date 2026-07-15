@@ -57,6 +57,7 @@ class AgentProcess private constructor(
                 process.inputStream.bufferedReader().use { r ->
                     while (isActive) {
                         val line = r.readLine() ?: break
+                        if (line.length < 200) log.info("stdout: $line") else log.info("stdout: ${line.take(80)}… (${line.length}B)")
                         stdout.send(line)
                     }
                 }

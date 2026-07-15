@@ -39,6 +39,7 @@ class SeedDesktopModel : DesktopModel {
         DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929", group = "g-auth"),
         DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8", group = null),
         DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1, group = "g-ci"), // keeps the Codex diff-approval surface exercised
+        DkSession("s4", "~/code/cc-pocket", "Update docs", AgentKind.OPENCODE, group = "g-auth"),
     )
     private val groupOverride = mutableStateMapOf<String, String?>()
     override val sessions: List<DkSession>
@@ -251,7 +252,11 @@ class SeedDesktopModel : DesktopModel {
     override val chatAgent: AgentKind get() = selected.agent
     override val chatWorkdir = "~/code/cc-pocket"
     override val chatBranch = "main"
-    override val chatModel: String get() = if (selected.agent == AgentKind.CODEX) "gpt-5.1-codex" else "sonnet"
+    override val chatModel: String get() = when (selected.agent) {
+        AgentKind.CODEX -> "gpt-5.1-codex"
+        AgentKind.OPENCODE -> "auto"
+        else -> "sonnet"
+    }
     override val chatMode = PermissionMode.DEFAULT
     override val streaming = true
     override val messages: List<ChatItem> = listOf(

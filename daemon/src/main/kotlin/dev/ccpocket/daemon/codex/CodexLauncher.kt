@@ -48,6 +48,7 @@ object CodexLauncher {
         return ProcessBuilder(argv).apply {
             directory(spec.workdir.toFile())
             redirectErrorStream(false) // keep stderr off the stdout JSON-RPC stream
+            // NOTE: no redirectInput — CodeX reads JSON-RPC from stdin
         }
     }
 }

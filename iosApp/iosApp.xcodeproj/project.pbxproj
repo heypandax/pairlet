@@ -21,7 +21,7 @@
 		0CF0BA8A92206DCBD9D678DD /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		402A520F4E5B4CEA624B49E9 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		668CECA83ACC03A83C85A623 /* iOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp.swift; sourceTree = "<group>"; };
-		86038AE1032E284E79B32AD6 /* iosApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = iosApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		86038AE1032E284E79B32AD6 /* cc-pocket.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "cc-pocket.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A200F24526F2E89B50E53BA7 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		A55143988C4C8F291BE72E9A /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		C117AD187833E2513BD2F553 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -69,7 +69,7 @@
 		94C98B8B3A2BFC1966447269 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				86038AE1032E284E79B32AD6 /* iosApp.app */,
+				86038AE1032E284E79B32AD6 /* cc-pocket.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -96,7 +96,7 @@
 				108F0D6F9A31550A5E7E3D81 /* FirebaseCrashlytics */,
 			);
 			productName = iosApp;
-			productReference = 86038AE1032E284E79B32AD6 /* iosApp.app */;
+			productReference = 86038AE1032E284E79B32AD6 /* cc-pocket.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -109,7 +109,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					78B53CC79860CBFC2F5543C6 = {
-						DevelopmentTeam = SC9S2SJ42G;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -169,7 +168,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n# Xcode 的构建环境 PATH 里通常没有 java；显式指定，避免 gradlew 启动失败\nexport JAVA_HOME=\"${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}\"\ncd \"$SRCROOT/..\"\n./gradlew :mobile:composeApp:embedAndSignAppleFrameworkForXcode\n";
+			shellScript = "set -e\n# Xcode 的构建环境里常见两个问题：\n# 1) JAVA_HOME 为空或指向不存在的 JDK；\n# 2) 本机只装了 21，没有 17。\n# 这里优先复用有效的 JAVA_HOME，再自动探测可用 JDK。\nif [ -z \"${JAVA_HOME:-}\" ] || [ ! -d \"$JAVA_HOME\" ]; then\n  JAVA_HOME=\"$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home -v 17 2>/dev/null || true)\"\n  if [ -z \"${JAVA_HOME:-}\" ] || [ ! -d \"$JAVA_HOME\" ]; then\n    for candidate in /opt/homebrew/opt/openjdk@21 /opt/homebrew/opt/openjdk@17; do\n      if [ -d \"$candidate\" ]; then\n        JAVA_HOME=\"$candidate\"\n        break\n      fi\n    done\n  fi\nfi\nif [ -z \"${JAVA_HOME:-}\" ] || [ ! -d \"$JAVA_HOME\" ]; then\n  echo \"ERROR: No valid JDK found. Install JDK 21 or 17, or set JAVA_HOME.\"\n  exit 1\nfi\nexport JAVA_HOME\ncd \"$SRCROOT/..\"\n./gradlew :mobile:composeApp:embedAndSignAppleFrameworkForXcode\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -323,7 +322,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = SC9S2SJ42G;
+				DEVELOPMENT_TEAM = HA86XAH5HL;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -340,7 +339,7 @@
 					"-framework",
 					ComposeApp,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.panda.ccpocket;
+				PRODUCT_BUNDLE_IDENTIFIER = com.JerseyBro.ccpocket;
 				PRODUCT_NAME = "cc-pocket";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -354,7 +353,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = SC9S2SJ42G;
+				DEVELOPMENT_TEAM = HA86XAH5HL;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -371,7 +370,7 @@
 					"-framework",
 					ComposeApp,
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.panda.ccpocket;
+				PRODUCT_BUNDLE_IDENTIFIER = com.JerseyBro.ccpocket;
 				PRODUCT_NAME = "cc-pocket";
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;

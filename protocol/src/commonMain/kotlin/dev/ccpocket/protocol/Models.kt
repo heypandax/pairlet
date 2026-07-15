@@ -39,6 +39,7 @@ enum class Decision {
 enum class AgentKind {
     @SerialName("claude") CLAUDE,
     @SerialName("codex") CODEX,
+    @SerialName("opencode") OPENCODE,
 }
 
 /** One assistant content piece (closed set for M0: text | thinking). tool_use is a [ToolEvent]. */
