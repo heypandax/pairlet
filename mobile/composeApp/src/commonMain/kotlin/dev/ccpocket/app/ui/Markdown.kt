@@ -120,8 +120,16 @@ private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String
 
 // http(s) only (matches what the platform viewers accept); the trailing trim drops sentence
 // punctuation that prose glues onto a URL ("see https://x.dev/docs." / 中文句读)
+//
+// The class has to stop at bracket OPENERS and at ")", not just at the closers ）】」 (issue #154).
+// Listing only closers let a markdown link trailed by a CJK parenthetical —
+// [执行副本](https://…/base/Lp9noe)（`Lp9noe`） — run the match through the link's own ")" and on into
+// "（Lp9noe", halting at the first listed char, "）". Ending on a letter, the trim below then no-op'd,
+// so ONE span covered ")（Lp9noe" and the tap opened that. Hence the boundary lives here, in the class:
+// the trim only ever cleaned tails that happened to END in punctuation, which this shape never did.
+// A URL legitimately carrying "(" (…/Foo_(bar)) still truncates — long tail, deliberately no special case.
 internal val urlRx: Regex? by lazy {
-    runCatching { Regex("""https?://[^\s<>"'`一-鿿）】」，。；！？]+""") }.getOrNull()
+    runCatching { Regex("""https?://[^\s<>"'`一-鿿)、（）【】「」，。；！？]+""") }.getOrNull()
 }
 internal const val URL_TRAIL = ".,;:!?)]}>"
 

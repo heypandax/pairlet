@@ -68,4 +68,40 @@ class PathLinkTest {
         val text = "no links in http-less prose /a/b/c"
         assertEquals(0, AnnotatedString(text).withUrlLinks().getLinkAnnotations(0, text.length).size)
     }
+
+    @Test
+    fun urlEndsAtTheMarkdownLinkParen() {
+        // issue #154, the reported shape verbatim: a markdown link trailed by a CJK parenthetical (the
+        // backticks are already gone — inline() strips them before linkification sees the text). The match
+        // used to jump the link's own ")" into "（Lp9noe" and halt at "）"; ending on a letter, URL_TRAIL's
+        // trim never fired, so one span covered ")（Lp9noe" and the tap opened that address.
+        val text = "Base 执行副本 — [执行副本](https://hellotalk.feishu.cn/base/Lp9noe)（Lp9noe）"
+        val linked = AnnotatedString(text).withUrlLinks()
+        val links = linked.getLinkAnnotations(0, text.length)
+        assertEquals(1, links.size)
+        assertEquals("https://hellotalk.feishu.cn/base/Lp9noe", text.substring(links[0].start, links[0].end))
+    }
+
+    @Test
+    fun urlEndsAtAnAdjacentBracketOfEitherWidth() {
+        // the same class either side of the pair: a halfwidth parenthetical glued straight onto the link's
+        // ")", and a bare URL a CJK "（" runs into with no ")" for the trim to catch in the first place
+        val half = "[t](https://a.dev/x)(Lp9noe)"
+        val halfLinks = AnnotatedString(half).withUrlLinks().getLinkAnnotations(0, half.length)
+        assertEquals("https://a.dev/x", half.substring(halfLinks[0].start, halfLinks[0].end))
+
+        val full = "见 https://x.dev/a（说明）继续"
+        val fullLinks = AnnotatedString(full).withUrlLinks().getLinkAnnotations(0, full.length)
+        assertEquals("https://x.dev/a", full.substring(fullLinks[0].start, fullLinks[0].end))
+    }
+
+    @Test
+    fun anIdeographicCommaSeparatesTwoUrls() {
+        // "、" is a list separator, never URL content: it used to glue both links into one dead span
+        val text = "见 https://a.dev/x、https://b.dev/y"
+        val links = AnnotatedString(text).withUrlLinks().getLinkAnnotations(0, text.length)
+        assertEquals(2, links.size)
+        assertEquals("https://a.dev/x", text.substring(links[0].start, links[0].end))
+        assertEquals("https://b.dev/y", text.substring(links[1].start, links[1].end))
+    }
 }
