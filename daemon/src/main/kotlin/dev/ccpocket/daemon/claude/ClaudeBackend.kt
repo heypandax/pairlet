@@ -16,15 +16,20 @@ import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PresetEnv
 import dev.ccpocket.protocol.SessionSummary
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -59,12 +64,62 @@ class ClaudeBackend(
 
     override fun processBuilder(spec: AgentSpec): ProcessBuilder = ClaudeLauncher.processBuilder(exe(), spec, configDir, presetEnv())
 
+    // rename acks in flight (issue #158): request_id -> waiter. Settled by [parse] when the CLI's
+    // control_response arrives on the stdout pump; failed on relaunch (the old process took the
+    // request to its grave).
+    private val pendingRenames = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+
     override suspend fun attach(io: AgentIo, spec: AgentSpec) {
         this.io = io
         this.workdir = spec.workdir.toString()
+        // a relaunch orphans any in-flight rename ack — fail it now instead of riding out the timeout
+        pendingRenames.values.forEach { it.complete(false) }
+        pendingRenames.clear()
     }
 
-    override suspend fun parse(line: String): List<AgentEvent> = StreamParser.parse(line)
+    override suspend fun parse(line: String): List<AgentEvent> {
+        // rename_session ack (issue #158): control_response is daemon-side bookkeeping, not a UI event —
+        // settle the waiter here and let StreamParser keep reporting the line as Ignored.
+        if (pendingRenames.isNotEmpty() && line.contains("\"control_response\"")) settleRenameAck(line)
+        return StreamParser.parse(line)
+    }
+
+    private fun settleRenameAck(line: String) {
+        val root = runCatching { json.parseToJsonElement(line) }.getOrNull() as? JsonObject ?: return
+        if ((root["type"] as? JsonPrimitive)?.contentOrNull != "control_response") return
+        val resp = root["response"] as? JsonObject ?: return
+        val id = (resp["request_id"] as? JsonPrimitive)?.contentOrNull ?: return
+        val waiter = pendingRenames.remove(id) ?: return // an interrupt's ack, or an already-timed-out rename
+        val ok = (resp["subtype"] as? JsonPrimitive)?.contentOrNull == "success"
+        if (!ok) log.warn("rename_session $id rejected: ${(resp["error"] as? JsonPrimitive)?.contentOrNull}")
+        waiter.complete(ok)
+    }
+
+    /** issue #158: ask the LIVE CLI to rename its own session. Probed on 2.1.210: `-p` stream-json accepts
+     *  `control_request/rename_session {title}`, appends the `custom-title` record through its own writer
+     *  (no second appender on the transcript) and THEN acks success — so a true return means the record is
+     *  on disk and a rescan sees the new title. False = no live IO, an explicit rejection (e.g. an older
+     *  CLI without the subtype), or an ack timeout. */
+    override suspend fun renameSession(title: String): Boolean {
+        val io = io ?: return false
+        val requestId = "pocket-rename-${interruptSeq.getAndIncrement()}"
+        val waiter = CompletableDeferred<Boolean>()
+        pendingRenames[requestId] = waiter
+        val frame = buildJsonObject {
+            put("type", "control_request")
+            put("request_id", requestId)
+            putJsonObject("request") {
+                put("subtype", "rename_session")
+                put("title", title)
+            }
+        }
+        return try {
+            io.writeLine(frame.toString())
+            withTimeoutOrNull(RENAME_ACK_TIMEOUT_MS) { waiter.await() } ?: false
+        } finally {
+            pendingRenames.remove(requestId)
+        }
+    }
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
         val io = io ?: return
@@ -192,4 +247,10 @@ class ClaudeBackend(
 
     override fun resumeFailedTurnStreak(workdir: String, sessionId: String): Int =
         TranscriptScanner.syntheticTailStreak(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
+
+    private companion object {
+        // the CLI appends + acks in one tick; generous so a mid-turn rename survives a busy stdout,
+        // bounded so a wedged process fails the rename honestly instead of hanging the router job
+        const val RENAME_ACK_TIMEOUT_MS = 10_000L
+    }
 }

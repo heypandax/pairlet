@@ -35,6 +35,12 @@ interface AgentBackend {
     /** Encode + write an interrupt for the in-flight turn; no-op if the process isn't ready. */
     suspend fun interrupt()
 
+    /** Ask the LIVE agent process to rename its session (issue #158) — Claude: a `rename_session`
+     *  control_request; the CLI appends its own `custom-title` record and acks, so the daemon never
+     *  writes a transcript its child holds. True = the agent acknowledged (record on disk). Default
+     *  false = unsupported (Codex) / no live IO — the caller reports or falls back to a disk append. */
+    suspend fun renameSession(title: String): Boolean = false
+
     /** Write a permission decision for [askId] (an [AgentEvent.ControlRequest.requestId]).
      *  [remember] maps to a session-scoped "always allow" (Codex acceptForSession). */
     suspend fun respondPermission(

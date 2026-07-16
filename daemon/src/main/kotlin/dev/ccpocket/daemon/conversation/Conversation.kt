@@ -1301,6 +1301,18 @@ class Conversation(
         requestInterrupt()
     }
 
+    /** A live agent process is attached right now — its CLI holds (and appends) the transcript. */
+    fun hasLiveProcess(): Boolean = proc?.isAlive() == true
+
+    /** Rename the session THROUGH the live agent (issue #158): the CLI appends its own `custom-title`
+     *  record and acks, so the daemon never appends to a transcript its child is writing. False = not
+     *  acked (no live process / backend without rename support / rejected / timeout) — the caller
+     *  reports it; it must NOT fall back to a disk append while this process lives. */
+    suspend fun renameSession(title: String): Boolean {
+        if (!hasLiveProcess()) return false
+        return backend.renameSession(title)
+    }
+
     /**
      * Stop ONE background job from the phone's task panel (issue #80). The daemon's only lever over the
      * agent's work is the interrupt control (same primitive as [cancelTurn] / the composer ■) — it can't
