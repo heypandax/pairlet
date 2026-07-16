@@ -554,6 +554,8 @@
     <string name="group_delete">Delete group</string>
     <string name="group_delete_confirm">Delete this group? Its sessions move to Ungrouped.</string>
     <string name="group_name_hint">Group name</string>
+    <string name="session_rename">Rename session</string>
+    <string name="session_rename_hint">Session title</string>
 
     <!-- scheduled tasks (issue #137) -->
     <string name="schedule_tasks_title">Scheduled tasks</string>

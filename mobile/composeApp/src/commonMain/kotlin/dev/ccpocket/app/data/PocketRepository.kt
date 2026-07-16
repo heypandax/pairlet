@@ -137,6 +137,7 @@ import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupRename
+import dev.ccpocket.protocol.RenameSession
 import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
@@ -542,6 +543,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
      *  vs an older daemon / a guest connection that omits groups entirely (hide the affordance). */
     val groupsSupported = mutableStateOf(false)
+    /** True when THIS connection may rename sessions (issue #158): the daemon stamped
+     *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon or a guest —
+     *  hides the rename entry instead of sending a frame the daemon would silently drop. */
+    val renameSupported = mutableStateOf(false)
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -1638,6 +1643,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     ?: (frame as? GroupDelete)?.workdir ?: (frame as GroupAssign).workdir
                 handle(Sessions(wd, DemoData.sessions(wd)))
             }
+            // #158 rename: same no-persistence re-echo (the demo Sessions omits renameSupported, so the
+            // entry stays hidden anyway — this just keeps every sendable frame answered)
+            is RenameSession -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
             is OpenSession -> {
                 val cid = "demo-convo-${frame.resumeId ?: "new"}"
                 handle(SessionLive(cid, frame.workdir, frame.resumeId ?: DemoData.LIVE_SESSION_ID, mode = frame.mode, executing = false))
@@ -1729,6 +1737,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 sessionsDir.value = f.workdir; replace(sessions, f.items)
                 replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                 groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
+                renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
                 sessionsRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
@@ -2501,6 +2510,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun assignGroup(sessionId: String, groupId: String?, wd: String? = null) {
         val dir = wd ?: sessionsDir.value ?: return
         scope.launch { send(GroupAssign(dir, sessionId, groupId)) }
+    }
+
+    /** Rename session [sessionId]'s title (issue #158) — the daemon lands claude's own `custom-title`
+     *  record and answers with the re-pushed [Sessions] (same refresh contract as the group ops; no
+     *  optimistic local edit), or a [PocketError] when the rename can't land (e.g. the session is live
+     *  in another client). Gate the entry on [renameSupported]. */
+    fun renameSession(sessionId: String, title: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        if (title.isBlank()) return
+        scope.launch { send(RenameSession(dir, sessionId, title.trim())) }
     }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.

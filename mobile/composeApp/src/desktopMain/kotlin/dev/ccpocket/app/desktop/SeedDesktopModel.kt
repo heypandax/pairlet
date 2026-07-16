@@ -41,8 +41,12 @@ class SeedDesktopModel : DesktopModel {
         DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1, group = "g-ci"), // keeps the Codex diff-approval surface exercised
     )
     private val groupOverride = mutableStateMapOf<String, String?>()
+    private val titleOverride = mutableStateMapOf<String, String>() // session rename (issue #158)
     override val sessions: List<DkSession>
-        get() = baseSessions.map { if (groupOverride.containsKey(it.sessionId)) it.copy(group = groupOverride[it.sessionId]) else it }
+        get() = baseSessions.map { s ->
+            val grouped = if (groupOverride.containsKey(s.sessionId)) s.copy(group = groupOverride[s.sessionId]) else s
+            titleOverride[s.sessionId]?.let { grouped.copy(title = it) } ?: grouped
+        }
 
     // custom groups of the current project (issue #119) — mutable so create/rename/delete are observable
     private val groupList = mutableStateListOf(DkGroup("g-auth", "Auth work", 0), DkGroup("g-ci", "CI & release", 1))
@@ -58,6 +62,9 @@ class SeedDesktopModel : DesktopModel {
         baseSessions.filter { (groupOverride[it.sessionId] ?: it.group) == groupId }.forEach { groupOverride[it.sessionId] = null }
     }
     override fun assignGroup(sessionId: String, groupId: String?) { groupOverride[sessionId] = groupId }
+    // session rename (issue #158) — local override so the seed exercises the sidebar entry
+    override val canRenameSessions = true
+    override fun renameSession(sessionId: String, title: String) { titleOverride[sessionId] = title.trim() }
     private val groupCollapse = mutableStateListOf<String>()
     override fun groupCollapsed(projectPath: String, groupId: String) = "$projectPath\u0000$groupId" in groupCollapse
     override fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {

@@ -296,6 +296,15 @@ interface DesktopModel {
     fun groupCollapsed(projectPath: String, groupId: String): Boolean = false
     fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {}
 
+    // ── session rename (issue #158) ───────────────────────────────────────────────────────────────
+    /** Owner on a rename-aware daemon (the daemon stamps Sessions.renameSupported): false hides the
+     *  row's Rename entry (an older daemon would silently drop the frame). Claude rows only — the row
+     *  itself skips Codex sessions (their rename write path is out of #158's scope). */
+    val canRenameSessions: Boolean get() = false
+    /** Rename [sessionId]'s title — lands claude's own `custom-title` record on the daemon, which
+     *  re-pushes Sessions to refresh the row (no optimistic local edit). */
+    fun renameSession(sessionId: String, title: String) {}
+
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false
 

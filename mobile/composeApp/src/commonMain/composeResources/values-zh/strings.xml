@@ -554,6 +554,8 @@
     <string name="group_delete">删除分组</string>
     <string name="group_delete_confirm">删除该分组？组内会话将回落到未分组。</string>
     <string name="group_name_hint">分组名称</string>
+    <string name="session_rename">重命名会话</string>
+    <string name="session_rename_hint">会话标题</string>
 
     <!-- scheduled tasks (issue #137) -->
     <string name="schedule_tasks_title">定时任务</string>

@@ -550,6 +550,16 @@ class RepoDesktopModel(
     override fun deleteGroup(groupId: String) { repo.deleteGroup(groupId) }
     override fun assignGroup(sessionId: String, groupId: String?) { repo.assignGroup(sessionId, groupId) }
 
+    // session rename (issue #158) — same gating shape as canEditGroups: the daemon's capability stamp,
+    // plus the belt-and-suspenders guest check (a guest's Sessions already comes stamped false)
+    override val canRenameSessions: Boolean
+        get() {
+            if (!repo.renameSupported.value) return false
+            val dir = repo.sessionsDir.value ?: return false
+            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+        }
+    override fun renameSession(sessionId: String, title: String) { repo.renameSession(sessionId, title) }
+
     // collapse memory keyed by (canonical project path, group id) — persisted like the RECENT visit keys
     // (issue #102): a snapshot list so reads recompose, written through the same DesktopStore.
     private val groupCollapsedState = mutableStateListOf<String>().apply {
