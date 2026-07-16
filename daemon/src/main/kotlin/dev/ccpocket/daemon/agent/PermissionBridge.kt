@@ -70,14 +70,17 @@ class PermissionBridge(
             respond(ev.requestId, false, false, ev.input, null, "denied — $escaped is outside the shared folder")
             return
         }
-        // AskUserQuestion carries its ANSWERS in the verdict — an auto-allow would answer nothing
-        // ("the user did not answer"), so questions reach the phone even under bypassPermissions.
-        val isQuestion = ev.toolName == AskQuestions.TOOL
-        if (autoAllow && !isQuestion) {
+        val meta = ToolMetadata.of(ev.toolName, ev.input)
+        // bypassPermissions auto-allows ordinary tools — but NOT the neverRemember class (issue #156): those
+        // are human-decision gates that must survive every skip-the-ask path (the ToolMeta contract).
+        // ExitPlanMode, because approving a plan is always an explicit, per-plan decision; AskUserQuestion,
+        // because its ANSWERS ride in the verdict — an auto-allow would answer nothing ("the user did not
+        // answer"). Deliberately meta.neverRemember, not forceNeverRemember: whether a bridge-origin session
+        // (#91) should also re-ask under user-chosen bypass is a separate, undecided policy.
+        if (autoAllow && !meta.neverRemember) {
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
-        val meta = ToolMetadata.of(ev.toolName, ev.input)
         // neverRemember tools (ExitPlanMode, AskUserQuestion) are a human-decision gate: never satisfy them
         // from a remembered rule. [forceNeverRemember] extends that to EVERY ask on a bridge-origin session
         // (issue #91), so an owner's earlier "always allow" can't auto-clear a new attacker-supplied prompt.
@@ -86,6 +89,7 @@ class PermissionBridge(
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
+        val isQuestion = ev.toolName == AskQuestions.TOOL
         val askId = ev.requestId
         val timeoutMs = if (isQuestion) questionTimeoutMs else verdictTimeoutMs
         val timeout = scope.launch {
