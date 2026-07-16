@@ -45,6 +45,21 @@ data class GroupDelete(val workdir: String, val groupId: String) : ToDaemon
 @SerialName("pocket/group.assign")
 data class GroupAssign(val workdir: String, val sessionId: String, val groupId: String? = null) : ToDaemon
 
+/**
+ * phone -> daemon: rename session [sessionId] under [workdir] to [title] (issue #158). The daemon lands it
+ * as Claude's OWN `custom-title` transcript record — appended by the live CLI itself (a `rename_session`
+ * control_request) when the daemon is driving that session, or appended to the idle `.jsonl` directly in
+ * the CLI's exact record shape — so the CLI and every client adopt it through the existing
+ * custom-title → ai-title → firstPrompt fallback (#14). Claude sessions only (a Codex id has no transcript
+ * under the project dir and fails cleanly). Reply: the re-pushed [Sessions] on success (the same refresh
+ * contract as the group mutations), a [PocketError] (code `rename_failed`) on failure — including a session
+ * live in ANOTHER client (terminal), which is refused rather than raced. A brand-new message type: an old
+ * daemon can't decode it and drops the frame (clients hide the entry unless [Sessions.renameSupported]).
+ */
+@Serializable
+@SerialName("pocket/session.rename")
+data class RenameSession(val workdir: String, val sessionId: String, val title: String) : ToDaemon
+
 /** Fetch aggregated token usage over the last [days] local days (reads transcripts; no launch). Issue #26. */
 @Serializable
 @SerialName("pocket/usage.fetch")
@@ -505,6 +520,10 @@ data class Sessions(
     // files each row under [SessionSummary.group]. A trailing optional: an old daemon omits it (the client shows
     // no groups, a flat list), an old app ignores it. Re-pushed after every pocket/group.* mutation.
     val groups: List<SessionGroup>? = null,
+    // This daemon handles [RenameSession] and this connection may send it (owner only — false for a guest,
+    // issue #158). A trailing optional: an old daemon omits it → false → clients hide their rename entry
+    // instead of sending a frame that would be silently dropped; an old app ignores it.
+    val renameSupported: Boolean = false,
 ) : ToPhone
 
 /**

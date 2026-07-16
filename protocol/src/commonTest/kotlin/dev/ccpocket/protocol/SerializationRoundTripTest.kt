@@ -1396,11 +1396,28 @@ class SerializationRoundTripTest {
         // the new-daemon → OLD-app direction, exercised as a STRUCTURED unknown-key skip: an old app whose
         // schema lacks `groups` decodes a NEW pocket/sessions frame that DOES carry a populated array-of-objects
         // and must skip it (ignoreUnknownKeys) — the exact skip path over structured data that has bitten before.
-        // [OldSessions] (top-level) simulates the pre-#119 schema.
-        val newFrame = """{"workdir":"/x","items":[],"groups":[{"id":"g1","name":"Docs","order":0}]}"""
+        // [OldSessions] (top-level) simulates the pre-#119 schema (and pre-#158: no renameSupported either).
+        val newFrame = """{"workdir":"/x","items":[],"groups":[{"id":"g1","name":"Docs","order":0}],"renameSupported":true}"""
         val back = PocketJson.decodeFromString<OldSessions>(newFrame)
         assertEquals("/x", back.workdir)
         assertTrue(back.items.isEmpty())
+    }
+
+    @Test
+    fun renameSession_frame_roundtrips_and_old_daemon_omits_the_capability() {
+        // issue #158: a brand-new message type — new↔new round-trip; an old daemon doesn't know the
+        // discriminator and silently drops the frame (runCatching decode), never a crash or a reply.
+        val env = Envelope(id = "rn1", ts = 0, body = RenameSession("/x", "sid-1", "Auth refactor"))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/session.rename\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // capability tail on Sessions: an OLD daemon's frame has no renameSupported key → false (entry
+        // hidden), and a NEW daemon's `true` survives its own round-trip.
+        val legacy = """{"workdir":"/x","items":[]}"""
+        assertEquals(false, PocketJson.decodeFromString<Sessions>(legacy).renameSupported)
+        val stamped = Sessions(workdir = "/x", items = emptyList(), renameSupported = true)
+        assertEquals(true, PocketJson.decodeFromString<Sessions>(PocketJson.encodeToString(stamped)).renameSupported)
     }
 
     @Test
