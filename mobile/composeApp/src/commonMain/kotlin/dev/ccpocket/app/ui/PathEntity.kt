@@ -43,7 +43,7 @@ fun normalizePath(display: String, cwd: String?): String {
 
 /**
  * Recognises every path/URL in [text] and labels each (issue #116). Reuses issue #74's regexes and
- * trimming verbatim — nothing about WHAT is recognised changes here. [canOpen] decides OPEN vs COPY
+ * the shared [cleanUrl] boundary — nothing about WHAT is recognised is decided here. [canOpen] decides OPEN vs COPY
  * for a path by the session's machine: on the desktop it is the local exists() gate (a remote
  * session's paths report false → COPY); on the phone it is always false (files live on the computer).
  * URLs that a path regex would also touch are dropped from the path pass so a link is labelled once.
@@ -53,8 +53,7 @@ fun recognizeEntities(text: String, cwd: String?, canOpen: (String) -> Boolean):
     val urlRanges = ArrayList<IntRange>()
     if (text.contains("http")) urlRx?.let { rx ->
         for (m in rx.findAll(text)) {
-            val url = m.value.trimEnd { it in URL_TRAIL }
-            if (url.length <= "https://".length) continue
+            val url = cleanUrl(text, m) ?: continue // the one shared end-boundary rule (issue #154)
             val start = m.range.first
             val end = start + url.length
             urlRanges += start until end

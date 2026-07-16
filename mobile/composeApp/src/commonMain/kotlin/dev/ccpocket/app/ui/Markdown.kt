@@ -118,12 +118,35 @@ private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String
     }
 }
 
-// http(s) only (matches what the platform viewers accept); the trailing trim drops sentence
-// punctuation that prose glues onto a URL ("see https://x.dev/docs." / 中文句读)
+// http(s) only (matches what the platform viewers accept). The char class is an ALLOWLIST of
+// RFC 3986-ish URL characters (quotes/backticks stay out on purpose: they are prose wrappers) —
+// full-width/CJK punctuation ends a URL by simply not being in the set. The old blocklist
+// enumerated the full-width closers it knew (）】」，。…) and any it forgot let the match run on:
+// the full-width OPEN paren in "[文本](https://…/X)（X）" made it swallow ")（X" whole, burying
+// the markdown link's `)` mid-match where the trailing trim can't reach it (issue #154).
 internal val urlRx: Regex? by lazy {
-    runCatching { Regex("""https?://[^\s<>"'`一-鿿）】」，。；！？]+""") }.getOrNull()
+    runCatching { Regex("""https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%\[\]-]+""") }.getOrNull()
 }
 internal const val URL_TRAIL = ".,;:!?)]}>"
+
+/**
+ * The one URL end-boundary rule (issue #154), shared by [withUrlLinks] and [recognizeEntities].
+ * [m] is a raw [urlRx] match inside [text]; returns the URL with structural/sentence tails dropped,
+ * or null when nothing meaningful is left.
+ *  • Paren wrapper: a match directly preceded by `(` is the markdown form `[文本](https://…)` or
+ *    prose `(https://…)` — the URL ends at the first `)`, which closes the wrapper, not the URL.
+ *    (URLs with their own parens à la Wikipedia are the long tail this deliberately ignores.)
+ *  • Trailing trim: sentence punctuation prose glues onto a URL ("see https://x.dev/docs.") stays out.
+ */
+internal fun cleanUrl(text: String, m: MatchResult): String? {
+    var url = m.value
+    if (m.range.first > 0 && text[m.range.first - 1] == '(') {
+        val close = url.indexOf(')')
+        if (close >= 0) url = url.take(close)
+    }
+    url = url.trimEnd { it in URL_TRAIL }
+    return url.takeIf { it.length > "https://".length }
+}
 
 /** Adds browser link spans over every http(s) URL — phones open an in-app browser, desktop the system
  *  one (see [dev.ccpocket.app.openWebUrl]). Unlike path links this needs no host gate: a URL is
@@ -132,8 +155,7 @@ fun AnnotatedString.withUrlLinks(): AnnotatedString {
     if (!text.contains("http")) return this
     val rx = urlRx ?: return this
     val hits = rx.findAll(text).mapNotNull { m ->
-        val url = m.value.trimEnd { it in URL_TRAIL }
-        if (url.length <= "https://".length) null else m.range.first to url
+        cleanUrl(text, m)?.let { m.range.first to it }
     }.toList()
     return withLinks(hits, "url") { dev.ccpocket.app.openWebUrl(it) }
 }
