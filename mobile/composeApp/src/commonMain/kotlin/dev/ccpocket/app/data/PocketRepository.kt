@@ -106,6 +106,8 @@ import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.AuthState
+import dev.ccpocket.protocol.compatibleModelForAgent
+import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
@@ -1773,15 +1775,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
-                f.model?.let { model.value = it }
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
+                val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
+                if (f.model != null) model.value = compatibleModelForAgent(liveAgent, f.model)
                 // unconditional (not ?.let): switching from a bridge session to a normal one must CLEAR the chip
                 sessionOrigin.value = f.origin // "via <bridge>" header chip (issue #91); null = interactive/old daemon
                 // window fallback is Claude-only: contextWindowFor knows nothing about gpt-* ids, and a Codex
                 // session with no daemon-sent window was rendering a % against a meaningless Claude 200k —
                 // null instead, and the UI shows raw tokens without a denominator
-                val claudeish = (f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+                val claudeish = liveAgent == AgentKind.CLAUDE
                 // the user's override wins over the daemon's value (for Claude, f.contextWindow is never null and
                 // would otherwise pin a custom model at the CLI's 200k fallback — issue #60)
                 contextWindow.value = contextWindowOverride.value ?: f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
@@ -2551,7 +2554,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
         // new Claude sessions seed from the persisted default model; resumed keep their own, and a Codex launch
         // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend.
-        val openModel = saved?.model ?: when (openAgent) {
+        val openModel = compatibleModelForAgent(openAgent, saved?.model) ?: when (openAgent) {
             // New OpenCode sessions let the daemon choose from OpenCode config / `opencode models`.
             AgentKind.OPENCODE -> null
             else -> defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
@@ -3272,9 +3275,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun switchModel(name: String) {
         val target = name.trim()
         if (convoId.value == null || target.isEmpty() || target == model.value) return
-        // OpenCode only accepts "provider/model-name" format — reject bare ids like "deepseek-chat"
-        // or "sonnet" that would leak from gateway presets or the custom input field.
-        if (sessionAgent.value == AgentKind.OPENCODE && '/' !in target) return
+        // Keep model ids scoped to the active agent. OpenCode requires provider/model, Codex uses
+        // Codex-shaped ids, and Claude remains permissive for gateway custom ids.
+        if (!isModelCompatibleWithAgent(sessionAgent.value ?: AgentKind.CLAUDE, target)) return
         model.value = target // optimistic; the daemon's next SessionLive corrects it to the resolved id
         switchViaCommand("/model $target")
     }
@@ -3379,8 +3382,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // wire default (ask each step), ignoring the user's chosen mode (issue #50). Model/effort
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
+            val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
             mode.value = defaultMode.value
-            send(OpenSession(wd, sid, model = saved?.model, mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true, lastEventSeq = lastEventSeqFor(sid)))
+            send(OpenSession(wd, sid, model = compatibleModelForAgent(agent, saved?.model), mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true, lastEventSeq = lastEventSeqFor(sid)))
         }
     }
 

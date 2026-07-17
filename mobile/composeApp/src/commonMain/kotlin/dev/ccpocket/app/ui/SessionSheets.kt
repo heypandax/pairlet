@@ -48,13 +48,16 @@ import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CODEX_MODEL_IDS
+import dev.ccpocket.protocol.compatibleModelForAgent
+import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.alpha
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 
 // ── model + effort option sets (what `--model` / `--effort` accept) ──
-internal val CODEX_MODEL_OPTIONS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex") // Codex sessions get Codex models; shared with the desktop ⋯ popover
+internal val CODEX_MODEL_OPTIONS = CODEX_MODEL_IDS // Codex sessions get Codex models; shared with the desktop ⋯ popover
 // OpenCode model picker options. Update this list when upstream OpenCode adds/removes models.
 // Also update OpenCodeLauncher.kt's model validation if the naming convention changes.
 internal val OPENCODE_MODEL_OPTIONS = listOf(
@@ -78,6 +81,16 @@ fun modelAlias(model: String?): String {
     val m = model?.trim().orEmpty()
     if (m.isEmpty()) return ""
     return m.removePrefix("claude-").takeWhile { it != '-' && it != '[' && it != '_' }.ifBlank { m }
+}
+
+/** Agent-aware display label: Claude gets aliases, Codex/OpenCode keep their full model ids. */
+fun modelLabelForAgent(agent: AgentKind?, model: String?): String {
+    val a = agent ?: AgentKind.CLAUDE
+    val m = compatibleModelForAgent(a, model) ?: return ""
+    return when (a) {
+        AgentKind.CLAUDE -> modelAlias(m)
+        AgentKind.CODEX, AgentKind.OPENCODE -> m
+    }
 }
 
 /** Compact human token count: 45200 -> "45k", 1000000 -> "1.0M" (one decimal, truncated). */
@@ -170,7 +183,7 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: ()
                 QaSub.MAIN -> {
                     Text(stringResource(Res.string.quick_actions_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ActionRow(stringResource(Res.string.qa_model), value = modelAlias(repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
+                        ActionRow(stringResource(Res.string.qa_model), value = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
                         ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
                         // the permission-mode switch lives here now (was a persistent header badge — one
                         // more thing crowding the top bar for a setting touched a few times per session)
@@ -279,12 +292,14 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
         val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW
         ModelChoice(name, alias, alias, if (big) "1M" else "200K", big)
     }
-    val selected = if (codex) repo.model.value else modelAlias(repo.model.value)
+    val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
+    val compatibleModel = compatibleModelForAgent(agent, repo.model.value)
+    val selected = if (codex || opencode) compatibleModel else modelAlias(compatibleModel)
     var switchingTo by remember { mutableStateOf<String?>(null) }
     // close once the daemon confirms the switch (model re-announced through SessionLive)…
     LaunchedEffect(switchingTo, repo.model.value) {
         val target = switchingTo ?: return@LaunchedEffect
-        val now = if (codex) repo.model.value else modelAlias(repo.model.value)
+        val now = if (codex || opencode) compatibleModelForAgent(agent, repo.model.value) else modelAlias(compatibleModelForAgent(agent, repo.model.value))
         // raw compare too: a custom id ("kimi-k2…") never alias-matches, but the daemon echoes it verbatim
         if (now.equals(target, ignoreCase = true) || repo.model.value?.equals(target, ignoreCase = true) == true) onDone()
     }
@@ -355,8 +370,8 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
     // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
     // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
     val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) }
-    val customActive = !presetActive && !repo.model.value.isNullOrBlank()
-    var custom by remember { mutableStateOf(if (customActive) repo.model.value.orEmpty() else "") }
+    val customActive = !presetActive && !compatibleModel.isNullOrBlank()
+    var custom by remember(agent, compatibleModel) { mutableStateOf(if (customActive) compatibleModel.orEmpty() else "") }
     Column(Modifier.padding(top = 12.dp)) {
         Text(stringResource(Res.string.model_custom_label), color = Tok.muted, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
         Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -370,11 +385,12 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
             Box(Modifier.width(40.dp), contentAlignment = Alignment.Center) {
                 val t = custom.trim()
                 val isSwitchingCustom = switchingTo != null && switchingTo.equals(t, ignoreCase = true) && !presetActive
+                val canSwitchCustom = t.isNotEmpty() && isModelCompatibleWithAgent(agent, t)
                 when {
                     isSwitchingCustom -> CircularProgressIndicator(Modifier.size(17.dp), color = Tok.accent, strokeWidth = 2.dp)
-                    customActive && t.equals(repo.model.value, ignoreCase = true) && switchingTo == null ->
+                    customActive && t.equals(compatibleModel, ignoreCase = true) && switchingTo == null ->
                         Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    t.isNotEmpty() && switchingTo == null -> Text(
+                    canSwitchCustom && switchingTo == null -> Text(
                         "→", color = Tok.accent, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clip(RoundedCornerShape(8.dp))
                             .clickable { switchingTo = t; repo.switchModel(t) }.padding(6.dp),

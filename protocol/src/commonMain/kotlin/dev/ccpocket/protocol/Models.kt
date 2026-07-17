@@ -42,6 +42,31 @@ enum class AgentKind {
     @SerialName("opencode") OPENCODE,
 }
 
+/** Codex model ids the app exposes as first-class presets. */
+val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex")
+
+/** OpenCode model ids must include their provider prefix, e.g. "opencode/deepseek-v4-flash-free". */
+fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it && it.substringBefore('/').isNotBlank() && it.substringAfter('/').isNotBlank() } == true
+
+/** Keep Codex sessions on Codex-shaped ids while still allowing future gpt-*-codex custom ids. */
+fun isCodexModelId(model: String?): Boolean = model?.trim()?.let { m ->
+    CODEX_MODEL_IDS.any { it.equals(m, ignoreCase = true) } || m.contains("codex", ignoreCase = true)
+} == true
+
+/** Whether a model id belongs to the selected backend. Claude remains permissive for gateway ids. */
+fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
+    val m = model?.trim().orEmpty()
+    if (m.isEmpty()) return false
+    return when (agent) {
+        AgentKind.CODEX -> isCodexModelId(m)
+        AgentKind.OPENCODE -> isOpenCodeModelId(m)
+        AgentKind.CLAUDE -> !isCodexModelId(m) && !isOpenCodeModelId(m)
+    }
+}
+
+fun compatibleModelForAgent(agent: AgentKind, model: String?): String? =
+    model?.trim()?.takeIf { isModelCompatibleWithAgent(agent, it) }
+
 /** One assistant content piece (closed set for M0: text | thinking). tool_use is a [ToolEvent]. */
 @Serializable
 sealed interface StreamPiece {

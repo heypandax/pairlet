@@ -1311,7 +1311,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                         // placeholder — never a blank gap. A pre-first-turn session (lazy start #61) whose
                         // model the daemon couldn't eager-resolve shows the placeholder until the first turn's
                         // init names the CLI/account default (issue #96)
-                        val modelLabel = modelAlias(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
+                        val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
                         Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
                         Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1)
                         AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet

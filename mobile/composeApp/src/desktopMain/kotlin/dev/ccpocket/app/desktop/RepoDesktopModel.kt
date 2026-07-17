@@ -20,7 +20,7 @@ import dev.ccpocket.app.ui.ComposerState
 import dev.ccpocket.app.ui.fleet.MachineOs
 import dev.ccpocket.app.ui.fleet.osFromName
 import dev.ccpocket.app.ui.folderName
-import dev.ccpocket.app.ui.modelAlias
+import dev.ccpocket.app.ui.modelLabelForAgent
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.app.ui.trimTrailingSep
 import dev.ccpocket.protocol.AgentKind
@@ -686,7 +686,7 @@ class RepoDesktopModel(
     override val chatAgent: AgentKind get() = repo.sessionAgent.value ?: AgentKind.CLAUDE
     override val chatWorkdir: String get() = repo.workdir.value?.let { tilde(it) } ?: ""
     override val chatBranch: String? get() = openSummary()?.gitBranch
-    override val chatModel: String get() = modelAlias(repo.model.value)
+    override val chatModel: String get() = modelLabelForAgent(repo.sessionAgent.value, repo.model.value)
     override val chatModelId: String get() = repo.model.value ?: ""
     override val chatMode: PermissionMode get() = repo.mode.value
     override val chatEffort: String? get() = repo.effort.value
