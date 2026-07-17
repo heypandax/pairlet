@@ -15,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -44,6 +45,11 @@ class PermissionBridge(
     // bridge-origin sessions so a single owner "always allow" can't be replayed by later attacker-supplied
     // prompts — the whole session is externally driven, so a remembered rule is a standing blank cheque.
     private val forceNeverRemember: Boolean = false,
+    // BRIDGE (issue #91) defense-in-depth, driven by anyone in a chat. Two effects, both bridge-only:
+    //  1. Bash gated by [BridgeCommandPolicy] before any ask (destructive→deny, provably-safe→allow).
+    //  2. structured file tools (Read/Write/Edit/Glob/Grep) confined to the bound [workdir] — a bridge has
+    //     no pathScope, so without this a Read of ~/.ssh/id_rsa would exfiltrate it to the chat.
+    private val bridgeSession: Boolean = false,
     // issue #115: a GUEST folder-share's canonical shared roots. Non-null → a file tool (Read/Write/Edit/…)
     // whose target lands OUTSIDE the roots is HARD-DENIED here, before any ask and regardless of mode — so
     // the guest can't reach the owner's other files even under acceptEdits, and can't be tricked into
@@ -67,8 +73,26 @@ class PermissionBridge(
         // under EVERY mode (even acceptEdits/bypass) and the guest is never shown an ask for it. Bash is not
         // guarded (its targets aren't statically knowable), which the owner's boundary card states plainly.
         outOfScopeTarget(ev.toolName, ev.input)?.let { escaped ->
-            respond(ev.requestId, false, false, ev.input, null, "denied — $escaped is outside the shared folder")
+            respond(ev.requestId, false, false, ev.input, null, "denied — $escaped is outside the allowed directory")
             return
+        }
+        // BRIDGE defense-in-depth (issue #91): a hard Bash gate BEFORE the ask/auto-allow paths. Destructive
+        // commands are refused outright — no phone tap can approve `rm -rf /` — and plainly read-only ones
+        // run without pestering the owner. The ambiguous middle falls through to the normal ask/push below.
+        // Bridge-only (anyone in a chat drives it); the owner's own sessions never reach this.
+        if (bridgeSession && ev.toolName == "Bash") {
+            val command = (ev.input?.get("command") as? JsonPrimitive)?.content.orEmpty()
+            when (BridgeCommandPolicy.classify(command)) {
+                BridgeCommandPolicy.Verdict.DENY -> {
+                    respond(ev.requestId, false, false, ev.input, null, "denied — this command is blocked for a bridge (destructive/high-risk)")
+                    return
+                }
+                BridgeCommandPolicy.Verdict.ALLOW -> {
+                    respond(ev.requestId, true, false, ev.input, null, null)
+                    return
+                }
+                BridgeCommandPolicy.Verdict.ASK -> {} // fall through to the phone approval below
+            }
         }
         val meta = ToolMetadata.of(ev.toolName, ev.input)
         // bypassPermissions auto-allows ordinary tools — but NOT the neverRemember class (issue #156): those
@@ -182,7 +206,13 @@ class PermissionBridge(
      * out of the tree is caught, mirroring the DirList/@-completion containment (#90/#67).
      */
     private fun outOfScopeTarget(tool: String, input: JsonObject?): String? {
-        val roots = pathScope ?: return null
+        // GUEST: pathScope confines file tools to the shared roots. BRIDGE (issue #91): no pathScope, but a
+        // structured file tool must still not escape the bound workdir — else a Read of ~/.ssh/id_rsa
+        // exfiltrates it to the chat. Bash isn't guarded here (targets not statically knowable); its
+        // content reads route to ASK via BridgeCommandPolicy instead.
+        // canonicalize the implicit bridge root: PathScope.contains assumes canonical roots, and a raw
+        // workdir (trailing slash / symlinked prefix / ..) would otherwise mis-compare (review N7).
+        val roots = pathScope ?: (workdir?.takeIf { bridgeSession }?.let { listOf(PathScope.canonical(it) ?: it) } ?: return null)
         return ToolMetadata.pathTargets(tool, input).firstOrNull { target ->
             val abs = if (File(target).isAbsolute || workdir == null) target else File(workdir, target).path
             !PathScope.contains(roots, abs)

@@ -29,6 +29,7 @@ dependencies {
     implementation(libs.cryptography.core)          // E2ECrypto / E2ESession (protocol's e2e API)
     runtimeOnly(libs.cryptography.provider.jdk)      // registers the JDK crypto provider at runtime
     implementation(libs.nayuki.qrcodegen)            // terminal QR for `pair`
+    implementation(libs.lark.oapi.sdk)               // built-in Feishu bridge: event long-connection + reply API
 
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)

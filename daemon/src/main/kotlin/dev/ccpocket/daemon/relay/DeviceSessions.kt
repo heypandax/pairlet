@@ -14,7 +14,13 @@ import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CloseSession
+import dev.ccpocket.protocol.ConfigureBridgeRunner
+import dev.ccpocket.protocol.ControlBridgeRunner
+import dev.ccpocket.protocol.CreateBridge
 import dev.ccpocket.protocol.CreateShare
+import dev.ccpocket.protocol.DetachBridgeRunner
+import dev.ccpocket.protocol.ListBridges
+import dev.ccpocket.protocol.RevokeBridge
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
@@ -60,10 +66,14 @@ class DeviceSessions(
 ) {
     private val log = logger("DeviceSessions")
 
-    /** The OWNER folder-share control plane (issue #115), installed by [RelayClient] after construction
-     *  (it needs the relay's mint/revoke). Null on the local-server path — share creation needs the relay. */
-    @Volatile
-    var shareControl: dev.ccpocket.daemon.relay.ShareControl? = null
+    /** The OWNER control planes (share #115 / bridge #91 follow-up) live on [DaemonCore] — the LAN
+     *  transport serves them too, so they can't be relay-local state. These are convenience views. */
+    var shareControl: dev.ccpocket.daemon.relay.ShareControl?
+        get() = core.shareControl
+        set(v) { core.shareControl = v }
+    var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl?
+        get() = core.bridgeControl
+        set(v) { core.bridgeControl = v }
     private val mutex = Mutex()
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
     private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
@@ -161,9 +171,9 @@ class DeviceSessions(
     }
 
     /** The relay says this device was just revoked: cut key + live E2E session immediately. The persist
-     *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For a
-     *  GUEST (issue #115) this ALSO ends its running sessions now — the owner's "revoke" promise is "their
-     *  sessions end", not merely "their link drops".
+     *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For any
+     *  RESTRICTED credential (a GUEST #115 or a BRIDGE #91) this ALSO ends its running sessions now — the
+     *  owner's "revoke" promise is "their sessions end", not merely "their link drops".
      *
      *  Returns true when a guest-facing [ShareEnded] notice was actually sealed toward the guest (the
      *  #115 follow-up: the precise "revoked"/"expired" ending for its terminal card). The notice rides
@@ -172,6 +182,9 @@ class DeviceSessions(
      *  unchanged and unconditional right after. */
     suspend fun onDeviceRevoked(deviceId: String, reason: String = ShareEnded.REASON_REVOKED): Boolean {
         val wasGuest = bridges.isGuest(deviceId)
+        // guest OR bridge — a revoke must end the sessions of EITHER, not just a guest's (issue #91: a
+        // bridge's live Claude turn otherwise keeps editing files until the idle reaper claims it)
+        val wasRestricted = bridges.isRestricted(deviceId)
         var noticed = false
         if (wasGuest) {
             // sealAndSend silently no-ops without a live session — only report a notice that could seal
@@ -179,23 +192,24 @@ class DeviceSessions(
             // ownerLabel = the computer name the guest already learned from its invite (leaks nothing new)
             runCatching { sealAndSend(deviceId, ShareEnded(reason, hostname())) }
         }
-        val guestOrigin = if (wasGuest) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
-        val guestConvos = mutex.withLock {
+        val revokedOrigin = if (wasRestricted) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
+        val revokedConvos = mutex.withLock {
             devicePubs.remove(deviceId); sessions.remove(deviceId); pskFor.remove(deviceId)
             seenThisAttach.remove(deviceId)
-            if (wasGuest) owned.remove(deviceId).orEmpty() else emptyList()
+            if (wasRestricted) owned.remove(deviceId).orEmpty() else emptyList()
         }
         bridges.remove(deviceId) // a revoked credential loses its entry (and live guard) the same instant
         persist()
-        // force-close the guest's convos NOW (kills their process trees) — the owner's revoke promise is
-        // "their sessions end", not "their link drops". The per-connection `owned` list covers this
-        // connection; closeByOrigin ALSO reaps convos the guest opened on an EARLIER connection (which
-        // `owned` cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
-        if (wasGuest) {
-            guestConvos.forEach { runCatching { core.registry.close(it, force = true) } }
-            guestOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
+        // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
+        // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
+        // a bridge's running Claude turn must not outlive the revoke. The per-connection `owned` list covers
+        // this connection; closeByOrigin ALSO reaps convos opened on an EARLIER connection (which `owned`
+        // cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
+        if (wasRestricted) {
+            revokedConvos.forEach { runCatching { core.registry.close(it, force = true) } }
+            revokedOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
         }
-        log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasGuest) " (guest sessions ended)" else ""}")
+        log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasRestricted) " (${if (wasGuest) "guest " else ""}sessions ended)" else ""}")
         return noticed
     }
 
@@ -356,10 +370,11 @@ class DeviceSessions(
                 }
             }
             else -> {
-                // FULL-POWER owner device: the folder-share control plane (mint / list / revoke) needs the
-                // relay handle the router lacks, so it's intercepted here. A guest/bridge never reaches this
-                // branch (its own whitelist denies these frames), so re-sharing is structurally impossible.
-                if (handleOwnerShare(env.body, sink)) return
+                // FULL-POWER owner device: the share/bridge control planes (mint / list / revoke) need
+                // handles the router lacks, so they're intercepted here — via the SAME dispatcher the LAN
+                // transport uses. A guest/bridge never reaches this branch (its own whitelist denies these
+                // frames), so re-sharing the machine or minting another bridge is structurally impossible.
+                if (dispatchOwnerControl(env.body, shareControl, bridgeControl) { sink.emit(it) }) return
             }
         }
         try {
@@ -373,21 +388,6 @@ class DeviceSessions(
             log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")
             runCatching { sink.emit(PocketError("internal", e.message ?: "request failed")) }
         }
-    }
-
-    /** OWNER-only folder-share control plane (issue #115). Returns true when [frame] was a share frame and
-     *  was handled (the caller returns); false lets an ordinary owner frame fall through to the router.
-     *  Null [shareControl] (local-server path) → false, so CreateShare there surfaces the router's
-     *  "unsupported" rather than silently vanishing. */
-    private suspend fun handleOwnerShare(frame: Frame, sink: OutboundSink): Boolean {
-        val sc = shareControl ?: return false
-        when (frame) {
-            is CreateShare -> sink.emit(sc.create(frame))
-            is ListShares -> sink.emit(sc.list())
-            is RevokeShare -> sink.emit(sc.revoke(frame.deviceId))
-            else -> return false
-        }
-        return true
     }
 
     /** The convoId an inbound frame targets, for error attribution (bridge denials). */

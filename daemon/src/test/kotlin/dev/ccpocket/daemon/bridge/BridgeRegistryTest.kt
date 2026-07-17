@@ -78,6 +78,22 @@ class BridgeRegistryTest {
     }
 
     @Test
+    fun persist_preserves_each_credentials_original_createdAt() {
+        val r = BridgeRegistry(store)
+        r.recordIntent("t1", spec(), ttlMs = 120_000, now = 1_000)
+        r.holdProvisional("d1", pub("A")); r.finalize("d1", "t1".encodeToByteArray(), now = 1_000)
+        // a later, unrelated persist (binding a second bridge) must not restamp d1's bind time
+        r.recordIntent("t2", spec(), ttlMs = 120_000, now = 2_000)
+        r.holdProvisional("d2", pub("B")); r.finalize("d2", "t2".encodeToByteArray(), now = 2_000)
+        assertEquals(1_000L, BridgeStore.load(store)["d1"]?.createdAt)
+        assertEquals(2_000L, BridgeStore.load(store)["d2"]?.createdAt)
+        // and the bind time survives a reload → re-persist cycle (revoking an unrelated key)
+        val r2 = BridgeRegistry(store)
+        r2.remove("d2")
+        assertEquals(1_000L, BridgeStore.load(store)["d1"]?.createdAt)
+    }
+
+    @Test
     fun grace_window_keeps_a_late_first_frame_bindable_not_mis_promoted() {
         // issue #91 LOW (clock skew / pairing latency): with a graced bindable TTL (ticket 120s + grace),
         // a device whose first frame lands LATE (near the ticket edge) still classifies as a bridge —
