@@ -85,18 +85,22 @@ class FeishuCommands(
     private val routes: FeishuRoutes,
     private val workdirs: List<String>,
     private val adminOpenId: String?,
+    /** The Feishu GROUP OWNER's open_id for a chat (cached), or null if unknown — the FALLBACK /bind
+     *  authority when [adminOpenId] is unset. Injected by the engine; the pure default keeps this class
+     *  IO-free and unit-testable. An explicit admin always WINS; the owner only fills the no-admin gap. */
+    private val chatOwnerOf: (chatId: String) -> String? = { null },
 ) {
     fun handle(text: String, chatId: String, senderOpenId: String): ChatAction {
         if (!text.startsWith("/")) {
             routes.workdirFor(chatId)?.let { return ChatAction.Ask(it, text) }
-            // Unbound chat. The bridge allows exactly one project AND the ADMIN is the one talking →
-            // bind automatically and answer: for the by-far-common single-project setup, the owner's
-            // first message just works, no ceremony. Gated on the admin deliberately — a stranger's
-            // message in a random group the bot got dragged into must stay inert, and admin-unset stays
-            // inert too (binding is a privileged act; nobody has proven ownership yet).
-            val admin = adminOpenId?.takeIf { it.isNotBlank() }
+            // Unbound chat. The bridge allows exactly one project AND the binding AUTHORITY is the one
+            // talking → bind automatically and answer: for the by-far-common single-project setup, the
+            // owner's first message just works, no ceremony. Authority = the designated admin, or (when no
+            // admin is set) the Feishu group owner. A stranger's message in a random group stays inert, and
+            // if neither is known yet it stays inert too (binding is privileged; nobody's proven ownership).
+            val authority = adminOpenId?.takeIf { it.isNotBlank() } ?: chatOwnerOf(chatId)
             val only = workdirs.singleOrNull()
-            if (only != null && admin != null && senderOpenId == admin) {
+            if (only != null && authority != null && senderOpenId == authority) {
                 routes.bind(chatId, only)
                 return ChatAction.Ask(
                     only, text,
@@ -123,12 +127,16 @@ class FeishuCommands(
             }
             "bind", "unbind" -> ChatAction.Reply(
                 run {
-                    val admin = adminOpenId?.takeIf { it.isNotBlank() }
+                    // authority to bind = the designated admin if set, else the Feishu GROUP OWNER (looked up
+                    // live, no env / no restart). Binding only points a chat at an ALREADY allow-listed
+                    // workdir and every action still hits owner approval, so the group's own owner is a sound
+                    // low-privilege authority; an explicit admin still WINS when configured.
+                    val authority = adminOpenId?.takeIf { it.isNotBlank() } ?: chatOwnerOf(chatId)
                     when {
-                        admin == null ->
-                            "未设置管理员，拒绝绑定。\n你的 open_id 是：$senderOpenId\n" +
-                                "在桌面端把它填进这个 bridge 的 admin 字段后重启，即可用 /bind。"
-                        senderOpenId != admin -> "只有管理员可以绑定/解绑本群。"
+                        authority == null ->
+                            "还没法确认谁能绑定：没设管理员，也还没查到群主。\n你的 open_id 是：$senderOpenId\n" +
+                                "让群主发一次 /bind（稍候重试，正在确认群主），或在桌面端把某人填进 admin 字段。"
+                        senderOpenId != authority -> "只有管理员或群主可以绑定 / 解绑本群。"
                         cmd == "unbind" ->
                             if (routes.unbind(chatId)) "已解绑，本群不再响应。" else "本群本来就没有绑定项目。"
                         else -> {

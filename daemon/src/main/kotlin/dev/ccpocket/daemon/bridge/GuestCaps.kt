@@ -137,5 +137,5 @@ object GuestCaps {
      * an "Autonomous" share still surfaces shell / dangerous actions for the guest to approve.
      */
     fun clampMode(requested: PermissionMode, tier: AccessTier): PermissionMode =
-        ScopedCaps.clampMode(requested, tier) // shared with the BRIDGE ceiling — one clamp, no drift
+        TierClamp.clampMode(requested, tier) // shared with the BRIDGE ceiling — one clamp, no drift
 }

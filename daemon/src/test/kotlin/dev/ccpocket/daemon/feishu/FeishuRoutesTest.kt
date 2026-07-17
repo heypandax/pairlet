@@ -128,6 +128,32 @@ class FeishuRoutesTest {
     }
 
     @Test
+    fun bind_falls_back_to_the_group_owner_when_no_admin_is_set() {
+        // no admin configured, but the Feishu group owner is known → the owner (and only the owner) can bind
+        val r = FeishuRoutes(routesFile)
+        val c = FeishuCommands(r, workdirs, adminOpenId = null, chatOwnerOf = { if (it == "oc_1") "ou_owner" else null })
+        // a non-owner is refused, and nothing persists
+        assertTrue("只有管理员或群主" in assertIs<ChatAction.Reply>(c.handle("/bind alpha", "oc_1", "ou_stranger")).text)
+        assertNull(r.workdirFor("oc_1"))
+        // the group owner binds
+        assertTrue("已绑定" in assertIs<ChatAction.Reply>(c.handle("/bind alpha", "oc_1", "ou_owner")).text)
+        assertEquals("/p/alpha", r.workdirFor("oc_1"))
+        // owner not resolved yet (cache miss) → "confirming, retry" + echo the caller id, not a silent refuse
+        val pending = assertIs<ChatAction.Reply>(c.handle("/bind alpha", "oc_2", "ou_someone")).text
+        assertTrue("确认" in pending && "ou_someone" in pending, pending)
+    }
+
+    @Test
+    fun an_explicit_admin_wins_over_the_group_owner() {
+        // admin set AND a group owner known: the owner must NOT be able to bind — the designated admin wins
+        val r = FeishuRoutes(routesFile)
+        val c = FeishuCommands(r, workdirs, adminOpenId = "ou_admin", chatOwnerOf = { "ou_owner" })
+        assertTrue("只有管理员或群主" in assertIs<ChatAction.Reply>(c.handle("/bind alpha", "oc_1", "ou_owner")).text)
+        assertNull(r.workdirFor("oc_1"))
+        assertTrue("已绑定" in assertIs<ChatAction.Reply>(c.handle("/bind alpha", "oc_1", "ou_admin")).text)
+    }
+
+    @Test
     fun projects_lists_basenames_with_bind_counts_and_never_absolute_paths() {
         val (r, c) = commands()
         r.bind("oc_1", "/p/alpha")

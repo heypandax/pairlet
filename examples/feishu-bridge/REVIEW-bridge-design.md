@@ -50,7 +50,7 @@
 - 产品：回贴零失败处理（`feishu_bridge.py:125-130` 不查 `resp.success()`、无重试），且同步 HTTP 跑在 asyncio loop 会卡 reader，应 `run_in_executor`。
 - README 诚实度补三点：①回复明文经飞书云端（E2E 只覆盖 bridge↔daemon）；②owner 收到的 ask 看不到谁触发；③AskUserQuestion 弹 owner 手机而群友无法作答，超时按未回答继续。
 - 凭证身份长期应改用 deviceId 而非 name 作 `origin` 键（revoke 后重建同名会误伤 `closeByOrigin`／计数）。
-- 架构：三个 caps 概念关系清楚，不建议合并（显式列举比继承更安全）；`ScopedCaps` 名不副实（是 clamp 不是 capability 集）。
+- 架构：三个 caps 概念关系清楚，不建议合并（显式列举比继承更安全）；`ScopedCaps` 名不副实（是 clamp 不是 capability 集），已改名 `TierClamp`。
 
 ## 各视角原始裁定摘要
 

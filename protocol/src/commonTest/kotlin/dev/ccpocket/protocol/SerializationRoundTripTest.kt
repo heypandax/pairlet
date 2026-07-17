@@ -1585,6 +1585,32 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun bridgeInfo_skips_unknown_keys() {
+        // the NEW-daemon → OLD-app direction for the bridge row: a newer daemon adds a field this
+        // schema lacks, and the old app must SKIP it (ignoreUnknownKeys) rather than fail the listing —
+        // the known fields must survive the skip. Same per-shape pin as share_shapes_tolerate_an_unknown_future_key.
+        val info = PocketJson.decodeFromString<BridgeInfo>(
+            """{"name":"feishu-bot","workdirs":["/p/a"],"deviceId":"dev-bridge-1","online":true,
+               "activeSessions":1,"tier":"review","futureFlag":true,"futureObj":{"x":1}}""",
+        )
+        assertEquals("feishu-bot", info.name)
+        assertEquals(listOf("/p/a"), info.workdirs)
+        assertEquals("dev-bridge-1", info.deviceId)
+        assertTrue(info.online)
+        assertEquals(1, info.activeSessions)
+        assertEquals(AccessTier.REVIEW, info.tier)
+
+        // and the enclosing BridgeListing frame still decodes with the unknown key nested in an item
+        val listing = PocketJson.decodeFromString<Envelope>(
+            """{"id":"b10","ts":0,"to":"PEER","body":{"t":"pocket/bridge.listing","items":[
+               {"name":"bot2","pendingTicket":true,"unknownFuture":9}]}}""",
+        )
+        val nested = (listing.body as BridgeListing).items.single()
+        assertEquals("bot2", nested.name)
+        assertTrue(nested.pendingTicket)
+    }
+
+    @Test
     fun bridgeCredential_roundtrips_the_shape_the_adapter_reads_from_disk() {
         val cred = BridgeCredential(
             name = "feishu-bot", accountId = "acct", daemonPub = "pub", ticket = "tkt",
@@ -1595,5 +1621,19 @@ class SerializationRoundTripTest {
         assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
         // the adapter's Credential.load reads exactly these keys — keep them on the wire verbatim
         for (k in listOf("name", "accountId", "daemonPub", "ticket", "relay", "workdirs")) assertTrue("\"$k\"" in json, "$k missing: $json")
+    }
+
+    @Test
+    fun bridge_frame_unknown_t_is_dropped() {
+        // The mixed-version story CreateBridge's doc pins: a daemon that predates the bridge control
+        // plane can't decode "pocket/bridge.create" (unknown discriminator throws → runCatching at its
+        // decode site drops the frame silently), so the owner's app times out to "update the daemon"
+        // instead of the socket breaking. Same contract the generic unknown_frame_discriminator_throws
+        // pins, restated on this plane so a future default-deserializer change can't quietly break it.
+        val json = PocketJson.encodeToString(Envelope(id = "b11", ts = 0, body = CreateBridge(name = "feishu-bot", workdirs = listOf("/p/a"))))
+        assertTrue("\"t\":\"pocket/bridge.create\"" in json, json)
+        // simulate the old peer: a codec whose sealed hierarchy doesn't know the type ≈ unknown "t" here
+        val unknownT = json.replace("pocket/bridge.create", "pocket/bridge.create-from-the-future")
+        assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
     }
 }

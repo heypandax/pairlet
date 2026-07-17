@@ -96,12 +96,19 @@ class BridgeService(
 ) : BridgeControl {
     private val log = logger("BridgeService")
 
+    /** Is [name] already claimed by ANY of the three bridge row sources — a confirmed credential, a
+     *  minted-but-unredeemed intent, or a managed runner (external adapter OR built-in engine)? A bridge's
+     *  name is its stable identity across all three, so create must reject a collision in any of them; kept
+     *  in ONE place so the three sources can't drift apart between here and [list] (issue #91 review). */
+    private fun nameTaken(name: String): Boolean =
+        registry.list().any { it.second.name == name } ||
+            registry.pendingIntents().any { it.name == name } ||
+            runners?.isManaged(name) == true
+
     override suspend fun create(req: CreateBridge): BridgeCreated {
         val name = req.name.trim()
         if (name.isEmpty()) return BridgeCreated(ok = false, error = "a bridge needs a name")
-        if (registry.list().any { it.second.name == name } || registry.pendingIntents().any { it.name == name } ||
-            runners?.isManaged(name) == true
-        ) {
+        if (nameTaken(name)) {
             return BridgeCreated(ok = false, error = "a bridge named \"$name\" already exists — revoke it first or pick another name")
         }
         if (req.workdirs.isEmpty()) {

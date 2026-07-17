@@ -17,7 +17,7 @@ import dev.ccpocket.protocol.PermissionMode
  * hand one of them more autonomy than was granted, and that failure is invisible until something
  * destructive runs unprompted.
  */
-object ScopedCaps {
+object TierClamp {
 
     /** Clamp [requested] to the ceiling [tier] grants. Unknown/newer tiers clamp to the safest behaviour. */
     fun clampMode(requested: PermissionMode, tier: AccessTier): PermissionMode {

@@ -77,10 +77,10 @@ object BridgeCaps {
      * tier. [AccessTier.REVIEW] (the mint default) means every dangerous action prompts the OWNER's phone;
      * COLLABORATE/AUTONOMOUS let file edits apply silently while shell / network still prompt.
      *
-     * BYPASS_PERMISSIONS stays unreachable at every tier — see [ScopedCaps]. Without this, the ceiling was
+     * BYPASS_PERMISSIONS stays unreachable at every tier — see [TierClamp]. Without this, the ceiling was
      * whatever the ADAPTER asked for (only bypass was refused), so an IM bot could self-select ACCEPT_EDITS.
      * Now the owner decides at mint time and the adapter cannot exceed it.
      */
     fun clampMode(requested: PermissionMode, tier: AccessTier): PermissionMode =
-        ScopedCaps.clampMode(requested, tier)
+        TierClamp.clampMode(requested, tier)
 }

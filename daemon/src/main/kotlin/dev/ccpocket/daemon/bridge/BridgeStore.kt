@@ -51,7 +51,7 @@ data class BridgeSpec(
      *  cut and the credential purged (issue #115 §6). */
     val expiresAt: Long? = null,
     /** The autonomy tier the owner granted — the permission-mode CEILING (never bypass), enforced for
-     *  BOTH kinds via [ScopedCaps]. Always set explicitly at mint: [guest] takes the owner's chosen tier,
+     *  BOTH kinds via [TierClamp]. Always set explicitly at mint: [guest] takes the owner's chosen tier,
      *  [clamped] defaults a bridge to the strictest.
      *
      *  The default here is REVIEW because it is the FALLBACK, and a fallback must fail safe: it applies to

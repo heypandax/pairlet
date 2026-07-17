@@ -62,7 +62,7 @@ class FeishuEngine(
     private val appSecret = env["FEISHU_APP_SECRET"].orEmpty()
     private val adminOpenId = env["FEISHU_ADMIN_OPEN_ID"]
     private val routes = FeishuRoutes(File(stateDir, "feishu-routes.json"))
-    private val commands = FeishuCommands(routes, spec.workdirs, adminOpenId)
+    private val commands = FeishuCommands(routes, spec.workdirs, adminOpenId, chatOwnerOf = { chatOwners[it] })
     private val guard = BridgeGuard(spec)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -98,13 +98,29 @@ class FeishuEngine(
     private val seenMessages = object : LinkedHashMap<String, Boolean>(64, 0.75f, false) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > SEEN_MESSAGES_MAX
     }
+    // Feishu GROUP OWNER per chat (open_id), lazily fetched — the fallback /bind authority when no admin
+    // open_id is configured, so a group's own owner can bind with no env and no restart. ConcurrentHashMap:
+    // written from scope coroutines, read on the lark dispatcher thread.
+    // Security notes (issue #91 crypto review): (1) with no admin set this makes the group OWNER the /bind
+    // authority — a deliberate trust widening; a configured admin removes the fallback entirely. (2) No TTL:
+    // an ownership transfer keeps the OLD owner as bind authority until the engine restarts — bounded, since
+    // binding only selects an already-allow-listed workdir and every action still hits owner approval.
+    private val chatOwners = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val http = java.net.http.HttpClient.newHttpClient()
 
     @Volatile override var running: Boolean = false
         private set
     @Volatile override var lastError: String? = null
         private set
 
-    /** The engine's slice of the router's outbound stream — dispatch by convoId, drop everything else. */
+    /**
+     * The engine's slice of the router's outbound stream. EGRESS is deny-by-default and STRUCTURAL, not by
+     * adapter discipline (issue #91 design review): [onFrame] acts on a fixed handful of outcome/state frames
+     * and DROPS every other kind, and no branch there forwards a frame's raw content outward — the only
+     * group-visible bytes are text this engine COMPUTES and passes to [reply] (which then runs SecretRedactor).
+     * INGRESS is symmetric: everything this engine sends goes through [vet] → BridgeGuard, whose own
+     * `else -> Deny(FORBIDDEN)` refuses any frame that isn't open/prompt/cancel/close.
+     */
     private val sink = dev.ccpocket.daemon.conversation.OutboundSink { frame -> onFrame(frame) }
 
     override fun start(): String? {
@@ -188,17 +204,20 @@ class FeishuEngine(
      * was the reference adapter's behaviour, and it misfires whenever the app receives all group messages).
      * Best-effort async: until (or unless) it lands, the filter falls back to any-mention and says so once.
      */
+    /** A tenant_access_token for app-authenticated Feishu REST calls (bot info, chat owner), or null. */
+    private fun tenantToken(): String? = runCatching {
+        val req = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
+            .header("Content-Type", "application/json")
+            .POST(java.net.http.HttpRequest.BodyPublishers.ofString("""{"app_id":"$appId","app_secret":"$appSecret"}"""))
+            .build()
+        Json.parseToJsonElement(http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
+            .jsonObject["tenant_access_token"]?.jsonPrimitive?.content
+    }.getOrNull()
+
     private fun fetchBotIdentity() {
         scope.launch {
             runCatching {
-                val http = java.net.http.HttpClient.newHttpClient()
-                val tokenReq = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
-                    .header("Content-Type", "application/json")
-                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(
-                        """{"app_id":"$appId","app_secret":"$appSecret"}"""))
-                    .build()
-                val token = Json.parseToJsonElement(http.send(tokenReq, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
-                    .jsonObject["tenant_access_token"]?.jsonPrimitive?.content ?: error("no tenant_access_token in reply")
+                val token = tenantToken() ?: error("no tenant_access_token in reply")
                 val infoReq = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/bot/v3/info"))
                     .header("Authorization", "Bearer $token").GET().build()
                 val openId = Json.parseToJsonElement(http.send(infoReq, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
@@ -207,6 +226,24 @@ class FeishuEngine(
                 log.info("feishu bot identity: ${openId.take(12)}…")
             }.onFailure {
                 logLine("[engine] couldn't fetch the bot's own open_id (${it.message}) — falling back to answering ANY @mention")
+            }
+        }
+    }
+
+    /** Cache the Feishu GROUP OWNER's open_id for [chatId] (GET /im/v1/chats/:id) — the fallback /bind
+     *  authority when no admin is configured. Best-effort async; a miss just makes /bind say "confirming,
+     *  retry". Only called when no admin open_id is set (see onMessage), so it never runs needlessly. */
+    private fun fetchChatOwner(chatId: String) {
+        scope.launch {
+            runCatching {
+                val token = tenantToken() ?: return@launch
+                val req = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/im/v1/chats/$chatId?user_id_type=open_id"))
+                    .header("Authorization", "Bearer $token").GET().build()
+                val owner = Json.parseToJsonElement(http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
+                    .jsonObject["data"]?.jsonObject?.get("owner_id")?.jsonPrimitive?.content
+                // only a USER open_id (ou_…) may become a bind authority — a bot-owned group (cli_…) or any
+                // other shape fails closed (never cached ⇒ /bind stays "confirming, retry"), never authorizes
+                if (owner != null && owner.startsWith("ou_")) chatOwners[chatId] = owner
             }
         }
     }
@@ -231,6 +268,8 @@ class FeishuEngine(
         for (m in mentions) m.key?.let { text = text.replace(it, "").trim() }
         if (text.isEmpty()) return
         val chatId = msg.chatId ?: return
+        // warm the group-owner cache for the /bind fallback — only when no admin is set (else it's unused)
+        if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
         val sender = data.sender?.senderId?.openId.orEmpty()
         val replyTo = msg.messageId ?: return
         // Feishu delivers events at-least-once — the SAME message can arrive again on a retry / reconnect,
@@ -405,7 +444,9 @@ class FeishuEngine(
                     postTurn(id, "⚠️ ${frame.message}")
                 }
             }
-            else -> {} // chunks, tool events — the phone renders those; this engine only needs the outcome
+            // deny-by-default egress (see [sink]): any frame NOT named above is dropped here, and nothing
+            // above forwards raw frame content — so a future frame kind can't leak into the group by omission
+            else -> {} // chunks, tool events, ask-withdrawn, … — rendered on the phone; the engine needs none
         }
     }
 
