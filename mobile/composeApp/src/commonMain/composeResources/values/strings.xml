@@ -269,6 +269,7 @@
     <string name="model_custom_label">Custom</string>
     <string name="model_custom_hint">model id passed to --model</string>
     <string name="model_switching">Restarting session… history is kept.</string>
+    <string name="model_next_turn_note">Switch applies to the next turn.</string>
     <string name="model_not_installed">not installed</string>
     <string name="model_gateway_section">Gateway models</string>
     <string name="model_gateway_via">via %1$s</string>

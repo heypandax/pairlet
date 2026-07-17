@@ -10,7 +10,7 @@ import dev.ccpocket.app.theme.Tok
  * common vendor ids one tap in the model picker — the free-form custom field stays for everything
  * else.
  *
- * SINGLE source of truth for both shells (mobile [ModelPicker] + desktop QuickActionsPopover).
+ * SINGLE source of truth for both shells (mobile [ModelPicker] + desktop ModelPopover).
  * Ids are the vendors' mainstream stable names; actual routing depends on the user's gateway —
  * each vendor's Claude-compatible endpoint decides what a given id maps to, so keep entries to
  * ids the vendors themselves publish (never invent one; when unsure, leave it out).

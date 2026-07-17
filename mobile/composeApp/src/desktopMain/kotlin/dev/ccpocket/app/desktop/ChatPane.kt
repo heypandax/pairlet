@@ -71,6 +71,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -100,6 +103,8 @@ import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.ui.CheckMiniGlyph
+import dev.ccpocket.app.ui.ModelChip
+import dev.ccpocket.app.ui.modelChipLabel
 import dev.ccpocket.app.ui.RetryGlyph
 import dev.ccpocket.app.ui.SpinnerRing
 import dev.ccpocket.app.ui.VideoPoster
@@ -850,6 +855,26 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                 }
                             },
                         )
+                    }
+                    // model chip (issue #157): the current model, one click from its picker — the popover
+                    // anchors right here so the entrance rides the composer, same as mobile's. Boxed to the
+                    // send circle's 34dp so the pill centers against the round buttons (the row bottom-aligns
+                    // while the field grows). Dimmed mid-turn — a switch lands on the next turn anyway.
+                    Box(Modifier.height(34.dp), contentAlignment = Alignment.Center) {
+                        ModelChip(
+                            label = modelChipLabel(model.chatModelId).ifBlank { "default" },
+                            open = model.showModelPopover,
+                            enabled = !model.streaming,
+                            contentDescription = "Switch model",
+                        ) { model.showModelPopover = true }
+                        if (model.showModelPopover) {
+                            val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                            Popup(
+                                popupPositionProvider = remember(gap) { AboveAnchorEndPopupPositionProvider(gap) },
+                                onDismissRequest = { model.showModelPopover = false },
+                                properties = PopupProperties(focusable = true),
+                            ) { ModelPopover(model) { model.showModelPopover = false } }
+                        }
                     }
                     // ■ interrupt rides BESIDE send while a turn runs (send itself never morphs) — a
                     // just-sent prompt returns to the composer via stopTurn (#48, quick-regret window

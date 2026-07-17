@@ -286,6 +286,51 @@ class DesktopUiTest {
     }
 
     @Test
+    fun composerModelChipOpensAnchoredPopover() = runComposeUiTest {
+        // issue #157: the chip on the composer is the one-click model entrance. The seed streams by
+        // default (chip inert mid-turn), so pin a quiet session to drive the open.
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val streaming = false
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("sonnet")                                                // the chip carries the current model
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showModelPopover, "clicking the chip opens the model popover")
+        assertPresent("Fable")            // the alias rows render in the anchored popover
+        assertPresent("Gateway presets")  // collapsed presets row (no gateway in the seed)
+        assertPresent("CUSTOM")           // the custom-id section
+    }
+
+    @Test
+    fun composerModelChipInertWhileStreaming() = runComposeUiTest {
+        // mid-turn the chip dims and disables (design model-chip.jsx state 3) — the running turn keeps
+        // its model, so the entrance rests; the ⋯ Model shortcut still reaches the popover.
+        val model = SeedDesktopModel() // seed streams (streaming = true)
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(!model.showModelPopover, "the dimmed chip must not open the popover mid-turn")
+    }
+
+    @Test
+    fun quickActionsModelRowShortcutsToPopover() = runComposeUiTest {
+        // issue #157: ⋯ → Model no longer drills a second-level page — it closes the menu and opens
+        // the SAME anchored popover the composer chip owns.
+        val model = SeedDesktopModel().apply { showQuickActions = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText("Model")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!model.showQuickActions, "the shortcut closes the ⋯ menu")
+        assertTrue(model.showModelPopover, "…and opens the shared model popover")
+        assertPresent("Fable")                              // popover content anchored at the chip
+        assertPresent("Switch applies to the next turn.")   // seed streams → the next-turn note shows
+    }
+
+    @Test
     fun watchPaneRidesBesideTheChat() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertPresent("Run integration tests")                          // watch pane header
