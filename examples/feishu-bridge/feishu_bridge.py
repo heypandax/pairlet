@@ -19,6 +19,11 @@ event source and reply call; only PocketBridge and Routes are shared.
 
 Run:  see README.md. Needs `lark-oapi` for the Feishu side; the cc-pocket side needs no Feishu at all,
 so you can smoke-test PocketBridge on its own (see the __main__ block).
+
+SUPERSEDED for Feishu: the daemon now ships a BUILT-IN feishu engine (no python) — that is the
+production path (create it from the desktop/phone Bridges page). Keep this as a wire reference and a
+starting point for other IMs. PoC gap beyond pocket_client's resume/reconnect: reply() below does not
+check `resp.success()` or retry, so a transient Feishu API error silently drops the answer.
 """
 from __future__ import annotations
 

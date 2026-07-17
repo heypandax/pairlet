@@ -6,6 +6,10 @@
 
 > 定位：**参考 / PoC**，不是生产级。目标是把 bridge 凭证的签发与 wire 接口用法示范清楚。Slack / Telegram / 钉钉 适配器同构，只换事件源与回贴 API，`pocket_client.py` 与 `routes.py` 可直接复用。
 
+> ⚠️ **飞书用户现在有内置版**：飞书的生产路径已改为 daemon **内置引擎**（无需 python / pip / 脚本路径，桌面端或手机端 Bridges 页直接新建）。这份 python 保留仅为 ① 讲清 wire 协议、② 给别的 IM 写新适配器起步。
+>
+> **照抄前先看已知缺口**（下列内置引擎都已处理，这份 PoC 没有）：`pocket_client.py` 的掉线 resume 是死代码（`_convos` 从不驱逐，会话被回收后该话题永久回 `session_gone`）、ws 断开后不重连（`_reader` 静默结束、进程聋着）、回贴不查 `resp.success()` 也不重试。真要上生产请补齐这三点，或直接照 `daemon/src/main/kotlin/dev/ccpocket/daemon/feishu/FeishuEngine.kt` 抄。
+
 ## 它能做什么 / 不能做什么（安全边界由 daemon 强制，不靠适配器自觉）
 
 - 能：在**签发时白名单的 workdir 下** `session.open`、发 `prompt`、收自己会话的流式回复与 `turn.done`。

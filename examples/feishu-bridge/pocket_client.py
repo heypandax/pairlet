@@ -18,6 +18,12 @@ by the daemon; a bridge cannot see or answer them. The daemon enforces all of th
 client's good behavior is not what makes it safe.
 
 Deps: `pip install websockets cryptography aiohttp` (see requirements.txt).
+
+NOT production-hardened (issue #91 design review). Two known gaps to port before relying on this:
+  * the reaped-session RESUME path is dead code — `_convos` is never evicted, so the `resumeId` branch
+    is unreachable and a reaped topic answers `session_gone` forever until restart.
+  * NO relay reconnect — `_reader` just ends on a dropped ws and the process stays alive but deaf.
+The daemon's built-in engine (daemon/.../feishu/FeishuEngine.kt) handles both; this is the wire demo.
 """
 from __future__ import annotations
 
