@@ -1,5 +1,6 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
@@ -172,6 +173,30 @@ class DesktopUiTest {
         val after = m.sessions.first { it.sessionId == "s2" }
         assertEquals("Stream parser hardening", after.title, "the committed title is trimmed and adopted")
         assertEquals(before.group, after.group, "a rename must not disturb group membership")
+    }
+
+    @Test
+    fun refusedRenameShowsInlineErrorOnTheAskingRowAndEscDismisses() = runComposeUiTest {
+        // issue #158: a rename_failed refusal re-opens the ASKING row's editor with the daemon's reason
+        // inline — the feedback lands on the sessions surface, not as a Sys line in whatever chat happens
+        // to be open (the common refusal, a terminal-held session, is renamed with no chat open at all).
+        val reason = "session is live in another client — rename it there (/rename) or stop it first"
+        val err = mutableStateOf<String?>(reason)
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override fun renameError(sessionId: String): String? = err.value.takeIf { sessionId == "s2" }
+            override fun dismissRenameError() { err.value = null }
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(reason)                       // the inline reason renders on s2's (re-opened) editor row
+        // …with the editor prefilled with the still-current title, ready for a retry
+        val field = onNode(hasSetTextAction() and hasText("Fix stream parser test"))
+        field.requestFocus()
+        waitForIdle()
+        field.performKeyInput { pressKey(Key.Escape) } // Esc backs out and dismisses the refusal
+        waitForIdle()
+        assertTrue(!present(reason), "Esc must dismiss the inline refusal")
+        assertPresent("Fix stream parser test")     // the plain row is back
     }
 
     @Test

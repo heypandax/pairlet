@@ -241,6 +241,10 @@ enum class ImgState { Compressing, Ready, Rejected }
 /** One quick-terminal command and its [ShellResult] (null while awaiting approval/result). Issue #3. */
 data class TerminalEntry(val command: String, val result: ShellResult? = null)
 
+/** A refused session rename (issue #158): [sessionId] is the row that asked, [message] the daemon's
+ *  reason — surfaced on the sessions list (the asking row), never in a chat transcript. */
+data class RenameRefusal(val sessionId: String, val message: String)
+
 /**
  * A localizable status line: the UI resolves [res] (and substitutes [arg] for %1$s when present).
  * Keeping the resource key — not resolved text — in state means the line re-renders in the right
@@ -547,6 +551,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon or a guest —
      *  hides the rename entry instead of sending a frame the daemon would silently drop. */
     val renameSupported = mutableStateOf(false)
+    /** The daemon's refusal of the LAST [renameSession] attempt (issue #158), keyed to the session it
+     *  targeted. Renames are asked from the SESSIONS list, so the feedback belongs there — the most
+     *  common refusal (renaming a terminal-held session from the sidebar) happens with no chat open at
+     *  all, and whatever chat IS open is an unrelated session whose transcript must not absorb the
+     *  error line. Cleared by the next attempt / [dismissRenameError]. */
+    val renameError = mutableStateOf<RenameRefusal?>(null)
+    private var renameTarget: String? = null // the sessionId the in-flight RenameSession asked about
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -1905,7 +1916,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is WorkflowAgentDetail -> if (f.convoId == convoId.value) {
                 workflowAgentDetails["${f.runId}#${f.agentIndex}"] = f
             }
-            is PocketError -> {
+            is PocketError -> if (f.code == "rename_failed") {
+                // #158: a rename refusal answers to the SESSIONS surface (the sidebar/list row that
+                // asked) — the common case (renaming a terminal-held session) has no chat open, and an
+                // open chat is an UNRELATED session whose transcript must not absorb the error line.
+                renameError.value = renameTarget?.let { RenameRefusal(it, f.message) }
+            } else {
                 opening.value = false // a failed open re-enables the one-tap entries right away
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
@@ -2519,8 +2535,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun renameSession(sessionId: String, title: String, wd: String? = null) {
         val dir = wd ?: sessionsDir.value ?: return
         if (title.isBlank()) return
+        renameTarget = sessionId // key a rename_failed answer back to the asking row
+        renameError.value = null // a fresh attempt clears the previous refusal
         scope.launch { send(RenameSession(dir, sessionId, title.trim())) }
     }
+
+    /** Dismiss the inline rename-refusal feedback (Esc on the sidebar's rename row). */
+    fun dismissRenameError() { renameError.value = null }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {

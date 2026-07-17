@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.disk
 
 import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 import kotlin.io.path.readLines
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
@@ -63,6 +64,23 @@ class TranscriptRenameTest {
         assertEquals(2, lines.size, lines.toString())
         assertTrue(lines[1].startsWith("""{"type":"custom-title""""), lines[1])
         assertEquals("titled", assertNotNull(TranscriptScanner.summarize(f)).title)
+    }
+
+    @Test
+    fun append_leaves_the_transcripts_mtime_untouched() {
+        // the append must be mtime-invisible: transcript freshness is a signal elsewhere — the
+        // externallyActive 20s live window (a rename would fake a "live" dot), recency ordering (the
+        // renamed row would jump to the top) and the Windows observe degrade all key off it
+        val dir = Files.createTempDirectory("ccp-rename")
+        val f = dir.resolve("sess-5.jsonl")
+        f.writeText("""{"type":"user","message":{"role":"user","content":"hi"},"cwd":"/repo"}""" + "\n")
+        val past = FileTime.fromMillis(System.currentTimeMillis() - 90_000) // a stale, idle transcript
+        Files.setLastModifiedTime(f, past)
+
+        assertTrue(TranscriptRename.append(f, "sess-5", "quiet rename"))
+
+        assertEquals(past.toMillis(), Files.getLastModifiedTime(f).toMillis(), "a rename is metadata — it must not freshen mtime")
+        assertEquals("quiet rename", assertNotNull(TranscriptScanner.summarize(f)).title, "…while the record still lands")
     }
 
     @Test

@@ -405,7 +405,13 @@ class SessionRegistry(
     suspend fun renameSession(workdir: String, sessionId: String, title: String): String? {
         val t = title.trim()
         if (t.isEmpty()) return "title must not be empty"
-        val live = mutex.withLock { convos.values.firstOrNull { it.sessionId == sessionId } }
+        // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too (the
+        // same identity [open] reattaches by above): a spawned-but-not-yet-init conversation already
+        // holds the transcript, and a sessionId-only miss here read it as "idle disk" and appended
+        // under our own child's pen.
+        val live = mutex.withLock {
+            convos.values.firstOrNull { it.sessionId == sessionId || (it.sessionId == null && it.resumeAnchor == sessionId) }
+        }
         if (live != null && live.hasLiveProcess()) {
             log.info("rename ${sessionId.take(8)}… via live convo ${live.convoId.take(8)}…")
             return if (live.renameSession(t)) null

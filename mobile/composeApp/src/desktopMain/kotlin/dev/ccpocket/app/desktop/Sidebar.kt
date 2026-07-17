@@ -761,15 +761,27 @@ private fun SessionRow(
     // rename entry (issue #158): Claude rows only — a Codex rename write path is out of scope
     val canRename = renameable && s.agent != AgentKind.CODEX
     // inline rename swaps the row for a prefilled title field (the group header's rename pattern);
-    // committing sends the rename — the daemon re-pushes Sessions, which refreshes the row title
+    // committing sends the rename — the daemon re-pushes Sessions, which refreshes the row title.
+    // A REFUSED rename (rename_failed) re-opens the editor with the daemon's reason inline: the ask
+    // came from THIS row, so the feedback lands here — the chat transcript is the wrong surface (the
+    // common refusal, a terminal-held session, is renamed with no chat open at all). Esc dismisses.
     var renaming by remember(s.sessionId) { mutableStateOf(false) }
-    if (renaming) {
-        GroupNameInput(
-            initial = s.title,
-            hint = stringResource(Res.string.session_rename_hint),
-            onCommit = { model.renameSession(s.sessionId, it); renaming = false },
-            onCancel = { renaming = false },
-        )
+    val renameError = model.renameError(s.sessionId)
+    if (renaming || renameError != null) {
+        Column {
+            GroupNameInput(
+                initial = s.title,
+                hint = stringResource(Res.string.session_rename_hint),
+                onCommit = { model.renameSession(s.sessionId, it); renaming = false },
+                onCancel = { renaming = false; model.dismissRenameError() },
+            )
+            if (renameError != null) {
+                Text(
+                    renameError, color = Tok.danger, fontFamily = Dk.ui, fontSize = 10.sp, lineHeight = 13.sp,
+                    modifier = Modifier.padding(start = 22.dp, end = 12.dp, top = 2.dp, bottom = 3.dp),
+                )
+            }
+        }
         return
     }
     if (menuGroups.isEmpty() && !canRename) { SessionRowBody(model, s, selected, indented, onClick); return }
