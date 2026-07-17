@@ -186,6 +186,10 @@ private fun GeneralPane(model: DesktopModel) {
                 TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
             }
         }
+        // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default
+        Group("Menu bar", "A persistent status glyph — approvals and running sessions at a glance, without raising this window.") {
+            ToggleRow("Show cc-pocket in the menu bar", model.menuBarEnabled) { model.menuBarEnabled = !model.menuBarEnabled }
+        }
         // daemon-side switch: silence phone alerts while working at the computer. Null = old daemon.
         LaunchedEffect(Unit) { model.refreshPushPrefs() }
         Group("Notifications", "Turn-complete alerts pushed to your phone by this computer.") {

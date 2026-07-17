@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -445,13 +446,23 @@ class DesktopUiTest {
         // live-shaped SeedDesktopModel, so every row is real fleet state
         val model = SeedDesktopModel()
         setContent { PocketTheme { TrayPopover(model) } }
-        assertPresent("PENDING APPROVALS")
-        assertPresent("RUNNING SESSIONS")
+        assertPresent("NEEDS YOU")                           // menubar-presence handoff section grammar (#151)
+        assertPresent("RUNNING")
         assertPresent("rm -rf ./build && ./gradlew clean") // a REAL fleet approval preview (mac-studio's Bash)
-        assertPresent("mac-studio")                          // the owning machine, not a hardcoded name
+        assertPresent("mac-studio")                          // the owning machine chip, not a hardcoded name
         assertPresent("api-server")                          // a REAL running project on another machine
         assertPresent("3 computers · 3 sessions")            // header derived from live fleet state
         assertPresent("Open cc-pocket")
+        // (elapsed labels ride the process-wide TrayRunningSince clock — value coverage lives in
+        // MenuBarStateTest, since "now" vs "1m" here would depend on suite timing)
+        assertTrue(!present("⌘⏎"), "the keycap hint hides where the shortcut isn't wired (in-window overlay)")
+    }
+
+    @Test
+    fun trayKeyHintShowsOnlyInTheMenuBarWindow() = runComposeUiTest {
+        // the OS popover wires ⌘⏎ in its key handler and passes keyHint = true — only then is the cap honest
+        setContent { PocketTheme { TrayPopover(SeedDesktopModel(), keyHint = true) } }
+        assertPresent("⌘⏎")
     }
 
     @Test
@@ -478,11 +489,30 @@ class DesktopUiTest {
     @Test
     fun traySettingsGearOpensSettings() = runComposeUiTest {
         val model = SeedDesktopModel()
-        setContent { PocketTheme { TrayPopover(model) } }
+        var raised = false
+        setContent { PocketTheme { TrayPopover(model, onOpenMain = { raised = true }) } }
         assertTrue(!model.showSettings)
         onAllNodes(hasContentDescription("Settings")).onFirst().performClick()
         waitForIdle()
         assertTrue(model.showSettings, "the gear opens Settings (was a dead clickable)")
+        // Settings lives in the main window — from the menu-bar popover the gear must surface it too,
+        // or the modal opens under whatever covers the buried window and reads as a dead click
+        assertTrue(raised, "the gear also raises the main window")
+    }
+
+    @Test
+    fun settingsMenuBarToggleFlipsTheModel() = runComposeUiTest {
+        // issue #151: the menu-bar presence opt-out — General pane, same ToggleRow idiom as phone push
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { SettingsModal(model) {} } }
+        assertTrue(model.menuBarEnabled, "menu-bar presence defaults on")
+        // the group sits below the General pane's first viewport — scroll it in before clicking
+        onAllNodes(hasText("Show cc-pocket in the menu bar")).onFirst().performScrollTo().performClick()
+        waitForIdle()
+        assertTrue(!model.menuBarEnabled)
+        onAllNodes(hasText("Show cc-pocket in the menu bar")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.menuBarEnabled)
     }
 
     @Test

@@ -835,6 +835,13 @@ class RepoDesktopModel(
         get() = terminalAppState
         set(v) { terminalAppState = v; store.putString(K_TERMINAL_APP, v.id) }
 
+    // menu-bar presence (issue #151) — desktop-only pref, persisted beside the pins. Absent = ON (the
+    // environment layer defaults on; only an explicit "0" opts out, so upgrades gain the glyph).
+    private var menuBarEnabledState by mutableStateOf(store.getString(K_MENUBAR) != "0")
+    override var menuBarEnabled: Boolean
+        get() = menuBarEnabledState
+        set(v) { menuBarEnabledState = v; store.putString(K_MENUBAR, if (v) "1" else "0") }
+
     override val phonePush: Boolean? get() = repo.pushPrefs.value
     override fun setPhonePush(enabled: Boolean) { repo.setPushEnabled(enabled) }
     override fun refreshPushPrefs() { repo.fetchPushPrefs() }
@@ -910,6 +917,7 @@ class RepoDesktopModel(
         const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
         const val K_GROUP_COLLAPSED = "desktop_group_collapsed" // per project+group collapse memory (issue #119)
         const val K_TERMINAL_APP = "desktop_terminal_app"
+        const val K_MENUBAR = "desktop_menubar_enabled" // menu-bar presence opt-out (issue #151); absent = on
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
         const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
         const val REFILL_ECHO_TIMEOUT_MS = 4_000L // per-dir wait for the restored-RECENT sweep's listing echo (#102)

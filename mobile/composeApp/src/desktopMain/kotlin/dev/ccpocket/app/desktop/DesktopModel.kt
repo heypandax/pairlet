@@ -486,6 +486,9 @@ interface DesktopModel {
     // context-window override (tokens) for the usage statusline's 100% mark; null = follow the derived window (#60)
     var contextWindowOverride: Long?
     var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
+    // menu-bar presence (issue #151, direction 1): the OS status glyph + anchored popover. Default ON —
+    // the environment layer is the point; Settings ▸ General offers the opt-out.
+    var menuBarEnabled: Boolean
     // appearance (issue #63): force light/dark or follow the OS. The window root reads this into PocketTheme;
     // RepoDesktopModel persists it through the shared repo, seed/preview models just hold it in memory.
     var themeMode: ThemeMode

@@ -176,6 +176,7 @@ class SeedDesktopModel : DesktopModel {
     override var defaultModel: String? by mutableStateOf(null)
     override var contextWindowOverride: Long? by mutableStateOf(null)
     override var terminalApp by mutableStateOf(TerminalApp.SYSTEM)
+    override var menuBarEnabled by mutableStateOf(true)
     override var themeMode by mutableStateOf(ThemeMode.DARK)
     private var phonePushState by mutableStateOf(true)
     override val phonePush: Boolean? get() = phonePushState

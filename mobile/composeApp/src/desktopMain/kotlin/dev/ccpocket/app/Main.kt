@@ -116,6 +116,17 @@ fun main() = application {
         }
     }
 
+    // menu-bar presence (issue #151, direction 1): the OS status glyph + anchored popover live at
+    // application scope, so they outlast minimize/unfocus — the whole point of the environment layer.
+    // Composed to nothing where the platform has no tray (headless / some Linux desktops).
+    if (model.menuBarEnabled) {
+        dev.ccpocket.app.desktop.MenuBarExtra(model) {
+            windowState.isMinimized = false
+            awtWindow?.toFront()
+            awtWindow?.requestFocus()
+        }
+    }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "CC Pocket",
