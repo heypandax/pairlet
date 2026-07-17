@@ -48,34 +48,45 @@ internal object JediTermEngine {
             .setInitialColumns(120)
             .setInitialRows(28)
             .start()
-        val widget = object : JediTermWidget(CcTermSettings) {
-            override fun createScrollBar(): JScrollBar = darkScrollBar()
-        }
-        widget.ttyConnector = PtyTtyConnector(process)
-        val session = JediTermSession(widget, process)
-        // running ⟷ the shell process: `exit` (or a crash) drops the strip's live dot honestly
-        process.onExit().thenRun { session.markExited() }
-        // the focused state drives the panel's terracotta inner ring
-        widget.terminalPanel.addFocusListener(object : FocusListener {
-            override fun focusGained(e: FocusEvent?) = session.markFocus(true)
-            override fun focusLost(e: FocusEvent?) = session.markFocus(false)
-        })
-        // ⌘J from INSIDE the terminal (see onCmdJ doc above); scoped to this widget's focus subtree
-        val mask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
-        val dispatcher = KeyEventDispatcher { e ->
-            if (e.id == KeyEvent.KEY_PRESSED && e.keyCode == KeyEvent.VK_J && (e.modifiersEx and mask) == mask) {
-                val owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
-                if (owner != null && SwingUtilities.isDescendingFrom(owner, widget)) {
-                    onCmdJ()
-                    return@KeyEventDispatcher true
-                }
+        // The shell is LIVE from here on: if any wiring step below throws, the outer runCatching
+        // alone would swallow it and orphan an invisible login shell (plus a possibly-registered
+        // global key dispatcher). The catch reclaims both before falling back to null.
+        var dispatcher: KeyEventDispatcher? = null
+        try {
+            val widget = object : JediTermWidget(CcTermSettings) {
+                override fun createScrollBar(): JScrollBar = darkScrollBar()
             }
-            false
+            widget.ttyConnector = PtyTtyConnector(process)
+            val session = JediTermSession(widget, process)
+            // running ⟷ the shell process: `exit` (or a crash) drops the strip's live dot honestly
+            process.onExit().thenRun { session.markExited() }
+            // the focused state drives the panel's terracotta inner ring
+            widget.terminalPanel.addFocusListener(object : FocusListener {
+                override fun focusGained(e: FocusEvent?) = session.markFocus(true)
+                override fun focusLost(e: FocusEvent?) = session.markFocus(false)
+            })
+            // ⌘J from INSIDE the terminal (see onCmdJ doc above); scoped to this widget's focus subtree
+            val mask = Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
+            val cmdJDispatcher = KeyEventDispatcher { e ->
+                if (e.id == KeyEvent.KEY_PRESSED && e.keyCode == KeyEvent.VK_J && (e.modifiersEx and mask) == mask) {
+                    val owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+                    if (owner != null && SwingUtilities.isDescendingFrom(owner, widget)) {
+                        onCmdJ()
+                        return@KeyEventDispatcher true
+                    }
+                }
+                false
+            }
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(cmdJDispatcher)
+            dispatcher = cmdJDispatcher
+            session.dispatcher = cmdJDispatcher
+            widget.start()
+            session
+        } catch (t: Throwable) {
+            dispatcher?.let { KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(it) }
+            runCatching { process.destroy() }
+            null
         }
-        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(dispatcher)
-        session.dispatcher = dispatcher
-        widget.start()
-        session
     }.getOrNull()
 
     private fun shellCommand(): Array<String> {

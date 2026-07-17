@@ -44,7 +44,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -101,6 +103,16 @@ class TerminalPanelController(
         private set
     var engine by mutableStateOf<EmbeddedTerminal?>(null)
         private set
+
+    /** The OPEN panel's real rendered height in px, reported by TerminalPanelView's onSizeChanged.
+     *  The pane Column hands the dock only what's LEFT after the subheader/composer rows, so
+     *  "pane height × fraction" overstates the panel — drag math and the PANEL menu anchor read
+     *  this measured truth instead (the divider used to track the mouse at only ~85%). */
+    var panelHeightPx by mutableStateOf(0f)
+
+    /** What the Column actually offers the dock (measured px ÷ the fraction that produced it) —
+     *  the denominator that turns a drag Δpx into a Δfraction 1:1. 0 until the panel lays out. */
+    val availableHeightPx: Float get() = if (panelHeightPx > 0f) panelHeightPx / heightFraction else 0f
 
     fun openEmbedded(cwd: String?, branch: String?) {
         if (cwd.isNullOrBlank()) return
@@ -215,7 +227,6 @@ private val rowResizeCursor = PointerIcon(java.awt.Cursor(java.awt.Cursor.N_RESI
 fun TerminalDock(
     model: DesktopModel,
     interopHidden: Boolean,
-    paneHeightPx: () -> Float,
     onOpenMenu: (TermMenuAnchor) -> Unit,
     menuAnchor: TermMenuAnchor?,
 ) {
@@ -223,7 +234,7 @@ fun TerminalDock(
     if (!tp.dockedAt(model.chatWorkdir)) return
     when (tp.mode) {
         TermPanelMode.OPEN -> {
-            TerminalDivider(tp, paneHeightPx)
+            TerminalDivider(tp)
             TerminalPanelView(tp, model, interopHidden, onOpenMenu, menuOpen = menuAnchor == TermMenuAnchor.PANEL)
         }
         TermPanelMode.COLLAPSED ->
@@ -233,9 +244,11 @@ fun TerminalDock(
 }
 
 /** The draggable hairline divider above the panel: 9dp hit strip, centered 1px hairline, a grab
- *  pill on hover, row-resize cursor. Dragging re-fractions the panel; the height persists on release. */
+ *  pill on hover, row-resize cursor. Dragging re-fractions the panel against the height the dock
+ *  can actually occupy (NOT the whole pane — that denominator made the divider lag the mouse);
+ *  the height persists on release. */
 @Composable
-private fun TerminalDivider(tp: TerminalPanelController, paneHeightPx: () -> Float) {
+private fun TerminalDivider(tp: TerminalPanelController) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Box(
@@ -244,7 +257,7 @@ private fun TerminalDivider(tp: TerminalPanelController, paneHeightPx: () -> Flo
             .pointerInput(tp) {
                 detectDragGestures(onDragEnd = { tp.persistHeight() }) { change, drag ->
                     change.consume()
-                    val h = paneHeightPx()
+                    val h = tp.availableHeightPx
                     if (h > 0f) tp.dragHeightTo(tp.heightFraction - drag.y / h)
                 }
             },
@@ -270,6 +283,7 @@ private fun TerminalPanelView(
     val focused = engine?.focused == true
     Column(
         Modifier.fillMaxWidth().fillMaxHeight(tp.heightFraction)
+            .onSizeChanged { tp.panelHeightPx = it.height.toFloat() } // the real height (see panelHeightPx)
             .border(1.dp, if (focused) Tok.accent else Color.Transparent)
             .padding(1.dp),
     ) {
@@ -408,7 +422,6 @@ private fun TermBranchChip(branch: String) {
 fun TerminalMenuOverlay(
     model: DesktopModel,
     anchor: TermMenuAnchor,
-    paneHeightPx: () -> Float,
     onDismiss: () -> Unit,
 ) {
     val density = LocalDensity.current
@@ -419,10 +432,10 @@ fun TerminalMenuOverlay(
         val (alignment, pad) = when (anchor) {
             TermMenuAnchor.HEADER -> Alignment.TopEnd to PaddingValues(top = 44.dp, end = 96.dp)
             TermMenuAnchor.PANEL -> {
-                // sit just above the panel's top edge (its height = pane height × fraction, + the divider)
-                val panelH = with(density) {
-                    (paneHeightPx() * (model.terminalPanel?.heightFraction ?: TerminalPanelController.DEFAULT_FRACTION)).toDp()
-                }
+                // sit just above the panel's top edge — its MEASURED height, not pane × fraction:
+                // the Column gives the dock only what's left after the subheader/composer, so the
+                // estimate floated the menu tens of px too high at large fractions
+                val panelH = with(density) { (model.terminalPanel?.panelHeightPx ?: 0f).toDp() }
                 Alignment.BottomStart to PaddingValues(start = 8.dp, bottom = panelH + 11.dp)
             }
             TermMenuAnchor.STRIP -> Alignment.BottomStart to PaddingValues(start = 8.dp, bottom = 38.dp)
@@ -493,7 +506,9 @@ private fun TermMenuRow(
     icon: @Composable (Color) -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).hoverFill(RoundedCornerShape(8.dp))
+        // the tag pins WHICH row carries the default check — UI tests assert its position, not just presence
+        Modifier.fillMaxWidth().testTag(if (primary) "term-menu-default-row" else "term-menu-row")
+            .clip(RoundedCornerShape(8.dp)).hoverFill(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

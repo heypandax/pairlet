@@ -1,7 +1,10 @@
 package dev.ccpocket.app.desktop
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
@@ -64,6 +67,8 @@ class TerminalDockUiTest {
         assertPresent("⌘J") // the default's keycap hint
         assertPresent("Open in system terminal") // seed pref = SYSTEM
         assertPresent("Default can be changed in Settings → Terminal.")
+        // seed default = embedded → the check (primary styling) sits on the EMBEDDED row
+        onNode(hasTestTag("term-menu-default-row")).assert(hasText("Open embedded"))
 
         onNode(hasText("Open embedded")).performClick()
         waitForIdle()
@@ -82,9 +87,12 @@ class TerminalDockUiTest {
         onNode(hasContentDescription("Terminal menu")).performClick() // the panel header's glyph
         waitForIdle()
         // the ⌘J keycap rides the EMBEDDED row regardless; the check (primary styling) follows the
-        // default — asserted via the panel state staying put when the menu merely opens
+        // default — exactly ONE row carries it, and it must be the external one
         assertPresent("Open embedded")
         assertPresent("Open in system terminal")
+        onAllNodes(hasTestTag("term-menu-default-row")).assertCountEquals(1)
+        onNode(hasTestTag("term-menu-default-row")).assert(hasText("Open in system terminal"))
+        onNode(hasTestTag("term-menu-row")).assert(hasText("Open embedded")) // the un-checked row
         assertEquals(TermPanelMode.OPEN, model.terminalPanel.mode)
     }
 }

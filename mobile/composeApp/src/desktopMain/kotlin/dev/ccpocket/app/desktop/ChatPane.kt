@@ -87,7 +87,6 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -192,10 +191,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             }
         }
     }
-    // embedded terminal (issue #153): the open-mode menu's anchor (null = closed) and the pane's px
-    // height — the dock's divider drags against it, and the PANEL menu anchor offsets by it.
+    // embedded terminal (issue #153): the open-mode menu's anchor (null = closed); drag math and
+    // the PANEL menu anchor read the panel's own measured height off the controller.
     var termMenuFrom by remember { mutableStateOf<TermMenuAnchor?>(null) }
-    var paneHeightPx by remember { mutableStateOf(0f) }
     @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
     Box(
         modifier.fillMaxSize().dragAndDropTarget(
@@ -205,7 +203,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             target = dropTarget,
         ),
     ) {
-    Column(Modifier.fillMaxSize().background(Tok.base).onSizeChanged { paneHeightPx = it.height.toFloat() }) {
+    Column(Modifier.fillMaxSize().background(Tok.base)) {
         // split view marks the pane that owns the keyboard with a 2px terracotta top hairline (Fleet ⑥)
         if (focused) Box(Modifier.fillMaxWidth().height(2.dp).background(Tok.accent))
         // While a QuestionCard text field (its "Other…" / freeform box) owns the keyboard, the composer
@@ -338,19 +336,19 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         SessionHealthStrip(model)
         if (model.observing) ObserveBar(model) else Composer(model, suppressAutoFocus = questionOwnsInput)
         // embedded terminal dock (issue #153): divider + panel / collapsed strip at the pane bottom.
-        // The heavyweight Swing terminal swaps out for a flat stand-in while any overlay (or this
-        // pane's own open-mode menu) is up — SwingPanel would otherwise paint OVER the popover.
+        // The heavyweight Swing terminal swaps out for a flat stand-in while any overlay, this
+        // pane's own open-mode menu, or the file-drop scrim is up — SwingPanel would otherwise
+        // paint OVER those Compose layers (the DropOverlay's lower edge included).
         TerminalDock(
             model,
-            interopHidden = model.anyOverlayOpen || termMenuFrom != null,
-            paneHeightPx = { paneHeightPx },
+            interopHidden = model.anyOverlayOpen || termMenuFrom != null || dragOver.value,
             onOpenMenu = { termMenuFrom = it },
             menuAnchor = termMenuFrom,
         )
     }
     if (dragOver.value) DropOverlay()
     termMenuFrom?.let { anchor ->
-        TerminalMenuOverlay(model, anchor, paneHeightPx = { paneHeightPx }) { termMenuFrom = null }
+        TerminalMenuOverlay(model, anchor) { termMenuFrom = null }
     }
     }
     }
