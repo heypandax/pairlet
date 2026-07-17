@@ -834,6 +834,16 @@ class RepoDesktopModel(
     override var terminalApp: TerminalApp
         get() = terminalAppState
         set(v) { terminalAppState = v; store.putString(K_TERMINAL_APP, v.id) }
+    // embedded terminal (issue #153): default-open pref + dock height, persisted like terminalApp.
+    // Absent key = embedded — the new default holds for existing users too (the issue's call).
+    private var terminalEmbedState by mutableStateOf(store.getString(K_TERMINAL_EMBED) != "0")
+    override var terminalDefaultEmbedded: Boolean
+        get() = terminalEmbedState
+        set(v) { terminalEmbedState = v; store.putString(K_TERMINAL_EMBED, if (v) "1" else "0") }
+    override val terminalPanel = TerminalPanelController(
+        loadHeight = { store.getString(K_TERMINAL_HEIGHT)?.toFloatOrNull() },
+        saveHeight = { store.putString(K_TERMINAL_HEIGHT, it.toString()) },
+    )
 
     override val phonePush: Boolean? get() = repo.pushPrefs.value
     override fun setPhonePush(enabled: Boolean) { repo.setPushEnabled(enabled) }
@@ -910,6 +920,8 @@ class RepoDesktopModel(
         const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
         const val K_GROUP_COLLAPSED = "desktop_group_collapsed" // per project+group collapse memory (issue #119)
         const val K_TERMINAL_APP = "desktop_terminal_app"
+        const val K_TERMINAL_EMBED = "desktop_terminal_embed" // "1"/absent = embedded default, "0" = external (#153)
+        const val K_TERMINAL_HEIGHT = "desktop_terminal_height" // dock height as a ChatPane fraction (#153)
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
         const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
         const val REFILL_ECHO_TIMEOUT_MS = 4_000L // per-dir wait for the restored-RECENT sweep's listing echo (#102)

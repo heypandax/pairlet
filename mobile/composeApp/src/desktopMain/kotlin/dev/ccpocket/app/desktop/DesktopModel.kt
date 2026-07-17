@@ -486,6 +486,16 @@ interface DesktopModel {
     // context-window override (tokens) for the usage statusline's 100% mark; null = follow the derived window (#60)
     var contextWindowOverride: Long?
     var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
+    // ── embedded terminal (issue #153) ──
+    /** True (the default) = terminal gestures open the embedded ChatPane dock; false = the external
+     *  app ([terminalApp]). Settings ▸ Terminal owns the flip; the header menu picks per-gesture only. */
+    var terminalDefaultEmbedded: Boolean
+        get() = true
+        set(_) {}
+    /** The embedded dock's state — ONE shell, bound to the session cwd that opened it. Null = this
+     *  model can't host a dock (bare fakes); Seed and Repo both provide a controller (Seed's has no
+     *  engine factory, so tests/previews drive the chrome without ever spawning a PTY). */
+    val terminalPanel: TerminalPanelController? get() = null
     // appearance (issue #63): force light/dark or follow the OS. The window root reads this into PocketTheme;
     // RepoDesktopModel persists it through the shared repo, seed/preview models just hold it in memory.
     var themeMode: ThemeMode

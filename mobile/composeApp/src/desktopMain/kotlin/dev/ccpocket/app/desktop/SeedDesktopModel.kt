@@ -176,6 +176,8 @@ class SeedDesktopModel : DesktopModel {
     override var defaultModel: String? by mutableStateOf(null)
     override var contextWindowOverride: Long? by mutableStateOf(null)
     override var terminalApp by mutableStateOf(TerminalApp.SYSTEM)
+    override var terminalDefaultEmbedded by mutableStateOf(true) // issue #153; no engine factory → chrome only
+    override val terminalPanel = TerminalPanelController()
     override var themeMode by mutableStateOf(ThemeMode.DARK)
     private var phonePushState by mutableStateOf(true)
     override val phonePush: Boolean? get() = phonePushState

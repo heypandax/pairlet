@@ -180,8 +180,17 @@ private fun GeneralPane(model: DesktopModel) {
         Group("Default permission mode", "How much a new session may do before it asks.") {
             CLAUDE_MODES.forEach { m -> ModeRow(m, selected = m.mode == model.defaultMode) { model.defaultMode = m.mode } }
         }
-        // only terminals actually present on this machine are offered (issue #44)
-        Group("Terminal", "Which app the chat header's >_ button opens at the session's folder.") {
+        // how a terminal opens (issue #153: embedded dock is the default) + which external app (issue #44 —
+        // only terminals actually present on this machine are offered)
+        Group("Terminal", "How the chat header's >_ opens a terminal at the session's folder.") {
+            PrefRow("Embedded panel", "⌘J · docked in the session", selected = model.terminalDefaultEmbedded) {
+                model.terminalDefaultEmbedded = true
+            }
+            PrefRow("External window", "opens the app below", selected = !model.terminalDefaultEmbedded) {
+                model.terminalDefaultEmbedded = false
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("External app", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 7.dp))
             TerminalApp.entries.filter(TerminalLauncher::installed).forEach { t ->
                 TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
             }

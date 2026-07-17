@@ -171,10 +171,11 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 QaRow("Effort", value = model.chatEffort ?: "default", chevron = true) { page = QaPage.EFFORT }
                 QaRow("Mode", value = CLAUDE_MODES.first { it.mode == model.chatMode }.token, chevron = true) { page = QaPage.MODE }
                 // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every
-                // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader
+                // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader.
+                // Routes by the user's default (issue #153): embedded dock unless Settings says external.
                 val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
                 if (canOpenTerminal) {
-                    QaRow("Open terminal") { TerminalLauncher.open(model.terminalApp, model.chatWorkdir); onDismiss() }
+                    QaRow("Open terminal") { model.openTerminalPreferred(); onDismiss() }
                 }
                 QaRow("Compact context") { model.compactConversation(); onDismiss() }
                 QaRow(

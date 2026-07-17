@@ -87,6 +87,7 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -191,6 +192,10 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             }
         }
     }
+    // embedded terminal (issue #153): the open-mode menu's anchor (null = closed) and the pane's px
+    // height — the dock's divider drags against it, and the PANEL menu anchor offsets by it.
+    var termMenuFrom by remember { mutableStateOf<TermMenuAnchor?>(null) }
+    var paneHeightPx by remember { mutableStateOf(0f) }
     @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
     Box(
         modifier.fillMaxSize().dragAndDropTarget(
@@ -200,14 +205,14 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
             target = dropTarget,
         ),
     ) {
-    Column(Modifier.fillMaxSize().background(Tok.base)) {
+    Column(Modifier.fillMaxSize().background(Tok.base).onSizeChanged { paneHeightPx = it.height.toFloat() }) {
         // split view marks the pane that owns the keyboard with a 2px terracotta top hairline (Fleet ⑥)
         if (focused) Box(Modifier.fillMaxWidth().height(2.dp).background(Tok.accent))
         // While a QuestionCard text field (its "Other…" / freeform box) owns the keyboard, the composer
         // must not yank focus back with its land-ready requestFocus loop, or the box goes unresponsive (#76).
         // Reset per question so a fresh ask doesn't inherit the last card's ownership.
         var questionOwnsInput by remember(model.ask?.askId) { mutableStateOf(false) }
-        ChatSubHeader(model)
+        ChatSubHeader(model, onTerminalMenu = { termMenuFrom = TermMenuAnchor.HEADER })
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             // the QuestionCard docks inside the LazyColumn's unbounded tail item — hand it a bound from the
             // pane's real viewport so its #125 cap+inner-scroll works instead of falling back to full natural
@@ -332,8 +337,21 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
         }
         SessionHealthStrip(model)
         if (model.observing) ObserveBar(model) else Composer(model, suppressAutoFocus = questionOwnsInput)
+        // embedded terminal dock (issue #153): divider + panel / collapsed strip at the pane bottom.
+        // The heavyweight Swing terminal swaps out for a flat stand-in while any overlay (or this
+        // pane's own open-mode menu) is up — SwingPanel would otherwise paint OVER the popover.
+        TerminalDock(
+            model,
+            interopHidden = model.anyOverlayOpen || termMenuFrom != null,
+            paneHeightPx = { paneHeightPx },
+            onOpenMenu = { termMenuFrom = it },
+            menuAnchor = termMenuFrom,
+        )
     }
     if (dragOver.value) DropOverlay()
+    termMenuFrom?.let { anchor ->
+        TerminalMenuOverlay(model, anchor, paneHeightPx = { paneHeightPx }) { termMenuFrom = null }
+    }
     }
     }
 }
@@ -396,7 +414,7 @@ private fun OpeningChat(title: String) {
 }
 
 @Composable
-private fun ChatSubHeader(model: DesktopModel) {
+private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
@@ -411,12 +429,14 @@ private fun ChatSubHeader(model: DesktopModel) {
             // quick terminal at the session's cwd — only when that directory exists on THIS machine, so a
             // remote machine's session never shows it (same locality contract as DesktopPathOpener). #44
             // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every recomposition.
+            // Since issue #153 the chip anchors the open-mode menu (embedded ⌘J default / external app)
+            // instead of jumping straight to the external window.
             val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
             if (canOpenTerminal) {
                 Text(
                     ">_", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
-                        .clickable { TerminalLauncher.open(model.terminalApp, model.chatWorkdir) }
+                        .clickable(onClick = onTerminalMenu)
                         .padding(horizontal = 9.dp, vertical = 3.dp),
                 )
             }
