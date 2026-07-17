@@ -382,9 +382,12 @@ interface DesktopModel {
     fun switchMode(m: PermissionMode) {}
     fun switchModel(name: String) {}
     fun switchEffort(level: String) {}
-    /** OpenCode model list from the daemon — fetched by [fetchOpenCodeModels]. */
+    /** Agent model lists from the daemon — fetched by [fetchModels]. */
+    fun modelsForAgent(agent: AgentKind): List<String> = emptyList()
+    fun fetchModels(agent: AgentKind) {}
+    /** OpenCode model list from the daemon — kept for existing callers. */
     val openCodeModels: List<String> get() = emptyList()
-    fun fetchOpenCodeModels() {}
+    fun fetchOpenCodeModels() = fetchModels(AgentKind.OPENCODE)
     fun compactConversation() {}
     fun clearConversation() {}
 

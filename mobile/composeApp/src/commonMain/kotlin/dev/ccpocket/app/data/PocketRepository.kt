@@ -1751,7 +1751,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
             is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
-            is ModelsList -> openCodeModels.value = f
+            is ModelsList -> {
+                agentModels[f.agent] = f
+                if (f.agent == AgentKind.OPENCODE) openCodeModels.value = f
+            }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
@@ -2223,8 +2226,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** OpenCode model list — fetched from the daemon via [fetchOpenCodeModels]; shows the same models
      *  `opencode models` returns on the Mac. Null until first fetch. */
     val openCodeModels = mutableStateOf<ModelsList?>(null)
+    val agentModels = mutableStateMapOf<AgentKind, ModelsList>()
 
-    fun fetchOpenCodeModels() { scope.launch { runCatching { send(FetchModels) } } }
+    fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
+        scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
+    }
+
+    fun fetchOpenCodeModels() = fetchModels(AgentKind.OPENCODE)
 
     /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
      *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */
@@ -2564,7 +2572,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         // Pre-fetch OpenCode model list so the picker has it ready when the user opens it,
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
-        if (openAgent == AgentKind.OPENCODE) fetchOpenCodeModels()
+        fetchModels(openAgent)
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it

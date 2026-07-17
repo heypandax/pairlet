@@ -187,11 +187,12 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
             }
             QaPage.MODEL -> {
                 QaBack("Model") { page = QaPage.MAIN }
-                LaunchedEffect(model.chatAgent) { if (model.chatAgent == AgentKind.OPENCODE) model.fetchOpenCodeModels() }
+                LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
+                val claudeLabels = CLAUDE_MODEL_OPTIONS.associate { (label, alias) -> alias to label }
                 val options = when (model.chatAgent) {
-                    AgentKind.CODEX -> CODEX_MODEL_OPTIONS.map { m -> m to m }
-                    AgentKind.OPENCODE -> model.openCodeModels.ifEmpty { OPENCODE_MODEL_OPTIONS }.map { m -> m to m }
-                    else -> CLAUDE_MODEL_OPTIONS
+                    AgentKind.CODEX -> model.modelsForAgent(AgentKind.CODEX).ifEmpty { CODEX_MODEL_OPTIONS }.map { m -> m to m }
+                    AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).ifEmpty { OPENCODE_MODEL_OPTIONS }.map { m -> m to m }
+                    else -> model.modelsForAgent(AgentKind.CLAUDE).ifEmpty { CLAUDE_MODEL_OPTIONS.map { it.second } }.map { m -> (claudeLabels[m] ?: m) to m }
                 }
                 fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
                 // gateway model presets (issue #139): mirrors mobile's ModelPicker off the same shared

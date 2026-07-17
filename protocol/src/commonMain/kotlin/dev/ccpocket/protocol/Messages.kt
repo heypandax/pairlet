@@ -1280,20 +1280,23 @@ data class ScheduleState(
  *  two can't drift — a runaway sub-minute repeat would hammer sessions in a loop. */
 const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 
-// ── opencode model listing ──────────────────────────────────────────────
+// ── agent model listing ─────────────────────────────────────────────────
 
-/** client -> daemon: fetch the model list from `opencode models`. */
+/** client -> daemon: fetch the model list for one backend from the Mac daemon. */
 @Serializable
 @SerialName("pocket/models.fetch")
-data object FetchModels : ToDaemon
+data class FetchModels(
+    val agent: AgentKind = AgentKind.OPENCODE,
+    val workdir: String? = null,
+) : ToDaemon
 
-/** daemon -> client: the model list from `opencode models`, grouped by provider prefix.
- *  [models] is the raw output (one per line, "provider/model"), sorted with opencode/
- *  free models first, then third-party providers in alphabetical order.
- *  [error] is set when the daemon couldn't run `opencode models` (binary not found etc.). */
+/** daemon -> client: the model list for the requested backend.
+ *  [models] is raw ids in the order the picker should present them.
+ *  [error] is set when the daemon couldn't inspect the backend. */
 @Serializable
 @SerialName("pocket/models.list")
 data class ModelsList(
+    val agent: AgentKind = AgentKind.OPENCODE,
     val models: List<String> = emptyList(),
     val error: String? = null,
 ) : ToPhone

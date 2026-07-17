@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.opencode
 
 import dev.ccpocket.protocol.ModelsList
+import dev.ccpocket.protocol.AgentKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
@@ -16,12 +17,12 @@ class OpenCodeModelService(
             val exe = OpenCodeLauncher.resolveExecutable(opencodeBin)
             val result = runner(exe, timeoutMs)
             when {
-                result.timedOut -> ModelsList(error = "opencode models timed out after ${timeoutMs / 1000}s")
-                result.exitCode != 0 -> ModelsList(error = "opencode models exited ${result.exitCode}: ${result.stderr}")
-                else -> ModelsList(models = sortModels(result.stdout.lines().filter { it.isNotBlank() }))
+                result.timedOut -> ModelsList(agent = AgentKind.OPENCODE, error = "opencode models timed out after ${timeoutMs / 1000}s")
+                result.exitCode != 0 -> ModelsList(agent = AgentKind.OPENCODE, error = "opencode models exited ${result.exitCode}: ${result.stderr}")
+                else -> ModelsList(agent = AgentKind.OPENCODE, models = sortModels(result.stdout.lines().filter { it.isNotBlank() }))
             }
         }.getOrElse { e ->
-            ModelsList(error = "Failed to list models: ${e.message ?: e.javaClass.simpleName}")
+            ModelsList(agent = AgentKind.OPENCODE, error = "Failed to list models: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 

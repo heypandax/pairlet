@@ -75,6 +75,7 @@ internal val OPENCODE_MODEL_OPTIONS = listOf(
 )
 internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku") // display name → alias; shared by both shells' pickers
 internal val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max") // shared: live /effort picker + Settings default
+private val CLAUDE_MODEL_LABELS = CLAUDE_MODEL_OPTIONS.associate { (label, alias) -> alias to label }
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
 fun modelAlias(model: String?): String {
@@ -278,21 +279,26 @@ private fun CtxPill(ctx: String, big: Boolean) {
 internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
     val codex = repo.sessionAgent.value == AgentKind.CODEX
     val opencode = repo.sessionAgent.value == AgentKind.OPENCODE
-    // fetch dynamic model list from the daemon when OpenCode picker opens
-    LaunchedEffect(opencode) { if (opencode) repo.fetchOpenCodeModels() }
-    val opencodeModels = repo.openCodeModels.value
-    val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
-    else if (opencode) {
-        val models = opencodeModels?.models
-        val visibleModels = models?.takeIf { it.isNotEmpty() && opencodeModels?.error == null } ?: OPENCODE_MODEL_OPTIONS
+    val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
+    // Fetch dynamic model list from the daemon when any agent picker opens.
+    LaunchedEffect(agent) { repo.fetchModels(agent) }
+    val agentModels = repo.agentModels[agent]
+    val choices = if (codex) {
+        val visibleModels = agentModels?.models?.takeIf { it.isNotEmpty() && agentModels.error == null } ?: CODEX_MODEL_OPTIONS
+        visibleModels.map { ModelChoice(it, it, it, "", false) }
+    } else if (opencode) {
+        val visibleModels = agentModels?.models?.takeIf { it.isNotEmpty() && agentModels.error == null } ?: OPENCODE_MODEL_OPTIONS
         visibleModels.map { m -> ModelChoice(m, m, m, "", false, unavailable = false) }
     }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
-    else CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
-        val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW
-        ModelChoice(name, alias, alias, if (big) "1M" else "200K", big)
+    else {
+        val visibleModels = agentModels?.models?.takeIf { it.isNotEmpty() && agentModels.error == null } ?: CLAUDE_MODEL_OPTIONS.map { it.second }
+        visibleModels.map { model ->
+            val name = CLAUDE_MODEL_LABELS[model] ?: model
+            val big = contextWindowFor(model) == LARGE_CONTEXT_WINDOW
+            ModelChoice(name, model, model, if (big) "1M" else "200K", big)
+        }
     }
-    val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
     val compatibleModel = compatibleModelForAgent(agent, repo.model.value)
     val selected = if (codex || opencode) compatibleModel else modelAlias(compatibleModel)
     var switchingTo by remember { mutableStateOf<String?>(null) }

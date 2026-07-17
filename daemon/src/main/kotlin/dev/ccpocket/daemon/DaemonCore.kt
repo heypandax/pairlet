@@ -8,6 +8,8 @@ import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.disk.SpawnedSessions
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.claude.ClaudeModelService
+import dev.ccpocket.daemon.codex.CodexModelService
 import dev.ccpocket.daemon.opencode.OpenCodeModelService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
@@ -39,6 +41,7 @@ class DaemonCore(
     presetStore: PresetStore = PresetStore.load(),
     scheduleStore: ScheduleStore = ScheduleStore.load(),
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
+    codexModels: CodexModelService = CodexModelService(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val registry = SessionRegistry(scope, backends)
@@ -102,7 +105,10 @@ class DaemonCore(
         scope.launch { scheduler.runLoop() }
     }
 
-    val router = RequestRouter(registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler, openCodeModels)
+    val router = RequestRouter(
+        registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
+        openCodeModels, codexModels, ClaudeModelService(claudeConfigDir),
+    )
 
     suspend fun shutdown() = registry.closeAll()
 }

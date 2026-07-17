@@ -50,7 +50,9 @@ fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it 
 
 /** Keep Codex sessions on Codex-shaped ids while still allowing future gpt-*-codex custom ids. */
 fun isCodexModelId(model: String?): Boolean = model?.trim()?.let { m ->
-    CODEX_MODEL_IDS.any { it.equals(m, ignoreCase = true) } || m.contains("codex", ignoreCase = true)
+    CODEX_MODEL_IDS.any { it.equals(m, ignoreCase = true) } ||
+        m.startsWith("gpt-", ignoreCase = true) ||
+        m.contains("codex", ignoreCase = true)
 } == true
 
 /** Whether a model id belongs to the selected backend. Claude remains permissive for gateway ids. */

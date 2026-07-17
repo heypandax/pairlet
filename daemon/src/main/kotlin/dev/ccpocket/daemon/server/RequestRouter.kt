@@ -4,7 +4,9 @@ import dev.ccpocket.daemon.DaemonPrefs
 import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.claude.AuthService
+import dev.ccpocket.daemon.claude.ClaudeModelService
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.codex.CodexModelService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
@@ -20,6 +22,7 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.ActiveSession
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.AuthLogin
@@ -90,6 +93,8 @@ class RequestRouter(
     private val presets: PresetService,
     private val scheduler: SchedulerService,
     private val openCodeModels: OpenCodeModelService = OpenCodeModelService(),
+    private val codexModels: CodexModelService = CodexModelService(),
+    private val claudeModels: ClaudeModelService = ClaudeModelService(),
 ) {
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
@@ -265,8 +270,14 @@ class RequestRouter(
                 sink.emit(PushPrefs(prefs.pushEnabled))
             }
 
-            // opencode model listing: runs `opencode models` on the daemon host and returns the list
-            is FetchModels -> scope.launch { sink.emit(openCodeModels.fetch()) }
+            // agent model listing: inspect the Mac daemon's local agent config/cache.
+            is FetchModels -> scope.launch {
+                sink.emit(when (frame.agent) {
+                    AgentKind.OPENCODE -> openCodeModels.fetch()
+                    AgentKind.CODEX -> codexModels.fetch()
+                    AgentKind.CLAUDE -> claudeModels.fetch(frame.workdir)
+                })
+            }
 
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
         }
