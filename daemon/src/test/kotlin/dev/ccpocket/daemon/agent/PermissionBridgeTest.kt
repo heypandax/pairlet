@@ -143,6 +143,24 @@ class PermissionBridgeTest {
     }
 
     @Test
+    fun exit_plan_mode_snake_case_spelling_also_asks_under_bypass() = runBlocking {
+        // #156 review follow-up: the CLI has emitted both spellings historically; ToolMeta maps them to the
+        // same neverRemember meta, so both must survive bypass. Pins the snake_case leg explicitly.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("p2", "exit_plan_mode", buildJsonObject { put("plan", "step 1") }))
+        val ask = emitted.single()
+        assertIs<PermissionAsk>(ask)
+        assertTrue(ask.neverRemember)
+        assertTrue(responses.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
     fun resurfacePending_reemits_open_ask_only_until_answered() = runBlocking {
         // issue #55: a reattaching phone (backgrounded when the live PermissionAsk fired — plan mode surfaces the
         // AskUserQuestion minutes after a premature `result`) must be re-shown the still-open card, and NOT one it
