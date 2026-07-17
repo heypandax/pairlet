@@ -9,6 +9,7 @@ import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.bridge.BridgeGuard
 import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.bridge.BridgeVerdict
+import dev.ccpocket.daemon.bridge.InProcessBridgeEngine
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
@@ -55,7 +56,7 @@ class FeishuEngine(
     stateDir: File,
     /** log lines flow here — the runner's ring buffer, i.e. the bridge card's "adapter log". */
     private val logLine: (String) -> Unit,
-) {
+) : InProcessBridgeEngine {
     private val log = logger("FeishuEngine")
     private val appId = env["FEISHU_APP_ID"].orEmpty()
     private val appSecret = env["FEISHU_APP_SECRET"].orEmpty()
@@ -92,15 +93,15 @@ class FeishuEngine(
     // fallback then is "any mention", the pre-fix behaviour, so a slow fetch degrades soft.
     @Volatile private var botOpenId: String? = null
 
-    @Volatile var running: Boolean = false
+    @Volatile override var running: Boolean = false
         private set
-    @Volatile var lastError: String? = null
+    @Volatile override var lastError: String? = null
         private set
 
     /** The engine's slice of the router's outbound stream — dispatch by convoId, drop everything else. */
     private val sink = dev.ccpocket.daemon.conversation.OutboundSink { frame -> onFrame(frame) }
 
-    fun start(): String? {
+    override fun start(): String? {
         if (running) return null
         if (appId.isBlank() || appSecret.isBlank()) return "FEISHU_APP_ID / FEISHU_APP_SECRET are required for the built-in adapter"
         return runCatching {
@@ -135,7 +136,7 @@ class FeishuEngine(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         running = false
         // The SDK's ws.Client exposes no public stop — only protected disconnect() and an autoReconnect
         // flag. Reflection is regrettable but contained: the version is PINNED in the catalog, and the
@@ -151,11 +152,11 @@ class FeishuEngine(
         log.info("feishu engine \"$name\" stopped")
     }
 
-    fun shutdown() { stop(); scope.cancel() }
+    override fun shutdown() { stop(); scope.cancel() }
 
     /** ConvoIds this engine ever opened — the caller intersects with live registry state for the
      *  "active now" pulse on the management pages, same as an external bridge's guard. */
-    fun ownedConvoIds(): Set<String> = guard.ownedConvoIds()
+    override fun ownedConvoIds(): Set<String> = guard.ownedConvoIds()
 
     /**
      * REVOKE/REMOVE teardown ONLY: force-close every conversation this engine opened so its in-flight
@@ -168,7 +169,7 @@ class FeishuEngine(
      * stop()/restart deliberately does NOT call this: it reuses the same engine and its live convos for
      * continuity.
      */
-    suspend fun closeOwnedConvos() {
+    override suspend fun closeOwnedConvos() {
         ownedConvoIds().forEach { runCatching { core.registry.close(it, force = true) } }
         runCatching { core.registry.closeByOrigin(spec.name) }
     }

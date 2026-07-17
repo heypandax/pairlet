@@ -43,11 +43,13 @@ class BridgeRunners(
     private val log = logger("BridgeRunners")
     private val entries = ConcurrentHashMap<String, RunnerEntry>()
     private val procs = ConcurrentHashMap<String, Process>()
-    // in-process engines (the BUILT-IN feishu bridge): kind=feishu + blank scriptPath. Not persisted here —
-    // rebuilt from their RunnerEntry on start. Installed by the daemon's run path; null in bare tests, so
-    // an in-process start there refuses with a clear message instead of NPEing.
-    var engineFactory: ((name: String, spec: BridgeSpec, env: Map<String, String>, dir: File, logLine: (String) -> Unit) -> dev.ccpocket.daemon.feishu.FeishuEngine)? = null
-    private val engines = ConcurrentHashMap<String, dev.ccpocket.daemon.feishu.FeishuEngine>()
+    // in-process engines (the BUILT-IN adapters): a managed runner with a blank scriptPath, hosted inside
+    // the daemon and rebuilt from its RunnerEntry on start. Kept kind-AGNOSTIC — the daemon's run path
+    // registers a factory PER IM kind ([registerEngine]); a kind with no registered factory simply has no
+    // built-in adapter (a bare test registers none, so it can't accidentally start one). This is what keeps
+    // generic runner infrastructure from depending on any one concrete IM (issue #91 design review).
+    private val engineFactories = ConcurrentHashMap<String, InProcessEngineFactory>()
+    private val engines = ConcurrentHashMap<String, InProcessBridgeEngine>()
     private val logs = ConcurrentHashMap<String, ArrayDeque<String>>()
     private val lastError = ConcurrentHashMap<String, String>()
     private val startedAt = ConcurrentHashMap<String, Long>()
@@ -99,6 +101,14 @@ class BridgeRunners(
 
     /** The in-process bridges' specs — BridgeService.list() merges these with the registry's rows. */
     fun inProcessSpecs(): List<BridgeSpec> = entries.values.mapNotNull { it.bridgeSpec }
+
+    /** Register a BUILT-IN engine factory for an IM [kind] (e.g. RUNNER_KIND_FEISHU). The daemon's run
+     *  path calls this once at startup; a kind with no registered factory has no built-in adapter. */
+    fun registerEngine(kind: String, factory: InProcessEngineFactory) { engineFactories[kind] = factory }
+
+    /** True if a built-in engine is registered for [kind] — BridgeService gates create() on this rather
+     *  than hard-coding one specific IM. */
+    fun hasBuiltIn(kind: String): Boolean = engineFactories.containsKey(kind)
 
     /** Live convo count for an in-process bridge — its "online/active" pulse on the management pages. */
     suspend fun inProcessActive(name: String, liveCount: suspend (Collection<String>) -> Int): Int =
@@ -183,10 +193,10 @@ class BridgeRunners(
 
     private fun startInProcess(name: String, entry: RunnerEntry, bridgeSpec: BridgeSpec): String? {
         engines[name]?.let { if (it.running) return null } // idempotent
-        val factory = engineFactory
-            ?: return "this daemon build can't host the built-in adapter" // bare test construction only
+        val factory = engineFactories[entry.spec.kind]
+            ?: return "this daemon build has no built-in \"${entry.spec.kind}\" adapter" // unknown kind / bare test
         val engine = engines.getOrPut(name) {
-            factory(name, bridgeSpec, entry.spec.env, dirFor(name)) { line ->
+            factory.create(name, bridgeSpec, entry.spec.env, dirFor(name)) { line ->
                 val ring = logs.getOrPut(name) { ArrayDeque() }
                 synchronized(ring) {
                     ring.addLast(line.take(MAX_LOG_LINE_CHARS))

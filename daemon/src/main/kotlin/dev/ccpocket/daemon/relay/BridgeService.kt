@@ -119,7 +119,7 @@ class BridgeService(
         val runnerSpec = req.runner
         if (runnerSpec != null && runnerSpec.scriptPath.isBlank()) {
             val rs = runners ?: return BridgeCreated(ok = false, error = "this daemon can't manage adapter processes")
-            if (runnerSpec.kind != dev.ccpocket.protocol.RUNNER_KIND_FEISHU) {
+            if (!rs.hasBuiltIn(runnerSpec.kind)) {
                 return BridgeCreated(ok = false, error = "no built-in adapter for kind \"${runnerSpec.kind}\" — set an adapter script path")
             }
             val spec = BridgeSpec.clamped(

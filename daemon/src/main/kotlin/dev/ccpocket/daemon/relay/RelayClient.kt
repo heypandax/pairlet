@@ -196,9 +196,9 @@ class RelayClient(
             runners = bridgeRunners,
             liveCount = { ids -> core.registry.liveCountOf(ids) },
         )
-        // the BUILT-IN feishu engine (issue #91 follow-up): in-process, driven through the same guard +
-        // router an external bridge passes — see FeishuEngine
-        bridgeRunners.engineFactory = { name, spec, env, dir, logLine ->
+        // register the BUILT-IN engines by wire kind (issue #91 follow-up): in-process, driven through the
+        // same guard + router an external bridge passes — see FeishuEngine. A new IM adds one line here.
+        bridgeRunners.registerEngine(dev.ccpocket.protocol.RUNNER_KIND_FEISHU) { name, spec, env, dir, logLine ->
             dev.ccpocket.daemon.feishu.FeishuEngine(name, spec, env, core, dir, logLine)
         }
         // Managed adapters come up only once the relay link exists: an external adapter started earlier
