@@ -36,7 +36,13 @@ class StorePushService(
 
     override suspend fun notify(account: String, title: String, body: String, route: NotifyRoute?) {
         val targets = store.pushTargets(account)
-        if (targets.isEmpty()) return
+        if (targets.isEmpty()) {
+            // the silent dead-end that hid a whole class of "my phone never buzzes": the relay got the
+            // NotifyPush and had NOWHERE to send it (no registered token — the app never registered, or
+            // every token was pruned after a 410). Now it says so.
+            log("[push] account=${account.take(8)}… has NO registered tokens — dropping \"$title\"")
+            return
+        }
         var accepted = 0
         var pruned = 0
         for (t in targets) {
