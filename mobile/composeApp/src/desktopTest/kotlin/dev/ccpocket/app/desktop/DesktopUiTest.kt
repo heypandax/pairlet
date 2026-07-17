@@ -1,5 +1,6 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
@@ -306,13 +307,23 @@ class DesktopUiTest {
     @Test
     fun composerModelChipInertWhileStreaming() = runComposeUiTest {
         // mid-turn the chip dims and disables (design model-chip.jsx state 3) — the running turn keeps
-        // its model, so the entrance rests; the ⋯ Model shortcut still reaches the popover.
-        val model = SeedDesktopModel() // seed streams (streaming = true)
+        // its model, so the entrance rests; the ⋯ Model shortcut still reaches the popover. Streaming
+        // is snapshot state here so the second half can end the turn and pin the recovery: the chip
+        // re-enables through recomposition and opens the popover again.
+        val streamingState = mutableStateOf(true)
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val streaming: Boolean get() = streamingState.value
+        }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
         onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
         waitForIdle()
         assertTrue(!model.showModelPopover, "the dimmed chip must not open the popover mid-turn")
+        streamingState.value = false // the turn ends
+        waitForIdle()
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showModelPopover, "once streaming ends the chip re-enables and opens the popover")
     }
 
     @Test
