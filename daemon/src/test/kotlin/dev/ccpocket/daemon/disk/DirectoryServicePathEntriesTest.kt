@@ -62,4 +62,11 @@ class DirectoryServicePathEntriesTest {
         assertNull(DirectoryService().listPathEntries(root.toString(), "nope", 500))
         assertNull(DirectoryService().listPathEntries(root.toString(), "README.md", 500)) // a file, not a dir
     }
+
+    @Test
+    fun tilde_workdir_anchors_the_listing_at_the_daemon_home() {
+        // the phone's folder browser (issue #152) lists with workdir == "~": the daemon owns the
+        // expansion (only it knows the remote home), so the anchor must stay listable here
+        assertTrue(DirectoryService().listPathEntries("~", "", 500) != null, "the home anchor must be listable")
+    }
 }

@@ -7,6 +7,7 @@ import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.OpenSession
@@ -106,6 +107,16 @@ class GuestGuardTest {
         // in-scope workdir + owned session → allowed
         allow(g.vet(ReadFile(root.path, "sid-own", "x"), now = 0))
         allow(g.vet(ListSessionFiles(root.path, "sid-own"), now = 0))
+    }
+
+    @Test
+    fun the_home_browse_anchor_is_denied_for_a_guest_but_in_root_listing_stays_allowed() {
+        // the phone's folder browser (issue #152) anchors ListPathEntries at the literal "~" — for a
+        // guest that resolves nowhere inside the shared root (canonical() never expands tilde), so the
+        // whole-machine browse is refused while the #75 in-root @-completion keeps working
+        deny(guard().vet(ListPathEntries("~"), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        deny(guard().vet(ListPathEntries("~", "Desktop"), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        allow(guard().vet(ListPathEntries(root.path, "src"), now = 0))
     }
 
     @Test
