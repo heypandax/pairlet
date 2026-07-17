@@ -1,6 +1,5 @@
 package dev.ccpocket.app.desktop
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -32,6 +31,8 @@ import java.awt.geom.Path2D
 import java.awt.image.BaseMultiResolutionImage
 import java.awt.image.BufferedImage
 import kotlinx.coroutines.delay
+import org.jetbrains.skiko.SystemTheme
+import org.jetbrains.skiko.currentSystemTheme
 
 /**
  * The OS menu-bar presence (issue #151, direction 1 — "menubar-presence" handoff): a persistent status
@@ -69,8 +70,9 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
         if (flashNonce > 0) { flashing = true; delay(MENUBAR_DONE_FLASH_MS); flashing = false }
     }
     val spec = menuBarIcon(snapshot, flashing)
-    // the OS appearance — the MENU BAR follows it regardless of the app's own theme pick
-    val darkMenuBar = isSystemInDarkTheme()
+    // repaint trigger for OS appearance flips: tray clicks bump it so the raster below re-asks skiko
+    // (deliberately NOT isSystemInDarkTheme() — see menuBarIsDark for the process-cached-default trap)
+    var appearancePing by remember { mutableStateOf(0) }
 
     // keep the running-elapsed clock fed while the popover is closed, so reopening shows honest ages
     val runningKeys = model.running.map { (m, p) -> runningKey(m, p) }
@@ -84,6 +86,7 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
     // while the popover is open steals its focus first (focus-loss closes it) — both debounce here so a
     // single click is a single toggle instead of a flicker.
     val toggle: (Int, Int) -> Unit = toggle@{ x: Int, y: Int ->
+        appearancePing++ // every click re-rasterizes — the user's own repaint path after an appearance flip
         val now = System.currentTimeMillis()
         if (anchor != null) {
             if (now - openedAt > 350) { anchor = null; closedAt = now }
@@ -93,7 +96,7 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
         }
     }
     val trayIcon = remember {
-        java.awt.TrayIcon(menuBarImage(MenuBarIconSpec(MenuBarKind.IDLE), darkMenuBar = true)).apply {
+        java.awt.TrayIcon(menuBarImage(MenuBarIconSpec(MenuBarKind.IDLE), darkMenuBar = menuBarIsDark())).apply {
             isImageAutoSize = false
             toolTip = "cc-pocket"
         }
@@ -119,7 +122,8 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
             if (added) runCatching { java.awt.SystemTray.getSystemTray().remove(trayIcon) }
         }
     }
-    LaunchedEffect(spec, darkMenuBar) { trayIcon.image = menuBarImage(spec, darkMenuBar) }
+    // every redraw asks the OS afresh; an appearance flip alone lands on the next state change or click
+    LaunchedEffect(spec, appearancePing) { trayIcon.image = menuBarImage(spec, darkMenuBar = menuBarIsDark()) }
 
     // ── the anchored popover window ──
     val a = anchor
@@ -220,12 +224,28 @@ internal fun placePopover(w: java.awt.Window, a: TrayAnchor) {
 // Geometry is menubar.jsx's, 1pt = 1 viewBox unit: chevron (4,4.5)→(8.3,8.8)→(4,13.1) + underscore
 // (9.6,13.2)→(14,13.2) in an 18×18 box, stroke 1.9 round (hollow offline: 1.4 @ 50%). Colour is spent
 // ONLY on needs-you (terracotta dot + count) and the done tick (green) — everything else is monochrome
-// against the menu bar, white on a dark bar / near-black on a light one (AWT has no template images, so
-// the host redraws on OS appearance flips).
+// against the menu bar, white on a dark bar / near-black on a light one (AWT has no template images —
+// [menuBarIsDark] is how, and how honestly, the host tracks the bar's appearance).
 
 private val MB_ACCENT = Color(0xD9, 0x77, 0x57) // Tok dark-palette accent — identical in both palettes' bars
 private val MB_OK = Color(0x4F, 0xB4, 0x77)
 private const val MB_H = 18 // pt — the menu-bar content box
+
+/**
+ * The menu bar's appearance, asked of skiko fresh on every call — deliberately NOT
+ * [androidx.compose.foundation.isSystemInDarkTheme]. At `application` scope no window provides
+ * LocalSystemTheme, so that composable reads the composition local's DEFAULT — a static default computed
+ * once (it queries skiko) and then cached for the whole process. Flip macOS appearance mid-run and the
+ * glyph would keep the old contrast (near-black strokes on a now-dark bar ≈ invisible) until relaunch.
+ *
+ * skiko's [currentSystemTheme] getter is an uncached JNI query (macOS: NSUserDefaults' AppleInterfaceStyle;
+ * verified live — flipping appearance mid-process flips the returned value), so every raster pass gets the
+ * bar as it is NOW. Honest limit: AWT surfaces no appearance-change event, so a flip alone shows on the
+ * next redraw — any state change or a tray click — not instantly.
+ * UNKNOWN or a failed query counts as a light bar, the same mapping the composition local's default uses.
+ */
+private fun menuBarIsDark(): Boolean =
+    runCatching { currentSystemTheme == SystemTheme.DARK }.getOrDefault(false)
 
 /** The tray image at 1x+2x so retina menu bars stay crisp (AWT picks the variant per backing scale). */
 internal fun menuBarImage(spec: MenuBarIconSpec, darkMenuBar: Boolean): java.awt.Image =
