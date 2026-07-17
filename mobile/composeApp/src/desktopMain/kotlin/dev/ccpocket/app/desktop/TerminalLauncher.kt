@@ -24,7 +24,8 @@ object TerminalLauncher {
     private val mac = os.contains("mac")
     private val win = os.contains("win")
 
-    private fun resolve(path: String): File =
+    // internal: the embedded terminal engine (issue #153) resolves the same "~" the same way
+    internal fun resolve(path: String): File =
         File(if (path == "~" || path.startsWith("~/")) System.getProperty("user.home") + path.drop(1) else path)
 
     fun canOpen(dir: String?): Boolean = dir != null && resolve(dir).isDirectory
