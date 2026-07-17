@@ -179,7 +179,8 @@ interface DesktopModel {
     var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
-    var showQuickActions: Boolean // chat-header ⋯ popover: model/effort/mode + compact/clear (mirrors mobile's sheet)
+    var showQuickActions: Boolean // chat-header ⋯ popover: effort/mode + compact/clear (mirrors mobile's sheet)
+    var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
 
@@ -188,11 +189,11 @@ interface DesktopModel {
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges || showSkills
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false; showSkills = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts

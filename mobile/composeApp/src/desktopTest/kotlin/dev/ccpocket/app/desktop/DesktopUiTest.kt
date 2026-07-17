@@ -1,5 +1,6 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
@@ -297,6 +298,61 @@ class DesktopUiTest {
         onAllNodes(hasText("Full auto")).onLast().performClick()     // picking one closes the popover
         waitForIdle()
         assertTrue(!model.showQuickActions, "picking a mode dismisses the quick-actions popover")
+    }
+
+    @Test
+    fun composerModelChipOpensAnchoredPopover() = runComposeUiTest {
+        // issue #157: the chip on the composer is the one-click model entrance. The seed streams by
+        // default (chip inert mid-turn), so pin a quiet session to drive the open.
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val streaming = false
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("sonnet")                                                // the chip carries the current model
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showModelPopover, "clicking the chip opens the model popover")
+        assertPresent("Fable")            // the alias rows render in the anchored popover
+        assertPresent("Gateway presets")  // collapsed presets row (no gateway in the seed)
+        assertPresent("CUSTOM")           // the custom-id section
+    }
+
+    @Test
+    fun composerModelChipInertWhileStreaming() = runComposeUiTest {
+        // mid-turn the chip dims and disables (design model-chip.jsx state 3) — the running turn keeps
+        // its model, so the entrance rests; the ⋯ Model shortcut still reaches the popover. Streaming
+        // is snapshot state here so the second half can end the turn and pin the recovery: the chip
+        // re-enables through recomposition and opens the popover again.
+        val streamingState = mutableStateOf(true)
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val streaming: Boolean get() = streamingState.value
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(!model.showModelPopover, "the dimmed chip must not open the popover mid-turn")
+        streamingState.value = false // the turn ends
+        waitForIdle()
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showModelPopover, "once streaming ends the chip re-enables and opens the popover")
+    }
+
+    @Test
+    fun quickActionsModelRowShortcutsToPopover() = runComposeUiTest {
+        // issue #157: ⋯ → Model no longer drills a second-level page — it closes the menu and opens
+        // the SAME anchored popover the composer chip owns.
+        val model = SeedDesktopModel().apply { showQuickActions = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText("Model")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!model.showQuickActions, "the shortcut closes the ⋯ menu")
+        assertTrue(model.showModelPopover, "…and opens the shared model popover")
+        assertPresent("Fable")                              // popover content anchored at the chip
+        assertPresent("Switch applies to the next turn.")   // seed streams → the next-turn note shows
     }
 
     @Test

@@ -277,6 +277,7 @@
     <string name="model_custom_label">自定义</string>
     <string name="model_custom_hint">输入传给 --model 的模型 id</string>
     <string name="model_switching">正在重启会话……历史保留。</string>
+    <string name="model_next_turn_note">切换将于下一轮生效。</string>
     <string name="model_not_installed">未安装</string>
     <string name="model_gateway_section">网关模型</string>
     <string name="model_gateway_via">经 %1$s</string>

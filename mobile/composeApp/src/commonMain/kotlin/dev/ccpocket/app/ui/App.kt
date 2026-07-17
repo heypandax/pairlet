@@ -1231,6 +1231,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
+    var showModelSheet by remember { mutableStateOf(false) } // composer model chip → the picker, one tap (issue #157)
     var showBgJobs by remember { mutableStateOf(false) }
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
@@ -1608,6 +1609,20 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                                 focusRequester = composerFocus,
                             )
                             Spacer(Modifier.width(8.dp))
+                            // model chip (issue #157): the high-frequency switch rides the composer — one tap
+                            // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
+                            // Boxed to the 44dp button height so it centers against the round send/mic while
+                            // the field grows above (the row bottom-aligns). Dimmed mid-turn: the running turn
+                            // keeps its model, so the entrance rests until the next turn can take a switch.
+                            Box(Modifier.height(44.dp), contentAlignment = Alignment.Center) {
+                                ModelChip(
+                                    label = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) },
+                                    open = showModelSheet,
+                                    enabled = !repo.streaming.value,
+                                    contentDescription = stringResource(Res.string.qa_model),
+                                ) { showModelSheet = true }
+                            }
+                            Spacer(Modifier.width(8.dp))
                             // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
                             // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
                             // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
@@ -1700,6 +1715,8 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                 onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
             ) { showQuickActions = false }
         }
+        // the composer chip's direct model sheet (issue #157) — same picker, no quick-actions detour
+        if (showModelSheet) ModelSheet(repo) { showModelSheet = false }
         if (showChangedFiles) ChangedFilesSheet(repo, onOpen = { repo.openChangedFile(it) }) { showChangedFiles = false }
         if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs, onStop = { repo.stopBackgroundJob(it.id) }) { showBgJobs = false }
         if (showSwitcher) dev.ccpocket.app.ui.fleet.MachineSwitcherSheet(repo, onDismiss = { showSwitcher = false }, onManage = onOpenFleet)
