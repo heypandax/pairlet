@@ -497,6 +497,37 @@
     <string name="share_revoke_c3">此邀请无法再次使用。</string>
     <string name="share_revoke_confirm">撤销访问权限</string>
 
+    <!-- headless bridges (issue #91 follow-up): phone-side monitor + revoke + runner control -->
+    <string name="settings_bridges">机器人桥接</string>
+    <string name="bridges_title">机器人桥接</string>
+    <string name="bridges_empty">还没有机器人桥接</string>
+    <string name="bridges_empty_hint">在桌面端创建。桥接让飞书 / Slack 机器人驱动这台电脑——你在这里监控和撤销它们。</string>
+    <string name="bridges_stale">升级 daemon 后可管理桥接，然后重新打开。</string>
+    <string name="bridge_online">在线</string>
+    <string name="bridge_idle">空闲</string>
+    <string name="bridge_offline">离线</string>
+    <string name="bridge_waiting_adapter">等待适配器连接</string>
+    <string name="bridge_runner_start">启动</string>
+    <string name="bridge_runner_stop">停止</string>
+    <string name="bridge_runner_restart">重启</string>
+    <string name="bridge_runner_unmanaged">此桥接由你自行运行适配器。</string>
+    <string name="bridge_adapter_log">适配器日志</string>
+    <string name="bridge_exited_code">已退出（代码 %1$d）</string>
+    <string name="bridge_last_error">最近错误</string>
+    <string name="bridge_projects">项目</string>
+    <string name="bridge_revoke_title">撤销此桥接？</string>
+    <string name="bridge_revoke_c1">它进行中的会话会立即结束。</string>
+    <string name="bridge_revoke_c2">凭证会被删除；若有托管适配器，会一并停止。</string>
+    <string name="bridge_revoke_confirm">撤销桥接</string>
+    <string name="bridge_edit">编辑</string>
+    <string name="bridge_edit_title">编辑适配器配置</string>
+    <string name="bridge_edit_hint">留空的字段保持不变。当前已设置：%1$s</string>
+    <string name="bridge_edit_admin_ph">FEISHU_ADMIN_OPEN_ID（ou_ 开头）</string>
+    <string name="bridge_edit_appid_ph">FEISHU_APP_ID（cli_ 开头，留空不变）</string>
+    <string name="bridge_edit_secret_ph">FEISHU_APP_SECRET（留空不变）</string>
+    <string name="bridge_edit_save">保存并重启</string>
+    <string name="bridge_merge_lost">daemon 版本过旧，不支持增量编辑——这些值被清空而不是保留：%1$s。请升级 daemon 后重新编辑并补填。</string>
+
     <!-- guest: accept preview -->
     <string name="join_title">加入文件夹</string>
     <string name="join_get_title">你将可以</string>

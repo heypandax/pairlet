@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
@@ -607,5 +608,23 @@ class DesktopUiTest {
             m.computers.any { it.online } && m.computers.any { !it.online },
             "seed has both online and offline computers",
         )
+    }
+@Test
+    fun bridgeFormComposesInsideTheSettingsScrollContainer() = runComposeUiTest {
+        setContent {
+            PocketTheme {
+                // the same shape SettingsModal gives every pane: an unbounded verticalScroll Box.
+                // A nested unbounded scrollable inside the form crashed at measure time (infinite
+                // max-height) — this test exists so that regression can't come back silently.
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                ) {
+                    NewBridgeForm(onCancel = {}, onCreate = { _, _, _, _ -> })
+                }
+            }
+        }
+        waitForIdle()
+        assertPresent("AUTONOMY")
+        assertPresent("Let the daemon run the adapter")
     }
 }

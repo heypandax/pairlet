@@ -425,6 +425,31 @@ interface DesktopModel {
     /** Open the browser: flip the flag and re-pull the catalog (cheap daemon-side disk scan). */
     fun openSkills() { showSkills = true; fetchSkillCatalog() }
 
+    // headless bridges (issue #91 follow-up): mint / manage the IM bots this machine answers to.
+    // Defaults keep seed/preview models inert, like the skills browser above.
+    val bridges: List<dev.ccpocket.protocol.BridgeInfo> get() = emptyList()
+    val bridgesLoaded: Boolean get() = false
+    /** No reply — the daemon predates pocket/bridge.*; the page shows its "update the daemon" state. */
+    val bridgesStale: Boolean get() = false
+    val bridgeBusy: Boolean get() = false
+    val bridgeError: String? get() = null
+    /** Keys a MERGE edit came back WITHOUT — an old daemon replaced wholesale; they must be re-entered. */
+    val bridgeMergeLost: List<String>? get() = null
+    /** A just-minted UNMANAGED credential to copy out; null for managed bridges (nothing to hand over). */
+    val bridgeCredential: dev.ccpocket.protocol.BridgeCredential? get() = null
+    fun fetchBridges() {}
+    fun createBridge(
+        name: String,
+        workdirs: List<String>,
+        tier: dev.ccpocket.protocol.AccessTier,
+        maxSessions: Int?,
+        runner: dev.ccpocket.protocol.BridgeRunnerSpec?,
+    ) {}
+    fun revokeBridge(name: String) {}
+    fun controlBridgeRunner(name: String, action: String) {}
+    fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean = false) {}
+    fun clearBridgeCredential() {}
+
     // composer image attachments (⌘V paste / attach icon → file picker); ride the next send
     val pendingImages: List<dev.ccpocket.app.data.PendingImage>
     fun attachImages(raw: List<ByteArray>)

@@ -497,6 +497,37 @@
     <string name="share_revoke_c3">This invite can\'t be reused.</string>
     <string name="share_revoke_confirm">Revoke access</string>
 
+    <!-- headless bridges (issue #91 follow-up): phone-side monitor + revoke + runner control -->
+    <string name="settings_bridges">Bridges</string>
+    <string name="bridges_title">Bridges</string>
+    <string name="bridges_empty">No bridges yet</string>
+    <string name="bridges_empty_hint">Create one from the desktop app. Bridges let a Feishu / Slack bot drive this machine — you monitor and revoke them here.</string>
+    <string name="bridges_stale">Update the daemon to manage bridges, then reopen.</string>
+    <string name="bridge_online">Online</string>
+    <string name="bridge_idle">Idle</string>
+    <string name="bridge_offline">Offline</string>
+    <string name="bridge_waiting_adapter">waiting for the adapter to connect</string>
+    <string name="bridge_runner_start">Start</string>
+    <string name="bridge_runner_stop">Stop</string>
+    <string name="bridge_runner_restart">Restart</string>
+    <string name="bridge_runner_unmanaged">You run this adapter yourself.</string>
+    <string name="bridge_adapter_log">Adapter log</string>
+    <string name="bridge_exited_code">Exited (code %1$d)</string>
+    <string name="bridge_last_error">Last error</string>
+    <string name="bridge_projects">Projects</string>
+    <string name="bridge_revoke_title">Revoke this bridge?</string>
+    <string name="bridge_revoke_c1">Its live sessions end immediately.</string>
+    <string name="bridge_revoke_c2">The credential is deleted; a managed adapter is stopped too.</string>
+    <string name="bridge_revoke_confirm">Revoke bridge</string>
+    <string name="bridge_edit">Edit</string>
+    <string name="bridge_edit_title">Edit adapter config</string>
+    <string name="bridge_edit_hint">Blank fields keep their current values. Set now: %1$s</string>
+    <string name="bridge_edit_admin_ph">FEISHU_ADMIN_OPEN_ID (ou_…)</string>
+    <string name="bridge_edit_appid_ph">FEISHU_APP_ID (cli_…, blank = unchanged)</string>
+    <string name="bridge_edit_secret_ph">FEISHU_APP_SECRET (blank = unchanged)</string>
+    <string name="bridge_edit_save">Save &amp; restart</string>
+    <string name="bridge_merge_lost">The daemon is too old for partial edits — it CLEARED these values instead of keeping them: %1$s. Update the daemon, then edit again and re-enter them.</string>
+
     <!-- guest: accept preview -->
     <string name="join_title">Join folder</string>
     <string name="join_get_title">You\'ll be able to</string>

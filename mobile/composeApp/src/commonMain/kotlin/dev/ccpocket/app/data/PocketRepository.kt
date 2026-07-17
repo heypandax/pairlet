@@ -37,6 +37,18 @@ import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.AccessTier
+import dev.ccpocket.protocol.BridgeCreated
+import dev.ccpocket.protocol.BridgeCredential
+import dev.ccpocket.protocol.BridgeInfo
+import dev.ccpocket.protocol.BridgeListing
+import dev.ccpocket.protocol.BridgeRevoked
+import dev.ccpocket.protocol.BridgeRunnerSpec
+import dev.ccpocket.protocol.BridgeRunnerStatus
+import dev.ccpocket.protocol.ConfigureBridgeRunner
+import dev.ccpocket.protocol.ControlBridgeRunner
+import dev.ccpocket.protocol.CreateBridge
+import dev.ccpocket.protocol.ListBridges
+import dev.ccpocket.protocol.RevokeBridge
 import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.ListShares
 import dev.ccpocket.protocol.RevokeShare
@@ -1736,6 +1748,41 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 skillCatalogDeadline?.cancel()
                 skillCatalog.value = f; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
             }
+            // headless bridges (issue #91 follow-up) — the owner's control plane replies
+            is BridgeListing -> {
+                bridgesDeadline?.cancel(); bridgeBusyDeadline?.cancel()
+                bridges.clear(); bridges.addAll(f.items)
+                bridgesLoaded.value = true; bridgesUnavailable.value = false; bridgeBusy.value = false
+            }
+            is BridgeCreated -> {
+                bridgeBusyDeadline?.cancel()
+                bridgeBusy.value = false
+                bridgeError.value = f.error
+                // only an UNMANAGED mint hands back a ticket; a managed one already gave it to its process
+                bridgeCredential.value = f.credential
+                if (f.ok) fetchBridges() // the new row (and its runner state) comes from the listing
+            }
+            is BridgeRevoked -> {
+                bridgeBusyDeadline?.cancel()
+                bridgeBusy.value = false
+                bridgeError.value = f.error
+                if (f.ok) fetchBridges()
+            }
+            is BridgeRunnerStatus -> {
+                bridgeBusyDeadline?.cancel()
+                bridgeBusy.value = false
+                bridgeError.value = f.error
+                // merge-loss guard: an OLD daemon ignores mergeEnv and replaces wholesale — keys the edit
+                // didn't retype silently die. envKeys in the reply is the proof either way.
+                pendingMergeCheck?.let { (n, prior) ->
+                    if (f.name == n) {
+                        pendingMergeCheck = null
+                        val lost = prior - (f.state?.envKeys?.toSet() ?: emptySet())
+                        if (lost.isNotEmpty()) bridgeMergeLost.value = lost.sorted()
+                    }
+                }
+                fetchBridges() // start/stop/detach all move the row's state
+            }
             is AuthState -> authState.value = f
             // scheduled tasks (issue #137): the single reply to every pocket/schedule.* request
             is ScheduleState -> {
@@ -2284,6 +2331,90 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
         scope.launch { send(FetchSkillCatalog(workdir.value)) }
     }
+
+    // ── headless bridges (issue #91 follow-up): the owner's IM-bot control plane ──
+    /** The daemon's bridges — the latest [BridgeListing]. */
+    val bridges = mutableStateListOf<BridgeInfo>()
+    /** True once the first [BridgeListing] of this session lands — "no bridges yet" vs. "still loading". */
+    val bridgesLoaded = mutableStateOf(false)
+    /** No reply — the daemon predates pocket/bridge.* and silently drops the unknown frame, so silence is
+     *  the only signal. Distinct from an EMPTY list: one says "update the daemon", the other "create one". */
+    val bridgesUnavailable = mutableStateOf(false)
+    /** The last create/revoke/runner error, for the page to surface verbatim. Cleared on the next request. */
+    val bridgeError = mutableStateOf<String?>(null)
+    /** A just-minted UNMANAGED credential the owner must copy out before its TTL lapses. Managed bridges
+     *  never set this — the daemon injected the ticket itself and there is nothing to hand over. */
+    val bridgeCredential = mutableStateOf<BridgeCredential?>(null)
+    val bridgeBusy = mutableStateOf(false)
+    /** Non-null = the last MERGE edit came back with env keys MISSING — the daemon is too old for partial
+     *  edits and replaced wholesale (the exact way a user once lost their app secret). The UI must shout,
+     *  not shrug: these keys now need re-entering. Cleared on the next bridge request. */
+    val bridgeMergeLost = mutableStateOf<List<String>?>(null)
+    private var pendingMergeCheck: Pair<String, Set<String>>? = null
+    private var bridgesDeadline: Job? = null
+    private var bridgeBusyDeadline: Job? = null
+
+    /** Arm a request: clear the last error and make sure a lost reply can't spin the page forever. */
+    private fun bridgeRequestStarted() {
+        bridgeBusy.value = true
+        bridgeError.value = null
+        bridgeMergeLost.value = null
+        bridgeBusyDeadline?.cancel()
+        bridgeBusyDeadline = scope.launch {
+            delay(10_000)
+            if (bridgeBusy.value) {
+                bridgeBusy.value = false
+                bridgeError.value = "the daemon didn't answer — try again"
+            }
+        }
+    }
+
+    fun fetchBridges() {
+        bridgesUnavailable.value = false
+        bridgesDeadline?.cancel()
+        bridgesDeadline = scope.launch {
+            delay(8_000)
+            if (!bridgesLoaded.value) bridgesUnavailable.value = true
+        }
+        scope.launch { send(ListBridges) }
+    }
+
+    /** Mint a bridge. [runner] non-null = the daemon manages the adapter process and the credential never
+     *  comes back to us (see [CreateBridge.runner]). */
+    fun createBridge(
+        name: String,
+        workdirs: List<String>,
+        tier: AccessTier = AccessTier.REVIEW,
+        maxSessions: Int? = null,
+        runner: BridgeRunnerSpec? = null,
+    ) {
+        bridgeRequestStarted()
+        bridgeCredential.value = null
+        scope.launch { send(CreateBridge(name, workdirs, maxSessions, tier = tier, runner = runner)) }
+    }
+
+    fun revokeBridge(name: String) {
+        bridgeRequestStarted()
+        scope.launch { send(RevokeBridge(name)) }
+    }
+
+    fun controlBridgeRunner(name: String, action: String) {
+        bridgeRequestStarted()
+        scope.launch { send(ControlBridgeRunner(name, action)) }
+    }
+
+    /** [mergeEnv] = the edit path: only non-blank env values land, everything else is kept daemon-side. */
+    fun configureBridgeRunner(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false) {
+        bridgeRequestStarted()
+        // arm the merge-loss guard: remember what WAS configured, so the reply can prove nothing vanished
+        pendingMergeCheck = if (mergeEnv) {
+            name to (bridges.firstOrNull { it.name == name }?.runner?.envKeys?.toSet() ?: emptySet())
+        } else null
+        scope.launch { send(ConfigureBridgeRunner(name, spec, mergeEnv)) }
+    }
+
+    /** Dismiss the one-shot credential card once the owner says they've copied it. */
+    fun clearBridgeCredential() { bridgeCredential.value = null }
 
     // ── scheduled tasks (issue #137): one-shot & repeat prompt deliveries the daemon fires ──
     /** The daemon's schedule list — the latest [ScheduleState]. */

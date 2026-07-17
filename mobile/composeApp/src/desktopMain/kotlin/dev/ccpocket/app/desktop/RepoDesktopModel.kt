@@ -185,6 +185,28 @@ class RepoDesktopModel(
     override val skillCatalogStale: Boolean get() = repo.skillCatalogUnavailable.value
     override fun fetchSkillCatalog() = repo.fetchSkillCatalog()
 
+    // ── headless bridges (issue #91 follow-up): straight repo pass-throughs ──
+    override val bridges: List<dev.ccpocket.protocol.BridgeInfo> get() = repo.bridges
+    override val bridgesLoaded: Boolean get() = repo.bridgesLoaded.value
+    override val bridgesStale: Boolean get() = repo.bridgesUnavailable.value
+    override val bridgeBusy: Boolean get() = repo.bridgeBusy.value
+    override val bridgeError: String? get() = repo.bridgeError.value
+    override val bridgeMergeLost: List<String>? get() = repo.bridgeMergeLost.value
+    override val bridgeCredential: dev.ccpocket.protocol.BridgeCredential? get() = repo.bridgeCredential.value
+    override fun fetchBridges() = repo.fetchBridges()
+    override fun createBridge(
+        name: String,
+        workdirs: List<String>,
+        tier: dev.ccpocket.protocol.AccessTier,
+        maxSessions: Int?,
+        runner: dev.ccpocket.protocol.BridgeRunnerSpec?,
+    ) = repo.createBridge(name, workdirs, tier, maxSessions, runner)
+    override fun revokeBridge(name: String) = repo.revokeBridge(name)
+    override fun controlBridgeRunner(name: String, action: String) = repo.controlBridgeRunner(name, action)
+    override fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean) =
+        repo.configureBridgeRunner(name, spec, mergeEnv)
+    override fun clearBridgeCredential() = repo.clearBridgeCredential()
+
     override val connected: Boolean get() = repo.sessionActive.value
     override val connGen: Int get() = repo.connGen.value
 

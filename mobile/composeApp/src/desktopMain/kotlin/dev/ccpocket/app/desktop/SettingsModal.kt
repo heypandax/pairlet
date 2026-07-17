@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import dev.ccpocket.app.epochMillis
@@ -97,6 +98,7 @@ private enum class SettingsTab(val label: String, val icon: ImageVector) {
     COMPUTERS("Computers", Icons.Rounded.Devices),
     SCHEDULES("Schedules", Icons.Rounded.Schedule),
     SHARES("Shared", Icons.Rounded.Share),
+    BRIDGES("Bridges", Icons.Rounded.SmartToy),
     SHORTCUTS("Shortcuts", Icons.Rounded.Keyboard),
     ABOUT("About", Icons.Outlined.Info),
 }
@@ -129,6 +131,7 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SCHEDULES -> SchedulesPane(model)
                     SettingsTab.SHARES -> SharesPane(model)
+                    SettingsTab.BRIDGES -> BridgesPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
                     SettingsTab.ABOUT -> AboutPane(model)
                 }
