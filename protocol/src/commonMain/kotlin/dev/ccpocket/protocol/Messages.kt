@@ -827,7 +827,15 @@ data class LanHello(val deviceId: String) : ToDaemon
  */
 @Serializable
 @SerialName("pocket/daemon.info")
-data class DaemonInfo(val lanUrl: String? = null, val hostname: String? = null, val gatewayBaseUrl: String? = null) : ToPhone
+data class DaemonInfo(
+    val lanUrl: String? = null,
+    val hostname: String? = null,
+    val gatewayBaseUrl: String? = null,
+    // capability advertisement (issue #91): this daemon understands the bridge control plane. ABSENT from an
+    // older daemon's DaemonInfo → decodes to false → the management page can say "update your daemon" up front
+    // instead of sending a bridge frame that just times out on a build that never learned it.
+    val bridgeControl: Boolean = false,
+) : ToPhone
 
 @Serializable
 enum class ChatRole {

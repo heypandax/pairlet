@@ -1407,6 +1407,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         authState.value = null
         presetsState.value = null; presetsStateRev.value = 0
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
+        bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -1811,6 +1812,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // gateway hint (issue #139): unconditional, incl. null — a daemon back on the official
                 // endpoint (or an old daemon omitting the field) must clear a previous gateway's value
                 gatewayBaseUrl.value = f.gatewayBaseUrl
+                bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
             }
             is SessionLive -> {
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
@@ -2258,6 +2260,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  handshake — non-null means claude launches route through a gateway, so the model picker leads
      *  with the gateway model presets. Null on the official endpoint or from a daemon that predates it. */
     val gatewayBaseUrl = mutableStateOf<String?>(null)
+
+    /** Whether the connected daemon understands the bridge control plane (issue #91), from [DaemonInfo]:
+     *  null until the first one lands, false from a daemon too old to carry the field. The Bridges screen
+     *  shows "update the daemon" up front on false, instead of waiting for a bridge fetch to time out. */
+    val bridgeControl = mutableStateOf<Boolean?>(null)
 
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 

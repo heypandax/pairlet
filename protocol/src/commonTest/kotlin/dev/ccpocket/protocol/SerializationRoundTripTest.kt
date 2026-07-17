@@ -502,6 +502,20 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun daemonInfo_bridgeControl_is_optional_and_back_compatible() {
+        // bridgeControl (issue #91) is a trailing optional capability bit: round-trips when set, and an OLD
+        // daemon's frame (no key) decodes to false — so the phone treats "silent about bridges" as "no bridge
+        // control plane" and shows "update the daemon" up front instead of waiting for a fetch to time out.
+        val on = Envelope(id = "b1", ts = 0, body = DaemonInfo("ws://x/v1/ws", "Host", null, bridgeControl = true))
+        val json = PocketJson.encodeToString(on)
+        assertTrue("\"bridgeControl\":true" in json, json)
+        assertEquals(on, PocketJson.decodeFromString<Envelope>(json))
+        // an OLD daemon's frame (no bridgeControl key) decodes to false — the safe deny-by-omission default
+        val legacy = """{"id":"b2","ts":0,"to":"PEER","body":{"t":"pocket/daemon.info","lanUrl":"ws://x/v1/ws"}}"""
+        assertEquals(false, (PocketJson.decodeFromString<Envelope>(legacy).body as DaemonInfo).bridgeControl)
+    }
+
+    @Test
     fun sessionSummary_omits_null_gitBranch() {
         val s = SessionSummary(
             sessionId = "s", title = "t", firstPrompt = "p",

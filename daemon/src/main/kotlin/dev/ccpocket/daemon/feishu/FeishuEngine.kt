@@ -92,6 +92,12 @@ class FeishuEngine(
     // the bot's own open_id (fetched at start) — the mention filter's ground truth. Null until fetched;
     // fallback then is "any mention", the pre-fix behaviour, so a slow fetch degrades soft.
     @Volatile private var botOpenId: String? = null
+    // Feishu delivers events AT-LEAST-ONCE; this bounded LRU of message ids drops a redelivered duplicate so
+    // one message never fires the same prompt twice. Guarded by its own monitor — onMessage runs on the lark
+    // SDK's dispatcher threads (not a coroutine), so the engine's suspend mutex can't cover it.
+    private val seenMessages = object : LinkedHashMap<String, Boolean>(64, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > SEEN_MESSAGES_MAX
+    }
 
     @Volatile override var running: Boolean = false
         private set
@@ -205,6 +211,11 @@ class FeishuEngine(
         }
     }
 
+    /** First time we've seen [messageId]? Records it and returns true; a redelivered duplicate returns
+     *  false. Bounded LRU ([seenMessages]); thread-safe for the lark dispatcher threads onMessage runs on. */
+    private fun firstSeen(messageId: String): Boolean =
+        synchronized(seenMessages) { seenMessages.put(messageId, true) == null }
+
     private fun onMessage(event: P2MessageReceiveV1) {
         val data = event.event ?: return
         val msg = data.message ?: return
@@ -222,6 +233,9 @@ class FeishuEngine(
         val chatId = msg.chatId ?: return
         val sender = data.sender?.senderId?.openId.orEmpty()
         val replyTo = msg.messageId ?: return
+        // Feishu delivers events at-least-once — the SAME message can arrive again on a retry / reconnect,
+        // and without dedup that re-runs the prompt (issue #91). Drop a message id we've already handled.
+        if (!firstSeen(replyTo)) return
 
         when (val action = commands.handle(text, chatId, sender)) {
             is ChatAction.Ignore -> {}
@@ -396,6 +410,7 @@ class FeishuEngine(
     }
 
     private companion object {
+        const val SEEN_MESSAGES_MAX = 512   // at-least-once dedup LRU capacity (see seenMessages)
         const val NUDGE_MS = 25_000L        // no reply yet after this + an approval pending → nudge the group
         const val TURN_TIMEOUT_MS = 300_000L
         const val OPEN_TIMEOUT_MS = 30_000L

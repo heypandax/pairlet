@@ -268,7 +268,7 @@ class DeviceSessions(
         // A bridge (issue #91) never gets this: it can't use the direct-LAN path (its key isn't in
         // devices.json, so the LAN gate refuses it) and shouldn't learn the host's LAN address. The
         // sealAndSend egress filter would drop it anyway; skipping avoids a pointless sealed frame.
-        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl()))
+        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {
