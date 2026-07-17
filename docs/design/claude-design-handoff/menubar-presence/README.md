@@ -18,4 +18,4 @@
 
 ## 落地状态
 
-- [ ] 待实现——issue #151 只做方向 1；实现触点：`Tray.kt`（内容复用）＋桌面 `Main.kt`（menu-bar extra 常驻与状态图标）＋`DesktopModel.attention/running`（数据已通）。方向 2（待办墙）／方向 3（状态性格）后置不做。
+- [x] 已实现（分支 worktree-agent-ae041722ea146dee0）——issue #151 只做方向 1；落点：`MenuBarExtra.kt`／`MenuBarState.kt`（五态图标＋锚定 popover，复用 `Tray.kt` 的 TrayPopover）＋桌面 `Main.kt`（application 域常驻）＋`DesktopModel.attention/running`（数据已通）。方向 2（待办墙）／方向 3（状态性格）后置不做。
