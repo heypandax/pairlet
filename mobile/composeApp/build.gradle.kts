@@ -76,6 +76,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cryptography.provider.jdk)
             implementation(libs.jna) // objc bridge: bundle-identity macOS notifications (issue #99); inert off-mac
+            // embedded terminal (issue #153): JediTerm Swing widget + local PTY — desktop target ONLY
+            implementation(libs.jediterm.core)
+            implementation(libs.jediterm.ui)
+            implementation(libs.pty4j)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

@@ -20,6 +20,12 @@ dependencyResolutionManagement {
     repositories {
         mavenCentral()
         google()
+        // JediTerm (the desktop app's embedded terminal engine, issue #153) is published to JetBrains'
+        // intellij-dependencies repo, not Maven Central. Content-filtered so ONLY that group ever
+        // resolves from here — everything else keeps coming from the two repos above.
+        maven("https://packages.jetbrains.team/maven/p/ij/intellij-dependencies") {
+            content { includeGroup("org.jetbrains.jediterm") }
+        }
     }
 }
 

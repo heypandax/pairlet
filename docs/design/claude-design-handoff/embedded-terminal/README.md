@@ -18,4 +18,4 @@
 
 ## 落地状态
 
-- [ ] 待实现——已派 worktree agent 按稿落 Compose Desktop（`ChatPane.kt` 底部面板层＋`TerminalLauncher` 外开降级为次选）。
+- [x] 已实现（分支 worktree-agent-aa56d76842bb3356c）——按稿落 Compose Desktop（`ChatPane.kt` 底部面板层＋`TerminalLauncher` 外开降级为次选）。
