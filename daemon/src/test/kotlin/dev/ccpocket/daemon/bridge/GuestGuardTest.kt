@@ -111,12 +111,30 @@ class GuestGuardTest {
 
     @Test
     fun the_home_browse_anchor_is_denied_for_a_guest_but_in_root_listing_stays_allowed() {
-        // the phone's folder browser (issue #152) anchors ListPathEntries at the literal "~" — for a
-        // guest that resolves nowhere inside the shared root (canonical() never expands tilde), so the
-        // whole-machine browse is refused while the #75 in-root @-completion keeps working
+        // the phone's folder browser (issue #152) anchors ListPathEntries at the literal "~" — the
+        // guard hard-rejects EVERY tilde-form workdir before containment. Containment alone would NOT
+        // be enough: canonical() doesn't expand tilde, it resolves it against the JVM cwd, so "~" only
+        // happens to land outside the shared root while the cwd is outside it (see the next test for
+        // the other geometry). The #75 in-root @-completion keeps working.
         deny(guard().vet(ListPathEntries("~"), now = 0), BridgeDenyCode.BAD_WORKDIR)
         deny(guard().vet(ListPathEntries("~", "Desktop"), now = 0), BridgeDenyCode.BAD_WORKDIR)
         allow(guard().vet(ListPathEntries(root.path, "src"), now = 0))
+    }
+
+    @Test
+    fun tilde_is_denied_even_when_the_jvm_cwd_sits_inside_the_shared_root() {
+        // the narrow hole the hard reject closes: canonical("~") = "<cwd>/~" (tilde is NOT expanded),
+        // so a daemon started — against the rules — from inside a shared root would find "~" under
+        // containment while the EXECUTION side expands it to the owner's real home. Reproduce that
+        // geometry by rooting the share at the JVM cwd itself.
+        val cwdRoot = File(".").canonicalFile
+        val g = GuestGuard(BridgeSpec.guest("alex", cwdRoot.path, AccessTier.COLLABORATE, FUTURE))
+        deny(g.vet(ListPathEntries("~"), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        deny(g.vet(ListPathEntries("~", "Desktop"), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        deny(g.vet(OpenSession("~/proj"), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        // sanity that the geometry really holds (cwd IS inside the root): a cwd-relative path resolves
+        // under it and passes — which is exactly why "<cwd>/~" would have been contained too
+        allow(g.vet(ListPathEntries("."), now = 0))
     }
 
     @Test

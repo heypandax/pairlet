@@ -575,6 +575,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
     val browseListing = mutableStateOf<PathEntries?>(null)   // latest home-anchored folder-browse listing (issue #152); match its subPath before use
+    private var lastBrowseSub: String? = null                // subPath of the LATEST browseHomeDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -2038,9 +2039,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
             // the visible listing on its own requested subPath anyway).
             // The folder browser (issue #152) rides the same frame anchored at the literal "~" — a session's
-            // workdir is always a real absolute path, so the two listings can't collide on the key.
+            // workdir is always a real absolute path, so the two listings can't collide on the key. Browser
+            // replies additionally pass the latest-request gate: replies can arrive out of order, and a
+            // drilled-past level's late reply must not clobber the fresh one (#152 复核, [foldBrowseReply]).
             is PathEntries -> when (f.workdir) {
-                BROWSE_HOME -> browseListing.value = f
+                BROWSE_HOME -> browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
                 workdir.value -> pathListing.value = f
             }
             // ── folder-share (issue #115): owner control-plane replies ──
@@ -3011,10 +3014,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Ask the daemon for the children under its HOME + [subPath] ('/'-joined, "" = home itself) for the
      *  "open a project folder" browser (issue #152). Reuses the #75 listing frame anchored at the literal
      *  "~" — only the daemon knows the remote machine's home, and its NIO resolve accepts '/' on Windows
-     *  too. The reply lands in [browseListing]; the picker only renders it once its subPath matches. A
-     *  guest credential gets a PocketError instead (GuestGuard clamps the frame to the shared root), which
-     *  the picker never sees — the entry is owner-only client-side and the daemon stays the authority. */
+     *  too. The reply lands in [browseListing] only while it answers the LATEST request — a stale reply
+     *  from a drilled-past level is dropped at fold time (#152 复核), and the picker additionally keys
+     *  rendering on its own subPath. A guest credential gets a PocketError instead (GuestGuard denies the
+     *  "~" anchor), which the picker never sees — the entry is owner-only client-side and the daemon
+     *  stays the authority. */
     fun browseHomeDirs(subPath: String) {
+        lastBrowseSub = subPath
         scope.launch { send(ListPathEntries(BROWSE_HOME, subPath)) }
     }
 
@@ -3422,6 +3428,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
          *  home. Also the [PathEntries] routing key that separates browser replies from @-completion
          *  ones — a real session's workdir is never the bare "~" (SessionLive carries the resolved path). */
         const val BROWSE_HOME = "~"
+
+        /** #152 复核 (pure, for tests): fold a home-browse [PathEntries] reply into the held browseListing.
+         *  Replies can arrive out of order over the relay (drill fast → a drilled-past level's slow reply
+         *  lands AFTER the current level's), so only the reply answering the LATEST request ([lastSub]) is
+         *  accepted; a stale one is dropped. Letting it clobber the fresh listing would strand the picker
+         *  on the loading skeleton forever — browseRows keys on subPath and no request is pending to
+         *  repair it. */
+        fun foldBrowseReply(held: PathEntries?, reply: PathEntries, lastSub: String?): PathEntries? =
+            if (reply.subPath == lastSub) reply else held
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)

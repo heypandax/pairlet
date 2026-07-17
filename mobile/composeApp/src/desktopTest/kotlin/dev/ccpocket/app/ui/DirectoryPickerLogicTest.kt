@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PathEntry
@@ -38,6 +39,20 @@ class DirectoryPickerLogicTest {
         assertNull(browseRows(null, ""), "no reply yet = loading")
         val atCompletion = PathEntries(workdir = "/Users/x/proj", subPath = "", entries = listOf(PathEntry("a", true)))
         assertNull(browseRows(atCompletion, ""), "an @-completion reply (real workdir) must never leak into the browser")
+    }
+
+    @Test
+    fun an_out_of_order_stale_root_reply_must_not_clobber_the_fresh_child_listing() {
+        // drill root→"src" fast enough that both requests are in flight and the CHILD's reply lands
+        // first, the root's stale reply after. Folding the stale one in would strand the picker on the
+        // skeleton forever: browseRows keys on subPath and no further request is pending to repair it.
+        var held: PathEntries? = null
+        val lastSub = "src" // what the repo recorded when it sent the latest request
+        held = PocketRepository.foldBrowseReply(held, listing("src", PathEntry("main", true)), lastSub)
+        assertEquals(listOf("main"), browseRows(held, "src")!!.map { it.name }, "fresh child reply renders")
+        held = PocketRepository.foldBrowseReply(held, listing("", PathEntry("src", true)), lastSub)
+        assertEquals("src", held?.subPath, "the late root reply must be dropped, not folded in")
+        assertEquals(listOf("main"), browseRows(held, "src")!!.map { it.name }, "child rows survive the stale arrival")
     }
 
     @Test
