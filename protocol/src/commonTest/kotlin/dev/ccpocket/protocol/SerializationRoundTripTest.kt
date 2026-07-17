@@ -1488,4 +1488,98 @@ class SerializationRoundTripTest {
         assertEquals(null, p.version)
         assertTrue(p.commands.isEmpty())
     }
+
+    // ---- headless bridge control plane (issue #91 follow-up) ----
+
+    @Test
+    fun createBridge_roundtrips_and_omits_null_caps() {
+        val env = Envelope(id = "b1", ts = 0, body = CreateBridge(name = "feishu-bot", workdirs = listOf("/p/a", "/p/b")))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"t\":\"pocket/bridge.create\"" in json, json)
+        assertFalse("maxSessions" in json, json)   // explicitNulls=false → daemon applies its defaults
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun listBridges_is_a_bare_object_frame() {
+        val json = PocketJson.encodeToString(Envelope(id = "b2", ts = 0, body = ListBridges))
+        assertTrue("\"t\":\"pocket/bridge.list\"" in json, json)
+        assertEquals(ListBridges, PocketJson.decodeFromString<Envelope>(json).body)
+    }
+
+    @Test
+    fun bridgeRunner_env_map_roundtrips_and_state_never_carries_values() {
+        val spec = BridgeRunnerSpec(
+            scriptPath = "/repo/examples/feishu-bridge/feishu_bridge.py",
+            env = mapOf("FEISHU_APP_ID" to "cli_x", "FEISHU_APP_SECRET" to "s3cret"),
+        )
+        val env = Envelope(id = "b3", ts = 0, body = ConfigureBridgeRunner(name = "feishu-bot", spec = spec))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"kind\":\"feishu\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // the reply must be able to describe the runner WITHOUT echoing any secret back
+        val state = BridgeRunnerState(kind = RUNNER_KIND_FEISHU, scriptPath = spec.scriptPath,
+            envKeys = spec.env.keys.toList(), running = true, pid = 42)
+        val reply = PocketJson.encodeToString(Envelope(id = "b4", ts = 0, body = BridgeRunnerStatus("feishu-bot", ok = true, state = state)))
+        assertFalse("s3cret" in reply, "runner state must never carry env VALUES: $reply")
+        assertTrue("FEISHU_APP_SECRET" in reply, reply)  // the key name is fine — it's what the page shows
+    }
+
+    @Test
+    fun a_managed_bridge_returns_a_runner_and_no_credential_to_copy() {
+        // the managed path's whole point: the ticket never leaves the machine
+        val managed = BridgeCreated(ok = true, runner = BridgeRunnerState(kind = RUNNER_KIND_FEISHU, scriptPath = "/x.py", running = true, pid = 7))
+        val json = PocketJson.encodeToString(Envelope(id = "b7", ts = 0, body = managed))
+        assertFalse("credential" in json, "a managed bridge must not ship a ticket back: $json")
+        assertEquals(managed, PocketJson.decodeFromString<Envelope>(json).body)
+    }
+
+    @Test
+    fun createBridge_defaults_to_the_strictest_tier_and_no_runner() {
+        val req = CreateBridge(name = "feishu-bot", workdirs = listOf("/p/a"))
+        assertEquals(AccessTier.REVIEW, req.tier)
+        assertEquals(null, req.runner)
+        val json = PocketJson.encodeToString(Envelope(id = "b8", ts = 0, body = req))
+        assertTrue("\"tier\":\"review\"" in json, json)
+        // an older daemon that ignores `tier` must not thereby get a LOOSER bridge: review is what its
+        // own BridgeSpec default already means, so the omission is safe in both directions
+        assertFalse("runner" in json, json)
+    }
+
+    @Test
+    fun bridgeInfo_trailing_optionals_default_for_an_older_peer() {
+        // the minimal listing row a leaner/older daemon could send: name only
+        val json = """{"id":"b5","ts":0,"body":{"t":"pocket/bridge.listing","to":"PEER","items":[{"name":"feishu-bot"}]}}"""
+        val row = (PocketJson.decodeFromString<Envelope>(json).body as BridgeListing).items.single()
+        assertEquals("feishu-bot", row.name)
+        assertEquals(null, row.deviceId)      // not yet redeemed
+        assertFalse(row.online)
+        assertEquals(0, row.activeSessions)
+        assertEquals(null, row.runner)        // no managed process
+        assertTrue(row.workdirs.isEmpty())
+    }
+
+    @Test
+    fun a_future_tier_on_a_bridge_row_degrades_to_the_safest_not_the_loosest() {
+        // a newer peer grants a tier this build has never heard of. It must not blow up the listing, and
+        // it must not be treated as MORE autonomy than we understand — unknown means "ask about everything".
+        val future = """{"id":"b9","ts":0,"body":{"t":"pocket/bridge.listing","to":"PEER","items":[{"name":"bot","tier":"yolo"}]}}"""
+        val row = (PocketJson.decodeFromString<Envelope>(future).body as BridgeListing).items.single()
+        assertEquals(AccessTier.UNKNOWN, row.tier)
+        assertEquals(PermissionMode.DEFAULT, AccessTier.ceiling(row.tier))
+    }
+
+    @Test
+    fun bridgeCredential_roundtrips_the_shape_the_adapter_reads_from_disk() {
+        val cred = BridgeCredential(
+            name = "feishu-bot", accountId = "acct", daemonPub = "pub", ticket = "tkt",
+            relay = "wss://pocket.ark-nexus.cc", workdirs = listOf("/p/alpha"), ttlSec = 120,
+        )
+        val env = Envelope(id = "b6", ts = 0, body = BridgeCreated(ok = true, credential = cred))
+        val json = PocketJson.encodeToString(env)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        // the adapter's Credential.load reads exactly these keys — keep them on the wire verbatim
+        for (k in listOf("name", "accountId", "daemonPub", "ticket", "relay", "workdirs")) assertTrue("\"$k\"" in json, "$k missing: $json")
+    }
 }

@@ -438,6 +438,97 @@ data object ListShares : ToDaemon
 @SerialName("pocket/share.revoke")
 data class RevokeShare(val deviceId: String) : ToDaemon
 
+// ---- headless bridge control plane (issue #91 follow-up): OWNER-only, on exactly the same footing as
+//      the folder-share plane above — a guest/bridge whitelist omits every frame here, so a bridge can
+//      never mint or inspect another bridge (self-escalation), and the daemon only reaches this dispatch
+//      from its full-power-owner branch. Until now this plane was CLI-only (`pair --headless`,
+//      `bridges`), which put the whole feature behind a terminal. ----
+
+/**
+ * owner -> daemon: mint a bridge credential (the wire twin of `pair --headless`). The daemon mints a
+ * headless pairing ticket over its relay link, records a BRIDGE intent binding [workdirs] + caps to that
+ * ticket, and replies [BridgeCreated] with the redeemable blob. Null caps = the daemon's defaults.
+ * A daemon that predates this drops the frame (the owner's app times out to "update the daemon").
+ */
+@Serializable
+@SerialName("pocket/bridge.create")
+data class CreateBridge(
+    val name: String,
+    val workdirs: List<String>,
+    val maxSessions: Int? = null,
+    val opensPerMin: Int? = null,
+    val promptsPerMin: Int? = null,
+    /** The permission-mode ceiling to grant. Defaults to the STRICTEST ([AccessTier.REVIEW]: every
+     *  dangerous action prompts the owner) — a bridge relays prompts from anyone in a chat, so silent
+     *  edits must be opted into, not inherited. Never reaches bypassPermissions at any tier. */
+    val tier: AccessTier = AccessTier.REVIEW,
+    /**
+     * Non-null = the daemon MANAGES the adapter process for this bridge (starts it, restarts it, keeps it
+     * alive across reboots) instead of the owner running it themselves.
+     *
+     * This must be decided HERE rather than in a later [ConfigureBridgeRunner], because the daemon does not
+     * retain the minted ticket (only its hash, as a pairing intent) — the plaintext exists for exactly this
+     * one reply. So the daemon can only hand a credential to a runner at mint time. The upside: when
+     * managed, [BridgeCreated.credential] is null and the owner never handles the ticket at all.
+     */
+    val runner: BridgeRunnerSpec? = null,
+) : ToDaemon
+
+/** owner -> daemon: list my bridges + their activity and runner state (the management page). Reply: [BridgeListing]. */
+@Serializable
+@SerialName("pocket/bridge.list")
+data object ListBridges : ToDaemon
+
+/** owner -> daemon: revoke a bridge by [name] — cuts its live link NOW, deletes the credential, and stops
+ *  its runner if one is managed. Reply: [BridgeRevoked]. */
+@Serializable
+@SerialName("pocket/bridge.revoke")
+data class RevokeBridge(val name: String) : ToDaemon
+
+/**
+ * owner -> daemon: UPDATE the managed runner of an already-managed bridge [name] — rotate the IM app
+ * secret, set the admin open_id after the bootstrap round-trip, point at a moved checkout, toggle
+ * autostart. The daemon restarts the process if it was running. Reply: [BridgeRunnerStatus].
+ *
+ * This cannot ATTACH a runner to a bridge minted without one: the daemon no longer holds that bridge's
+ * ticket (see [CreateBridge.runner]), so it has nothing to authenticate a new process with. Attaching
+ * after the fact means revoking and re-creating. [spec]'s env replaces the stored env wholesale.
+ */
+@Serializable
+@SerialName("pocket/bridge.runner.configure")
+data class ConfigureBridgeRunner(
+    val name: String,
+    val spec: BridgeRunnerSpec,
+    /**
+     * True = overlay [spec]'s NON-BLANK env values onto the stored env instead of replacing it wholesale.
+     * This exists for the edit form: the owner types ONLY what changes (say, FEISHU_ADMIN_OPEN_ID after
+     * the bot's bootstrap echo) — they cannot retype the app secret because it is never echoed back out.
+     *
+     * Mixed-version honesty: an OLD daemon ignores this field and replaces wholesale, which can drop keys
+     * the app didn't resend. That loss is immediately visible — the [BridgeRunnerStatus] reply's
+     * [BridgeRunnerState.envKeys] no longer lists them — so the client can tell the owner to re-enter,
+     * rather than the secret silently vanishing.
+     */
+    val mergeEnv: Boolean = false,
+) : ToDaemon
+
+/** owner -> daemon: start / stop / restart bridge [name]'s managed runner. Reply: [BridgeRunnerStatus].
+ *  Unknown [action] is refused rather than guessed. */
+@Serializable
+@SerialName("pocket/bridge.runner.control")
+data class ControlBridgeRunner(val name: String, val action: String) : ToDaemon
+
+/** owner -> daemon: drop the managed runner for [name] (stops it; keeps the bridge credential).
+ *  Reply: [BridgeRunnerStatus] with a cleared state. */
+@Serializable
+@SerialName("pocket/bridge.runner.detach")
+data class DetachBridgeRunner(val name: String) : ToDaemon
+
+const val RUNNER_KIND_FEISHU = "feishu"
+const val RUNNER_START = "start"
+const val RUNNER_STOP = "stop"
+const val RUNNER_RESTART = "restart"
+
 // ===========================================================================
 //  daemon  ->  phone   (ToPhone)
 // ===========================================================================
@@ -1153,6 +1244,48 @@ data class ShareListing(val items: List<ShareInfo> = emptyList()) : ToPhone
 @Serializable
 @SerialName("pocket/share.revoked")
 data class ShareRevoked(val deviceId: String, val ok: Boolean, val error: String? = null) : ToPhone
+
+// ---- headless bridge control plane (issue #91 follow-up): OWNER-side replies ----
+
+/**
+ * daemon -> owner: the reply to [CreateBridge]. On failure [error] says why (duplicate name, non-absolute
+ * workdir, relay offline, adapter wouldn't start).
+ *
+ * On success exactly ONE of these is set, and which one is the whole UX difference:
+ *  - [credential]: an UNMANAGED bridge — hand this blob to an adapter you run yourself, before its short
+ *    TTL lapses.
+ *  - [runner]: a MANAGED bridge — the daemon already injected the credential into the process it started,
+ *    so the ticket never leaves the machine and the owner has nothing to copy.
+ */
+@Serializable
+@SerialName("pocket/bridge.created")
+data class BridgeCreated(
+    val ok: Boolean,
+    val credential: BridgeCredential? = null,
+    val error: String? = null,
+    val runner: BridgeRunnerState? = null,
+) : ToPhone
+
+/** daemon -> owner: the reply to [ListBridges] — my bridges, their activity, and any managed runner. */
+@Serializable
+@SerialName("pocket/bridge.listing")
+data class BridgeListing(val items: List<BridgeInfo> = emptyList()) : ToPhone
+
+/** daemon -> owner: the reply to [RevokeBridge]. [ok] false + [error] when [name] wasn't a bridge. */
+@Serializable
+@SerialName("pocket/bridge.revoked")
+data class BridgeRevoked(val name: String, val ok: Boolean, val error: String? = null) : ToPhone
+
+/** daemon -> owner: the reply to [ConfigureBridgeRunner] / [ControlBridgeRunner] / [DetachBridgeRunner].
+ *  [state] is the runner's state AFTER the request (null once detached). */
+@Serializable
+@SerialName("pocket/bridge.runner.status")
+data class BridgeRunnerStatus(
+    val name: String,
+    val ok: Boolean,
+    val error: String? = null,
+    val state: BridgeRunnerState? = null,
+) : ToPhone
 
 /**
  * daemon -> GUEST (issue #115 follow-up): this device's folder share just ended — the precise "why"
