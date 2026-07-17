@@ -33,7 +33,10 @@ import java.util.UUID
  * ([dev.ccpocket.daemon.session.SessionRegistry.renameSession]: a daemon-held live session renames
  * through the CLI itself; an external live writer is refused). The append is a single whole-line
  * write under O_APPEND, and a transcript whose tail lost its newline (a crashed writer) gets one
- * first so the record never merges into a partial line. Never creates the file, never throws.
+ * first so the record never merges into a partial line. The file's mtime is restored after the write
+ * (best-effort) — a rename is metadata, and a freshened mtime reads as ACTIVITY elsewhere (the 20s
+ * live-detector window, recency ordering, the Windows observe degrade). Never creates the file,
+ * never throws.
  */
 object TranscriptRename {
     private val log = logger("TranscriptRename")
@@ -55,11 +58,18 @@ object TranscriptRename {
         }.toString()
         return runCatching {
             val rescueNewline = !endsWithNewline(file)
+            // The append must be mtime-invisible: transcript freshness is a SIGNAL everywhere else —
+            // the externallyActive 20s window (a rename would read as "live" for 20s), recency ordering
+            // (the renamed row jumps to the top), and the Windows observe degrade all key off it.
+            // Renaming is metadata, not activity. Best-effort on both sides: a failed read/restore only
+            // costs the cosmetics, never the rename itself.
+            val mtime = runCatching { Files.getLastModifiedTime(file) }.getOrNull()
             val bytes = (if (rescueNewline) "\n$record\n" else "$record\n").toByteArray(Charsets.UTF_8)
             FileChannel.open(file, StandardOpenOption.WRITE, StandardOpenOption.APPEND).use { ch ->
                 val buf = ByteBuffer.wrap(bytes)
                 while (buf.hasRemaining()) ch.write(buf) // one call in practice — a short line never splits
             }
+            mtime?.let { m -> runCatching { Files.setLastModifiedTime(file, m) } }
             true
         }.getOrElse { e ->
             log.warn("rename append failed for $file: ${e.message}")

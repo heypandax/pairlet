@@ -582,6 +582,9 @@ class RepoDesktopModel(
             return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
         }
     override fun renameSession(sessionId: String, title: String) { repo.renameSession(sessionId, title) }
+    override fun renameError(sessionId: String): String? =
+        repo.renameError.value?.takeIf { it.sessionId == sessionId }?.message
+    override fun dismissRenameError() { repo.dismissRenameError() }
 
     // collapse memory keyed by (canonical project path, group id) — persisted like the RECENT visit keys
     // (issue #102): a snapshot list so reads recompose, written through the same DesktopStore.

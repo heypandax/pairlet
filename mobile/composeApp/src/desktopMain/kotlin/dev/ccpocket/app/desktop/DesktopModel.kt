@@ -305,6 +305,13 @@ interface DesktopModel {
     /** Rename [sessionId]'s title — lands claude's own `custom-title` record on the daemon, which
      *  re-pushes Sessions to refresh the row (no optimistic local edit). */
     fun renameSession(sessionId: String, title: String) {}
+    /** The daemon's refusal of the last rename, iff it targeted [sessionId] (else null) — the sidebar
+     *  row re-enters its edit state and shows this inline. Session-scoped feedback because the failure
+     *  frame is session-independent: it must land on the row that ASKED, not in whatever chat happens
+     *  to be open (the common refusal — a terminal-held session — is renamed with no chat at all). */
+    fun renameError(sessionId: String): String? = null
+    /** Dismiss the inline rename refusal (the rename row's Esc). */
+    fun dismissRenameError() {}
 
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false
