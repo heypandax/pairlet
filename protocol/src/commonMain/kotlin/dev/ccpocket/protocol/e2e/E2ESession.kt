@@ -81,14 +81,34 @@ class E2ESession internal constructor(
             peerStaticPub: ByteArray,
             psk: ByteArray,
             initiatorEphPub: ByteArray,
-        ): Pair<E2ESession, ByteArray> {
+        ): Pair<E2ESession, ByteArray> =
+            responder(staticPriv, staticPub, peerStaticPub, listOf(psk), initiatorEphPub)
+                .let { (sessions, eph) -> sessions.single() to eph }
+
+        /** Complete a handshake as the responder deriving ONE session PER candidate PSK, all sharing a
+         *  single responder ephemeral (msg2). The four DH values are PSK-independent — only the final
+         *  HKDF mixes the PSK — so one msg2 serves every candidate, and which session the initiator's
+         *  first transport frame decrypts under reveals which PSK it actually mixed. This lets a
+         *  responder follow a peer that already consumed its pairing ticket (candidates [ticket, empty])
+         *  without weakening the ticket-bound path for a peer that still holds it (issue #161). */
+        fun responder(
+            staticPriv: ByteArray,
+            staticPub: ByteArray,
+            peerStaticPub: ByteArray,
+            psks: List<ByteArray>,
+            initiatorEphPub: ByteArray,
+        ): Pair<List<E2ESession>, ByteArray> {
+            require(psks.isNotEmpty()) { "at least one PSK candidate required" }
             val eph = E2ECrypto.generateKeyPair()
             val es = E2ECrypto.agree(staticPriv, initiatorEphPub)      // DH(S_r, E_i)
             val ss = E2ECrypto.agree(staticPriv, peerStaticPub)        // DH(S_r, S_i)
             val ee = E2ECrypto.agree(eph.privateRaw, initiatorEphPub)  // DH(E_r, E_i)
             val se = E2ECrypto.agree(eph.privateRaw, peerStaticPub)    // DH(E_r, S_i)
-            val keys = derive(es, ss, ee, se, psk, sInitiator = peerStaticPub, sResponder = staticPub, eInitiator = initiatorEphPub, eResponder = eph.publicRaw)
-            return E2ESession(sendKey = keys.second, recvKey = keys.first) to eph.publicRaw // responder sends k_r2i, receives k_i2r
+            val sessions = psks.map { psk ->
+                val keys = derive(es, ss, ee, se, psk, sInitiator = peerStaticPub, sResponder = staticPub, eInitiator = initiatorEphPub, eResponder = eph.publicRaw)
+                E2ESession(sendKey = keys.second, recvKey = keys.first) // responder sends k_r2i, receives k_i2r
+            }
+            return sessions to eph.publicRaw
         }
     }
 }
