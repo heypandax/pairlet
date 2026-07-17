@@ -251,6 +251,14 @@
     <string name="new_path_title">New session in a folder</string>
     <string name="new_path_sub">Type the absolute path to a folder on your computer — it doesn\'t need any prior history. (To create a brand-new folder, make it first from the in-chat terminal.)</string>
     <string name="new_path_start">Start session</string>
+    <string name="dir_picker_title">Open a project folder</string>
+    <string name="dir_picker_sub">Browse your computer\'s home folder and start a session in any directory — no prior history needed.</string>
+    <string name="dir_picker_type_path">Type a path…</string>
+    <string name="dir_picker_recents">RECENTS</string>
+    <string name="dir_picker_browse">BROWSE</string>
+    <string name="dir_picker_use_here">Start session here</string>
+    <string name="dir_picker_empty">No subfolders</string>
+    <string name="dir_picker_error">Can\'t read this folder</string>
     <string name="ob_open">Need to install cc-pocket on your computer?</string>
     <string name="ob_title">Connect your computer</string>
     <string name="ob_sub">Install the cc-pocket daemon on the computer you want to drive.</string>

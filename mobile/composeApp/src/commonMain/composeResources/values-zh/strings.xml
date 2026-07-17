@@ -251,6 +251,14 @@
     <string name="new_path_title">在文件夹中新建会话</string>
     <string name="new_path_sub">输入电脑上某个文件夹的绝对路径，无需已有历史记录。（如需全新文件夹，可先用聊天里的终端创建。）</string>
     <string name="new_path_start">开始会话</string>
+    <string name="dir_picker_title">打开项目目录</string>
+    <string name="dir_picker_sub">浏览电脑的家目录，在任意已有目录里开新会话——无需已有历史记录。</string>
+    <string name="dir_picker_type_path">输入路径…</string>
+    <string name="dir_picker_recents">最近</string>
+    <string name="dir_picker_browse">浏览</string>
+    <string name="dir_picker_use_here">在此目录开会话</string>
+    <string name="dir_picker_empty">没有子目录</string>
+    <string name="dir_picker_error">读不了这个目录</string>
     <string name="ob_open">还没在电脑上安装 cc-pocket？</string>
     <string name="ob_title">连接你的电脑</string>
     <string name="ob_sub">在你要驱动的电脑上安装 cc-pocket daemon。</string>
