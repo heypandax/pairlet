@@ -53,6 +53,7 @@ import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
+import dev.ccpocket.protocol.RenameSession
 import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
@@ -118,6 +119,19 @@ class RequestRouter(
             is GroupAssign -> {
                 if (guestScope == null) SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
                 emitSessions(frame.workdir, sink, guestScope)
+            }
+
+            // session rename (issue #158): lands claude's own custom-title record (live daemon session:
+            // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
+            // an agent-ack/disk round-trip → off the inbound pump like FetchUsage. Success answers with
+            // the re-pushed Sessions (the group ops' refresh contract); failure with a PocketError. A
+            // guest never reaches here (GuestCaps default-denies the frame type at the choke point) —
+            // the null-check is belt-and-suspenders like the group mutations', answering with the list.
+            is RenameSession -> scope.launch {
+                if (guestScope != null) { emitSessions(frame.workdir, sink, guestScope); return@launch }
+                val err = registry.renameSession(groupWorkdir(frame.workdir), frame.sessionId, frame.title)
+                if (err == null) emitSessions(frame.workdir, sink, guestScope)
+                else sink.emit(PocketError("rename_failed", err))
             }
 
             // heavy transcript scan → off the inbound pump so it can't wedge the socket
@@ -283,7 +297,9 @@ class RequestRouter(
         var items = registry.listSessions(wd).map { if (it.sessionId in busy) it.copy(busy = true) else it }
         if (guestScope != null) items = items.filter { it.sessionId in guestScope.ownedSessions }
         val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
-        sink.emit(Sessions(workdir, items, groups = groups))
+        // renameSupported (issue #158): owner-only — a guest's RenameSession is capability-denied anyway,
+        // so its client must not show the entry
+        sink.emit(Sessions(workdir, items, groups = groups, renameSupported = guestScope == null))
     }
 
     /**

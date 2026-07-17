@@ -163,6 +163,19 @@ class DesktopUiTest {
     }
 
     @Test
+    fun seedSessionRenameTracksState() {
+        // issue #158: the sidebar's inline rename commits through the model and the row title follows
+        // (production routes it daemon-side and the Sessions re-push refreshes; the seed applies locally)
+        val m = SeedDesktopModel()
+        assertTrue(m.canRenameSessions)
+        val before = m.sessions.first { it.sessionId == "s2" }
+        m.renameSession("s2", "  Stream parser hardening  ")
+        val after = m.sessions.first { it.sessionId == "s2" }
+        assertEquals("Stream parser hardening", after.title, "the committed title is trimmed and adopted")
+        assertEquals(before.group, after.group, "a rename must not disturb group membership")
+    }
+
+    @Test
     fun seedGroupCollapseToggles() {
         val m = SeedDesktopModel()
         assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))

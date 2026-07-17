@@ -149,6 +149,7 @@ import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupRename
+import dev.ccpocket.protocol.RenameSession
 import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
@@ -554,6 +555,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  empty — a group-aware daemon with zero groups yet (show "+ New group" so the FIRST one is creatable)
      *  vs an older daemon / a guest connection that omits groups entirely (hide the affordance). */
     val groupsSupported = mutableStateOf(false)
+    /** True when THIS connection may rename sessions (issue #158): the daemon stamped
+     *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon or a guest —
+     *  hides the rename entry instead of sending a frame the daemon would silently drop. */
+    val renameSupported = mutableStateOf(false)
     val messages = mutableStateListOf<ChatItem>()
     val pendingImages = mutableStateListOf<PendingImage>() // photos staged in the composer (pre-send)
     val pendingFiles = mutableStateListOf<PendingFile>()   // files staged/uploading into the workspace inbox (issue #90)
@@ -581,6 +586,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
     val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
+    val browseListing = mutableStateOf<PathEntries?>(null)   // latest home-anchored folder-browse listing (issue #152); match its subPath before use
+    private var lastBrowseSub: String? = null                // subPath of the LATEST browseHomeDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -1651,6 +1658,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     ?: (frame as? GroupDelete)?.workdir ?: (frame as GroupAssign).workdir
                 handle(Sessions(wd, DemoData.sessions(wd)))
             }
+            // #158 rename: same no-persistence re-echo (the demo Sessions omits renameSupported, so the
+            // entry stays hidden anyway — this just keeps every sendable frame answered)
+            is RenameSession -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
             is OpenSession -> {
                 val cid = "demo-convo-${frame.resumeId ?: "new"}"
                 handle(SessionLive(cid, frame.workdir, frame.resumeId ?: DemoData.LIVE_SESSION_ID, mode = frame.mode, executing = false))
@@ -1742,6 +1752,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 sessionsDir.value = f.workdir; replace(sessions, f.items)
                 replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                 groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
+                renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
                 sessionsRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
@@ -2076,7 +2087,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // @-file completion (issue #75): keyed on workdir, not a session id — it browses the cwd, not a
             // session's changed set. A reply for a workdir we've since left is dropped (the completer keys
             // the visible listing on its own requested subPath anyway).
-            is PathEntries -> if (f.workdir == workdir.value) pathListing.value = f
+            // The folder browser (issue #152) rides the same frame anchored at the literal "~" — a session's
+            // workdir is always a real absolute path, so the two listings can't collide on the key. Browser
+            // replies additionally pass the latest-request gate: replies can arrive out of order, and a
+            // drilled-past level's late reply must not clobber the fresh one (#152 复核, [foldBrowseReply]).
+            is PathEntries -> when (f.workdir) {
+                BROWSE_HOME -> browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
+                workdir.value -> pathListing.value = f
+            }
             // ── folder-share (issue #115): owner control-plane replies ──
             is ShareCreated -> { lastShareCreated.value = f; sharesRefreshing.value = false }
             is ShareListing -> { replace(shares, f.items); sharesLoaded.value = true; sharesRefreshing.value = false }
@@ -2640,6 +2658,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val dir = wd ?: sessionsDir.value ?: return
         scope.launch { send(GroupAssign(dir, sessionId, groupId)) }
     }
+
+    /** Rename session [sessionId]'s title (issue #158) — the daemon lands claude's own `custom-title`
+     *  record and answers with the re-pushed [Sessions] (same refresh contract as the group ops; no
+     *  optimistic local edit), or a [PocketError] when the rename can't land (e.g. the session is live
+     *  in another client). Gate the entry on [renameSupported]. */
+    fun renameSession(sessionId: String, title: String, wd: String? = null) {
+        val dir = wd ?: sessionsDir.value ?: return
+        if (title.isBlank()) return
+        scope.launch { send(RenameSession(dir, sessionId, title.trim())) }
+    }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
     fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
@@ -3121,6 +3149,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(ListPathEntries(wd, subPath)) }
     }
 
+    /** Ask the daemon for the children under its HOME + [subPath] ('/'-joined, "" = home itself) for the
+     *  "open a project folder" browser (issue #152). Reuses the #75 listing frame anchored at the literal
+     *  "~" — only the daemon knows the remote machine's home, and its NIO resolve accepts '/' on Windows
+     *  too. The reply lands in [browseListing] only while it answers the LATEST request — a stale reply
+     *  from a drilled-past level is dropped at fold time (#152 复核), and the picker additionally keys
+     *  rendering on its own subPath. A guest credential gets a PocketError instead (GuestGuard denies the
+     *  "~" anchor), which the picker never sees — the entry is owner-only client-side and the daemon
+     *  stays the authority. */
+    fun browseHomeDirs(subPath: String) {
+        lastBrowseSub = subPath
+        scope.launch { send(ListPathEntries(BROWSE_HOME, subPath)) }
+    }
+
     // ── voice input actions ───────────────────────────────────────────────
 
     /** Mic tap (S1). Picks the engine: iOS native streaming dictation, else record→daemon-whisper. */
@@ -3521,6 +3562,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     internal companion object {
+        /** The folder browser's workdir anchor (issue #152): the literal "~" the daemon expands to ITS
+         *  home. Also the [PathEntries] routing key that separates browser replies from @-completion
+         *  ones — a real session's workdir is never the bare "~" (SessionLive carries the resolved path). */
+        const val BROWSE_HOME = "~"
+
+        /** #152 复核 (pure, for tests): fold a home-browse [PathEntries] reply into the held browseListing.
+         *  Replies can arrive out of order over the relay (drill fast → a drilled-past level's slow reply
+         *  lands AFTER the current level's), so only the reply answering the LATEST request ([lastSub]) is
+         *  accepted; a stale one is dropped. Letting it clobber the fresh listing would strand the picker
+         *  on the loading skeleton forever — browseRows keys on subPath and no request is pending to
+         *  repair it. */
+        fun foldBrowseReply(held: PathEntries?, reply: PathEntries, lastSub: String?): PathEntries? =
+            if (reply.subPath == lastSub) reply else held
         const val FIRST_GRACE_MS = 2_000L     // first connect: show the skeleton this long before "can't reach server"
         const val RECONNECT_GRACE_MS = 6_000L // a reconnect already keeps the old list under a banner
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)

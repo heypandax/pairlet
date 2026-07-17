@@ -533,6 +533,10 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     // "+" → type an arbitrary path to start a session in a folder with no prior history (issue #7)
     var showNewPath by remember { mutableStateOf(false) }
     var newPathTarget by remember { mutableStateOf<String?>(null) }
+    // "open a project folder" browser (issue #152): the "+" entries land here for an OWNER; a guest
+    // keeps the manual path sheet (its browse anchor "~" is outside the share and daemon-denied anyway)
+    var showDirPicker by remember { mutableStateOf(false) }
+    val openFolderEntry = { if (isGuestDirView(dirsSnapshot)) showNewPath = true else showDirPicker = true }
 
     // typing in the filter then scrolling the list dismisses the keyboard (fires once per scroll gesture)
     val focus = LocalFocusManager.current
@@ -560,7 +564,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                 }
             },
         ) {
-            IconButton({ showNewPath = true }, modifier = Modifier.size(36.dp)) {
+            IconButton(openFolderEntry, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Rounded.Add, stringResource(Res.string.new_path_open), tint = Tok.tx2, modifier = Modifier.size(22.dp))
             }
             ViewToggle(tree) { repo.setTreeView(!tree) }
@@ -573,10 +577,11 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        // discoverable entry to open ANY folder by absolute path — the browser only shows folders that already
-        // have history, and the top-bar "+" reads as "new", so this spells out how to reach a fresh folder (#32)
+        // discoverable entry to open ANY folder — the project list only shows folders that already have
+        // history, and the top-bar "+" reads as "new", so this spells out how to reach a fresh folder
+        // (#32); both now land in the #152 browser (guests keep the manual sheet)
         Row(
-            Modifier.fillMaxWidth().clickable { showNewPath = true }.padding(horizontal = 16.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().clickable(onClick = openFolderEntry).padding(horizontal = 16.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(16.dp))
@@ -662,6 +667,16 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             onDismiss = { showNewPath = false },
             onOptions = { p -> showNewPath = false; newPathTarget = p },
         ) { p -> showNewPath = false; repo.openSession(p) } // one tap: start with the defaults right away
+        // "open a project folder" (issue #152): browse the computer's home and start a session in ANY
+        // existing directory — same two bottom actions as NewPathSheet (defaults chip → picker; primary →
+        // open right away), and the manual sheet stays one tap away for off-home paths
+        if (showDirPicker) DirectoryPickerSheet(
+            repo,
+            onDismiss = { showDirPicker = false },
+            onTypePath = { showDirPicker = false; showNewPath = true },
+            onOptions = { p -> showDirPicker = false; newPathTarget = p },
+            onStart = { p -> showDirPicker = false; repo.openSession(p) },
+        )
         // wants a different agent/mode for the new path → the standard picker, then open the session there
         newPathTarget?.let { path ->
             StartSessionModeSheet(
@@ -868,9 +883,10 @@ private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onSha
 @Composable
 private fun PinGlyph() = Icon(Icons.Filled.PushPin, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
 
-/** The terracotta "history" pill shown on a dir/folder/leaf that has Claude history. */
+/** The terracotta "history" pill shown on a dir/folder/leaf that has Claude history. (internal: the
+ *  #152 DirectoryPicker stamps the same pill on browsed folders that are already projects.) */
 @Composable
-private fun HistoryBadge(onClick: (() -> Unit)? = null) {
+internal fun HistoryBadge(onClick: (() -> Unit)? = null) {
     val base = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f))
     Text(
         stringResource(Res.string.history_badge), color = Tok.accent, fontSize = 10.5.sp,
@@ -899,9 +915,10 @@ private fun ViewSeg(on: Boolean, icon: ImageVector) {
     ) { Icon(icon, null, tint = if (on) Tok.base else Tok.tx2, modifier = Modifier.size(16.dp)) }
 }
 
-/** Path breadcrumb shown when drilled into a subfolder: back ‹ + tappable mono segments (current bolded). */
+/** Path breadcrumb shown when drilled into a subfolder: back ‹ + tappable mono segments (current bolded).
+ *  (internal: the #152 DirectoryPicker renders the same crumb over its home-anchored browse.) */
 @Composable
-private fun Breadcrumb(segs: List<String>, onUp: () -> Unit, onSegment: (Int) -> Unit) {
+internal fun Breadcrumb(segs: List<String>, onUp: () -> Unit, onSegment: (Int) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp),
