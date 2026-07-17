@@ -2551,12 +2551,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
         // new Claude sessions seed from the persisted default model; resumed keep their own, and a Codex launch
         // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend.
-        // OpenCode sessions get a model from the daemon-side default (model picker selection) — sending
-        // the Claude default to opencode would break the session.
-        val openModel = saved?.model ?: defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
+        val openModel = saved?.model ?: when (openAgent) {
+            // New OpenCode sessions let the daemon choose from OpenCode config / `opencode models`.
+            AgentKind.OPENCODE -> null
+            else -> defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
+        }
         mode.value = openMode; allowRules.clear()
         model.value = openModel; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
+        // Pre-fetch OpenCode model list so the picker has it ready when the user opens it,
+        // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
+        if (openAgent == AgentKind.OPENCODE) fetchOpenCodeModels()
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
@@ -3260,11 +3265,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** Switch the model — routed through the daemon's `/model` interception; applied on the next turn
-     *  (issue #84), never interrupting a running one. */
+    /** Switch the model — routed through the daemon's `/model` interception; applied on the next
+     *  turn (issue #84), never interrupting a running one. For OpenCode sessions, rejects models
+     *  that lack a provider prefix (e.g. "deepseek-chat", "sonnet") — those are Claude/gateway ids
+     *  and would cause silent launch hangs in the opencode backend. */
     fun switchModel(name: String) {
         val target = name.trim()
         if (convoId.value == null || target.isEmpty() || target == model.value) return
+        // OpenCode only accepts "provider/model-name" format — reject bare ids like "deepseek-chat"
+        // or "sonnet" that would leak from gateway presets or the custom input field.
+        if (sessionAgent.value == AgentKind.OPENCODE && '/' !in target) return
         model.value = target // optimistic; the daemon's next SessionLive corrects it to the resolved id
         switchViaCommand("/model $target")
     }

@@ -3,6 +3,8 @@ package dev.ccpocket.daemon.conversation
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
+import dev.ccpocket.daemon.agent.AgentProcessMode
+import dev.ccpocket.daemon.agent.AgentPromptDelivery
 import dev.ccpocket.daemon.agent.AgentProcess
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.agent.ApprovalTimeout
@@ -136,7 +138,6 @@ class Conversation(
     @Volatile
     private var proc: AgentProcess? = null
     private var bridge: PermissionBridge? = null
-    private val transcriptWriter = backend.createTranscriptWriter(workdir.toString())
     private val seq = AtomicLong(0)
 
     // background work (bg shells / sub-agents / monitors) tracked from the tool stream; drives the in-chat
@@ -327,6 +328,18 @@ class Conversation(
         }
     }
 
+    /** One-shot argv prompts have no stdin replay; the process accepting the turn settles the launch prompt. */
+    private fun settleInitialArgPrompt() = synchronized(promptLedger) {
+        val iter = promptLedger.iterator()
+        while (iter.hasNext()) {
+            val entry = iter.next()
+            if (entry.generation == processGeneration) {
+                iter.remove()
+                return@synchronized
+            }
+        }
+    }
+
     private fun hasUnconsumedPrompts(): Boolean = synchronized(promptLedger) { promptLedger.isNotEmpty() }
 
     /** /clear + switchDirectory: the old session's undelivered prompts must not leak into a fresh one. */
@@ -413,7 +426,11 @@ class Conversation(
         // break "tap to take over" and could let two writers clobber one transcript. Codex ignores forkSession; a
         // null resumeId is a brand-new session either way.
         if (takeOver) {
-            launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = fork))
+            // OpenCode: same guard as sendPrompt — only pass the real opencode sessionId, not the daemon's
+            // SessionRegistry ID (which opencode doesn't know and hangs on). On first takeover there is no
+            // opencode session yet → resumeId=null → fresh session.
+            val opencodeResumeId = if (backend.kind == AgentKind.OPENCODE) sessionId else resumeId
+            launchProcess(AgentSpec(workdir, opencodeResumeId, model, mode, effort = effort, forkSession = fork))
         }
         // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
         // init that would drive SessionLive — until the first user turn / handshake lands (and on a lazy open there
@@ -747,7 +764,11 @@ class Conversation(
         // its stdin (or its internal mid-turn queue) that never produced a consumption replay — is
         // re-handed to this fresh process, oldest first, before anything else rides it. This is the old
         // healSessionLock resend generalized to EVERY spawn: crash, shutdown, settings relaunch, lock heal.
-        val redeliver = promptsForRedelivery(processGeneration)
+        val redeliver = if (backend.promptDelivery == AgentPromptDelivery.STDIN_REPLAY) {
+            promptsForRedelivery(processGeneration)
+        } else {
+            emptyList()
+        }
         if (redeliver.isNotEmpty()) {
             executing = true // the re-injected prompts start a turn; TurnResult clears it as usual
             log.info("$convoId re-injecting ${redeliver.size} unconsumed prompt(s) into the fresh agent")
@@ -829,12 +850,13 @@ class Conversation(
     }
 
     private suspend fun pump(p: AgentProcess, b: PermissionBridge) {
+        var turnCompleted = false
         for (line in p.stdout) {
             lastActivityMs = System.currentTimeMillis()
             for (ev in backend.parse(line)) {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
-                        transcriptWriter?.append(ev, sessionId)
+                        if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
                         val firstTime = sessionId == null
                         val prevSid = sessionId
                         ev.sessionId?.let { newSid ->
@@ -879,14 +901,12 @@ class Conversation(
                         executing = true
                         if (ev.parentId == null) {
                             sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
-                            transcriptWriter?.append(ev, sessionId)
                         }
                     }
                     is AgentEvent.AssistantThinking -> {
                         executing = true
                         if (ev.parentId == null) {
                             sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
-                            transcriptWriter?.append(ev, sessionId)
                         }
                     }
                     is AgentEvent.AssistantToolUse -> {
@@ -913,12 +933,10 @@ class Conversation(
                             ),
                         )
                         if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
-                        if (ev.parentId == null) transcriptWriter?.append(ev, sessionId)
                     }
                     is AgentEvent.ToolResult -> {
                         if (ev.parentId == null) {
                             finishSubagentFromResult(ev)
-                            transcriptWriter?.append(ev, sessionId)
                         }
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
                     }
@@ -962,7 +980,8 @@ class Conversation(
                         sawSyntheticThisTurn = true
                     }
                     is AgentEvent.TurnResult -> {
-                        transcriptWriter?.append(ev, sessionId)
+                        turnCompleted = true
+                        if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
                         executing = false
                         // relaunch continuation grace anchor (issue #122 ⑤): this result may be a phantom
                         // (fable early result/fallback) — for RELAUNCH_GRACE ms after it, sendPrompt must
@@ -1048,6 +1067,13 @@ class Conversation(
             // real process exit before touching the file (intentional stops settle in stopProcess)
             executing = false // a dead process never delivers TurnResult
             p.awaitExit()
+            if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
+                log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
+                proc = null
+                bridge?.cancelAll()
+                bridge = null
+                return
+            }
             // workflows died with the process — settle them so no card pulses forever (#106)
             for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
             backend.onProcessEnded(sessionId)
@@ -1211,7 +1237,7 @@ class Conversation(
         val initialSend = InitialSend(promptId, text, images)
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
-            val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
+            val relaunched = runCatching { relaunch(sessionId ?: if (backend.kind == AgentKind.OPENCODE) null else openedResumeId, armExecuting = true, initialSend = initialSend) }
             if (relaunched.isFailure) {
                 executing = false // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
@@ -1227,7 +1253,10 @@ class Conversation(
             // This branch is ALSO the respawn after an unexpected process death (issue #122 — the pump nulls `proc`):
             // then the live sessionId is the anchor (the dead process's turns live in ITS transcript, not the
             // originally-resumed one), resumed in place — its own id is never a foreign id to fork off.
-            val anchor = sessionId ?: openedResumeId
+            // OpenCode: only use the real opencode sessionId from step_start; NEVER fall back to openedResumeId
+            // (the daemon's SessionRegistry ID) — opencode hangs silently when asked to resume a session that
+            // doesn't exist in its SQLite DB. On first launch sessionId is null → no --session → fresh session.
+            val anchor = if (backend.kind == AgentKind.OPENCODE) sessionId else (sessionId ?: openedResumeId)
             val fork = if (sessionId == null) openedWithFork else false
             log.info("$convoId sendPrompt proc==null: anchor=$anchor model=$model mode=$mode effort=$effort initialPrompt=${text.take(40)}")
             val launched = runCatching {
@@ -1240,6 +1269,10 @@ class Conversation(
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
                 return
             }
+        } else if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT && proc != null) {
+            promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
+            sink.emit(PocketError("agent_busy", "${backend.kind} is still handling the current turn; retry when it finishes.", convoId))
+            return
         } else {
             log.info("$convoId sendPrompt queued-send: proc!=null backend=${backend.kind}")
             executing = true
@@ -1248,7 +1281,6 @@ class Conversation(
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
         backend.sendPrompt(text, images)
-        transcriptWriter?.onUserPrompt(text, sessionId)
         promptId?.let {
             sink.emit(PromptAck(convoId, it)) // the turn is in the agent's hands — receipt (issue #66)
             // (issue #104) an ack is NOT a started turn. If the client later reports turnStalled for this prompt,

@@ -12,6 +12,7 @@ import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SkillCatalogService
 import dev.ccpocket.daemon.disk.UsageService
+import dev.ccpocket.daemon.opencode.OpenCodeModelService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.schedule.SchedulerService
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -88,6 +89,7 @@ class RequestRouter(
     private val prefs: DaemonPrefs,
     private val presets: PresetService,
     private val scheduler: SchedulerService,
+    private val openCodeModels: OpenCodeModelService = OpenCodeModelService(),
 ) {
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
@@ -264,25 +266,7 @@ class RequestRouter(
             }
 
             // opencode model listing: runs `opencode models` on the daemon host and returns the list
-            is FetchModels -> {
-                try {
-                    val exe = dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable()
-                    val pb = ProcessBuilder(exe.toString(), "models")
-                    val proc = pb.start()
-                    val out = proc.inputStream.bufferedReader().readText().trim()
-                    val exit = proc.waitFor()
-                    if (exit != 0) {
-                        val err = proc.errorStream.bufferedReader().readText().trim()
-                        sink.emit(ModelsList(error = "opencode models exited $exit: $err"))
-                    } else {
-                        val models = out.lines().filter { it.isNotBlank() }
-                            .sortedBy { if (it.startsWith("opencode/")) "0$it" else "1$it" }
-                        sink.emit(ModelsList(models = models))
-                    }
-                } catch (e: Exception) {
-                    sink.emit(ModelsList(error = "Failed to list models: ${e.message ?: e.javaClass.simpleName}"))
-                }
-            }
+            is FetchModels -> scope.launch { sink.emit(openCodeModels.fetch()) }
 
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
         }

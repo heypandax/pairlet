@@ -55,6 +55,7 @@ import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
+import dev.ccpocket.app.ui.OPENCODE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.EFFORT_OPTIONS
 import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
@@ -189,14 +190,16 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 LaunchedEffect(model.chatAgent) { if (model.chatAgent == AgentKind.OPENCODE) model.fetchOpenCodeModels() }
                 val options = when (model.chatAgent) {
                     AgentKind.CODEX -> CODEX_MODEL_OPTIONS.map { m -> m to m }
-                    AgentKind.OPENCODE -> model.openCodeModels.map { m -> m to m }
+                    AgentKind.OPENCODE -> model.openCodeModels.ifEmpty { OPENCODE_MODEL_OPTIONS }.map { m -> m to m }
                     else -> CLAUDE_MODEL_OPTIONS
                 }
                 fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
                 // gateway model presets (issue #139): mirrors mobile's ModelPicker off the same shared
                 // table. Gateway reported by the daemon → the section LEADS (those users pick vendor
                 // ids, not Claude aliases); official endpoint → it waits behind a collapsed toggle.
-                val gatewayUrl = if (model.chatAgent == AgentKind.CODEX) null else model.gatewayBaseUrl
+                // OpenCode excluded: gateway presets use bare ids like "deepseek-chat" that would cause
+                // silent launch hangs in the opencode backend.
+                val gatewayUrl = if (model.chatAgent != AgentKind.CLAUDE) null else model.gatewayBaseUrl
                 @Composable
                 fun gatewayRows() = recommendedGatewayPresets(gatewayUrl).forEach { p ->
                     GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
@@ -219,7 +222,7 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 options.forEach { (label, pick) ->
                     QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
                 }
-                if (gatewayUrl == null && model.chatAgent != AgentKind.CODEX) {
+                if (gatewayUrl == null && model.chatAgent == AgentKind.CLAUDE) {
                     var showGateway by remember { mutableStateOf(false) }
                     QaRow("Gateway presets", chevron = !showGateway) { showGateway = !showGateway }
                     if (showGateway) gatewayRows()

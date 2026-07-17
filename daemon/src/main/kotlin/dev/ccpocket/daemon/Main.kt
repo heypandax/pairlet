@@ -146,6 +146,7 @@ private class RunCmd : CliktCommand(name = "run") {
             prefs = prefs,
             claudeConfigDir = claudeHome,
             presetStore = presetStore,
+            openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
         )
         if (claudeHome != null) {
             echo("claude credential isolation: ON — daemon login store: $claudeHome")

@@ -8,7 +8,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.nio.file.Path
 
 /**
  * Reads OpenCode sessions from the SQLite database (~/.local/share/opencode/opencode.db)
@@ -38,9 +37,8 @@ object OpenCodeTranscriptScanner {
                     val sid = rs.getString("id") ?: continue
                     val title = rs.getString("title") ?: sid
                     val directory = rs.getString("directory") ?: ""
-                    val model = rs.getString("model")
+                    val model = parseModel(rs.getString("model"))
                     val timeUpdated = rs.getLong("time_updated")
-                    val timeCreated = rs.getLong("time_created")
                     val msgCount = rs.getInt("msg_count")
                     if (workdir.isNotBlank() && directory.isNotBlank()) {
                         if (ProjectPaths.normCwd(directory) != ProjectPaths.normCwd(workdir)) continue
@@ -55,11 +53,26 @@ object OpenCodeTranscriptScanner {
                         version = null,
                         live = System.currentTimeMillis() - timeUpdated < LIVE_WINDOW_MS,
                         agent = AgentKind.OPENCODE,
+                        model = model,
                     ))
                 }
                 out
             }
         }.getOrElse { emptyList() }
+    }
+
+    fun resumeModel(sessionId: String): String? {
+        val dbPath = OpenCodePaths.database()
+        if (!dbPath.toFile().exists()) return null
+        return runCatching {
+            val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.toFile().absolutePath}")
+            conn.use {
+                val stmt = it.prepareStatement("SELECT model FROM session WHERE id = ? LIMIT 1")
+                stmt.setString(1, sessionId)
+                val rs = stmt.executeQuery()
+                if (rs.next()) parseModel(rs.getString("model")) else null
+            }
+        }.getOrNull()
     }
 
     /** Every directory with OpenCode sessions → its newest session mtime. */
@@ -82,5 +95,23 @@ object OpenCodeTranscriptScanner {
                 out
             }
         }.getOrDefault(emptyMap())
+    }
+
+    internal fun parseModel(raw: String?): String? {
+        val text = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        if (!text.startsWith("{")) return text.takeIf { "/" in it }
+        return runCatching {
+            val obj = json.parseToJsonElement(text).jsonObject
+            val provider = obj["providerID"]?.jsonPrimitive?.contentOrNull
+                ?: obj["provider"]?.jsonPrimitive?.contentOrNull
+            val id = obj["id"]?.jsonPrimitive?.contentOrNull
+                ?: obj["modelID"]?.jsonPrimitive?.contentOrNull
+                ?: obj["model"]?.jsonPrimitive?.contentOrNull
+            when {
+                provider.isNullOrBlank() || id.isNullOrBlank() -> null
+                "/" in id -> id
+                else -> "$provider/$id"
+            }
+        }.getOrNull()
     }
 }

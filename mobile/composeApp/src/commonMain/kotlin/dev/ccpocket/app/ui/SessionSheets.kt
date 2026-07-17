@@ -271,12 +271,8 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
     val choices = if (codex) CODEX_MODEL_OPTIONS.map { ModelChoice(it, it, it, "", false) }
     else if (opencode) {
         val models = opencodeModels?.models
-        if (models != null && opencodeModels?.error == null) {
-            val grouped = models.groupBy { it.substringBefore("/") + "/*" }
-            models.map { m -> ModelChoice(m, m, m, "", false, unavailable = false) }
-        } else {
-            emptyList()
-        }
+        val visibleModels = models?.takeIf { it.isNotEmpty() && opencodeModels?.error == null } ?: OPENCODE_MODEL_OPTIONS
+        visibleModels.map { m -> ModelChoice(m, m, m, "", false, unavailable = false) }
     }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     else CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
@@ -303,8 +299,9 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
     // daemon reports a gateway ANTHROPIC_BASE_URL (DaemonInfo) the section LEADS the picker — those
     // users pick vendor ids, not Claude aliases. On the official endpoint it sits behind a collapsed
     // toggle below, so the sheet keeps today's size for everyone else. Claude sessions only: Codex
-    // model routing doesn't go through ANTHROPIC_BASE_URL.
-    val gatewayUrl = if (codex) null else repo.gatewayBaseUrl.value
+    // model routing doesn't go through ANTHROPIC_BASE_URL, and OpenCode has its own model format
+    // (provider/name) — gateway presets would send bare ids like "deepseek-chat" that cause hangs.
+    val gatewayUrl = if (codex || opencode) null else repo.gatewayBaseUrl.value
     val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
     if (gatewayUrl != null) {
         GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset)

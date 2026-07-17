@@ -46,6 +46,9 @@ object OpenCodeLauncher {
                 // non-existent provider) causes opencode to hang silently on resume. Strip any "openai/"
                 // prefix that leaked from old configs — the model id alone is enough.
                 val cleaned = model.removePrefix("openai/")
+                require("/" in cleaned) {
+                    "OpenCode model must use provider/model format, got '$model'"
+                }
                 add("--model"); add(cleaned)
             }
             spec.resumeId?.let { add("--session"); add(it) }
@@ -64,7 +67,7 @@ object OpenCodeLauncher {
             val env = environment()
             val home = System.getProperty("user.home")
             // Point to the standard XDG data dir so OpenCode CLI reads the SAME database
-            // as OpenCodePaths.dataRoot() / OpenCodeTranscriptWriter (default: ~/.local/share/opencode/).
+            // as OpenCodePaths.dataRoot() / SQLite transcript readers (default: ~/.local/share/opencode/).
             // Under launchd the daemon inherits a stripped environment — the XDG vars ensure
             // OpenCode (Node.js) can locate its state DB; without them init may block.
             env.putIfAbsent("XDG_DATA_HOME", "$home/.local/share")

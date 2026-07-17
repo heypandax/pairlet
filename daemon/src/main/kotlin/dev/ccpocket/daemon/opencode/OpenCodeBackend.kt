@@ -4,9 +4,9 @@ import dev.ccpocket.protocol.TokenUsage
 import dev.ccpocket.daemon.agent.AgentBackend
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
+import dev.ccpocket.daemon.agent.AgentProcessMode
+import dev.ccpocket.daemon.agent.AgentPromptDelivery
 import dev.ccpocket.daemon.agent.AgentSpec
-import dev.ccpocket.daemon.transcript.OpenCodeTranscriptWriter
-import dev.ccpocket.daemon.transcript.TranscriptWriter
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.HistoryMessage
@@ -42,8 +42,13 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     private val deltaSeen = ConcurrentHashMap.newKeySet<String>()
 
     override val kind: AgentKind = AgentKind.OPENCODE
+    override val processMode: AgentProcessMode = AgentProcessMode.ONE_SHOT_TURN
+    override val promptDelivery: AgentPromptDelivery = AgentPromptDelivery.INITIAL_ARG_ONE_SHOT
 
-    override fun processBuilder(spec: AgentSpec): ProcessBuilder = OpenCodeLauncher.processBuilder(exe(), spec)
+    override fun processBuilder(spec: AgentSpec): ProcessBuilder {
+        val chosenModel = spec.model ?: defaultModel(spec.workdir.toString())
+        return OpenCodeLauncher.processBuilder(exe(), spec.copy(model = chosenModel))
+    }
 
     private fun exe(): Path = resolvedExe ?: OpenCodeLauncher.resolveExecutable(opencodeBin).also { resolvedExe = it }
 
@@ -145,8 +150,6 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
 
     override suspend fun onProcessEnded(sessionId: String?) {}
 
-    override fun createTranscriptWriter(workdir: String): TranscriptWriter? = OpenCodeTranscriptWriter()
-
     // ---- disk: transcript scanning + replay ----
 
     override fun transcriptDir(workdir: String): Path = OpenCodePaths.dataRoot()
@@ -156,5 +159,9 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
 
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
-    override fun defaultModel(workdir: String): String? = OpenCodeDefaultModel.resolve(workdir)
+    override fun resumeModel(workdir: String, sessionId: String): String? =
+        OpenCodeTranscriptScanner.resumeModel(sessionId)
+
+    override fun defaultModel(workdir: String): String? =
+        OpenCodeDefaultModel.resolve(workdir) ?: OpenCodeModelService.defaultModel(opencodeBin)
 }

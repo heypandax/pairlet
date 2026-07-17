@@ -23,6 +23,6 @@ object OpenCodeDefaultModel {
         val configFile = listOfNotNull(projectConfig?.takeIf { it.isFile }, globalConfig.takeIf { it.isFile }).firstOrNull()
             ?: return@runCatching null
         val root = json.parseToJsonElement(configFile.readText()).jsonObject
-        root["model"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        root["model"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() && "/" in it }
     }.getOrNull()
 }
