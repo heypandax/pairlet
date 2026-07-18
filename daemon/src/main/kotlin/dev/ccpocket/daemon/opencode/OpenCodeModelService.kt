@@ -28,16 +28,19 @@ class OpenCodeModelService(
 
     companion object {
         const val DEFAULT_TIMEOUT_MS = 8_000L
-        private const val FALLBACK_MODEL = "opencode/deepseek-v4-flash-free"
 
-        fun defaultModel(opencodeBin: String? = null, timeoutMs: Long = 3_000L): String =
+        /** Best-effort probe of `opencode models` for a default. NULL when it can't answer — the
+         *  launcher then passes NO --model and opencode uses its OWN configured default. Never a
+         *  hardcoded fallback: any id pinned here names a provider the user may not have configured
+         *  (free-tier catalogs also rotate), and a wrong --model hangs the run silently. */
+        fun defaultModel(opencodeBin: String? = null, timeoutMs: Long = 3_000L): String? =
             runCatching {
                 val exe = OpenCodeLauncher.resolveExecutable(opencodeBin)
                 val result = runModels(exe, timeoutMs)
                 if (result.exitCode == 0 && !result.timedOut) {
                     sortModels(result.stdout.lines().filter { it.isNotBlank() }).firstOrNull()
                 } else null
-            }.getOrNull() ?: FALLBACK_MODEL
+            }.getOrNull()
 
         internal fun sortModels(models: List<String>): List<String> =
             models.distinct().sortedWith(compareBy<String> { if (it.startsWith("opencode/")) 0 else 1 }.thenBy { it })

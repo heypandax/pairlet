@@ -41,15 +41,12 @@ object OpenCodeLauncher {
             add("run")
             add("--format"); add("json")
             spec.model?.let { model ->
-                // Validate: opencode models use "provider/model-name" format (e.g. "opencode/big-pickle",
-                // "zhipuai/glm-4.5"). The old broken format "openai/gpt-5.4-mini-fast" (with slash but
-                // non-existent provider) causes opencode to hang silently on resume. Strip any "openai/"
-                // prefix that leaked from old configs — the model id alone is enough.
-                val cleaned = model.removePrefix("openai/")
-                require("/" in cleaned) {
-                    "OpenCode model must use provider/model format, got '$model'"
-                }
-                add("--model"); add(cleaned)
+                // opencode models are "provider/model-name" (e.g. "opencode/big-pickle", "zhipuai/glm-4.5");
+                // a bare id makes `opencode run` hang silently on a resumed session, so refuse it here —
+                // the failure surfaces as a clear agent_unavailable instead of a 45s watchdog kill.
+                // No --model at all (model == null) is valid: opencode falls back to its own configured default.
+                require("/" in model) { "OpenCode model must use provider/model format, got '$model'" }
+                add("--model"); add(model)
             }
             spec.resumeId?.let { add("--session"); add(it) }
             spec.effort?.let { add("--variant"); add(it) }
@@ -63,15 +60,14 @@ object OpenCodeLauncher {
             redirectErrorStream(false) // keep stderr off the stdout JSON stream
             redirectInput(ProcessBuilder.Redirect.from(File(if (isWindows) "NUL" else "/dev/null")))
             // Under launchd the daemon inherits a stripped environment — opencode (Node.js) needs
-            // these to locate its state DB and config. Without them it may block on init.
+            // XDG_DATA_HOME to locate its state DB (same resolution as OpenCodePaths.dataRoot(), the
+            // spec default ~/.local/share). ONLY the data dir, and only to its SPEC DEFAULT: forcing
+            // XDG_STATE_HOME to a non-default value made the daemon-launched opencode resolve state
+            // somewhere the user's terminal opencode doesn't → split session DBs → "Session not found"
+            // on every cross-launch resume.
             val env = environment()
             val home = System.getProperty("user.home")
-            // Point to the standard XDG data dir so OpenCode CLI reads the SAME database
-            // as OpenCodePaths.dataRoot() / SQLite transcript readers (default: ~/.local/share/opencode/).
-            // Under launchd the daemon inherits a stripped environment — the XDG vars ensure
-            // OpenCode (Node.js) can locate its state DB; without them init may block.
             env.putIfAbsent("XDG_DATA_HOME", "$home/.local/share")
-            env.putIfAbsent("XDG_STATE_HOME", "$home/.local/share")
             env.putIfAbsent("LANG", "C.UTF-8")
         }
     }

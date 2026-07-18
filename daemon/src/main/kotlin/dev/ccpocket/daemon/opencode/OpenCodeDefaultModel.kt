@@ -14,7 +14,10 @@ import java.nio.file.Path
  * for the top-level `model` key. NEVER throws: a failed resolve degrades to null.
  */
 object OpenCodeDefaultModel {
-    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    // the global config is a .jsonc — comments/trailing commas are the NORM there, and isLenient
+    // does NOT cover them: without these flags every commented config silently resolved to null
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; allowComments = true; allowTrailingComma = true }
 
     fun resolve(workdir: String? = null): String? = runCatching {
         // Try project-level config first

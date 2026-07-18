@@ -19,10 +19,8 @@ object OpenCodeTranscriptScanner {
 
     /** All OpenCode sessions whose directory matches [workdir], newest-first. */
     fun scan(workdir: String): List<SessionSummary> {
-        val dbPath = OpenCodePaths.database()
-        if (!dbPath.toFile().exists()) return emptyList()
         return runCatching {
-            val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.toFile().absolutePath}")
+            val conn = OpenCodePaths.connectReadOnly() ?: return emptyList()
             conn.use {
                 val stmt = it.prepareStatement(
                     "SELECT s.id, s.title, s.directory, s.model, s.cost, " +
@@ -62,10 +60,8 @@ object OpenCodeTranscriptScanner {
     }
 
     fun resumeModel(sessionId: String): String? {
-        val dbPath = OpenCodePaths.database()
-        if (!dbPath.toFile().exists()) return null
         return runCatching {
-            val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.toFile().absolutePath}")
+            val conn = OpenCodePaths.connectReadOnly() ?: return null
             conn.use {
                 val stmt = it.prepareStatement("SELECT model FROM session WHERE id = ? LIMIT 1")
                 stmt.setString(1, sessionId)
@@ -77,10 +73,8 @@ object OpenCodeTranscriptScanner {
 
     /** Every directory with OpenCode sessions → its newest session mtime. */
     fun cwdsByNewest(): Map<String, Long> {
-        val dbPath = OpenCodePaths.database()
-        if (!dbPath.toFile().exists()) return emptyMap()
         return runCatching {
-            val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.toFile().absolutePath}")
+            val conn = OpenCodePaths.connectReadOnly() ?: return emptyMap()
             conn.use {
                 val stmt = it.prepareStatement(
                     "SELECT directory, MAX(time_updated) as mtime FROM session WHERE time_archived IS NULL AND directory IS NOT NULL GROUP BY directory"

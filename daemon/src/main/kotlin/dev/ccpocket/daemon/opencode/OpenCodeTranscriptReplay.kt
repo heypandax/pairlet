@@ -22,10 +22,8 @@ object OpenCodeTranscriptReplay {
     private const val MAX_TEXT_PER_MESSAGE = 4000
 
     fun read(sessionId: String, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
-        val dbPath = OpenCodePaths.database()
-        if (!dbPath.toFile().exists()) return emptyList()
         return runCatching {
-            val conn = java.sql.DriverManager.getConnection("jdbc:sqlite:${dbPath.toFile().absolutePath}")
+            val conn = OpenCodePaths.connectReadOnly() ?: return emptyList()
             conn.use {
                 // Read messages for this session
                 val msgStmt = it.prepareStatement(

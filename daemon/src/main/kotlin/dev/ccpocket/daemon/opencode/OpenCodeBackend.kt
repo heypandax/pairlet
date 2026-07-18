@@ -46,6 +46,7 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     override val promptDelivery: AgentPromptDelivery = AgentPromptDelivery.INITIAL_ARG_ONE_SHOT
 
     override fun processBuilder(spec: AgentSpec): ProcessBuilder {
+        // null is a valid resolution: no --model → opencode applies its own configured default.
         val chosenModel = spec.model ?: defaultModel(spec.workdir.toString())
         return OpenCodeLauncher.processBuilder(exe(), spec.copy(model = chosenModel))
     }
@@ -71,11 +72,13 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
         return events.flatMap { event ->
             when (event) {
                 is AgentEvent.SessionInit -> {
-                    // Capture session ID from first step_start
+                    // opencode emits step_start per STEP, not per process — only the first one is the
+                    // session announcement. Re-emitting the rest would re-run Conversation's whole init
+                    // path (SessionLive re-push per step = pure frame noise for every attached client).
                     if (sessionId == null && event.sessionId != null) {
                         sessionId = event.sessionId
-                    }
-                    listOf(event)
+                        listOf(event)
+                    } else emptyList()
                 }
                 is AgentEvent.AssistantText -> {
                     lastAgentText = (lastAgentText ?: "") + event.text
@@ -162,6 +165,17 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
     override fun resumeModel(workdir: String, sessionId: String): String? =
         OpenCodeTranscriptScanner.resumeModel(sessionId)
 
+    // `opencode models` is a full Node CLI boot — and one-shot means processBuilder runs EVERY turn,
+    // so an unconfigured default would pay that subprocess per message. Probe once per conversation.
+    @Volatile private var probedDefault: String? = null
+    @Volatile private var probeDone = false
+
     override fun defaultModel(workdir: String): String? =
-        OpenCodeDefaultModel.resolve(workdir) ?: OpenCodeModelService.defaultModel(opencodeBin)
+        OpenCodeDefaultModel.resolve(workdir) ?: run {
+            if (!probeDone) {
+                probedDefault = OpenCodeModelService.defaultModel(opencodeBin)
+                probeDone = true
+            }
+            probedDefault
+        }
 }
