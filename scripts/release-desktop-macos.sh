@@ -53,6 +53,30 @@ else
   echo "==> WARNING: DEVELOPER_ID unset — building an UNSIGNED dmg (dev only; Gatekeeper warns on other Macs)."
 fi
 
+# pty4j ships Mach-O binaries INSIDE its jar (resources/com/pty4j/native/darwin/*). The Compose
+# plugin signs every binary it can SEE in the .app, but never looks inside jars — and Apple's notary
+# service does: v1.4.0 was rejected with "the executable does not have the hardened runtime enabled"
+# on pty4j-unix-spawn-helper (#153 embedded terminal). Fix: resolve the dependency first, then
+# re-sign the darwin natives in the CACHED jar (Developer ID + hardened runtime + timestamp) and zip
+# them back, so packageDmg packs an already-clean jar. Signatures travel with the files, so the
+# helper pty4j extracts at runtime stays valid. Signed builds only — an unsigned dev dmg needs none.
+if [ -n "${DEVELOPER_ID:-}" ]; then
+  echo "==> pre-resolve desktop classpath (populates the dependency cache)"
+  ./gradlew :mobile:composeApp:desktopJar --no-daemon -q \
+    ${JAVA_HOME:+-Dorg.gradle.java.home="$JAVA_HOME"}
+  echo "==> sign darwin natives inside cached pty4j jar(s)"
+  find "${GRADLE_USER_HOME:-$HOME/.gradle}/caches/modules-2" -name 'pty4j-*.jar' ! -name '*sources*' | while read -r JAR; do
+    WORK="$(mktemp -d)"
+    unzip -q "$JAR" 'resources/com/pty4j/native/darwin/*' -d "$WORK" 2>/dev/null || { rm -rf "$WORK"; continue; }
+    find "$WORK" -type f | while read -r BIN; do
+      codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID" "$BIN"
+      echo "    signed $(basename "$BIN") in $(basename "$JAR")"
+    done
+    (cd "$WORK" && zip -q "$JAR" resources/com/pty4j/native/darwin/*)
+    rm -rf "$WORK"
+  done
+fi
+
 echo "==> gradle :mobile:composeApp:packageDmg  (v$VERSION · $ARCH)"
 ./gradlew :mobile:composeApp:packageDmg --no-daemon -q \
   -Pcompose.desktop.packaging.checkJdkVendor=false \
