@@ -1440,13 +1440,28 @@ data class ScheduleState(
  *  two can't drift — a runaway sub-minute repeat would hammer sessions in a loop. */
 const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 
+// ── client capability declaration ───────────────────────────────────────
+
+/** client -> daemon, once right after connect: which OPTIONAL wire vocabulary this client build
+ *  understands. Old builds decode an UNKNOWN enum value as a whole-Envelope failure and silently
+ *  drop the frame (their PocketJson predates coerceInputValues) — so the daemon must NOT emit
+ *  `agent:"opencode"` into lists an undeclared client will receive, or that client loses its whole
+ *  session/project list. Until this frame arrives the daemon filters those rows out (claude/codex
+ *  entries flow as always); an old daemon receiving this frame just drops it — additive both ways.
+ *  [supportsAgents] carries wire names ("opencode"), so future AgentKind additions reuse the frame. */
+@Serializable
+@SerialName("pocket/client.caps")
+data class ClientCaps(
+    val supportsAgents: List<String> = emptyList(),
+) : ToDaemon
+
 // ── agent model listing ─────────────────────────────────────────────────
 
 /** client -> daemon: fetch the model list for one backend from the Mac daemon. */
 @Serializable
 @SerialName("pocket/models.fetch")
 data class FetchModels(
-    val agent: AgentKind = AgentKind.OPENCODE,
+    val agent: AgentKind = AgentKind.CLAUDE, // default keeps older peers on Claude, like every agent field
     val workdir: String? = null,
 ) : ToDaemon
 
@@ -1456,7 +1471,7 @@ data class FetchModels(
 @Serializable
 @SerialName("pocket/models.list")
 data class ModelsList(
-    val agent: AgentKind = AgentKind.OPENCODE,
+    val agent: AgentKind = AgentKind.CLAUDE, // default keeps older peers on Claude, like every agent field
     val models: List<String> = emptyList(),
     val error: String? = null,
 ) : ToPhone

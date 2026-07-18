@@ -124,6 +124,8 @@ import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchModels
+import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
+import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.FetchPresets
 import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.FetchSkillCatalog
@@ -1282,7 +1284,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // ask for the list now; it buffers in the outbox and flushes once the handshake lands. Ready is
         // asserted only when the real Directories reply arrives (see handle()), never optimistically here.
         // On a reconnect, also re-sync whatever page the user is parked on (re-open a live chat, re-list sessions).
-        scope.launch { send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
+        // ClientCaps FIRST: it declares this build understands agent="opencode", so the daemon stops
+        // filtering those rows out of the lists that follow (old builds never send it — see Messages.kt).
+        scope.launch { send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE))); send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
         startGrace(reconnect)
         startConnectWatchdog()
     }

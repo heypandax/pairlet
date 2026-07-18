@@ -23,6 +23,9 @@ import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
+import dev.ccpocket.protocol.ScheduleState
+import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.AudioCancel
 import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.AuthLogin
@@ -97,17 +100,33 @@ class RequestRouter(
     private val codexModels: CodexModelService = CodexModelService(),
     private val claudeModels: ClaudeModelService = ClaudeModelService(),
 ) {
+    /** One connection's declared wire vocabulary (see [ClientCaps] in Messages.kt). Mutable: the
+     *  declaration frame lands after connect and upgrades the SAME holder the ingress created for
+     *  the connection. Default (no declaration, or a legacy ingress passing null) = filter — an
+     *  already-shipped client hard-fails the whole Envelope on an unknown [AgentKind], so opencode
+     *  rows must never reach a peer that didn't declare them. */
+    class ClientCapsHolder {
+        @Volatile var supportsOpencode: Boolean = false
+    }
+
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
      *  it clamps the project/session VISIBILITY to the shared root + the guest's own sessions, and rides
-     *  into [SessionRegistry.open] as the conversation's tool path guard. */
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, onOpened: suspend (String) -> Unit = {}) {
+     *  into [SessionRegistry.open] as the conversation's tool path guard. [caps] is the connection's
+     *  capability holder — null (legacy ingress / bridges) filters like an undeclared client. */
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
-            is ListDirectories ->
-                if (guestScope != null) sink.emit(Directories(scopedDirectories(guestScope)))
-                else sink.emit(Directories(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd())))
+            // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
+            // next list request answers unfiltered. Ingress handlers may process frames concurrently,
+            // so a burst's first list can still race the declaration: worst case one filtered snapshot,
+            // corrected by the client's next fetch.
+            is ClientCaps -> caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
 
-            is ListSessions -> emitSessions(frame.workdir, sink, guestScope)
+            is ListDirectories ->
+                if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope), caps)))
+                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd()), caps)))
+
+            is ListSessions -> emitSessions(frame.workdir, sink, guestScope, caps)
 
             // session groups (issue #119): mutate the daemon-side group store, then re-push this workdir's
             // session list so the grouping change reflects immediately (same response path as ListSessions).
@@ -115,19 +134,19 @@ class RequestRouter(
             // mutation but still answer with the (re-filtered) list so the client isn't left hanging.
             is GroupCreate -> {
                 if (guestScope == null) SessionGroups.create(groupWorkdir(frame.workdir), frame.name)
-                emitSessions(frame.workdir, sink, guestScope)
+                emitSessions(frame.workdir, sink, guestScope, caps)
             }
             is GroupRename -> {
                 if (guestScope == null) SessionGroups.rename(groupWorkdir(frame.workdir), frame.groupId, frame.name)
-                emitSessions(frame.workdir, sink, guestScope)
+                emitSessions(frame.workdir, sink, guestScope, caps)
             }
             is GroupDelete -> {
                 if (guestScope == null) SessionGroups.delete(groupWorkdir(frame.workdir), frame.groupId)
-                emitSessions(frame.workdir, sink, guestScope)
+                emitSessions(frame.workdir, sink, guestScope, caps)
             }
             is GroupAssign -> {
                 if (guestScope == null) SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
-                emitSessions(frame.workdir, sink, guestScope)
+                emitSessions(frame.workdir, sink, guestScope, caps)
             }
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
@@ -137,9 +156,9 @@ class RequestRouter(
             // guest never reaches here (GuestCaps default-denies the frame type at the choke point) —
             // the null-check is belt-and-suspenders like the group mutations', answering with the list.
             is RenameSession -> scope.launch {
-                if (guestScope != null) { emitSessions(frame.workdir, sink, guestScope); return@launch }
+                if (guestScope != null) { emitSessions(frame.workdir, sink, guestScope, caps); return@launch }
                 val err = registry.renameSession(groupWorkdir(frame.workdir), frame.sessionId, frame.title)
-                if (err == null) emitSessions(frame.workdir, sink, guestScope)
+                if (err == null) emitSessions(frame.workdir, sink, guestScope, caps)
                 else sink.emit(PocketError("rename_failed", err))
             }
 
@@ -192,6 +211,13 @@ class RequestRouter(
                 val wd = dirs.validateOrCreateWorkdir(frame.workdir)
                 when {
                     wd == null -> sink.emit(PocketError("bad_workdir", "not a readable directory: ${frame.workdir}"))
+                    // OpenCode runs `--auto` (no approval protocol): every tool call is CLI-approved, so the
+                    // PermissionBridge that enforces a guest's path scope / a bridge's command policy is never
+                    // consulted. Until opencode exposes an enforceable approval channel, a RESTRICTED origin
+                    // (guest #115 / bridge #91) must not be able to open one — it would be unsandboxed
+                    // full-auto under a credential whose whole design is scoped, per-call consent.
+                    (guestScope != null || origin != null) && frame.agent == AgentKind.OPENCODE ->
+                        sink.emit(PocketError("share_forbidden", "OpenCode sessions are not available over shared/bridge access (no enforceable approval channel)"))
                     guestScope != null && !PathScope.contains(guestScope.roots, wd.toString()) ->
                         sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
                     else -> {
@@ -274,9 +300,9 @@ class RequestRouter(
             // scheduled tasks (issue #137): quick store ops; each answers with the full ScheduleState
             // truth (same single-reply contract as pocket/presets.*). Guests/bridges never reach here —
             // their capability whitelists deny the frame type at the choke point (default-deny).
-            is ScheduleCreate -> sink.emit(scheduler.create(frame, dirs.validateWorkdir(frame.workdir)?.toString()))
-            is ScheduleList -> sink.emit(scheduler.state())
-            is ScheduleCancel -> sink.emit(scheduler.cancel(frame.id))
+            is ScheduleCreate -> sink.emit(filterSchedule(scheduler.create(frame, dirs.validateWorkdir(frame.workdir)?.toString()), caps))
+            is ScheduleList -> sink.emit(filterSchedule(scheduler.state(), caps))
+            is ScheduleCancel -> sink.emit(filterSchedule(scheduler.cancel(frame.id), caps))
 
             // phone-push switch: null enabled = query only; either way the daemon's truth is the reply
             is SetPushPrefs -> {
@@ -309,16 +335,35 @@ class RequestRouter(
      * sessions, marks the busy ones, and stamps the project's groups. A GUEST (issue #115) sees ONLY the
      * sessions IT started (visibility "by initiator") and no group headers.
      */
-    private suspend fun emitSessions(workdir: String, sink: OutboundSink, guestScope: GuestScope?) {
+    private suspend fun emitSessions(workdir: String, sink: OutboundSink, guestScope: GuestScope?, caps: ClientCapsHolder? = null) {
         val busy = registry.busySessionIds()
         val wd = groupWorkdir(workdir)
         var items = registry.listSessions(wd).map { if (it.sessionId in busy) it.copy(busy = true) else it }
         if (guestScope != null) items = items.filter { it.sessionId in guestScope.ownedSessions }
+        // wire-compat (ClientCaps): an undeclared client would drop this WHOLE frame on one opencode row
+        if (caps?.supportsOpencode != true) items = items.filter { it.agent != AgentKind.OPENCODE }
         val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
         // renameSupported (issue #158): owner-only — a guest's RenameSession is capability-denied anyway,
         // so its client must not show the entry
         sink.emit(Sessions(workdir, items, groups = groups, renameSupported = guestScope == null))
     }
+
+    // ── ClientCaps filters: strip agent=OPENCODE rows for peers that never declared support, so an
+    // already-shipped build (unknown-enum decode = whole-frame drop) keeps its claude/codex lists ──
+
+    /** [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
+     *  enrichment carries [AgentKind] — strip the opencode entries, keep the row. */
+    private fun filterDirs(entries: List<DirectoryEntry>, caps: ClientCapsHolder?): List<DirectoryEntry> =
+        if (caps?.supportsOpencode == true) entries
+        else entries.map { e ->
+            if (e.activeSessions.any { it.agent == AgentKind.OPENCODE }) {
+                e.copy(activeSessions = e.activeSessions.filter { it.agent != AgentKind.OPENCODE })
+            } else e
+        }
+
+    private fun filterSchedule(state: ScheduleState, caps: ClientCapsHolder?): ScheduleState =
+        if (caps?.supportsOpencode == true || state.items.none { it.agent == AgentKind.OPENCODE }) state
+        else state.copy(items = state.items.filter { it.agent != AgentKind.OPENCODE })
 
     /**
      * The project list a GUEST sees (issue #115): ONLY the shared root(s) — each stamped with the origin

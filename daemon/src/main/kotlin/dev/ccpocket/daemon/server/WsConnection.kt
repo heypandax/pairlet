@@ -75,6 +75,8 @@ class WsConnection(
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
     private val owned: MutableList<String> = Collections.synchronizedList(mutableListOf())
+    // this socket's declared wire vocabulary (ClientCaps) — one holder per connection, upgraded in place
+    private val caps = RequestRouter.ClientCapsHolder()
     private var gatedDeviceId: String? = null // which paired device this gated socket authenticated as
     private var allowlistEpoch = PairedDevices.epoch
 
@@ -191,7 +193,7 @@ class WsConnection(
                             // for everything else (and when the controls aren't up yet).
                             val (sc, bc) = ownerControls?.invoke() ?: (null to null)
                             if (dispatchOwnerControl(env.body, sc, bc) { sink.emit(it) }) return@launch
-                            router.handle(env.body, sink) { owned.add(it) }
+                            router.handle(env.body, sink, caps = caps) { owned.add(it) }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
                             log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")

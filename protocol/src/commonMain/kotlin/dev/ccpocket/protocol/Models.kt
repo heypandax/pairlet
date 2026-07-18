@@ -42,6 +42,10 @@ enum class AgentKind {
     @SerialName("opencode") OPENCODE,
 }
 
+/** OPENCODE's wire name, shared by [ClientCaps.supportsAgents] declarations on both ends — the
+ *  daemon must not emit this enum value to a peer that never declared it (see ClientCaps). */
+const val AGENT_WIRE_OPENCODE = "opencode"
+
 /** Codex model ids the app exposes as first-class presets. */
 val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex")
 

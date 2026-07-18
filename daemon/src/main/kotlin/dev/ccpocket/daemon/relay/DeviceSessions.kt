@@ -8,6 +8,7 @@ import dev.ccpocket.daemon.bridge.CredentialKind
 import dev.ccpocket.daemon.bridge.GuestCaps
 import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.bridge.PathScope
+import dev.ccpocket.daemon.server.RequestRouter
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.identity.PairedDevices
@@ -82,6 +83,9 @@ class DeviceSessions(
     private val owned = HashMap<String, MutableList<String>>()
     private val nextId = AtomicLong(0)
     private val seenThisAttach = HashSet<String>()          // devices the relay re-announced since the last attach
+    // deviceId -> declared wire vocabulary (ClientCaps): survives reconnects of the same device, bounded
+    // by the paired-device count. Concurrent map — route() reads it outside the mutex.
+    private val deviceCaps = java.util.concurrent.ConcurrentHashMap<String, RequestRouter.ClientCapsHolder>()
 
     @Volatile
     private var lastInteractiveMintAt = 0L // serializes interactive vs headless pairing (issue #91)
@@ -418,7 +422,7 @@ class DeviceSessions(
             }
         }
         try {
-            core.router.handle(toRoute, sink, origin, guestScope) { convoId ->
+            core.router.handle(toRoute, sink, origin, guestScope, caps = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
