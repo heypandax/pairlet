@@ -89,7 +89,6 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         bootstrap.withLock { pendingPrompt = null }
         lastAgentText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
-        threadResumeFailed = false
         // kick off the handshake — initialized + thread open happen when the response lands (see handleResponse)
         initializeId = rpcRequest("initialize", buildJsonObject {
             putJsonObject("clientInfo") { put("name", "cc-pocket"); put("version", CLIENT_VERSION) }
@@ -109,7 +108,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
                 method != null && idEl != null -> handleServerRequest(method, idEl, root.obj("params"))
                 method != null -> handleNotification(method, root.obj("params"))
                 root.containsKey("result") -> handleResponse(idEl, root["result"])
-                root.containsKey("error") -> handleErrorResponse(idEl, root.obj("error"))
+                root.containsKey("error") -> { log.warn("codex error: ${root["error"]}"); emptyList() }
                 else -> emptyList()
             }
         }.getOrElse { log.warn("codex parse failed: ${it.message}"); emptyList() }
@@ -129,20 +128,6 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         }
     }
 
-    /** thread/resume failed — fall back to creating a fresh thread so the conversation can proceed. */
-    @Volatile private var threadResumeFailed = false
-
-    private suspend fun handleErrorResponse(idEl: JsonElement?, error: JsonObject?): List<AgentEvent> {
-        if ((idEl as? JsonPrimitive)?.longOrNull == threadOpenId && resumeId != null && !threadResumeFailed) {
-            threadResumeFailed = true
-            val msg = error?.str("message") ?: "unknown"
-            log.warn("codex thread/resume failed ($msg) — falling back to thread/start (fresh thread)")
-            resumeId = null
-            openThread()
-        }
-        return emptyList()
-    }
-
     private suspend fun openThread() {
         val rid = resumeId
         threadOpenId = if (rid != null) {
@@ -160,12 +145,6 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     private suspend fun onThreadReady(result: JsonObject?): List<AgentEvent> {
         val thread = result?.obj("thread") ?: return emptyList()
         val tid = thread.str("id") ?: return emptyList()
-        // If this was a fallback thread/start (after a failed thread/resume), notify the phone
-        // so it knows the conversation continued on a new thread rather than the expected one.
-        if (threadResumeFailed) {
-            // The thread is fresh — the phone needs to know the old thread was unrecoverable.
-            // We emit this as an assistant text so the user sees the explanation.
-        }
         val flush = bootstrap.withLock {
             threadId = tid
             pendingPrompt.also { pendingPrompt = null }
@@ -193,15 +172,20 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
             "item/completed" -> onItemCompleted(params.obj("item"))
             "thread/tokenUsage/updated" -> {
                 val tu = params.obj("tokenUsage")
+                // `last` is the finished call's usage ≈ what's occupying the context window; `total` is the
+                // SESSION-CUMULATIVE sum, which only grows and reads as absurd occupancy after a few turns.
+                // Prefer last, fall back to total only for server builds that don't send it (app-server is
+                // experimental and drifts — see the probe regression notes).
                 captureUsage(tu?.obj("last") ?: tu?.obj("total"))
                 emptyList()
             }
             "turn/completed" -> onTurnCompleted(params.obj("turn"))
             "error" -> {
                 val msg = params.obj("error")?.str("message") ?: "codex error"
+                // turn/completed (status=failed) still follows and clears `executing`; surface the text now
                 listOf(AgentEvent.AssistantText("⚠️ $msg"))
             }
-            else -> emptyList()
+            else -> emptyList() // unknown notification type — tolerate (codex adds these over time)
         }
     }
 
@@ -221,13 +205,13 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
                 val diff = changes?.mapNotNull { (it as? JsonObject)?.str("diff") }?.joinToString("\n")?.takeIf { it.isNotBlank() }
                 if (id != null) {
                     path?.let { fileChangePaths[id] = it }
-                    diff?.let { fileChangeDiffs[id] = it.take(MAX_DIFF_CHARS) }
+                    diff?.let { fileChangeDiffs[id] = it.take(MAX_DIFF_CHARS) } // cap so the approval frame stays under the relay limit
                 }
                 listOf(AgentEvent.AssistantToolUse(id, "Edit", buildJsonObject { path?.let { put("file_path", it) } }))
             }
             "mcpToolCall" -> listOf(AgentEvent.AssistantToolUse(id, item.str("toolName") ?: "tool", null))
             "webSearch" -> listOf(AgentEvent.AssistantToolUse(id, "WebSearch", null))
-            else -> emptyList()
+            else -> emptyList() // agentMessage/reasoning flow through deltas; other item kinds are not surfaced
         }
     }
 
@@ -238,6 +222,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
             "agentMessage" -> {
                 val text = item.str("text")
                 if (text != null) lastAgentText = text
+                // deltas already streamed this message → don't double-emit; only emit if no delta arrived
                 if (text != null && (id == null || id !in deltaSeen)) listOf(AgentEvent.AssistantText(text)) else emptyList()
             }
             "commandExecution" -> listOf(
@@ -256,13 +241,14 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         val u = lastUsage
         val ev = AgentEvent.TurnResult(
             finalText = lastAgentText,
+            // a turn that never saw a tokenUsage event reports "unknown" (null), not an empty window
             usage = if (usageSeen) TokenUsage(u.input, u.output, null, u.cached) else null,
             isError = status == "failed",
         )
         lastAgentText = null
         currentTurnId = null
         deltaSeen.clear()
-        fileChangePaths.clear(); fileChangeDiffs.clear()
+        fileChangePaths.clear(); fileChangeDiffs.clear() // approvals for this turn are resolved by now — don't accumulate
         return listOf(ev)
     }
 
@@ -287,7 +273,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
                     params?.str("command")?.let { put("command", it) }
                     params?.str("cwd")?.let { put("cwd", it) }
                 }
-                listOf(AgentEvent.ControlRequest(askId, "Bash", input))
+                listOf(AgentEvent.ControlRequest(askId, "Bash", input)) // "Bash" → ToolMetadata danger regex + "Run command" title
             }
             "item/fileChange/requestApproval" -> {
                 pendingApprovals[askId] = idEl
@@ -297,10 +283,12 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
                 val input = buildJsonObject {
                     (path ?: params?.str("reason"))?.let { put("file_path", it) }
                 }
-                listOf(AgentEvent.ControlRequest(askId, "Edit", input, diff = diff))
+                listOf(AgentEvent.ControlRequest(askId, "Edit", input, diff = diff)) // diff is typed, not smuggled in input
 
             }
             else -> {
+                // permissions/tool-input/elicitation + deprecated v1 approvals: not supported under our config.
+                // Reply with an error so codex doesn't block waiting on us.
                 log.warn("codex unsupported server request: $method")
                 rpcRespondError(idEl, -32601, "not supported by cc-pocket")
                 emptyList()
@@ -323,10 +311,11 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
+                // images: Codex takes image{url}/localImage{path}, not base64 inline — deferred (Tier C)
             }
             put("cwd", workdir)
             put("approvalPolicy", approvalPolicy())
-            putJsonObject("sandboxPolicy") { put("type", sandbox().tag) }
+            putJsonObject("sandboxPolicy") { put("type", sandbox().tag) } // turn/start takes the object form
             codexModel()?.let { put("model", it) }
             effort?.let { put("effort", codexEffort(it)) }
         })
@@ -351,6 +340,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         rpcRespondResult(idEl, buildJsonObject { put("decision", decision) })
     }
 
+    // codex applies mode/model/effort per turn → no relaunch; just stash for the next turn/start
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean {
         mode?.let { this.mode = it }
         model?.let { this.model = it }
@@ -358,7 +348,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         return false
     }
 
-    override suspend fun onProcessEnded(sessionId: String?) {}
+    override suspend fun onProcessEnded(sessionId: String?) {} // codex rollouts are self-managed; nothing to unhide
 
     // ---- disk: ~/.codex/sessions rollout scanning + replay (filtered by recorded cwd) ----
 
@@ -380,17 +370,22 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     // record to read back, so there's nothing to seed the statusline with on resume.
     override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
 
+    // issue #96: read the configured default (top-level `model` in $CODEX_HOME/config.toml) so a brand-new
+    // Codex session's header shows the real model before the first turn instead of a blank segment.
     override fun defaultModel(workdir: String): String? = CodexDefaultModel.resolve()
 
-    // ---- mode mapping ----
+    // ---- mode mapping (Claude's single mode → Codex's approvalPolicy × sandbox axes) ----
 
+    // The 4 PermissionMode values are the phone's Codex presets (Cautious/Balanced/Autonomous/Full auto).
     private fun approvalPolicy(): String = when (mode) {
-        PermissionMode.PLAN -> "untrusted"
-        PermissionMode.DEFAULT -> "on-request"
-        PermissionMode.ACCEPT_EDITS -> "never"
-        PermissionMode.BYPASS_PERMISSIONS -> "never"
+        PermissionMode.PLAN -> "untrusted"             // Cautious: ask every step (paired with read-only)
+        PermissionMode.DEFAULT -> "on-request"         // Balanced: ask when needed (the recommended default)
+        PermissionMode.ACCEPT_EDITS -> "never"         // Autonomous: never ask, writes in the workspace
+        PermissionMode.BYPASS_PERMISSIONS -> "never"   // Full auto: never ask + full access
     }
 
+    /** The sandbox for the current mode in both spellings codex needs: flat SandboxMode string (thread/start)
+     *  + the SandboxPolicy object tag (turn/start). One source so the two can't desync. */
     private data class Sandbox(val flat: String, val tag: String)
 
     private fun sandbox(): Sandbox = when (mode) {
@@ -399,8 +394,10 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         else -> Sandbox("workspace-write", "workspaceWrite")
     }
 
+    /** Drop Claude model aliases (opus/sonnet/haiku) — they're meaningless to codex and would error. */
     private fun codexModel(): String? = model?.takeIf { it.lowercase() !in CLAUDE_ALIASES }
 
+    /** cc-pocket's effort ladder includes "max"; codex's top tier is "xhigh" — map it so the turn isn't rejected. */
     private fun codexEffort(e: String): String = if (e == "max") "xhigh" else e
 
     // ---- JSON-RPC plumbing ----
@@ -429,8 +426,9 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     }
 
     private companion object {
+        // the daemon's real build version (single runtime source — no per-release manual bump here)
         val CLIENT_VERSION: String get() = dev.ccpocket.daemon.util.DaemonVersion.CURRENT
-        const val MAX_DIFF_CHARS = 6000
+        const val MAX_DIFF_CHARS = 6000 // approval diff cap — keeps the PermissionAsk frame well under the relay's 256 KiB limit
         val CLAUDE_ALIASES = setOf("opus", "sonnet", "haiku")
     }
 }

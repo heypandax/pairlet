@@ -36,7 +36,12 @@ import kotlin.test.assertTrue
 class ConversationOpenCodeOneShotTest {
     private fun win() = System.getProperty("os.name").lowercase().contains("win")
 
-    private class OneShotBackend(private val scripts: List<List<String>>) : AgentBackend {
+    /** [shell] overrides the per-launch shell command (index, stream file) — lets a test emit the first
+     *  line then stall (long-turn shape) or hang with zero output (startup-hang shape). Default: cat. */
+    private class OneShotBackend(
+        private val scripts: List<List<String>>,
+        private val shell: ((Int, Path) -> String)? = null,
+    ) : AgentBackend {
         val specs = CopyOnWriteArrayList<AgentSpec>()
         override val kind = AgentKind.OPENCODE
         override val processMode = AgentProcessMode.ONE_SHOT_TURN
@@ -44,10 +49,12 @@ class ConversationOpenCodeOneShotTest {
 
         override fun processBuilder(spec: AgentSpec): ProcessBuilder {
             specs.add(spec)
-            val lines = scripts[minOf(specs.size, scripts.size) - 1]
+            val idx = minOf(specs.size, scripts.size) - 1
+            val lines = scripts[idx]
             val f = Files.createTempDirectory("ccp-opencode-one-shot").resolve("stream.jsonl")
                 .apply { writeText(lines.joinToString("\n") + "\n") }
-            return ProcessBuilder("sh", "-c", "cat '${f.absolutePathString()}'")
+            val cmd = shell?.invoke(idx, f) ?: "cat '${f.absolutePathString()}'"
+            return ProcessBuilder("sh", "-c", cmd)
         }
 
         override suspend fun attach(io: AgentIo, spec: AgentSpec) {}
@@ -137,6 +144,109 @@ class ConversationOpenCodeOneShotTest {
             convo.sendPrompt("hello", promptId = "p1")
             await { frames.count { it is PromptAck && it.promptId == "p1" } >= 2 }
             assertEquals(1, backend.specs.size)
+        } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    /** Watchdog regression (review P0): a turn STREAMING past the startup window must never be killed —
+     *  the guard is startup-only (zero stdout), not a turn-length cap. */
+    @Test
+    fun long_turn_streaming_past_watchdog_window_is_not_killed() = runBlocking {
+        if (win()) return@runBlocking
+        System.setProperty(Conversation.OPENCODE_WATCHDOG_PROP, "300")
+        try {
+            val frames = CopyOnWriteArrayList<Frame>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            // first line (step_start) immediately, the rest well after the 300ms watchdog window
+            val backend = OneShotBackend(listOf(okTurn("ses_open_1"))) { _, f ->
+                "head -n 1 '${f.absolutePathString()}'; sleep 1.2; tail -n +2 '${f.absolutePathString()}'"
+            }
+            val convo = Conversation("cOpen", Files.createTempDirectory("ccp-open"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+            try {
+                convo.open(resumeId = null, model = null)
+                convo.sendPrompt("hello", promptId = "p1")
+                await { frames.any { it is TurnDone } }
+                assertFalse(frames.any { it is PocketError && it.code == "opencode_startup_timeout" }, frames.toString())
+            } finally {
+                convo.close()
+                scope.cancel()
+            }
+        } finally {
+            System.clearProperty(Conversation.OPENCODE_WATCHDOG_PROP)
+        }
+    }
+
+    /** The hang the watchdog exists for: a process that is alive but never prints gets killed + reported. */
+    @Test
+    fun zero_stdout_hang_is_killed_by_watchdog() = runBlocking {
+        if (win()) return@runBlocking
+        System.setProperty(Conversation.OPENCODE_WATCHDOG_PROP, "300")
+        try {
+            val frames = CopyOnWriteArrayList<Frame>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            val backend = OneShotBackend(listOf(okTurn("ses_open_1"))) { _, _ -> "sleep 30" }
+            val convo = Conversation("cOpen", Files.createTempDirectory("ccp-open"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+            try {
+                convo.open(resumeId = null, model = null)
+                convo.sendPrompt("hello", promptId = "p1")
+                await { frames.any { it is PocketError && it.code == "opencode_startup_timeout" } }
+                assertTrue(frames.any { it is PocketError && it.code == "opencode_startup_timeout" })
+            } finally {
+                convo.close()
+                scope.cancel()
+            }
+        } finally {
+            System.clearProperty(Conversation.OPENCODE_WATCHDOG_PROP)
+        }
+    }
+
+    /** Cold-resume regression (review P0): tapping a DISK session (openedResumeId set, no live sessionId)
+     *  must resume that opencode session — not silently fork a fresh one. */
+    @Test
+    fun cold_resume_anchors_on_opened_resume_id() = runBlocking {
+        if (win()) return@runBlocking
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = OneShotBackend(listOf(okTurn("ses_disk_1")))
+        val convo = Conversation("cOpen", Files.createTempDirectory("ccp-open"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+        try {
+            convo.open(resumeId = "ses_disk_1", model = null)
+            convo.sendPrompt("hello again", promptId = "p1")
+            await { frames.any { it is TurnDone } }
+            assertEquals("ses_disk_1", backend.specs[0].resumeId)
+            assertEquals(false, backend.specs[0].forkSession)
+        } finally {
+            convo.close()
+            scope.cancel()
+        }
+    }
+
+    /** Mid-turn sends queue (same receipt contract as the stdin mid-turn queue) and drain into the next
+     *  one-shot spawn after the running turn completes — never bounced with an error. */
+    @Test
+    fun midturn_prompt_queues_and_runs_after_current_turn() = runBlocking {
+        if (win()) return@runBlocking
+        val frames = CopyOnWriteArrayList<Frame>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = OneShotBackend(listOf(okTurn("ses_open_1"), okTurn("ses_open_1", "second answer"))) { idx, f ->
+            // first launch stalls mid-turn so the second prompt lands while it runs; later launches just cat
+            if (idx == 0) "head -n 1 '${f.absolutePathString()}'; sleep 1.2; tail -n +2 '${f.absolutePathString()}'"
+            else "cat '${f.absolutePathString()}'"
+        }
+        val convo = Conversation("cOpen", Files.createTempDirectory("ccp-open"), PermissionMode.DEFAULT, { frames.add(it) }, scope, backend)
+        try {
+            convo.open(resumeId = null, model = null)
+            convo.sendPrompt("first", promptId = "p1")
+            await { frames.any { it is PromptAck && it.promptId == "p1" } }
+            convo.sendPrompt("second", promptId = "p2") // lands mid-turn (first launch is still sleeping)
+            await { frames.count { it is TurnDone } >= 2 }
+            assertFalse(frames.any { it is PocketError }, frames.toString())
+            assertEquals(1, frames.count { it is PromptAck && it.promptId == "p2" })
+            assertEquals(2, backend.specs.size)
+            assertEquals("second", backend.specs[1].initialPrompt)
+            assertEquals("ses_open_1", backend.specs[1].resumeId) // queued turn continues the SAME session
         } finally {
             convo.close()
             scope.cancel()

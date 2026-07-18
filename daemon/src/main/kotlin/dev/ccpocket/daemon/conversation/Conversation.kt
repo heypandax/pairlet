@@ -328,8 +328,17 @@ class Conversation(
         }
     }
 
+    // which generation already settled its launch prompt — the settle runs ONCE per process (SessionInit
+    // normally; TurnResult only as the fallback for a stream that carried no step_start). Without this
+    // guard the TurnResult call would ALSO fire and eat a QUEUED prompt recorded mid-turn under the same
+    // generation, silently dropping it from the one-shot drain.
+    @Volatile
+    private var initialArgSettledGen = -1L
+
     /** One-shot argv prompts have no stdin replay; the process accepting the turn settles the launch prompt. */
     private fun settleInitialArgPrompt() = synchronized(promptLedger) {
+        if (initialArgSettledGen == processGeneration) return@synchronized
+        initialArgSettledGen = processGeneration
         val iter = promptLedger.iterator()
         while (iter.hasNext()) {
             val entry = iter.next()
@@ -341,6 +350,11 @@ class Conversation(
     }
 
     private fun hasUnconsumedPrompts(): Boolean = synchronized(promptLedger) { promptLedger.isNotEmpty() }
+
+    /** One-shot queue drain: the oldest queued prompt leaves the ledger to become the next spawn's
+     *  argv message — launchProcess re-records it (initialSend) under the fresh generation, so the
+     *  usual SessionInit settle applies. Pop-then-re-record keeps exactly one live copy. */
+    private fun popQueuedPrompt(): PendingPrompt? = synchronized(promptLedger) { promptLedger.removeFirstOrNull() }
 
     /** /clear + switchDirectory: the old session's undelivered prompts must not leak into a fresh one. */
     private fun clearPromptLedger() = synchronized(promptLedger) { promptLedger.clear() }
@@ -426,11 +440,12 @@ class Conversation(
         // break "tap to take over" and could let two writers clobber one transcript. Codex ignores forkSession; a
         // null resumeId is a brand-new session either way.
         if (takeOver) {
-            // OpenCode: same guard as sendPrompt — only pass the real opencode sessionId, not the daemon's
-            // SessionRegistry ID (which opencode doesn't know and hangs on). On first takeover there is no
-            // opencode session yet → resumeId=null → fresh session.
-            val opencodeResumeId = if (backend.kind == AgentKind.OPENCODE) sessionId else resumeId
-            launchProcess(AgentSpec(workdir, opencodeResumeId, model, mode, effort = effort, forkSession = fork))
+            // [resumeId] is valid for every backend here: for OpenCode it is the REAL opencode session id
+            // (the scanner read it out of opencode.db — the registry keys conversations by that same id),
+            // so a take-over of a disk session resumes it instead of silently forking a fresh one. The
+            // eager launch below is still a no-op for OpenCode (argv needs a prompt; the guard in
+            // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
+            launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = fork))
         }
         // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
         // init that would drive SessionLive — until the first user turn / handshake lands (and on a lazy open there
@@ -718,12 +733,9 @@ class Conversation(
         }
         val spec = if (cleanRoom) rawSpec.copy(cleanRoom = true) else rawSpec
         intentionalStop = false
-        pendingRelaunch = false
-        processGeneration += 1
-        log.info("$convoId launchProcess: kind=${backend.kind} workdir=$workdir resumeId=${spec.resumeId?.take(12)} initialPrompt=${spec.initialPrompt?.take(40)}")
-        val pb = backend.processBuilder(spec)
-        log.info("$convoId launchProcess: pb.cmd=${pb.command().joinToString(" ") { if (it.length > 40) it.take(20) + "…" else it }} pb.dir=${pb.directory()}")
-        val p = AgentProcess.start(pb, scope)
+        pendingRelaunch = false // this launch bakes the current model/mode/effort — no switch is pending anymore (issue #84)
+        processGeneration += 1 // ledger entries written from here on belong to THIS process (issue #122)
+        val p = AgentProcess.start(backend.processBuilder(spec), scope)
         val io = AgentIo(writeLine = p::writeLine, emit = { sink.emit(it) }) // read sink dynamically (reattach)
         // Ask pushes ride the emit path for two flavors of conversation (issue #91 bridge + #138 owner):
         //  - BRIDGE (origin set, no pathScope): the ask frame fans out normally (the bridge's egress
@@ -802,10 +814,14 @@ class Conversation(
         // invalid --model on a resumed session exits neither stdout nor stderr, just hangs).
         if (backend.kind == AgentKind.OPENCODE) {
             scope.launch(CoroutineName("opencode-watchdog-$convoId")) {
-                delay(OPENCODE_STARTUP_TIMEOUT_MS)
-                // still the same process? (a relaunch already replaced it → no-op)
-                if (proc === p && p.isAlive()) {
-                    log.warn("$convoId OpenCode watchdog: no stdout in ${OPENCODE_STARTUP_TIMEOUT_MS}ms, killing process ${p.pid}")
+                val windowMs = System.getProperty(OPENCODE_WATCHDOG_PROP)?.toLongOrNull() ?: OPENCODE_STARTUP_TIMEOUT_MS
+                delay(windowMs)
+                // STARTUP-only guard: fires only when the process produced ZERO stdout since launch.
+                // A healthy long turn (streaming well past the window) has sawStdout=true and is never
+                // touched — without this check every >45s turn would be killed mid-stream and misreported
+                // as a startup timeout. Same-process check: a relaunch already replaced it → no-op.
+                if (proc === p && p.isAlive() && !p.sawStdout) {
+                    log.warn("$convoId OpenCode watchdog: no stdout in ${windowMs}ms, killing process ${p.pid}")
                     intentionalStop = true
                     p.shutdown(eofGraceMs = 1_000, termGraceMs = 1_000, forceGraceMs = 1_000)
                     p.awaitExit()
@@ -819,7 +835,7 @@ class Conversation(
                     val why = p.lastStderr?.let { " — ${it.take(300)}" } ?: ""
                     sink.emit(PocketError(
                         "opencode_startup_timeout",
-                        "OpenCode did not produce any output within ${OPENCODE_STARTUP_TIMEOUT_MS / 1000}s ($why). " +
+                        "OpenCode did not produce any output within ${windowMs / 1000}s ($why). " +
                             "The model may be invalid or the session may be corrupted. Try a new session or a different model.",
                         convoId,
                     ))
@@ -912,15 +928,11 @@ class Conversation(
                     // folds into the Task card instead (issue #77)
                     is AgentEvent.AssistantText -> {
                         executing = true
-                        if (ev.parentId == null) {
-                            sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
-                        }
+                        if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
                     }
                     is AgentEvent.AssistantThinking -> {
                         executing = true
-                        if (ev.parentId == null) {
-                            sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
-                        }
+                        if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
                     }
                     is AgentEvent.AssistantToolUse -> {
                         executing = true
@@ -948,9 +960,7 @@ class Conversation(
                         if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
                     }
                     is AgentEvent.ToolResult -> {
-                        if (ev.parentId == null) {
-                            finishSubagentFromResult(ev)
-                        }
+                        if (ev.parentId == null) finishSubagentFromResult(ev)
                         if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
                     }
                     is AgentEvent.BackgroundTaskStarted -> {
@@ -1082,9 +1092,37 @@ class Conversation(
             p.awaitExit()
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
                 log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
-                proc = null
+                // settle any card the clean exit left open (a tool_use that never reported completed)
+                for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
                 bridge?.cancelAll()
                 bridge = null
+                // MID-TURN QUEUE, one-shot flavor: prompts that arrived while this process ran were
+                // ledgered (and acked as queued) by sendPrompt — argv can't take a second message, so
+                // the queue drains ONE per process: pop the oldest and relaunch with it as the next
+                // spawn's argv message. launchProcess re-records it as initialSend under the fresh
+                // generation, so SessionInit settles it exactly like a directly-sent prompt. Drain only
+                // on a CLEAN exit: after a crash the entries stay ledgered and the client's resend path
+                // recovers them via releaseLostPrompt (#122 ④) — auto-draining a crash would loop the
+                // same prompt into the same failure forever. No onProcessEnded: a one-shot clean exit
+                // is the turn's natural end, not a death to clean up after.
+                proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
+                val next = popQueuedPrompt()
+                if (next != null) {
+                    log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
+                    runCatching {
+                        launchProcess(
+                            AgentSpec(workdir, sessionId ?: openedResumeId, model, mode, effort = effort, initialPrompt = next.text),
+                            armExecuting = true,
+                            initialSend = InitialSend(next.key, next.text, next.images),
+                        )
+                    }.onFailure { e ->
+                        executing = false // the spawn never started a turn
+                        // the popped entry is gone from the ledger — forget its id too, so the client's
+                        // resend runs it fresh instead of being hollow-re-acked as "already delivered"
+                        synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
+                        sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
+                    }
+                }
                 return
             }
             // workflows died with the process — settle them so no card pulses forever (#106)
@@ -1236,7 +1274,6 @@ class Conversation(
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
-        log.info("$convoId sendPrompt: text=${text.take(40)} procNull=${proc == null} executing=$executing pendingRelaunch=$pendingRelaunch promptId=${promptId?.take(8)}")
         val relaunching = proc != null && !executing && pendingRelaunch && relaunchGraceElapsed() && !continuationExpected()
         // `executing` must be armed with a happens-before edge to the new pump: a process that dies
         // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
@@ -1250,7 +1287,7 @@ class Conversation(
         val initialSend = InitialSend(promptId, text, images)
         if (relaunching) {
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
-            val relaunched = runCatching { relaunch(sessionId ?: if (backend.kind == AgentKind.OPENCODE) null else openedResumeId, armExecuting = true, initialSend = initialSend) }
+            val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
             if (relaunched.isFailure) {
                 executing = false // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
@@ -1266,29 +1303,36 @@ class Conversation(
             // This branch is ALSO the respawn after an unexpected process death (issue #122 — the pump nulls `proc`):
             // then the live sessionId is the anchor (the dead process's turns live in ITS transcript, not the
             // originally-resumed one), resumed in place — its own id is never a foreign id to fork off.
-            // OpenCode: only use the real opencode sessionId from step_start; NEVER fall back to openedResumeId
-            // (the daemon's SessionRegistry ID) — opencode hangs silently when asked to resume a session that
-            // doesn't exist in its SQLite DB. On first launch sessionId is null → no --session → fresh session.
-            val anchor = if (backend.kind == AgentKind.OPENCODE) sessionId else (sessionId ?: openedResumeId)
+            // For OpenCode both anchors are REAL opencode session ids: sessionId came from step_start,
+            // openedResumeId from the SQLite scanner — a cold resume (daemon restart, tap an old session)
+            // MUST fall back to openedResumeId or the first prompt silently forks a brand-new session.
+            // A truly stale id is recovered at process death (SESSION_NOT_FOUND clears the lineage).
+            val anchor = sessionId ?: openedResumeId
             val fork = if (sessionId == null) openedWithFork else false
-            log.info("$convoId sendPrompt proc==null: anchor=$anchor model=$model mode=$mode effort=$effort initialPrompt=${text.take(40)}")
             val launched = runCatching {
                 launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork, initialPrompt = text), armExecuting = true, initialSend = initialSend)
             }
             if (launched.isFailure) {
-                executing = false
-                log.warn("$convoId agent failed to start: ${launched.exceptionOrNull()?.message}")
+                executing = false // the spawn never started a turn
+                // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
                 return
             }
-        } else if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT && proc != null) {
-            promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
-            sink.emit(PocketError("agent_busy", "${backend.kind} is still handling the current turn; retry when it finishes.", convoId))
-            return
+        } else if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) {
+            // ONE-SHOT mid-turn queue: the live process baked its prompt into argv and reads no stdin,
+            // so this prompt can't ride it. Ledger it — the ack below means "queued", the same receipt
+            // contract as the stdin mid-turn queue — and the pump's clean-exit hook drains the queue
+            // into the next spawn (one prompt per process). recordPromptWritten stamps the CURRENT
+            // generation, so a client resend while this turn runs is a plain re-ack (#122 ④: an entry
+            // owned by the live process is queued, not lost).
+            recordPromptWritten(promptId, text, images)
         } else {
-            log.info("$convoId sendPrompt queued-send: proc!=null backend=${backend.kind}")
-            executing = true
+            // queued send onto the already-live process (mid-turn queue, or a steady-state next turn):
+            // no new pump is starting, so there is no death-branch to race — arm executing directly, and
+            // ledger BEFORE the write (issue #122 ③): even a write that dies inside the backend leaves the
+            // prompt recorded, and only the CLI's consumption replay settles it (ack ≠ consumed).
+            executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
             recordPromptWritten(promptId, text, images)
         }
         lastActivityMs = System.currentTimeMillis()
@@ -1587,10 +1631,13 @@ class Conversation(
         // PermissionBridge. Only a push that actually went out spends the window (see [maybePushAsk]).
         const val ASK_PUSH_COALESCE_MS = 60_000L
 
-        // OpenCode: max time to wait for first stdout after process launch before declaring it hung.
+        // OpenCode: max time to wait for the FIRST stdout after process launch before declaring it hung.
         // opencode run with an invalid --model on a resumed session hangs silently (no stdout, no stderr,
-        // no exit) — the pump would block forever without this watchdog.
+        // no exit) — the pump would block forever without this watchdog. Startup only: once any stdout
+        // arrived (sawStdout) the watchdog stands down — turn LENGTH is unbounded by design. Overridable
+        // (system property) so tests can exercise the window without a 45s wait.
         const val OPENCODE_STARTUP_TIMEOUT_MS = 45_000L
+        const val OPENCODE_WATCHDOG_PROP = "ccpocket.opencode.watchdogMs"
 
         // a process death this soon after a TurnResult is the SAME failure the turn's push already
         // reported (a fatal error result is often followed by the CLI exiting) — no second alert (#138)
