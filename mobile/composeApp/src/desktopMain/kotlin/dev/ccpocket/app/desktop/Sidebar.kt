@@ -58,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -445,7 +446,9 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                 if (index >= 0) listState.animateScrollToItem(index)
             }
         }
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) { // lazy: a visited project can hold hundreds of sessions
+        // testTag: the RECENT list overflows the default test viewport (it grows with every seed
+        // session) — UI tests scroll it to their target instead of assuming everything fits
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().testTag("sidebar-list")) { // lazy: a visited project can hold hundreds of sessions
             groups.forEach { g ->
                 val closed = g.path in collapsed
                 item(key = "h:${g.path}") {
@@ -760,7 +763,10 @@ private fun SessionRow(
     onClick: () -> Unit,
 ) {
     // rename entry (issue #158): Claude rows only — a Codex rename write path is out of scope
-    val canRename = renameable && s.agent != AgentKind.CODEX
+    // Claude only: rename lands a record in the session's transcript FILE — codex rollouts are
+    // self-managed and opencode sessions live in SQLite (no file), so the daemon's rename path
+    // fails for both; don't offer an entry that can only end in rename_failed.
+    val canRename = renameable && (s.agent == null || s.agent == AgentKind.CLAUDE)
     // inline rename swaps the row for a prefilled title field (the group header's rename pattern);
     // committing sends the rename — the daemon re-pushes Sessions, which refreshes the row title.
     // A REFUSED rename (rename_failed) re-opens the editor with the daemon's reason inline: the ask

@@ -43,9 +43,9 @@ fun agentName(agent: AgentKind): String = when (agent) {
     else -> "Claude"
 }
 fun agentTagline(agent: AgentKind): String = when (agent) {
-    AgentKind.CODEX -> "Codex \u00b7 OpenAI"
-    AgentKind.OPENCODE -> "OpenCode \u00b7 Open Source"
-    else -> "Claude Code \u00b7 Anthropic"
+    AgentKind.CODEX -> "Codex · OpenAI"
+    AgentKind.OPENCODE -> "OpenCode · Open Source"
+    else -> "Claude Code · Anthropic"
 }
 
 /** The two standard agent-color tints — a 12% fill + a 42% border — shared by the chip and the selection cards. */
@@ -107,7 +107,7 @@ fun AgentTag(agent: AgentKind, small: Boolean = true) {
     }
 }
 
-/** Header / list-row badge: shows the tag ONLY for the non-default Codex (Claude stays unmarked), with a leading [gap]. */
+/** Header / list-row badge: the DEFAULT Claude stays unmarked; every other agent (Codex, OpenCode, …) shows its tag, with a leading [gap]. */
 @Composable
 fun AgentBadge(agent: AgentKind?, gap: Dp = 6.dp) {
     if (agent != null && agent != AgentKind.CLAUDE) {

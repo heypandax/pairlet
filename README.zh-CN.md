@@ -4,7 +4,7 @@
 
 [English](README.md) | **简体中文**
 
-**你的编程 agent，装进口袋。**CC Pocket 让你用手机——或另一台电脑——操控跑在自己电脑上的 Claude Code 或 OpenAI Codex，走到哪儿管到哪儿，不受局域网限制。实时看它干活，两下点掉工具授权，没聊完的会话随手接起。所有流量都经**零知识中继（zero-knowledge relay）**转发——中继只搬运端到端加密后的密文，无账号，零内容日志。纯净室 Kotlin 实现，MIT 许可。
+**你的编程 agent，装进口袋。**CC Pocket 让你用手机——或另一台电脑——操控跑在自己电脑上的 Claude Code、OpenAI Codex 或 OpenCode，走到哪儿管到哪儿，不受局域网限制。实时看它干活，两下点掉工具授权，没聊完的会话随手接起。所有流量都经**零知识中继（zero-knowledge relay）**转发——中继只搬运端到端加密后的密文，无账号，零内容日志。纯净室 Kotlin 实现，MIT 许可。
 
 **🌐 官网：**<https://heypandax.github.io/cc-pocket/> · **📋 完整功能列表：**[features](https://heypandax.github.io/cc-pocket/features.html)
 
@@ -30,15 +30,15 @@
 flowchart LR
     phone["📱🖥️ CC Pocket<br/>(phone · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
     relay -- "wss · ciphertext" --> daemon["daemon<br/>(your computer)"]
-    daemon -- "stdio" --> agent["claude / codex CLI"]
+    daemon -- "stdio" --> agent["claude / codex / opencode CLI"]
 ```
 
-**daemon** 跑在你电脑上，以子进程方式拉起 `claude` 或 `codex` CLI，并**主动外连**中继——不用开放任何入站端口。**中继**只管两件事：帮设备配对、转发加密帧；消息内容它不存，私钥它没有。App 和 daemon 之间是一条端到端加密会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文永远只在这两个可信端点上。同一局域网里 App 会直连 daemon，延迟更低；出了门，中继兜底。
+**daemon** 跑在你电脑上，以子进程方式拉起 `claude`、`codex` 或 `opencode` CLI，并**主动外连**中继——不用开放任何入站端口。**中继**只管两件事：帮设备配对、转发加密帧；消息内容它不存，私钥它没有。App 和 daemon 之间是一条端到端加密会话（P-256 ECDH + HKDF + AES-256-GCM，X3DH/Noise 式握手），明文永远只在这两个可信端点上。同一局域网里 App 会直连 daemon，延迟更低；出了门，中继兜底。
 
 ## 能做什么
 
 - **随处批准** —— agent 一请求授权，手机马上收到，几秒钟就能批；没顾上，超时自动拒绝、不会放行。四档执行模式（每步都问、只管改文件、先出计划、全自动），默认模式与推理强度设一次就记住，本会话的授权记忆随时可查可撤。
-- **Claude 或 Codex，按会话选** —— 开会话时二选一；流式、审批、打断两边手感一样。Codex 会话带一档权限预设（Cautious / Balanced / Autonomous / Full auto），映射到 approval-policy × sandbox，青色标识。
+- **Claude、Codex 或 OpenCode，按会话选** —— 开会话时任选其一；流式与会话接续三边一致。Codex 会话带一档权限预设（Cautious / Balanced / Autonomous / Full auto），映射到 approval-policy × sandbox，青色标识。OpenCode 会话紫色标识，且恒为**完全访问**：`opencode run` 没有交互式审批协议，App 直接如实说明，而不是提供一排管不住的模式。
 - **接起任何会话** —— 电脑上跑着的会话拿起手机接着聊，想开新的哪个仓库都行。终端里的会话默认只读旁观，「Continue here」**原地**接管——只有终端确实还在写入时才会分叉。聊完 `claude --resume` 交回桌面。会话还能按项目分组，手机和桌面同步。
 - **实时看它干活** —— 流式输出、代码高亮、带耗时的工具事件、扩展思考、后台任务，一样不少。子 agent 一人一张卡、点开看报告，多 agent 的 `Workflow` 有自己的进度视图。网络一抖也不怕，重连后漏掉的输出自动补齐。
 - **看清改了什么** —— 会话动过的每个文件都摆出来：行级 diff、文字可选可复制、文件能预览能导出（会话外的读取要先过你这关）。对话里的路径点一下就打开，长按还能看完整路径、顺手复制。

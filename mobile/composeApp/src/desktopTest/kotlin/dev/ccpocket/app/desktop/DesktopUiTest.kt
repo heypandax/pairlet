@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -66,6 +68,10 @@ class DesktopUiTest {
         waitForIdle()
         val badge = runBlocking { getString(Res.string.shared_badge) }
         val left = runBlocking { getString(Res.string.share_left_days, 6) }
+        // the RECENT list outgrew the test viewport (the OpenCode seed row) — scroll the shared
+        // group into view first; the assertions below are about RENDERING, not initial visibility
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("acme-api"))
+        waitForIdle()
         assertPresent("acme-api")                 // the shared group's header renders
         assertPresent(badge)                      // the hairline pill (shared_badge — same string as mobile)
         assertPresent("panda-mbp · $left")        // origin machine + remaining validity, at rest

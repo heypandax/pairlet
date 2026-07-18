@@ -1826,8 +1826,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
             is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
             is ModelsList -> {
-                agentModels[f.agent] = f
-                if (f.agent == AgentKind.OPENCODE) openCodeModels.value = f
+                // keep the LAST-GOOD list under a failed refresh: one `opencode models` timeout must
+                // not wipe a working picker back to the empty state — carry the fresh error alongside
+                val prev = agentModels[f.agent]
+                agentModels[f.agent] =
+                    if (f.error != null && f.models.isEmpty() && prev != null && prev.models.isNotEmpty()) prev.copy(error = f.error)
+                    else f
             }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
@@ -1856,7 +1860,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
                 val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
-                if (f.model != null) model.value = compatibleModelForAgent(liveAgent, f.model)
+                // daemon truth verbatim: filtering the REPORTED model through the compat guard nulled
+                // legitimate ids (codex "o3", gateway "vendor/model") and wiped the header — the guard
+                // is for what we SEND (openSession seeding), never for what the daemon says is running
+                f.model?.let { model.value = it }
                 // unconditional (not ?.let): switching from a bridge session to a normal one must CLEAR the chip
                 sessionOrigin.value = f.origin // "via <bridge>" header chip (issue #91); null = interactive/old daemon
                 // window fallback is Claude-only: contextWindowFor knows nothing about gpt-* ids, and a Codex
@@ -2315,16 +2322,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 
-    /** OpenCode model list — fetched from the daemon via [fetchOpenCodeModels]; shows the same models
-     *  `opencode models` returns on the Mac. Null until first fetch. */
-    val openCodeModels = mutableStateOf<ModelsList?>(null)
+    /** Per-agent model lists from the daemon ([FetchModels] → [ModelsList]) — what the picker offers
+     *  beyond the static presets. Keyed by agent so a late reply can't cross-pollute another backend. */
     val agentModels = mutableStateMapOf<AgentKind, ModelsList>()
 
     fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
         scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
     }
-
-    fun fetchOpenCodeModels() = fetchModels(AgentKind.OPENCODE)
 
     /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
      *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */

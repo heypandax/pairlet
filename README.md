@@ -4,7 +4,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-**Your coding agent, in your pocket.** CC Pocket drives Claude Code — or OpenAI Codex — running on your computer, from your phone or from another computer, from anywhere (not just your LAN). Watch the agent work in real time, answer its tool-permission requests in two taps, and pick up any session exactly where you left it. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext — no account, no content logging. Clean-room Kotlin, MIT.
+**Your coding agent, in your pocket.** CC Pocket drives Claude Code — or OpenAI Codex, or OpenCode — running on your computer, from your phone or from another computer, from anywhere (not just your LAN). Watch the agent work in real time, answer its tool-permission requests in two taps, and pick up any session exactly where you left it. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext — no account, no content logging. Clean-room Kotlin, MIT.
 
 **🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **📋 Full feature list:** [features](https://heypandax.github.io/cc-pocket/features.html)
 
@@ -30,15 +30,15 @@ On a phone, the [website](https://heypandax.github.io/cc-pocket/) links straight
 flowchart LR
     phone["📱🖥️ CC Pocket<br/>(phone · desktop)"] -- "wss · ciphertext" --> relay["relay<br/>(zero-knowledge broker)"]
     relay -- "wss · ciphertext" --> daemon["daemon<br/>(your computer)"]
-    daemon -- "stdio" --> agent["claude / codex CLI"]
+    daemon -- "stdio" --> agent["claude / codex / opencode CLI"]
 ```
 
-The **daemon** runs on your computer and drives the `claude` or `codex` CLI as a subprocess, dialing *out* to the relay — no inbound ports to open. The **relay** pairs your devices and routes opaque encrypted frames between them; it holds no message content and no private keys. The app and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake), so plaintext never leaves the two trusted endpoints. On the same network, the app connects to the daemon directly for lower latency; the relay stays as the from-anywhere fallback.
+The **daemon** runs on your computer and drives the `claude`, `codex`, or `opencode` CLI as a subprocess, dialing *out* to the relay — no inbound ports to open. The **relay** pairs your devices and routes opaque encrypted frames between them; it holds no message content and no private keys. The app and the daemon run an end-to-end session (P-256 ECDH + HKDF + AES-256-GCM, an X3DH/Noise-style handshake), so plaintext never leaves the two trusted endpoints. On the same network, the app connects to the daemon directly for lower latency; the relay stays as the from-anywhere fallback.
 
 ## What it does
 
 - **Approve from anywhere** — tool-permission requests reach your phone the moment the agent raises one. Allow or deny in seconds; if you don't, it times out to a safe deny. Four execution modes (ask each step, auto-edit, plan, full auto), a persisted default mode and reasoning effort, plus per-session allow rules you can inspect and revoke.
-- **Claude or Codex, per session** — pick the agent when you start a session; streaming, step-by-step approvals and interrupts work the same for both. Codex sessions get a permission preset (Cautious / Balanced / Autonomous / Full auto) mapped to Codex's approval-policy × sandbox, and are tagged teal.
+- **Claude, Codex, or OpenCode, per session** — pick the agent when you start a session; streaming and session resume work the same for all three. Codex sessions get a permission preset (Cautious / Balanced / Autonomous / Full auto) mapped to Codex's approval-policy × sandbox, and are tagged teal. OpenCode sessions are tagged purple and always run **full access**: `opencode run` has no interactive approval protocol, so the app says so up front instead of offering modes it can't enforce.
 - **Pick up any session** — resume the exact session you left running, or start fresh in any repo. A terminal session is observed read-only; "Continue here" takes it over *in place*, forking only while the terminal is truly still writing. Hand it back later with `claude --resume`. Organize sessions into named groups per project, synced between phone and desktop.
 - **Watch it work, live** — streaming output, syntax-highlighted code blocks, tool events with timing, extended thinking, and background tasks. Sub-agents show up as expandable cards, and a multi-agent `Workflow` run gets its own orchestration view with per-phase progress. If your connection blips, the missed output is backfilled on reconnect.
 - **See what changed** — browse every file a session touched with line-level diffs, select and copy diff text, preview or export files (approval-gated), tap a path in the transcript to open it, and hover / long-press any path for the full normalized value plus one-tap copy.

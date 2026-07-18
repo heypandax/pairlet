@@ -39,7 +39,10 @@ class SeedDesktopModel : DesktopModel {
         DkSession("s1", "~/code/cc-pocket", "Refactor auth module", running = true, model = "claude-sonnet-5-20250929", group = "g-auth"),
         DkSession("s2", "~/code/cc-pocket", "Fix stream parser test", running = true, model = "claude-opus-4-8", group = null),
         DkSession("s3", "~/code/cc-pocket", "Tidy CI workflow", AgentKind.CODEX, pending = 1, group = "g-ci"), // keeps the Codex diff-approval surface exercised
-        DkSession("s4", "~/code/cc-pocket", "Update docs", AgentKind.OPENCODE, group = "g-auth"),
+        // ungrouped on purpose: parked in a group it would push the shared "acme-api" section below
+        // the test viewport (sharedGroupShowsProvenancePillAndExpiry) — here it exercises the
+        // OpenCode badge/row surfaces without reshaping the grouped sections above it
+        DkSession("s4", "~/code/cc-pocket", "Update docs", AgentKind.OPENCODE),
     )
     private val groupOverride = mutableStateMapOf<String, String?>()
     private val titleOverride = mutableStateMapOf<String, String>() // session rename (issue #158)

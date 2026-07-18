@@ -748,8 +748,6 @@ class RepoDesktopModel(
     override fun compactConversation() { repo.sendPrompt("/compact") }
     override fun modelsForAgent(agent: AgentKind): List<String> = repo.agentModels[agent]?.models ?: emptyList()
     override fun fetchModels(agent: AgentKind) = repo.fetchModels(agent)
-    override val openCodeModels: List<String> get() = repo.openCodeModels.value?.models ?: emptyList()
-    override fun fetchOpenCodeModels() = repo.fetchOpenCodeModels()
     override fun clearConversation() = repo.clearConversation()
 
     override fun send(text: String) {
