@@ -34,9 +34,11 @@ import dev.ccpocket.app.desktop.DesktopApp
 import dev.ccpocket.app.desktop.DesktopNotify
 import dev.ccpocket.app.desktop.DkTitleBar
 import dev.ccpocket.app.desktop.FullscreenExitStrip
+import dev.ccpocket.app.desktop.JediTermEngine
 import dev.ccpocket.app.desktop.MacWindow
 import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
+import dev.ccpocket.app.desktop.toggleEmbeddedTerminal
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
@@ -90,6 +92,11 @@ fun main() = application {
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // paired → connect straight away
+        // embedded terminal (issue #153): the LIVE shell is the only place the real JediTerm engine is
+        // installed — DesktopApp under seed/UI tests keeps the factory null, so no test ever spawns a PTY.
+        model.terminalPanel?.let { tp ->
+            tp.engineFactory = { cwd -> JediTermEngine.spawn(cwd, onCmdJ = { tp.collapse() }) }
+        }
     }
     val connected by repo.sessionActive
 
@@ -116,6 +123,17 @@ fun main() = application {
         }
     }
 
+    // menu-bar presence (issue #151, direction 1): the OS status glyph + anchored popover live at
+    // application scope, so they outlast minimize/unfocus — the whole point of the environment layer.
+    // Composed to nothing where the platform has no tray (headless / some Linux desktops).
+    if (model.menuBarEnabled) {
+        dev.ccpocket.app.desktop.MenuBarExtra(model) {
+            windowState.isMinimized = false
+            awtWindow?.toFront()
+            awtWindow?.requestFocus()
+        }
+    }
+
     Window(
         onCloseRequest = ::exitApplication,
         title = "CC Pocket",
@@ -137,6 +155,10 @@ fun main() = application {
             when {
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.K && connected -> { model.palette = PaletteScope.ALL; true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.N && connected -> { model.openNewSession(); true }
+                // ⌘J (issue #153): open the embedded terminal in the current session / collapse-restore
+                // the one it has. While the SHELL owns the keyboard AWT keeps the keystroke — the
+                // engine's own dispatcher forwards it, so the toggle works from either side.
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.J && connected -> { model.toggleEmbeddedTerminal(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.R && connected -> { model.refresh(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Zero && connected -> { model.switcherOpen = !model.switcherOpen; true }
                 e.type == KeyEventType.KeyDown && digit >= 0 && connected && model.switcherOpen -> {

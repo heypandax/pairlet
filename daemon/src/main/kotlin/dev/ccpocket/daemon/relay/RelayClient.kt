@@ -108,6 +108,15 @@ class RelayClient(
      *  and always null on the local-server path, which has no relay link to mint a ticket over. */
     val shareControl: ShareControl? get() = sessions.shareControl
 
+    /** The OWNER bridge control plane (issue #91 follow-up) — PairLoopback serves `pair --headless` /
+     *  `bridges` from it, so the CLI and the app mint through one implementation. Null on the same terms
+     *  as [shareControl]. */
+    val bridgeControl: BridgeControl? get() = sessions.bridgeControl
+
+    /** Daemon-managed adapter processes (issue #91 follow-up). Owned here so their lifetime matches the
+     *  relay link they exist to talk over. */
+    private val bridgeRunners = dev.ccpocket.daemon.bridge.BridgeRunners()
+
     /** True while an interactive pairing ticket could still be redeemed (headless mint must wait). */
     fun interactivePairingPending(): Boolean = sessions.interactivePairingPending()
 
@@ -172,6 +181,29 @@ class RelayClient(
             revokeCredential = { deviceId -> revokeBridge(deviceId) },
             liveSessions = { core.registry.liveByCwd().entries.flatMap { (cwd, list) -> list.map { cwd to it } } },
         )
+        // issue #91 follow-up: the OWNER bridge control plane, on the same relay-only footing as the share
+        // plane above. PairLoopback serves `pair --headless` / `bridges` from this SAME instance, so the CLI
+        // and the app's "New bridge" bind an identical intent.
+        sessions.bridgeControl = BridgeService(
+            accountId = identity.accountId,
+            daemonPubB64 = identity.e2ePubB64,
+            relayWsBase = relayWsBase,
+            registry = sessions.bridges,
+            mintTicket = { headless -> mintTicket(headless) },
+            interactivePairingPending = { sessions.interactivePairingPending() },
+            revokeCredential = { deviceId -> revokeBridge(deviceId) },
+            liveSessions = { core.registry.liveByCwd().entries.flatMap { (cwd, list) -> list.map { cwd to it } } },
+            runners = bridgeRunners,
+            liveCount = { ids -> core.registry.liveCountOf(ids) },
+        )
+        // register the BUILT-IN engines by wire kind (issue #91 follow-up): in-process, driven through the
+        // same guard + router an external bridge passes — see FeishuEngine. A new IM adds one line here.
+        bridgeRunners.registerEngine(dev.ccpocket.protocol.RUNNER_KIND_FEISHU) { name, spec, env, dir, logLine ->
+            dev.ccpocket.daemon.feishu.FeishuEngine(name, spec, env, core, dir, logLine)
+        }
+        // Managed adapters come up only once the relay link exists: an external adapter started earlier
+        // would just burn its redeem attempts against a daemon that can't yet carry its handshake.
+        bridgeRunners.startAutostarted()
         launch { reaperLoop() } // reclaim sessions abandoned while the phone is offline
         launch { guestExpiryLoop() } // cut + purge folder shares the instant they expire (issue #115 §6)
         var backoff = 1_000L

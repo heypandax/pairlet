@@ -15,6 +15,7 @@ import dev.ccpocket.daemon.claude.ClaudeLauncher
 import dev.ccpocket.daemon.codex.CodexBackend
 import dev.ccpocket.daemon.codex.CodexLauncher
 import dev.ccpocket.daemon.identity.Identity
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.daemon.relay.LoopbackBridge
 import dev.ccpocket.daemon.relay.LoopbackHeadlessCred
@@ -298,6 +299,11 @@ private class PairCmd : CliktCommand(name = "pair") {
     private val maxSessions by option("--max-sessions", help = "headless only: concurrent live sessions cap (default ${dev.ccpocket.daemon.bridge.BridgeSpec.DEFAULT_MAX_SESSIONS}, max 8)").int()
     private val opensPerMin by option("--open-per-min", help = "headless only: session.open rate cap (default ${dev.ccpocket.daemon.bridge.BridgeSpec.DEFAULT_OPENS_PER_MIN}/min)").int()
     private val promptsPerMin by option("--prompt-per-min", help = "headless only: prompt rate cap (default ${dev.ccpocket.daemon.bridge.BridgeSpec.DEFAULT_PROMPTS_PER_MIN}/min)").int()
+    private val out by option("--out", help = "headless only: write the credential JSON to this file (0600) instead of printing it — the ticket is short-lived, so hand the path straight to the adapter")
+    private val tier by option(
+        "--tier",
+        help = "headless only: what this bridge may do WITHOUT asking you. review (default) = every dangerous action prompts your phone; collaborate/autonomous = file edits apply silently, shell still prompts. Never reaches bypassPermissions.",
+    ).choice("review", "collaborate", "autonomous").default("review")
 
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
@@ -343,7 +349,7 @@ private class PairCmd : CliktCommand(name = "pair") {
         }
     }
 
-    /** Mint a headless bridge credential and print it as ONE JSON blob for the adapter. */
+    /** Mint a headless bridge credential and hand it to the adapter — written to [out] (0600) or printed. */
     private suspend fun pairHeadless(client: HttpClient) {
         val n = name?.trim().orEmpty()
         if (n.isEmpty()) { echo("✗ --headless requires --name <bridge-name> (e.g. --name feishu-bot)"); return }
@@ -353,7 +359,12 @@ private class PairCmd : CliktCommand(name = "pair") {
             echo("  can read under these roots in its default mode. Point it at a dedicated, low-sensitivity checkout.)")
             return
         }
-        val req = LoopbackHeadlessReq(n, workdir.toList(), maxSessions, opensPerMin, promptsPerMin)
+        val grantedTier = when (tier) {
+            "collaborate" -> AccessTier.COLLABORATE
+            "autonomous" -> AccessTier.AUTONOMOUS
+            else -> AccessTier.REVIEW
+        }
+        val req = LoopbackHeadlessReq(n, workdir.toList(), maxSessions, opensPerMin, promptsPerMin, grantedTier)
         val body = runCatching {
             client.post("http://127.0.0.1:$pairPort/pair/headless") { setBody(PocketJson.encodeToString(req)) }.bodyAsText()
         }.getOrElse {
@@ -365,15 +376,49 @@ private class PairCmd : CliktCommand(name = "pair") {
             echo("✗ headless pairing failed: $body")
             return
         }
+        val json = PocketJson.encodeToString(cred)
+        val outPath = out?.trim().orEmpty()
         echo("")
-        echo("  Bridge credential for \"${cred.name}\" — single-use, expires in ${cred.ttlSec}s.")
-        echo("  Hand this JSON to the bridge adapter NOW (it redeems the ticket on first start, e.g.")
-        echo("  save it as bridge-credential.json for examples/feishu-bridge):")
-        echo("")
-        echo(PocketJson.encodeToString(cred))
+        if (outPath.isEmpty()) {
+            echo("  Bridge credential for \"${cred.name}\" — single-use, expires in ${cred.ttlSec}s.")
+            echo("  Hand this JSON to the bridge adapter NOW (it redeems the ticket on first start, e.g.")
+            echo("  save it as bridge-credential.json for examples/feishu-bridge — or re-run with --out to")
+            echo("  skip the copy/paste):")
+            echo("")
+            echo(json)
+        } else {
+            val f = java.io.File(outPath).absoluteFile
+            val written = runCatching {
+                f.parentFile?.mkdirs()
+                // Create 0600 BEFORE the secret lands: writeText on a fresh file would briefly expose the
+                // ticket at the umask default. Pre-creating and chmod-ing an empty file closes that window.
+                if (!f.exists()) f.createNewFile()
+                runCatching {
+                    java.nio.file.Files.setPosixFilePermissions(
+                        f.toPath(), java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"))
+                }
+                f.writeText(json)
+            }.isSuccess
+            if (!written) {
+                echo("✗ could not write ${f.path} — falling back to stdout. The credential:")
+                echo("")
+                echo(json)
+                echo("")
+            } else {
+                echo("  ✓ Bridge credential for \"${cred.name}\" written to ${f.path} (0600).")
+                echo("    Single-use, expires in ${cred.ttlSec}s — start the adapter NOW; it redeems the")
+                echo("    ticket on first start and caches its own device key from there on.")
+            }
+        }
         echo("")
         echo("  The bridge can ONLY: open sessions under ${cred.workdirs} / send prompts / read its own")
         echo("  sessions' replies. Permission prompts still go to YOUR phone; it cannot approve anything.")
+        echo(
+            when (grantedTier) {
+                AccessTier.REVIEW -> "  Tier: review — every dangerous action (shell, writes) prompts your phone first."
+                else -> "  Tier: $tier — file edits under those roots apply WITHOUT prompting you; shell still prompts."
+            },
+        )
         echo("  Manage it later:  cc-pocket-daemon bridges   |   cc-pocket-daemon bridges --revoke ${cred.name}")
     }
 

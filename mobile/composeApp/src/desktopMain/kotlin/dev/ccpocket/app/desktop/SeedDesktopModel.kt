@@ -42,8 +42,12 @@ class SeedDesktopModel : DesktopModel {
         DkSession("s4", "~/code/cc-pocket", "Update docs", AgentKind.OPENCODE, group = "g-auth"),
     )
     private val groupOverride = mutableStateMapOf<String, String?>()
+    private val titleOverride = mutableStateMapOf<String, String>() // session rename (issue #158)
     override val sessions: List<DkSession>
-        get() = baseSessions.map { if (groupOverride.containsKey(it.sessionId)) it.copy(group = groupOverride[it.sessionId]) else it }
+        get() = baseSessions.map { s ->
+            val grouped = if (groupOverride.containsKey(s.sessionId)) s.copy(group = groupOverride[s.sessionId]) else s
+            titleOverride[s.sessionId]?.let { grouped.copy(title = it) } ?: grouped
+        }
 
     // custom groups of the current project (issue #119) — mutable so create/rename/delete are observable
     private val groupList = mutableStateListOf(DkGroup("g-auth", "Auth work", 0), DkGroup("g-ci", "CI & release", 1))
@@ -59,6 +63,9 @@ class SeedDesktopModel : DesktopModel {
         baseSessions.filter { (groupOverride[it.sessionId] ?: it.group) == groupId }.forEach { groupOverride[it.sessionId] = null }
     }
     override fun assignGroup(sessionId: String, groupId: String?) { groupOverride[sessionId] = groupId }
+    // session rename (issue #158) — local override so the seed exercises the sidebar entry
+    override val canRenameSessions = true
+    override fun renameSession(sessionId: String, title: String) { titleOverride[sessionId] = title.trim() }
     private val groupCollapse = mutableStateListOf<String>()
     override fun groupCollapsed(projectPath: String, groupId: String) = "$projectPath\u0000$groupId" in groupCollapse
     override fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {
@@ -167,16 +174,20 @@ class SeedDesktopModel : DesktopModel {
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
+    override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)
 
-    override val appVersion = "1.3.6"
+    override val appVersion = "1.4.0"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
     override var defaultModel: String? by mutableStateOf(null)
     override var contextWindowOverride: Long? by mutableStateOf(null)
     override var terminalApp by mutableStateOf(TerminalApp.SYSTEM)
+    override var terminalDefaultEmbedded by mutableStateOf(true) // issue #153; no engine factory → chrome only
+    override val terminalPanel = TerminalPanelController()
+    override var menuBarEnabled by mutableStateOf(true)
     override var themeMode by mutableStateOf(ThemeMode.DARK)
     private var phonePushState by mutableStateOf(true)
     override val phonePush: Boolean? get() = phonePushState

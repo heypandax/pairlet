@@ -51,6 +51,24 @@ class E2ESessionTest {
         assertNull(daemonSession.open(deviceSession.seal("hello".encodeToByteArray())))
     }
 
+    @Test fun multi_psk_responder_shares_one_ephemeral_and_each_candidate_pairs_only_with_its_initiator() {
+        // #161: the responder derives a session per candidate PSK off ONE msg2; an initiator that mixed
+        // the ticket interops with the ticket session, one that mixed nothing with the empty twin — and
+        // never the other way around.
+        val device = E2ECrypto.generateKeyPair()
+        val daemon = E2ECrypto.generateKeyPair()
+        val ticket = ByteArray(43) { 9 }
+        for (deviceUsedTicket in listOf(true, false)) {
+            val init = E2ESession.initiator(device.privateRaw, device.publicRaw, daemon.publicRaw, if (deviceUsedTicket) ticket else ByteArray(0))
+            val (candidates, respEph) = E2ESession.responder(daemon.privateRaw, daemon.publicRaw, device.publicRaw, listOf(ticket, ByteArray(0)), init.ephPublic)
+            val deviceSession = init.finish(respEph)
+            val (match, other) = if (deviceUsedTicket) candidates[0] to candidates[1] else candidates[1] to candidates[0]
+            assertNull(other.open(deviceSession.seal("probe".encodeToByteArray()))) // open() is side-effect-free on failure
+            assertContentEquals("probe2".encodeToByteArray(), match.open(deviceSession.seal("probe2".encodeToByteArray())))
+            assertContentEquals("reply".encodeToByteArray(), deviceSession.open(match.seal("reply".encodeToByteArray())))
+        }
+    }
+
     @Test fun wrong_peer_static_breaks_the_channel() {
         val device = E2ECrypto.generateKeyPair()
         val daemon = E2ECrypto.generateKeyPair()

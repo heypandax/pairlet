@@ -111,6 +111,7 @@ class RepoDesktopModel(
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
+    override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)
     override val composerState = ComposerState()
@@ -184,6 +185,28 @@ class RepoDesktopModel(
     override val skillCatalogLoading: Boolean get() = repo.skillCatalogLoading.value
     override val skillCatalogStale: Boolean get() = repo.skillCatalogUnavailable.value
     override fun fetchSkillCatalog() = repo.fetchSkillCatalog()
+
+    // ── headless bridges (issue #91 follow-up): straight repo pass-throughs ──
+    override val bridges: List<dev.ccpocket.protocol.BridgeInfo> get() = repo.bridges
+    override val bridgesLoaded: Boolean get() = repo.bridgesLoaded.value
+    override val bridgesStale: Boolean get() = repo.bridgesUnavailable.value
+    override val bridgeBusy: Boolean get() = repo.bridgeBusy.value
+    override val bridgeError: String? get() = repo.bridgeError.value
+    override val bridgeMergeLost: List<String>? get() = repo.bridgeMergeLost.value
+    override val bridgeCredential: dev.ccpocket.protocol.BridgeCredential? get() = repo.bridgeCredential.value
+    override fun fetchBridges() = repo.fetchBridges()
+    override fun createBridge(
+        name: String,
+        workdirs: List<String>,
+        tier: dev.ccpocket.protocol.AccessTier,
+        maxSessions: Int?,
+        runner: dev.ccpocket.protocol.BridgeRunnerSpec?,
+    ) = repo.createBridge(name, workdirs, tier, maxSessions, runner)
+    override fun revokeBridge(name: String) = repo.revokeBridge(name)
+    override fun controlBridgeRunner(name: String, action: String) = repo.controlBridgeRunner(name, action)
+    override fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean) =
+        repo.configureBridgeRunner(name, spec, mergeEnv)
+    override fun clearBridgeCredential() = repo.clearBridgeCredential()
 
     override val connected: Boolean get() = repo.sessionActive.value
     override val connGen: Int get() = repo.connGen.value
@@ -550,6 +573,19 @@ class RepoDesktopModel(
     override fun deleteGroup(groupId: String) { repo.deleteGroup(groupId) }
     override fun assignGroup(sessionId: String, groupId: String?) { repo.assignGroup(sessionId, groupId) }
 
+    // session rename (issue #158) — same gating shape as canEditGroups: the daemon's capability stamp,
+    // plus the belt-and-suspenders guest check (a guest's Sessions already comes stamped false)
+    override val canRenameSessions: Boolean
+        get() {
+            if (!repo.renameSupported.value) return false
+            val dir = repo.sessionsDir.value ?: return false
+            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+        }
+    override fun renameSession(sessionId: String, title: String) { repo.renameSession(sessionId, title) }
+    override fun renameError(sessionId: String): String? =
+        repo.renameError.value?.takeIf { it.sessionId == sessionId }?.message
+    override fun dismissRenameError() { repo.dismissRenameError() }
+
     // collapse memory keyed by (canonical project path, group id) — persisted like the RECENT visit keys
     // (issue #102): a snapshot list so reads recompose, written through the same DesktopStore.
     private val groupCollapsedState = mutableStateListOf<String>().apply {
@@ -838,6 +874,23 @@ class RepoDesktopModel(
     override var terminalApp: TerminalApp
         get() = terminalAppState
         set(v) { terminalAppState = v; store.putString(K_TERMINAL_APP, v.id) }
+    // embedded terminal (issue #153): default-open pref + dock height, persisted like terminalApp.
+    // Absent key = embedded — the new default holds for existing users too (the issue's call).
+    private var terminalEmbedState by mutableStateOf(store.getString(K_TERMINAL_EMBED) != "0")
+    override var terminalDefaultEmbedded: Boolean
+        get() = terminalEmbedState
+        set(v) { terminalEmbedState = v; store.putString(K_TERMINAL_EMBED, if (v) "1" else "0") }
+    override val terminalPanel = TerminalPanelController(
+        loadHeight = { store.getString(K_TERMINAL_HEIGHT)?.toFloatOrNull() },
+        saveHeight = { store.putString(K_TERMINAL_HEIGHT, it.toString()) },
+    )
+
+    // menu-bar presence (issue #151) — desktop-only pref, persisted beside the pins. Absent = ON (the
+    // environment layer defaults on; only an explicit "0" opts out, so upgrades gain the glyph).
+    private var menuBarEnabledState by mutableStateOf(store.getString(K_MENUBAR) != "0")
+    override var menuBarEnabled: Boolean
+        get() = menuBarEnabledState
+        set(v) { menuBarEnabledState = v; store.putString(K_MENUBAR, if (v) "1" else "0") }
 
     override val phonePush: Boolean? get() = repo.pushPrefs.value
     override fun setPhonePush(enabled: Boolean) { repo.setPushEnabled(enabled) }
@@ -914,6 +967,9 @@ class RepoDesktopModel(
         const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
         const val K_GROUP_COLLAPSED = "desktop_group_collapsed" // per project+group collapse memory (issue #119)
         const val K_TERMINAL_APP = "desktop_terminal_app"
+        const val K_TERMINAL_EMBED = "desktop_terminal_embed" // "1"/absent = embedded default, "0" = external (#153)
+        const val K_TERMINAL_HEIGHT = "desktop_terminal_height" // dock height as a ChatPane fraction (#153)
+        const val K_MENUBAR = "desktop_menubar_enabled" // menu-bar presence opt-out (issue #151); absent = on
         const val MAX_RECENT = 6 // RECENT groups kept per machine — enough context, never a wall
         const val DRAFT_DEBOUNCE_MS = 400L // composer draft persist debounce — matches the mobile composer (#88)
         const val REFILL_ECHO_TIMEOUT_MS = 4_000L // per-dir wait for the restored-RECENT sweep's listing echo (#102)

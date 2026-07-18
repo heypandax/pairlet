@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.bridge
 
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.CancelTurn
@@ -19,6 +20,7 @@ import kotlin.reflect.full.primaryConstructor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 /**
@@ -78,11 +80,37 @@ class BridgeCapsTest {
     }
 
     @Test
-    fun mode_clamp_removes_bypass_but_preserves_the_rest() {
-        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.BYPASS_PERMISSIONS))
-        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.DEFAULT))
-        assertEquals(PermissionMode.PLAN, BridgeCaps.clampMode(PermissionMode.PLAN))
-        assertEquals(PermissionMode.ACCEPT_EDITS, BridgeCaps.clampMode(PermissionMode.ACCEPT_EDITS))
+    fun review_tier_forces_every_dangerous_action_to_prompt_the_owner() {
+        // the mint default: the adapter may ask for whatever it likes, nothing above DEFAULT is granted
+        val t = AccessTier.REVIEW
+        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.BYPASS_PERMISSIONS, t))
+        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.ACCEPT_EDITS, t))
+        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.DEFAULT, t))
+        // more cautious than the tier is always allowed
+        assertEquals(PermissionMode.PLAN, BridgeCaps.clampMode(PermissionMode.PLAN, t))
+    }
+
+    @Test
+    fun granted_tier_is_the_ceiling_not_the_mode() {
+        // COLLABORATE grants silent edits, but the bridge still only gets what it asks for
+        assertEquals(PermissionMode.ACCEPT_EDITS, BridgeCaps.clampMode(PermissionMode.ACCEPT_EDITS, AccessTier.COLLABORATE))
+        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.DEFAULT, AccessTier.COLLABORATE))
+        assertEquals(PermissionMode.ACCEPT_EDITS, BridgeCaps.clampMode(PermissionMode.BYPASS_PERMISSIONS, AccessTier.AUTONOMOUS))
+        // a newer peer's tier we don't understand must clamp to the safest, never the loosest
+        assertEquals(PermissionMode.DEFAULT, BridgeCaps.clampMode(PermissionMode.ACCEPT_EDITS, AccessTier.UNKNOWN))
+    }
+
+    @Test
+    fun bypass_is_unreachable_at_every_tier() {
+        // the invariant the whole approval-routing design rests on: an IM bot can never put the daemon
+        // into "approve nothing", no matter what it requests or what tier the owner granted
+        for (tier in AccessTier.entries) {
+            assertNotEquals(
+                PermissionMode.BYPASS_PERMISSIONS,
+                BridgeCaps.clampMode(PermissionMode.BYPASS_PERMISSIONS, tier),
+                "tier $tier must not grant bypassPermissions",
+            )
+        }
     }
 
     // ---- minimal sample instances so we can call the predicates on every frame type ----

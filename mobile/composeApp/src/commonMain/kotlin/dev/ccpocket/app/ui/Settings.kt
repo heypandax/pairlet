@@ -79,6 +79,9 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     if (showShares) { SharedFoldersScreen(repo, onBack = { showShares = false }); return }
     var showJoin by remember { mutableStateOf(false) }
     if (showJoin) { JoinFolderScreen(repo, onBack = { showJoin = false }, onJoined = { showJoin = false; onBack() }); return }
+    // headless bridges (issue #91 follow-up): monitor + revoke the IM bots driving this machine
+    var showBridges by remember { mutableStateOf(false) }
+    if (showBridges) { dev.ccpocket.app.ui.bridge.BridgesScreen(repo, onBack = { showBridges = false }); return }
     // back closes Settings — register a handler so it doesn't fall through to the app-level navigation
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
@@ -130,6 +133,14 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(stringResource(Res.string.join_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("›", color = Tok.muted, fontSize = 16.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+                Row(
+                    Modifier.fillMaxWidth().clickable { showBridges = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.settings_bridges), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                     Text("›", color = Tok.muted, fontSize = 16.sp)
                 }
             }

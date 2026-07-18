@@ -50,8 +50,16 @@ data class BridgeSpec(
     /** GUEST only: when this share expires (epoch ms). null = no expiry (a bridge). Past → the guest is
      *  cut and the credential purged (issue #115 §6). */
     val expiresAt: Long? = null,
-    /** GUEST only: the autonomy tier the owner granted — the permission-mode CEILING (never bypass). */
-    val tier: AccessTier = AccessTier.COLLABORATE,
+    /** The autonomy tier the owner granted — the permission-mode CEILING (never bypass), enforced for
+     *  BOTH kinds via [TierClamp]. Always set explicitly at mint: [guest] takes the owner's chosen tier,
+     *  [clamped] defaults a bridge to the strictest.
+     *
+     *  The default here is REVIEW because it is the FALLBACK, and a fallback must fail safe: it applies to
+     *  a spec built without naming a tier (a stored entry from before the field existed, a test, a future
+     *  call site). Defaulting to COLLABORATE would mean forgetting to pass a tier silently grants silent
+     *  file edits — the failure would be invisible until something wrote without asking. Live data is
+     *  unaffected either way: PocketJson has encodeDefaults=true, so every persisted spec names its tier. */
+    val tier: AccessTier = AccessTier.REVIEW,
 ) {
     val isGuest: Boolean get() = kind == CredentialKind.GUEST
 
@@ -69,14 +77,31 @@ data class BridgeSpec(
         const val GUEST_OPENS_PER_MIN = 12
         const val GUEST_PROMPTS_PER_MIN = 60
 
-        /** Clamp owner-supplied bridge overrides into sane bounds — a typo'd `--max-sessions 999` must not
-         *  turn one credential into a fork bomb. */
-        fun clamped(name: String, workdirs: List<String>, maxSessions: Int?, opensPerMin: Int?, promptsPerMin: Int?) = BridgeSpec(
+        /**
+         * Clamp owner-supplied bridge overrides into sane bounds — a typo'd `--max-sessions 999` must not
+         * turn one credential into a fork bomb.
+         *
+         * [tier] is the granted permission-mode CEILING (issue #91's "configurable default execution
+         * mode"), and it defaults to the STRICTEST — unlike a guest share, which defaults to COLLABORATE.
+         * The asymmetry is deliberate: a folder share is handed to a specific person the owner chose,
+         * whereas a bridge relays prompts from ANYONE in an IM chat. Silent file edits are a reasonable
+         * default for the former and a bad one for the latter, so an owner who wants that for a bot has
+         * to say so at mint time.
+         */
+        fun clamped(
+            name: String,
+            workdirs: List<String>,
+            maxSessions: Int?,
+            opensPerMin: Int?,
+            promptsPerMin: Int?,
+            tier: AccessTier = AccessTier.REVIEW,
+        ) = BridgeSpec(
             name = name,
             workdirs = workdirs,
             maxSessions = (maxSessions ?: DEFAULT_MAX_SESSIONS).coerceIn(1, 8),
             opensPerMin = (opensPerMin ?: DEFAULT_OPENS_PER_MIN).coerceIn(1, 30),
             promptsPerMin = (promptsPerMin ?: DEFAULT_PROMPTS_PER_MIN).coerceIn(1, 120),
+            tier = tier.takeUnless { it == AccessTier.UNKNOWN } ?: AccessTier.REVIEW, // unknown → safest
         )
 
         /** Build a GUEST spec (issue #115): a single canonical shared root, an access tier, and an expiry. */

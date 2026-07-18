@@ -87,6 +87,11 @@ class PromptDeliveryTest {
     @Test
     fun anAckWithNoFollowingTurnSurfacesTheResendCue() = runBlocking {
         val r = repo()
+        // The NOT-YET-stalled pre-assertions below race the deadline in the other direction from
+        // [awaitCue]'s concern: under a loaded JVM (parallel suites) a 30ms sleep can overshoot an 80ms
+        // deadline and the watchdog fires "early". Widen THIS test's injected deadline so the pre-window
+        // holds under load; the firing side still goes through awaitCue's poll.
+        r.promptTurnTimeoutMs = 700
         r.convoId.value = "c1"
         r.workdir.value = "/tmp/proj"
 
@@ -94,7 +99,7 @@ class PromptDeliveryTest {
         val pid = lastUserPromptId(r)
         r.receiveForTest(PromptAck("c1", pid)) // daemon wrote it to the agent's stdin — NOT a started turn
 
-        delay(30) // the 80ms turn deadline hasn't elapsed yet
+        delay(100) // well inside the 700ms turn deadline, even when the runner is starved
         assertFalse(r.turnStalled.value, "a fresh delivery must not cry stall before the turn deadline")
         assertFalse(r.sendStalled.value, "the receipt cleared the stage-1 (delivery) stall")
         assertTrue((r.messages.last() as ChatItem.User).delivered, "the ack flips the bubble to delivered")

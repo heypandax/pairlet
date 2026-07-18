@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.relay.dispatchOwnerControl
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.session.SessionRegistry
@@ -65,6 +66,11 @@ class WsConnection(
     private val router: RequestRouter,
     private val registry: SessionRegistry,
     private val e2e: LanE2E? = null,
+    /** The owner control planes (share #115 / bridge #91) — served on the LAN transport too, because the
+     *  desktop app on the daemon's own machine arrives HERE, not over the relay, and every LAN peer is a
+     *  full-power owner by construction (restricted credentials can't pass the LAN gate). Null while the
+     *  relay link is still coming up, or forever on a LAN-only `serve` (minting needs the relay). */
+    private val ownerControls: (() -> Pair<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?>)? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
@@ -129,7 +135,7 @@ class WsConnection(
                     gatedDeviceId = id
                     // freshly gated: hand the device our current direct address (IP may have changed since it
                     // stored it). outbox is buffered, so this queues until pump()'s writer starts draining.
-                    sink.emit(DaemonInfo(gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl()))
+                    sink.emit(DaemonInfo(gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true))
                     log.info("direct E2E session established with ${id.take(8)}…")
                     return crypto
                 }
@@ -180,6 +186,11 @@ class WsConnection(
                     log.info("recv ${env.body::class.simpleName}")
                     launch {
                         try {
+                            // owner control planes first (share #115 / bridge #91) — the same dispatcher the
+                            // relay transport uses, so the two paths can't drift. Falls through to the router
+                            // for everything else (and when the controls aren't up yet).
+                            val (sc, bc) = ownerControls?.invoke() ?: (null to null)
+                            if (dispatchOwnerControl(env.body, sc, bc) { sink.emit(it) }) return@launch
                             router.handle(env.body, sink) { owned.add(it) }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e

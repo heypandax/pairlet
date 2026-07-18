@@ -49,8 +49,13 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupPositionProvider
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
@@ -61,6 +66,7 @@ import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
 import dev.ccpocket.app.ui.gatewayHostLabel
 import dev.ccpocket.app.ui.matchesGatewayHost
+import dev.ccpocket.app.ui.modelChipLabel
 import dev.ccpocket.app.ui.recommendedGatewayPresets
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
@@ -157,8 +163,9 @@ fun NewSessionPopover(
 
 // ── quick actions (the chat-header ⋯): model / effort / mode / terminal / compact / clear ──
 // Mirrors mobile's QuickActionsSheet so the two shells stay in sync (mobile moved the mode
-// switch here off the top bar); drives the same repo verbs via DesktopModel.
-private enum class QaPage { MAIN, MODEL, EFFORT, MODE }
+// switch here off the top bar); drives the same repo verbs via DesktopModel. Model is no longer
+// a page here — the row shortcuts to the composer chip's anchored popover (issue #157).
+private enum class QaPage { MAIN, EFFORT, MODE }
 
 @Composable
 fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
@@ -171,92 +178,25 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
         when (page) {
             QaPage.MAIN -> {
                 PopoverLabel("Quick actions")
-                QaRow("Model", value = model.chatModel.ifBlank { "default" }, chevron = true) { page = QaPage.MODEL }
+                // Model is a plain shortcut now (issue #157): closes this menu and opens the SAME anchored
+                // popover the composer chip owns — no second-level page. Hidden while observing: the read-only
+                // view has no composer (no chip to anchor at), and you can't drive that session anyway.
+                if (!model.observing) {
+                    QaRow("Model", value = modelChipLabel(model.chatModelId).ifBlank { "default" }) { onDismiss(); model.showModelPopover = true }
+                }
                 QaRow("Effort", value = model.chatEffort ?: "default", chevron = true) { page = QaPage.EFFORT }
                 QaRow("Mode", value = CLAUDE_MODES.first { it.mode == model.chatMode }.token, chevron = true) { page = QaPage.MODE }
                 // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every
-                // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader
+                // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader.
+                // Routes by the user's default (issue #153): embedded dock unless Settings says external.
                 val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
                 if (canOpenTerminal) {
-                    QaRow("Open terminal") { TerminalLauncher.open(model.terminalApp, model.chatWorkdir); onDismiss() }
+                    QaRow("Open terminal") { model.openTerminalPreferred(); onDismiss() }
                 }
                 QaRow("Compact context") { model.compactConversation(); onDismiss() }
                 QaRow(
                     if (clearArmed) "Clear chat — tap again" else "Clear chat", danger = true,
                 ) { if (clearArmed) { model.clearConversation(); onDismiss() } else clearArmed = true }
-            }
-            QaPage.MODEL -> {
-                QaBack("Model") { page = QaPage.MAIN }
-                LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
-                val claudeLabels = CLAUDE_MODEL_OPTIONS.associate { (label, alias) -> alias to label }
-                val options = when (model.chatAgent) {
-                    AgentKind.CODEX -> model.modelsForAgent(AgentKind.CODEX).ifEmpty { CODEX_MODEL_OPTIONS }.map { m -> m to m }
-                    AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).ifEmpty { OPENCODE_MODEL_OPTIONS }.map { m -> m to m }
-                    else -> model.modelsForAgent(AgentKind.CLAUDE).ifEmpty { CLAUDE_MODEL_OPTIONS.map { it.second } }.map { m -> (claudeLabels[m] ?: m) to m }
-                }
-                fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
-                // gateway model presets (issue #139): mirrors mobile's ModelPicker off the same shared
-                // table. Gateway reported by the daemon → the section LEADS (those users pick vendor
-                // ids, not Claude aliases); official endpoint → it waits behind a collapsed toggle.
-                // OpenCode excluded: gateway presets use bare ids like "deepseek-chat" that would cause
-                // silent launch hangs in the opencode backend.
-                val gatewayUrl = if (model.chatAgent != AgentKind.CLAUDE) null else model.gatewayBaseUrl
-                @Composable
-                fun gatewayRows() = recommendedGatewayPresets(gatewayUrl).forEach { p ->
-                    GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
-                }
-                if (gatewayUrl != null) {
-                    // "GATEWAY · host" section header with a live-green dot flush right (0714 design)
-                    Row(Modifier.fillMaxWidth().padding(bottom = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("GATEWAY", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
-                        Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
-                        Spacer(Modifier.weight(1f))
-                        Dot(Tok.ok, 5.dp)
-                    }
-                    gatewayRows()
-                    Text(
-                        "Which model an id reaches is decided by your gateway.",
-                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                    PopoverLabel("Anthropic API")
-                }
-                options.forEach { (label, pick) ->
-                    QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
-                }
-                if (gatewayUrl == null && model.chatAgent == AgentKind.CLAUDE) {
-                    var showGateway by remember { mutableStateOf(false) }
-                    QaRow("Gateway presets", chevron = !showGateway) { showGateway = !showGateway }
-                    if (showGateway) gatewayRows()
-                }
-                // custom id (issue #54): third-party gateways route ids the preset list can't know;
-                // `--model` takes any string, so pass it through. Enter submits. Prefilled when the
-                // session already runs a non-preset id.
-                val presetActive = options.any { (_, pick) -> isActive(pick) }
-                var custom by remember {
-                    mutableStateOf(if (!presetActive) model.chatModelId.ifBlank { model.chatModel } else "")
-                }
-                PopoverLabel("Custom")
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                        .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    BasicTextField(
-                        custom, { custom = it }, singleLine = true,
-                        textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
-                        cursorBrush = SolidColor(Tok.accent),
-                        modifier = Modifier.weight(1f).onPreviewKeyEvent { e ->
-                            if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && custom.isNotBlank()) {
-                                model.switchModel(custom.trim()); onDismiss(); true
-                            } else false
-                        },
-                    )
-                    if (custom.isNotBlank()) Text(
-                        "→", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                            .clickable { model.switchModel(custom.trim()); onDismiss() }.padding(horizontal = 4.dp),
-                    )
-                }
             }
             QaPage.EFFORT -> {
                 QaBack("Effort") { page = QaPage.MAIN }
@@ -273,6 +213,110 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * The anchored model popover (issue #157, design model-chip.jsx): the composer chip's target — and the
+ * ⋯ Model row's, which now shortcuts here instead of drilling a second-level page. Carries exactly the
+ * rows the old ⋯ → Model page did: gateway presets (issue #139) leading when the daemon reports a
+ * gateway, the Anthropic aliases, and the custom-id field (issue #54).
+ */
+@Composable
+fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
+    Column(
+        Modifier.width(340.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised)
+            .border(1.dp, Tok.hair, RoundedCornerShape(14.dp)).padding(15.dp)
+            // the focusable popup owns the keyboard while open — Esc must close from inside it
+            .onPreviewKeyEvent { e ->
+                if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onDismiss(); true } else false
+            },
+    ) {
+        PopoverLabel("Model")
+        LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
+        val claudeLabels = CLAUDE_MODEL_OPTIONS.associate { (label, alias) -> alias to label }
+        val options = when (model.chatAgent) {
+            AgentKind.CODEX -> model.modelsForAgent(AgentKind.CODEX).ifEmpty { CODEX_MODEL_OPTIONS }.map { it to it }
+            AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).ifEmpty { OPENCODE_MODEL_OPTIONS }.map { it to it }
+            AgentKind.CLAUDE -> model.modelsForAgent(AgentKind.CLAUDE).ifEmpty { CLAUDE_MODEL_OPTIONS.map { it.second } }
+                .map { (claudeLabels[it] ?: it) to it }
+        }
+        fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
+        // gateway model presets (issue #139): mirrors mobile's ModelPicker off the same shared
+        // table. Gateway reported by the daemon → the section LEADS (those users pick vendor
+        // ids, not Claude aliases); official endpoint → it waits behind a collapsed toggle.
+        val gatewayUrl = if (model.chatAgent != AgentKind.CLAUDE) null else model.gatewayBaseUrl
+        @Composable
+        fun gatewayRows() = recommendedGatewayPresets(gatewayUrl).forEach { p ->
+            GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
+        }
+        if (gatewayUrl != null) {
+            // "GATEWAY · host" section header with a live-green dot flush right (0714 design)
+            Row(Modifier.fillMaxWidth().padding(bottom = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("GATEWAY", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+                Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Spacer(Modifier.weight(1f))
+                Dot(Tok.ok, 5.dp)
+            }
+            gatewayRows()
+            Text(
+                "Which model an id reaches is decided by your gateway.",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
+            )
+            PopoverLabel("Anthropic API")
+        }
+        options.forEach { (label, pick) ->
+            QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
+        }
+        if (gatewayUrl == null && model.chatAgent == AgentKind.CLAUDE) {
+            var showGateway by remember { mutableStateOf(false) }
+            QaRow("Gateway presets", chevron = !showGateway) { showGateway = !showGateway }
+            if (showGateway) gatewayRows()
+        }
+        // custom id (issue #54): third-party gateways route ids the preset list can't know;
+        // `--model` takes any string, so pass it through. Enter submits. Prefilled when the
+        // session already runs a non-preset id.
+        val presetActive = options.any { (_, pick) -> isActive(pick) }
+        var custom by remember {
+            mutableStateOf(if (!presetActive) model.chatModelId.ifBlank { model.chatModel } else "")
+        }
+        PopoverLabel("Custom")
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            BasicTextField(
+                custom, { custom = it }, singleLine = true,
+                textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.weight(1f).onPreviewKeyEvent { e ->
+                    if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && custom.isNotBlank()) {
+                        model.switchModel(custom.trim()); onDismiss(); true
+                    } else false
+                },
+            )
+            if (custom.isNotBlank()) Text(
+                "→", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                    .clickable { model.switchModel(custom.trim()); onDismiss() }.padding(horizontal = 4.dp),
+            )
+        }
+        // mid-turn (issue #157): the running turn keeps its model — say the pick lands on the NEXT turn
+        if (model.streaming) Text(
+            "Switch applies to the next turn.",
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp),
+        )
+    }
+}
+
+/** Places the chip's popup ABOVE its anchor with right edges aligned (design model-chip.jsx),
+ *  clamped inside the window — the popover reads as growing out of the chip. */
+internal class AboveAnchorEndPopupPositionProvider(private val gapPx: Int) : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
+        val x = (anchorBounds.right - popupContentSize.width).coerceIn(0, maxOf(0, windowSize.width - popupContentSize.width))
+        val y = (anchorBounds.top - gapPx - popupContentSize.height).coerceAtLeast(0)
+        return IntOffset(x, y)
     }
 }
 

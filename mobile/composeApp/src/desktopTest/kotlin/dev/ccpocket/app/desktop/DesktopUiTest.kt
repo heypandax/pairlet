@@ -1,5 +1,6 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasContentDescription
@@ -9,9 +10,11 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
@@ -162,6 +165,43 @@ class DesktopUiTest {
     }
 
     @Test
+    fun seedSessionRenameTracksState() {
+        // issue #158: the sidebar's inline rename commits through the model and the row title follows
+        // (production routes it daemon-side and the Sessions re-push refreshes; the seed applies locally)
+        val m = SeedDesktopModel()
+        assertTrue(m.canRenameSessions)
+        val before = m.sessions.first { it.sessionId == "s2" }
+        m.renameSession("s2", "  Stream parser hardening  ")
+        val after = m.sessions.first { it.sessionId == "s2" }
+        assertEquals("Stream parser hardening", after.title, "the committed title is trimmed and adopted")
+        assertEquals(before.group, after.group, "a rename must not disturb group membership")
+    }
+
+    @Test
+    fun refusedRenameShowsInlineErrorOnTheAskingRowAndEscDismisses() = runComposeUiTest {
+        // issue #158: a rename_failed refusal re-opens the ASKING row's editor with the daemon's reason
+        // inline — the feedback lands on the sessions surface, not as a Sys line in whatever chat happens
+        // to be open (the common refusal, a terminal-held session, is renamed with no chat open at all).
+        val reason = "session is live in another client — rename it there (/rename) or stop it first"
+        val err = mutableStateOf<String?>(reason)
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override fun renameError(sessionId: String): String? = err.value.takeIf { sessionId == "s2" }
+            override fun dismissRenameError() { err.value = null }
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(reason)                       // the inline reason renders on s2's (re-opened) editor row
+        // …with the editor prefilled with the still-current title, ready for a retry
+        val field = onNode(hasSetTextAction() and hasText("Fix stream parser test"))
+        field.requestFocus()
+        waitForIdle()
+        field.performKeyInput { pressKey(Key.Escape) } // Esc backs out and dismisses the refusal
+        waitForIdle()
+        assertTrue(!present(reason), "Esc must dismiss the inline refusal")
+        assertPresent("Fix stream parser test")     // the plain row is back
+    }
+
+    @Test
     fun seedGroupCollapseToggles() {
         val m = SeedDesktopModel()
         assertTrue(!m.groupCollapsed("~/code/cc-pocket", "g-auth"))
@@ -283,6 +323,61 @@ class DesktopUiTest {
         onAllNodes(hasText("Full auto")).onLast().performClick()     // picking one closes the popover
         waitForIdle()
         assertTrue(!model.showQuickActions, "picking a mode dismisses the quick-actions popover")
+    }
+
+    @Test
+    fun composerModelChipOpensAnchoredPopover() = runComposeUiTest {
+        // issue #157: the chip on the composer is the one-click model entrance. The seed streams by
+        // default (chip inert mid-turn), so pin a quiet session to drive the open.
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val streaming = false
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent("sonnet")                                                // the chip carries the current model
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showModelPopover, "clicking the chip opens the model popover")
+        assertPresent("Fable")            // the alias rows render in the anchored popover
+        assertPresent("Gateway presets")  // collapsed presets row (no gateway in the seed)
+        assertPresent("CUSTOM")           // the custom-id section
+    }
+
+    @Test
+    fun composerModelChipInertWhileStreaming() = runComposeUiTest {
+        // mid-turn the chip dims and disables (design model-chip.jsx state 3) — the running turn keeps
+        // its model, so the entrance rests; the ⋯ Model shortcut still reaches the popover. Streaming
+        // is snapshot state here so the second half can end the turn and pin the recovery: the chip
+        // re-enables through recomposition and opens the popover again.
+        val streamingState = mutableStateOf(true)
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val streaming: Boolean get() = streamingState.value
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(!model.showModelPopover, "the dimmed chip must not open the popover mid-turn")
+        streamingState.value = false // the turn ends
+        waitForIdle()
+        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showModelPopover, "once streaming ends the chip re-enables and opens the popover")
+    }
+
+    @Test
+    fun quickActionsModelRowShortcutsToPopover() = runComposeUiTest {
+        // issue #157: ⋯ → Model no longer drills a second-level page — it closes the menu and opens
+        // the SAME anchored popover the composer chip owns.
+        val model = SeedDesktopModel().apply { showQuickActions = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        onAllNodes(hasText("Model")).onLast().performClick()
+        waitForIdle()
+        assertTrue(!model.showQuickActions, "the shortcut closes the ⋯ menu")
+        assertTrue(model.showModelPopover, "…and opens the shared model popover")
+        assertPresent("Fable")                              // popover content anchored at the chip
+        assertPresent("Switch applies to the next turn.")   // seed streams → the next-turn note shows
     }
 
     @Test
@@ -445,13 +540,23 @@ class DesktopUiTest {
         // live-shaped SeedDesktopModel, so every row is real fleet state
         val model = SeedDesktopModel()
         setContent { PocketTheme { TrayPopover(model) } }
-        assertPresent("PENDING APPROVALS")
-        assertPresent("RUNNING SESSIONS")
+        assertPresent("NEEDS YOU")                           // menubar-presence handoff section grammar (#151)
+        assertPresent("RUNNING")
         assertPresent("rm -rf ./build && ./gradlew clean") // a REAL fleet approval preview (mac-studio's Bash)
-        assertPresent("mac-studio")                          // the owning machine, not a hardcoded name
+        assertPresent("mac-studio")                          // the owning machine chip, not a hardcoded name
         assertPresent("api-server")                          // a REAL running project on another machine
         assertPresent("3 computers · 3 sessions")            // header derived from live fleet state
         assertPresent("Open cc-pocket")
+        // (elapsed labels ride the process-wide TrayRunningSince clock — value coverage lives in
+        // MenuBarStateTest, since "now" vs "1m" here would depend on suite timing)
+        assertTrue(!present("⌘⏎"), "the keycap hint hides where the shortcut isn't wired (in-window overlay)")
+    }
+
+    @Test
+    fun trayKeyHintShowsOnlyInTheMenuBarWindow() = runComposeUiTest {
+        // the OS popover wires ⌘⏎ in its key handler and passes keyHint = true — only then is the cap honest
+        setContent { PocketTheme { TrayPopover(SeedDesktopModel(), keyHint = true) } }
+        assertPresent("⌘⏎")
     }
 
     @Test
@@ -478,11 +583,30 @@ class DesktopUiTest {
     @Test
     fun traySettingsGearOpensSettings() = runComposeUiTest {
         val model = SeedDesktopModel()
-        setContent { PocketTheme { TrayPopover(model) } }
+        var raised = false
+        setContent { PocketTheme { TrayPopover(model, onOpenMain = { raised = true }) } }
         assertTrue(!model.showSettings)
         onAllNodes(hasContentDescription("Settings")).onFirst().performClick()
         waitForIdle()
         assertTrue(model.showSettings, "the gear opens Settings (was a dead clickable)")
+        // Settings lives in the main window — from the menu-bar popover the gear must surface it too,
+        // or the modal opens under whatever covers the buried window and reads as a dead click
+        assertTrue(raised, "the gear also raises the main window")
+    }
+
+    @Test
+    fun settingsMenuBarToggleFlipsTheModel() = runComposeUiTest {
+        // issue #151: the menu-bar presence opt-out — General pane, same ToggleRow idiom as phone push
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { SettingsModal(model) {} } }
+        assertTrue(model.menuBarEnabled, "menu-bar presence defaults on")
+        // the group sits below the General pane's first viewport — scroll it in before clicking
+        onAllNodes(hasText("Show cc-pocket in the menu bar")).onFirst().performScrollTo().performClick()
+        waitForIdle()
+        assertTrue(!model.menuBarEnabled)
+        onAllNodes(hasText("Show cc-pocket in the menu bar")).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.menuBarEnabled)
     }
 
     @Test
@@ -607,5 +731,23 @@ class DesktopUiTest {
             m.computers.any { it.online } && m.computers.any { !it.online },
             "seed has both online and offline computers",
         )
+    }
+@Test
+    fun bridgeFormComposesInsideTheSettingsScrollContainer() = runComposeUiTest {
+        setContent {
+            PocketTheme {
+                // the same shape SettingsModal gives every pane: an unbounded verticalScroll Box.
+                // A nested unbounded scrollable inside the form crashed at measure time (infinite
+                // max-height) — this test exists so that regression can't come back silently.
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                ) {
+                    NewBridgeForm(onCancel = {}, onCreate = { _, _, _, _ -> })
+                }
+            }
+        }
+        waitForIdle()
+        assertPresent("AUTONOMY")
+        assertPresent("Let the daemon run the adapter")
     }
 }

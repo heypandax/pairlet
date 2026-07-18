@@ -223,8 +223,23 @@ class BridgeRegistry(
 
     /** Confirmed BRIDGE deviceIds + names — for the `bridges` CLI listing (guests excluded). */
     @Synchronized
-    fun list(): List<Pair<String, BridgeSpec>> =
-        specs.entries.filter { it.value.kind == CredentialKind.BRIDGE }.map { it.key to it.value }
+    fun list(): List<Pair<String, BridgeSpec>> = bridges().map { (id, spec, _) -> id to spec }
+
+    /** Confirmed BRIDGEs — deviceId + spec + when bound — for the owner's management page. The [list]
+     *  twin of [guests]; carries the bind time the CLI listing has no use for. */
+    @Synchronized
+    fun bridges(): List<Triple<String, BridgeSpec, Long>> =
+        specs.entries.filter { it.value.kind == CredentialKind.BRIDGE }
+            .map { Triple(it.key, it.value, createdAts[it.key] ?: 0L) }
+
+    /** Specs with an outstanding, unexpired intent — minted but not yet redeemed. The owner's page shows
+     *  these as "waiting for the adapter to connect"; they vanish on their own when the ticket lapses,
+     *  so their absence later is expiry, not failure. */
+    @Synchronized
+    fun pendingIntents(now: Long = System.currentTimeMillis()): List<BridgeSpec> {
+        purgeExpired(now)
+        return intents.values.map { it.spec }
+    }
 
     /** Confirmed GUEST shares (issue #115) — deviceId + spec + when bound — for the owner's management page. */
     @Synchronized
@@ -243,7 +258,9 @@ class BridgeRegistry(
         // invariant (a pre-#115 daemon reading bridges.json must never see a guest key)
         val byKind = bridgePubs.entries.groupBy { specs[it.key]?.kind }
         fun rows(kind: CredentialKind) = (byKind[kind] ?: emptyList()).associate { (id, pub) ->
-            id to BridgeEntry(b64enc.encodeToString(pub), specs[id]!!, System.currentTimeMillis())
+            // keep each credential's ORIGINAL bind time — an unrelated persist (another bind, a revoke)
+            // must not restamp every row's createdAt
+            id to BridgeEntry(b64enc.encodeToString(pub), specs[id]!!, createdAts[id] ?: System.currentTimeMillis())
         }
         BridgeStore.save(rows(CredentialKind.BRIDGE), store)
         GuestStore.save(rows(CredentialKind.GUEST), guestStore)
@@ -261,5 +278,19 @@ class BridgeRegistry(
     @OptIn(ExperimentalStdlibApi::class)
     private fun hashHex(b: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(b).toHexString()
 
-    private companion object { const val MAX_GUEST_SESSIONS = 512 }
+    companion object {
+        private const val MAX_GUEST_SESSIONS = 512
+
+        /**
+         * Grace beyond a redeem ticket's TTL for its intent to stay bindable. The intent is recorded AFTER
+         * the mint round-trip, so it already outlives the relay ticket slightly; the grace makes
+         * classification robust to redeem→connect→first-frame latency and modest clock skew, so a
+         * slow-to-first-frame bridge/guest is never mis-promoted to a full-power device (issue #91).
+         *
+         * One constant for every mint path — loopback `pair --headless`, the wire [dev.ccpocket.protocol.CreateBridge],
+         * and folder-share — because they must classify identically. An abandoned mint blocks re-mint for
+         * at most this long.
+         */
+        const val INTENT_GRACE_MS = 120_000L
+    }
 }

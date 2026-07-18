@@ -96,6 +96,8 @@ import dev.ccpocket.app.resources.group_name_hint
 import dev.ccpocket.app.resources.group_new
 import dev.ccpocket.app.resources.group_rename
 import dev.ccpocket.app.resources.group_ungrouped
+import dev.ccpocket.app.resources.session_rename
+import dev.ccpocket.app.resources.session_rename_hint
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
@@ -462,6 +464,10 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // sessions the current project can be moved between (owner + has groups) — drives the row
                     // right-click "move to group" menu; empty everywhere else so no menu appears.
                     val menuGroups = if (g.current && model.canEditGroups) custom else emptyList()
+                    // right-click "Rename session" (issue #158): the live-listed project's rows on an owner +
+                    // rename-capable daemon — same scoping as the group menu (a RECENT snapshot's dir isn't
+                    // the one the daemon would resolve the rename against).
+                    val renameable = g.current && model.canRenameSessions
                     // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
                     // entry forces scrolling past a long session list to create a group. Current + group-aware
                     // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
@@ -478,14 +484,14 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             }
                         }
                         items(g.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                            SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups) { model.selectSession(s) }
+                            SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups, renameable = renameable) { model.selectSession(s) }
                         }
                     } else {
                         sessionSections(g.sessions, custom).forEach { sec ->
                             item(key = "gh:${g.path}:${sec.id}") { CustomGroupHeader(model, g.path, sec) }
                             if (!model.groupCollapsed(g.path, sec.id)) {
                                 items(sec.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                                    SessionRow(model, s, selected = s.sessionId == selectedId, indented = true, menuGroups = menuGroups) { model.selectSession(s) }
+                                    SessionRow(model, s, selected = s.sessionId == selectedId, indented = true, menuGroups = menuGroups, renameable = renameable) { model.selectSession(s) }
                                 }
                             }
                         }
@@ -598,7 +604,10 @@ private fun CustomGroupHeader(model: DesktopModel, projectPath: String, sec: Ses
     var editing by remember(sec.id) { mutableStateOf(false) }
     var confirming by remember(sec.id) { mutableStateOf(false) }
     if (editing) {
-        GroupNameInput(initial = sec.name ?: "", onCommit = { model.renameGroup(sec.id, it); editing = false }, onCancel = { editing = false })
+        GroupNameInput(
+            initial = sec.name ?: "", hint = stringResource(Res.string.group_name_hint),
+            onCommit = { model.renameGroup(sec.id, it); editing = false }, onCancel = { editing = false },
+        )
         return
     }
     if (confirming) {
@@ -660,7 +669,10 @@ private fun GroupDeleteConfirm(onConfirm: () -> Unit, onCancel: () -> Unit) {
 private fun NewGroupRow(model: DesktopModel) {
     var adding by remember { mutableStateOf(false) }
     if (adding) {
-        GroupNameInput(initial = "", onCommit = { model.createGroup(it); adding = false }, onCancel = { adding = false })
+        GroupNameInput(
+            initial = "", hint = stringResource(Res.string.group_name_hint),
+            onCommit = { model.createGroup(it); adding = false }, onCancel = { adding = false },
+        )
         return
     }
     Row(
@@ -672,10 +684,10 @@ private fun NewGroupRow(model: DesktopModel) {
     }
 }
 
-/** Inline group-name field (issue #119) shared by "New group" and rename: auto-focused, Enter commits a
- *  non-blank trimmed name, Esc cancels. */
+/** Inline name field shared by "New group" / group rename (issue #119) and the session-row rename
+ *  (issue #158): auto-focused, Enter commits a non-blank trimmed name, Esc cancels. */
 @Composable
-private fun GroupNameInput(initial: String, onCommit: (String) -> Unit, onCancel: () -> Unit) {
+private fun GroupNameInput(initial: String, hint: String, onCommit: (String) -> Unit, onCancel: () -> Unit) {
     var text by remember { mutableStateOf(initial) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
@@ -687,7 +699,7 @@ private fun GroupNameInput(initial: String, onCommit: (String) -> Unit, onCancel
             Modifier.weight(1f).clip(RoundedCornerShape(6.dp)).border(1.dp, Tok.accent, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
-            if (text.isEmpty()) Text(stringResource(Res.string.group_name_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            if (text.isEmpty()) Text(hint, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
             BasicTextField(
                 value = text, onValueChange = { text = it }, singleLine = true,
                 textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 11.sp),
@@ -734,8 +746,9 @@ private fun NewSessionRow(onClick: () -> Unit) {
     }
 }
 
-/** A session row, optionally wrapped in a right-click "move to group" menu (issue #119): the current
- *  project's editable rows offer "move to <group>" per group + "remove from group" when already grouped. */
+/** A session row, optionally wrapped in a right-click menu: the current project's rows offer "Rename
+ *  session" (issue #158, Claude rows on a rename-capable owner connection) and — when the project has
+ *  custom groups (issue #119) — "move to <group>" per group + "remove from group" when already grouped. */
 @Composable
 private fun SessionRow(
     model: DesktopModel,
@@ -743,14 +756,43 @@ private fun SessionRow(
     selected: Boolean,
     indented: Boolean = false,
     menuGroups: List<DkGroup> = emptyList(),
+    renameable: Boolean = false,
     onClick: () -> Unit,
 ) {
-    if (menuGroups.isEmpty()) { SessionRowBody(model, s, selected, indented, onClick); return }
+    // rename entry (issue #158): Claude rows only — a Codex rename write path is out of scope
+    val canRename = renameable && s.agent != AgentKind.CODEX
+    // inline rename swaps the row for a prefilled title field (the group header's rename pattern);
+    // committing sends the rename — the daemon re-pushes Sessions, which refreshes the row title.
+    // A REFUSED rename (rename_failed) re-opens the editor with the daemon's reason inline: the ask
+    // came from THIS row, so the feedback lands here — the chat transcript is the wrong surface (the
+    // common refusal, a terminal-held session, is renamed with no chat open at all). Esc dismisses.
+    var renaming by remember(s.sessionId) { mutableStateOf(false) }
+    val renameError = model.renameError(s.sessionId)
+    if (renaming || renameError != null) {
+        Column {
+            GroupNameInput(
+                initial = s.title,
+                hint = stringResource(Res.string.session_rename_hint),
+                onCommit = { model.renameSession(s.sessionId, it); renaming = false },
+                onCancel = { renaming = false; model.dismissRenameError() },
+            )
+            if (renameError != null) {
+                Text(
+                    renameError, color = Tok.danger, fontFamily = Dk.ui, fontSize = 10.sp, lineHeight = 13.sp,
+                    modifier = Modifier.padding(start = 22.dp, end = 12.dp, top = 2.dp, bottom = 3.dp),
+                )
+            }
+        }
+        return
+    }
+    if (menuGroups.isEmpty() && !canRename) { SessionRowBody(model, s, selected, indented, onClick); return }
+    val rename = stringResource(Res.string.session_rename)
     val moveTo = stringResource(Res.string.group_move_to)
     val moveOut = stringResource(Res.string.group_move_out)
     ContextMenuArea(
         items = {
             buildList {
+                if (canRename) add(ContextMenuItem(rename) { renaming = true })
                 menuGroups.filter { it.id != s.group }.forEach { grp ->
                     add(ContextMenuItem("$moveTo · ${grp.name}") { model.assignGroup(s.sessionId, grp.id) })
                 }

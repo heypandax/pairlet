@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.relay
 import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
+import dev.ccpocket.protocol.CreateBridge
 import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.PocketJson
 import io.ktor.http.ContentType
@@ -47,6 +48,8 @@ data class LoopbackHeadlessReq(
     val maxSessions: Int? = null,
     val opensPerMin: Int? = null,
     val promptsPerMin: Int? = null,
+    /** granted permission-mode ceiling; absent (an older CLI) → the strictest, same as the flag's default */
+    val tier: AccessTier = AccessTier.REVIEW,
 )
 
 /** daemon -> CLI: everything a bridge adapter needs to redeem + connect. The CLI prints it as one
@@ -109,6 +112,10 @@ data class LoopbackShareMinted(
 @Serializable
 data class LoopbackShareRevokeReq(val deviceId: String)
 
+/** daemon -> CLI (loopback): why a headless mint was refused, in the service's own words. */
+@Serializable
+data class LoopbackHeadlessErr(val message: String, val error: String = "headless_mint_refused")
+
 /**
  * A loopback-only helper so the `pair` CLI can ask the ALREADY-RUNNING daemon to mint a pairing
  * ticket over its single authenticated relay connection — instead of opening a second daemon
@@ -166,55 +173,50 @@ class PairLoopback(
 
                 // ---- headless bridge management (issue #91) ----
 
+                // Delegates to the SAME BridgeService the app drives over the wire — no re-implemented mint
+                // logic, so `pair --headless` and the app's "New bridge" apply one name check, one
+                // workdir-must-exist rule, and one mint-serialization dance. A drift between two copies of
+                // that would mis-classify a credential's power, which is the one thing #91 must never get
+                // wrong. (Same reuse the `share` CLI below already does.)
                 post("/pair/headless") {
                     val req = runCatching { PocketJson.decodeFromString<LoopbackHeadlessReq>(call.receiveText()) }.getOrNull()
                     if (req == null || req.name.isBlank() || req.workdirs.isEmpty()) {
                         call.respondText("""{"error":"bad_request","message":"name and at least one --workdir are required"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
                         return@post
                     }
-                    if (relay.bridges.list().any { it.second.name == req.name }) {
-                        call.respondText("""{"error":"name_taken","message":"a bridge named \"${req.name}\" already exists — revoke it first or pick another name"}""", ContentType.Application.Json, HttpStatusCode.Conflict)
+                    val bc = relay.bridgeControl
+                    if (bc == null) {
+                        // no relay-side control plane yet: daemon still wiring up, or a LAN-only `run` with
+                        // no relay link to mint a redeem ticket over
+                        call.respondText(
+                            """{"error":"relay_offline","message":"minting needs the relay link — the daemon is still starting, or it's running LAN-only","attached":${relay.attached}}""",
+                            ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
+                        )
                         return@post
                     }
-                    // every allow-listed root must EXIST as a directory — a typo'd root would mint a
-                    // credential that can open sessions somewhere unintended once the path appears later
-                    val roots = req.workdirs.map { File(it) }
-                    val bad = roots.firstOrNull { !it.isAbsolute || !it.isDirectory }
-                    if (bad != null) {
-                        call.respondText("""{"error":"bad_workdir","message":"not an existing absolute directory: $bad"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
-                        return@post
-                    }
-                    // the reverse half of mint serialization: a phone ticket may still be outstanding
-                    if (relay.interactivePairingPending()) {
-                        call.respondText("""{"error":"interactive_pairing_pending","message":"a phone pairing ticket is still valid — retry in ~2 minutes"}""", ContentType.Application.Json, HttpStatusCode.Conflict)
-                        return@post
-                    }
-                    val spec = BridgeSpec.clamped(
-                        req.name.trim(),
-                        roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) },
-                        req.maxSessions, req.opensPerMin, req.promptsPerMin,
+                    val res = bc.create(
+                        CreateBridge(
+                            name = req.name, workdirs = req.workdirs,
+                            maxSessions = req.maxSessions, opensPerMin = req.opensPerMin, promptsPerMin = req.promptsPerMin,
+                            tier = req.tier,
+                        ),
                     )
-                    val ticket = relay.mintTicket(headless = true)
-                    if (ticket == null) {
-                        call.respondText("""{"error":"relay_offline","attached":${relay.attached}}""", ContentType.Application.Json, HttpStatusCode.ServiceUnavailable)
+                    val cred = res.credential
+                    if (!res.ok || cred == null) {
+                        // Conflict is the honest status for every refusal here: they are all "some other
+                        // pairing/bridge holds the slot or the name" or a bad input the CLI already screened.
+                        call.respondText(
+                            PocketJson.encodeToString(LoopbackHeadlessErr(res.error ?: "headless pairing failed")),
+                            ContentType.Application.Json, HttpStatusCode.Conflict,
+                        )
                         return@post
                     }
-                    // bindable window = ticket TTL + a grace margin (issue #91 LOW): the daemon records the
-                    // intent AFTER the mint round-trip, so it already outlives the relay ticket slightly;
-                    // the grace makes classification robust to pairing latency near the ticket-expiry edge
-                    // and modest clock skew, so a slow-to-first-frame bridge is never mis-promoted to a
-                    // full-power device (onDevicePaired then reliably sees looksHeadless == true).
-                    if (!relay.bridges.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + INTENT_GRACE_MS)) {
-                        call.respondText("""{"error":"headless_pairing_pending","message":"another bridge pairing is already in progress"}""", ContentType.Application.Json, HttpStatusCode.Conflict)
-                        return@post
-                    }
-                    log.info("headless credential minted for \"${spec.name}\" (workdirs=${spec.workdirs})")
                     call.respondText(
                         PocketJson.encodeToString(
                             LoopbackHeadlessCred(
-                                name = spec.name, accountId = relay.accountId, daemonPub = daemonPubB64,
-                                ticket = ticket.ticket, ttlSec = ticket.expiresInSec, relay = relayWsBase,
-                                workdirs = spec.workdirs,
+                                name = cred.name, accountId = cred.accountId, daemonPub = cred.daemonPub,
+                                ticket = cred.ticket, ttlSec = cred.ttlSec, relay = cred.relay,
+                                workdirs = cred.workdirs,
                             ),
                         ),
                         ContentType.Application.Json,

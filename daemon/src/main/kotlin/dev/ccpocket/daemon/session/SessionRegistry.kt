@@ -50,6 +50,10 @@ class SessionRegistry(
     // decision matrix is unit-testable; the real probe shells out to lsof (LiveProcesses.externalClaudeAt)
     private val processProbe: (workdir: String, transcript: Path) -> LiveProcesses.ExternalClaude =
         LiveProcesses::externalClaudeAt,
+    // Claude transcript root — injectable ONLY so [renameSession]'s disk write is unit-testable against
+    // a temp dir instead of the user's real ~/.claude/projects (every other path resolves via the
+    // backends / ProjectPaths directly, same default)
+    private val projectsRoot: Path = ProjectPaths.projectsRoot(),
 ) {
     private val mutex = Mutex()
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
@@ -382,6 +386,45 @@ class SessionRegistry(
     suspend fun fetchHistoryPage(f: dev.ccpocket.protocol.FetchHistoryPage, sink: OutboundSink) {
         get(f.convoId)?.let { it.fetchHistoryPage(f.beforeSeq, f.limit, sink); return }
         mutex.withLock { observes[f.convoId] }?.fetchHistoryPage(f.beforeSeq, f.limit, sink)
+    }
+
+    /**
+     * Rename [sessionId]'s title (issue #158) by landing Claude's own `custom-title` transcript record,
+     * picking the writer by who holds the file:
+     *  - a conversation THIS daemon is driving with a live process → the CLI renames itself
+     *    (`rename_session` control_request; it appends the record and acks) — never a second appender
+     *    on a file our child is writing;
+     *  - a claude LIVE OUTSIDE the daemon (terminal) → refused: we can't control that process, and
+     *    appending under a foreign writer risks splicing into a record it is mid-writing;
+     *  - idle transcript (incl. a daemon convo with no live process yet) → [TranscriptRename.append],
+     *    the CLI's exact record shape.
+     * Returns null on success (the record is on disk — a rescan sees the new title), else a
+     * human-readable failure for the client's error surface. Codex sessions have no transcript under
+     * the project dir and fail with the not-found message (their rename path is out of #158's scope).
+     */
+    suspend fun renameSession(workdir: String, sessionId: String, title: String): String? {
+        val t = title.trim()
+        if (t.isEmpty()) return "title must not be empty"
+        // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too (the
+        // same identity [open] reattaches by above): a spawned-but-not-yet-init conversation already
+        // holds the transcript, and a sessionId-only miss here read it as "idle disk" and appended
+        // under our own child's pen.
+        val live = mutex.withLock {
+            convos.values.firstOrNull { it.sessionId == sessionId || (it.sessionId == null && it.resumeAnchor == sessionId) }
+        }
+        if (live != null && live.hasLiveProcess()) {
+            log.info("rename ${sessionId.take(8)}… via live convo ${live.convoId.take(8)}…")
+            return if (live.renameSession(t)) null
+            else "the running agent didn't accept the rename — stop the session and try again"
+        }
+        val file = ProjectPaths.dirForUnder(projectsRoot, workdir).resolve("$sessionId.jsonl")
+        if (!file.exists()) return "no transcript for this session here (Codex sessions can't be renamed yet)"
+        if (externallyActive(sessionId, workdir, file)) {
+            return "session is live in another client — rename it there (/rename) or stop it first"
+        }
+        log.info("rename ${sessionId.take(8)}… via idle transcript append")
+        return if (dev.ccpocket.daemon.disk.TranscriptRename.append(file, sessionId, t)) null
+        else "couldn't write the rename to the transcript"
     }
 
     /** Workdir of a live conversation — used by voice transcription for term injection. */

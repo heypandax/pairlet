@@ -697,10 +697,17 @@ class Conversation(
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
     }
 
-    // GUEST folder-share (issue #115): a scoped guest conversation launches its agent clean-room — no MCP
-    // servers — so it can't reach the owner's authenticated integrations. One place to stamp it: every
-    // AgentSpec built above flows through here, so the launch flags carry it without touching each site.
-    private val cleanRoom: Boolean = pathScope != null
+    // Restricted-credential conversations (GUEST folder-share #115, BRIDGE #91) launch their agent
+    // clean-room: no MCP servers (can't act through the owner's authenticated integrations) and — the part
+    // that bit for real — `--setting-sources ""`, because the owner's own ~/.claude settings carry
+    // permissions.allow rules accumulated for their PERSONAL convenience (a bare "Edit" was live on the
+    // machine this shipped from), and the CLI honours those BEFORE the daemon's --permission-prompt-tool
+    // ever hears about the call. A stranger in an IM chat inheriting the owner's "don't ask me again"
+    // choices breaks the one promise the tier ceiling makes ("dangerous actions prompt your phone"), so
+    // both restricted kinds strip the settings layer and the daemon stays the sole permission authority.
+    // origin != null is exactly "bridge or guest": the scheduler and every interactive device open with a
+    // null origin. One place to stamp it: every AgentSpec built above flows through here.
+    private val cleanRoom: Boolean = launchesCleanRoom(pathScope, origin)
 
     private suspend fun launchProcess(rawSpec: AgentSpec, armExecuting: Boolean = false, initialSend: InitialSend? = null) {
         // OpenCode requires a message argument — can't launch without one (opencode run exits with error).
@@ -747,6 +754,9 @@ class Conversation(
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
             // allow", so one owner approval can't be replayed by later attacker-supplied prompts
             forceNeverRemember = origin != null,
+            // bridge defense-in-depth (issue #91): Bash gated by BridgeCommandPolicy + structured file tools
+            // confined to the bound workdir (a bridge Read must not escape to ~/.ssh). Bridge only.
+            bridgeSession = origin != null && pathScope == null,
             // GUEST folder-share (issue #115): confine every file tool to the shared roots
             pathScope = pathScope,
             workdir = workdir.toString(),
@@ -845,6 +855,9 @@ class Conversation(
         // off the pump: a control-plane push must never stall stdout parsing
         scope.launch {
             val pushed = runCatching { hook.onAskPending(workdir, sessionId, origin, label, watched) }.getOrDefault(false)
+            // one line so a "why didn't my phone buzz" never again means grepping two hours of relay logs:
+            // this is the daemon-side truth of whether an ask-push was even attempted.
+            log.info("ask-push origin=${origin ?: "owner"} tool=$label watched=$watched → ${if (pushed) "queued to relay" else "not pushed"}")
             if (!pushed) lastAskPushMs = prev
         }
     }
@@ -1392,6 +1405,18 @@ class Conversation(
         requestInterrupt()
     }
 
+    /** A live agent process is attached right now — its CLI holds (and appends) the transcript. */
+    fun hasLiveProcess(): Boolean = proc?.isAlive() == true
+
+    /** Rename the session THROUGH the live agent (issue #158): the CLI appends its own `custom-title`
+     *  record and acks, so the daemon never appends to a transcript its child is writing. False = not
+     *  acked (no live process / backend without rename support / rejected / timeout) — the caller
+     *  reports it; it must NOT fall back to a disk append while this process lives. */
+    suspend fun renameSession(title: String): Boolean {
+        if (!hasLiveProcess()) return false
+        return backend.renameSession(title)
+    }
+
     /**
      * Stop ONE background job from the phone's task panel (issue #80). The daemon's only lever over the
      * agent's work is the interrupt control (same primitive as [cancelTurn] / the composer ■) — it can't
@@ -1506,7 +1531,7 @@ class Conversation(
         scope.cancel()
     }
 
-    private companion object {
+    companion object {
         val EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh", "max")
 
         // claude's session-lock refusal on stderr: "Error: Session <id> is currently running as a
@@ -1569,6 +1594,14 @@ class Conversation(
 
         // a process death this soon after a TurnResult is the SAME failure the turn's push already
         // reported (a fatal error result is often followed by the CLI exiting) — no second alert (#138)
-        const val DEATH_PUSH_QUIET_MS = 10_000L
+        private const val DEATH_PUSH_QUIET_MS = 10_000L
+
+        /** True when a conversation's agent must launch CLEAN-ROOM (no MCP, no settings sources — the
+         *  daemon is the sole permission authority). Exactly the restricted-credential conversations:
+         *  a GUEST share carries a [pathScope]; a BRIDGE carries an [origin]; the scheduler and every
+         *  interactive device carry neither. Pinned by ConversationCleanRoomTest — a regression here
+         *  silently re-opens the owner-settings bypass (a stranger inheriting "don't ask me again"). */
+        fun launchesCleanRoom(pathScope: List<String>?, origin: String?): Boolean =
+            pathScope != null || origin != null
     }
 }

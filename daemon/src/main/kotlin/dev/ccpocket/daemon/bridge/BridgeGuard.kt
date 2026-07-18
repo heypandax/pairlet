@@ -106,7 +106,7 @@ class BridgeGuard(val spec: BridgeSpec) {
         // clamp: mode capped (never bypass), take-over forbidden, workdir canonicalized. The daemon —
         // not the bridge — is the authority on these; the rewritten frame is what gets routed.
         return BridgeVerdict.Allow(
-            f.copy(workdir = wd, mode = BridgeCaps.clampMode(f.mode), takeOver = false),
+            f.copy(workdir = wd, mode = BridgeCaps.clampMode(f.mode, spec.tier), takeOver = false),
         )
     }
 

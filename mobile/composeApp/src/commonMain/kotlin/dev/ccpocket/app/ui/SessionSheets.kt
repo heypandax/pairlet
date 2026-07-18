@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -31,9 +34,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -92,6 +103,25 @@ fun modelLabelForAgent(agent: AgentKind?, model: String?): String {
         AgentKind.CLAUDE -> modelAlias(m)
         AgentKind.CODEX, AgentKind.OPENCODE -> m
     }
+}
+
+/** Middle-truncate a long model id for the composer chip ("deepseek-chat-v3.2" → "deepseek…v3.2"):
+ *  head + tail keep both the vendor and the variant readable while the chip's width holds steady
+ *  (issue #157, design model-chip.jsx). ≤ head+tail+1 chars pass through — swapping one character
+ *  for '…' would save nothing. */
+internal fun midTruncateModel(id: String, head: Int = 8, tail: Int = 4): String =
+    if (id.length <= head + tail + 1) id else id.take(head) + "…" + id.takeLast(tail)
+
+/** The composer chip's label (issue #157): Claude-family ids collapse to their short alias exactly
+ *  like the header meta line; anything else (gateway/custom/Codex ids) keeps the REAL id, middle-
+ *  truncated — [modelAlias] would misname "deepseek-chat" as "deepseek". Blank in = blank out
+ *  (callers fall back to the "account default" placeholder, same as the header). */
+internal fun modelChipLabel(model: String?): String {
+    val m = model?.trim().orEmpty()
+    if (m.isEmpty()) return ""
+    val claudeFamily = m.startsWith("claude-", ignoreCase = true) ||
+        CLAUDE_MODEL_OPTIONS.any { (_, alias) -> alias.equals(m, ignoreCase = true) }
+    return if (claudeFamily) modelAlias(m) else midTruncateModel(m)
 }
 
 /** Compact human token count: 45200 -> "45k", 1000000 -> "1.0M" (one decimal, truncated). */
@@ -184,7 +214,7 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: ()
                 QaSub.MAIN -> {
                     Text(stringResource(Res.string.quick_actions_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ActionRow(stringResource(Res.string.qa_model), value = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
+                        ActionRow(stringResource(Res.string.qa_model), value = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
                         ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
                         // the permission-mode switch lives here now (was a persistent header badge — one
                         // more thing crowding the top bar for a setting touched a few times per session)
@@ -214,6 +244,60 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: ()
                     onBack = { sub = QaSub.MAIN },
                 ) { repo.switchEffort(it); onDismiss() }
             }
+        }
+    }
+}
+
+/**
+ * The composer's quiet model chip (issue #157, design model-chip.jsx): hairline pill on the raised
+ * surface, mono 11sp label (middle-truncated id) capped at ~82dp, chevron-up that flips while its
+ * picker is open (the border warms to accent). Dimmed + disabled while a turn streams — a switch
+ * would only land on the NEXT turn anyway. Never accent-filled: send stays the loudest control.
+ * Shared by both shells (mobile composer + desktop ChatPane).
+ */
+@Composable
+internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDescription: String, onClick: () -> Unit) {
+    val chev by animateFloatAsState(if (open) 180f else 0f, label = "chipChevron")
+    val cd = contentDescription
+    Row(
+        Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
+            .border(1.dp, if (open) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.42f)
+            .padding(start = 10.dp, end = 8.dp)
+            .semantics { this.contentDescription = cd },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 82.dp),
+        )
+        Spacer(Modifier.width(5.dp))
+        ChevronUpGlyph(Tok.muted, Modifier.size(12.dp).rotate(chev))
+    }
+}
+
+/** 12dp chevron-up stroke (design: M3 9l4-4 4 4 in a 14-box) — drawn, not a text glyph, so the
+ *  open-state 180° flip stays optically centered. */
+@Composable
+private fun ChevronUpGlyph(tint: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        val p = Path().apply {
+            moveTo(size.width * 0.21f, size.height * 0.64f)
+            lineTo(size.width * 0.50f, size.height * 0.36f)
+            lineTo(size.width * 0.79f, size.height * 0.64f)
+        }
+        drawPath(p, tint, style = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** The chip's direct model sheet (issue #157): the SAME [ModelPicker] the quick-actions page hosts,
+ *  one level shallower — opens straight on the rows (no back affordance), closes on done/scrim. */
+@Composable
+fun ModelSheet(repo: PocketRepository, onDismiss: () -> Unit) {
+    PocketSheet(onDismiss) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
+            ModelPicker(repo, onBack = null, onDone = onDismiss)
         }
     }
 }
@@ -269,14 +353,15 @@ private fun CtxPill(ctx: String, big: Boolean) {
 }
 
 /**
- * Model picker (design cc-pocket/Model Picker.html) — reached from Quick actions → Model (NOT a new top-bar
- * button; the bar is already busy). Rich rows: display name + mono `--model` value + a 1M/200K context pill +
+ * Model picker (design cc-pocket/Model Picker.html) — reached from Quick actions → Model AND, one level
+ * shallower, straight from the composer's model chip via [ModelSheet] (issue #157; onBack = null there —
+ * direct open, direct close). Rich rows: display name + mono `--model` value + a 1M/200K context pill +
  * a check. Tapping starts a switch: the row shows a spinner while the daemon relaunches; the sheet closes once
  * the model is re-announced (or after a short timeout, so it never hangs). Claude uses the real opus/sonnet/haiku
  * aliases; Codex sessions list Codex model ids.
  */
 @Composable
-internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
+internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: () -> Unit) { // internal (was private) so desktopTest's ShowcaseRender can compose it — SessionsScreen/ChatScreen precedent
     val codex = repo.sessionAgent.value == AgentKind.CODEX
     val opencode = repo.sessionAgent.value == AgentKind.OPENCODE
     val agent = repo.sessionAgent.value ?: AgentKind.CLAUDE
@@ -313,7 +398,8 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
     LaunchedEffect(switchingTo) { if (switchingTo != null) { delay(4000); onDone() } }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
+        // chip-direct opens (ModelSheet) have no quick-actions page to go back to — the title stands alone
+        if (onBack != null) Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(enabled = switchingTo == null, onClick = onBack).padding(end = 4.dp))
         Text(stringResource(Res.string.qa_model), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
     }
     // Gateway model presets (issue #139): one-tap vendor ids for third-party gateway users. When the
@@ -431,7 +517,11 @@ internal fun ModelPicker(repo: PocketRepository, onBack: () -> Unit, onDone: () 
                 CircularProgressIndicator(Modifier.size(13.dp), color = Tok.accent, strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(stringResource(Res.string.model_switching), color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
-            } else Text(stringResource(Res.string.model_switch_hint), color = Tok.muted, fontSize = 12.5.sp)
+            } else Column {
+                // mid-turn (issue #157): the running turn keeps its model — say the pick lands NEXT turn
+                if (repo.streaming.value) Text(stringResource(Res.string.model_next_turn_note), color = Tok.tx2, fontSize = 12.5.sp, modifier = Modifier.padding(bottom = 6.dp))
+                Text(stringResource(Res.string.model_switch_hint), color = Tok.muted, fontSize = 12.5.sp)
+            }
         }
     }
 }

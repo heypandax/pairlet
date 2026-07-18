@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import dev.ccpocket.app.epochMillis
@@ -98,6 +99,7 @@ private enum class SettingsTab(val label: String, val icon: ImageVector) {
     COMPUTERS("Computers", Icons.Rounded.Devices),
     SCHEDULES("Schedules", Icons.Rounded.Schedule),
     SHARES("Shared", Icons.Rounded.Share),
+    BRIDGES("Bridges", Icons.Rounded.SmartToy),
     SHORTCUTS("Shortcuts", Icons.Rounded.Keyboard),
     ABOUT("About", Icons.Outlined.Info),
 }
@@ -130,6 +132,7 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
                     SettingsTab.COMPUTERS -> ComputersPane(model)
                     SettingsTab.SCHEDULES -> SchedulesPane(model)
                     SettingsTab.SHARES -> SharesPane(model)
+                    SettingsTab.BRIDGES -> BridgesPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
                     SettingsTab.ABOUT -> AboutPane(model)
                 }
@@ -182,11 +185,24 @@ private fun GeneralPane(model: DesktopModel) {
         Group("Default permission mode", "How much a new session may do before it asks.") {
             CLAUDE_MODES.forEach { m -> ModeRow(m, selected = m.mode == model.defaultMode) { model.defaultMode = m.mode } }
         }
-        // only terminals actually present on this machine are offered (issue #44)
-        Group("Terminal", "Which app the chat header's >_ button opens at the session's folder.") {
+        // how a terminal opens (issue #153: embedded dock is the default) + which external app (issue #44 —
+        // only terminals actually present on this machine are offered)
+        Group("Terminal", "How the chat header's >_ opens a terminal at the session's folder.") {
+            PrefRow("Embedded panel", "⌘J · docked in the session", selected = model.terminalDefaultEmbedded) {
+                model.terminalDefaultEmbedded = true
+            }
+            PrefRow("External window", "opens the app below", selected = !model.terminalDefaultEmbedded) {
+                model.terminalDefaultEmbedded = false
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("External app", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 7.dp))
             TerminalApp.entries.filter(TerminalLauncher::installed).forEach { t ->
                 TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
             }
+        }
+        // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default
+        Group("Menu bar", "A persistent status glyph — approvals and running sessions at a glance, without raising this window.") {
+            ToggleRow("Show cc-pocket in the menu bar", model.menuBarEnabled) { model.menuBarEnabled = !model.menuBarEnabled }
         }
         // daemon-side switch: silence phone alerts while working at the computer. Null = old daemon.
         LaunchedEffect(Unit) { model.refreshPushPrefs() }

@@ -18,6 +18,12 @@ by the daemon; a bridge cannot see or answer them. The daemon enforces all of th
 client's good behavior is not what makes it safe.
 
 Deps: `pip install websockets cryptography aiohttp` (see requirements.txt).
+
+NOT production-hardened (issue #91 design review). Two known gaps to port before relying on this:
+  * the reaped-session RESUME path is dead code — `_convos` is never evicted, so the `resumeId` branch
+    is unreachable and a reaped topic answers `session_gone` forever until restart.
+  * NO relay reconnect — `_reader` just ends on a dropped ws and the process stays alive but deaf.
+The daemon's built-in engine (daemon/.../feishu/FeishuEngine.kt) handles both; this is the wire demo.
 """
 from __future__ import annotations
 
@@ -126,6 +132,7 @@ class PocketBridge:
         self._by_key: dict[str, str] = {}         # caller key (e.g. chat/thread) -> convoId
         self._session_of: dict[str, str] = {}     # convoId -> sessionId (for resume)
         self._hooks: list = []                    # transient SessionLive watchers used by _open
+        self._open_locks: dict[str, asyncio.Lock] = {}   # workdir -> lock (see _open)
 
     def _http_base(self) -> str:
         return self.cred.relay.replace("wss://", "https://").replace("ws://", "http://")
@@ -259,28 +266,37 @@ class PocketBridge:
         existing = self._by_key.get(key)
         if existing and existing in self._convos:
             return existing
-        # resume our own prior session if we learned its id, else a fresh open
-        resume = None
-        if existing:
-            resume = self._session_of.get(existing)
-        # convoId is minted by the daemon and arrives on SessionLive; wait for it, correlating by workdir
-        pending = _Convo(convo_id="?")
-        live = asyncio.Event()
-        got = {"id": None}
+        # SessionLive is correlated by workdir alone, so two concurrent opens on the SAME workdir would
+        # both match the first one back and collide onto one convoId — two chats bound to one project
+        # (or two threads in one chat) would silently share a session. Serialize per workdir; the
+        # daemon mints one convo per open, so one waiter per workdir is enough to keep them distinct.
+        lock = self._open_locks.setdefault(workdir, asyncio.Lock())
+        async with lock:
+            existing = self._by_key.get(key)  # may have been opened while we waited for the lock
+            if existing and existing in self._convos:
+                return existing
+            # resume our own prior session if we learned its id, else a fresh open
+            resume = self._session_of.get(existing) if existing else None
+            live = asyncio.Event()
+            got = {"id": None}
 
-        def hook(body):
-            if body.get("t") == "pocket/session.live" and body.get("workdir") == workdir and got["id"] is None:
-                got["id"] = body["convoId"]
-                live.set()
+            def hook(body):
+                if body.get("t") == "pocket/session.live" and body.get("workdir") == workdir and got["id"] is None:
+                    got["id"] = body["convoId"]
+                    live.set()
 
-        self._hooks.append(hook)
-        await self._send({"t": "pocket/session.open", "workdir": workdir, **({"resumeId": resume} if resume else {})})
-        await asyncio.wait_for(live.wait(), 30.0)
-        self._hooks.remove(hook)
-        cid = got["id"]
-        self._convos[cid] = _Convo(convo_id=cid)
-        self._by_key[key] = cid
-        return cid
+            self._hooks.append(hook)
+            try:
+                await self._send({"t": "pocket/session.open", "workdir": workdir, **({"resumeId": resume} if resume else {})})
+                # a refused open (bridge_busy / bad workdir) never yields SessionLive — time out rather
+                # than wait forever, and drop the hook either way so it can't match a later open's reply.
+                await asyncio.wait_for(live.wait(), 30.0)
+            finally:
+                self._hooks.remove(hook)
+            cid = got["id"]
+            self._convos[cid] = _Convo(convo_id=cid)
+            self._by_key[key] = cid
+            return cid
 
 
 def _wire(kind: int, body: bytes) -> bytes:

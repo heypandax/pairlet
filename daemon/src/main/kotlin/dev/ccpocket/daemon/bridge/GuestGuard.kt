@@ -137,7 +137,16 @@ class GuestGuard(
     private fun ownedOr(convoId: String, frame: Frame): BridgeVerdict =
         if (owns(convoId)) BridgeVerdict.Allow(frame) else notOwn()
 
-    private fun underScope(workdir: String): Boolean = PathScope.contains(roots, workdir)
+    /** Tilde forms are refused OUTRIGHT, before containment: "~" is an OWNER-side convention (the #152
+     *  home-browse anchor). [PathScope.canonical] does NOT expand it — it resolves against the JVM cwd —
+     *  while the EXECUTION side expands it to the real home dir. So if the daemon were (against the
+     *  rules) started from inside a shared root, "<cwd>/~" would pass containment and a guest could walk
+     *  the owner's whole home tree. A guest's scope is always issued as an absolute root, so no
+     *  legitimate guest frame ever needs a tilde — the hard reject makes the gate unconditional. */
+    private fun underScope(workdir: String): Boolean {
+        if (workdir.startsWith("~")) return false
+        return PathScope.contains(roots, workdir)
+    }
     private fun owns(convoId: String) = convoId in ownedConvos
     private fun notOwn() = BridgeVerdict.Deny(BridgeDenyCode.NOT_OWN_SESSION)
     private fun badWorkdir() = BridgeVerdict.Deny(BridgeDenyCode.BAD_WORKDIR)

@@ -251,6 +251,14 @@
     <string name="new_path_title">在文件夹中新建会话</string>
     <string name="new_path_sub">输入电脑上某个文件夹的绝对路径，无需已有历史记录。（如需全新文件夹，可先用聊天里的终端创建。）</string>
     <string name="new_path_start">开始会话</string>
+    <string name="dir_picker_title">打开项目目录</string>
+    <string name="dir_picker_sub">浏览电脑的家目录，在任意已有目录里开新会话——无需已有历史记录。</string>
+    <string name="dir_picker_type_path">输入路径…</string>
+    <string name="dir_picker_recents">最近</string>
+    <string name="dir_picker_browse">浏览</string>
+    <string name="dir_picker_use_here">在此目录开会话</string>
+    <string name="dir_picker_empty">没有子目录</string>
+    <string name="dir_picker_error">读不了这个目录</string>
     <string name="ob_open">还没在电脑上安装 cc-pocket？</string>
     <string name="ob_title">连接你的电脑</string>
     <string name="ob_sub">在你要驱动的电脑上安装 cc-pocket daemon。</string>
@@ -269,6 +277,7 @@
     <string name="model_custom_label">自定义</string>
     <string name="model_custom_hint">输入传给 --model 的模型 id</string>
     <string name="model_switching">正在重启会话……历史保留。</string>
+    <string name="model_next_turn_note">切换将于下一轮生效。</string>
     <string name="model_not_installed">未安装</string>
     <string name="model_gateway_section">网关模型</string>
     <string name="model_gateway_via">经 %1$s</string>
@@ -498,6 +507,37 @@
     <string name="share_revoke_c3">此邀请无法再次使用。</string>
     <string name="share_revoke_confirm">撤销访问权限</string>
 
+    <!-- headless bridges (issue #91 follow-up): phone-side monitor + revoke + runner control -->
+    <string name="settings_bridges">机器人桥接</string>
+    <string name="bridges_title">机器人桥接</string>
+    <string name="bridges_empty">还没有机器人桥接</string>
+    <string name="bridges_empty_hint">在桌面端创建。桥接让飞书 / Slack 机器人驱动这台电脑——你在这里监控和撤销它们。</string>
+    <string name="bridges_stale">升级 daemon 后可管理桥接，然后重新打开。</string>
+    <string name="bridge_online">在线</string>
+    <string name="bridge_idle">空闲</string>
+    <string name="bridge_offline">离线</string>
+    <string name="bridge_waiting_adapter">等待适配器连接</string>
+    <string name="bridge_runner_start">启动</string>
+    <string name="bridge_runner_stop">停止</string>
+    <string name="bridge_runner_restart">重启</string>
+    <string name="bridge_runner_unmanaged">此桥接由你自行运行适配器。</string>
+    <string name="bridge_adapter_log">适配器日志</string>
+    <string name="bridge_exited_code">已退出（代码 %1$d）</string>
+    <string name="bridge_last_error">最近错误</string>
+    <string name="bridge_projects">项目</string>
+    <string name="bridge_revoke_title">撤销此桥接？</string>
+    <string name="bridge_revoke_c1">它进行中的会话会立即结束。</string>
+    <string name="bridge_revoke_c2">凭证会被删除；若有托管适配器，会一并停止。</string>
+    <string name="bridge_revoke_confirm">撤销桥接</string>
+    <string name="bridge_edit">编辑</string>
+    <string name="bridge_edit_title">编辑适配器配置</string>
+    <string name="bridge_edit_hint">留空的字段保持不变。当前已设置：%1$s</string>
+    <string name="bridge_edit_admin_ph">FEISHU_ADMIN_OPEN_ID（ou_ 开头）</string>
+    <string name="bridge_edit_appid_ph">FEISHU_APP_ID（cli_ 开头，留空不变）</string>
+    <string name="bridge_edit_secret_ph">FEISHU_APP_SECRET（留空不变）</string>
+    <string name="bridge_edit_save">保存并重启</string>
+    <string name="bridge_merge_lost">daemon 版本过旧，不支持增量编辑——这些值被清空而不是保留：%1$s。请升级 daemon 后重新编辑并补填。</string>
+
     <!-- guest: accept preview -->
     <string name="join_title">加入文件夹</string>
     <string name="join_get_title">你将可以</string>
@@ -555,6 +595,8 @@
     <string name="group_delete">删除分组</string>
     <string name="group_delete_confirm">删除该分组？组内会话将回落到未分组。</string>
     <string name="group_name_hint">分组名称</string>
+    <string name="session_rename">重命名会话</string>
+    <string name="session_rename_hint">会话标题</string>
 
     <!-- scheduled tasks (issue #137) -->
     <string name="schedule_tasks_title">定时任务</string>

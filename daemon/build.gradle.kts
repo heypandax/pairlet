@@ -14,7 +14,7 @@ application {
 // The release version: -PappVersion in CI, fallback for local builds. Baked into the
 // cc-pocket-version.properties resource so the daemon knows its own version at runtime —
 // the self-update check compares it against GitHub releases/latest.
-val appVersion = (findProperty("appVersion") as String?) ?: "1.3.6"
+val appVersion = (findProperty("appVersion") as String?) ?: "1.4.0"
 
 tasks.processResources {
     inputs.property("appVersion", appVersion)
@@ -29,6 +29,7 @@ dependencies {
     implementation(libs.cryptography.core)          // E2ECrypto / E2ESession (protocol's e2e API)
     runtimeOnly(libs.cryptography.provider.jdk)      // registers the JDK crypto provider at runtime
     implementation(libs.nayuki.qrcodegen)            // terminal QR for `pair`
+    implementation(libs.lark.oapi.sdk)               // built-in Feishu bridge: event long-connection + reply API
 
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)

@@ -112,24 +112,33 @@ object ToolMetadata {
     fun pathTargets(tool: String, input: JsonObject?): List<String> {
         fun str(k: String) = (input?.get(k) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         val keyed = PATH_KEYS.mapNotNull { str(it) }
-        val patternRoot = if (tool == "Glob") str("pattern")?.let(::absoluteGlobRoot) else null
+        val patternRoot = if (tool == "Glob") str("pattern")?.let(::globRoot) else null
         return keyed + listOfNotNull(patternRoot)
     }
 
     /**
-     * The literal root directory an ABSOLUTE glob pattern reaches into, or null for a relative pattern (which
-     * resolves under the in-scope session cwd and so needs no separate target). "Literal" = the prefix before
-     * the first glob metacharacter (one of star, question-mark, open-bracket, open-brace), backed off to its
-     * containing directory so a real on-disk path survives to be canonicalized by [PathScope.contains]. So an
-     * etc-rooted wildcard yields the etc directory; a wildcard at the filesystem root yields the root itself;
-     * a bare absolute file path yields its parent directory. A ".." in the prefix is left for the caller's
-     * canonicalization to collapse. Windows drive-absolute patterns pass through unchanged (File.isAbsolute).
+     * The literal root directory a glob pattern reaches into, or null when the pattern stays trivially in
+     * the session cwd. "Literal" = the prefix before the first glob metacharacter (star, question-mark,
+     * open-bracket, open-brace), backed off to its containing directory so a real on-disk path survives to
+     * be canonicalized by [PathScope.contains].
+     *
+     * BOTH absolute and relative patterns are handled (review N6): a RELATIVE pattern whose prefix contains
+     * a parent-dir hop (dot-dot then a wildcard segment) walks OUT of the cwd, so its literal dir must be
+     * returned for the caller to resolve against the workdir and canonicalize — returning null here (the old
+     * behaviour) let it escape the scope guard. A bare relative pattern with no directory prefix resolves
+     * in-cwd and needs no target. Absolute yields its literal dir (a root wildcard yields the root).
      */
-    private fun absoluteGlobRoot(pattern: String): String? {
-        if (!File(pattern).isAbsolute) return null // relative pattern is cwd-relative, hence in scope
+    private fun globRoot(pattern: String): String? {
         val meta = pattern.indexOfFirst { it in "*?[{" }
         val literal = if (meta < 0) pattern else pattern.substring(0, meta)
         val dir = literal.substringBeforeLast(File.separatorChar, "")
-        return dir.ifEmpty { File.separator } // a wildcard directly at the filesystem root
+        return when {
+            File(pattern).isAbsolute -> dir.ifEmpty { File.separator } // wildcard at the filesystem root
+            // ANY `..` segment can walk out, even one PAST a leading wildcard (`*/../../etc`) that the
+            // literal-prefix extract misses — yield the workdir parent so containment denies it (review r3).
+            pattern.split('/').any { it == ".." } -> ".."
+            dir.isEmpty() -> null                                       // bare in-cwd pattern like *.kt
+            else -> dir                                                 // relative dir prefix, no ..
+        }
     }
 }

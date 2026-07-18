@@ -13,7 +13,7 @@ plugins {
 // Single source of truth for the app version: the Android versionName AND the in-app "About" version both
 // derive from this (the latter via the generated constant below, so it can never drift — which is how it
 // got stuck at 0.1.0). Keep in lockstep with the iOS CFBundleShortVersionString in iosApp/iosApp/Info.plist.
-val appVersionName = "1.3.6"
+val appVersionName = "1.4.0"
 
 // Emit a commonMain constant from [appVersionName] so the displayed version always matches the build.
 val generateAppVersion by tasks.registering {
@@ -76,6 +76,10 @@ kotlin {
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.cryptography.provider.jdk)
             implementation(libs.jna) // objc bridge: bundle-identity macOS notifications (issue #99); inert off-mac
+            // embedded terminal (issue #153): JediTerm Swing widget + local PTY — desktop target ONLY
+            implementation(libs.jediterm.core)
+            implementation(libs.jediterm.ui)
+            implementation(libs.pty4j)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
@@ -105,7 +109,7 @@ android {
         applicationId = "com.panda.ccpocket" // matches the iOS bundle id + the Firebase google-services.json client
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidTargetSdk.get().toInt()
-        versionCode = 13
+        versionCode = 14
         versionName = appVersionName // single source of truth (see top); lockstep with iOS CFBundleShortVersionString
     }
     // release signing comes from ~/.gradle/gradle.properties (CCPOCKET_KEYSTORE*) — keys never
@@ -149,7 +153,7 @@ compose.desktop {
             // the release scripts rename the jpackage output, but local paths ARE affected: the bundle is now
             // "CC Pocket.app" / app/CC Pocket (see scripts/update-local-desktop.sh and build-windows.yml).
             packageName = "CC Pocket"
-            packageVersion = "1.3.6"
+            packageVersion = "1.4.0"
             windows {
                 iconFile.set(project.file("desktop-icons/cc-pocket.ico"))
             }

@@ -136,17 +136,6 @@ object GuestCaps {
      * unreachable for ANY tier — a scoped guest can never put the daemon into "approve nothing", so even
      * an "Autonomous" share still surfaces shell / dangerous actions for the guest to approve.
      */
-    fun clampMode(requested: PermissionMode, tier: AccessTier): PermissionMode {
-        val ceiling = AccessTier.ceiling(tier) // DEFAULT for Review, ACCEPT_EDITS for Collaborate/Autonomous
-        return if (autonomy(requested) > autonomy(ceiling)) ceiling else requested
-    }
-
-    /** The autonomy rank used only for the tier clamp — higher = the agent acts with less human gating.
-     *  PLAN (research/plan only) is the most cautious; BYPASS the least (and unreachable for a guest). */
-    private fun autonomy(mode: PermissionMode): Int = when (mode) {
-        PermissionMode.PLAN -> 0
-        PermissionMode.DEFAULT -> 1
-        PermissionMode.ACCEPT_EDITS -> 2
-        PermissionMode.BYPASS_PERMISSIONS -> 3
-    }
+    fun clampMode(requested: PermissionMode, tier: AccessTier): PermissionMode =
+        TierClamp.clampMode(requested, tier) // shared with the BRIDGE ceiling — one clamp, no drift
 }

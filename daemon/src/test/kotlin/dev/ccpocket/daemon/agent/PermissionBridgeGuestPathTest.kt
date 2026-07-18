@@ -63,9 +63,79 @@ class PermissionBridgeGuestPathTest {
             assertTrue(emitted.isEmpty(), "$tool must not surface an ask for an out-of-scope target")
             val r = responses.single()
             assertFalse(r.allow, "$tool out of scope must be denied")
-            assertTrue(r.deny!!.contains("outside the shared folder"))
+            assertTrue(r.deny!!.contains("outside the allowed directory"))
             scope.cancel()
         }
+    }
+
+    @Test
+    fun a_bridge_read_outside_the_workdir_is_denied_even_without_a_pathScope() = runBlocking {
+        // issue #91 (security review H1): a bridge has NO pathScope, but its structured file tools must
+        // still not escape the bound workdir — else a Read of ~/.ssh/id_rsa exfiltrates it to the chat.
+        for ((tool, key) in listOf("Read" to "file_path", "Write" to "file_path", "Grep" to "path")) {
+            val scope = CoroutineScope(Dispatchers.Unconfined)
+            val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+            val b = PermissionBridge(
+                "c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+                respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
+                pathScope = null,          // a bridge has none
+                workdir = root.path,
+                bridgeSession = true,      // but the workdir becomes the implicit scope
+            )
+            b.onControlRequest(req(tool, key, System.getProperty("user.home") + "/.ssh/id_rsa"))
+            assertTrue(emitted.isEmpty(), "$tool must not even ASK for an out-of-workdir read")
+            assertFalse(responses.single().allow, "$tool outside a bridge's workdir must be denied")
+            scope.cancel()
+        }
+        // and a read INSIDE the workdir still flows to a normal ask (not auto-denied)
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = PermissionBridge(
+            "c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
+            pathScope = null, workdir = root.path, bridgeSession = true,
+        )
+        b.onControlRequest(req("Read", "file_path", File(root, "src/x.kt").path))
+        assertTrue(emitted.single() is PermissionAsk)
+        assertTrue(responses.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
+    fun a_glob_with_a_relative_dotdot_pattern_is_denied_not_just_absolute() = runBlocking {
+        // review N6: a relative Glob pattern with `..` walks out of the workdir but has no `path` key —
+        // the old absoluteGlobRoot returned null for it, escaping the scope guard.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
+        val b = PermissionBridge(
+            "c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
+            pathScope = null, workdir = root.path, bridgeSession = true,
+        )
+        for (pattern in listOf("../../../../etc/ssh/*_key", "*/../../../etc/ssh/*")) { // .. leading AND past a wildcard
+            val s = CoroutineScope(Dispatchers.Unconfined)
+            val em = mutableListOf<Frame>(); val rs = mutableListOf<Resp>()
+            val bb = PermissionBridge(
+                "c1", PermissionMode.DEFAULT, s, { em += it }, mutableSetOf(),
+                respond = { id, allow, _, _, _, deny -> rs += Resp(id, allow, deny) },
+                pathScope = null, workdir = root.path, bridgeSession = true,
+            )
+            bb.onControlRequest(req("Glob", "pattern", pattern))
+            assertTrue(em.isEmpty(), "a ../-escaping glob must not surface an ask: $pattern")
+            assertFalse(rs.single().allow, "a ../-escaping glob must be denied: $pattern")
+            s.cancel()
+        }
+        // an in-workdir glob is untouched
+        val s2 = CoroutineScope(Dispatchers.Unconfined)
+        val em2 = mutableListOf<Frame>(); val rs2 = mutableListOf<Resp>()
+        val b2 = PermissionBridge(
+            "c1", PermissionMode.DEFAULT, s2, { em2 += it }, mutableSetOf(),
+            respond = { id, allow, _, _, _, deny -> rs2 += Resp(id, allow, deny) },
+            pathScope = null, workdir = root.path, bridgeSession = true,
+        )
+        b2.onControlRequest(req("Glob", "pattern", "src/**/*.kt"))
+        assertTrue(em2.single() is PermissionAsk, "an in-workdir glob flows to a normal ask")
+        s2.cancel()
     }
 
     @Test
@@ -137,7 +207,7 @@ class PermissionBridgeGuestPathTest {
             assertTrue(emitted.isEmpty(), "$tool must not surface an ask for an out-of-scope target")
             val r = responses.single()
             assertFalse(r.allow, "$tool out of scope must be denied")
-            assertTrue(r.deny!!.contains("outside the shared folder"))
+            assertTrue(r.deny!!.contains("outside the allowed directory"))
             scope.cancel()
         }
     }
@@ -153,7 +223,7 @@ class PermissionBridgeGuestPathTest {
         b.onControlRequest(req("ReadMany", "file_path", "/etc/shadow"))
         assertTrue(emitted.isEmpty(), "an unlisted file tool must not surface an ask for an out-of-scope target")
         assertFalse(responses.single().allow)
-        assertTrue(responses.single().deny!!.contains("outside the shared folder"))
+        assertTrue(responses.single().deny!!.contains("outside the allowed directory"))
         scope.cancel()
     }
 
@@ -170,7 +240,7 @@ class PermissionBridgeGuestPathTest {
         b.onControlRequest(req("Read", "file_path", File(link, "hosts").path)) // root/out/hosts → /etc/hosts
         assertTrue(emitted.isEmpty())
         assertFalse(responses.single().allow)
-        assertTrue(responses.single().deny!!.contains("outside the shared folder"))
+        assertTrue(responses.single().deny!!.contains("outside the allowed directory"))
         scope.cancel()
     }
 
@@ -201,7 +271,7 @@ class PermissionBridgeGuestPathTest {
             assertTrue(emitted.isEmpty(), "Glob pattern '$pattern' must not surface an ask (out of scope)")
             val r = responses.single()
             assertFalse(r.allow, "Glob '$pattern' out of scope must be denied")
-            assertTrue(r.deny!!.contains("outside the shared folder"))
+            assertTrue(r.deny!!.contains("outside the allowed directory"))
             scope.cancel()
         }
     }

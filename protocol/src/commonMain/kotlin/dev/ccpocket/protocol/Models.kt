@@ -599,3 +599,97 @@ data class ShareInfo(
     val revoked: Boolean = false,       // history rows (issue #115 "Share Endings" — Revoked/Expired)
     val expired: Boolean = false,
 )
+
+/**
+ * The single-use blob an adapter redeems to become a bridge ([dev.ccpocket.protocol.BridgeCreated]) —
+ * the wire twin of what `pair --headless` prints. Same shape the adapter already reads from disk, so the
+ * owner's app can hand it over by writing this verbatim.
+ *
+ * [ticket] is a SECRET with a short [ttlSec]: it is E2E-sealed in transit and must land at 0600.
+ */
+@Serializable
+data class BridgeCredential(
+    val name: String,
+    val accountId: String,
+    val daemonPub: String,     // owner daemon's static pub (base64url) — the adapter's E2E handshake identity
+    val ticket: String,        // single-use, short-lived; spent on the adapter's first connect
+    val relay: String,
+    val workdirs: List<String>,
+    val ttlSec: Int,
+)
+
+/**
+ * One bridge on the owner's management page ([dev.ccpocket.protocol.BridgeListing]).
+ *
+ * A bridge exists in two stages: MINTED (a ticket was issued, nobody redeemed it yet — [deviceId] null,
+ * [pendingTicket] true) and LIVE (redeemed; [deviceId] is the revoke handle). A minted-but-unredeemed row
+ * disappears on its own when the ticket lapses, which is why the page must not present it as a failure.
+ */
+@Serializable
+data class BridgeInfo(
+    val name: String,
+    val workdirs: List<String> = emptyList(),
+    val deviceId: String? = null,       // null = minted, not yet redeemed
+    val pendingTicket: Boolean = false, // a ticket is outstanding and still unexpired
+    val online: Boolean = false,        // the adapter's link is up right now
+    val activeSessions: Int = 0,
+    val maxSessions: Int = 0,
+    val createdAt: Long = 0,
+    val lastActiveAt: Long? = null,     // newest activity via this bridge; null = never used
+    val runner: BridgeRunnerState? = null, // null = no managed process (the owner runs the adapter themselves)
+    /** The granted permission-mode ceiling — what this bridge can do WITHOUT asking the owner.
+     *  REVIEW = nothing dangerous is silent. Shown on the row because it is the security-relevant fact. */
+    val tier: AccessTier = AccessTier.REVIEW,
+)
+
+/**
+ * How to run a bridge's adapter, when the daemon manages it ([dev.ccpocket.protocol.CreateBridge.runner]).
+ *
+ * [scriptPath] EMPTY (the default posture for kind "feishu") = the daemon's BUILT-IN adapter: an
+ * in-process client, no python, no checkout, nothing for the owner to install. Non-empty = a custom
+ * external adapter script the daemon runs and supervises — the escape hatch for other IMs, forks, or
+ * adapters living outside this machine's daemon distribution. A daemon that predates the built-in engine
+ * treats empty as "script not found" and says so — error, not silence.
+ *
+ * [env] carries the adapter's IM credentials (FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_ADMIN_OPEN_ID).
+ * It is a SECRET: E2E-sealed in transit, stored 0600, and never echoed back — [BridgeRunnerState] returns
+ * only [BridgeRunnerState.envKeys]. The daemon injects the bridge's own cc-pocket credential separately;
+ * it is never part of this map.
+ */
+@Serializable
+data class BridgeRunnerSpec(
+    val scriptPath: String,
+    val env: Map<String, String> = emptyMap(),
+    val kind: String = RUNNER_KIND_FEISHU,
+    /** interpreter for [scriptPath]; null = the daemon resolves python3 off its own PATH. */
+    val interpreter: String? = null,
+    val autostart: Boolean = true,
+)
+
+/**
+ * The state of a daemon-managed adapter process ([dev.ccpocket.protocol.ConfigureBridgeRunner]).
+ *
+ * The configured env never comes back out — there is no map here to put it in, only [envKeys], so the
+ * page can show WHICH vars are set without revealing them. [lastError] + [logTail] are how a
+ * misconfigured adapter explains itself without the owner opening a terminal, which is much of the point
+ * of managing the process at all.
+ *
+ * Note what that does NOT promise: [logTail] is the adapter's own stdout/stderr verbatim, so an adapter
+ * that prints its own config, or dies with a traceback rendering os.environ, puts its secret in here. The
+ * containment is that this frame is OWNER-only (both restricted credential kinds deny it), so it reaches
+ * exactly the person who supplied the secret — not that the bytes are known-clean.
+ */
+@Serializable
+data class BridgeRunnerState(
+    val kind: String,
+    val scriptPath: String,
+    val interpreter: String? = null,
+    val autostart: Boolean = true,
+    val running: Boolean = false,
+    val pid: Int? = null,
+    val startedAt: Long? = null,
+    val exitCode: Int? = null,        // last exit, when it stopped on its own
+    val lastError: String? = null,
+    val envKeys: List<String> = emptyList(),  // names only — never values
+    val logTail: List<String> = emptyList(),
+)

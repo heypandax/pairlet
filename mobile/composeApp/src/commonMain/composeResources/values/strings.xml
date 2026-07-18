@@ -251,6 +251,14 @@
     <string name="new_path_title">New session in a folder</string>
     <string name="new_path_sub">Type the absolute path to a folder on your computer — it doesn\'t need any prior history. (To create a brand-new folder, make it first from the in-chat terminal.)</string>
     <string name="new_path_start">Start session</string>
+    <string name="dir_picker_title">Open a project folder</string>
+    <string name="dir_picker_sub">Browse your computer\'s home folder and start a session in any directory — no prior history needed.</string>
+    <string name="dir_picker_type_path">Type a path…</string>
+    <string name="dir_picker_recents">RECENTS</string>
+    <string name="dir_picker_browse">BROWSE</string>
+    <string name="dir_picker_use_here">Start session here</string>
+    <string name="dir_picker_empty">No subfolders</string>
+    <string name="dir_picker_error">Can\'t read this folder</string>
     <string name="ob_open">Need to install cc-pocket on your computer?</string>
     <string name="ob_title">Connect your computer</string>
     <string name="ob_sub">Install the cc-pocket daemon on the computer you want to drive.</string>
@@ -269,6 +277,7 @@
     <string name="model_custom_label">Custom</string>
     <string name="model_custom_hint">model id passed to --model</string>
     <string name="model_switching">Restarting session… history is kept.</string>
+    <string name="model_next_turn_note">Switch applies to the next turn.</string>
     <string name="model_not_installed">not installed</string>
     <string name="model_gateway_section">Gateway models</string>
     <string name="model_gateway_via">via %1$s</string>
@@ -498,6 +507,37 @@
     <string name="share_revoke_c3">This invite can\'t be reused.</string>
     <string name="share_revoke_confirm">Revoke access</string>
 
+    <!-- headless bridges (issue #91 follow-up): phone-side monitor + revoke + runner control -->
+    <string name="settings_bridges">Bridges</string>
+    <string name="bridges_title">Bridges</string>
+    <string name="bridges_empty">No bridges yet</string>
+    <string name="bridges_empty_hint">Create one from the desktop app. Bridges let a Feishu / Slack bot drive this machine — you monitor and revoke them here.</string>
+    <string name="bridges_stale">Update the daemon to manage bridges, then reopen.</string>
+    <string name="bridge_online">Online</string>
+    <string name="bridge_idle">Idle</string>
+    <string name="bridge_offline">Offline</string>
+    <string name="bridge_waiting_adapter">waiting for the adapter to connect</string>
+    <string name="bridge_runner_start">Start</string>
+    <string name="bridge_runner_stop">Stop</string>
+    <string name="bridge_runner_restart">Restart</string>
+    <string name="bridge_runner_unmanaged">You run this adapter yourself.</string>
+    <string name="bridge_adapter_log">Adapter log</string>
+    <string name="bridge_exited_code">Exited (code %1$d)</string>
+    <string name="bridge_last_error">Last error</string>
+    <string name="bridge_projects">Projects</string>
+    <string name="bridge_revoke_title">Revoke this bridge?</string>
+    <string name="bridge_revoke_c1">Its live sessions end immediately.</string>
+    <string name="bridge_revoke_c2">The credential is deleted; a managed adapter is stopped too.</string>
+    <string name="bridge_revoke_confirm">Revoke bridge</string>
+    <string name="bridge_edit">Edit</string>
+    <string name="bridge_edit_title">Edit adapter config</string>
+    <string name="bridge_edit_hint">Blank fields keep their current values. Set now: %1$s</string>
+    <string name="bridge_edit_admin_ph">FEISHU_ADMIN_OPEN_ID (ou_…)</string>
+    <string name="bridge_edit_appid_ph">FEISHU_APP_ID (cli_…, blank = unchanged)</string>
+    <string name="bridge_edit_secret_ph">FEISHU_APP_SECRET (blank = unchanged)</string>
+    <string name="bridge_edit_save">Save &amp; restart</string>
+    <string name="bridge_merge_lost">The daemon is too old for partial edits — it CLEARED these values instead of keeping them: %1$s. Update the daemon, then edit again and re-enter them.</string>
+
     <!-- guest: accept preview -->
     <string name="join_title">Join folder</string>
     <string name="join_get_title">You\'ll be able to</string>
@@ -555,6 +595,8 @@
     <string name="group_delete">Delete group</string>
     <string name="group_delete_confirm">Delete this group? Its sessions move to Ungrouped.</string>
     <string name="group_name_hint">Group name</string>
+    <string name="session_rename">Rename session</string>
+    <string name="session_rename_hint">Session title</string>
 
     <!-- scheduled tasks (issue #137) -->
     <string name="schedule_tasks_title">Scheduled tasks</string>

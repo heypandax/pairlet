@@ -14,7 +14,13 @@ import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CloseSession
+import dev.ccpocket.protocol.ConfigureBridgeRunner
+import dev.ccpocket.protocol.ControlBridgeRunner
+import dev.ccpocket.protocol.CreateBridge
 import dev.ccpocket.protocol.CreateShare
+import dev.ccpocket.protocol.DetachBridgeRunner
+import dev.ccpocket.protocol.ListBridges
+import dev.ccpocket.protocol.RevokeBridge
 import dev.ccpocket.protocol.DaemonInfo
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.Frame
@@ -38,8 +44,8 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Manages the end-to-end-encrypted [E2ESession]s per paired device (one active + one reconnect-overlap
- * fallback — see [DeviceLink], issue #146) and bridges decrypted frames into the shared [DaemonCore]
- * router. The daemon is the Noise responder; the device initiates. Paired device public keys are
+ * fallback, plus a pre-first-contact empty-PSK twin — see [DeviceLink], issues #146/#161) and bridges
+ * decrypted frames into the shared [DaemonCore] router. The daemon is the Noise responder; the device initiates. Paired device public keys are
  * persisted so reconnects survive a daemon restart; the pairing-ticket PSK is kept in memory only for
  * the brief first handshake. Sessions survive the daemon's OWN relay reconnects (issue #145) — they are
  * bound to the device handshake, not to the relay leg.
@@ -60,10 +66,14 @@ class DeviceSessions(
 ) {
     private val log = logger("DeviceSessions")
 
-    /** The OWNER folder-share control plane (issue #115), installed by [RelayClient] after construction
-     *  (it needs the relay's mint/revoke). Null on the local-server path — share creation needs the relay. */
-    @Volatile
-    var shareControl: dev.ccpocket.daemon.relay.ShareControl? = null
+    /** The OWNER control planes (share #115 / bridge #91 follow-up) live on [DaemonCore] — the LAN
+     *  transport serves them too, so they can't be relay-local state. These are convenience views. */
+    var shareControl: dev.ccpocket.daemon.relay.ShareControl?
+        get() = core.shareControl
+        set(v) { core.shareControl = v }
+    var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl?
+        get() = core.bridgeControl
+        set(v) { core.bridgeControl = v }
     private val mutex = Mutex()
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
     private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
@@ -161,9 +171,9 @@ class DeviceSessions(
     }
 
     /** The relay says this device was just revoked: cut key + live E2E session immediately. The persist
-     *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For a
-     *  GUEST (issue #115) this ALSO ends its running sessions now — the owner's "revoke" promise is "their
-     *  sessions end", not merely "their link drops".
+     *  bumps [PairedDevices.epoch], which also severs any LIVE direct-LAN socket on its next frame. For any
+     *  RESTRICTED credential (a GUEST #115 or a BRIDGE #91) this ALSO ends its running sessions now — the
+     *  owner's "revoke" promise is "their sessions end", not merely "their link drops".
      *
      *  Returns true when a guest-facing [ShareEnded] notice was actually sealed toward the guest (the
      *  #115 follow-up: the precise "revoked"/"expired" ending for its terminal card). The notice rides
@@ -172,6 +182,9 @@ class DeviceSessions(
      *  unchanged and unconditional right after. */
     suspend fun onDeviceRevoked(deviceId: String, reason: String = ShareEnded.REASON_REVOKED): Boolean {
         val wasGuest = bridges.isGuest(deviceId)
+        // guest OR bridge — a revoke must end the sessions of EITHER, not just a guest's (issue #91: a
+        // bridge's live Claude turn otherwise keeps editing files until the idle reaper claims it)
+        val wasRestricted = bridges.isRestricted(deviceId)
         var noticed = false
         if (wasGuest) {
             // sealAndSend silently no-ops without a live session — only report a notice that could seal
@@ -179,29 +192,32 @@ class DeviceSessions(
             // ownerLabel = the computer name the guest already learned from its invite (leaks nothing new)
             runCatching { sealAndSend(deviceId, ShareEnded(reason, hostname())) }
         }
-        val guestOrigin = if (wasGuest) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
-        val guestConvos = mutex.withLock {
+        val revokedOrigin = if (wasRestricted) bridges.specOf(deviceId)?.name else null // read BEFORE bridges.remove
+        val revokedConvos = mutex.withLock {
             devicePubs.remove(deviceId); sessions.remove(deviceId); pskFor.remove(deviceId)
             seenThisAttach.remove(deviceId)
-            if (wasGuest) owned.remove(deviceId).orEmpty() else emptyList()
+            if (wasRestricted) owned.remove(deviceId).orEmpty() else emptyList()
         }
         bridges.remove(deviceId) // a revoked credential loses its entry (and live guard) the same instant
         persist()
-        // force-close the guest's convos NOW (kills their process trees) — the owner's revoke promise is
-        // "their sessions end", not "their link drops". The per-connection `owned` list covers this
-        // connection; closeByOrigin ALSO reaps convos the guest opened on an EARLIER connection (which
-        // `owned` cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
-        if (wasGuest) {
-            guestConvos.forEach { runCatching { core.registry.close(it, force = true) } }
-            guestOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
+        // force-close the revoked credential's convos NOW (kills their process trees) — the owner's revoke
+        // promise is "their sessions end", not "their link drops". Covers guests (#115) AND bridges (#91):
+        // a bridge's running Claude turn must not outlive the revoke. The per-connection `owned` list covers
+        // this connection; closeByOrigin ALSO reaps convos opened on an EARLIER connection (which `owned`
+        // cleared on disconnect) so nothing keeps running past the revoke (issue #115 crypto review L1).
+        if (wasRestricted) {
+            revokedConvos.forEach { runCatching { core.registry.close(it, force = true) } }
+            revokedOrigin?.let { runCatching { core.registry.closeByOrigin(it) } }
         }
-        log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasGuest) " (guest sessions ended)" else ""}")
+        log.info("device revoked: ${deviceId.take(8)}… — pruned from allow-list${if (wasRestricted) " (${if (wasGuest) "guest " else ""}sessions ended)" else ""}")
         return noticed
     }
 
-    /** True while this device's FIRST post-pairing handshake (the ticket-PSK-bound one) hasn't completed
-     *  over the relay. The LAN gate refuses such devices, so first contact stays bound to the pairing
-     *  ceremony — the one guarantee the LAN path's deliberate empty-PSK handshake cannot provide. */
+    /** True while this device's FIRST post-pairing contact hasn't completed over the relay. The LAN gate
+     *  refuses such devices, so first contact stays bound to the pairing ceremony — the one guarantee the
+     *  LAN path's deliberate empty-PSK handshake cannot provide. Completion normally proves the ticket
+     *  PSK; a device that provably burned its ticket on an interrupted first attempt completes via the
+     *  empty-PSK twin instead (#161) — still over the relay, still static-key-authenticated. */
     suspend fun firstContactPending(deviceId: String): Boolean = mutex.withLock { pskFor.containsKey(deviceId) }
 
     /** A device's inner E2E payload arrived (handshake or transport). */
@@ -231,10 +247,24 @@ class DeviceSessions(
         val devicePub = mutex.withLock { devicePubs[deviceId] } ?: bridges.pubOf(deviceId)
         if (devicePub == null) { log.warn("handshake from unknown device ${deviceId.take(8)}…"); return }
         val psk = mutex.withLock { pskFor[deviceId] ?: ByteArray(0) }
-        val (session, responderEph) = E2ESession.responder(identity.e2ePrivRaw, identity.e2ePubRaw, devicePub, psk, deviceEphPub)
+        // First-contact PSK deadlock (#161): the device consumes its pairing ticket on its first connect
+        // ATTEMPT, we only release ours on its first successful DECRYPT — any interruption in between
+        // (supersede kick, fleet cross-kick, network blink) leaves the two ends keyed apart on every
+        // retry: "psk 43B" handshakes plus decrypt failures forever, until a daemon restart. For a
+        // device already in the FULL-POWER allow-list, additionally derive an EMPTY-PSK twin off the
+        // same responder ephemeral; whichever session its first inbound frame decrypts under wins
+        // ([transport]). Static-key auth gates both, so the twin only ever trades away the ticket-PSK
+        // proof — which the relay's redeem step already verified, and which a daemon restart (in-memory
+        // pskFor) never carried anyway. Provisional bridge/guest candidates get NO twin: the exact
+        // ticket-PSK decrypt IS their classification proof ([BridgeRegistry.finalize]); they keep
+        // failing closed.
+        val twinned = psk.isNotEmpty() && mutex.withLock { devicePubs.containsKey(deviceId) }
+        val candidates = if (twinned) listOf(psk, ByteArray(0)) else listOf(psk)
+        val (derived, responderEph) = E2ESession.responder(identity.e2ePrivRaw, identity.e2ePubRaw, devicePub, candidates, deviceEphPub)
+        val session = derived.first()
         mutex.withLock {
             val link = sessions[deviceId]
-            if (link == null) sessions[deviceId] = DeviceLink(session)
+            if (link == null) sessions[deviceId] = DeviceLink(session, pskShadow = derived.getOrNull(1))
             else {
                 // Keep the PREVIOUS session as the overlap fallback instead of overwriting it (#146): the
                 // relay's supersede kick races the dying socket's last frames, so that socket's LATE
@@ -245,16 +275,17 @@ class DeviceSessions(
                 // decrypt promotes that session back (see [transport]).
                 link.fallback = link.active
                 link.active = session
+                link.pskShadow = derived.getOrNull(1) // the twin always tracks the NEWEST handshake
             }
         }
-        log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B) → session established")
+        log.info("handshake from ${deviceId.take(8)}… (psk ${psk.size}B${if (twinned) " + empty-PSK twin" else ""}) → session established")
         send(deviceId, Wire.payload(Wire.HANDSHAKE, responderEph))
         // teach the device where this daemon lives on the LAN so its next connect can skip the relay;
         // null actively clears a stale stored address (listener since disabled / no usable interface).
         // A bridge (issue #91) never gets this: it can't use the direct-LAN path (its key isn't in
         // devices.json, so the LAN gate refuses it) and shouldn't learn the host's LAN address. The
         // sealAndSend egress filter would drop it anyway; skipping avoids a pointless sealed frame.
-        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl()))
+        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {
@@ -271,13 +302,36 @@ class DeviceSessions(
             plaintext = fb?.open(body)
             if (plaintext != null && fb != null) mutex.withLock { link.fallback = link.active; link.active = fb }
         }
+        var viaTwin = false
+        if (plaintext == null) {
+            // #161: the empty-PSK twin decrypting means the device did the newest handshake WITHOUT the
+            // armed ticket-PSK — it burned the ticket on an earlier, interrupted first attempt. Its
+            // static key still authenticated it (the twin exists only for full-power allow-listed
+            // devices); promote the twin and abandon the armed PSK below, WITHOUT the finalize ticket
+            // proof (never applicable: a twinned device is not a provisional bridge/guest candidate).
+            val tw = link.pskShadow
+            plaintext = tw?.open(body)
+            if (plaintext != null && tw != null) {
+                viaTwin = true
+                mutex.withLock { link.fallback = link.active; link.active = tw; link.pskShadow = null }
+            }
+        }
         if (plaintext == null) { log.warn("decrypt failed from ${deviceId.take(8)}…"); return }
-        val confirmedPsk = mutex.withLock { pskFor.remove(deviceId) } // PSK confirmed; reconnects use authenticated statics
+        // PSK settled either way — reconnects use authenticated statics; a still-armed twin dies with it
+        // (once ANY frame proves a session, the phone provably keyed the other way)
+        val confirmedPsk = mutex.withLock { link.pskShadow = null; pskFor.remove(deviceId) }
         // FIRST successful decrypt after pairing: the PSK (the exact pairing ticket) is now PROVEN to be
         // held by this device. If it matches a pending intent, finalize the restricted classification here
         // (bridge #91 OR guest #115) — the one moment the binding is cryptographically exact.
         if (confirmedPsk != null && confirmedPsk.isNotEmpty()) {
-            bridges.finalize(deviceId, confirmedPsk)?.let { log.info("${it.kind.name.lowercase()} \"${it.name}\" confirmed on ${deviceId.take(8)}…") }
+            if (viaTwin) {
+                log.info("first-contact PSK abandoned for ${deviceId.take(8)}… — device handshook without its ticket (#161)")
+                // the post-handshake DaemonInfo sealed under the ticket-bound session this device can't
+                // read; re-send it under the just-proven twin so this connect still learns the LAN address
+                sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
+            } else {
+                bridges.finalize(deviceId, confirmedPsk)?.let { log.info("${it.kind.name.lowercase()} \"${it.name}\" confirmed on ${deviceId.take(8)}…") }
+            }
         }
         // FAIL CLOSED: a device that is neither a confirmed RESTRICTED credential (bridge/guest) nor in the
         // full-power allow-list is a provisional credential whose intent lapsed before this first frame
@@ -356,10 +410,11 @@ class DeviceSessions(
                 }
             }
             else -> {
-                // FULL-POWER owner device: the folder-share control plane (mint / list / revoke) needs the
-                // relay handle the router lacks, so it's intercepted here. A guest/bridge never reaches this
-                // branch (its own whitelist denies these frames), so re-sharing is structurally impossible.
-                if (handleOwnerShare(env.body, sink)) return
+                // FULL-POWER owner device: the share/bridge control planes (mint / list / revoke) need
+                // handles the router lacks, so they're intercepted here — via the SAME dispatcher the LAN
+                // transport uses. A guest/bridge never reaches this branch (its own whitelist denies these
+                // frames), so re-sharing the machine or minting another bridge is structurally impossible.
+                if (dispatchOwnerControl(env.body, shareControl, bridgeControl) { sink.emit(it) }) return
             }
         }
         try {
@@ -373,21 +428,6 @@ class DeviceSessions(
             log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")
             runCatching { sink.emit(PocketError("internal", e.message ?: "request failed")) }
         }
-    }
-
-    /** OWNER-only folder-share control plane (issue #115). Returns true when [frame] was a share frame and
-     *  was handled (the caller returns); false lets an ordinary owner frame fall through to the router.
-     *  Null [shareControl] (local-server path) → false, so CreateShare there surfaces the router's
-     *  "unsupported" rather than silently vanishing. */
-    private suspend fun handleOwnerShare(frame: Frame, sink: OutboundSink): Boolean {
-        val sc = shareControl ?: return false
-        when (frame) {
-            is CreateShare -> sink.emit(sc.create(frame))
-            is ListShares -> sink.emit(sc.list())
-            is RevokeShare -> sink.emit(sc.revoke(frame.deviceId))
-            else -> return false
-        }
-        return true
     }
 
     /** The convoId an inbound frame targets, for error attribution (bridge denials). */
@@ -433,15 +473,18 @@ class DeviceSessions(
     }
 
     /**
-     * The live E2E sessions of ONE device — at most the two ends of a reconnect overlap (issue #146).
+     * The live E2E sessions of ONE device — at most the two ends of a reconnect overlap (issue #146),
+     * plus (only until first contact confirms) the empty-PSK twin of the newest handshake (issue #161).
      * [active] seals every outbound frame and is the session that last PROVED itself: it completed the
      * most recent handshake, or successfully decrypted the most recent inbound frame that [active]
      * couldn't. [fallback] is the previous handshake's session, retained because the relay's per-device
      * supersede kick races the dying socket's late frames — its late handshake must not clobber the
      * surviving socket's session (the "僵会话" deafness loop). Each handshake displaces the fallback, so
-     * a device never holds more than two sessions.
+     * a device never holds more than two proven sessions. [pskShadow] is the ticket-less twin derived
+     * beside a PSK-armed handshake for an already-allow-listed device; it either gets promoted by the
+     * first inbound frame (the device provably burned its ticket) or dies with the PSK confirmation.
      */
-    private class DeviceLink(var active: E2ESession, var fallback: E2ESession? = null)
+    private class DeviceLink(var active: E2ESession, var fallback: E2ESession? = null, var pskShadow: E2ESession? = null)
 
     // ---- persistence of paired device public keys (shared with the direct-LAN gate) ----
 

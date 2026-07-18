@@ -110,5 +110,20 @@ class DaemonCore(
         openCodeModels, codexModels, ClaudeModelService(claudeConfigDir),
     )
 
+    /**
+     * The OWNER control planes (folder-share #115, bridges #91 follow-up), installed by RelayClient once
+     * the relay link is up (minting a redeem ticket needs it) and null until then / on a LAN-only `serve`.
+     *
+     * They live HERE — not on the relay's DeviceSessions — because the relay is not the only transport an
+     * owner arrives on: the desktop app on the daemon's own machine connects over the loopback LAN path,
+     * and a control plane reachable only via the relay made Settings ▸ Shared/Bridges dead exactly where
+     * they're most used. Every LAN peer is a full-power owner by construction (bridge/guest credentials
+     * are structurally barred from the LAN gate — see BridgeStore), so both transports may serve these.
+     */
+    @Volatile
+    var shareControl: dev.ccpocket.daemon.relay.ShareControl? = null
+    @Volatile
+    var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl? = null
+
     suspend fun shutdown() = registry.closeAll()
 }

@@ -179,7 +179,8 @@ interface DesktopModel {
     var showAddComputer: Boolean // pair a new computer in a modal without dropping the live session
     var showPermissionModal: Boolean // seed/demo only; the live model surfaces [ask] inline instead
     var showAttention: Boolean // bell popover: cross-machine approvals without leaving the session
-    var showQuickActions: Boolean // chat-header ⋯ popover: model/effort/mode + compact/clear (mirrors mobile's sheet)
+    var showQuickActions: Boolean // chat-header ⋯ popover: effort/mode + compact/clear (mirrors mobile's sheet)
+    var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
 
@@ -188,11 +189,11 @@ interface DesktopModel {
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showChanges || showSkills
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showChanges = false; showSkills = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -295,6 +296,22 @@ interface DesktopModel {
     /** Per project + per group collapse memory (issue #119; persisted like #102's RECENT keys). */
     fun groupCollapsed(projectPath: String, groupId: String): Boolean = false
     fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {}
+
+    // ── session rename (issue #158) ───────────────────────────────────────────────────────────────
+    /** Owner on a rename-aware daemon (the daemon stamps Sessions.renameSupported): false hides the
+     *  row's Rename entry (an older daemon would silently drop the frame). Claude rows only — the row
+     *  itself skips Codex sessions (their rename write path is out of #158's scope). */
+    val canRenameSessions: Boolean get() = false
+    /** Rename [sessionId]'s title — lands claude's own `custom-title` record on the daemon, which
+     *  re-pushes Sessions to refresh the row (no optimistic local edit). */
+    fun renameSession(sessionId: String, title: String) {}
+    /** The daemon's refusal of the last rename, iff it targeted [sessionId] (else null) — the sidebar
+     *  row re-enters its edit state and shows this inline. Session-scoped feedback because the failure
+     *  frame is session-independent: it must land on the row that ASKED, not in whatever chat happens
+     *  to be open (the common refusal — a terminal-held session — is renamed with no chat at all). */
+    fun renameError(sessionId: String): String? = null
+    /** Dismiss the inline rename refusal (the rename row's Esc). */
+    fun dismissRenameError() {}
 
     /** True while a session-list re-scan is in flight — the sidebar's refresh affordances spin on it. */
     val sessionsRefreshing: Boolean get() = false
@@ -431,6 +448,31 @@ interface DesktopModel {
     /** Open the browser: flip the flag and re-pull the catalog (cheap daemon-side disk scan). */
     fun openSkills() { showSkills = true; fetchSkillCatalog() }
 
+    // headless bridges (issue #91 follow-up): mint / manage the IM bots this machine answers to.
+    // Defaults keep seed/preview models inert, like the skills browser above.
+    val bridges: List<dev.ccpocket.protocol.BridgeInfo> get() = emptyList()
+    val bridgesLoaded: Boolean get() = false
+    /** No reply — the daemon predates pocket/bridge.*; the page shows its "update the daemon" state. */
+    val bridgesStale: Boolean get() = false
+    val bridgeBusy: Boolean get() = false
+    val bridgeError: String? get() = null
+    /** Keys a MERGE edit came back WITHOUT — an old daemon replaced wholesale; they must be re-entered. */
+    val bridgeMergeLost: List<String>? get() = null
+    /** A just-minted UNMANAGED credential to copy out; null for managed bridges (nothing to hand over). */
+    val bridgeCredential: dev.ccpocket.protocol.BridgeCredential? get() = null
+    fun fetchBridges() {}
+    fun createBridge(
+        name: String,
+        workdirs: List<String>,
+        tier: dev.ccpocket.protocol.AccessTier,
+        maxSessions: Int?,
+        runner: dev.ccpocket.protocol.BridgeRunnerSpec?,
+    ) {}
+    fun revokeBridge(name: String) {}
+    fun controlBridgeRunner(name: String, action: String) {}
+    fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean = false) {}
+    fun clearBridgeCredential() {}
+
     // composer image attachments (⌘V paste / attach icon → file picker); ride the next send
     val pendingImages: List<dev.ccpocket.app.data.PendingImage>
     fun attachImages(raw: List<ByteArray>)
@@ -492,6 +534,19 @@ interface DesktopModel {
     // context-window override (tokens) for the usage statusline's 100% mark; null = follow the derived window (#60)
     var contextWindowOverride: Long?
     var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
+    // ── embedded terminal (issue #153) ──
+    /** True (the default) = terminal gestures open the embedded ChatPane dock; false = the external
+     *  app ([terminalApp]). Settings ▸ Terminal owns the flip; the header menu picks per-gesture only. */
+    var terminalDefaultEmbedded: Boolean
+        get() = true
+        set(_) {}
+    /** The embedded dock's state — ONE shell, bound to the session cwd that opened it. Null = this
+     *  model can't host a dock (bare fakes); Seed and Repo both provide a controller (Seed's has no
+     *  engine factory, so tests/previews drive the chrome without ever spawning a PTY). */
+    val terminalPanel: TerminalPanelController? get() = null
+    // menu-bar presence (issue #151, direction 1): the OS status glyph + anchored popover. Default ON —
+    // the environment layer is the point; Settings ▸ General offers the opt-out.
+    var menuBarEnabled: Boolean
     // appearance (issue #63): force light/dark or follow the OS. The window root reads this into PocketTheme;
     // RepoDesktopModel persists it through the shared repo, seed/preview models just hold it in memory.
     var themeMode: ThemeMode

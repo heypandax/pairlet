@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.bridge
 
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.CancelTurn
@@ -70,12 +71,16 @@ object BridgeCaps {
         // usage.fetch, auth.*, push.prefs.set, audio.*, switchDir, job.stop, files.list — all refused for a bridge
     }
 
-    /** The clamp a bridge's requested permission mode is capped to: PLAN and DEFAULT prompt for
-     *  everything dangerous (which then routes to the phone). ACCEPT_EDITS is allowed (file edits without
-     *  a prompt, but shell/network still prompt). BYPASS_PERMISSIONS is NEVER reachable — a bridge cannot
-     *  put the daemon into "approve nothing", the whole point of routing approvals to the owner. */
-    fun clampMode(requested: PermissionMode): PermissionMode = when (requested) {
-        PermissionMode.BYPASS_PERMISSIONS -> PermissionMode.DEFAULT
-        else -> requested
-    }
+    /**
+     * Clamp a bridge's requested mode to the ceiling its credential was GRANTED at issue time (issue #91's
+     * "bridge credentials can configure a default execution mode"), on the same footing as a guest's share
+     * tier. [AccessTier.REVIEW] (the mint default) means every dangerous action prompts the OWNER's phone;
+     * COLLABORATE/AUTONOMOUS let file edits apply silently while shell / network still prompt.
+     *
+     * BYPASS_PERMISSIONS stays unreachable at every tier — see [TierClamp]. Without this, the ceiling was
+     * whatever the ADAPTER asked for (only bypass was refused), so an IM bot could self-select ACCEPT_EDITS.
+     * Now the owner decides at mint time and the adapter cannot exceed it.
+     */
+    fun clampMode(requested: PermissionMode, tier: AccessTier): PermissionMode =
+        TierClamp.clampMode(requested, tier)
 }

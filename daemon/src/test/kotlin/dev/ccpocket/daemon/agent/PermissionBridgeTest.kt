@@ -122,6 +122,45 @@ class PermissionBridgeTest {
     }
 
     @Test
+    fun exitPlanMode_still_asks_under_bypass_and_ignores_remembered_rules() = runBlocking {
+        // issue #156: the plan-approval gate is neverRemember — approving a plan is an explicit, per-plan
+        // human decision, so bypassPermissions must NOT auto-approve it (and neither may a stale rule).
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val rules = mutableSetOf("ExitPlanMode")
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("p1", "ExitPlanMode", buildJsonObject { put("plan", "1. refactor\n2. test") }))
+        val ask = emitted.single() // asked the phone despite bypass + remembered rule
+        assertIs<PermissionAsk>(ask)
+        assertEquals("p1", ask.askId)
+        assertEquals("1. refactor\n2. test", ask.inputPreview) // the plan itself is what the user reviews
+        assertTrue(ask.neverRemember)
+        assertTrue(responses.isEmpty()) // nothing was auto-allowed
+        scope.cancel()
+    }
+
+    @Test
+    fun exit_plan_mode_snake_case_spelling_also_asks_under_bypass() = runBlocking {
+        // #156 review follow-up: the CLI has emitted both spellings historically; ToolMeta maps them to the
+        // same neverRemember meta, so both must survive bypass. Pins the snake_case leg explicitly.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("p2", "exit_plan_mode", buildJsonObject { put("plan", "step 1") }))
+        val ask = emitted.single()
+        assertIs<PermissionAsk>(ask)
+        assertTrue(ask.neverRemember)
+        assertTrue(responses.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
     fun resurfacePending_reemits_open_ask_only_until_answered() = runBlocking {
         // issue #55: a reattaching phone (backgrounded when the live PermissionAsk fired — plan mode surfaces the
         // AskUserQuestion minutes after a premature `result`) must be re-shown the still-open card, and NOT one it

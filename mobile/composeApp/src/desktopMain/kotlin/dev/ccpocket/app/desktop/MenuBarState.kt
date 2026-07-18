@@ -1,0 +1,88 @@
+package dev.ccpocket.app.desktop
+
+/**
+ * The menu-bar glyph's five-state language (issue #151, direction 1 — "menubar-presence" handoff), as pure
+ * derivations so the whole state machine is unit-tested without AWT or composition:
+ *
+ *   OFFLINE    — hollow, 50%: the relay link is down or every paired computer is unreachable.
+ *   NEEDS YOU  — terracotta dot + count: approvals waiting somewhere in the fleet. The ONLY coloured state.
+ *   RUNNING    — mono session count: work in progress isn't an alert, so it stays monochrome.
+ *   DONE flash — a green tick after the LAST running session finishes with nothing waiting; decays to idle
+ *                after [MENUBAR_DONE_FLASH_MS] (the flash is a transition, not a resting state).
+ *   IDLE       — the quiet template glyph.
+ *
+ * Priority is top-down: offline beats everything (counts read as zero because we can't see, not because
+ * nothing is happening), a human being needed beats work running, and the flash only shows on an otherwise
+ * idle bar. [MenuBarExtra] renders these; [startsDoneFlash] is the one transition rule.
+ */
+internal enum class MenuBarKind { IDLE, RUNNING, NEEDS_YOU, DONE_FLASH, OFFLINE }
+
+/** What the glyph renders: the state plus the count beside it (needs-you or running; 0 = no count). */
+internal data class MenuBarIconSpec(val kind: MenuBarKind, val count: Int = 0)
+
+/** The observable inputs, folded once per change — [startsDoneFlash] compares consecutive snapshots. */
+internal data class MenuBarSnapshot(val offline: Boolean, val needs: Int, val running: Int)
+
+/** Fold live fleet state into a snapshot. Offline = no relay link OR no reachable computer — the same
+ *  "can't act on anything" the design's Offline cell describes ("daemon or all computers unreachable"). */
+internal fun menuBarSnapshot(model: DesktopModel): MenuBarSnapshot = MenuBarSnapshot(
+    offline = !model.connected || model.machines.none { it.computer.online },
+    needs = model.attention.size,
+    running = model.running.size,
+)
+
+/** The five-way priority fold. [flashing] is the time-boxed done-flash bit the host keeps. */
+internal fun menuBarIcon(s: MenuBarSnapshot, flashing: Boolean): MenuBarIconSpec = when {
+    s.offline -> MenuBarIconSpec(MenuBarKind.OFFLINE)
+    s.needs > 0 -> MenuBarIconSpec(MenuBarKind.NEEDS_YOU, s.needs)
+    s.running > 0 -> MenuBarIconSpec(MenuBarKind.RUNNING, s.running)
+    flashing -> MenuBarIconSpec(MenuBarKind.DONE_FLASH)
+    else -> MenuBarIconSpec(MenuBarKind.IDLE)
+}
+
+/**
+ * The done-flash trigger: the last running session finished and nothing waits on a human — "all work done".
+ * Offline edges never flash (a dropped link zeroes the counts artificially, which isn't completion), and a
+ * decrement that leaves other sessions running just updates the count instead.
+ */
+internal fun startsDoneFlash(prev: MenuBarSnapshot?, cur: MenuBarSnapshot): Boolean =
+    prev != null && !prev.offline && !cur.offline &&
+        prev.running > 0 && cur.running == 0 && cur.needs == 0
+
+/** How long the green tick stays before decaying back to idle. */
+internal const val MENUBAR_DONE_FLASH_MS = 2_500L
+
+// ── running elapsed (the popover's "12m" column) ─────────────────────────────────────────────────
+
+/**
+ * First-observed clock for running sessions. The protocol carries no per-project start time, so the honest
+ * elapsed is "running for at least this long while this app has been watching": the [MenuBarExtra] host
+ * feeds it continuously while the tray lives, so a session that ran 10 minutes with the popover closed
+ * still reads 10m on open. Keys that stop running are forgotten (a restart starts a fresh clock).
+ */
+internal class RunningSinceTracker {
+    private val since = HashMap<String, Long>()
+
+    /** Record [keys] as running at [now] (first observation wins), drop everything else; returns the map. */
+    @Synchronized
+    fun observe(keys: Collection<String>, now: Long): Map<String, Long> {
+        val keep = keys.toHashSet()
+        since.keys.retainAll(keep)
+        keys.forEach { since.getOrPut(it) { now } }
+        return HashMap(since)
+    }
+}
+
+/** Process-wide tracker shared by the menu-bar host and every [TrayPopover] composition. */
+internal val TrayRunningSince = RunningSinceTracker()
+
+/** One running row's identity across machines — account + project path, joined by an escaped NUL
+ *  (a byte no account id or path can contain, so distinct pairs can't collide). */
+internal fun runningKey(m: DkMachine, p: DkProject): String = "${m.computer.accountId}\u0000${p.path}"
+
+/** Compact elapsed for the popover's mono column: <1m "now", then minutes, then whole hours. */
+internal fun elapsedLabel(ms: Long): String = when {
+    ms < 60_000L -> "now"
+    ms < 3_600_000L -> "${ms / 60_000L}m"
+    else -> "${ms / 3_600_000L}h"
+}

@@ -39,7 +39,8 @@ class DaemonServer(
                     val peer = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
                     log.info("WS connect from $peer")
                     try {
-                        WsConnection(this, core.router, core.registry, e2e).serve()
+                        WsConnection(this, core.router, core.registry, e2e,
+                            ownerControls = { core.shareControl to core.bridgeControl }).serve()
                     } finally {
                         log.info("WS disconnect from $peer")
                     }

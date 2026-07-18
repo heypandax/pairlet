@@ -21,6 +21,11 @@ androidTargetSdk = "35"
 googleServices = "4.4.2"
 firebaseCrashlyticsPlugin = "3.0.2"
 firebaseBom = "33.7.0"
+# Embedded terminal engine (issue #153, desktop only). 3.72 is the newest JediTerm built with
+# Kotlin 2.1.21 — this project's exact compiler; 3.73+ jumps to kotlin-stdlib 2.4.0, whose klib
+# metadata a 2.1 compiler can't read. pty4j 0.13.12 is likewise 2.1.21 and shares our jna 5.14.0.
+jediterm = "3.72"
+pty4j = "0.13.12"
 
 [libraries]
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
@@ -52,7 +57,16 @@ sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqliteJdbc" }
 # desktop-only objc bridge for bundle-identity macOS notifications (issue #99); tiny next to the
 # bundled JRE, and its jnidispatch loads under the hardened runtime (disable-library-validation).
 jna = { module = "net.java.dev.jna:jna", version = "5.14.0" }
+# embedded terminal (issue #153, desktop target only — never commonMain/iOS/Android):
+# jediterm-ui carries the Swing JediTermWidget, jediterm-core the VT emulation it compiles against,
+# pty4j the local PTY (natives bundled in-jar; brings jna-platform beside our existing jna).
+jediterm-core = { module = "org.jetbrains.jediterm:jediterm-core", version.ref = "jediterm" }
+jediterm-ui = { module = "org.jetbrains.jediterm:jediterm-ui", version.ref = "jediterm" }
+pty4j = { module = "org.jetbrains.pty4j:pty4j", version.ref = "pty4j" }
 nayuki-qrcodegen = { module = "io.nayuki:qrcodegen", version = "1.8.0" }
+# Feishu official SDK — the daemon's BUILT-IN feishu bridge (issue #91 follow-up). Shades its own
+# okhttp (com.lark.oapi.okhttp), so it can't fight ktor; external deps are just gson/commons-codec/slf4j.
+lark-oapi-sdk = { module = "com.larksuite.oapi:oapi-sdk", version = "2.4.19" }
 qrkit = { module = "network.chaintech:qr-kit", version = "3.0.6" }
 # KMP syntax highlighting for chat code blocks (issue #51). Built with Kotlin 2.0.20 — its klibs are
 # consumable by this project's 2.1.21 (unlike cryptography-kotlin 0.5.0+, see note above).
