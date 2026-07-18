@@ -104,26 +104,17 @@ struct iOSApp: App {
     init() {
         // Firebase stays in Swift (the only place that imports it); the shared Kotlin Telemetry
         // calls back through the sink registered below — mirroring cc-dashboard's single seam.
-        // The GoogleService-Info.plist is gitignored; dev builds use a placeholder template.
-        // Only configure Firebase when a real API key is present (39-char "AIza..." format) to
-        // avoid the Firebase Installations crash on invalid keys.
-        if let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
-           let dict = NSDictionary(contentsOfFile: path) as? [String: Any],
-           let apiKey = dict["API_KEY"] as? String,
-           apiKey.count == 39 && apiKey.hasPrefix("AIza")
-        {
-            FirebaseApp.configure()
-            Analytics.setAnalyticsCollectionEnabled(true)
-            MainViewControllerKt.setTelemetrySink(
-                onEvent: { event, params in
-                    Analytics.logEvent(event, parameters: params)
-                },
-                onError: { message, phase in
-                    let info: [String: Any] = [NSLocalizedDescriptionKey: message, "phase": phase ?? ""]
-                    Crashlytics.crashlytics().record(error: NSError(domain: "ccpocket", code: 0, userInfo: info))
-                }
-            )
-        }
+        FirebaseApp.configure()
+        Analytics.setAnalyticsCollectionEnabled(true) // plist ships IS_ANALYTICS_ENABLED=false; opt in here
+        MainViewControllerKt.setTelemetrySink(
+            onEvent: { event, params in
+                Analytics.logEvent(event, parameters: params)
+            },
+            onError: { message, phase in
+                let info: [String: Any] = [NSLocalizedDescriptionKey: message, "phase": phase ?? ""]
+                Crashlytics.crashlytics().record(error: NSError(domain: "ccpocket", code: 0, userInfo: info))
+            }
+        )
         // Push registration lives in Swift (UIKit symbols aren't uniform across Kotlin/Native targets).
         // Kotlin's PushController calls this when registration starts (after pairing), so the prompt
         // follows pairing rather than firing at cold launch.

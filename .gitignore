@@ -59,10 +59,5 @@ scripts/__pycache__/
 /marketing/video/assets/footage/**/*.mp4
 /marketing/video/tools/*.json
 
-# local dev artifacts (not shared until needed)
-node_modules/
+# opencode project-local config/state
 .opencode/
-.vscode/
-**/bin/
-TOOLKIT-CHINESE.md
-scripts/fix-tailscale-routes.sh

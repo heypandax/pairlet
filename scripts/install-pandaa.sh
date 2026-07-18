@@ -19,11 +19,11 @@ if [[ -z "$DEVICE" ]]; then
   echo "   已配对设备列表：xcrun devicectl list devices"
   exit 1
 fi
-BUNDLE_ID="com.JerseyBro.ccpocket"
+BUNDLE_ID="com.panda.ccpocket"
 LOG=/tmp/ios-device-build.log
 
 echo "── 0/4 设备在线检查 ──"
- if ! xcrun devicectl list devices | grep "$DEVICE" | grep -Eq "available|connected"; then
+if ! xcrun devicectl list devices | grep "$DEVICE" | grep -q "available"; then
   echo "❌ 设备不在线：$DEVICE"
   xcrun devicectl list devices
   exit 1
