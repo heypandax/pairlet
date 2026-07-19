@@ -13,11 +13,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -32,8 +36,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.APP_VERSION
@@ -204,12 +217,20 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
 
             SectionLabel(stringResource(Res.string.context_window_section))
             val ctxDefaultLabel = stringResource(Res.string.value_default)
+            // #171: this control governs the CATCH-ALL only — models holding their own window ignore it. A silent
+            // no-op here IS the bug we're replacing (tap 200K, nothing moves, the setting reads broken), so once
+            // the user actually touches it we name the models it won't reach instead of staying quiet.
+            var catchAllEdited by remember { mutableStateOf(false) }
             SegmentedRow(
                 CONTEXT_WINDOW_OPTS, repo.contextWindowOverride.value,
                 label = { opt -> when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" } },
-            ) { repo.setContextWindowOverride(it) }
-            ContextWindowCustomRow(repo)
-            Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+            ) { catchAllEdited = true; repo.setContextWindowOverride(it) }
+            ContextWindowCustomRow(repo) { catchAllEdited = true }
+            val shadowing = repo.contextWindowOverrides.keys.sorted()
+            if (catchAllEdited && shadowing.isNotEmpty()) CatchAllShadowedNote(shadowing)
+            else Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+
+            PerModelWindows(repo)
 
             SectionLabel(stringResource(Res.string.af_show_from))
             Row(
@@ -448,7 +469,7 @@ private fun SectionLabel(text: String) {
  * Blank / 0 clears back to the segments rather than pinning a nonsense denominator.
  */
 @Composable
-private fun ContextWindowCustomRow(repo: PocketRepository) {
+private fun ContextWindowCustomRow(repo: PocketRepository, onEdit: () -> Unit = {}) {
     val current = repo.contextWindowOverride.value
     val isCustom = current != null && current != DEFAULT_CONTEXT_WINDOW && current != LARGE_CONTEXT_WINDOW
     // NOT keyed on the live value: picking a segment must not wipe digits the user is mid-typing
@@ -465,6 +486,7 @@ private fun ContextWindowCustomRow(repo: PocketRepository) {
             draft,
             { new ->
                 draft = new.filter(Char::isDigit).take(9)
+                onEdit()
                 repo.setContextWindowOverride(draft.toLongOrNull()?.takeIf { it > 0 })
             },
             placeholder = { Text(stringResource(Res.string.context_window_tokens), color = Tok.muted, fontSize = 12.sp) },
@@ -473,6 +495,118 @@ private fun ContextWindowCustomRow(repo: PocketRepository) {
             textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
             modifier = Modifier.width(130.dp),
         )
+    }
+}
+
+/** Thousands separators for a token count. The per-model surfaces show the exact number the user typed
+ *  (they typed "262144", not "262k"), so this deliberately does NOT reuse [formatTokens]'s abbreviations. */
+internal fun groupDigits(n: Long): String =
+    n.toString().reversed().chunked(3).joinToString(",").reversed()
+
+/** Dashed hairline: marks the empty per-model table as a placeholder waiting to be filled, rather than a
+ *  solid card that looks like a real (but broken) list. */
+private fun Modifier.dashedBorder(color: Color, radius: Dp) = this.drawBehind {
+    drawRoundRect(
+        color = color,
+        style = Stroke(width = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(7f, 6f))),
+        cornerRadius = CornerRadius(radius.toPx()),
+    )
+}
+
+/** #171: the catch-all edit the user just made cannot reach models holding their own window — so name them,
+ *  right here, the moment it happens. Amber rather than red: nothing broke, the edit simply has a narrower
+ *  reach than it looks. Silence here is precisely the old bug (a tap that changes nothing, with no reason given). */
+@Composable
+private fun CatchAllShadowedNote(shadowing: List<String>) {
+    val text =
+        if (shadowing.size == 1) stringResource(Res.string.ctx_conflict_one, shadowing[0])
+        else stringResource(Res.string.ctx_conflict_many, shadowing[0], shadowing.size - 1)
+    Row(
+        Modifier.padding(top = 11.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .background(Tok.warn.copy(alpha = 0.09f))
+            .border(1.dp, Tok.warn.copy(alpha = 0.32f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 11.dp, vertical = 10.dp),
+    ) {
+        Text(text, color = Tok.warn, fontSize = 12.5.sp, lineHeight = 18.sp)
+    }
+}
+
+/**
+ * #171: the per-model table, made auditable.
+ *
+ * Settings has no "current model" in scope (it opens with no session running), so this section never offers to
+ * WRITE an entry — that belongs in Session Info, beside the very bar being corrected. Here you review and clear.
+ *
+ * KNOWN GAP vs the design: the handoff also drew a "not run recently" marker on stale rows. The app keeps no
+ * per-model last-used record, so rather than invent a signal the rows carry no staleness mark — they stay
+ * visible and deletable, which is the requirement that actually mattered. See the handoff README.
+ */
+@Composable
+internal fun PerModelWindows(repo: PocketRepository) {
+    Spacer(Modifier.height(22.dp))
+    SectionLabel(stringResource(Res.string.per_model_section))
+    val entries = repo.contextWindowOverrides.entries.sortedBy { it.key }.map { it.key to it.value }
+    if (entries.isEmpty()) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).dashedBorder(Tok.hair, 14.dp)
+                .padding(horizontal = 14.dp, vertical = 16.dp),
+        ) {
+            Text(stringResource(Res.string.per_model_empty_title), color = Tok.tx2, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+            Text(
+                stringResource(Res.string.per_model_empty_body), color = Tok.muted, fontSize = 12.5.sp,
+                lineHeight = 18.sp, modifier = Modifier.padding(top = 5.dp),
+            )
+        }
+        return
+    }
+    // The row for the model running right now is flagged: its override is not hypothetical, it is in force.
+    val liveKey = repo.contextWindowKeyOf(repo.model.value)
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(14.dp)),
+    ) {
+        entries.forEachIndexed { i, (id, tokens) ->
+            if (i > 0) Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(1.dp).background(Tok.hair))
+            PerModelRow(id, tokens, live = id == liveKey) { repo.setContextWindowOverrideFor(id, null) }
+        }
+    }
+    Text(
+        stringResource(Res.string.per_model_hint), color = Tok.muted, fontSize = 12.sp,
+        lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp),
+    )
+}
+
+@Composable
+private fun PerModelRow(id: String, tokens: Long, live: Boolean, onDelete: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 14.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                id, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            if (live) Text(
+                stringResource(Res.string.per_model_overrides), color = Tok.warn,
+                fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp),
+            )
+        }
+        Text(
+            groupDigits(tokens), color = Tok.tx2, fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp, modifier = Modifier.padding(horizontal = 10.dp),
+        )
+        // Label sits on the CLICKABLE node, not the icon inside it: the tap target and the thing a11y (and
+        // the tests) name must be the same node, or you can find the label but not press it.
+        val deleteLabel = stringResource(Res.string.per_model_delete)
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
+                .semantics { contentDescription = deleteLabel }
+                .clickable(onClick = onDelete),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.DeleteOutline, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
+        }
     }
 }
 

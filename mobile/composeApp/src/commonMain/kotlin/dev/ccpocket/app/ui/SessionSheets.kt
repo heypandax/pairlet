@@ -20,12 +20,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.SubdirectoryArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -156,6 +162,7 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                 AboutRow(stringResource(Res.string.label_mode), MODE_BY[repo.mode.value]?.tech ?: repo.mode.value.name)
             }
             ContextBar(used = repo.contextUsed.value, total = repo.contextWindow.value)
+            PerModelWindowRow(repo)
             Column(Modifier.padding(top = 10.dp)) {
                 Text(stringResource(Res.string.label_workdir), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
                 TailPathText(repo.workdir.value ?: "", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
@@ -181,6 +188,93 @@ private fun ContextBar(used: Long?, total: Long?) {
         val fill = contextColor(frac)
         Box(Modifier.padding(top = 7.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Tok.hair)) {
             if (frac > 0f) Box(Modifier.fillMaxWidth(frac).height(4.dp).clip(RoundedCornerShape(2.dp)).background(fill))
+        }
+    }
+}
+
+/**
+ * #171: the WRITE surface for a model's own context window — deliberately here rather than in Settings.
+ *
+ * This is the one place where a concrete model and the denominator that's wrong about it are both on screen
+ * (the bar directly above), and it's where the composer gauge taps through to. Settings stays global: it owns
+ * the catch-all and audits the table, but it has no "current model" to write against.
+ *
+ * Hidden when the session has no model id to key an entry on — an entry needs something to be keyed BY.
+ */
+@Composable
+internal fun PerModelWindowRow(repo: PocketRepository) {
+    val model = repo.model.value ?: return
+    val key = repo.contextWindowKeyOf(model) ?: return
+    val own = repo.contextWindowOverrides[key]
+    val effective = repo.contextWindow.value
+    var editing by remember(key) { mutableStateOf(false) }
+    var draft by remember(key) { mutableStateOf(own?.toString() ?: "") }
+
+    if (editing) {
+        Column(
+            Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .background(Tok.base).border(1.dp, Tok.accent, RoundedCornerShape(12.dp))
+                .padding(start = 13.dp, end = 13.dp, top = 13.dp, bottom = 14.dp),
+        ) {
+            Text(stringResource(Res.string.ctx_window_for, model), color = Tok.tx2, fontSize = 12.sp)
+            OutlinedTextField(
+                draft,
+                { new -> draft = new.filter(Char::isDigit).take(9) },
+                placeholder = { Text(stringResource(Res.string.context_window_tokens), color = Tok.muted, fontSize = 12.sp) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, color = Tok.tx),
+                modifier = Modifier.padding(top = 9.dp).fillMaxWidth(),
+            )
+            Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(10.dp)).background(Tok.accent)
+                        .clickable {
+                            // Blank clears the entry: the model falls back to the catch-all rather than pinning a 0.
+                            repo.setContextWindowOverrideFor(model, draft.toLongOrNull()?.takeIf { it > 0 })
+                            editing = false
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(Res.string.ctx_save_for_model), color = Tok.base, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Box(
+                    Modifier.padding(start = 8.dp).height(44.dp).clip(RoundedCornerShape(10.dp))
+                        .border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+                        .clickable { draft = own?.toString() ?: ""; editing = false }
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(stringResource(Res.string.cancel), color = Tok.tx2, fontSize = 14.sp)
+                }
+            }
+        }
+        return
+    }
+
+    Row(
+        Modifier.padding(top = 14.dp).fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+            .background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
+            .clickable { draft = own?.toString() ?: ""; editing = true }
+            .padding(horizontal = 13.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (own == null) Icons.Rounded.SubdirectoryArrowRight else Icons.Rounded.Edit, null,
+            tint = if (own == null) Tok.muted else Tok.tx2, modifier = Modifier.size(15.dp),
+        )
+        Column(Modifier.padding(start = 11.dp).weight(1f)) {
+            Text(
+                stringResource(if (own == null) Res.string.ctx_set_for_model else Res.string.ctx_edit_for_model),
+                color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.Medium,
+            )
+            // Says WHERE the current denominator comes from — the inherit/own distinction is the whole point.
+            val sizeText = (own ?: effective)?.let { groupDigits(it) } ?: "—"
+            Text(
+                stringResource(if (own == null) Res.string.ctx_using_catchall else Res.string.ctx_own_value, sizeText),
+                color = if (own == null) Tok.muted else Tok.warn, fontSize = 11.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp),
+            )
         }
     }
 }

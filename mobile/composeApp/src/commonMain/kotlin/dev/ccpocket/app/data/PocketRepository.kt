@@ -453,6 +453,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  so the override table and the window table agree on what counts as "the same model". Blank → null (no key). */
     private fun modelKey(model: String?): String? = model?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
 
+    /** Public view of [modelKey] for UI that has to line a live model up against a table row (#171): Settings marks
+     *  which row is currently in force, Session Info picks "set" vs "edit". One folding rule, one definition. */
+    fun contextWindowKeyOf(model: String?): String? = modelKey(model)
+
     /** The denominator the user pinned for [model], most-specific first: a per-model entry beats the legacy
      *  catch-all. Null = no override, follow the daemon/model-derived window. */
     fun contextWindowOverrideFor(model: String?): Long? =
