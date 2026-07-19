@@ -90,6 +90,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import dev.ccpocket.app.media.rememberFileAttacher
 import dev.ccpocket.app.media.rememberImageAttacher
 import dev.ccpocket.app.media.rememberVideoAttacher
@@ -1220,7 +1221,15 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
 }
 
 @Composable
-internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) { // internal: rendered offscreen by ShowcaseRender (marketing frames), same precedent as SessionsScreen
+internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (marketing frames), same precedent as SessionsScreen
+    repo: PocketRepository,
+    onOpenFleet: () -> Unit = {},
+    onOpenInbox: () -> Unit = {},
+    // injectable so a test can assert where the transcript actually PARKED — "is the last line on screen"
+    // is not a usable proxy (a roomy test scene shows the whole transcript either way), and that blind
+    // spot is how the switcher shipped opening mid-transcript twice (issue #165)
+    listStateForTest: LazyListState? = null,
+) {
     // Restore the composer draft (keyed per conversation, workdir for a brand-new session). Re-inits on a
     // REAL switch only — keyed off composerEpoch, NOT draftKey (#29 semantics kept): the key chain flips in
     // place mid-typing (brand-new session materializing, forked resume corrected by SessionLive), and
@@ -1256,7 +1265,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     val launchFilePicker = rememberFileAttacher { picked -> repo.attachFiles(picked) } // issue #90
     val launchVideoPicker = rememberVideoAttacher { picked -> repo.attachFiles(picked) } // issue #98 — same upload path, movie-filtered
     var attachSheet by remember { mutableStateOf(false) } // Photo/File/Video chooser anchored above the composer
-    val listState = rememberLazyListState()
+    val listState = listStateForTest ?: rememberLazyListState()
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
     // Keyed on the conversation (as the desktop pane always was): the switcher (#165) made chat→chat
@@ -1274,6 +1283,18 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     // grace reveals an empty/new session that has no history to position on.
     var landed by remember(repo.convoId.value) { mutableStateOf(false) }
     LaunchedEffect(repo.convoId.value) { delay(180); landed = true }
+    // A conversation you switch INTO opens at its latest message (issue #165). Resetting `pinned` per
+    // conversation is not enough on its own: the follow-the-stream effect below keys on the MESSAGE list,
+    // so whether it re-runs late enough to observe the freshly reset pin is a race — and when it lost,
+    // the session opened parked wherever the previous one had been scrolled to. This lands it outright,
+    // keyed on the conversation and waiting for its transcript, so it cannot depend on that ordering.
+    LaunchedEffect(repo.convoId.value) {
+        if (repo.convoId.value == null) return@LaunchedEffect
+        snapshotFlow { repo.messages.size }.first { it > 0 }
+        listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+        pinned = true // …and it follows the stream from here, as a freshly opened session always has
+        landed = true
+    }
     // a just-created session opens on an empty chat — focus the composer and raise the keyboard
     // right away instead of making the user tap the field first. openSession arms the flag only
     // for resumeId == null (never on resume/reattach/fleet-follow); consumed here exactly once.
