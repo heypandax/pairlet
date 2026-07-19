@@ -14,7 +14,7 @@ application {
 // The release version: -PappVersion in CI, fallback for local builds. Baked into the
 // cc-pocket-version.properties resource so the daemon knows its own version at runtime —
 // the self-update check compares it against GitHub releases/latest.
-val appVersion = (findProperty("appVersion") as String?) ?: "1.4.1"
+val appVersion = (findProperty("appVersion") as String?) ?: "1.5.0"
 
 tasks.processResources {
     inputs.property("appVersion", appVersion)

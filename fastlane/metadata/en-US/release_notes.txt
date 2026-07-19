@@ -1,17 +1,15 @@
-What's new in 1.4.0
+What's new in 1.5.0
 
 New
-• Open a project: browse your computer's folders from the phone and start a fresh session in any of them — no longer limited to resuming past sessions
-• Faster model switching: a model chip next to the composer jumps straight to the model picker (phone and desktop)
-• Embedded terminal on desktop: ⌘J toggles a docked terminal panel, sessions can open "inside the app", and the default is configurable in Settings
-• macOS menu-bar status capsule: an always-on icon shows connection and turn state at a glance (five states), with a quick panel on click
-• Rename sessions on desktop: right-click a session in the sidebar to rename inline — kept in sync with Claude Code's own records
-• Bridge credentials (preview): connect Claude Code to external bots with least-privilege access (a Feishu group adapter ships as a reference), monitored and revocable from phone and desktop
+• OpenCode support: a third agent alongside Claude Code and Codex — sessions, permissions and model selection all wired up
+• Switch sessions across projects: a session chip beside the composer jumps straight to a session in another project, instead of backing out through the list
+• Context usage moved into the composer: the debug-looking badge that floated over the message stream is retired, replaced by a steady readout next to the input — tappable for detail, and the first thing to yield when space is tight
+• Per-model context window: a window belongs to the model, not to the phone — set the real size for each model right in the session info sheet, review and clear them in Settings
+• Gateway model list now comes from the gateway itself: no more relying on a built-in table of vendor ids — you see what your gateway actually serves, and vendor generation changes follow automatically
+• Desktop "Open Folder…": pick a project with the native directory chooser instead of typing a path
 
-Fixes & improvements
-• First pairing is now resilient: if the very first connection got interrupted, the app could stay unable to connect forever (even re-scanning didn't help, only restarting the daemon did) — it now heals itself on the next reconnect
-• iOS push fixed: some installs weren't receiving completion/approval notifications
-• Links in messages no longer swallow a trailing bracket into the URL
-• In bypassPermissions mode, plan confirmations are no longer auto-approved — they still wait for you
-
-Note: some features need the computer-side cc-pocket-daemon on 1.4.0 — run "cc-pocket-daemon update" (or brew upgrade / scoop update).
+Fixed
+• A context-window size you typed is no longer overridden by automatic inference
+• Switching sessions lands on the latest message reliably, even after scrolling back through history
+• Gateway model presets corrected: two retired ids removed, one updated to the current generation
+• Fixed older app versions showing OpenCode session rows that couldn't be opened
