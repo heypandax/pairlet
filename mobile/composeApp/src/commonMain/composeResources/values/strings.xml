@@ -84,6 +84,12 @@
 
     <!-- ── session list ──────────────────────────────────────────── -->
     <string name="sessions_title">Sessions</string>
+    <!-- cross-project session switcher (issue #165) -->
+    <string name="switcher_total">%1$d total</string>
+    <string name="switcher_current">Current</string>
+    <string name="switcher_recent">Recent</string>
+    <string name="switcher_all_projects">All projects</string>
+    <string name="switcher_empty">No other sessions yet</string>
     <string name="new_session_cta">＋ New session</string>
 
     <!-- ── relative time (session cards) ─────────────────────────── -->

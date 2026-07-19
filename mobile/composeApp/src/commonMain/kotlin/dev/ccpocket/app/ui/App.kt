@@ -1229,6 +1229,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     var viewer by remember { mutableStateOf<Pair<List<ByteArray>, Int>?>(null) } // tapped sent images → full-screen
     var videoViewer by remember { mutableStateOf<dev.ccpocket.app.data.SentFile?>(null) } // tapped sent video → player (issue #98)
     var showSwitcher by remember { mutableStateOf(false) } // machine name in the connection bar → switch computer
+    var showSessions by remember { mutableStateOf(false) } // stack chip → cross-project session switcher (issue #165)
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
@@ -1354,6 +1355,12 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                         PulseDot(Tok.accent)
                         Text(stringResource(Res.string.chat_running), color = Tok.accent, fontSize = 11.sp)
                     }
+                    // one tap to any other session you're juggling, across projects (issue #165). Sits here
+                    // rather than in ⋯ because switching is a navigation move made mid-thought — buried a
+                    // sheet deep it costs about what walking the nav back out already did. Draws nothing
+                    // when there's nowhere to go, so a single-session user sees no new header weight.
+                    val workingSet = repo.workingSet()
+                    SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
                     // mode switching moved into the ⋯ quick-actions sheet — the persistent badge was one
                     // more thing crowding the header for a setting touched a few times per session
                     Box(
@@ -1722,6 +1729,14 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
         if (showChangedFiles) ChangedFilesSheet(repo, onOpen = { repo.openChangedFile(it) }) { showChangedFiles = false }
         if (showBgJobs) BackgroundJobsSheet(repo.backgroundJobs, onStop = { repo.stopBackgroundJob(it.id) }) { showBgJobs = false }
         if (showSwitcher) dev.ccpocket.app.ui.fleet.MachineSwitcherSheet(repo, onDismiss = { showSwitcher = false }, onManage = onOpenFleet)
+        // #165: leaving for another session saves this one's draft first — same contract as the back button,
+        // which is the only other way out of a chat
+        if (showSessions) SessionSwitcherSheet(
+            set = repo.workingSet(),
+            onSelect = { repo.saveDraft(draftKey, input); repo.switchToSession(it) },
+            onAllProjects = { repo.saveDraft(draftKey, input); repo.backToDirectories() },
+            onDismiss = { showSessions = false },
+        )
     }
 }
 

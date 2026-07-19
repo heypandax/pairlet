@@ -477,6 +477,77 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_PINNED, pinnedPaths.joinToString("\n"))
     }
 
+    // ── cross-project working set (issue #165) ───────────────────────────────────────────────────────
+    // The switcher has to name sessions whose PROJECT isn't loaded right now, so "what was I just in" is
+    // remembered locally (the daemon's list only knows what is alive). Same client-side, dependency-free
+    // storage the pins use; all the rules live in SessionWorkingSet.kt as pure functions.
+
+    /** Sessions this device opened, newest first, capped at [WORKING_SET_MAX]. Persisted. */
+    private val workingSetMru = mutableStateListOf<WorkingSetEntry>().also {
+        it.addAll(decodeWorkingSet(SecureStore.getString(K_WORKING_SET)))
+    }
+
+    /** Sessions that finished while the user was looking at something ELSE — the switcher's attention
+     *  dot. Cleared per-session on open; per-machine (a disconnect/switch drops them, see [disconnect]). */
+    val unseenSessions = mutableStateOf<Set<String>>(emptySet())
+
+    /** Session ids the LAST project list reported as working — the busy→idle edge detector's other half. */
+    private var lastWorkingSessions: Set<String> = emptySet()
+
+    /** The session identity the chat is actually showing, or null when no chat is open. [sessionKey] alone
+     *  can't say this: it deliberately survives [backToBrowse] as the draft key, and a switcher opened from
+     *  the project list must count that session as "other", not as "current". */
+    private fun openSessionId(): String? = sessionKey.value?.takeIf { convoId.value != null }
+
+    /**
+     * The switcher's read-model (issue #165). Snapshot-observable end to end — it reads [directories], the
+     * MRU, the unseen marks and the current session's identity, so any Compose surface re-derives when the
+     * daemon re-lists, a session is opened, or a turn finishes elsewhere.
+     */
+    fun workingSet(): SessionWorkingSet = buildWorkingSet(
+        running = runningSessions(directories.toList()),
+        mru = workingSetMru.toList(),
+        currentSessionId = openSessionId(),
+        currentDirKey = workdir.value,
+        currentTitle = chatTitle.value,
+        unseen = unseenSessions.value,
+        // approvals stays empty by construction today: the daemon binds an ask to the connection that
+        // opened its conversation, so this client only ever holds the CURRENT session's ask (see
+        // fleetAttention). The seam is here for when asks go account-wide — no other change needed.
+    )
+
+    /**
+     * Record an open at the head of the MRU and clear that session's unseen mark. Called from the daemon's
+     * [SessionLive] announce (authoritative identity), from the first prompt of a brand-new session (which
+     * is when its title finally exists), and optimistically by [switchToSession] so the sheet re-orders on
+     * the tap rather than a round-trip later. Idempotent — a re-touch just refreshes labels.
+     */
+    internal fun rememberOpenedSession(dirKey: String?, sessionId: String?, title: String?, agent: AgentKind?) {
+        if (dirKey.isNullOrBlank() || sessionId.isNullOrBlank()) return
+        val known = workingSetMru.firstOrNull { it.sessionId == sessionId }
+        val project = directories.firstOrNull { it.path == dirKey }?.name?.takeIf { it.isNotBlank() }
+            ?: known?.project?.takeIf { it.isNotBlank() }
+            ?: projectLabelOf(dirKey)
+        val label = title?.takeIf { it.isNotBlank() } ?: known?.title?.takeIf { it.isNotBlank() } ?: project
+        val entry = WorkingSetEntry(dirKey, sessionId, label, project, epochMillis(), agent ?: known?.agent)
+        replace(workingSetMru, mruTouch(workingSetMru.toList(), entry))
+        // the demo walks fake projects — it may drive the switcher, but it must never write them into
+        // the real store (same rule the rest of demo mode follows: no persistence, no network)
+        if (!demoMode.value) SecureStore.putString(K_WORKING_SET, encodeWorkingSet(workingSetMru.toList()))
+        if (sessionId in unseenSessions.value) unseenSessions.value = unseenSessions.value - sessionId
+    }
+
+    /** Fold a fresh project list into the finished-while-away marks. Marks are pruned to sessions the
+     *  switcher can actually SHOW (running or remembered) — a badge with no row behind it is a lie. */
+    private fun noteWorkingSessions() {
+        val now = runningSessions(directories.toList()).map { it.sessionId }.toSet()
+        val marked = markFinishedAway(lastWorkingSessions, now, openSessionId(), unseenSessions.value)
+        val visible = now + workingSetMru.map { it.sessionId }
+        val pruned = marked.filterTo(mutableSetOf()) { it in visible }
+        if (pruned != unseenSessions.value) unseenSessions.value = pruned
+        lastWorkingSessions = now
+    }
+
     /** Composer draft persisted per conversation. Keyed most-durable-first: the real sessionId (stable across
      *  daemon reopens AND app restarts) → convoId (daemon-run-scoped) → workdir. #29 fixed the cross-session
      *  bleed with convoId keying, but convoIds are minted per open, so a draft rarely survived leave-and-reopen;
@@ -1441,6 +1512,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         pendingAsk.value = null
+        // #165: the busy→idle detector is per-MACHINE state. Carrying this machine's working ids into the
+        // next one's first project list would mark every one of them "finished while you were away".
+        lastWorkingSessions = emptySet(); unseenSessions.value = emptySet()
         directories.clear(); sessions.clear(); messages.clear(); pendingImages.clear(); clearFileUploads(); clearBackgroundJobs()
         resetHistoryPaging() // #147: the transcript left with messages — so must its cursor
         demoMode.value = false // leaving the demo returns to real pairing
@@ -1527,6 +1601,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         fontScale.value = from.fontScale.value
         themeMode.value = from.themeMode.value
         replace(pinnedPaths, from.pinnedPaths.toList())
+        replace(workingSetMru, from.workingSetMru.toList()) // #165: same reason — an in-memory mirror of a persisted store
         sessionParams.clear(); sessionParams.putAll(from.sessionParams)
         replace(pairedList, from.pairedList.toList())
         // freshen this binding's own copy too (pinned at construction — a rename/hostName/directUrl learned
@@ -1752,6 +1827,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         when (f) {
             is Directories -> {
                 replace(directories, f.entries); refreshing.value = false
+                noteWorkingSessions() // #165: a session that stopped working while you were elsewhere earns a dot
                 directoriesRev++ // the #145 presence probe checks this to prove the computer answered
                 directoriesLoaded.value = true; daemonOffline = false; listWaitJob?.cancel() // a reply proves the computer is online
                 if (!useRelay) attachedThisSession = true // direct mode: socket + data == attached
@@ -1889,6 +1965,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
                 persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
+                // #165: daemon-authoritative identity for the working set (a fork/lock-heal corrected the id
+                // we opened with, so this — not the optimistic resumeId — is what the switcher remembers)
+                rememberOpenedSession(f.workdir, f.sessionId, chatTitle.value, sessionAgent.value)
                 // SessionGone recovery: the reopen landed — resend the prompt that hit the dead convo. Single
                 // shot: a second SessionGone for the resent prompt takes the honest-error branch, never a loop.
                 // Workdir-matched so a user who navigated elsewhere mid-recovery doesn't get it misdelivered.
@@ -2995,7 +3074,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         messages.add(ChatItem.User(text, ready, pending = true, promptId = promptId, files = sentFiles))
         promptPending = true
         turnStartMark = kotlin.time.TimeSource.Monotonic.markNow()
-        if (chatTitle.value == null && text.isNotBlank()) chatTitle.value = text.take(48) // new session: first prompt becomes the header title
+        if (chatTitle.value == null && text.isNotBlank()) {
+            chatTitle.value = text.take(48) // new session: first prompt becomes the header title
+            // …and the working-set row's label: a brand-new session had no title when SessionLive landed,
+            // so without this it would sit in the switcher under its bare project name forever (#165)
+            rememberOpenedSession(workdir.value, sessionKey.value, chatTitle.value, sessionAgent.value)
+        }
         pendingImages.clear()
         pendingFiles.clear() // landed refs consumed; failed leftovers clear with the send
         promptQueued = streaming.value // a send into a running turn gets QUEUED by the CLI — flavors the ack→turn watchdog
@@ -3578,6 +3662,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         abandonVoice()
     }
 
+    /**
+     * Jump from this chat straight into another project's session (issue #165) — the switcher's whole point
+     * is that this costs one tap instead of a walk back out to the project list and in again.
+     *
+     * [openSession] already reclaims-or-leaves the outgoing conversation on exactly the rule [backToBrowse]
+     * uses (a still-running turn keeps running in the background), so the only extra work here is pointing
+     * the BACK stack at the session we're landing on: without it, backing out of a switched-into session
+     * would drop the user at the project they came FROM, which reads as the switch having been undone.
+     * The caller saves the outgoing draft first — it owns the composer text, same as the back button.
+     */
+    fun switchToSession(item: SessionSwitcherItem) {
+        if (item.current) return // the row is on screen already; a tap that reopens it would just flash
+        sessionsDir.value = item.dirKey
+        listSessions(item.dirKey) // freshen that project's list so the back trip doesn't show the old one's
+        // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with
+        // the authoritative id right after (a fork or lock-heal can hand back a different one), so a
+        // wrong guess self-corrects instead of sticking in the MRU.
+        rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent)
+        openSession(item.dirKey, item.sessionId, title = item.title, agent = item.agent ?: defaultAgent.value)
+    }
+
     /** Leaving the chat or losing the connection invalidates any in-flight capture. */
     private fun abandonVoice() {
         stopCapture(notifyDaemon = false) // the session is going away — an AudioCancel would be moot
@@ -3689,6 +3794,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
+        const val K_WORKING_SET = "working_set_mru"            // SecureStore: TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — cross-project switcher MRU (issue #165)
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<sessionId|convoId|workdir>" → unsent composer text for that conversation
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
