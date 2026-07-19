@@ -709,8 +709,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  table didn't know — a `/model fable` session once pinned the statusline at 100% mid-1M-session).
      *  The rule itself lives in ONE place — [dev.ccpocket.protocol.provenWindow] (daemon announce paths
      *  call it too); this is the phone's defensive re-check against old daemons. Codex sessions
-     *  keep window=null (raw-token display) and are untouched. */
+     *  keep window=null (raw-token display) and are untouched.
+     *
+     *  An explicit user override is EXEMPT (issue #159): the rule infers a window from a declaration we
+     *  guessed, but a hand-typed number isn't a guess — it's the user telling us the answer. Without this
+     *  guard the inference outranks them: type 256000 for a gateway model, cross 256k, and the denominator
+     *  silently becomes 1M — the percentage drops off a cliff and the setting looks broken. That made the
+     *  custom field this issue asked for pointless, since the value it writes wouldn't survive use. */
     private fun upgradeWindowIfProven() {
+        if (contextWindowOverride.value != null) return
         val win = contextWindow.value ?: return
         contextWindow.value = dev.ccpocket.protocol.provenWindow(win, contextUsed.value)
     }

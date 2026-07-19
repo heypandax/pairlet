@@ -83,10 +83,15 @@ object TranscriptScanner {
     }
 
     /**
-     * Context tokens the LAST completed assistant turn left in the window — `input + cache_read +
-     * cache_creation` of its `message.usage` (output isn't in-window yet). Mirrors the live TurnDone
-     * sum so the phone's usage statusline reads the same on resume as mid-session. Null when the file
-     * is absent or no turn carries usage yet.
+     * Context tokens the LAST completed assistant turn left in the window — its `message.usage` summed
+     * through [TokenUsage.contextTokens], i.e. `input + output + cache_read + cache_creation`. Mirrors
+     * the live TurnDone sum so the phone's usage statusline reads the same on resume as mid-session.
+     * Null when the file is absent or no turn carries usage yet.
+     *
+     * (This doc used to say "output isn't in-window yet" and list only three terms, contradicting both
+     * the code below and [TokenUsage.contextTokens]'s own reasoning — the assistant's reply is in the
+     * transcript the next turn replays. The code was right; corrected 2026-07-19 under issue #159
+     * before someone "fixed" the code to match the comment.)
      */
     fun lastContextTokens(file: Path): Long? {
         if (!file.exists()) return null

@@ -17,9 +17,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -430,6 +434,46 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
     )
+}
+
+/**
+ * Free-form token count for the context-window denominator (issue #159), below the 200K/1M segments.
+ *
+ * The desktop settings modal has had this field since the override shipped (515282f, 2026-07-06); mobile
+ * got only the three segments, while [Res.string.context_window_hint] right below promised exactly the
+ * capability the segments couldn't give — "set this when a custom model's real window isn't 200K". A
+ * gateway model with a 128K or 256K window had no way in. That gap IS #159.
+ *
+ * Digits only, capped at 9 (a billion-token window is past any real model, and it keeps the parse total).
+ * Blank / 0 clears back to the segments rather than pinning a nonsense denominator.
+ */
+@Composable
+private fun ContextWindowCustomRow(repo: PocketRepository) {
+    val current = repo.contextWindowOverride.value
+    val isCustom = current != null && current != DEFAULT_CONTEXT_WINDOW && current != LARGE_CONTEXT_WINDOW
+    // NOT keyed on the live value: picking a segment must not wipe digits the user is mid-typing
+    var draft by remember { mutableStateOf(if (isCustom) current.toString() else "") }
+    Row(
+        Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .background(if (isCustom) Tok.raised else Tok.surface)
+            .border(1.dp, if (isCustom) Tok.accent else Tok.hair, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(Res.string.context_window_custom), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        OutlinedTextField(
+            draft,
+            { new ->
+                draft = new.filter(Char::isDigit).take(9)
+                repo.setContextWindowOverride(draft.toLongOrNull()?.takeIf { it > 0 })
+            },
+            placeholder = { Text(stringResource(Res.string.context_window_tokens), color = Tok.muted, fontSize = 12.sp) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
+            modifier = Modifier.width(130.dp),
+        )
+    }
 }
 
 /** Horizontal segmented control: a surface track with equal-width segments; the selected one fills

@@ -224,6 +224,8 @@
     <string name="default_effort_section">默认推理强度</string>
     <string name="context_window_section">上下文窗口</string>
     <string name="context_window_hint">用量状态栏对应的 token 上限。自定义模型真实窗口不是 200K 时在此设置（CLI 无法自动上报）。</string>
+    <string name="context_window_custom">自定义</string>
+    <string name="context_window_tokens">token 数</string>
     <string name="text_size_section">字体大小</string>
     <string name="text_size_sample">示例消息文字 Sample 123</string>
     <string name="appearance_section">外观</string>
