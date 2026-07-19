@@ -222,7 +222,11 @@ fun App(scope: CoroutineScope) {
                         else -> Box(Modifier.fillMaxSize()) {
                             ConnectionGate(repo) {
                                 when {
-                                    repo.convoId.value != null -> ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
+                                    // switchingSession keeps the chat mounted across a chat→chat switch:
+                                    // openSession nulls convoId while it waits for the daemon, and without
+                                    // this the switcher bounced you out to a session list for a beat (#165)
+                                    repo.convoId.value != null || repo.switchingSession.value ->
+                                        ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
                                     repo.sessionsDir.value != null -> SessionsScreen(repo)
                                     else -> DirectoryScreen(repo, onOpenFleet = { fleetOpen = true })
                                 }
@@ -1255,7 +1259,10 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
     val listState = rememberLazyListState()
     // stick to the bottom only while the user is there ("pinned"); scrolling up unpins and shows
     // the Jump-to-latest pill instead of yanking the viewport down on every streamed chunk.
-    var pinned by rememberBottomPinned(listState)
+    // Keyed on the conversation (as the desktop pane always was): the switcher (#165) made chat→chat
+    // possible without remounting, so an un-keyed pinned carried the PREVIOUS session's "user scrolled
+    // up" over to the next one — which then opened parked mid-transcript instead of at the latest.
+    var pinned by rememberBottomPinned(listState, repo.convoId.value)
     // the Jump-to-latest scroll must survive the pill leaving composition. The pill's onClick sets
     // pinned=true, and that same recomposition removes the `if (!pinned)` block below — a
     // rememberCoroutineScope declared INSIDE that block is cancelled the instant it's forgotten,

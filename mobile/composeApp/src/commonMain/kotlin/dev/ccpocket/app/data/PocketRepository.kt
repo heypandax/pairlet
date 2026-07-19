@@ -747,6 +747,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val opening = mutableStateOf(false)                      // an OpenSession is in flight — one-tap entries disable on it (a double-tap would open two fresh sessions)
+    // A chat→chat switch is in flight (issue #165). [openSession] nulls convoId while it waits for the
+    // daemon, and the router falls to the session LIST whenever convoId is null — so without this the
+    // switcher visibly bounced you out to a list for a beat before landing. Cleared wherever [opening] is.
+    val switchingSession = mutableStateOf(false)
     val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
     val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
@@ -1654,7 +1658,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         workdir.value = null // same reason as disconnect(): a stale path must not leak into a later ⌘N (issue #56)
         sessionsDir.value = null; sessions.clear()
         chatTitle.value = null; observing.value = false; streaming.value = false
-        opening.value = false; openTimedOut.value = false; switching.value = false
+        opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
         autoFocusComposer.value = false
         pendingAsk.value = null
         messages.clear(); pendingImages.clear()
@@ -1986,7 +1990,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     streaming.value = exec
                 }
                 switching.value = false
-                opening.value = false // the open (or reattach) landed
+                opening.value = false; switchingSession.value = false // the open (or reattach) landed
                 openTimedOut.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
                 f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
@@ -2098,7 +2102,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // open chat is an UNRELATED session whose transcript must not absorb the error line.
                 renameError.value = renameTarget?.let { RenameRefusal(it, f.message) }
             } else {
-                opening.value = false // a failed open re-enables the one-tap entries right away
+                // …and a failed switch must release the router, or the chat would hold an empty screen
+                opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
@@ -2881,6 +2886,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         delay(8000) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
             opening.value = false
+            // …and release the router too (issue #165): a switch that never landed must fall back to the
+            // session list rather than strand the user on a chat that will never fill
+            switchingSession.value = false
             openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
         }
     }
@@ -3700,6 +3708,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      */
     fun switchToSession(item: SessionSwitcherItem) {
         if (item.current) return // the row is on screen already; a tap that reopens it would just flash
+        // hold the chat on screen across the round trip — see [switchingSession]. Only when we're actually
+        // IN a chat: switching from the project list should keep showing the list, as it always has.
+        switchingSession.value = convoId.value != null
         sessionsDir.value = item.dirKey
         listSessions(item.dirKey) // freshen that project's list so the back trip doesn't show the old one's
         // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with

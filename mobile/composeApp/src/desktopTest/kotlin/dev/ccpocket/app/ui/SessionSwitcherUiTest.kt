@@ -92,7 +92,57 @@ class SessionSwitcherUiTest {
         // out of a switched-into session reads as the switch having been undone
         assertEquals("/w/relay", repo.sessionsDir.value)
         assertEquals("s-relay", repo.sessionKey.value) // and the chat adopted the target's identity
+        // the switch RELEASES the router once it lands. A stuck flag would strand the user on a chat
+        // that never fills, with no way back — the dangerous half of holding the screen (issue #165)
+        assertTrue(!repo.switchingSession.value, "a landed switch must release the router")
     }
+
+    /**
+     * The router shows the session LIST whenever convoId is null, and [PocketRepository.openSession] nulls
+     * it while it waits for the daemon. Shipped that way, the switcher visibly bounced you out to a list
+     * for a beat on the way to the session you tapped. The chat has to stay mounted across the round trip.
+     */
+    @Test
+    fun switchingHoldsTheChatInsteadOfBouncingOutToTheList() = runComposeUiTest {
+        lateinit var repo: PocketRepository
+        setContent {
+            val scope = rememberCoroutineScope()
+            // NOT demo: nothing answers, so the in-flight window stays open to be observed
+            repo = remember {
+                PocketRepository(scope, account("acct-hold")).apply {
+                    directories.add(liveDir("/w/relay", "s-relay", "Fix flaky retry backoff"))
+                    workdir.value = "/w/pocket"; sessionKey.value = "s-pocket"; convoId.value = "c1"
+                    chatTitle.value = "Refactor auth module"
+                }
+            }
+            PocketTheme { }
+        }
+        waitForIdle()
+        val target = repo.workingSet().running.first { it.sessionId == "s-relay" }
+        repo.switchToSession(target)
+        // convoId is null mid-flight (openSession cleared it) — the flag is what keeps the router on chat
+        assertTrue(repo.switchingSession.value, "an in-flight switch must hold the chat")
+    }
+
+    /** Switching from the project LIST has no chat to hold — the router must keep showing the list. */
+    @Test
+    fun switchingFromTheListDoesNotClaimAChat() = runComposeUiTest {
+        lateinit var repo: PocketRepository
+        setContent {
+            val scope = rememberCoroutineScope()
+            repo = remember {
+                PocketRepository(scope, account("acct-fromlist")).apply {
+                    directories.add(liveDir("/w/relay", "s-relay", "Fix flaky retry backoff"))
+                    sessionsDir.value = "/w/pocket" // standing on a list, no conversation open
+                }
+            }
+            PocketTheme { }
+        }
+        waitForIdle()
+        repo.switchToSession(repo.workingSet().running.first())
+        assertTrue(!repo.switchingSession.value, "no chat was on screen, so none should be held")
+    }
+
     @Test
     fun theCurrentSessionIsNotOfferedAsSomewhereToGo() = runComposeUiTest {
         lateinit var set: SessionWorkingSet
