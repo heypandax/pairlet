@@ -482,10 +482,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // remembered locally (the daemon's list only knows what is alive). Same client-side, dependency-free
     // storage the pins use; all the rules live in SessionWorkingSet.kt as pure functions.
 
-    /** Sessions this device opened, newest first, capped at [WORKING_SET_MAX]. Persisted. */
-    private val workingSetMru = mutableStateListOf<WorkingSetEntry>().also {
-        it.addAll(decodeWorkingSet(SecureStore.getString(K_WORKING_SET)))
-    }
+    /**
+     * Sessions this device opened, newest first, capped at [WORKING_SET_MAX]. Persisted PER COMPUTER: a row
+     * names its session by path + id on one machine, so carrying the list across a machine switch would
+     * offer rows that open nothing there. Loaded by [loadWorkingSet] once [paired] exists (this property is
+     * declared before it) and again on every switch.
+     */
+    private val workingSetMru = mutableStateListOf<WorkingSetEntry>()
+
+    private fun workingSetKey(accountId: String? = paired.value?.accountId) = accountId?.let { K_WORKING_SET_PREFIX + it }
+
+    /** (Re)point the switcher's memory at [accountId]'s sessions. */
+    private fun loadWorkingSet(accountId: String? = paired.value?.accountId) = replace(
+        workingSetMru,
+        workingSetKey(accountId)?.let { decodeWorkingSet(SecureStore.getString(it)) } ?: emptyList(),
+    )
 
     /** Sessions that finished while the user was looking at something ELSE — the switcher's attention
      *  dot. Cleared per-session on open; per-machine (a disconnect/switch drops them, see [disconnect]). */
@@ -533,7 +544,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         replace(workingSetMru, mruTouch(workingSetMru.toList(), entry))
         // the demo walks fake projects — it may drive the switcher, but it must never write them into
         // the real store (same rule the rest of demo mode follows: no persistence, no network)
-        if (!demoMode.value) SecureStore.putString(K_WORKING_SET, encodeWorkingSet(workingSetMru.toList()))
+        if (!demoMode.value) workingSetKey()?.let { SecureStore.putString(it, encodeWorkingSet(workingSetMru.toList())) }
         if (sessionId in unseenSessions.value) unseenSessions.value = unseenSessions.value - sessionId
     }
 
@@ -902,6 +913,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 sessionParams[t[0]] = SessionParams(PermissionMode.valueOf(t[1]), t[2].ifEmpty { null }, t[3].ifEmpty { null }, AgentKind.valueOf(t[4]))
             }
         }
+        loadWorkingSet() // #165: keyed on [paired], which only exists this far down the constructor
     }
 
     private fun persistSessionParams() {
@@ -1574,6 +1586,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         disconnect()
         paired.value = target
         shareEnded.value = loadShareEnded(target.accountId) // per-account guest ending follows the switch
+        loadWorkingSet(target.accountId) // #165: and so does the switcher's memory — see [workingSetMru]
         Pairing.setActive(target.accountId)
         firstTicket = null // an already-paired daemon authenticates by static key — the PSK is only for first pair
         startRelay()
@@ -1601,7 +1614,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         fontScale.value = from.fontScale.value
         themeMode.value = from.themeMode.value
         replace(pinnedPaths, from.pinnedPaths.toList())
-        replace(workingSetMru, from.workingSetMru.toList()) // #165: same reason — an in-memory mirror of a persisted store
+        // #165: NOT copied from the outgoing primary — the working set is per-computer, and this promote is
+        // precisely the moment the machine changes. Load this satellite's own instead.
+        loadWorkingSet()
         sessionParams.clear(); sessionParams.putAll(from.sessionParams)
         replace(pairedList, from.pairedList.toList())
         // freshen this binding's own copy too (pinned at construction — a rename/hostName/directUrl learned
@@ -3794,7 +3809,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
-        const val K_WORKING_SET = "working_set_mru"            // SecureStore: TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — cross-project switcher MRU (issue #165)
+        const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)
         const val K_DRAFT_PREFIX = "draft:"                    // SecureStore: "draft:<sessionId|convoId|workdir>" → unsent composer text for that conversation
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
