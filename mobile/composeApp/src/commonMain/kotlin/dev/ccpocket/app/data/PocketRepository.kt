@@ -426,9 +426,37 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
      *  the model-derived / daemon-reported window. Exists because the CLI never reports a CUSTOM model's real
-     *  window, so [contextWindowFor] falls back to 200k and the % reads wrong (issue #60). Global — one value for
-     *  every session — and applied AHEAD of the daemon's SessionLive.contextWindow, which for Claude is never null. */
+     *  window, so [contextWindowFor] falls back to 200k and the % reads wrong (issue #60). Applied AHEAD of the
+     *  daemon's SessionLive.contextWindow, which for Claude is never null.
+     *
+     *  FALLBACK TIER (issue #169): this is one value for EVERY model, which is wrong on its face — a window is a
+     *  property of the model, not of the phone. Run a 256k gateway model and an official 200k Sonnet side by side
+     *  and one of them is always measured against the other's denominator. [contextWindowOverrides] is the
+     *  per-model answer and wins where it has an entry; this stays as the catch-all so the value existing users
+     *  already typed keeps working untouched (no migration, no silent loss of a setting they can't see move). */
     val contextWindowOverride = mutableStateOf(SecureStore.getString(K_CONTEXT_WINDOW_OVERRIDE)?.toLongOrNull())
+
+    /** Persisted PER-MODEL context-window overrides: normalized model id → tokens (issue #169). Keyed the same way
+     *  [contextWindowFor] normalizes (trim + lowercase) so "DeepSeek-Chat" and "deepseek-chat" are one entry.
+     *  Beats [contextWindowOverride]; absent entry falls through to it. */
+    val contextWindowOverrides = mutableStateMapOf<String, Long>().also { m ->
+        SecureStore.getString(K_CONTEXT_WINDOW_OVERRIDES).orEmpty().lineSequence().forEach { line ->
+            val tab = line.indexOf('\t')
+            if (tab <= 0) return@forEach // blank line or malformed — skip rather than poison the whole map
+            val id = modelKey(line.substring(0, tab)) ?: return@forEach
+            val tokens = line.substring(tab + 1).toLongOrNull()?.takeIf { it > 0 } ?: return@forEach
+            m[id] = tokens
+        }
+    }
+
+    /** Normalizer for [contextWindowOverrides] keys. Mirrors how [contextWindowFor] folds an id (trim + lowercase)
+     *  so the override table and the window table agree on what counts as "the same model". Blank → null (no key). */
+    private fun modelKey(model: String?): String? = model?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+
+    /** The denominator the user pinned for [model], most-specific first: a per-model entry beats the legacy
+     *  catch-all. Null = no override, follow the daemon/model-derived window. */
+    fun contextWindowOverrideFor(model: String?): Long? =
+        modelKey(model)?.let { contextWindowOverrides[it] } ?: contextWindowOverride.value
 
     /** Persisted default agent backend for NEW sessions (Claude unless the user switched to Codex). Resumed
      *  sessions keep their own backend (the picker only seeds new ones). */
@@ -717,9 +745,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  silently becomes 1M — the percentage drops off a cliff and the setting looks broken. That made the
      *  custom field this issue asked for pointless, since the value it writes wouldn't survive use. */
     private fun upgradeWindowIfProven() {
-        if (contextWindowOverride.value != null) return
+        // #169: the exemption follows the EFFECTIVE override for the running model, not a single global flag —
+        // otherwise a value typed for model A would also suppress the upgrade while model B is running.
+        if (contextWindowOverrideFor(model.value) != null) return
         val win = contextWindow.value ?: return
         contextWindow.value = dev.ccpocket.protocol.provenWindow(win, contextUsed.value)
+    }
+
+    /** Re-derive the live statusline denominator from the current model + overrides, then let the proven-window
+     *  rule have its say. Shared by both override setters so a mid-session change shows up immediately instead of
+     *  waiting for the next SessionLive/relaunch (issue #60), and so the derive order lives in ONE place. */
+    private fun reapplyContextWindow() {
+        if (convoId.value == null) return
+        val claudeish = (sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+        contextWindow.value = contextWindowOverrideFor(model.value)
+            ?: (if (claudeish) contextWindowFor(model.value) else null)
+        upgradeWindowIfProven()
     }
     val backgroundJobs = mutableStateListOf<BackgroundJob>() // bg shells / sub-agents / monitors the daemon is tracking
 
@@ -1223,14 +1264,24 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (v == contextWindowOverride.value) return
         contextWindowOverride.value = v
         SecureStore.putString(K_CONTEXT_WINDOW_OVERRIDE, v?.toString() ?: "")
-        // reflect on the live statusline immediately — mirror SessionLive's derive + proven-window upgrade so a
-        // mid-session change isn't invisible until reopen (clearing falls back to the model-derived window, which
-        // for a Claude session equals the daemon's value; a custom id resolves to 200k either way)
-        if (convoId.value != null) {
-            val claudeish = (sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
-            contextWindow.value = v ?: (if (claudeish) contextWindowFor(model.value) else null)
-            upgradeWindowIfProven() // keep the proven-window rule in ONE place instead of re-inlining provenWindow
-        }
+        reapplyContextWindow()
+    }
+
+    /** Settings: pin the denominator for ONE model (issue #169; tokens null or ≤0 = drop the entry and fall back to
+     *  the catch-all / derived window). This is the write path that knows what it is measuring — a window belongs to
+     *  a model, so two sessions on different models no longer share one number. No-op without a model to key on:
+     *  silently writing to the catch-all instead would recreate the exact bleed this replaces. */
+    fun setContextWindowOverrideFor(model: String?, tokens: Long?) {
+        val key = modelKey(model) ?: return
+        val v = tokens?.takeIf { it > 0 }
+        if (v == contextWindowOverrides[key]) return
+        if (v == null) contextWindowOverrides.remove(key) else contextWindowOverrides[key] = v
+        SecureStore.putString(
+            K_CONTEXT_WINDOW_OVERRIDES,
+            // sorted so the stored blob is stable across writes (diffable, and no spurious keychain churn)
+            contextWindowOverrides.entries.sortedBy { it.key }.joinToString("\n") { "${it.key}\t${it.value}" },
+        )
+        reapplyContextWindow()
     }
 
     /** Settings: persist the default agent backend that new sessions start under. */
@@ -1629,6 +1680,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultEffort.value = from.defaultEffort.value
         defaultModel.value = from.defaultModel.value
         contextWindowOverride.value = from.contextWindowOverride.value
+        contextWindowOverrides.clear(); contextWindowOverrides.putAll(from.contextWindowOverrides) // #169: per-model table travels with the rest of Settings
         defaultAgent.value = from.defaultAgent.value
         agentFilter.value = from.agentFilter.value
         treeView.value = from.treeView.value
@@ -1984,8 +2036,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // null instead, and the UI shows raw tokens without a denominator
                 val claudeish = liveAgent == AgentKind.CLAUDE
                 // the user's override wins over the daemon's value (for Claude, f.contextWindow is never null and
-                // would otherwise pin a custom model at the CLI's 200k fallback — issue #60)
-                contextWindow.value = contextWindowOverride.value ?: f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
+                // would otherwise pin a custom model at the CLI's 200k fallback — issue #60). Resolved against the
+                // model THIS session is running (#169), so switching sessions switches denominators with it.
+                contextWindow.value = contextWindowOverrideFor(f.model ?: model.value) ?: f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
                 // seed the usage statusline on resume (before the first new turn). Only when we have no
                 // value yet — a TurnDone this session is fresher than the daemon's transcript snapshot.
                 if (contextUsed.value == null) f.contextUsed?.let { contextUsed.value = it }
@@ -3833,7 +3886,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
         const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: model id for new Claude sessions ("" = CLI default)
-        const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: statusline denominator in tokens ("" = follow derived window)
+        const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
+        const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
         const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
