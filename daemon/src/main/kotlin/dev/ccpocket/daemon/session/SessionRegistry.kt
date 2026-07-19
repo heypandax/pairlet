@@ -132,7 +132,13 @@ class SessionRegistry(
      *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
      *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
      *  PermissionBridge denies any Read/Write/Edit whose target escapes them; null = unrestricted (owner). */
-    suspend fun open(open: OpenSession, sink: OutboundSink, origin: String? = null, pathScope: List<String>? = null): String {
+    suspend fun open(
+        open: OpenSession,
+        sink: OutboundSink,
+        origin: String? = null,
+        pathScope: List<String>? = null,
+        peerSupportsOpencode: Boolean = true,
+    ): String {
         val resume = open.resumeId
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
@@ -142,6 +148,18 @@ class SessionRegistry(
                 convos.values.firstOrNull { it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume) }
             }
             if (live != null) {
+                // The reattach match is by resumeId ALONE — `open.agent` is deliberately not consulted, so
+                // a client that guessed the agent wrong still lands on the right conversation. That makes
+                // this the choke point for the wire-compat gate: reattaching a peer that cannot decode
+                // AgentKind.OPENCODE would answer with a SessionLive it drops whole, leaving a session
+                // that reports itself open while every push vanishes. Refuse with something readable
+                // instead — and refuse HERE, so any future path that hands such a client an opencode
+                // session id is covered too.
+                if (live.kind == AgentKind.OPENCODE && !peerSupportsOpencode) {
+                    log.info("open ${resume.take(8)}… → refused: opencode session, peer never declared support")
+                    sink.emit(PocketError("agent_unavailable", "update the app to open OpenCode sessions"))
+                    return ""
+                }
                 log.info("open ${resume.take(8)}… → reattach ${live.convoId.take(8)}…")
                 cancelPendingClose(live.convoId); live.reattach(sink, open.lastEventSeq); return live.convoId
             }

@@ -1,5 +1,10 @@
 package dev.ccpocket.protocol
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlin.test.assertFailsWith
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlin.test.Test
@@ -493,6 +498,49 @@ class SerializationRoundTripTest {
         )
         // the whole-frame path: an envelope carrying a KNOWN agent round-trips unchanged
         assertEquals(sessions, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(sessions)))
+    }
+
+    /**
+     * The test above pins what a peer built from THIS release forward does. It cannot speak for the
+     * peers actually in the field, because it decodes with the current `AgentKind` — which knows
+     * `"opencode"`, so nothing is unknown to it and no coercion is exercised.
+     *
+     * This one replicates a shipped v1.4.0 peer properly: an enum WITHOUT the new constant, decoded by a
+     * Json WITHOUT `coerceInputValues` (that flag is new in this release — the builds already installed
+     * do not have it). It asserts the decode HARD-FAILS, which is the entire reason `ClientCaps` exists.
+     * Note `SessionLive.agent` being nullable does NOT rescue it, and the failure takes the whole
+     * Envelope with it — every ingress wraps decode in `runCatching{}.getOrNull()`, so the user's
+     * symptom is a silently vanished frame, not an error.
+     *
+     * If this ever stops throwing, the capability gate has become dead weight and can be retired.
+     */
+    @Serializable
+    private enum class LegacyAgentKind {
+        @SerialName("claude") CLAUDE,
+        @SerialName("codex") CODEX,
+    }
+
+    @Serializable
+    private data class LegacySessionLive(val convoId: String, val agent: LegacyAgentKind? = null)
+
+    @Test
+    fun a_peer_shipped_before_this_release_hard_fails_on_the_new_agent_value() {
+        // v1.4.0's Json: lenient + ignoreUnknownKeys, but NO coerceInputValues
+        val legacyJson = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
+
+        assertFailsWith<SerializationException> {
+            legacyJson.decodeFromString<LegacySessionLive>("""{"convoId":"c1","agent":"opencode"}""")
+        }
+        // nullability is not a rescue: the field being `AgentKind?` does not make an unknown value null
+        assertFailsWith<SerializationException> {
+            legacyJson.decodeFromString<LegacySessionLive>("""{"convoId":"c1","agent":"opencode"}""")
+        }
+        // and a value it DOES know still decodes — the failure is specific to the new constant, not
+        // to the shape, so the gate only has to withhold opencode rows rather than the whole message
+        assertEquals(
+            LegacySessionLive("c1", LegacyAgentKind.CLAUDE),
+            legacyJson.decodeFromString<LegacySessionLive>("""{"convoId":"c1","agent":"claude"}"""),
+        )
     }
 
     @Test

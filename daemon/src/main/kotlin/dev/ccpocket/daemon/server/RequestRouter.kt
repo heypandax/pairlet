@@ -109,6 +109,41 @@ class RequestRouter(
         @Volatile var supportsOpencode: Boolean = false
     }
 
+    companion object {
+        /**
+         * [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
+         * enrichment carries [AgentKind] — strip the opencode entries, keep the row.
+         *
+         * The SCALARS must be recomputed with them, not just the list. [DirectoryService] fills
+         * `activeSessionId` / `activeSessionTitle` / `gitBranch` / `open` / `executing` from
+         * `live.firstOrNull()` regardless of agent, so filtering the list alone left an old client holding
+         * `open=true` + an opencode `activeSessionId` + an EMPTY list. It rendered a live row; tapping it
+         * resolved the agent off the empty list (→ CLAUDE by default) and sent `OpenSession(resumeId=<the
+         * opencode session>, agent=CLAUDE)`. The registry reattaches on resumeId alone, so the daemon
+         * happily answered with a `SessionLive` carrying `agent="opencode"` — which that client cannot
+         * decode, dropping the whole frame. Net effect: a row that says "running", taps that do nothing
+         * forever, no error anywhere, and a registered sink that keeps dropping every later push.
+         *
+         * So: when nothing survives the filter, the row must look exactly like a row with no live session.
+         */
+        internal fun filterDirs(entries: List<DirectoryEntry>, caps: ClientCapsHolder?): List<DirectoryEntry> =
+            if (caps?.supportsOpencode == true) entries
+            else entries.map { e ->
+                if (e.activeSessions.none { it.agent == AgentKind.OPENCODE }) return@map e
+                val kept = e.activeSessions.filter { it.agent != AgentKind.OPENCODE }
+                val first = kept.firstOrNull()
+                e.copy(
+                    activeSessions = kept,
+                    // derive from what SURVIVED — never from the stripped-out session
+                    open = first != null,
+                    executing = kept.any { it.executing },
+                    activeSessionId = first?.sessionId,
+                    activeSessionTitle = first?.title,
+                    gitBranch = first?.gitBranch,
+                )
+            }
+    }
+
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
      *  it clamps the project/session VISIBILITY to the shared root + the guest's own sessions, and rides
@@ -224,7 +259,11 @@ class RequestRouter(
                         dirs.noteRecent(wd.toString())
                         // pathScope = the guest's roots → the conversation's PermissionBridge denies any
                         // Read/Write/Edit whose target lands outside them (issue #115 §4). Null for an owner.
-                        val convoId = registry.open(frame.copy(workdir = wd.toString()), sink, origin, pathScope = guestScope?.roots)
+                        val convoId = registry.open(
+                            frame.copy(workdir = wd.toString()), sink, origin, pathScope = guestScope?.roots,
+                            // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
+                            peerSupportsOpencode = caps?.supportsOpencode == true,
+                        )
                         if (convoId.isNotEmpty()) onOpened(convoId) // "" = backend unavailable (PocketError already sent)
                     }
                 }
@@ -351,15 +390,6 @@ class RequestRouter(
     // ── ClientCaps filters: strip agent=OPENCODE rows for peers that never declared support, so an
     // already-shipped build (unknown-enum decode = whole-frame drop) keeps its claude/codex lists ──
 
-    /** [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
-     *  enrichment carries [AgentKind] — strip the opencode entries, keep the row. */
-    private fun filterDirs(entries: List<DirectoryEntry>, caps: ClientCapsHolder?): List<DirectoryEntry> =
-        if (caps?.supportsOpencode == true) entries
-        else entries.map { e ->
-            if (e.activeSessions.any { it.agent == AgentKind.OPENCODE }) {
-                e.copy(activeSessions = e.activeSessions.filter { it.agent != AgentKind.OPENCODE })
-            } else e
-        }
 
     private fun filterSchedule(state: ScheduleState, caps: ClientCapsHolder?): ScheduleState =
         if (caps?.supportsOpencode == true || state.items.none { it.agent == AgentKind.OPENCODE }) state
