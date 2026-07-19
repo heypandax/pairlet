@@ -32,8 +32,8 @@ object WhisperTranscriber {
         "sudo apt install ffmpeg / sudo dnf install ffmpeg; macOS ships afconvert built-in)"
     val MSG_MODEL = "whisper model missing — run on the computer:\n" +
         "mkdir -p ~/.cache/cc-pocket/models && curl -L " +
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin " +
-        "-o ~/.cache/cc-pocket/models/ggml-small.bin"
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin " +
+        "-o ~/.cache/cc-pocket/models/ggml-large-v3-turbo-q5_0.bin"
 
     private val log = logger("Whisper")
 
@@ -54,14 +54,22 @@ object WhisperTranscriber {
         }
     }
 
-    /** Find a ggml model: prefer small, then any; `~/.cache/cc-pocket/models` first, then whisper's own cache. */
+    /**
+     * Find a ggml model: best quality tier wins (large-v3-turbo beats small at mixed-language
+     * speech by a wide margin); `~/.cache/cc-pocket/models` first, then whisper's own cache.
+     */
     fun resolveModel(home: Path = Path.of(System.getProperty("user.home"))): Path? {
         val dirs = listOf(home.resolve(".cache/cc-pocket/models"), home.resolve(".cache/whisper"))
         val models = dirs.filter { it.isDirectory() }.flatMap { dir ->
             runCatching { dir.listDirectoryEntries("ggml-*.bin") }.getOrDefault(emptyList())
         }
-        return models.firstOrNull { it.name == "ggml-small.bin" } ?: models.firstOrNull()
+        return models.minByOrNull { m ->
+            MODEL_RANK.indexOfFirst { m.name.contains(it) }.let { if (it < 0) MODEL_RANK.size else it }
+        }
     }
+
+    // quality order; "large-v3-turbo" must precede "large" so the substring match hits the right tier
+    private val MODEL_RANK = listOf("large-v3-turbo", "large", "medium", "small", "base", "tiny")
 
     /**
      * Whisper initial prompt: project terms the daemon knows (dir name, git branch, top-level names)
@@ -69,8 +77,9 @@ object WhisperTranscriber {
      *
      * The terms are wrapped in a fully-punctuated Chinese sentence, not emitted as a bare list:
      * whisper mimics the prompt's style, and an unpunctuated prompt yields unpunctuated transcripts
-     * (worst for Chinese with the small model). The mixed zh/EN sentence also matches how users
-     * actually dictate (Chinese speech with embedded code terms).
+     * (worst for Chinese with the small model). The sentence explicitly demonstrates code-switching
+     * (Chinese prose with embedded English terms, plus an instruction to keep English as-is) —
+     * without that exemplar whisper tends to drop or phoneticize English words in Chinese speech.
      */
     fun buildPrompt(workdir: Path?): String {
         if (workdir == null) return ""
@@ -86,7 +95,10 @@ object WhisperTranscriber {
                 .sorted()
                 .forEach { terms.add(it) }
         }
-        val intro = "以下是 ${workdir.name} 项目的开发口述"
+        SEED_TERMS.forEach { terms.add(it) }
+        // the "一律…不音译" instruction plus a spoken-style exemplar is load-bearing: without it whisper
+        // writes embedded English as Chinese loanwords (spoken "hello hello" → 「哈喽哈喽」, verified)
+        val intro = "以下是 ${workdir.name} 项目的中英混合开发口述，英文单词一律保留英文原文不音译，例如：hello，帮我 review 一下这个 function"
         val overhead = intro.length + "，可能提到 ".length + " 等术语。".length
         val list = StringBuilder()
         for (t in terms) {
@@ -111,6 +123,9 @@ object WhisperTranscriber {
         return null
     }
 
+    /** brew's whisper-cpp also ships `whisper-server`; absent = resident mode unavailable, cli only. */
+    fun resolveServerBin(): Path? = resolveOnPath("whisper-server")
+
     /** Find an executable named [name] on PATH or in the well-known fallback dirs. */
     private fun resolveOnPath(name: String): Path? {
         val candidates = LinkedHashSet<Path>()
@@ -123,10 +138,23 @@ object WhisperTranscriber {
         }
     }
 
-    /** whisper-cli argv. `-otxt -of` writes a deterministic .txt next to [outBase]; stdout is noise. */
-    fun buildArgs(model: Path, wav: Path, outBase: Path, prompt: String): List<String> = buildList {
+    /**
+     * whisper-cli argv. `-otxt -of` writes a deterministic .txt next to [outBase]; stdout is noise.
+     *
+     * Language defaults to auto-detect but honors `CC_POCKET_WHISPER_LANG` (e.g. `zh`): auto-detect
+     * looks only at the opening of the capture, so a mixed-language utterance that *starts* with an
+     * English term can lock the whole clip to English and garble the rest — pinning the primary
+     * language keeps embedded foreign words intact while fixing the base language.
+     */
+    fun buildArgs(
+        model: Path,
+        wav: Path,
+        outBase: Path,
+        prompt: String,
+        lang: String = System.getenv("CC_POCKET_WHISPER_LANG")?.trim()?.takeIf { it.isNotEmpty() } ?: "auto",
+    ): List<String> = buildList {
         add("-m"); add(model.toString())
-        add("-l"); add("auto")
+        add("-l"); add(lang)
         add("--no-timestamps")
         add("-np")
         add("-otxt")
@@ -166,10 +194,18 @@ object WhisperTranscriber {
                     if (conv != 0) return@withContext TranscribeResult.Err("convert_failed", "audio conversion failed (converter exit $conv)")
                 }
 
+                val prompt = buildPrompt(workdir)
+                val lang = System.getenv("CC_POCKET_WHISPER_LANG")?.trim()?.takeIf { it.isNotEmpty() } ?: "auto"
+
+                // fast path: resident whisper-server keeps the model loaded across a dictation burst
+                WhisperServer.transcribe(Files.readAllBytes(wav), model, prompt, lang)?.let {
+                    return@withContext TranscribeResult.Ok(cleanTranscript(it))
+                }
+
                 val outBase = tmp.resolve("out")
                 val t0 = System.currentTimeMillis()
                 val exit = runProcess(
-                    buildList { add(whisper.toString()); addAll(buildArgs(model, wav, outBase, buildPrompt(workdir))) },
+                    buildList { add(whisper.toString()); addAll(buildArgs(model, wav, outBase, prompt, lang)) },
                     WHISPER_TIMEOUT_S,
                 )
                 log.info("whisper exit=$exit in ${System.currentTimeMillis() - t0}ms")
@@ -202,8 +238,11 @@ object WhisperTranscriber {
     }
 
     private val BRACKET_ONLY = Regex("""^[\[(][^\[\]()]*[])]$""")
+    // spoken-often proper nouns whisper otherwise phoneticizes (observed: "Whisper"→"Visper", "iOS"→"RS");
+    // appended after the project's own terms so the cap spends its budget on project vocabulary first
+    private val SEED_TERMS = listOf("iOS", "Whisper", "GitHub", "API")
     private const val MAX_PROMPT = 200
     private const val CONVERT_TIMEOUT_S = 15L
-    private const val WHISPER_TIMEOUT_S = 60L
+    internal const val WHISPER_TIMEOUT_S = 60L
     private const val EXIT_TIMEOUT = Int.MIN_VALUE
 }

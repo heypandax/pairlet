@@ -185,6 +185,9 @@
     <string name="mic_body">cc-pocket 使用麦克风进行语音输入。音频仅用于转写本条消息，不会被录制或存储。</string>
     <string name="open_settings">打开设置</string>
     <string name="not_now">暂不</string>
+    <string name="voice_section">语音输入</string>
+    <string name="voice_use_whisper">用电脑 Whisper 识别</string>
+    <string name="voice_use_whisper_sub">中英混说更准；说完后录音发到电脑识别，没有逐字实时预览。</string>
     <string name="voice_no_speech">没有听到语音</string>
     <string name="voice_record_failed">无法开始录音</string>
     <string name="voice_daemon_unreachable">无法连接守护进程，请检查连接</string>

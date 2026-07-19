@@ -28,6 +28,12 @@ class WhisperTranscriberTest {
     }
 
     @Test
+    fun buildArgs_honors_pinned_language() {
+        val args = WhisperTranscriber.buildArgs(Path.of("/m"), Path.of("/w"), Path.of("/o"), "", lang = "zh")
+        assertEquals("zh", args[args.indexOf("-l") + 1])
+    }
+
+    @Test
     fun buildArgs_omits_empty_prompt() {
         val args = WhisperTranscriber.buildArgs(Path.of("/m"), Path.of("/w"), Path.of("/o"), "")
         assertTrue("--prompt" !in args)
@@ -43,7 +49,11 @@ class WhisperTranscriberTest {
         wd.resolve("daemon").createDirectories()
         wd.resolve("README.md").writeText("x")
         val p = WhisperTranscriber.buildPrompt(wd)
-        assertEquals("以下是 cc-pocket 项目的开发口述，可能提到 feat-voice、README.md、daemon 等术语。", p)
+        assertEquals(
+            "以下是 cc-pocket 项目的中英混合开发口述，英文单词一律保留英文原文不音译，例如：hello，帮我 review 一下这个 function，" +
+                "可能提到 feat-voice、README.md、daemon、iOS、Whisper、GitHub、API 等术语。",
+            p,
+        )
     }
 
     @Test
@@ -60,7 +70,11 @@ class WhisperTranscriberTest {
         wd.resolve(".git").createDirectories()
         wd.resolve(".git/HEAD").writeText("0123456789abcdef0123456789abcdef01234567\n") // detached: no ref line
         val p = WhisperTranscriber.buildPrompt(wd)
-        assertEquals("以下是 p 项目的开发口述。", p) // term list collapses; no crash, no hash leaked
+        assertEquals(
+            "以下是 p 项目的中英混合开发口述，英文单词一律保留英文原文不音译，例如：hello，帮我 review 一下这个 function，" +
+                "可能提到 iOS、Whisper、GitHub、API 等术语。",
+            p,
+        ) // project terms collapse to just the seeds; no crash, no hash leaked
     }
 
     // ── transcript cleanup ──────────────────────────────────────
@@ -103,7 +117,7 @@ class WhisperTranscriberTest {
     }
 
     @Test
-    fun resolveModel_prefers_small_then_any_then_null() {
+    fun resolveModel_prefers_best_quality_tier_then_any_then_null() {
         val home = tmp()
         assertNull(WhisperTranscriber.resolveModel(home))
         val models = home.resolve(".cache/cc-pocket/models").createDirectories()
@@ -111,5 +125,11 @@ class WhisperTranscriberTest {
         assertEquals("ggml-tiny.bin", WhisperTranscriber.resolveModel(home)?.fileName?.toString())
         Files.writeString(models.resolve("ggml-small.bin"), "x")
         assertEquals("ggml-small.bin", WhisperTranscriber.resolveModel(home)?.fileName?.toString())
+        Files.writeString(models.resolve("ggml-large-v3-turbo-q5_0.bin"), "x")
+        assertEquals("ggml-large-v3-turbo-q5_0.bin", WhisperTranscriber.resolveModel(home)?.fileName?.toString())
+        // unknown names still resolve (rank below every known tier, above nothing)
+        val only = tmp().also { it.resolve(".cache/cc-pocket/models").createDirectories() }
+        Files.writeString(only.resolve(".cache/cc-pocket/models/ggml-custom.bin"), "x")
+        assertEquals("ggml-custom.bin", WhisperTranscriber.resolveModel(only)?.fileName?.toString())
     }
 }

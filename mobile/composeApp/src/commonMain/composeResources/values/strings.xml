@@ -185,6 +185,9 @@
     <string name="mic_body">cc-pocket uses the mic to dictate prompts. Audio is transcribed for this message only — nothing is recorded or stored.</string>
     <string name="open_settings">Open Settings</string>
     <string name="not_now">Not now</string>
+    <string name="voice_section">VOICE INPUT</string>
+    <string name="voice_use_whisper">Transcribe on the computer (Whisper)</string>
+    <string name="voice_use_whisper_sub">Better for mixed-language speech; audio is sent to your computer after you stop, so there's no live transcript.</string>
     <string name="voice_no_speech">Didn't catch any speech</string>
     <string name="voice_record_failed">Couldn't start recording</string>
     <string name="voice_daemon_unreachable">Couldn't reach the daemon — check the connection</string>

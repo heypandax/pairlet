@@ -458,6 +458,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_THEME_MODE, mode.name)
     }
 
+    // Voice engine choice: route captures to the computer's whisper instead of on-device dictation —
+    // whisper handles mixed-language speech (zh + embedded English terms) far better than the native
+    // recognizer, at the cost of the live word-by-word transcript.
+    val voiceWhisper = mutableStateOf(SecureStore.getString(K_VOICE_ENGINE) == "whisper")
+    fun setVoiceWhisper(on: Boolean) {
+        if (on == voiceWhisper.value) return
+        voiceWhisper.value = on
+        SecureStore.putString(K_VOICE_ENGINE, if (on) "whisper" else "")
+    }
+
     /** App Lock (issue #109): the biometric gate state machine + its persisted enable/auto-lock prefs. Lazy so
      *  the desktop root and the repo unit tests — neither of which mounts the gate — never build the platform
      *  prompt (createBiometrics()); it is constructed the first time App() reads it on Android/iOS. */
@@ -1526,6 +1536,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         treeView.value = from.treeView.value
         fontScale.value = from.fontScale.value
         themeMode.value = from.themeMode.value
+        voiceWhisper.value = from.voiceWhisper.value
         replace(pinnedPaths, from.pinnedPaths.toList())
         sessionParams.clear(); sessionParams.putAll(from.sessionParams)
         replace(pairedList, from.pairedList.toList())
@@ -3226,7 +3237,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (voice.value !is VoiceState.Idle && voice.value !is VoiceState.Failed) return
         clearNotice()
         voiceLevels.clear()
-        if (NativeDictation.available && !preferRemote) startNativeVoice() else startRemoteVoice()
+        if (NativeDictation.available && !preferRemote && !voiceWhisper.value) startNativeVoice() else startRemoteVoice()
     }
 
     /** ✓ done (S2 → S3). */
@@ -3693,6 +3704,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
+        const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)
         const val FONT_SCALE_MAX = 1.4f                        // largest chat text scale (eye-comfort upper bound)

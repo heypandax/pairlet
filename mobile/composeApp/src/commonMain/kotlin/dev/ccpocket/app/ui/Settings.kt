@@ -40,6 +40,7 @@ import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.voice.NativeDictation
 import dev.ccpocket.app.ui.share.JoinFolderScreen
 import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
@@ -153,6 +154,20 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     checked = repo.notificationsOn.value,
                     onChange = { repo.setNotificationsEnabled(it) },
                 )
+            }
+
+            // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere
+            // whisper is already the only voice path and the toggle would be a no-op.
+            if (NativeDictation.available) {
+                SectionLabel(stringResource(Res.string.voice_section))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+                    ToggleRow(
+                        label = stringResource(Res.string.voice_use_whisper),
+                        sub = stringResource(Res.string.voice_use_whisper_sub),
+                        checked = repo.voiceWhisper.value,
+                        onChange = { repo.setVoiceWhisper(it) },
+                    )
+                }
             }
 
             SectionLabel(stringResource(Res.string.default_mode_section))
