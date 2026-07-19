@@ -9,6 +9,9 @@ cc-pocket 移动端设计资料，**统一采用 claude.ai/design**。Stitch 的
 | `UI-DESIGN.md` | 设计规格：设计系统 ／ 7 屏逐屏 ／ 组件 ／ 状态 ／ 无障碍 ＋ i18n ／ §10 可粘贴生成 prompt |
 | `CLAUDE-DESIGN-PROMPT.md` | 喂给 claude.ai/design 的开场 + 逐屏 prompt（生成本设计所用） |
 | `claude-design-handoff/` | **设计版本本体** —— claude.ai/design 的 Handoff bundle：7 屏 `.html/.jsx` + 设计对话 `chats/` + `README`（coding agent 落地指引） |
+| `CHANNEL-INTEGRATIONS-EVALUATING.md` | ⚠️ **评估中** —— 官方渠道集成（Claude Channels / Slack、Codex Slack / Linear）机制调研与机会分析。含五条方向层候选，**均未定案、未录台账**；定案后去掉 `-EVALUATING` 后缀 |
+
+> 命名约定：文件名带 `-EVALUATING` 后缀 = 调研 / 提案阶段，结论未定，不可作为实现依据。
 
 ## 设计系统速记
 
