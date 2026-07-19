@@ -1,7 +1,9 @@
 package dev.ccpocket.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,15 +37,23 @@ import dev.ccpocket.app.resources.qa_context_gauge
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
 
-/** Ring geometry, straight from the design (context-occupancy.jsx `Ring`). */
-private val RING_SIZE = 15.dp
+/** Ring geometry, straight from the design (gauge-rhythm.jsx `Ring`). */
+private val RING_SIZE = 13.dp
 private val RING_STROKE = 2.2.dp
 
 /**
- * Width the percent needs before it earns its place: ring 15 + gap 5 + four mono-11 glyphs (~26)
- * + the gauge's own 6 of horizontal padding. Below this the number is shed and the ring carries on.
+ * The capsule the ring sits in — the control band's own height (gauge-rhythm.jsx, D1). Same `raised`
+ * fill as the model / stack pills and, the entire point of it, NO hairline: a chip in this system is
+ * raised fill + hairline, so dropping the border drops this one rung. It holds the band without
+ * claiming a control's status.
  */
-private val NUMBER_ROOM = 54.dp
+private val CAPSULE = 30.dp
+
+/**
+ * Width the percent needs before it earns its place: ring 13 + gap 5 + four mono-11 glyphs (~26)
+ * + the capsule's 9/10 padding. Below this the number is shed and the ring capsule carries on.
+ */
+private val NUMBER_ROOM = 64.dp
 
 /** The escalation step where occupancy stops being ambient (mirrors [contextColor]'s warn stop). */
 private const val WARN_AT = 0.80f
@@ -58,11 +67,16 @@ const val CONTEXT_CRITICAL_AT = 0.95f
  * that one cost no layout height but covered content, could not be tapped, and read like a debug
  * overlay.
  *
- * A **chrome-less** gauge: no border, no fill. That is what keeps ambient information from reading as
- * a fourth control one thumb from Send. It escalates by GROWING rather than shouting — calm is a bare
- * ring, >=80% grows an amber percent, >=95% turns red (thresholds come from [contextColor], so the
- * session sheet's ContextBar stays in lockstep). Under width pressure it sheds the NUMBER first and
- * keeps the colour-carrying ring, so the model chip, the stack chip, stop and send never move.
+ * The ring rides a **borderless** [CAPSULE] (gauge-rhythm.jsx, D1). It shipped chrome-less — no shape
+ * at all — which made it the one element in a band of 30dp pills and 44dp buttons with no silhouette:
+ * at calm, its near-permanent state, a lone 15dp ring scanned as debris rather than as restraint. The
+ * fill locks it onto the band; the absent hairline is what still keeps it BELOW the chips, so ambient
+ * information never reads as a fourth control one thumb from Send.
+ *
+ * It escalates by GROWING rather than shouting — calm is a bare ring in a 30x30 capsule, >=80% grows an
+ * amber percent, >=95% turns red (thresholds come from [contextColor], so the session sheet's ContextBar
+ * stays in lockstep). Under width pressure it sheds the NUMBER first and collapses back to the ring
+ * capsule, so the model chip, the stack chip, stop and send never move.
  *
  * A null [window] means no known denominator (a backend whose window we cannot size): a hollow ring
  * plus raw occupancy `~84k` — never a fake percentage.
@@ -87,19 +101,27 @@ fun ContextGauge(
     val a11y = stringResource(Res.string.qa_context_gauge)
     BoxWithConstraints(
         modifier
-            // the glyph stays the design's 30dp, but the target fills the 44dp row — a chrome-less
+            // the capsule stays the design's 30dp, but the touch slot fills the 44dp row — an ambient
             // readout should not also be a small tap target
             .height(44.dp)
-            .widthIn(min = 30.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(999.dp))
             .clickable(onClick = onOpenInfo)
-            .semantics { contentDescription = a11y }
-            .padding(horizontal = 3.dp),
+            .semantics { contentDescription = a11y },
         contentAlignment = Alignment.Center,
     ) {
         // the number appears only once it means something, and only while there is room for it
         val showNumber = (!known || frac >= WARN_AT) && (maxWidth - reserveEnd) >= NUMBER_ROOM
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .height(CAPSULE)
+                // bare: a 30x30 slot with the ring centred. With a number it grows rightward only.
+                .then(if (showNumber) Modifier else Modifier.width(CAPSULE))
+                .clip(RoundedCornerShape(999.dp))
+                .background(Tok.raised)
+                .then(if (showNumber) Modifier.padding(start = 9.dp, end = 10.dp) else Modifier),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Canvas(Modifier.size(RING_SIZE)) {
                 val stroke = RING_STROKE.toPx()
                 val d = size.minDimension - stroke
