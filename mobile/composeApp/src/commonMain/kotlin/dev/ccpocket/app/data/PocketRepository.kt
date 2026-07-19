@@ -1998,9 +1998,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // keep the LAST-GOOD list under a failed refresh: one `opencode models` timeout must
                 // not wipe a working picker back to the empty state — carry the fresh error alongside
                 val prev = agentModels[f.agent]
-                agentModels[f.agent] =
+                val merged =
                     if (f.error != null && f.models.isEmpty() && prev != null && prev.models.isNotEmpty()) prev.copy(error = f.error)
                     else f
+                // Same rule one level down (#167 ②): the gateway probe fails INDEPENDENTLY of the alias
+                // list, so a refresh can carry good `models` and an empty `gatewayModels`. Taking that
+                // verbatim would flip the picker from the gateway's real ids back to the seed table
+                // mid-session — the model the user was reaching for vanishing under their finger.
+                agentModels[f.agent] =
+                    if (merged.gatewayModels.isEmpty() && !prev?.gatewayModels.isNullOrEmpty()) {
+                        merged.copy(gatewayModels = prev!!.gatewayModels)
+                    } else merged
             }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this

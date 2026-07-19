@@ -63,6 +63,7 @@ import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
 import dev.ccpocket.app.ui.EFFORT_OPTIONS
 import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
+import dev.ccpocket.app.ui.gatewayRowsFrom
 import dev.ccpocket.app.ui.gatewayHostLabel
 import dev.ccpocket.app.ui.matchesGatewayHost
 import dev.ccpocket.app.ui.modelChipLabel
@@ -275,7 +276,8 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         // ids, not Claude aliases); official endpoint → it waits behind a collapsed toggle.
         val gatewayUrl = if (model.chatAgent != AgentKind.CLAUDE) null else model.gatewayBaseUrl
         @Composable
-        fun gatewayRows() = recommendedGatewayPresets(gatewayUrl).forEach { p ->
+        // #167 ②: prefer the gateway's own list; the shared table degrades to a seed + a way to draw a row
+        fun gatewayRows() = gatewayRowsFrom(model.gatewayModels, gatewayUrl).forEach { p ->
             GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
         }
         if (gatewayUrl != null) {

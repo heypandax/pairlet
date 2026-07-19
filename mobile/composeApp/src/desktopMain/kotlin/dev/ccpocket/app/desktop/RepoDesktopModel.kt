@@ -747,6 +747,9 @@ class RepoDesktopModel(
     override val chatMode: PermissionMode get() = repo.mode.value
     override val chatEffort: String? get() = repo.effort.value
     override val gatewayBaseUrl: String? get() = repo.gatewayBaseUrl.value // issue #139: DaemonInfo's gateway hint
+    // issue #167 ②: the gateway's own model list, same source the mobile picker reads
+    override val gatewayModels: List<String>
+        get() = repo.agentModels[dev.ccpocket.protocol.AgentKind.CLAUDE]?.gatewayModels.orEmpty()
     override val messages: List<ChatItem> get() = repo.messages
     // older-history lazy load (issue #147) — straight delegation to the shared repository
     override val historyHasMore: Boolean get() = repo.historyHasMore.value

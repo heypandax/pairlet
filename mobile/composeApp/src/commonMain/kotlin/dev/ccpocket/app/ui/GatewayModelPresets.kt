@@ -72,10 +72,16 @@ val GATEWAY_MODEL_PRESETS: List<GatewayModelPreset> = listOf(
 )
 
 /** Compact display host of a gateway base URL: scheme/path stripped, port kept
- *  ("http://127.0.0.1:3456/api" → "127.0.0.1:3456"). Null/blank → null. */
+ *  ("http://127.0.0.1:3456/api" → "127.0.0.1:3456"). Null/blank → null.
+ *
+ *  Userinfo is dropped BEFORE the host, because a URL may carry it and the real host is what follows
+ *  the last `@`: "https://api.anthropic.com@evil.example" resolves to evil.example, but rendering it
+ *  verbatim (and truncating) would read as "api.anthropic.com…". Since #167 this URL is no longer just
+ *  a label — it's where the daemon sends a credential — so the pill must not be able to misname it. */
 fun gatewayHostLabel(baseUrl: String?): String? = baseUrl?.trim()
     ?.substringAfter("://")
     ?.substringBefore('/')
+    ?.substringAfterLast('@')
     ?.takeIf { it.isNotBlank() }
 
 /** True when [gatewayBaseUrl] names this vendor — drives both the rank-first ordering and the
@@ -91,4 +97,39 @@ fun GatewayModelPreset.matchesGatewayHost(gatewayBaseUrl: String?): Boolean {
 fun recommendedGatewayPresets(gatewayBaseUrl: String?): List<GatewayModelPreset> {
     if (gatewayBaseUrl == null) return GATEWAY_MODEL_PRESETS
     return GATEWAY_MODEL_PRESETS.sortedBy { if (it.matchesGatewayHost(gatewayBaseUrl)) 0 else 1 }
+}
+
+/**
+ * #167 ②: the rows to actually show, preferring what the GATEWAY ITSELF reported over our table.
+ *
+ * The authoritative answer arrives as bare ids — no vendor name, no monogram, no tint. So the table
+ * below stops being the SOURCE of ids and becomes a lookup for how to DRAW one: an id we happen to
+ * know keeps its vendor identity, and an id we've never heard of still gets a row synthesized from
+ * the id itself rather than being hidden because our list is a generation behind. That inverts the
+ * old failure mode — being out of date now costs some polish, not a missing model.
+ *
+ * [authoritativeIds] empty (no gateway, gateway didn't answer, older daemon) → unchanged behaviour.
+ */
+fun gatewayRowsFrom(authoritativeIds: List<String>, gatewayBaseUrl: String?): List<GatewayModelPreset> {
+    if (authoritativeIds.isEmpty()) return recommendedGatewayPresets(gatewayBaseUrl)
+    val known = GATEWAY_MODEL_PRESETS.associateBy { it.id.lowercase() }
+    return authoritativeIds.map { id -> known[id.trim().lowercase()] ?: syntheticPreset(id.trim()) }
+}
+
+/** A row for an id the table has never seen: identity derived from the id, never invented. The vendor
+ *  label is the id's own first segment verbatim — guessing a vendor's preferred casing would be a
+ *  fabrication, and this section's whole point is to stop guessing. */
+private fun syntheticPreset(id: String): GatewayModelPreset = GatewayModelPreset(
+    vendor = id.substringBefore('-').substringBefore('/').ifEmpty { id },
+    id = id,
+    monogram = id.filter(Char::isLetterOrDigit).take(2).uppercase().ifEmpty { "··" },
+    tint = stableTint(id),
+)
+
+/** Deterministic tint so a given id keeps its colour across recompositions and restarts. Modulo is
+ *  folded twice because `hashCode` can be negative (and `Int.MIN_VALUE` has no positive absolute). */
+private fun stableTint(id: String): GatewayTint {
+    val palette = GatewayTint.entries
+    val h = id.lowercase().hashCode()
+    return palette[((h % palette.size) + palette.size) % palette.size]
 }

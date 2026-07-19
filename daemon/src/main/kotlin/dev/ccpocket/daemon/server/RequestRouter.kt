@@ -81,6 +81,7 @@ import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /** Maps an inbound [Frame] to the registry/services. Returns fast; turns run on conversation scopes. */
@@ -350,7 +351,10 @@ class RequestRouter(
             }
 
             // agent model listing: inspect the Mac daemon's local agent config/cache.
-            is FetchModels -> scope.launch {
+            // On IO, not the shared Default pool: the Claude path may make a blocking HTTP call to the
+            // user's gateway (#167 ②), and a gateway that accepts the connection but never answers would
+            // otherwise pin a core-count-limited thread that the session pumps and scheduler share.
+            is FetchModels -> scope.launch(Dispatchers.IO) {
                 sink.emit(when (frame.agent) {
                     AgentKind.OPENCODE -> openCodeModels.fetch()
                     AgentKind.CODEX -> codexModels.fetch()

@@ -661,8 +661,11 @@ private fun GatewayPresetSection(
         Spacer(Modifier.weight(1f)) // pill sits flush right (0714 design)
         if (showHostPill) gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
     }
+    // #167 ②: prefer what the gateway itself reported; the built-in table is now only a fallback seed
+    // (and a lookup for how to draw a row). Empty list = no authoritative answer → previous behaviour.
+    val authoritative = repo.agentModels[AgentKind.CLAUDE]?.gatewayModels.orEmpty()
     Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        recommendedGatewayPresets(gatewayUrl).forEach { p ->
+        gatewayRowsFrom(authoritative, gatewayUrl).forEach { p ->
             val isSel = p.id.equals(repo.model.value, ignoreCase = true)
             val isSwitching = switchingTo?.equals(p.id, ignoreCase = true) == true
             val raised = isSel || isSwitching

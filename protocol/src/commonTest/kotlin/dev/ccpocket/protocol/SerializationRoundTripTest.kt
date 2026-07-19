@@ -466,6 +466,17 @@ class SerializationRoundTripTest {
         assertFalse("error" in listJson, listJson) // explicitNulls=false — null error stays off the wire
         assertEquals(list, PocketJson.decodeFromString<Envelope>(listJson))
 
+        // #167 ②: the gateway's authoritative id list rides in a trailing, defaulted field.
+        val gw = Envelope(id = "m2b", ts = 0, body = ModelsList(models = listOf("opus"), gatewayModels = listOf("glm-4.7")))
+        val gwJson = PocketJson.encodeToString(gw)
+        assertTrue("\"gatewayModels\":[\"glm-4.7\"]" in gwJson, gwJson)
+        assertEquals(gw, PocketJson.decodeFromString<Envelope>(gwJson))
+
+        // MIXED VERSIONS, the direction that matters: an OLDER daemon never sends the field at all.
+        // Decoding must yield an EMPTY list (→ client keeps using its built-in seed table), not throw.
+        val legacy = """{"t":"pocket/models.list","agent":"claude","models":["opus"]}"""
+        assertEquals(emptyList(), PocketJson.decodeFromString<ModelsList>(legacy).gatewayModels)
+
         val caps = Envelope(id = "m3", ts = 0, body = ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE)))
         val capsJson = PocketJson.encodeToString(caps)
         assertTrue("\"t\":\"pocket/client.caps\"" in capsJson, capsJson)

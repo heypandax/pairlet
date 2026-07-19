@@ -1474,6 +1474,14 @@ data class ModelsList(
     val agent: AgentKind = AgentKind.CLAUDE, // default keeps older peers on Claude, like every agent field
     val models: List<String> = emptyList(),
     val error: String? = null,
+    /** #167: ids the GATEWAY ITSELF reported (`/v1/models`), when the user routes through one and it
+     *  answered. Authoritative where present — the client should show these instead of its built-in
+     *  vendor-id table, which can only ever be a guess that rots silently.
+     *
+     *  Trailing + defaulted, so the wire stays compatible both ways: an older daemon simply never
+     *  sends it and the client falls back to its seed table (today's behaviour), while an older client
+     *  ignores it. Empty means "no authoritative answer", never "the gateway has no models". */
+    val gatewayModels: List<String> = emptyList(),
 ) : ToPhone
 
 // ===========================================================================

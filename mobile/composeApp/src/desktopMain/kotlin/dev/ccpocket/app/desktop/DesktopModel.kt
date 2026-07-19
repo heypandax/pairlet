@@ -369,6 +369,10 @@ interface DesktopModel {
     /** The daemon's third-party ANTHROPIC_BASE_URL (issue #139) — non-null puts the gateway model
      *  presets first in the ⋯ model picker. Default null keeps Seed/test fakes compiling. */
     val gatewayBaseUrl: String? get() = null
+    /** Ids the gateway itself reported (issue #167 ②). Authoritative where non-empty; empty falls back
+     *  to the built-in seed table. Desktop ships on its own cadence, so without this the retired ids
+     *  #167 exists to kill would keep showing here after mobile stopped showing them. */
+    val gatewayModels: List<String> get() = emptyList()
     val messages: List<ChatItem>
     // ── older-history lazy load (issue #147) — defaults keep Seed/test fakes compiling ──
     /** Rows older than the loaded window exist on the daemon — the top-of-list loader shows. */

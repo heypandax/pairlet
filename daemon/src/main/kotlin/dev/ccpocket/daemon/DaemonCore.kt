@@ -107,7 +107,10 @@ class DaemonCore(
 
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
-        openCodeModels, codexModels, ClaudeModelService(claudeConfigDir),
+        // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
+        // model list must be the host the client is showing, with that layer's own credential (#167 ②).
+        openCodeModels, codexModels,
+        ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
     )
 
     /**

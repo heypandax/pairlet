@@ -58,11 +58,70 @@ object GatewayDetector {
     }
 
     /** `env.ANTHROPIC_BASE_URL` from one settings file; null when absent / unreadable / blank. */
-    private fun baseUrlFromSettings(file: File): String? {
+    private fun baseUrlFromSettings(file: File): String? = envFromSettings(file, "ANTHROPIC_BASE_URL")
+
+    /** One `env.<key>` out of a settings file; null when absent / unreadable / blank. Same
+     *  never-throws contract as the rest of this object. */
+    internal fun envFromSettings(file: File, key: String): String? {
         if (!file.isFile) return null
         val obj = runCatching { json.parseToJsonElement(file.readText()).jsonObject }.getOrNull() ?: return null
         return runCatching {
-            (obj["env"] as? JsonObject)?.get("ANTHROPIC_BASE_URL")?.jsonPrimitive?.contentOrNull
+            (obj["env"] as? JsonObject)?.get(key)?.jsonPrimitive?.contentOrNull
         }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** A gateway and the credential that BELONGS to it, both read out of the SAME configuration layer.
+     *  [tokenVar] records which spelling it came from, so only the matching header is ever sent. */
+    data class Paired(val baseUrl: String, val token: String, val tokenVar: String)
+
+    /**
+     * The gateway to ask for a model list, together with the credential that layer pairs it with
+     * (issue #167 ②).
+     *
+     * WHY PAIRED, NOT TWO LOOKUPS: resolving the URL and the token independently silently mixes layers.
+     * A `settings.json` pointing at a third-party gateway plus a leftover `ANTHROPIC_API_KEY` in the
+     * daemon's own env — a very ordinary setup — would otherwise send the user's OFFICIAL Anthropic key
+     * to that third party. This repo already names that hazard: [dev.ccpocket.protocol.PresetEnv.SCRUBBED]
+     * exists precisely so a preset launch cannot leak an ambient credential to its own base URL, and
+     * `ClaudeLauncher.applyPresetEnv` wipes those variables for exactly this reason. Reading them back
+     * out through a second door would undo that.
+     *
+     * So: the FIRST layer that supplies a base URL also has to supply the token. If it doesn't, this
+     * returns null and no probe happens — losing a model list is strictly better than mispairing a
+     * secret with a destination.
+     *
+     * Layer order mirrors [resolve] exactly, so the host the client shows and the host we contact can
+     * never diverge: active preset → daemon env → user `settings.json`.
+     */
+    fun resolvePaired(
+        presetEnv: Map<String, String>? = null,
+        env: (String) -> String? = System::getenv,
+        userConfigDir: Path? = null,
+        home: File = File(System.getProperty("user.home")),
+    ): Paired? {
+        val userRoot = userConfigDir?.toFile()
+            ?: env("CLAUDE_CONFIG_DIR")?.takeIf { it.isNotBlank() }?.let(::File)
+            ?: File(home, ".claude")
+        val settings = File(userRoot, "settings.json")
+
+        fun clean(s: String?) = s?.trim()?.takeIf { it.isNotEmpty() }
+        // Each entry reads BOTH values from one layer only — that pairing is the whole point.
+        val layers: List<Pair<() -> String?, (String) -> String?>> = listOf(
+            { clean(presetEnv?.get("ANTHROPIC_BASE_URL")) } to { k: String -> clean(presetEnv?.get(k)) },
+            { clean(env("ANTHROPIC_BASE_URL")) } to { k: String -> clean(env(k)) },
+            { envFromSettings(settings, "ANTHROPIC_BASE_URL") } to { k: String -> envFromSettings(settings, k) },
+        )
+
+        for ((urlOf, tokenOf) in layers) {
+            val url = runCatching(urlOf).getOrNull() ?: continue
+            if (isOfficial(url)) return null // official endpoint: nothing to ask, and no reason to send a key
+            // AUTH_TOKEN first: it is the default `tokenVar` and the spelling relays actually use.
+            for (v in listOf("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY")) {
+                val tok = runCatching { tokenOf(v) }.getOrNull()
+                if (tok != null) return Paired(url, tok, v)
+            }
+            return null // this layer owns the URL but has no credential — do NOT borrow one from below
+        }
+        return null
     }
 }
