@@ -780,7 +780,7 @@ internal fun rememberBottomPinned(
     // conversation's pin. Entering a chat from the session list never hit it: that path remounts, so
     // there was only ever one instance.
     val pinned = remember { mutableStateOf(true) }
-    LaunchedEffect(*resetKeys) { pinned.value = true }
+    LaunchedEffect(*resetKeys) { trace165("pinned RESET -> true (keys=${resetKeys.joinToString()})"); pinned.value = true }
     LaunchedEffect(listState, userGesturesOnly) {
         var userDriven = !userGesturesOnly
         if (userGesturesOnly) launch {
@@ -788,12 +788,27 @@ internal fun rememberBottomPinned(
         }
         snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
             .collect { (scrolling, canFwd) ->
-                if (scrolling && userDriven) pinned.value = !canFwd
+                if (scrolling && userDriven) {
+                    trace165("pinned <- ${!canFwd} (user drag, canFwd=$canFwd)")
+                    pinned.value = !canFwd
+                }
                 if (!scrolling && userGesturesOnly) userDriven = false // gesture + fling fully settled
             }
     }
     return pinned
 }
+
+// TEMPORARY diagnostics for issue #165 ("switching sessions doesn't land at the latest message"). Five
+// hypotheses each failed to reproduce headless, so this ships to the device to report what actually
+// happens instead of what we keep guessing. Captured with:
+//   xcrun devicectl device process launch --console --device Pandaa com.panda.ccpocket
+// REMOVE once the root cause is nailed.
+internal fun trace165(what: String) = println("CCP165 $what")
+
+private fun LazyListState.trace165Pos(): String =
+    "first=$firstVisibleItemIndex+$firstVisibleItemScrollOffset total=${layoutInfo.totalItemsCount} " +
+        "lastVisible=${layoutInfo.visibleItemsInfo.lastOrNull()?.index} " +
+        "viewportEnd=${layoutInfo.viewportEndOffset} canFwd=$canScrollForward"
 
 /**
  * Scroll the transcript to its true end.
@@ -807,9 +822,11 @@ internal fun rememberBottomPinned(
  *
  * The huge scrollOffset then lands at the bottom even when that last item is taller than the viewport.
  */
-private suspend fun LazyListState.scrollToEnd() {
+private suspend fun LazyListState.scrollToEnd(why: String = "") {
     val last = layoutInfo.totalItemsCount - 1
+    trace165("scrollToEnd($why) target=$last before ${trace165Pos()}")
     if (last >= 0) scrollToItem(last, Int.MAX_VALUE)
+    trace165("scrollToEnd($why) after  ${trace165Pos()}")
 }
 
 /** Leaf recomposition scope for the keyboard-follow: reads the ime inset in composition (required on
@@ -1312,11 +1329,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // the session opened parked wherever the previous one had been scrolled to. This lands it outright,
     // keyed on the conversation and waiting for its transcript, so it cannot depend on that ordering.
     LaunchedEffect(repo.convoId.value) {
+        trace165("landing effect START convo=${repo.convoId.value} msgs=${repo.messages.size} ${listState.trace165Pos()}")
         if (repo.convoId.value == null) return@LaunchedEffect
         // wait for the transcript AND for the list to have measured it — the target below is read from
         // layout, so scrolling before the new content is laid out would aim at the previous session's
         snapshotFlow { repo.messages.size to listState.layoutInfo.totalItemsCount }.first { (m, t) -> m > 0 && t > 0 }
-        listState.scrollToEnd()
+        trace165("landing effect AWAITED msgs=${repo.messages.size} ${listState.trace165Pos()}")
+        listState.scrollToEnd("landing")
         pinned = true // …and it follows the stream from here, as a freshly opened session always has
         landed = true
     }
@@ -1333,11 +1352,29 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             keyboard?.show()
         }
     }
+    // Page in older history when the reader is genuinely parked at the top of the loaded window — NOT
+    // when the loader row merely composes. Every transcript lands via clear()+addAll(), which clamps the
+    // list to index 0, so composition fired on each history frame; each page prepended rows and clamped
+    // again, paging the entire session in while the view fought to stay at the bottom (issue #165).
+    // "Parked at the top" means: at index 0, and either the reader scrolled away from the bottom to get
+    // there, or the window is too short to scroll at all (where there is no other way to ask).
+    LaunchedEffect(repo.convoId.value) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 &&
+                (!pinned || !listState.canScrollForward)
+        }.collect { atTop ->
+            if (atTop && landed && repo.historyHasMore.value) {
+                trace165("older-page REQUEST ${listState.trace165Pos()} pinned=$pinned")
+                repo.loadOlderHistory()
+            }
+        }
+    }
     // persist the composer draft per project (debounced) so leaving mid-message doesn't lose it
     LaunchedEffect(input, draftKey) { delay(400); repo.saveDraft(draftKey, input) }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
-        if (pinned && repo.messages.isNotEmpty()) { listState.scrollToEnd(); landed = true }
+        trace165("follow effect FIRE pinned=$pinned msgs=${repo.messages.size} ${listState.trace165Pos()}")
+        if (pinned && repo.messages.isNotEmpty()) { listState.scrollToEnd("follow"); landed = true }
     }
     // keyboard-follow lives in its own leaf composable: the ime inset must be a COMPOSITION read
     // (iOS misses the animation otherwise), and reading it here would re-execute all of ChatScreen
@@ -1447,12 +1484,16 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     state = listState, verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = bottomGutter),
                 ) {
-                    // scroll-to-top loader (issue #147): the row only composes once scrolled into view —
-                    // exactly "reached the top of the loaded window" — and then asks for one older page.
-                    // An ambient status line, never a button (0714 handoff B1); a dead request fades it
-                    // out silently instead of snapping it away (B2).
+                    // scroll-to-top loader (issue #147). The REQUEST no longer rides this row's composition
+                    // (see the effect above ChatScreen's list): a transcript lands through clear()+addAll(),
+                    // which clamps the list to index 0 for a beat, so "the row composed" fired on every
+                    // history frame and not on reaching the top. Each spurious page prepended more rows,
+                    // clamped again, and paged again — a self-driving loop that walked the whole history
+                    // while the view fought to stay at the bottom, which is what "switching doesn't land at
+                    // the latest message" actually was (issue #165). The row is now purely the indicator:
+                    // an ambient status line, never a button (0714 handoff B1); a dead request fades out
+                    // silently instead of snapping away (B2).
                     if (historyLoaderVisible) item(key = "history-loader") {
-                        if (repo.historyHasMore.value) LaunchedEffect(Unit) { repo.loadOlderHistory() }
                         LoadEarlierRow(fading = !repo.historyHasMore.value)
                     }
                     itemsIndexed(repo.messages) { mi, m ->

@@ -2139,6 +2139,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // scrollback past the replay window, a bubble ahead of a lagging disk read) — TranscriptMerge
             // reconciles without flashing, duplicating, or reordering.
             is ConvoHistory -> if (f.convoId == convoId.value) {
+                // TEMPORARY (#165): how many times does a transcript land, and does each one wipe the list?
+                dev.ccpocket.app.ui.trace165("ConvoHistory delta=${f.delta} rows=${f.messages.size} localBefore=${messages.size} hasMore=${historyHasMore.value}")
                 if (f.delta) {
                     // incremental reattach (issue #147): only the rows past the cursor we sent — merged at
                     // the tail (or into the live-received overlap), NEVER a wipe/replace. An empty delta
@@ -3708,6 +3710,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      */
     fun switchToSession(item: SessionSwitcherItem) {
         if (item.current) return // the row is on screen already; a tap that reopens it would just flash
+        // TEMPORARY (#165): marks where a switch begins, so the trace can be split per switch
+        dev.ccpocket.app.ui.trace165("=== switchToSession -> ${item.title} dir=${item.dirKey} sid=${item.sessionId}")
         // hold the chat on screen across the round trip — see [switchingSession]. Only when we're actually
         // IN a chat: switching from the project list should keep showing the list, as it always has.
         switchingSession.value = convoId.value != null
