@@ -29,6 +29,26 @@ class GatewayModelPresetsTest {
         assertNull(gatewayHostLabel("   "))
     }
 
+    /**
+     * Issue #168: ids in this table rot silently — a retired one only fails at the user's gateway, so
+     * we get zero signal (`kimi-k2` sat dead here for two months). The audit comment above the table is
+     * prose; this is the executable half. Every id here was confirmed retired against vendor docs on
+     * 2026-07-19 — append, never remove, and never "fix" a failure by deleting the row from this list.
+     */
+    @Test
+    fun `no known-retired vendor id is in the table`() {
+        val retired = mapOf(
+            "deepseek-chat" to "retired 2026-07-24 15:59 UTC → deepseek-v4-flash (non-thinking)",
+            "deepseek-reasoner" to "retired 2026-07-24 15:59 UTC → deepseek-v4-flash (thinking)",
+            "kimi-k2" to "discontinued 2026-05-25 → kimi-k3",
+            "qwen3-coder" to "series name, never an API id → qwen3-coder-plus",
+        )
+        val ids = GATEWAY_MODEL_PRESETS.map { it.id.lowercase() }.toSet()
+        retired.forEach { (dead, why) ->
+            assertTrue(dead !in ids, "preset table still ships a retired id '$dead' — $why")
+        }
+    }
+
     @Test
     fun `vendor-matched rows rank first, table order otherwise`() {
         val deepseek = recommendedGatewayPresets("https://api.deepseek.com/anthropic")

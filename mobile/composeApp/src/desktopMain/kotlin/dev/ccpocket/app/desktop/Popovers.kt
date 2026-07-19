@@ -279,22 +279,31 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
         }
         if (gatewayUrl != null) {
-            // "GATEWAY · host" section header with a live-green dot flush right (0714 design)
-            Row(Modifier.fillMaxWidth().padding(bottom = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("GATEWAY", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+            // Issue #167: the Claude aliases LEAD on a gateway — compatible endpoints map
+            // opus/sonnet/haiku onto their own tiers, so an alias follows the vendor across
+            // generations while a hand-written native id rots (#168). Header keeps the
+            // "· host" + live dot (0714 design); the vendor rows drop one group below.
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("ANTHROPIC API", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
                 Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
                 Spacer(Modifier.weight(1f))
                 Dot(Tok.ok, 5.dp)
             }
+            Text(
+                "Recommended: your gateway maps these onto its own models.",
+                color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
+        options.forEach { (label, pick) ->
+            QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
+        }
+        if (gatewayUrl != null) {
+            PopoverLabel("Gateway models")
             gatewayRows()
             Text(
                 "Which model an id reaches is decided by your gateway.",
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
             )
-            PopoverLabel("Anthropic API")
-        }
-        options.forEach { (label, pick) ->
-            QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
         }
         if (gatewayUrl == null && model.chatAgent == AgentKind.CLAUDE) {
             var showGateway by remember { mutableStateOf(false) }

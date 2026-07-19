@@ -410,12 +410,21 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
         }
     }
     if (gatewayUrl != null) {
-        GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset)
-        // the alias list becomes the picker's second group, so it earns a divider + its own label (0714 design)
-        Column(Modifier.padding(top = 14.dp)) {
-            Hairline()
-            SectionLabel(stringResource(Res.string.model_section_anthropic), Modifier.padding(top = 12.dp))
+        // Issue #167: on a gateway the Claude ALIASES lead. Anthropic-compatible endpoints map
+        // opus/sonnet/haiku onto their own tiers, so an alias follows the vendor across generations
+        // — while a hand-written native id rots silently (#168 was exactly that rot coming due).
+        // The vendor rows keep their place one group below as cold-start seeds: aggregator gateways
+        // that don't map aliases still need them, and so does anyone wanting a specific tier.
+        Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel(stringResource(Res.string.model_section_anthropic))
+            Spacer(Modifier.weight(1f)) // pill sits flush right (0714 design)
+            gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
         }
+        Text(
+            stringResource(Res.string.model_gateway_alias_note),
+            color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp,
+            modifier = Modifier.padding(top = 6.dp),
+        )
     }
     Column(Modifier.padding(top = if (gatewayUrl != null) 8.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         choices.forEach { c ->
@@ -456,6 +465,12 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
                 }
             }
         }
+    }
+    // …then the vendor ids, demoted to the second group (issue #167). Ranking + "suggested" ticks
+    // still read the host, but the pill has moved up to the recommended group's header.
+    if (gatewayUrl != null) {
+        Column(Modifier.padding(top = 14.dp)) { Hairline() }
+        GatewayPresetSection(repo, gatewayUrl, switchingTo, pickPreset, showHostPill = false)
     }
     // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
     // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
@@ -532,16 +547,25 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
 
 /**
  * The gateway model preset rows (issue #139), fed by the shared [GATEWAY_MODEL_PRESETS] table.
- * [gatewayUrl] non-null = the daemon reported a third-party ANTHROPIC_BASE_URL: the header carries
- * a "via host" pill and [recommendedGatewayPresets] ranks that vendor's ids first. Ids route through
- * whatever the user's gateway maps them to — the note row says exactly that instead of promising.
+ * [gatewayUrl] non-null = the daemon reported a third-party ANTHROPIC_BASE_URL: [recommendedGatewayPresets]
+ * ranks that vendor's ids first and its rows wear the "suggested" tick. Ids route through whatever the
+ * user's gateway maps them to — the note row says exactly that instead of promising.
+ *
+ * [showHostPill] is false when the caller already shows the "via host" pill above (issue #167 put it on
+ * the recommended alias group's header), so the sheet never carries two.
  */
 @Composable
-private fun GatewayPresetSection(repo: PocketRepository, gatewayUrl: String?, switchingTo: String?, onPick: (String) -> Unit) {
+private fun GatewayPresetSection(
+    repo: PocketRepository,
+    gatewayUrl: String?,
+    switchingTo: String?,
+    onPick: (String) -> Unit,
+    showHostPill: Boolean = true,
+) {
     Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         SectionLabel(stringResource(Res.string.model_gateway_section))
         Spacer(Modifier.weight(1f)) // pill sits flush right (0714 design)
-        gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
+        if (showHostPill) gatewayHostLabel(gatewayUrl)?.let { host -> GatewayHostPill(host) }
     }
     Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         recommendedGatewayPresets(gatewayUrl).forEach { p ->

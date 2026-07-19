@@ -295,6 +295,7 @@
     <string name="model_gateway_note">Which model an id reaches is decided by your gateway.</string>
     <string name="model_gateway_suggested">suggested</string>
     <string name="model_section_anthropic">Anthropic API</string>
+    <string name="model_gateway_alias_note">Recommended: your gateway maps these aliases onto its own models, so they keep working when the vendor renames or replaces one.</string>
     <string name="af_show_from">Show sessions from</string>
     <string name="af_both">Both</string>
     <string name="af_claude_only">Claude only</string>

@@ -295,6 +295,7 @@
     <string name="model_gateway_note">同一个 id 实际打到哪个模型，由你的网关决定。</string>
     <string name="model_gateway_suggested">推荐</string>
     <string name="model_section_anthropic">Anthropic API</string>
+    <string name="model_gateway_alias_note">推荐用这组：网关会把这些别名映射到它自己的模型上，厂商改名换代都不用你跟着改。</string>
     <string name="af_show_from">显示哪个 agent 的会话</string>
     <string name="af_both">全部</string>
     <string name="af_claude_only">仅 Claude</string>
