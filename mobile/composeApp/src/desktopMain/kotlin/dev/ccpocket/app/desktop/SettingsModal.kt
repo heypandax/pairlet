@@ -83,6 +83,7 @@ import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.agentColor
+import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.protocol.AgentKind
@@ -168,6 +169,7 @@ private fun GeneralPane(model: DesktopModel) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
                 AgentCardRow(AgentKind.CODEX, model.defaultAgent == AgentKind.CODEX, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CODEX }
+                AgentCardRow(AgentKind.OPENCODE, model.defaultAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.OPENCODE }
             }
         }
         Group("Default model", "Which model new Claude sessions start on (Codex sessions keep their own).") {
@@ -291,7 +293,7 @@ private fun AgentCardRow(agent: AgentKind, selected: Boolean, modifier: Modifier
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         AgentGlyph(agent, size = 18)
-        Text(if (agent == AgentKind.CODEX) "Codex" else "Claude", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(agentName(agent), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

@@ -18,6 +18,12 @@ import java.nio.file.Path
 interface AgentBackend {
     val kind: AgentKind
 
+    /** How this backend's OS process is expected to live. */
+    val processMode: AgentProcessMode get() = AgentProcessMode.LONG_RUNNING
+
+    /** How user prompts are delivered and proven consumed. */
+    val promptDelivery: AgentPromptDelivery get() = AgentPromptDelivery.STDIN_REPLAY
+
     /** Build the OS process for [spec]. Pure (no side effects); the caller starts it. */
     fun processBuilder(spec: AgentSpec): ProcessBuilder
 
@@ -110,6 +116,20 @@ interface AgentBackend {
     /** How many consecutive turns at the transcript's TAIL were API-failure placeholders — seeds the
      *  degraded-session warning on resume (issue #65). 0 = healthy/unknown (default; e.g. Codex). */
     fun resumeFailedTurnStreak(workdir: String, sessionId: String): Int = 0
+}
+
+enum class AgentProcessMode {
+    /** The process stays alive between turns and accepts more input through stdin/RPC. */
+    LONG_RUNNING,
+    /** The process handles exactly one turn and a clean exit is not an error after a TurnResult. */
+    ONE_SHOT_TURN,
+}
+
+enum class AgentPromptDelivery {
+    /** Prompts are written to the process and settled only when stdout replays a top-level user turn. */
+    STDIN_REPLAY,
+    /** The turn prompt is baked into process launch argv; session/turn start is enough to mark it consumed. */
+    INITIAL_ARG_ONE_SHOT,
 }
 
 /** Builds a fresh [AgentBackend] per conversation. One factory per [AgentKind], registered in the daemon core. */

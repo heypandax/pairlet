@@ -476,7 +476,11 @@ internal fun peakLabel(day: UsageDay): String = day.date?.substringAfter('-') ?:
 
 @Composable
 private fun ModelRow(m: UsageModel, max: Long) {
-    val color = if (m.agent == AgentKind.CODEX) Tok.codex else Tok.accent
+    val color = when (m.agent) {
+        AgentKind.CODEX -> Tok.codex
+        AgentKind.OPENCODE -> Tok.opencode
+        else -> Tok.accent
+    }
     Column(Modifier.padding(vertical = 9.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(m.model, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1, modifier = Modifier.weight(1f))

@@ -119,7 +119,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
+import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.AttachImageIcon
 import dev.ccpocket.app.ui.EarlierMessagesSeam
 import dev.ccpocket.app.ui.LoadEarlierRow
@@ -428,7 +430,7 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
                 model.chatTitle, color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
-            if (model.chatAgent == AgentKind.CODEX) AgentTag(AgentKind.CODEX)
+            AgentBadge(model.chatAgent)
             // quick terminal at the session's cwd — only when that directory exists on THIS machine, so a
             // remote machine's session never shows it (same locality contract as DesktopPathOpener). #44
             // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every recomposition.
@@ -807,7 +809,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         // BasicTextField renders the raw style — the two never sat on the same baseline
                         val fieldStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, lineHeight = 20.sp)
                         if (model.composer.isEmpty()) {
-                            Text("Message ${if (model.chatAgent == AgentKind.CODEX) "Codex" else "Claude"}…", style = fieldStyle.copy(color = Tok.muted))
+                            Text("Message ${agentName(model.chatAgent)}…", style = fieldStyle.copy(color = Tok.muted))
                         }
                         // the model's ComposerState is the ONE source of truth: onValueChange is the only
                         // path user/IME edits take, and external writes call its explicit methods directly.

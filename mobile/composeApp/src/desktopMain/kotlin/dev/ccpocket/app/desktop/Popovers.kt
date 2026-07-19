@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Settings
@@ -67,6 +68,7 @@ import dev.ccpocket.app.ui.matchesGatewayHost
 import dev.ccpocket.app.ui.modelChipLabel
 import dev.ccpocket.app.ui.recommendedGatewayPresets
 import dev.ccpocket.app.ui.agentColor
+import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.protocol.AgentKind
@@ -106,7 +108,7 @@ fun NewSessionPopover(
             // Enter anywhere in the popover = the Start button (the path field holds focus)
             .onPreviewKeyEvent { e ->
                 if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute) {
-                    onStart(trimmed, agent, CLAUDE_MODES[modeIdx].mode); true
+                    onStart(trimmed, agent, if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else CLAUDE_MODES[modeIdx].mode); true
                 } else false
             },
     ) {
@@ -130,9 +132,29 @@ fun NewSessionPopover(
             Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 AgentCard(AgentKind.CLAUDE, agent == AgentKind.CLAUDE, Modifier.weight(1f)) { agent = AgentKind.CLAUDE }
                 AgentCard(AgentKind.CODEX, agent == AgentKind.CODEX, Modifier.weight(1f)) { agent = AgentKind.CODEX }
+                AgentCard(AgentKind.OPENCODE, agent == AgentKind.OPENCODE, Modifier.weight(1f)) { agent = AgentKind.OPENCODE }
             }
             PopoverLabel("Mode")
-            CLAUDE_MODES.forEachIndexed { i, m ->
+            if (agent == AgentKind.OPENCODE) {
+                // no selectable ladder: opencode has no approval protocol (daemon runs it --auto),
+                // so every mode row here would promise approvals that never come — same honesty
+                // rule as mobile's OpenCodeAutoApproveNotice. The stored mode is BYPASS (the truth).
+                Column(
+                    Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp))
+                        .background(Tok.warn.copy(alpha = 0.08f))
+                        .border(1.dp, Tok.warn.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
+                        Text("Full access (auto-approved)", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Text(
+                        "OpenCode auto-approves every tool call — permission modes and remote approvals don't apply.",
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            } else CLAUDE_MODES.forEachIndexed { i, m ->
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp))
                         .background(if (i == modeIdx) Tok.surface else Color.Transparent)
@@ -151,7 +173,9 @@ fun NewSessionPopover(
                 "Start session", color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
                     .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
-                    .clickable(enabled = looksAbsolute) { onStart(trimmed, agent, CLAUDE_MODES[modeIdx].mode) }.padding(vertical = 10.dp),
+                    .clickable(enabled = looksAbsolute) {
+                        onStart(trimmed, agent, if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else CLAUDE_MODES[modeIdx].mode)
+                    }.padding(vertical = 10.dp),
             )
         }
     }
@@ -229,12 +253,27 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             },
     ) {
         PopoverLabel("Model")
-        val options = if (model.chatAgent == AgentKind.CODEX) CODEX_MODEL_OPTIONS.map { it to it } else CLAUDE_MODEL_OPTIONS
+        LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
+        val options = when (model.chatAgent) {
+            AgentKind.CODEX -> model.modelsForAgent(AgentKind.CODEX).ifEmpty { CODEX_MODEL_OPTIONS }.map { it to it }
+            // daemon truth or nothing — no static catalog (see SessionSheets' OPTIONS note); the
+            // empty state renders below and the custom field still takes a provider/model id
+            AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).map { it to it }
+            // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
+            // table) — the daemon's list for Claude is config-default + the same aliases anyway
+            AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS
+        }
+        if (model.chatAgent == AgentKind.OPENCODE && options.isEmpty()) {
+            Text(
+                "Loading models from opencode…", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+        }
         fun isActive(pick: String) = model.chatModelId.equals(pick, true) || model.chatModel.equals(pick, true)
         // gateway model presets (issue #139): mirrors mobile's ModelPicker off the same shared
         // table. Gateway reported by the daemon → the section LEADS (those users pick vendor
         // ids, not Claude aliases); official endpoint → it waits behind a collapsed toggle.
-        val gatewayUrl = if (model.chatAgent == AgentKind.CODEX) null else model.gatewayBaseUrl
+        val gatewayUrl = if (model.chatAgent != AgentKind.CLAUDE) null else model.gatewayBaseUrl
         @Composable
         fun gatewayRows() = recommendedGatewayPresets(gatewayUrl).forEach { p ->
             GatewayPresetRow(p, isActive(p.id), suggested = p.matchesGatewayHost(gatewayUrl)) { model.switchModel(p.id); onDismiss() }
@@ -257,7 +296,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         options.forEach { (label, pick) ->
             QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
         }
-        if (gatewayUrl == null && model.chatAgent != AgentKind.CODEX) {
+        if (gatewayUrl == null && model.chatAgent == AgentKind.CLAUDE) {
             var showGateway by remember { mutableStateOf(false) }
             QaRow("Gateway presets", chevron = !showGateway) { showGateway = !showGateway }
             if (showGateway) gatewayRows()
@@ -390,7 +429,7 @@ internal fun AgentCard(agent: AgentKind, selected: Boolean, modifier: Modifier, 
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         AgentGlyph(agent, size = 17)
-        Text(if (agent == AgentKind.CODEX) "Codex" else "Claude", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(agentName(agent), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

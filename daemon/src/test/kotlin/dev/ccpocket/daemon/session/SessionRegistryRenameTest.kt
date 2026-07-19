@@ -49,11 +49,16 @@ class SessionRegistryRenameTest {
         )
 
     /** A transcript for [workdir]'s dirKey under [root] — created AFTER the registry so its fresh
-     *  mtime clears the restart-amnesia gate and the stubbed probe decides the verdict. */
+     *  mtime clears the restart-amnesia gate and the stubbed probe decides the verdict.
+     *  The mtime is bumped FORWARD explicitly: a write landing millis after the registry stamped
+     *  `startedAt` can still get a filesystem mtime TRUNCATED to an earlier tick (Linux jiffy /
+     *  coarse-clock granularity), tripping the `mtime < startedAt` amnesia gate and flipping the
+     *  live-writer verdict — the "refused rename" tests flaked exactly this way on CI runners. */
     private fun seedTranscript(root: Path, sessionId: String): Path {
         val dir = Files.createDirectories(root.resolve(ProjectPaths.dirKey(workdir)))
         val f = dir.resolve("$sessionId.jsonl")
         f.writeText("""{"type":"user","message":{"role":"user","content":"hi"},"cwd":"$workdir"}""" + "\n")
+        Files.setLastModifiedTime(f, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 50))
         return f
     }
 

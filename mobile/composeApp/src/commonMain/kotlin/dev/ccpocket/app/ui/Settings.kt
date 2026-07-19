@@ -201,6 +201,7 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     Triple("both", stringResource(Res.string.af_both), null as androidx.compose.ui.graphics.Color?),
                     Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
                     Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
+                    Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
                 )
                 afOpts.forEach { (key, label, dot) ->
                     val sel = repo.agentFilter.value == key

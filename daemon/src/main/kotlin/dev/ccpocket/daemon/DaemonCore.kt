@@ -8,6 +8,9 @@ import dev.ccpocket.daemon.disk.FileInboxService
 import dev.ccpocket.daemon.disk.SpawnedSessions
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.claude.ClaudeModelService
+import dev.ccpocket.daemon.codex.CodexModelService
+import dev.ccpocket.daemon.opencode.OpenCodeModelService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.presets.PresetStore
 import dev.ccpocket.daemon.schedule.ScheduleExecutor
@@ -37,6 +40,8 @@ class DaemonCore(
     claudeConfigDir: java.nio.file.Path? = null,
     presetStore: PresetStore = PresetStore.load(),
     scheduleStore: ScheduleStore = ScheduleStore.load(),
+    openCodeModels: OpenCodeModelService = OpenCodeModelService(),
+    codexModels: CodexModelService = CodexModelService(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val registry = SessionRegistry(scope, backends)
@@ -100,7 +105,10 @@ class DaemonCore(
         scope.launch { scheduler.runLoop() }
     }
 
-    val router = RequestRouter(registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler)
+    val router = RequestRouter(
+        registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
+        openCodeModels, codexModels, ClaudeModelService(claudeConfigDir),
+    )
 
     /**
      * The OWNER control planes (folder-share #115, bridges #91 follow-up), installed by RelayClient once

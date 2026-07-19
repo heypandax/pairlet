@@ -58,3 +58,6 @@ scripts/__pycache__/
 /marketing/video/**/__pycache__/
 /marketing/video/assets/footage/**/*.mp4
 /marketing/video/tools/*.json
+
+# opencode project-local config/state
+.opencode/

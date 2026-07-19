@@ -402,6 +402,7 @@ object SessionFilesService {
         when (agent) {
             AgentKind.CLAUDE -> claudeScan(file, ::touch, ::record)
             AgentKind.CODEX -> codexScan(file, ::touch, ::record)
+            AgentKind.OPENCODE -> { /* OpenCode uses SQLite, not file scanning */ }
         }
         return seen
     }
@@ -414,6 +415,7 @@ object SessionFilesService {
         val file = when (agent) {
             AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
             AgentKind.CODEX -> CodexPaths.findSession(sessionId)
+            AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
         }
         return file?.takeIf { it.exists() }
     }

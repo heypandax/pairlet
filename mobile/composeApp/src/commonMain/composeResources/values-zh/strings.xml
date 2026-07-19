@@ -289,7 +289,13 @@
     <string name="af_both">全部</string>
     <string name="af_claude_only">仅 Claude</string>
     <string name="af_codex_only">仅 Codex</string>
-    <string name="af_hint">选择列表里显示哪个 agent 的会话。Claude 与 Codex 仍以各自颜色标注。</string>
+    <string name="af_opencode_only">仅 OpenCode</string>
+    <string name="opencode_mode_short">完全访问</string>
+    <string name="opencode_mode_title">完全访问（自动批准）</string>
+    <string name="opencode_mode_note">OpenCode 以自动批准方式运行：所有工具调用（文件编辑、终端命令）由 CLI 自行放行，远程审批与权限模式对 OpenCode 会话不生效。</string>
+    <string name="opencode_mode_start">以完全访问开始</string>
+    <string name="opencode_models_loading">正在从 opencode 读取模型…</string>
+    <string name="af_hint">选择列表里显示哪个 agent 的会话。Claude、Codex 与 OpenCode 仍以各自颜色标注。</string>
     <string name="settings_usage">Token 用量</string>
     <string name="usage_title">用量</string>
     <string name="usage_tokens_today">今日 tokens</string>

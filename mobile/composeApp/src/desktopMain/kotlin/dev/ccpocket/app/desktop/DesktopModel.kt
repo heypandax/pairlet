@@ -399,6 +399,9 @@ interface DesktopModel {
     fun switchMode(m: PermissionMode) {}
     fun switchModel(name: String) {}
     fun switchEffort(level: String) {}
+    /** Agent model lists from the daemon — fetched by [fetchModels]. */
+    fun modelsForAgent(agent: AgentKind): List<String> = emptyList()
+    fun fetchModels(agent: AgentKind) {}
     fun compactConversation() {}
     fun clearConversation() {}
 

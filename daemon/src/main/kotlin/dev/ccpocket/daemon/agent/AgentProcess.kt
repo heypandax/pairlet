@@ -33,6 +33,13 @@ class AgentProcess private constructor(
     var lastStderr: String? = null
         private set
 
+    /** True once the process produced at least one stdout line. The startup watchdog's liveness
+     *  signal: "alive but sawStdout=false after the window" = hung on launch; a long healthy turn
+     *  keeps streaming and must never be confused with a hang. */
+    @Volatile
+    var sawStdout: Boolean = false
+        private set
+
     /** Exit code once the process has terminated, else null (also null if it can't be read). */
     fun exitCode(): Int? = runCatching { process.exitValue() }.getOrNull()
 
@@ -57,6 +64,7 @@ class AgentProcess private constructor(
                 process.inputStream.bufferedReader().use { r ->
                     while (isActive) {
                         val line = r.readLine() ?: break
+                        sawStdout = true
                         stdout.send(line)
                     }
                 }

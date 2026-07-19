@@ -118,10 +118,16 @@ import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.AuthState
+import dev.ccpocket.protocol.compatibleModelForAgent
+import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
+import dev.ccpocket.protocol.FetchModels
+import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
+import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.FetchPresets
+import dev.ccpocket.protocol.ModelsList
 import dev.ccpocket.protocol.FetchSkillCatalog
 import dev.ccpocket.protocol.FetchUsage
 import dev.ccpocket.protocol.SkillCatalog
@@ -1278,7 +1284,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // ask for the list now; it buffers in the outbox and flushes once the handshake lands. Ready is
         // asserted only when the real Directories reply arrives (see handle()), never optimistically here.
         // On a reconnect, also re-sync whatever page the user is parked on (re-open a live chat, re-list sessions).
-        scope.launch { send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
+        // ClientCaps FIRST: it declares this build understands agent="opencode", so the daemon stops
+        // filtering those rows out of the lists that follow (old builds never send it — see Messages.kt).
+        scope.launch { send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE))); send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
         startGrace(reconnect)
         startConnectWatchdog()
     }
@@ -1817,6 +1825,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // rev bumps on EVERY reply, including one equal to the last (a no-change save): UI effects
             // key on the rev, not the value, so an identical state still settles spinners/pending forms
             is PresetsState -> { presetsState.value = f; presetsStateRev.value++ }
+            is ModelsList -> {
+                // keep the LAST-GOOD list under a failed refresh: one `opencode models` timeout must
+                // not wipe a working picker back to the empty state — carry the fresh error alongside
+                val prev = agentModels[f.agent]
+                agentModels[f.agent] =
+                    if (f.error != null && f.models.isEmpty() && prev != null && prev.models.isNotEmpty()) prev.copy(error = f.error)
+                    else f
+            }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
@@ -1841,15 +1857,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
-                f.model?.let { model.value = it }
                 f.effort?.let { effort.value = it }
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
+                val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
+                // daemon truth verbatim: filtering the REPORTED model through the compat guard nulled
+                // legitimate ids (codex "o3", gateway "vendor/model") and wiped the header — the guard
+                // is for what we SEND (openSession seeding), never for what the daemon says is running
+                f.model?.let { model.value = it }
                 // unconditional (not ?.let): switching from a bridge session to a normal one must CLEAR the chip
                 sessionOrigin.value = f.origin // "via <bridge>" header chip (issue #91); null = interactive/old daemon
                 // window fallback is Claude-only: contextWindowFor knows nothing about gpt-* ids, and a Codex
                 // session with no daemon-sent window was rendering a % against a meaningless Claude 200k —
                 // null instead, and the UI shows raw tokens without a denominator
-                val claudeish = (f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
+                val claudeish = liveAgent == AgentKind.CLAUDE
                 // the user's override wins over the daemon's value (for Claude, f.contextWindow is never null and
                 // would otherwise pin a custom model at the CLI's 200k fallback — issue #60)
                 contextWindow.value = contextWindowOverride.value ?: f.contextWindow ?: (if (claudeish) contextWindowFor(f.model ?: model.value) else null)
@@ -2302,6 +2322,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 
+    /** Per-agent model lists from the daemon ([FetchModels] → [ModelsList]) — what the picker offers
+     *  beyond the static presets. Keyed by agent so a late reply can't cross-pollute another backend. */
+    val agentModels = mutableStateMapOf<AgentKind, ModelsList>()
+
+    fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
+        scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
+    }
+
     /** Create (null [id]) / update one preset. [token] is write-only plaintext (E2E protects the
      *  transport; the daemon stores it and only ever echoes a mask); null token on update = keep. */
     fun savePreset(id: String?, name: String, baseUrl: String, tokenVar: String, token: String?, model: String?, smallFastModel: String?) =
@@ -2728,11 +2756,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
         // new Claude sessions seed from the persisted default model; resumed keep their own, and a Codex launch
-        // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend
-        val openModel = saved?.model ?: defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
+        // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend.
+        val openModel = compatibleModelForAgent(openAgent, saved?.model) ?: when (openAgent) {
+            // New OpenCode sessions let the daemon choose from OpenCode config / `opencode models`.
+            AgentKind.OPENCODE -> null
+            else -> defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
+        }
         mode.value = openMode; allowRules.clear()
         model.value = openModel; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
+        // Pre-fetch OpenCode model list so the picker has it ready when the user opens it,
+        // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
+        fetchModels(openAgent)
         clearBackgroundJobs()
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
@@ -3449,11 +3484,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
-    /** Switch the model — routed through the daemon's `/model` interception; applied on the next turn
-     *  (issue #84), never interrupting a running one. */
+    /** Switch the model — routed through the daemon's `/model` interception; applied on the next
+     *  turn (issue #84), never interrupting a running one. For OpenCode sessions, rejects models
+     *  that lack a provider prefix (e.g. "deepseek-chat", "sonnet") — those are Claude/gateway ids
+     *  and would cause silent launch hangs in the opencode backend. */
     fun switchModel(name: String) {
         val target = name.trim()
         if (convoId.value == null || target.isEmpty() || target == model.value) return
+        // Keep model ids scoped to the active agent. OpenCode requires provider/model, Codex uses
+        // Codex-shaped ids, and Claude remains permissive for gateway custom ids.
+        if (!isModelCompatibleWithAgent(sessionAgent.value ?: AgentKind.CLAUDE, target)) return
         model.value = target // optimistic; the daemon's next SessionLive corrects it to the resolved id
         switchViaCommand("/model $target")
     }
@@ -3558,8 +3598,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // wire default (ask each step), ignoring the user's chosen mode (issue #50). Model/effort
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
+            val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
             mode.value = defaultMode.value
-            send(OpenSession(wd, sid, model = saved?.model, mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true, lastEventSeq = lastEventSeqFor(sid)))
+            send(OpenSession(wd, sid, model = compatibleModelForAgent(agent, saved?.model), mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true, lastEventSeq = lastEventSeqFor(sid)))
         }
     }
 

@@ -39,7 +39,45 @@ enum class Decision {
 enum class AgentKind {
     @SerialName("claude") CLAUDE,
     @SerialName("codex") CODEX,
+    @SerialName("opencode") OPENCODE,
 }
+
+/** OPENCODE's wire name, shared by [ClientCaps.supportsAgents] declarations on both ends — the
+ *  daemon must not emit this enum value to a peer that never declared it (see ClientCaps). */
+const val AGENT_WIRE_OPENCODE = "opencode"
+
+/** Codex model ids the app exposes as first-class presets. */
+val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex")
+
+/** Claude alias set — the ONE id family that is meaningless to the other backends. */
+val CLAUDE_MODEL_ALIAS_IDS = setOf("fable", "opus", "sonnet", "haiku")
+
+/** OpenCode model ids must include their provider prefix, e.g. "opencode/deepseek-v4-flash-free". */
+fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it && it.substringBefore('/').isNotBlank() && it.substringAfter('/').isNotBlank() } == true
+
+/**
+ * Whether SENDING [model] to [agent] can work at all. Deliberately a MINIMAL blocklist, not a
+ * classifier: the daemon is the model source of truth (configs/caches carry ids like "o3" or
+ * gateway "vendor/model" that no shape heuristic can place), and an over-eager guard here rejected
+ * daemon-reported models and locked the picker. Only two facts are hard:
+ *  - OpenCode hangs silently on anything that isn't provider/model;
+ *  - Claude aliases (opus/sonnet/...) are meaningless to the other two backends.
+ * Everything else passes — a genuinely wrong id fails loudly on the daemon side instead.
+ */
+fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
+    val m = model?.trim().orEmpty()
+    if (m.isEmpty()) return false
+    return when (agent) {
+        AgentKind.OPENCODE -> isOpenCodeModelId(m)
+        AgentKind.CODEX -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
+        AgentKind.CLAUDE -> true // gateway users run arbitrary ids, slashed OpenRouter-style included
+    }
+}
+
+/** [model] when it can be SENT to [agent], else null — for seeding outbound opens; never for
+ *  filtering what the daemon REPORTS back (daemon truth renders as-is). */
+fun compatibleModelForAgent(agent: AgentKind, model: String?): String? =
+    model?.trim()?.takeIf { isModelCompatibleWithAgent(agent, it) }
 
 /** One assistant content piece (closed set for M0: text | thinking). tool_use is a [ToolEvent]. */
 @Serializable

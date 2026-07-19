@@ -449,6 +449,53 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun models_and_caps_frames_roundtrip_with_pinned_discriminators() {
+        val fetch = Envelope(id = "m1", ts = 0, body = FetchModels(agent = AgentKind.OPENCODE, workdir = "/w"))
+        val fetchJson = PocketJson.encodeToString(fetch)
+        assertTrue("\"t\":\"pocket/models.fetch\"" in fetchJson, fetchJson)
+        assertEquals(fetch, PocketJson.decodeFromString<Envelope>(fetchJson))
+
+        val list = Envelope(id = "m2", ts = 0, body = ModelsList(agent = AgentKind.OPENCODE, models = listOf("opencode/a", "zhipuai/b")))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"t\":\"pocket/models.list\"" in listJson, listJson)
+        assertFalse("error" in listJson, listJson) // explicitNulls=false — null error stays off the wire
+        assertEquals(list, PocketJson.decodeFromString<Envelope>(listJson))
+
+        val caps = Envelope(id = "m3", ts = 0, body = ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE)))
+        val capsJson = PocketJson.encodeToString(caps)
+        assertTrue("\"t\":\"pocket/client.caps\"" in capsJson, capsJson)
+        assertEquals(caps, PocketJson.decodeFromString<Envelope>(capsJson))
+
+        // bare frames (an old peer omitting everything) decode to the Claude-keeping defaults
+        assertEquals(FetchModels(), PocketJson.decodeFromString<FetchModels>("""{}"""))
+        assertEquals(AgentKind.CLAUDE, PocketJson.decodeFromString<ModelsList>("""{}""").agent)
+    }
+
+    @Test
+    fun unknown_agent_kind_value_degrades_to_default_instead_of_failing_the_frame() {
+        // THE wire hazard of adding an AgentKind constant: a peer built before it receives
+        // `"agent":"<new>"` inside frames it already understands. coerceInputValues + the per-field
+        // defaults must degrade the ROW (agent -> default), never fail the whole Envelope — a failed
+        // Envelope is silently dropped by every ingress and the user loses the entire list. This is
+        // the regression pin for the NEXT agent addition; for peers shipped before coerceInputValues
+        // the daemon additionally capability-gates via ClientCaps (that part can't be unit-tested here).
+        val row = PocketJson.decodeFromString<SessionSummary>(
+            """{"sessionId":"s1","title":"t","firstPrompt":"p","messageCount":1,"cwd":"/w","lastModified":1,"agent":"some-future-agent"}""",
+        )
+        assertEquals(null, row.agent) // nullable default — degrades to "assume Claude" rendering
+
+        val active = PocketJson.decodeFromString<ActiveSession>("""{"sessionId":"c1","agent":"some-future-agent"}""")
+        assertEquals(AgentKind.CLAUDE, active.agent)
+
+        val sessions = Envelope(
+            id = "s", ts = 0,
+            body = Sessions("/w", listOf(SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.OPENCODE))),
+        )
+        // the whole-frame path: an envelope carrying a KNOWN agent round-trips unchanged
+        assertEquals(sessions, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(sessions)))
+    }
+
+    @Test
     fun unknown_frame_discriminator_throws() {
         // The invariant the whole forward-compat story rests on: an unknown "t" must THROW (each decode
         // site wraps in runCatching and drops the frame). A default polymorphic deserializer added later

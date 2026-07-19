@@ -122,11 +122,18 @@ fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
 @Composable
 fun ModeSheet(
     current: PermissionMode, rules: List<String>, switching: Boolean, workdir: String? = null,
+    agent: AgentKind? = null,
     onSelect: (PermissionMode) -> Unit, onClearRule: (String) -> Unit, onClearAll: () -> Unit, onDismiss: () -> Unit,
 ) {
     var confirmBypass by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
-        if (confirmBypass) {
+        if (agent == AgentKind.OPENCODE) {
+            // mid-session too the mode is immutable truth, not a choice — see OpenCodeAutoApproveNotice
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
+                Text(stringResource(Res.string.exec_mode_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                OpenCodeAutoApproveNotice(Modifier.padding(top = 12.dp))
+            }
+        } else if (confirmBypass) {
             BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { confirmBypass = false; onSelect(PermissionMode.BYPASS_PERMISSIONS) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
@@ -209,6 +216,7 @@ fun StartSessionModeSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     AgentOption(AgentKind.CLAUDE, chosenAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { chosenAgent = AgentKind.CLAUDE }
                     AgentOption(AgentKind.CODEX, chosenAgent == AgentKind.CODEX, Modifier.weight(1f)) { chosenAgent = AgentKind.CODEX }
+                    AgentOption(AgentKind.OPENCODE, chosenAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { chosenAgent = AgentKind.OPENCODE }
                 }
                 SectionLabel(stringResource(Res.string.label_mode))
                 if (chosenAgent == AgentKind.CLAUDE) {
@@ -219,6 +227,15 @@ fun StartSessionModeSheet(
                             }
                         }
                     }
+                } else if (chosenAgent == AgentKind.OPENCODE) {
+                    // no ladder: opencode has no approval protocol (daemon runs it --auto) — offering
+                    // Cautious/Plan here would promise approvals that never come. The stored mode is
+                    // BYPASS_PERMISSIONS because that is what actually runs.
+                    OpenCodeAutoApproveNotice()
+                    SheetButton(
+                        stringResource(Res.string.opencode_mode_start), Modifier.fillMaxWidth().padding(top = 10.dp),
+                        bg = Tok.warn, fg = Tok.base,
+                    ) { onPick(PermissionMode.BYPASS_PERMISSIONS, AgentKind.OPENCODE) }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         CODEX_PRESETS.forEach { p ->
@@ -241,9 +258,37 @@ fun StartSessionModeSheet(
 fun codexPresetFor(agent: AgentKind, mode: PermissionMode): CodexPreset? =
     if (agent == AgentKind.CODEX) CODEX_PRESETS.first { it.mode == mode } else null
 
-/** What [SessionDefaultsChip] is labeled for [agent]+[mode] — one owner for the rule, shared with tests. */
-fun sessionDefaultsLabel(agent: AgentKind, mode: PermissionMode): StringResource =
-    codexPresetFor(agent, mode)?.name ?: MODE_BY.getValue(mode).short
+/** What [SessionDefaultsChip] is labeled for [agent]+[mode] — one owner for the rule, shared with tests.
+ *  OpenCode is ALWAYS "Full access": the daemon runs it `--auto` (no approval protocol), so showing a
+ *  Claude mode name here would claim an approval flow that never happens. */
+fun sessionDefaultsLabel(agent: AgentKind, mode: PermissionMode): StringResource = when {
+    agent == AgentKind.OPENCODE -> Res.string.opencode_mode_short
+    else -> codexPresetFor(agent, mode)?.name ?: MODE_BY.getValue(mode).short
+}
+
+/**
+ * The honest replacement for a mode ladder on OpenCode surfaces: the daemon launches opencode with
+ * `--auto` — every tool call (edits, commands) is CLI-approved and the PermissionBridge is never
+ * consulted — so any selectable Cautious/Plan row would be pure theater (the review's "security
+ * semantics deception" P0). One immutable full-access card, warn-tinted, states what actually runs.
+ */
+@Composable
+fun OpenCodeAutoApproveNotice(modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier.fillMaxWidth().clip(shape).background(Tok.warn.copy(alpha = 0.08f))
+            .border(1.dp, Tok.warn.copy(alpha = 0.35f), shape).padding(13.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Icon(Icons.Rounded.WarningAmber, null, tint = Tok.warn, modifier = Modifier.size(15.dp))
+            Text(stringResource(Res.string.opencode_mode_title), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Text(
+            stringResource(Res.string.opencode_mode_note),
+            color = Tok.tx2, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+}
 
 /** Compact "what you'll get" chip beside the one-tap new-session entries: default agent glyph + the
  *  mode it will start in (Codex shows its preset name), tap → the full [StartSessionModeSheet]. Keeps
@@ -252,7 +297,12 @@ fun sessionDefaultsLabel(agent: AgentKind, mode: PermissionMode): StringResource
 fun SessionDefaultsChip(agent: AgentKind, mode: PermissionMode, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     val preset = codexPresetFor(agent, mode)
     val label = stringResource(sessionDefaultsLabel(agent, mode))
-    val color = when { preset == null -> MODE_BY.getValue(mode).color; preset.danger -> Tok.danger; else -> Tok.codex }
+    val color = when {
+        agent == AgentKind.OPENCODE -> Tok.warn // always full access — chip reads as the warning it is
+        preset == null -> MODE_BY.getValue(mode).color
+        preset.danger -> Tok.danger
+        else -> Tok.codex
+    }
     val shape = RoundedCornerShape(10.dp)
     Row(
         modifier.clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)

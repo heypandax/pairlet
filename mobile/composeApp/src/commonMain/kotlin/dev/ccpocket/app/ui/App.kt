@@ -1114,6 +1114,7 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                 when (af) {
                     "claude" -> (it.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
                     "codex" -> it.agent == AgentKind.CODEX
+                    "opencode" -> it.agent == AgentKind.OPENCODE
                     else -> true
                 }
             }
@@ -1328,10 +1329,10 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                         // placeholder — never a blank gap. A pre-first-turn session (lazy start #61) whose
                         // model the daemon couldn't eager-resolve shows the placeholder until the first turn's
                         // init names the CLI/account default (issue #96)
-                        val modelLabel = modelAlias(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
+                        val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
                         Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
                         Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1)
-                        AgentBadge(repo.sessionAgent.value) // shows only for Codex; Claude stays quiet
+                        AgentBadge(repo.sessionAgent.value) // non-Claude agents get their tag; Claude stays quiet
                         // external trigger source (issue #91): a bridge-opened session says so — the owner
                         // should know an IM bot, not a person, is driving this conversation
                         repo.sessionOrigin.value?.let { origin ->
@@ -1686,6 +1687,7 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
         if (showModeSheet) {
             ModeSheet(
                 current = repo.mode.value, rules = repo.allowRules, switching = repo.switching.value, workdir = repo.workdir.value,
+                agent = repo.sessionAgent.value, // OpenCode renders the immutable full-access notice, not a ladder
                 onSelect = { repo.switchMode(it) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },

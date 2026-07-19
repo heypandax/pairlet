@@ -13,20 +13,21 @@ class MainStartupGateTest {
 
     @Test
     fun both_missing_refuses_startup_with_actionable_message() {
-        val msg = missingAgentsMessage(null, null)
+        val msg = missingAgentsMessage(null, null, null)
         assertNotNull(msg)
         assertTrue("claude" in msg, msg)
         assertTrue("codex" in msg, msg)
         assertTrue("--claude-bin" in msg, msg)
         assertTrue("--codex-bin" in msg, msg)
+        assertTrue("opencode" in msg, msg)
     }
 
     @Test
-    fun codex_only_machine_starts() = assertNull(missingAgentsMessage(null, codex))
+    fun codex_only_machine_starts() = assertNull(missingAgentsMessage(null, codex, null))
 
     @Test
-    fun claude_only_machine_starts() = assertNull(missingAgentsMessage(claude, null))
+    fun claude_only_machine_starts() = assertNull(missingAgentsMessage(claude, null, null))
 
     @Test
-    fun both_present_starts() = assertNull(missingAgentsMessage(claude, codex))
+    fun both_present_starts() = assertNull(missingAgentsMessage(claude, codex, null))
 }

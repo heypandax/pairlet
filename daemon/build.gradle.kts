@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.clikt)
     implementation(libs.slf4j.api)
     runtimeOnly(libs.slf4j.simple)
+    implementation(libs.sqlite.jdbc)             // OpenCodeTranscriptScanner/Replay read opencode.db
 
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)

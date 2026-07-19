@@ -35,6 +35,7 @@ data class Palette(
     val accent: Color,
     val accentPressed: Color,
     val codex: Color,
+    val opencode: Color,
     val ok: Color,
     val warn: Color,
     val danger: Color,
@@ -54,6 +55,7 @@ val DarkPalette = Palette(
     accent = Color(0xFFD97757),
     accentPressed = Color(0xFFC4633F), // primary pressed/active (desktop hover-press)
     codex = Color(0xFF3FB5AC),         // Codex agent identity — calm teal that sits on the dark palette
+    opencode = Color(0xFF9B72CF),      // OpenCode agent identity — soft purple
     ok = Color(0xFF4FB477),
     warn = Color(0xFFE0A93B),
     danger = Color(0xFFE5604D),
@@ -74,6 +76,7 @@ val LightPalette = Palette(
     accent = Color(0xFFC15F3C),
     accentPressed = Color(0xFFA94E30),
     codex = Color(0xFF1C8B82),
+    opencode = Color(0xFF7B52AB),      // OpenCode agent identity — deeper purple for light mode
     ok = Color(0xFF2E9E5B),
     warn = Color(0xFFB07D1C),
     danger = Color(0xFFC53D2B),
@@ -101,6 +104,7 @@ object Tok {
     val accent: Color get() = current.accent
     val accentPressed: Color get() = current.accentPressed
     val codex: Color get() = current.codex
+    val opencode: Color get() = current.opencode
     val ok: Color get() = current.ok
     val warn: Color get() = current.warn
     val danger: Color get() = current.danger

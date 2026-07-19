@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
@@ -189,7 +190,7 @@ fun InlinePermCard(
                             if (isDiff) "${agentName(agent)} wants to edit files" else "${agentName(agent)} needs permission",
                             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
                         )
-                        if (agent == AgentKind.CODEX) AgentTag(AgentKind.CODEX)
+                        AgentBadge(agent)
                     }
                     if (isDiff) {
                         val diff = ask.diff!!
