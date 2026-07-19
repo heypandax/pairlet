@@ -31,5 +31,9 @@ data class AgentSpec(
     val cleanRoom: Boolean = false,
     // OpenCode only: the initial prompt text, passed as a CLI positional arg to `opencode run`.
     // Needed because `opencode run [message]` takes the message as a CLI arg, not stdin.
+    // KNOWN LIMITATION (review P1, tracked in the OpenCode follow-up issue): argv is readable in the
+    // local process table (`ps`) while the turn runs — unlike the stdin delivery claude/codex use —
+    // and Windows caps a command line at ~32K chars, so a very long pasted prompt can fail to spawn.
+    // If a future `opencode run` accepts the message on stdin, switch delivery there and drop this.
     val initialPrompt: String? = null,
 )
