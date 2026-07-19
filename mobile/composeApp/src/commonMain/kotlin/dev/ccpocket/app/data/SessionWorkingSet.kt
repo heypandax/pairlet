@@ -183,6 +183,13 @@ fun buildWorkingSet(
             agent = r.agent ?: m?.agent, lastOpenedAt = m?.at ?: 0,
         )
     }
+        // Most-recently-visited first, same rule `recent` follows — so "the session I just came from" is
+        // the top row whether or not it happens to be running. Sorting only `recent` left the ordering
+        // conditional on something the user can't see (whether the daemon still calls it alive): step out
+        // of a session that is still working and it jumped into RUNNING at a position decided by the
+        // project list. Sessions this device never opened have at = 0 and settle at the bottom in the
+        // daemon's own order (a stable sort keeps it) — there is no visit to rank them by.
+        .sortedByDescending { it.lastOpenedAt }
 
     val shown = runningItems.map { it.sessionId }.toSet() + setOfNotNull(currentSessionId)
     val recentItems = mru.filterNot { it.sessionId in shown }.map { m ->

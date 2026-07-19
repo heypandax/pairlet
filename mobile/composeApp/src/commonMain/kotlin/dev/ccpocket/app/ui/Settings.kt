@@ -204,6 +204,7 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 CONTEXT_WINDOW_OPTS, repo.contextWindowOverride.value,
                 label = { opt -> when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" } },
             ) { repo.setContextWindowOverride(it) }
+            ContextWindowCustomRow(repo)
             Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 
             SectionLabel(stringResource(Res.string.af_show_from))

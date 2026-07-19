@@ -85,6 +85,40 @@ class SessionWorkingSetTest {
         assertNull(r.first { it.sessionId == "s9" }.agent, "an older daemon's live row has no known backend")
     }
 
+    /**
+     * "The session I just came from is the top row" must hold whether or not that session is still
+     * working. Ordering only `recent` by visit made it conditional on something invisible to the user:
+     * step out of a session mid-turn and it moved into RUNNING, ranked by the project list instead.
+     */
+    @Test
+    fun runningIsOrderedByVisitSoTheOneYouJustLeftLeads() {
+        // the daemon lists them oldest-project-first; the user visited them in the opposite order
+        val dirs = listOf(
+            dir("/w/proj-a", ActiveSession("s1", "A")),
+            dir("/w/proj-b", ActiveSession("s2", "B")),
+            dir("/w/proj-c", ActiveSession("s3", "C")),
+        )
+        var mru = emptyList<WorkingSetEntry>()
+        listOf("s1", "s2", "s3").forEachIndexed { i, s -> mru = mruTouch(mru, entry(s, i.toLong(), dir = "/w/x")) }
+        // standing in s3, so s2 is the one just left
+        val ws = buildWorkingSet(runningSessions(dirs), mru, currentSessionId = "s3")
+        assertEquals(listOf("s2", "s1"), ws.running.map { it.sessionId }, "most-recently-visited leads")
+    }
+
+    /** A session this device never opened has no visit to rank by — it settles below the visited ones,
+     *  keeping the daemon's own order among its peers. */
+    @Test
+    fun neverVisitedRunningSessionsKeepDaemonOrderAtTheBottom() {
+        val dirs = listOf(
+            dir("/w/proj-x", ActiveSession("x1", "X1")), // never opened here (started on the computer)
+            dir("/w/proj-y", ActiveSession("y1", "Y1")), // ditto
+            dir("/w/proj-a", ActiveSession("s1", "A")),  // visited
+        )
+        val mru = listOf(entry("s1", 5, dir = "/w/proj-a"))
+        val ws = buildWorkingSet(runningSessions(dirs), mru, currentSessionId = null)
+        assertEquals(listOf("s1", "x1", "y1"), ws.running.map { it.sessionId })
+    }
+
     @Test
     fun runningWinsOverRecentForTheSameSession() {
         val mru = listOf(entry("s1", 9, dir = "/w/proj-a"), entry("s5", 8, dir = "/w/proj-e"))

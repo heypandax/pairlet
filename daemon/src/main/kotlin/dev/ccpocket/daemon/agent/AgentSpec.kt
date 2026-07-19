@@ -30,10 +30,21 @@ data class AgentSpec(
     // Credentials/auth are NOT a setting source, so the guest still bills the owner's account (billing intact).
     val cleanRoom: Boolean = false,
     // OpenCode only: the initial prompt text, passed as a CLI positional arg to `opencode run`.
-    // Needed because `opencode run [message]` takes the message as a CLI arg, not stdin.
-    // KNOWN LIMITATION (review P1, tracked in the OpenCode follow-up issue): argv is readable in the
-    // local process table (`ps`) while the turn runs — unlike the stdin delivery claude/codex use —
-    // and Windows caps a command line at ~32K chars, so a very long pasted prompt can fail to spawn.
-    // If a future `opencode run` accepts the message on stdin, switch delivery there and drop this.
+    // KNOWN LIMITATION (review P1, issue #164): argv is readable in the local process table (`ps`)
+    // while the turn runs — unlike the stdin delivery claude/codex use — and Windows caps a command
+    // line at ~32K chars, so a very long pasted prompt can fail to spawn.
+    //
+    // CORRECTION (2026-07-19, issue #164): the stated REASON for argv — "opencode run takes the
+    // message as a CLI arg, not stdin" — was never true. Upstream `cli/cmd/run.ts` has read piped
+    // stdin since 2025-07 (commit da909d9), a year before we wrote this: with no positional it uses
+    // the pipe as the prompt, with both it concatenates `argv + "\n" + piped`. So the limitation is
+    // ours to remove, not a CLI constraint.
+    //
+    // NOT switched yet, deliberately: opencode isn't installed on any machine we can test from, and
+    // a blind switch fails in the worst way — opencode would block on `Bun.stdin.text()` until EOF,
+    // emit nothing, and get culled by the 45s startup watchdog, surfacing as a generic timeout. When
+    // an opencode box is available, the move is three edits in OpenCodeLauncher.kt: drop the argv
+    // positional (line ~55; leaving it would send the prompt TWICE via the concat path), switch
+    // redirectInput off /dev/null to PIPE (~line 61), then write the prompt and CLOSE the stream.
     val initialPrompt: String? = null,
 )

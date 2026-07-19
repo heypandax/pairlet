@@ -47,22 +47,28 @@ fun GatewayTint.color(): Color = when (this) {
 }
 
 /**
- * Audited 2026-07-19 (issue #168). These ids ROT, and silently: `deepseek-chat`/`deepseek-reasoner`
- * expire 2026-07-24 15:59 UTC, and `kimi-k2` had been discontinued since 2026-05-25 — dead in this
- * table for two months with nobody noticing, because a wrong id only fails at the user's gateway.
- * `glm-4.6` and `MiniMax-M2` were checked the same day and are still on their vendors' supported
- * lists (newer generations exist; not-latest is not broken, so they stay put).
+ * Audited 2026-07-19 (issue #168), every id re-checked against the vendor's own docs that day.
+ * These ids ROT, and silently — a wrong one only fails at the USER's gateway, so we get zero signal:
+ * `kimi-k2` sat here dead for two months (discontinued 2026-05-25) before anyone noticed, and
+ * `deepseek-chat`/`deepseek-reasoner` expire 2026-07-24 15:59 UTC.
+ *
+ * The bar is "the vendor's current mainstream id", not merely "not yet retired": a two-generations-old
+ * id still answers, so nothing looks broken, while every user who taps the row quietly gets a worse
+ * model than they asked for. That is why `glm-4.6` → `glm-4.7` and `MiniMax-M2` → `MiniMax-M2.5`
+ * moved here even though both old ids were still being served.
  *
  * Re-audit whenever a vendor ships a generation. The structural fix — stop hand-maintaining ids and
- * let the gateway answer for itself — is issue #167; until then this comment is the only tripwire.
+ * let the gateway answer for itself — is issue #167, whose step ① already demoted this table below
+ * the Claude aliases; until the rest lands, this comment plus `GatewayModelPresetsTest` are the only
+ * tripwires.
  */
 val GATEWAY_MODEL_PRESETS: List<GatewayModelPreset> = listOf(
     GatewayModelPreset("DeepSeek", "deepseek-v4-pro", "DS", GatewayTint.BLUE, listOf("deepseek")),
     GatewayModelPreset("DeepSeek", "deepseek-v4-flash", "DS", GatewayTint.BLUE, listOf("deepseek")),
-    GatewayModelPreset("GLM", "glm-4.6", "GL", GatewayTint.VIOLET, listOf("bigmodel", "zhipu", "z.ai")),
+    GatewayModelPreset("GLM", "glm-4.7", "GL", GatewayTint.VIOLET, listOf("bigmodel", "zhipu", "z.ai")),
     GatewayModelPreset("Kimi", "kimi-k3", "KM", GatewayTint.AMBER, listOf("moonshot", "kimi")),
     GatewayModelPreset("Qwen", "qwen3-coder-plus", "QW", GatewayTint.TEAL, listOf("dashscope", "qwen", "aliyun")),
-    GatewayModelPreset("MiniMax", "MiniMax-M2", "MM", GatewayTint.PINK, listOf("minimax")),
+    GatewayModelPreset("MiniMax", "MiniMax-M2.5", "MM", GatewayTint.PINK, listOf("minimax")),
 )
 
 /** Compact display host of a gateway base URL: scheme/path stripped, port kept
