@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +29,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,36 +53,75 @@ import org.jetbrains.compose.resources.stringResource
  * Cross-project session switcher (issue #165). Moving between the two or three sessions you are actually
  * juggling used to mean walking the whole navigation back out to the project list and in again; this lands
  * you in any of them in one tap, without leaving the chat.
- *
- * The entry is deliberately ONE small element: the chat header already carries back, title, machine,
- * folder, model and the ⋯ menu, so anything wider would have to eat into the title.
  */
 
 /**
- * Top-bar entry — a tab-counter-style square holding how many OTHER sessions you could jump to, with a dot
- * when one of them wants you. It renders nothing at zero: a "0" chip is pure noise in an already crowded
- * header, and with no other session there is nothing to switch to. The switcher appears the moment a second
- * session exists, which is also the first moment it has a job.
+ * Composer-accessory entry — a stack glyph + the count of OTHER sessions you could jump to, with a dot when
+ * one of them wants you (design: switcher-entry-placement.jsx, option A).
+ *
+ * It shipped first as a bare 28dp bordered square in the CHAT HEADER and failed twice in the field: the
+ * header had no width left to give (back · title · machine · folder · model · running · ⋯), and a box
+ * holding only a number reads as a status badge, not a control. Both are the disease the two-layer composer
+ * already cured for the model chip (issue #157 follow-up), so the entry takes the same medicine: down to
+ * the accessory row, in the model chip's exact pill grammar, with a glyph that shows what it means instead
+ * of leaving it to be inferred.
+ *
+ * Honest tradeoff (design flagged it): this row otherwise answers "what will this message do", and a
+ * control that yanks you into a DIFFERENT chat sits a thumb-width from Send. The pill stays quiet and
+ * never accent-filled so Send keeps being the loudest thing here.
+ *
+ * Renders nothing at zero — with no other session there is nothing to switch to, and the row collapses
+ * back to exactly the shipped attach · chip · action layout with no gap.
  */
 @Composable
 fun SessionStackChip(count: Int, attention: Boolean, onClick: () -> Unit) {
     if (count <= 0) return
-    Box(Modifier.padding(end = 4.dp)) {
-        Box(
-            Modifier.size(28.dp).clip(RoundedCornerShape(8.dp))
-                .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
-                .clickable { onClick() },
-            contentAlignment = Alignment.Center,
+    val cd = stringResource(Res.string.switcher_open)
+    Box {
+        Row(
+            Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
+                .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                .clickable { onClick() }
+                .padding(start = 9.dp, end = 10.dp)
+                .semantics { contentDescription = cd },
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            SessionStackGlyph(Tok.tx2, Modifier.size(13.dp))
+            Spacer(Modifier.width(6.dp))
             Text(
+                // TightCenter for the same reason the model chip needs it: mono ascent/descent are
+                // asymmetric, so a raw Text rides high inside the pill even under CenterVertically
                 if (count > 9) "9+" else count.toString(),
-                color = Tok.tx2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                fontFamily = FontFamily.Monospace,
+                color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
+                maxLines = 1,
             )
         }
-        // attention rides the corner instead of recoloring the chip: the count stays readable and the
-        // header keeps showing exactly one accent-colored thing at a time
-        if (attention) Box(Modifier.align(Alignment.TopEnd).size(7.dp).clip(CircleShape).background(Tok.accent))
+        // attention rides the corner rather than recoloring the pill: the count stays readable, and the
+        // composer keeps exactly one accent-colored thing at a time (Send)
+        if (attention) Box(
+            Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp)
+                .size(7.dp).clip(CircleShape).background(Tok.accent),
+        )
+    }
+}
+
+/** 13dp "stacked cards" glyph — two offset rounded rects, 1.5pt stroke like the rest of the line icons. */
+@Composable
+private fun SessionStackGlyph(tint: Color, modifier: Modifier) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val r = 1.5.dp.toPx()
+        val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        // back card peeks out top-right; front card sits full — reads as "more than one of these"
+        drawRoundRect(
+            tint, topLeft = Offset(w * 0.30f, 0f), size = Size(w * 0.70f, h * 0.70f),
+            cornerRadius = CornerRadius(r, r), style = stroke,
+        )
+        drawRoundRect(
+            tint, topLeft = Offset(0f, h * 0.30f), size = Size(w * 0.70f, h * 0.70f),
+            cornerRadius = CornerRadius(r, r), style = stroke,
+        )
     }
 }
 

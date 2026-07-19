@@ -1355,12 +1355,6 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                         PulseDot(Tok.accent)
                         Text(stringResource(Res.string.chat_running), color = Tok.accent, fontSize = 11.sp)
                     }
-                    // one tap to any other session you're juggling, across projects (issue #165). Sits here
-                    // rather than in ⋯ because switching is a navigation move made mid-thought — buried a
-                    // sheet deep it costs about what walking the nav back out already did. Draws nothing
-                    // when there's nowhere to go, so a single-session user sees no new header weight.
-                    val workingSet = repo.workingSet()
-                    SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
                     // mode switching moved into the ⋯ quick-actions sheet — the persistent badge was one
                     // more thing crowding the header for a setting touched a few times per session
                     Box(
@@ -1636,6 +1630,14 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                                     contentDescription = stringResource(Res.string.qa_model),
                                     labelMax = 120.dp, // relaxed on the accessory row (mobile-composer.jsx); desktop keeps 82
                                 ) { showModelSheet = true }
+                                // one tap to any other session you're juggling, across projects (issue #165).
+                                // Came DOWN here from the header, which had no width left to give and made a
+                                // bare count square read as a badge — same cure the model chip got, so the two
+                                // shallow entrances now share a lane. The flexible gap below absorbs it, so the
+                                // chip's 120dp label and the 44dp action button are never squeezed.
+                                val workingSet = repo.workingSet()
+                                if (workingSet.otherCount > 0) Spacer(Modifier.width(6.dp))
+                                SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
                                 Spacer(Modifier.weight(1f))
                                 // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
                                 // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
