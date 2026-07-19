@@ -772,10 +772,16 @@ internal fun rememberBottomPinned(
     vararg resetKeys: Any?,
     userGesturesOnly: Boolean = true,
 ): MutableState<Boolean> {
-    val pinned = remember(*resetKeys) { mutableStateOf(true) }
-    // keyed on the pinned INSTANCE too: resetKeys mint a fresh state, and a collector keyed only on
-    // the list would keep writing the previous one (desktop resets per selected session)
-    LaunchedEffect(listState, userGesturesOnly, pinned) {
+    // ONE instance for the life of the screen, RESET BY VALUE per key — never re-minted. Keying the
+    // remember itself handed every effect that had already captured the old instance a dead object: it
+    // kept reading (and writing) a state nothing rendered from. That is what broke switching between
+    // sessions (issue #165) — the transcript arrives via clear()+addAll(), which clamps the list back to
+    // index 0, and the follow-the-stream effect that should have re-landed it was consulting the previous
+    // conversation's pin. Entering a chat from the session list never hit it: that path remounts, so
+    // there was only ever one instance.
+    val pinned = remember { mutableStateOf(true) }
+    LaunchedEffect(*resetKeys) { pinned.value = true }
+    LaunchedEffect(listState, userGesturesOnly) {
         var userDriven = !userGesturesOnly
         if (userGesturesOnly) launch {
             listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) userDriven = true }
@@ -789,6 +795,23 @@ internal fun rememberBottomPinned(
     return pinned
 }
 
+/**
+ * Scroll the transcript to its true end.
+ *
+ * Deliberately targets the last LIST item rather than `messages.lastIndex`: the chat list is not just the
+ * messages. A paginated session puts an "earlier messages" loader at index 0, and a live turn appends
+ * status rows (working / queued / no-response) after the last message — so the message index is short by
+ * however many of those exist right now, and aiming at it parks the view a whole message above the end.
+ * With a tall final message (a Bash block, a long reply) that reads as "it didn't scroll down" — which is
+ * exactly how switching into a session with history looked (issue #165).
+ *
+ * The huge scrollOffset then lands at the bottom even when that last item is taller than the viewport.
+ */
+private suspend fun LazyListState.scrollToEnd() {
+    val last = layoutInfo.totalItemsCount - 1
+    if (last >= 0) scrollToItem(last, Int.MAX_VALUE)
+}
+
 /** Leaf recomposition scope for the keyboard-follow: reads the ime inset in composition (required on
  *  iOS) so the per-frame invalidation during the keyboard animation stays inside this empty leaf
  *  instead of re-executing the whole ChatScreen. ONE collector scrolls (no restart per frame). */
@@ -797,7 +820,7 @@ private fun ImeFollower(listState: LazyListState, repo: PocketRepository, pinned
     val imeBottom = rememberUpdatedState(WindowInsets.ime.getBottom(LocalDensity.current))
     LaunchedEffect(listState) {
         snapshotFlow { imeBottom.value }.collect { bottom ->
-            if (pinned() && bottom > 0 && repo.messages.isNotEmpty()) listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+            if (pinned() && bottom > 0 && repo.messages.isNotEmpty()) listState.scrollToEnd()
         }
     }
 }
@@ -1290,8 +1313,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     // keyed on the conversation and waiting for its transcript, so it cannot depend on that ordering.
     LaunchedEffect(repo.convoId.value) {
         if (repo.convoId.value == null) return@LaunchedEffect
-        snapshotFlow { repo.messages.size }.first { it > 0 }
-        listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE)
+        // wait for the transcript AND for the list to have measured it — the target below is read from
+        // layout, so scrolling before the new content is laid out would aim at the previous session's
+        snapshotFlow { repo.messages.size to listState.layoutInfo.totalItemsCount }.first { (m, t) -> m > 0 && t > 0 }
+        listState.scrollToEnd()
         pinned = true // …and it follows the stream from here, as a freshly opened session always has
         landed = true
     }
@@ -1312,7 +1337,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     LaunchedEffect(input, draftKey) { delay(400); repo.saveDraft(draftKey, input) }
     // a huge scrollOffset lands at the bottom even when the last message is taller than the viewport
     LaunchedEffect(repo.messages.size, repo.messages.lastOrNull(), repo.streaming.value) {
-        if (pinned && repo.messages.isNotEmpty()) { listState.scrollToItem(repo.messages.lastIndex, Int.MAX_VALUE); landed = true }
+        if (pinned && repo.messages.isNotEmpty()) { listState.scrollToEnd(); landed = true }
     }
     // keyboard-follow lives in its own leaf composable: the ime inset must be a COMPOSITION read
     // (iOS misses the animation otherwise), and reading it here would re-execute all of ChatScreen

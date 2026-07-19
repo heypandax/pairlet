@@ -56,6 +56,64 @@ class SwitchScrollLandingTest {
         (1..40).map { HistoryMessage(if (it % 2 == 0) ChatRole.ASSISTANT else ChatRole.USER, "$tag line $it") },
     )
 
+    /**
+     * The one that reproduces what shipped, twice.
+     *
+     * A transcript lands through `clear() + addAll()`, and emptying the list clamps [LazyListState] back to
+     * index 0 — so every history frame parks the chat at the TOP and something has to re-land it. The
+     * follow-the-stream effect does that, but only while the chat is pinned, and switching used to re-mint
+     * the pin state per conversation: effects still holding the previous instance read a dead object, so
+     * nothing re-landed and the session opened at the top of its history. Entering from a session list
+     * never showed it — that path remounts, so only one instance ever existed.
+     *
+     * A SECOND history frame is the point: the first lands while everything is still fresh.
+     */
+    @Test
+    fun aSecondHistoryFrameAfterSwitchingStillLandsAtTheEnd() = runComposeUiTest {
+        lateinit var repo: PocketRepository
+        val listState = LazyListState()
+        setContent {
+            val scope = rememberCoroutineScope()
+            repo = remember {
+                PocketRepository(scope, account("acct-land-2wave")).apply {
+                    receiveForTest(live("c1", "/w/alpha"))
+                    receiveForTest(history("c1", "alpha"))
+                }
+            }
+            PocketTheme { Box(Modifier.requiredSize(390.dp, 600.dp)) { ChatScreen(repo, listStateForTest = listState) } }
+        }
+        waitForIdle()
+
+        // switch into another project's session
+        repo.messages.clear()
+        repo.receiveForTest(live("c2", "/w/beta"))
+        repo.receiveForTest(history("c2", "beta"))
+        waitForIdle()
+
+        // …and the daemon sends more of it (paging catch-up / a replay landing after the first) — another
+        // clear()+addAll(), another clamp to the top, which only the pin gets the view back down from
+        repo.receiveForTest(history("c2", "beta"))
+        waitForIdle()
+
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull()
+        assertTrue(info.totalItemsCount > 1, "sanity: the transcript must overflow this viewport")
+        assertTrue(
+            lastVisible?.index == info.totalItemsCount - 1,
+            "the chat must be back at its last item after the transcript re-lands " +
+                "(last visible ${lastVisible?.index} of ${info.totalItemsCount - 1})",
+        )
+        // …and REACHED, not merely the last one composed: a list scrolled to its maximum still reads as
+        // "it didn't scroll down" if the final message's bottom sits past the viewport (which is what a
+        // tall Bash block looks like on the phone)
+        val bottom = (lastVisible!!.offset + lastVisible.size)
+        assertTrue(
+            bottom <= info.viewportEndOffset,
+            "the last message must end INSIDE the viewport — its bottom is at $bottom, viewport ends at " +
+                "${info.viewportEndOffset} (clipped by ${bottom - info.viewportEndOffset}px)",
+        )
+    }
+
     @Test
     fun switchingProjectsLandsOnTheLatestMessage() = runComposeUiTest {
         lateinit var repo: PocketRepository
