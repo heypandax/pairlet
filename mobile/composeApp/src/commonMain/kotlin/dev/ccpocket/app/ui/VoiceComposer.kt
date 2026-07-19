@@ -62,9 +62,10 @@ internal fun fmtMmSs(seconds: Int): String = "${seconds / 60}:${(seconds % 60).t
 
 internal fun fmtElapsed(ms: Long): String = fmtMmSs((ms / 1000).toInt())
 
-/** The composer text field per the design: base bg, hairline border, radius 12, minHeight 44.
- *  [state] is the field's single source of truth ([ComposerState]) — external writes (completion,
- *  clear-on-send, draft adopt) go through its explicit methods, never through recomposition. */
+/** The composer text field per the design (mobile-composer.jsx): base bg, hairline border,
+ *  radius 14, minHeight 44. [state] is the field's single source of truth ([ComposerState]) —
+ *  external writes (completion, clear-on-send, draft adopt) go through its explicit methods,
+ *  never through recomposition. */
 @Composable
 fun ComposerField(
     state: ComposerState,
@@ -72,7 +73,7 @@ fun ComposerField(
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
 ) {
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(14.dp)
     Box(
         modifier.heightIn(min = 44.dp).clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)
             .padding(horizontal = 14.dp),
@@ -80,13 +81,13 @@ fun ComposerField(
     ) {
         BasicTextField(
             state.field, state::onValueChange,
-            textStyle = TextStyle(color = Tok.tx, fontSize = 14.5.sp, lineHeight = 21.sp),
+            textStyle = TextStyle(color = Tok.tx, fontSize = 15.sp, lineHeight = 21.sp),
             cursorBrush = SolidColor(Tok.accent),
             maxLines = 4,
             modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp)
                 .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
         )
-        if (state.text.isEmpty()) Text(placeholder, color = Tok.muted, fontSize = 14.5.sp, maxLines = 1)
+        if (state.text.isEmpty()) Text(placeholder, color = Tok.muted, fontSize = 15.sp, maxLines = 1)
     }
 }
 

@@ -1582,19 +1582,10 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                     } else {
                         val failed = voiceState as? VoiceState.Failed
                         if (failed != null) VoiceErrorChip(failed.detail ?: stringResource(failed.res))
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.Bottom) {
-                            val attachInteraction = remember { MutableInteractionSource() }
-                            val attachPressed by attachInteraction.collectIsPressedAsState()
-                            // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
-                            // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
-                            // deeper but unchanged.
-                            IconButton(onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
-                                AttachPlusGlyph(
-                                    open = attachSheet,
-                                    tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
+                        // Two-layer composer (issue #157 follow-up, design: mobile-composer.jsx): the field
+                        // owns the full width on top; attach + model chip + the action slot live on an
+                        // accessory row below — the chip no longer squeezes what you type on narrow phones.
+                        Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp)) {
                             ComposerField(
                                 composer,
                                 // mid-turn the field stays enabled (sends queue into the running turn) — say so,
@@ -1606,69 +1597,85 @@ internal fun ChatScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, on
                                         else -> Res.string.message_claude_hint
                                     },
                                 ),
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 focusRequester = composerFocus,
                             )
-                            Spacer(Modifier.width(8.dp))
-                            // model chip (issue #157): the high-frequency switch rides the composer — one tap
-                            // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
-                            // Boxed to the 44dp button height so it centers against the round send/mic while
-                            // the field grows above (the row bottom-aligns). Dimmed mid-turn: the running turn
-                            // keeps its model, so the entrance rests until the next turn can take a switch.
-                            Box(Modifier.height(44.dp), contentAlignment = Alignment.Center) {
+                            Row(
+                                // start 8 / end 10: the 44dp targets carry their own inner padding, so the
+                                // glyphs sit optically on the field's 16dp edge (design values)
+                                Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp, top = 6.dp).heightIn(min = 44.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                val attachInteraction = remember { MutableInteractionSource() }
+                                val attachPressed by attachInteraction.collectIsPressedAsState()
+                                // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
+                                // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
+                                // deeper but unchanged.
+                                IconButton(onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
+                                    AttachPlusGlyph(
+                                        open = attachSheet,
+                                        tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
+                                    )
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                // model chip (issue #157): the high-frequency switch rides the composer — one tap
+                                // straight to the picker (the ⋯ → Model path stays; this is the shallow entrance).
+                                // Dimmed mid-turn: the running turn keeps its model, so the entrance rests until
+                                // the next turn can take a switch.
                                 ModelChip(
                                     label = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_model_default) },
                                     open = showModelSheet,
                                     enabled = !repo.streaming.value,
                                     contentDescription = stringResource(Res.string.qa_model),
+                                    labelMax = 120.dp, // relaxed on the accessory row (mobile-composer.jsx); desktop keeps 82
                                 ) { showModelSheet = true }
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
-                            // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
-                            // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
-                            // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
-                            if (repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)) {
-                                StopButton { repo.cancelTurn() }
-                                Spacer(Modifier.width(8.dp))
-                            }
-                            when {
-                                // uploads still moving → send WAITS (spinner ring around a muted arrow,
-                                // design: file-attach.jsx) — landing must finish before the @-refs exist
-                                uploadsBusy -> {
-                                    Box(
-                                        Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        SpinnerRing(30.dp, 2.dp)
-                                        Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.weight(1f))
+                                // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
+                                // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
+                                // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
+                                // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
+                                if (repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)) {
+                                    StopButton { repo.cancelTurn() }
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                when {
+                                    // uploads still moving → send WAITS (spinner ring around a muted arrow,
+                                    // design: file-attach.jsx) — landing must finish before the @-refs exist
+                                    uploadsBusy -> {
+                                        Box(
+                                            Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            SpinnerRing(30.dp, 2.dp)
+                                            Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+                                        }
                                     }
-                                }
-                                // text/image/file staged -> SEND, even mid-turn (claude queues it; see above)
-                                input.isNotBlank() || hasReady || hasLanded -> {
-                                    val sendLabel = stringResource(Res.string.send)
-                                    RoundActionButton(
-                                        onClick = {
-                                            // read the state at TAP time (composer.text), not the composition-captured
-                                            // `input` — a same-frame IME commit racing the tap must still be sent
-                                            val t = composer.text.trim()
-                                            // a gated send (degraded session, issue #65) returns false — keep the text for the retry
-                                            if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
-                                        },
-                                        filled = true, contentDescription = sendLabel,
-                                        // long-press → schedule this message for later (issue #137). Text-only:
-                                        // images/files can't ride a schedule (nothing is uploaded at fire time).
-                                        onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
-                                    ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
-                                }
-                                // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
-                                repo.streaming.value -> StopButton { repo.cancelTurn() }
-                                else -> {
-                                    val dictateLabel = stringResource(Res.string.dictate)
-                                    RoundActionButton(
-                                        onClick = { if (failed != null) repo.retryVoice() else repo.startVoice() },
-                                        filled = false, contentDescription = dictateLabel,
-                                    ) { Icon(MicIcon, dictateLabel, tint = if (failed != null) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp)) }
+                                    // text/image/file staged -> SEND, even mid-turn (claude queues it; see above)
+                                    input.isNotBlank() || hasReady || hasLanded -> {
+                                        val sendLabel = stringResource(Res.string.send)
+                                        RoundActionButton(
+                                            onClick = {
+                                                // read the state at TAP time (composer.text), not the composition-captured
+                                                // `input` — a same-frame IME commit racing the tap must still be sent
+                                                val t = composer.text.trim()
+                                                // a gated send (degraded session, issue #65) returns false — keep the text for the retry
+                                                if ((t.isNotBlank() || hasReady || hasLanded) && repo.sendPrompt(t)) { composer.clear(); repo.clearDraft(draftKey) }
+                                            },
+                                            filled = true, contentDescription = sendLabel,
+                                            // long-press → schedule this message for later (issue #137). Text-only:
+                                            // images/files can't ride a schedule (nothing is uploaded at fire time).
+                                            onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
+                                        ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
+                                    }
+                                    // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
+                                    repo.streaming.value -> StopButton { repo.cancelTurn() }
+                                    else -> {
+                                        val dictateLabel = stringResource(Res.string.dictate)
+                                        RoundActionButton(
+                                            onClick = { if (failed != null) repo.retryVoice() else repo.startVoice() },
+                                            filled = false, contentDescription = dictateLabel,
+                                        ) { Icon(MicIcon, dictateLabel, tint = if (failed != null) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp)) }
+                                    }
                                 }
                             }
                         }

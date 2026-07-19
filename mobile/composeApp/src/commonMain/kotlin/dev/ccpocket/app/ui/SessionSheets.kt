@@ -239,13 +239,14 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: ()
 
 /**
  * The composer's quiet model chip (issue #157, design model-chip.jsx): hairline pill on the raised
- * surface, mono 11sp label (middle-truncated id) capped at ~82dp, chevron-up that flips while its
- * picker is open (the border warms to accent). Dimmed + disabled while a turn streams — a switch
- * would only land on the NEXT turn anyway. Never accent-filled: send stays the loudest control.
- * Shared by both shells (mobile composer + desktop ChatPane).
+ * surface, mono 11sp label (middle-truncated id), chevron-up that flips while its picker is open
+ * (the border warms to accent). Dimmed + disabled while a turn streams — a switch would only land
+ * on the NEXT turn anyway. Never accent-filled: send stays the loudest control. Shared by both
+ * shells; [labelMax] defaults to the original 82dp cap (desktop's single-row composer) — the
+ * mobile accessory row relaxes it to 120dp now that the chip has its own lane (mobile-composer.jsx).
  */
 @Composable
-internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDescription: String, onClick: () -> Unit) {
+internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDescription: String, labelMax: Dp = 82.dp, onClick: () -> Unit) {
     val chev by animateFloatAsState(if (open) 180f else 0f, label = "chipChevron")
     val cd = contentDescription
     Row(
@@ -258,8 +259,10 @@ internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDe
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 82.dp),
+            // TightCenter: mono ascent/descent are asymmetric, so a raw Text rides high inside the
+            // pill even under CenterVertically — same trim the agent tags and mode chips use
+            label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = labelMax),
         )
         Spacer(Modifier.width(5.dp))
         ChevronUpGlyph(Tok.muted, Modifier.size(12.dp).rotate(chev))
