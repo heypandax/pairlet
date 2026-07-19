@@ -57,7 +57,7 @@
     <string name="msg_no_response">No response yet — tap to resend</string>
     <string name="msg_queued">Queued — the current turn is still running</string>
     <string name="session_degraded_banner">This session looks over its context limit — recent replies were API failures. Start a new session or send /clear.</string>
-    <string name="context_high_banner">Context %1$s full — consider a new session or /clear soon</string>
+    <string name="context_critical_caption">Context full — oldest turns will start dropping</string>
     <string name="open_session_timeout">Couldn\'t open the session — the computer didn\'t respond</string>
     <string name="turn_done_marker">done</string>
     <string name="conn_pairing_invalid_title">Pairing expired</string>
@@ -415,6 +415,7 @@
     <string name="session_actions_open">Session actions</string>
     <string name="quick_actions_title">Quick actions</string>
     <string name="qa_model">Switch model</string>
+    <string name="qa_context_gauge">Context usage — open session info</string>
     <string name="qa_clear">Clear conversation</string>
     <string name="qa_clear_hint">Tap again to confirm</string>
     <string name="qa_compact">Compact context</string>

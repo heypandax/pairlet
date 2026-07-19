@@ -57,7 +57,7 @@
     <string name="msg_no_response">还没有响应——点此重发</string>
     <string name="msg_queued">已排队——当前轮仍在运行</string>
     <string name="session_degraded_banner">会话疑似已超上下文上限——最近的回复均为 API 失败。建议开新会话或发送 /clear。</string>
-    <string name="context_high_banner">上下文已用 %1$s——建议尽快开新会话或 /clear</string>
+    <string name="context_critical_caption">上下文即将写满——最早的几轮会开始被丢弃</string>
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
     <string name="turn_done_marker">已完成</string>
     <string name="conn_pairing_invalid_title">配对已失效</string>
@@ -415,6 +415,7 @@
     <string name="session_actions_open">会话操作</string>
     <string name="quick_actions_title">快捷操作</string>
     <string name="qa_model">切换模型</string>
+    <string name="qa_context_gauge">上下文占用——打开会话信息</string>
     <string name="qa_clear">清空会话</string>
     <string name="qa_clear_hint">再次点击确认</string>
     <string name="qa_compact">压缩上下文</string>

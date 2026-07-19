@@ -104,7 +104,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1431,16 +1430,11 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 }
             }
             Box(Modifier.weight(1f)) {
-                // reserve a gutter below the last message so the floating context pill sits in empty
-                // space (with a gap) instead of covering the last line + its copy button (issue #15).
-                // The pill's MEASURED height drives the reserve (issue #81): a fixed 30.dp only cleared
-                // it at font-scale 1 — the pill grows with the system/app text size while a hardcoded
-                // gutter doesn't, so a long reply's tail slid under the pill on larger text. Measuring
-                // keeps the pill floating (no layout footprint → never pushes the composer) yet always
-                // leaves the last line above it. Falls back to the old gutter until the pill measures.
-                val density = LocalDensity.current
-                var pillHeightPx by remember { mutableStateOf(0) }
-                val bottomGutter = (with(density) { pillHeightPx.toDp() } + 16.dp).coerceAtLeast(36.dp)
+                // plain breathing room under the last message. This used to be a MEASURED reserve for the
+                // floating context pill, which covered the last line + its copy button (issues #15, #81);
+                // the pill now lives inline on the accessory row, so nothing hovers here and the gutter
+                // goes back to being a constant.
+                val bottomGutter = 24.dp
                 // older-history lazy load (issue #147): a prepended page shifts every index — scroll by
                 // the prepend count (+ the loader row when it stays) so the viewport keeps the row the
                 // user was reading instead of jumping to the newly loaded region. Visuals per the 0714
@@ -1536,14 +1530,6 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         }
                     }
                 }
-                // context usage floats over the message tail's bottom-right — no layout footprint (issue #15).
-                // Its measured height feeds the list's bottom gutter above (issue #81) so the pill never
-                // covers the last line; onSizeChanged only fires once it renders (skipped while hidden).
-                ContextStatusline(
-                    repo.contextUsed.value, repo.contextWindow.value,
-                    Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 12.dp)
-                        .onSizeChanged { pillHeightPx = it.height },
-                )
                 // approvals waiting on OTHER machines pull you over without reflowing this stream —
                 // floats under the connection bar; this machine's own ask keeps its sheet (Fleet ⑤)
                 dev.ccpocket.app.ui.fleet.CrossMachineBanner(
@@ -1552,17 +1538,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
                 )
             }
-            // session health (issue #65): a degraded session (recent turns all API failures) or a nearly
-            // full context window gets a persistent strip right above the composer — warn BEFORE the next
-            // prompt goes in, not after it fails
+            // session health (issue #65): a degraded session (recent turns all API failures) gets a
+            // persistent strip right above the composer — warn BEFORE the next prompt goes in, not
+            // after it fails. The context half of this strip is gone: the accessory-row gauge now
+            // carries ≥80% inline, so only the critical step still earns a line (see the caption
+            // inside the composer below).
             if (repo.sessionDegraded.value) {
                 StatusBanner(Tok.danger, stringResource(Res.string.session_degraded_banner))
-            } else {
-                val used = repo.contextUsed.value
-                val window = repo.contextWindow.value
-                if (used != null && window != null && used.toFloat() / window >= 0.9f) {
-                    StatusBanner(Tok.warn, stringResource(Res.string.context_high_banner, "${(used.toFloat() / window * 100).toInt()}%"))
-                }
             }
             // Claude paused its turn to ask questions — the card docks above the composer; the
             // stream above stays scrollable so the user can re-read context before answering.
@@ -1658,6 +1640,15 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // owns the full width on top; attach + model chip + the action slot live on an
                         // accessory row below — the chip no longer squeezes what you type on narrow phones.
                         Column(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp)) {
+                            // all that survives of the old full-width amber strip: one slim line, and only
+                            // once turns are actually about to drop (design: context-occupancy.jsx)
+                            val ctxUsed = repo.contextUsed.value
+                            val ctxWindow = repo.contextWindow.value
+                            if (ctxUsed != null && ctxWindow != null && ctxWindow > 0L &&
+                                ctxUsed.toFloat() / ctxWindow >= CONTEXT_CRITICAL_AT
+                            ) {
+                                ContextCriticalCaption()
+                            }
                             ComposerField(
                                 composer,
                                 // mid-turn the field stays enabled (sends queue into the running turn) — say so,
@@ -1709,12 +1700,24 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 val workingSet = repo.workingSet()
                                 if (workingSet.otherCount > 0) Spacer(Modifier.width(6.dp))
                                 SessionStackChip(workingSet.otherCount, workingSet.attention) { showSessions = true }
+                                // context occupancy came IN here from a pill that floated over the message
+                                // tail — unreadable as a control, and it covered the last line (design:
+                                // context-occupancy.jsx, Option C). Last in the left cluster, against the
+                                // elastic gap, so it is the natural thing to shed when width runs out.
+                                val stopShowing = repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)
+                                Spacer(Modifier.width(6.dp))
+                                ContextGauge(
+                                    repo.contextUsed.value,
+                                    repo.contextWindow.value,
+                                    // the action slot Row can't see: one 44dp button, plus the ■ and its gap mid-turn
+                                    reserveEnd = if (stopShowing) 96.dp else 44.dp,
+                                ) { showSessionInfo = true }
                                 Spacer(Modifier.weight(1f))
                                 // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
                                 // replacing it — mirrors Claude Code, where interrupt (Esc) and queue-a-message
                                 // (Enter) coexist. Claude's stream-json input queues a mid-turn user message and
                                 // weaves it into the running turn at the next tool boundary (verified on 2.1.201).
-                                if (repo.streaming.value && (input.isNotBlank() || hasReady || hasLanded)) {
+                                if (stopShowing) {
                                     StopButton { repo.cancelTurn() }
                                     Spacer(Modifier.width(8.dp))
                                 }
@@ -2049,35 +2052,6 @@ private fun NoResponseRow(onResend: () -> Unit) {
         PulseDot(Tok.warn, size = 5.dp)
         Text(stringResource(Res.string.msg_no_response), color = Tok.warn, fontSize = 12.5.sp)
     }
-}
-
-/**
- * The usage indicator (issue #15): a light "Context NN%" that FLOATS over the bottom-right of the
- * message list, so it costs no layout height and never pushes the composer. How full the model's
- * window is after the last turn — seeded on resume from the daemon's transcript snapshot, refreshed
- * each turn from TurnDone; hidden until there's a number. A faint raised pill keeps it legible over
- * content; rests at muted, escalating at the ContextBar thresholds (warn ≥ 80%, danger ≥ 95%).
- */
-@Composable
-private fun ContextStatusline(used: Long?, window: Long?, modifier: Modifier = Modifier) {
-    used ?: return // no turn yet / older daemon — nothing to show
-    // no known denominator (Codex — gpt-* windows aren't in our table): show raw occupancy, not a fake %
-    val label = if (window == null) {
-        "${stringResource(Res.string.label_context)} ~${if (used >= 1000) "${used / 1000}k" else "$used"}"
-    } else {
-        "${stringResource(Res.string.label_context)} ${(used.toFloat() / window).coerceIn(0f, 1f).times(100).toInt()}%"
-    }
-    val frac = if (window == null) 0f else (used.toFloat() / window).coerceIn(0f, 1f)
-    Text(
-        label,
-        color = contextColor(frac, Tok.muted),
-        fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
-        modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(Tok.raised.copy(alpha = 0.85f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
 }
 
 /** Extended reasoning, collapsed to one italic line; expands to the full text behind a hairline rule. */
