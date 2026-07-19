@@ -258,6 +258,12 @@ class RepoDesktopModel(
                 DkMachine(
                     computer = d.toDk(online = link?.phase?.value == ConnPhase.Ready),
                     active = active,
+                    // issue #163: never actually wired before — the "this Mac" pill and the palette's
+                    // same label existed but could not render, since nothing ever set this true outside
+                    // the seed model. Gating the native folder chooser needed a real answer, so it is
+                    // computed here now. Unknown either side (old daemon with no hostname) stays false.
+                    thisMachine = d.hostName?.takeIf { it.isNotBlank() }
+                        ?.equals(localHostName(), ignoreCase = true) == true,
                     pending = if (link?.pendingAsk?.value != null) 1 else 0,
                     // per-account directories (live when loaded, else the coordinator's last snapshot):
                     // RUNNING rows + non-active group content keep showing through a machine switch,
@@ -697,6 +703,20 @@ class RepoDesktopModel(
             return focus?.takeIf { it.first == acct }?.second ?: repo.sessionsDir.value ?: repo.workdir.value
         }
     override var newSessionSeed: String? by mutableStateOf(null)
+
+    /** Issue #163: a folder the daemon already lists has agent history (the listing is Claude ∪ Codex,
+     *  so both count) → open it as a project, reusing the exact path string the daemon keys its listing
+     *  by. Anything else seeds the new-session popover: the user still chooses agent + permission mode,
+     *  because picking a folder says nothing about either and guessing would decide them silently. */
+    override fun openFolderPath(path: String) {
+        val p = trimTrailingSep(path.trim())
+        if (p.isEmpty()) return
+        val known = repo.directories.firstOrNull { sameDir(it.path, p) }
+        if (known != null) openProject(known.toDkProject()) else openNewSession(p)
+    }
+
+    override val activeIsThisMachine: Boolean
+        get() = machines.firstOrNull { it.active }?.thisMachine == true
 
     override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode) {
         // "~" ships raw, exactly like mobile's NewPathSheet: the daemon owns the expansion

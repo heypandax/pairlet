@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DragIndicator
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LaptopMac
 import androidx.compose.material.icons.rounded.LaptopWindows
@@ -49,6 +50,7 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -133,6 +135,9 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
     Column(modifier.width(width).fillMaxHeight().background(Tok.surface)) {
         SwitcherHeader(model)
         NewSessionRow { model.openNewSession() }
+        // issue #163: the sibling entry for "I don't remember the path" — browse to it instead
+        val folderScope = rememberCoroutineScope()
+        OpenFolderRow { openFolderAction(folderScope, model) }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         PinnedZone(model)
         RunningZone(model)
@@ -746,6 +751,21 @@ private fun NewSessionRow(onClick: () -> Unit) {
         Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
         Text("New session", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         Key("⌘N")
+    }
+}
+
+/** "Open Folder…" (issue #163) — the browse-to-it twin of [NewSessionRow], deliberately quieter: it is
+ *  a way IN to an existing folder, not a call to action, so it wears the muted tint rather than accent. */
+@Composable
+private fun OpenFolderRow(onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(32.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Rounded.FolderOpen, null, tint = Tok.tx2, modifier = Modifier.size(13.dp))
+        Text("Open Folder…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        Key("⌘O")
     }
 }
 

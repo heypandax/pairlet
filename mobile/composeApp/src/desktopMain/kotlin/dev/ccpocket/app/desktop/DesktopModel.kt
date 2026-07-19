@@ -337,6 +337,19 @@ interface DesktopModel {
     }
     /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home). */
     fun newSession(dir: String, agent: AgentKind, mode: PermissionMode)
+    /**
+     * True when the ACTIVE computer is the one this desktop app runs on (issue #163). Gates the native
+     * directory chooser: a local Finder panel can only browse local disk, so a remote machine has to fall
+     * back to the typed-path popover. Default false = "assume remote", the safe direction — a wrong false
+     * costs a typed path, a wrong true offers folders the daemon can't see.
+     */
+    val activeIsThisMachine: Boolean get() = false
+    /**
+     * Open an already-existing folder picked from disk (issue #163), splitting on whether it has history:
+     * a folder with sessions opens as that project; a folder with none seeds the new-session popover.
+     * Default implementation is the seed path — models with no directory listing can't tell the two apart.
+     */
+    fun openFolderPath(path: String) { openNewSession(path) }
 
     // main pane: the open chat
     val hasChat: Boolean

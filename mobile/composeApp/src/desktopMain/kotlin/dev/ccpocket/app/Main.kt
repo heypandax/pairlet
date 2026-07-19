@@ -31,6 +31,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.desktop.AddComputerModal
 import dev.ccpocket.app.desktop.ConnectPanel
 import dev.ccpocket.app.desktop.DesktopApp
+import dev.ccpocket.app.desktop.openFolderAction
 import dev.ccpocket.app.desktop.DesktopNotify
 import dev.ccpocket.app.desktop.DkTitleBar
 import dev.ccpocket.app.desktop.FullscreenExitStrip
@@ -155,6 +156,8 @@ fun main() = application {
             when {
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.K && connected -> { model.palette = PaletteScope.ALL; true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.N && connected -> { model.openNewSession(); true }
+                // ⌘O (issue #163): the IDE "Open Folder…" — browse to a folder instead of typing its path
+                e.type == KeyEventType.KeyDown && mod && e.key == Key.O && connected -> { openFolderAction(scope, model); true }
                 // ⌘J (issue #153): open the embedded terminal in the current session / collapse-restore
                 // the one it has. While the SHELL owns the keyboard AWT keeps the keystroke — the
                 // engine's own dispatcher forwards it, so the toggle works from either side.

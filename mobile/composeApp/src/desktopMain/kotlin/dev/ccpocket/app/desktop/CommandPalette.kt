@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
@@ -34,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +64,7 @@ import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.fmtMmSs
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
+import kotlinx.coroutines.CoroutineScope
 
 private enum class PKind(val tag: String) { MACHINE("machine"), ACTION("action"), PROJECT("project"), SESSION("session") }
 
@@ -79,12 +82,14 @@ private class PItem(
 )
 
 /** Flatten the model into palette rows: machine verbs lead (Fleet ⑧), then projects and sessions. */
-private fun buildItems(model: DesktopModel): List<PItem> = buildList {
+private fun buildItems(model: DesktopModel, scope: CoroutineScope): List<PItem> = buildList {
     fun projectItem(p: DkProject) = PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder) { model.openProject(p) }
     // scoped mode ("All projects…"): the full project list plus the type-any-path entry, nothing else
     if (model.palette == PaletteScope.PROJECTS) {
         // type any path — the daemon creates a missing leaf folder
         add(PItem(PKind.ACTION, "New session at path…", "~/", Icons.Outlined.Folder) { model.openNewSession("~/") })
+        // issue #163: the same destination reached by browsing instead of typing
+        add(PItem(PKind.ACTION, "Open Folder…", "browse", Icons.Outlined.FolderOpen, hint = "⌘O") { openFolderAction(scope, model) })
         model.projects.forEach { add(projectItem(it)) }
         return@buildList
     }
@@ -107,6 +112,10 @@ private fun buildItems(model: DesktopModel): List<PItem> = buildList {
     model.activeComputer?.let { c ->
         val where = model.newSessionDir?.let { tilde(it) } ?: "" // the dir it will actually start in
         add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, null) { model.openNewSession() })
+        // NOTE (issue #163): "Open Folder…" deliberately does NOT get a row here. The blank-query list is
+        // the palette's front page, and a third action pushes the project rows below the lazy viewport —
+        // a cost paid on every ⌘K for an entry that is already global (⌘O), visible in the sidebar, and
+        // present one scope over in "All projects…", right beside the path-typing row it mirrors.
         // the installed skills/plugins browser (issue #132) — a machine fact, so it rides the active computer
         add(PItem(PKind.ACTION, "Browse skills & plugins", "on ${c.name}", Icons.Outlined.AutoAwesome, null) { model.openSkills() })
     }
@@ -144,7 +153,8 @@ private fun PItem.score(q: String): Int {
 fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(0) }
-    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.palette) { buildItems(model) }
+    val paletteScope = rememberCoroutineScope()
+    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.palette) { buildItems(model, paletteScope) }
     val items = remember(all, query) {
         if (query.isBlank()) all.take(60) // blank query keeps source order — skip the score/sort/strip pass
         else all.mapNotNull { it.score(query).takeIf { s -> s > 0 }?.let { s -> it to s } }
