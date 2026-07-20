@@ -1,5 +1,7 @@
 package dev.ccpocket.app.desktop
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -7,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
@@ -19,6 +22,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.rememberWindowState
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.theme.Tok
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Font
@@ -136,7 +140,12 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
                 size = DpSize.Unspecified, // pack to the popover's content
             ),
             undecorated = true,
-            transparent = true,
+            // OPAQUE on purpose: skiko 0.8.18 (CMP 1.7.3) crashes creating the Metal device for a
+            // TRANSPARENT window on macOS 26 "Tahoe" — EXC_BREAKPOINT in AppKit _NSWindowSetShadowProperties
+            // via MetalRedrawer.createMetalDevice (JetBrains CMP-7352 / compose-multiplatform#3171). The
+            // main window is undecorated+opaque and renders fine on the same OS, so this popover matches it:
+            // the card fills an opaque root (below) and leans on the native window shadow instead of the
+            // transparent-gutter self-shadow. Restore transparency (for rounded corners) after a skiko bump.
             resizable = false,
             alwaysOnTop = true,
             title = "cc-pocket",
@@ -177,13 +186,18 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
             val rowCounts = model.attention.size to model.running.size
             LaunchedEffect(rowCounts) { window.pack() }
             PocketTheme(mode = model.themeMode) {
-                TrayPopover(
-                    model,
-                    onOpenMain = { anchor = null; onActivateWindow() },
-                    showPointer = a.fromTop,
-                    elevated = true,
-                    keyHint = true,
-                )
+                // Opaque root so the borderless window's square corners blend into the card colour; the
+                // OS supplies the drop shadow an opaque window gets for free. flat (elevated=false) card,
+                // no transparent-gutter self-shadow, no pointer triangle (it needs transparency to read).
+                Box(Modifier.background(Tok.raised)) {
+                    TrayPopover(
+                        model,
+                        onOpenMain = { anchor = null; onActivateWindow() },
+                        showPointer = false,
+                        elevated = false,
+                        keyHint = true,
+                    )
+                }
             }
         }
     }
@@ -191,7 +205,7 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
 
 // ── popover anchoring (AWT screen points) ────────────────────────────────────────────────────────
 
-internal const val POPOVER_W = 392 // 360dp card + the elevated shadow gutters
+internal const val POPOVER_W = 360 // the opaque card's width (placePopover re-centers on the real packed size)
 
 /** Where the popover hangs: the glyph's screen X, the edge Y to grow from, and which way it grows. */
 internal data class TrayAnchor(val centerX: Int, val y: Int, val fromTop: Boolean, val screen: java.awt.Rectangle)
