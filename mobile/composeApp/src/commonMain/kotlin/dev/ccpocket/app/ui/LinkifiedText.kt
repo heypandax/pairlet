@@ -162,12 +162,19 @@ private fun isRel(s: String): Boolean =
 
 private fun styled(src: AnnotatedString, items: List<LinkEntity>, onOpen: (LinkEntity) -> Unit, onTake: (LinkEntity) -> Unit): AnnotatedString {
     if (items.isEmpty()) return src
-    val solid = TextLinkStyles(SpanStyle(color = Tok.info, textDecoration = TextDecoration.Underline))
+    // read-doc-inline handoff: an openable file path underlines in terracotta (the "tap to open a document"
+    // affordance), a URL keeps the blue open-treatment, and a copy-only path stays the dashed-grey mark
+    // (drawn in drawBehind). Three destinations, three distinct reads.
+    val openStyle = TextLinkStyles(SpanStyle(color = Tok.accent, textDecoration = TextDecoration.Underline))
+    val urlStyle = TextLinkStyles(SpanStyle(color = Tok.info, textDecoration = TextDecoration.Underline))
     return buildAnnotatedString {
         append(src)
         for (e in items) {
-            if (e.kind == EntityKind.COPY) addLink(LinkAnnotation.Clickable("p", null) { onTake(e) }, e.start, e.end)
-            else addLink(LinkAnnotation.Clickable("p", solid) { onOpen(e) }, e.start, e.end)
+            when (e.kind) {
+                EntityKind.COPY -> addLink(LinkAnnotation.Clickable("p", null) { onTake(e) }, e.start, e.end)
+                EntityKind.URL -> addLink(LinkAnnotation.Clickable("p", urlStyle) { onOpen(e) }, e.start, e.end)
+                EntityKind.OPEN -> addLink(LinkAnnotation.Clickable("p", openStyle) { onOpen(e) }, e.start, e.end)
+            }
         }
     }
 }

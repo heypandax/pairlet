@@ -51,6 +51,11 @@ import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
 
+/** The file-writing tools whose transcript preview should read as their clean target PATH (via
+ *  [ToolMetadata.of]) rather than raw input JSON — the phone turns this path into an openable "open file"
+ *  chip (read-doc-inline handoff). Kept in lockstep with the mobile `TOOL_FILE_PATH_TOOLS` set. */
+private val FILE_PATH_TOOLS = setOf("Write", "Edit", "MultiEdit", "NotebookEdit")
+
 /**
  * One live conversation: glues an [AgentBackend] (Claude / Codex) to an [OutboundSink]. Owns its own
  * scope; a single stdout pump assigns the monotonic `seq` (no locks). Agent-agnostic — every provider
@@ -948,6 +953,11 @@ class Conversation(
                             // a Workflow's input is the whole orchestration script — preview its description,
                             // never 280 chars of raw source (issue #106)
                             isWorkflowTool(ev.name) -> ev.input.strField("description")?.ifBlank { null } ?: "workflow"
+                            // file-writing tools: surface the clean (tilde-abbreviated) target PATH via the shared
+                            // extractor, not 280 chars of raw input JSON that buries the path behind the file
+                            // content — this is what the phone turns into an openable "open file" chip and it also
+                            // reads far better in the transcript (read-doc-inline handoff, Component 2).
+                            ev.name in FILE_PATH_TOOLS -> ToolMetadata.of(ev.name, ev.input).preview
                             else -> ev.input?.toString()?.take(280)
                         }
                         if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))

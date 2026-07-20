@@ -376,6 +376,7 @@
     <string name="file_transfer_progress">%1$s / 共 %2$s</string>
     <string name="file_export_request">请求导出（需批准）</string>
     <string name="file_export_waiting">等待批准…</string>
+    <string name="file_copy_path">改为复制路径</string>
     <string name="file_export_other">导出列表外的文件…</string>
     <string name="file_export_other_hint">项目内路径，如 output/report.xlsx</string>
     <string name="file_view">查看文件</string>

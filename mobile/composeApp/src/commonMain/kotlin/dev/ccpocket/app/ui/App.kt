@@ -49,6 +49,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.PushPin
@@ -1448,7 +1449,12 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         listState.scrollToItem(n + (if (historyLoaderVisible) 1 else 0))
                     }
                 }
-                CompositionLocalProvider(LocalPathCwd provides repo.workdir.value) {
+                // read-doc-inline handoff: give the mobile transcript a PathOpener so file paths in
+                // assistant markdown / tool cards become tappable — the phone can't stat a local disk, so
+                // this opener is optimistic (every regex-matched path lights up) and hands taps to the
+                // daemon read, which opens the same full-screen viewer the changed-files list uses.
+                val pathOpener = remember(repo) { RemotePathOpener { repo.openChangedFile(it) } }
+                CompositionLocalProvider(LocalPathCwd provides repo.workdir.value, LocalPathOpener provides pathOpener) {
                 LazyColumn(
                     Modifier.fillMaxSize().padding(16.dp).graphicsLayer { alpha = if (landed) 1f else 0f }
                         .pointerInput(Unit) { detectTapGestures { focus.clearFocus() } },
@@ -1962,13 +1968,20 @@ private fun MessageItem(
         } else if (isSubagentTool(m.tool)) SubagentCard(m) else {
             val isPlan = m.tool == "ExitPlanMode" || m.tool == "exit_plan_mode"
             var expanded by remember(m) { mutableStateOf(isPlan) } // plans read open by default (issue #10)
+            // read-doc-inline handoff (Component 2): a Write/Edit tool card carries the written file's path as
+            // its preview (ToolMeta tilde-abbreviates it) — render that path as an openable chip so a tap opens
+            // the file in the viewer, while the rest of the card keeps its expand/collapse. Only for file-path
+            // tools and only when the preview truly reads as a path (Bash/other previews stay plain text).
+            val opener = LocalPathOpener.current
+            val openablePath = m.tool in TOOL_FILE_PATH_TOOLS && opener != null && looksLikePath(m.preview)
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
                     .clickable { expanded = !expanded }.padding(8.dp),
             ) {
                 Text(if (isPlan) "⚙ Plan" else "⚙ ${m.tool}", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                 if (m.preview.isNotBlank()) {
-                    if (isPlan && expanded) Box(Modifier.padding(top = 4.dp)) { MarkdownText(m.preview, Tok.tx2) } // plan rendered as markdown
+                    if (openablePath) OpenablePathChip(m.preview, Modifier.padding(top = 6.dp)) { opener!!.open(m.preview) }
+                    else if (isPlan && expanded) Box(Modifier.padding(top = 4.dp)) { MarkdownText(m.preview, Tok.tx2) } // plan rendered as markdown
                     else Text(
                         m.preview, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
                         maxLines = if (expanded) Int.MAX_VALUE else 1,
@@ -1990,6 +2003,41 @@ private fun MessageItem(
                 color = Tok.ok, fontSize = 11.sp,
             )
         }
+    }
+}
+
+/** The built-in tools whose ToolMeta preview is a file path (ToolMeta.kt) — the ones whose transcript
+ *  card can turn its path into an openable chip (read-doc-inline handoff, Component 2). */
+private val TOOL_FILE_PATH_TOOLS = setOf("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+/** A conservative "does this preview read as a single filesystem path?" guard, so only a real path gets
+ *  the openable chip — a multi-line or slash-less preview stays plain text. The `{`/`"` reject is the
+ *  mixed-version guard: an OLD daemon still sends a file-write preview as raw input JSON (which contains a
+ *  slash), and that must NOT be mistaken for a path — a new daemon sends the clean tilde path instead. */
+private fun looksLikePath(s: String): Boolean =
+    s.isNotBlank() && '\n' !in s && '{' !in s && '"' !in s &&
+        (s.startsWith("~/") || s.startsWith("/") || (s.length >= 2 && s[1] == ':') || '/' in s || '\\' in s)
+
+/** read-doc-inline handoff (Component 2): the openable file-path chip on a Write/Edit tool card — a
+ *  terracotta-tinted bordered pill that reads as "tap to open", its own hit target so tapping it opens
+ *  the file while the rest of the card still toggles expand. Monospace path + a trailing open glyph. */
+@Composable
+private fun OpenablePathChip(path: String, modifier: Modifier = Modifier, onOpen: () -> Unit) {
+    Row(
+        modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(Tok.accent.copy(alpha = 0.10f))
+            .border(1.dp, Tok.accent.copy(alpha = 0.30f), RoundedCornerShape(8.dp))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            path, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(7.dp))
+        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, tint = Tok.accent, modifier = Modifier.size(13.dp))
     }
 }
 

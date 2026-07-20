@@ -30,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -252,6 +254,11 @@ fun FileViewerScreen(repo: PocketRepository, onExit: (() -> Unit)? = null, onBac
                 exportSlot = when {
                     repo.exportWaiting.value -> ({ ExportWaitingRow() })
                     exportRequestable(repo.viewedFile.value) -> ({ ExportRequestButton { repo.requestExport() } })
+                    // read-doc-inline handoff (Component 3 error state): an optimistic path tap that can't be
+                    // reached — a typo, or a Bash file outside the synced workspace the containment gate won't
+                    // serve — lands here. Give it the design's graceful "Copy path instead" escape so a failed
+                    // tap is never a dead end (the path is still exactly what you'd paste back to the computer).
+                    repo.viewedFile.value?.ok == false -> ({ CopyPathButton(path) })
                     else -> null
                 },
             )
@@ -271,6 +278,20 @@ private fun exportRequestable(content: FileContent?): Boolean {
 private fun ExportRequestButton(onClick: () -> Unit) {
     TextButton(onClick, Modifier.padding(top = 6.dp)) {
         Text(stringResource(Res.string.file_export_request), color = Tok.accent, fontSize = 13.sp)
+    }
+}
+
+/** read-doc-inline handoff: the graceful escape under a failed read — copies the file's path so a tap that
+ *  couldn't open the file still hands you exactly the address to paste back to the computer. */
+@Composable
+private fun CopyPathButton(path: String) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    TextButton({ clipboard.setText(AnnotatedString(path)); copied = true }, Modifier.padding(top = 6.dp)) {
+        Text(
+            if (copied) stringResource(Res.string.path_copied) else stringResource(Res.string.file_copy_path),
+            color = Tok.muted, fontSize = 13.sp,
+        )
     }
 }
 

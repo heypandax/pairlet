@@ -58,6 +58,20 @@ interface PathOpener {
     fun open(path: String)
 }
 
+/**
+ * The mobile [PathOpener] (read-doc-inline handoff): a phone has no local disk to stat, so [exists] is
+ * OPTIMISTIC — every regex-matched path lights up as openable, and [open] hands it to the daemon read
+ * ([onOpen] → PocketRepository.openChangedFile). A path that isn't really reachable (a typo, or a Bash
+ * file outside the synced workspace) fails inside the file viewer's own error state — which carries the
+ * export / copy-path escape — instead of dead-clicking in the transcript. The design deliberately accepts
+ * this: the link is styled as a calm "tap to try", not a guaranteed-valid button, so an occasional miss
+ * that lands on a clear error is the intended trade for making documents reachable at all.
+ */
+class RemotePathOpener(private val onOpen: (String) -> Unit) : PathOpener {
+    override fun exists(path: String): Boolean = true
+    override fun open(path: String) = onOpen(path)
+}
+
 val LocalPathOpener = staticCompositionLocalOf<PathOpener?> { null }
 
 /** The open session's working directory, so a cwd-relative path can be normalized to an absolute one
@@ -97,11 +111,14 @@ fun AnnotatedString.withPathLinks(opener: PathOpener?): AnnotatedString {
         val path = m.value.trimEnd('.') // sentence-final period is punctuation, not the path
         if (opener.exists(path)) m.range.first to path else null
     }.toList()
-    return withLinks(hits, "path", opener::open)
+    // Terracotta for openable-DOCUMENT paths (read-doc-inline handoff) — deliberately distinct from the
+    // blue "open URL" treatment below, so the two affordances read as different destinations.
+    return withLinks(hits, "path", Tok.accent, opener::open)
 }
 
-/** The one link-span builder both passes share: [hits] are (startOffset, matchedText) pairs. */
-private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String, open: (String) -> Unit): AnnotatedString {
+/** The one link-span builder both passes share: [hits] are (startOffset, matchedText) pairs. [color]
+ *  tints the underlined span — terracotta for file paths, info-blue for URLs. */
+private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String, color: Color = Tok.info, open: (String) -> Unit): AnnotatedString {
     if (hits.isEmpty()) return this
     return buildAnnotatedString {
         append(this@withLinks)
@@ -109,7 +126,7 @@ private fun AnnotatedString.withLinks(hits: List<Pair<Int, String>>, tag: String
             addLink(
                 LinkAnnotation.Clickable(
                     tag,
-                    TextLinkStyles(SpanStyle(color = Tok.info, textDecoration = TextDecoration.Underline)),
+                    TextLinkStyles(SpanStyle(color = color, textDecoration = TextDecoration.Underline)),
                 ) { open(s) },
                 start,
                 start + s.length,

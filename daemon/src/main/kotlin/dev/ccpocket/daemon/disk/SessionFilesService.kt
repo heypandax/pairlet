@@ -314,7 +314,10 @@ object SessionFilesService {
      */
     fun containedForExport(workdir: String, path: String): ExportGate {
         val root = runCatching { Path.of(workdir).toRealPath() }.getOrNull() ?: return ExportGate.Missing
-        val lexical = runCatching { root.resolve(path).normalize() }.getOrNull() ?: return ExportGate.Outside
+        // `~/…` → daemon-home absolute BEFORE resolving: a phone tap on a tilde-abbreviated tool-card path
+        // must resolve to the same file, then face the unchanged containment check below (root.resolve of an
+        // absolute path returns that path, so an out-of-tree `~` still lands Outside — no widening).
+        val lexical = runCatching { root.resolve(expandTilde(path)).normalize() }.getOrNull() ?: return ExportGate.Outside
         val real = runCatching { lexical.toRealPath() }.getOrNull()
             ?: return if (lexical.startsWith(root)) ExportGate.Missing else ExportGate.Outside
         if (!real.startsWith(root)) return ExportGate.Outside                 // `..`/symlink escape — refuse
@@ -578,9 +581,20 @@ object SessionFilesService {
 
     /** Absolute normalized form; Codex patch paths are workdir-relative, Claude's are absolute. */
     private fun resolve(raw: String, workdir: String): String? = runCatching {
-        val p = Path.of(raw)
+        val p = Path.of(expandTilde(raw))
         (if (p.isAbsolute) p else Path.of(workdir).resolve(p)).normalize().toString()
     }.getOrNull()
+
+    /** Expand a leading `~`/`~/` against the DAEMON host's home (issue: mobile can't expand tildes —
+     *  Write/Edit tool-card previews are tilde-abbreviated by [ToolMeta], so a phone tap sends "~/…").
+     *  Purely a path-normalization step: the expanded ABSOLUTE form still runs through the same
+     *  [containedForExport]/changed-set gates below, so `~` never widens the read surface — it only lets a
+     *  tilde path resolve to the same file an absolute one would. Other `~user` forms are left untouched. */
+    private fun expandTilde(path: String): String {
+        if (path != "~" && !path.startsWith("~/")) return path
+        val home = System.getProperty("user.home") ?: return path
+        return home + path.substring(1) // "~" -> home, "~/a" -> home + "/a"
+    }
 
     private fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.int(key: String): Int = (this[key] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0

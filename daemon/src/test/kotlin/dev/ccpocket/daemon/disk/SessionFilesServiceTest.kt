@@ -122,6 +122,41 @@ class SessionFilesServiceTest {
     }
 
     @Test
+    fun read_expands_a_tilde_path_against_the_daemon_home() {
+        // ToolMeta abbreviates an in-home file path to "~/…" on the tool card; a phone tap sends that tilde
+        // form, so the daemon must expand it against its OWN home before the containment check — otherwise a
+        // Write/Edit card can never open its file. Expansion is pure normalization: the red line still holds.
+        val home = Path.of(System.getProperty("user.home"))
+        val proj = Files.createTempDirectory(home, "ccpocket-tilde-test-")
+        try {
+            val report = Files.writeString(proj.resolve("report.md"), "# from bash")
+            val t = claudeTranscript("Write" to report.toString())
+            val tilde = "~/" + home.relativize(report) // e.g. ~/ccpocket-tilde-test-xxx/report.md
+            val r = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", tilde)
+            assertTrue(r.ok, r.error)
+            assertEquals("# from bash", r.text)
+            assertNull(r.base64) // md rides the TEXT channel — renders inline, never a base64 doc card
+            // containment red line survives expansion: a ~ path OUTSIDE the workdir is still refused, not widened
+            val outside = SessionFilesService.readFileIn(AgentKind.CLAUDE, t, proj.toString(), "s", "~/.ccpocket-not-in-proj.md")
+            assertFalse(outside.ok)
+        } finally {
+            proj.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun export_serves_a_text_document_inline_not_as_base64() {
+        // P1: an approved export of a text-class file (md/txt/log) must ride FileContent.text so the viewer
+        // renders it inline via MarkdownText — it must NOT come back as base64 (which the viewer would hand to
+        // a native doc card instead of reading in place).
+        val md = Files.writeString(tmp.resolve("summary.md"), "# report\n\n- done")
+        val out = SessionFilesService.serveExport(tmp.toString(), "s", md.toString())
+        assertTrue(out.ok, out.error)
+        assertEquals("# report\n\n- done", out.text)
+        assertNull(out.base64)
+    }
+
+    @Test
     fun read_caps_text_and_flags_truncation() {
         val big = tmp.resolve("big.txt").also { Files.writeString(it, "x".repeat(SessionFilesService.TEXT_CAP_BYTES + 500)) }
         val t = claudeTranscript("Write" to big.toString())

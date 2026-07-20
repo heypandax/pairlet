@@ -376,6 +376,7 @@
     <string name="file_transfer_progress">%1$s of %2$s</string>
     <string name="file_export_request">Request export (needs approval)</string>
     <string name="file_export_waiting">Waiting for approval…</string>
+    <string name="file_copy_path">Copy path instead</string>
     <string name="file_export_other">Export a file not in this list…</string>
     <string name="file_export_other_hint">path/in/project.xlsx</string>
     <string name="file_view">View file</string>
