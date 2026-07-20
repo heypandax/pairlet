@@ -204,8 +204,8 @@ class RepoDesktopModel(
     ) = repo.createBridge(name, workdirs, tier, maxSessions, runner)
     override fun revokeBridge(name: String) = repo.revokeBridge(name)
     override fun controlBridgeRunner(name: String, action: String) = repo.controlBridgeRunner(name, action)
-    override fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean) =
-        repo.configureBridgeRunner(name, spec, mergeEnv)
+    override fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean, workdirs: List<String>?) =
+        repo.configureBridgeRunner(name, spec, mergeEnv, workdirs)
     override fun clearBridgeCredential() = repo.clearBridgeCredential()
 
     override val connected: Boolean get() = repo.sessionActive.value

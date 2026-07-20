@@ -2655,13 +2655,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     /** [mergeEnv] = the edit path: only non-blank env values land, everything else is kept daemon-side. */
-    fun configureBridgeRunner(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false) {
+    fun configureBridgeRunner(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, workdirs: List<String>? = null) {
         bridgeRequestStarted()
         // arm the merge-loss guard: remember what WAS configured, so the reply can prove nothing vanished
         pendingMergeCheck = if (mergeEnv) {
             name to (bridges.firstOrNull { it.name == name }?.runner?.envKeys?.toSet() ?: emptySet())
         } else null
-        scope.launch { send(ConfigureBridgeRunner(name, spec, mergeEnv)) }
+        scope.launch { send(ConfigureBridgeRunner(name, spec, mergeEnv, workdirs)) }
     }
 
     /** Dismiss the one-shot credential card once the owner says they've copied it. */

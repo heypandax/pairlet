@@ -186,8 +186,18 @@ class BridgeService(
 
     override suspend fun configureRunner(req: ConfigureBridgeRunner): BridgeRunnerStatus {
         val rs = runners ?: return BridgeRunnerStatus(req.name, ok = false, error = "this daemon can't manage adapter processes")
+        // editing the PROJECT allow-list (issue #91): validate EXACTLY like create — each root must be an
+        // existing absolute directory — then canonicalize before it becomes the new authority. null = unchanged.
+        val canonicalWorkdirs = req.workdirs?.let { list ->
+            if (list.isEmpty()) return BridgeRunnerStatus(req.name, ok = false, error = "pick at least one project — a bridge with no allow-listed directory can't open anything")
+            val roots = list.map { File(it) }
+            roots.firstOrNull { !it.isAbsolute || !it.isDirectory }?.let {
+                return BridgeRunnerStatus(req.name, ok = false, error = "not an existing absolute directory: $it")
+            }
+            roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) }
+        }
         val wasRunning = rs.state(req.name)?.running == true
-        rs.reconfigure(req.name, req.spec, req.mergeEnv)?.let { return BridgeRunnerStatus(req.name, ok = false, error = it) }
+        rs.reconfigure(req.name, req.spec, req.mergeEnv, canonicalWorkdirs)?.let { return BridgeRunnerStatus(req.name, ok = false, error = it) }
         // a config change that isn't applied to the RUNNING adapter would be a lie on the page. Note the
         // running check happens BEFORE reconfigure: an in-process engine is torn down by the edit itself,
         // so probing afterwards would always read "stopped" and skip the restart.

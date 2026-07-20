@@ -185,8 +185,9 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
             Spacer(Modifier.height(10.dp))
             EditRunnerForm(
                 envKeys = b.runner?.envKeys.orEmpty(),
+                workdirs = b.workdirs,
                 onCancel = { editing = false },
-                onSave = { appId, appSecret, adminId ->
+                onSave = { appId, appSecret, adminId, workdirs ->
                     // merge semantics: only what was typed lands; blank fields keep the stored values —
                     // the app secret is never echoed back out, so "retype everything" isn't even possible
                     model.configureBridgeRunner(
@@ -202,6 +203,8 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                             autostart = b.runner?.autostart ?: true,
                         ),
                         mergeEnv = true,
+                        // only send the allow-list when it actually changed — null = daemon leaves it as-is
+                        workdirs = workdirs.takeIf { it != b.workdirs },
                     )
                     editing = false
                 },

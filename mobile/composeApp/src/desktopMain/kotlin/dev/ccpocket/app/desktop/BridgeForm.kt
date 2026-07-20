@@ -225,28 +225,36 @@ internal fun NewBridgeForm(
 }
 
 /**
- * Edit a managed bridge's adapter config in place. Exists chiefly for the /bind bootstrap: the bot echoes
- * the owner's open_id in the chat, and this is where it gets pasted — without retyping the app secret,
- * which the owner CANNOT retype from the page (it is never echoed back out). Hence merge semantics:
- * blank fields keep their stored values; [envKeys] shows what's already set. The daemon restarts the
- * adapter with the new config.
+ * Edit a managed bridge in place: its PROJECT allow-list (add / remove projects) and its adapter config.
+ * The project editor is pre-filled with the bridge's current [workdirs]. The adapter fields keep merge
+ * semantics — blank keeps the stored value, since the app secret is never echoed back out ([envKeys] shows
+ * what's set) — and double as the /bind bootstrap slot for pasting the owner's open_id. The daemon
+ * re-validates the projects and restarts the adapter with the new config.
  */
 @Composable
 internal fun EditRunnerForm(
     envKeys: List<String>,
+    workdirs: List<String>,
     onCancel: () -> Unit,
-    onSave: (appId: String, appSecret: String, adminId: String) -> Unit,
+    onSave: (appId: String, appSecret: String, adminId: String, workdirs: List<String>) -> Unit,
 ) {
     var appId by remember { mutableStateOf("") }
     var appSecret by remember { mutableStateOf("") }
     var adminId by remember { mutableStateOf("") }
-    val dirty = appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank()
+    val picked = remember { mutableStateListOf<String>().apply { addAll(workdirs) } }
+    val projectsChanged = picked.toList() != workdirs
+    // save is live once SOMETHING changed AND at least one project remains (a bridge with no allow-listed
+    // directory can open nothing — the daemon rejects it too, this just greys the button first)
+    val dirty = (appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank() || projectsChanged) && picked.isNotEmpty()
 
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
             .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(12.dp),
     ) {
-        FieldLabel("EDIT ADAPTER CONFIG", "blank fields keep their current values — set: ${envKeys.joinToString(", ").ifEmpty { "(nothing yet)" }}")
+        FieldLabel("PROJECTS", "the directories this bot may open sessions in — add or remove, then Save & restart")
+        PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
+        Spacer(Modifier.height(14.dp))
+        FieldLabel("ADAPTER CONFIG", "blank fields keep their current values — set: ${envKeys.joinToString(", ").ifEmpty { "(nothing yet)" }}")
         TextInput(adminId, { adminId = it }, "FEISHU_ADMIN_OPEN_ID — paste the open_id the bot echoed after /bind")
         Spacer(Modifier.height(6.dp))
         TextInput(appId, { appId = it }, "FEISHU_APP_ID (unchanged if blank)")
@@ -259,7 +267,7 @@ internal fun EditRunnerForm(
                 fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (dirty) Tok.accent else Tok.muted).copy(alpha = 0.12f))
-                    .clickable(enabled = dirty) { onSave(appId, appSecret, adminId) }
+                    .clickable(enabled = dirty) { onSave(appId, appSecret, adminId, picked.toList()) }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
             Text(

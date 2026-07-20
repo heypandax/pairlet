@@ -1664,6 +1664,22 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun configureBridgeRunner_workdirs_is_optional_and_back_compatible() {
+        // editing the project allow-list (issue #91): workdirs is a trailing optional — round-trips when set,
+        // omitted when null (byte-identical to the pre-edit shape), and an OLD daemon's frame decodes to null
+        // (the allow-list simply stays unchanged, never accidentally cleared).
+        val spec = BridgeRunnerSpec(scriptPath = "", env = mapOf("FEISHU_ADMIN_OPEN_ID" to "ou_x"))
+        val edit = Envelope(id = "b5", ts = 0, body = ConfigureBridgeRunner("feishu-bot", spec, mergeEnv = true, workdirs = listOf("/p/a", "/p/b")))
+        val json = PocketJson.encodeToString(edit)
+        assertTrue("\"workdirs\":[\"/p/a\",\"/p/b\"]" in json, json)
+        assertEquals(edit, PocketJson.decodeFromString<Envelope>(json))
+        // null is omitted on the wire, and an old daemon's frame (no key) decodes to null = "leave as-is"
+        assertFalse("workdirs" in PocketJson.encodeToString(Envelope(id = "b6", ts = 0, body = ConfigureBridgeRunner("feishu-bot", spec, mergeEnv = true))))
+        val legacy = """{"id":"b7","ts":0,"to":"PEER","body":{"t":"pocket/bridge.runner.configure","name":"feishu-bot","spec":{"scriptPath":""},"mergeEnv":true}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(legacy).body as ConfigureBridgeRunner).workdirs)
+    }
+
+    @Test
     fun a_managed_bridge_returns_a_runner_and_no_credential_to_copy() {
         // the managed path's whole point: the ticket never leaves the machine
         val managed = BridgeCreated(ok = true, runner = BridgeRunnerState(kind = RUNNER_KIND_FEISHU, scriptPath = "/x.py", running = true, pid = 7))

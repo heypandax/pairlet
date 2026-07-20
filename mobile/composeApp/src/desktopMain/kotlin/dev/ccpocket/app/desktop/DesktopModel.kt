@@ -484,7 +484,7 @@ interface DesktopModel {
     ) {}
     fun revokeBridge(name: String) {}
     fun controlBridgeRunner(name: String, action: String) {}
-    fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean = false) {}
+    fun configureBridgeRunner(name: String, spec: dev.ccpocket.protocol.BridgeRunnerSpec, mergeEnv: Boolean = false, workdirs: List<String>? = null) {}
     fun clearBridgeCredential() {}
 
     // composer image attachments (⌘V paste / attach icon → file picker); ride the next send

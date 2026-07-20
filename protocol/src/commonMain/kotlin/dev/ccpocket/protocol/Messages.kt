@@ -525,6 +525,15 @@ data class ConfigureBridgeRunner(
      * rather than the secret silently vanishing.
      */
     val mergeEnv: Boolean = false,
+    /**
+     * New PROJECT allow-list for the bridge, or null = leave it unchanged (issue #91). Editing this widens
+     * or narrows what the bot may touch — a bridge's authority, not runner config, so it rides here as an
+     * explicit override rather than in [BridgeRunnerSpec]. Only a BUILT-IN (in-process) bridge keeps its
+     * spec daemon-side; an external bridge's scope is fixed by its redeemed credential (revoke + re-create
+     * to change it). The daemon re-validates each path (existing absolute dir) before it becomes authority.
+     * Absent on an OLD daemon → ignored → the allow-list simply stays as-is (safe).
+     */
+    val workdirs: List<String>? = null,
 ) : ToDaemon
 
 /** owner -> daemon: start / stop / restart bridge [name]'s managed runner. Reply: [BridgeRunnerStatus].

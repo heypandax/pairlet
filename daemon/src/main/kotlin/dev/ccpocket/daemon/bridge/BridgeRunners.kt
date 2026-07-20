@@ -121,7 +121,7 @@ class BridgeRunners(
      * owner types only what changes and the app secret (never echoed back) must survive untouched.
      * Deleting a key needs a full replace (mergeEnv=false); the edit form has no delete affordance yet.
      */
-    fun reconfigure(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false): String? {
+    fun reconfigure(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, newWorkdirs: List<String>? = null): String? {
         val cur = entries[name] ?: return "\"$name\" has no managed adapter — bridges created without one " +
             "can't gain it later (the daemon no longer holds their credential); revoke and re-create it instead"
         val merged = if (!mergeEnv) spec else spec.copy(
@@ -131,7 +131,11 @@ class BridgeRunners(
             scriptPath = spec.scriptPath.ifBlank { cur.spec.scriptPath },
             interpreter = spec.interpreter ?: cur.spec.interpreter,
         )
-        entries[name] = cur.copy(spec = merged)
+        // an owner may edit the PROJECT allow-list (its authority). Only an in-process bridge keeps its spec
+        // here; [newWorkdirs] is already validated + canonicalized by BridgeService. Replace just the
+        // workdirs, preserving tier / rate limits. The engine is rebuilt below, so it re-guards on the new set.
+        val newSpec = if (newWorkdirs != null && cur.bridgeSpec != null) cur.bridgeSpec.copy(workdirs = newWorkdirs) else cur.bridgeSpec
+        entries[name] = cur.copy(spec = merged, bridgeSpec = newSpec)
         persist()
         // an in-process ENGINE binds its env at construction — a cached instance would keep serving the
         // OLD admin/secret after this edit. Drop it; the next start() rebuilds from the updated entry.
