@@ -23,13 +23,17 @@ on:
         description: "Only build & attach the Android APK (skip daemon jobs). For testing the APK pipeline against an existing release WITHOUT re-uploading daemon tarballs (which would change their sha256 and break the published Homebrew cask)."
         type: boolean
         default: false
+      only_macos_desktop:
+        description: "Only rebuild & re-attach the macOS DESKTOP app (.dmg, both arches) + regenerate SHA256SUMS, leaving the daemon tarballs / Windows / Android untouched. For a desktop-only hotfix onto an existing release WITHOUT changing the daemon sha256 (which would break the published Homebrew cask / Scoop manifest)."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   macos:
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     strategy:
       fail-fast: false
       matrix:
@@ -93,7 +97,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" "$ARTIFACT" --clobber
 
   windows:
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,7 +121,7 @@ jobs:
           gh release upload "v${{ inputs.version }}" $artifact --clobber
 
   linux:
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -155,6 +159,7 @@ jobs:
     # website's "newest .apk" link always resolves to a current, release-signed build. The signing
     # key is injected from repo secrets; if any are missing the build.gradle signing config is
     # skipped and we FAIL the job rather than ship an unsigned APK (apksigner verify is the gate).
+    if: ${{ !inputs.only_macos_desktop }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -321,7 +326,7 @@ jobs:
     # The Compose Desktop APP (.msi installer) for Windows, attached to the release under a stable version-less
     # name. jpackage can't cross-compile, so this runs on windows-latest (which ships WiX, so the MSI builds).
     # Mirrors build-windows.yml's windows-app job but uploads to the release instead of a workflow artifact.
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -388,7 +393,7 @@ jobs:
   # Needs a repo secret SCOOP_BUCKET_TOKEN: a fine-grained PAT with contents:write on
   # heypandax/scoop-bucket. Skips gracefully (with a warning) when the secret is absent.
   bump-scoop:
-    if: ${{ !inputs.only_android }}
+    if: ${{ !inputs.only_android && !inputs.only_macos_desktop }}
     needs: [windows]
     runs-on: ubuntu-latest
     steps:
@@ -425,7 +430,9 @@ jobs:
   # (the Claude Code pattern: manifest + per-platform checksum). Runs after all uploads so the sums
   # cover the final artifacts; --clobber makes re-runs safe.
   checksums:
-    if: ${{ !inputs.only_android }}
+    # !cancelled() (not the default success()) so this still runs when the daemon/windows/android jobs
+    # are SKIPPED in only_macos_desktop mode — it re-sums whatever assets are on the release now.
+    if: ${{ !cancelled() && !inputs.only_android }}
     needs: [macos, windows, linux, android, macos-desktop, windows-desktop]
     runs-on: ubuntu-latest
     steps:
