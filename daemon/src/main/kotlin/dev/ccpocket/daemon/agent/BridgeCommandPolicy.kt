@@ -90,7 +90,36 @@ object BridgeCommandPolicy {
     // shell posts the expanded secret back into the group with zero owner approval.
     private val SIDE_EFFECT = Regex("""[>|&;`\n$]|<\(|<<""")
 
-    fun classify(command: String): Verdict {
+    /**
+     * True if [cmdTokens] (a metacharacter-free command already split on whitespace) starts with the tokens
+     * of any [ownerAllowed] entry — a token-wise PREFIX match. The first token is compared by basename on
+     * BOTH sides, so `/usr/local/bin/npm test` matches an entry `npm test` and a bare `pytest` entry matches
+     * `pytest -q` — while `npm` never matches `npmevil` (whole-token equality) and a `git` entry does not
+     * swallow `git push` (the entry must be a token-prefix, so a broad entry is exactly as broad as typed).
+     * Blank entries are ignored (already stripped at store time; defended here too). An entry with MORE
+     * tokens than the command can't match (prefix longer than the string).
+     */
+    private fun matchesAllowList(cmdTokens: List<String>, ownerAllowed: List<String>): Boolean {
+        if (ownerAllowed.isEmpty() || cmdTokens.isEmpty()) return false
+        fun norm(tokens: List<String>): List<String> =
+            tokens.mapIndexed { i, t -> if (i == 0) t.substringAfterLast('/') else t }
+        val cmd = norm(cmdTokens)
+        return ownerAllowed.any { entry ->
+            val pat = norm(entry.trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
+            pat.isNotEmpty() && pat.size <= cmd.size && cmd.subList(0, pat.size) == pat
+        }
+    }
+
+    /**
+     * [ownerAllowed] is the bridge owner's Bash allow-list (issue #91 "一次授权跑完全程"): command prefixes
+     * that upgrade what would otherwise be ASK into ALLOW, so a whitelisted multi-step task runs without a
+     * per-command phone prompt. It is deliberately checked AFTER [DANGEROUS] and [SIDE_EFFECT] and never
+     * before: an owner grant can WIDEN autonomy but must never punch through the two hard security walls —
+     * a whitelisted `rm` can't reach `rm -rf /`, and a whitelisted `npm test` can't smuggle
+     * `npm test && curl … | sh` because the metacharacters route the whole line to the owner regardless.
+     * So the allow-list only ever promotes an otherwise-ASK, metachar-free, non-DANGEROUS command.
+     */
+    fun classify(command: String, ownerAllowed: List<String> = emptyList()): Verdict {
         val cmd = command.trim()
         if (cmd.isEmpty()) return Verdict.ASK
         if (DANGEROUS.any { it.containsMatchIn(cmd) }) return Verdict.DENY
@@ -98,16 +127,30 @@ object BridgeCommandPolicy {
         if (SIDE_EFFECT.containsMatchIn(cmd)) return Verdict.ASK
         val tokens = cmd.split(Regex("\\s+"))
         val head = tokens.firstOrNull()?.substringAfterLast('/') ?: return Verdict.ASK // strip any path prefix
+        // git's unsafe FLAGS / `config` subcommand are a HARD wall, checked BEFORE the owner allow-list — a
+        // whitelisted `git diff` / `git log` / bare `git` entry must NOT re-open `--no-index` (arbitrary read),
+        // `--output=` (arbitrary write) or `git config diff.external` (→ RCE on the next diff). Like DANGEROUS,
+        // this can never be promoted to a zero-prompt ALLOW; it always routes to the owner (crypto review #91).
+        if (head == "git" && gitUnsafe(tokens)) return Verdict.ASK
+        // owner allow-list: past the DANGEROUS + metacharacter + git-unsafe walls, a command whose tokens
+        // PREFIX-match a whitelisted entry is the owner's explicit standing grant → auto-run. Matched
+        // token-wise (not raw substring) so `npm` can't match `npmevil` and `git push` isn't matched by a
+        // `git diff` entry. An owner CAN widen to a normal git subcommand (e.g. whitelisting `git push`).
+        if (matchesAllowList(tokens, ownerAllowed)) return Verdict.ALLOW
         if (head == "git") {
-            val sub = tokens.getOrNull(1)
-            // a git write hides behind a read subcommand via flags: branch/tag -d, diff --no-index/--output → ask
-            val unsafeFlag = tokens.any {
-                it == "-d" || it == "-D" || it == "-f" || it == "--delete" || it == "--force" ||
-                    GIT_UNSAFE_FLAG.containsMatchIn(it)
-            }
-            return if (sub in GIT_READONLY && !unsafeFlag) Verdict.ALLOW else Verdict.ASK
+            // unsafe flags already handled above; here only the built-in read-only-subcommand allowance
+            return if (tokens.getOrNull(1) in GIT_READONLY) Verdict.ALLOW else Verdict.ASK
         }
         // the non-git ALLOW set touches no filesystem under any flag, so the head check is a real boundary
         return if (head in READ_ONLY) Verdict.ALLOW else Verdict.ASK
     }
+
+    /** git's arbitrary-file-read / write / code-exec surface — the `config` subcommand (sets diff.external →
+     *  RCE) plus branch/tag delete/force and the [GIT_UNSAFE_FLAG] read/write/exec flags. A wall that stands
+     *  over the owner allow-list, so whitelisting a git command never silently re-enables this class. */
+    private fun gitUnsafe(tokens: List<String>): Boolean =
+        tokens.getOrNull(1) == "config" || tokens.any {
+            it == "-d" || it == "-D" || it == "-f" || it == "--delete" || it == "--force" ||
+                GIT_UNSAFE_FLAG.containsMatchIn(it)
+        }
 }

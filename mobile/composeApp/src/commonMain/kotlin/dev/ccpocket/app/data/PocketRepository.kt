@@ -2638,10 +2638,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         tier: AccessTier = AccessTier.REVIEW,
         maxSessions: Int? = null,
         runner: BridgeRunnerSpec? = null,
+        allowedCommands: List<String> = emptyList(),
     ) {
         bridgeRequestStarted()
         bridgeCredential.value = null
-        scope.launch { send(CreateBridge(name, workdirs, maxSessions, tier = tier, runner = runner)) }
+        scope.launch { send(CreateBridge(name, workdirs, maxSessions, tier = tier, allowedCommands = allowedCommands, runner = runner)) }
     }
 
     fun revokeBridge(name: String) {
@@ -2655,13 +2656,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     /** [mergeEnv] = the edit path: only non-blank env values land, everything else is kept daemon-side. */
-    fun configureBridgeRunner(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, workdirs: List<String>? = null) {
+    fun configureBridgeRunner(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, workdirs: List<String>? = null, allowedCommands: List<String>? = null) {
         bridgeRequestStarted()
         // arm the merge-loss guard: remember what WAS configured, so the reply can prove nothing vanished
         pendingMergeCheck = if (mergeEnv) {
             name to (bridges.firstOrNull { it.name == name }?.runner?.envKeys?.toSet() ?: emptySet())
         } else null
-        scope.launch { send(ConfigureBridgeRunner(name, spec, mergeEnv, workdirs)) }
+        scope.launch { send(ConfigureBridgeRunner(name, spec, mergeEnv, workdirs, allowedCommands)) }
     }
 
     /** Dismiss the one-shot credential card once the owner says they've copied it. */

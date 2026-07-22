@@ -78,6 +78,57 @@ class PermissionBridgeTest {
         scope.cancel()
     }
 
+    // ── OWNER BYPASS (issue #91): the configured owner's OWN turn runs unrestricted; nobody else's does ──
+
+    @Test
+    fun owner_bypass_auto_allows_even_a_command_the_bridge_bash_gate_would_deny() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, ownerBypassSession = true)
+        // rm -rf / is a hard DENY under BridgeCommandPolicy — but the configured owner's own turn is full-trust
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        assertTrue(emitted.isEmpty(), "owner bypass must not push an ask")
+        assertTrue(responses.single().allow, "owner bypass must auto-allow, skipping the bridge Bash gate")
+        scope.cancel()
+    }
+
+    @Test
+    fun owner_bypass_off_keeps_the_bridge_bash_gate_denying_for_everyone_else() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, ownerBypassSession = false) // the shared / group session (the default)
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        assertTrue(emitted.isEmpty())
+        assertFalse(responses.single().allow, "a non-owner's rm -rf / must stay denied by the bridge gate")
+        scope.cancel()
+    }
+
+    @Test
+    fun owner_bypass_still_routes_AskUserQuestion_to_a_human() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, ownerBypassSession = true)
+        // AskUserQuestion's ANSWER rides the verdict — auto-allowing it would answer nothing, so even under
+        // owner bypass it must reach a human (neverRemember), exactly like user-chosen bypass mode.
+        val input = kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"questions":[{"question":"Which?","header":"H","multiSelect":false,
+                "options":[{"label":"A","description":"a"},{"label":"B","description":"b"}]}]}""",
+        ) as kotlinx.serialization.json.JsonObject
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "AskUserQuestion", input))
+        assertIs<PermissionAsk>(emitted.single())
+        assertTrue(responses.isEmpty(), "the question must await a real answer, not auto-allow")
+        scope.cancel()
+    }
+
     @Test
     fun askUserQuestion_carries_questions_and_merges_answers_into_updatedInput() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
@@ -210,6 +261,57 @@ class PermissionBridgeTest {
         b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -s") }))
         assertEquals(1, emitted.size) // only the first asked
         assertTrue(responses.last().allow)
+        scope.cancel()
+    }
+
+    // ── issue #91: a bridge's owner Bash allow-list auto-runs matching commands with NO phone ask ──
+
+    @Test
+    fun bridge_whitelisted_command_auto_allows_without_emitting_an_ask() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, bridgeAllowedCommands = listOf("npm test"))
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "npm test -- --ci") }))
+        assertTrue(emitted.isEmpty(), "a whitelisted command must not raise a phone ask")
+        val r = responses.single()
+        assertTrue(r.allow)
+        assertFalse(r.remember) // one-off allow, never a standing remembered rule
+        scope.cancel()
+    }
+
+    @Test
+    fun bridge_non_whitelisted_command_still_asks_the_owner() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, bridgeAllowedCommands = listOf("npm test"))
+
+        // not on the list, and not a metachar/dangerous line → routes to the phone as before
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "python deploy.py") }))
+        assertIs<PermissionAsk>(emitted.single())
+        assertTrue(responses.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
+    fun bridge_whitelist_never_overrides_a_dangerous_command() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, bridgeAllowedCommands = listOf("rm")) // even a reckless "rm" grant
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        assertTrue(emitted.isEmpty()) // hard-denied, not asked
+        val r = responses.single()
+        assertFalse(r.allow) // DANGEROUS wall stands over any whitelist
         scope.cancel()
     }
 

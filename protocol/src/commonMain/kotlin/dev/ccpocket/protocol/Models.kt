@@ -650,6 +650,10 @@ data class BridgeInfo(
     /** The granted permission-mode ceiling — what this bridge can do WITHOUT asking the owner.
      *  REVIEW = nothing dangerous is silent. Shown on the row because it is the security-relevant fact. */
     val tier: AccessTier = AccessTier.REVIEW,
+    /** BRIDGE only (issue #91): the owner-configured Bash commands that auto-run without a phone prompt.
+     *  Echoed back so the edit form can pre-fill it. Empty for a bridge whose owner whitelisted none, and
+     *  from an OLD daemon that predates the field (safe: the edit form shows an empty list). */
+    val allowedCommands: List<String> = emptyList(),
 )
 
 /**
@@ -702,4 +706,7 @@ data class BridgeRunnerState(
     val lastError: String? = null,
     val envKeys: List<String> = emptyList(),  // names only — never values
     val logTail: List<String> = emptyList(),
+    // OWNER BYPASS (issue #91): the CONFIGURED owner's OWN messages run without approval. A display flag so
+    // the edit form can pre-fill its toggle — NOT a secret. Absent on an older daemon → false (feature off).
+    val ownerBypass: Boolean = false,
 )

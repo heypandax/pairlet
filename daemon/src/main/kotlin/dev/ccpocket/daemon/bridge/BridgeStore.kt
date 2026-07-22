@@ -60,6 +60,15 @@ data class BridgeSpec(
      *  file edits — the failure would be invisible until something wrote without asking. Live data is
      *  unaffected either way: PocketJson has encodeDefaults=true, so every persisted spec names its tier. */
     val tier: AccessTier = AccessTier.REVIEW,
+    /**
+     * BRIDGE only (issue #91 "一次授权跑完全程"): owner-configured Bash command prefixes that auto-run with
+     * NO phone prompt on this bridge's sessions. Widens [BridgeCommandPolicy]'s tiny built-in read-only set;
+     * it can never override the DANGEROUS deny-list, and a command with shell metacharacters still routes to
+     * the owner. Held here (an owner-only file the credential holder can't write), so it's an owner grant,
+     * not something the IM side can raise. Empty for a guest and for the pre-field default (safe: nothing
+     * extra auto-runs). Normalized (trimmed, blanks dropped, deduped, capped) by [clamped].
+     */
+    val allowedCommands: List<String> = emptyList(),
 ) {
     val isGuest: Boolean get() = kind == CredentialKind.GUEST
 
@@ -95,6 +104,7 @@ data class BridgeSpec(
             opensPerMin: Int?,
             promptsPerMin: Int?,
             tier: AccessTier = AccessTier.REVIEW,
+            allowedCommands: List<String> = emptyList(),
         ) = BridgeSpec(
             name = name,
             workdirs = workdirs,
@@ -102,7 +112,16 @@ data class BridgeSpec(
             opensPerMin = (opensPerMin ?: DEFAULT_OPENS_PER_MIN).coerceIn(1, 30),
             promptsPerMin = (promptsPerMin ?: DEFAULT_PROMPTS_PER_MIN).coerceIn(1, 120),
             tier = tier.takeUnless { it == AccessTier.UNKNOWN } ?: AccessTier.REVIEW, // unknown → safest
+            allowedCommands = normalizeAllowedCommands(allowedCommands),
         )
+
+        /** Owner input hygiene for the Bash allow-list: trim, drop blanks, dedupe (case-sensitive — command
+         *  names are), and cap the count so a pasted mega-list can't bloat the spec. Not a security check —
+         *  BridgeCommandPolicy still gates every entry against DANGEROUS + metacharacters at match time. */
+        fun normalizeAllowedCommands(raw: List<String>): List<String> =
+            raw.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(MAX_ALLOWED_COMMANDS)
+
+        const val MAX_ALLOWED_COMMANDS = 64
 
         /** Build a GUEST spec (issue #115): a single canonical shared root, an access tier, and an expiry. */
         fun guest(name: String, root: String, tier: AccessTier, expiresAt: Long) = BridgeSpec(

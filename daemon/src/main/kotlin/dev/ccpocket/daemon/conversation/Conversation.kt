@@ -77,6 +77,10 @@ class Conversation(
      *  every interactive owner client. Rides SessionLive/ActiveSession as the "via <name>" label, lengthens
      *  the ask timeout (nobody is watching the sheet live), and arms the ask push below. */
     val origin: String? = null,
+    // issue #91 OWNER BYPASS: true when this is the bridge OWNER's OWN dedicated session (the built-in engine
+    // routes non-owner messages to a separate session) → its PermissionBridge auto-allows. Per-session, set at
+    // open by trusted in-process code only; false for every wire-opened session, so it's un-forgeable.
+    private val ownerBypass: Boolean = false,
     // how a pending permission ask reaches a human who isn't watching: a bridge conversation's owner
     // (issue #91 — the bridge never gets the frame) or an owner session's locked/away phone (issue #138)
     private val askPushHookProvider: () -> AskPushHook? = { null },
@@ -87,6 +91,10 @@ class Conversation(
      *  Non-null → the PermissionBridge hard-denies any Read/Write/Edit whose target escapes them, BEFORE
      *  the guest is even asked. Null = an unrestricted owner conversation (no path guard). */
     private val pathScope: List<String>? = null,
+    /** BRIDGE only (issue #91 "一次授权跑完全程"): the owner-configured Bash command allow-list. A matching
+     *  command auto-runs on this session with no phone prompt (via BridgeCommandPolicy); empty for owner/guest
+     *  and for a bridge whose owner configured none. Only consulted when [bridgeSession] is true. */
+    private val bridgeAllowedCommands: List<String> = emptyList(),
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -774,6 +782,12 @@ class Conversation(
             // bridge defense-in-depth (issue #91): Bash gated by BridgeCommandPolicy + structured file tools
             // confined to the bound workdir (a bridge Read must not escape to ~/.ssh). Bridge only.
             bridgeSession = origin != null && pathScope == null,
+            // OWNER BYPASS (issue #91): this whole conversation is the owner's dedicated session → auto-allow.
+            // Per-session (set at open) ⇒ race-free: no attributing individual tool calls to a sender.
+            ownerBypassSession = ownerBypass,
+            // the owner's Bash allow-list for this bridge — matching commands auto-run with no phone prompt
+            // (issue #91 "一次授权跑完全程"). Empty for owner/guest; only consulted on a bridgeSession.
+            bridgeAllowedCommands = bridgeAllowedCommands,
             // GUEST folder-share (issue #115): confine every file tool to the shared roots
             pathScope = pathScope,
             workdir = workdir.toString(),

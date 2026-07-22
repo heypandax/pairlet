@@ -748,7 +748,7 @@ class DesktopUiTest {
                 androidx.compose.foundation.layout.Box(
                     androidx.compose.ui.Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
                 ) {
-                    NewBridgeForm(onCancel = {}, onCreate = { _, _, _, _ -> })
+                    NewBridgeForm(onCancel = {}, onCreate = { _, _, _, _, _ -> })
                 }
             }
         }

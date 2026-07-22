@@ -96,4 +96,60 @@ class BridgeCommandPolicyTest {
         assertEquals(Verdict.ASK, v("/bin/cat secret"))   // cat is no longer auto-allowed
         assertEquals(Verdict.ASK, v("/bin/ls -la"))       // ls now touches fs → ASK (收敛)
     }
+
+    // ── owner Bash allow-list (issue #91 "一次授权跑完全程") ──
+    private fun v(cmd: String, allow: List<String>) = BridgeCommandPolicy.classify(cmd, allow)
+
+    @Test
+    fun whitelisted_prefix_upgrades_an_otherwise_ASK_command_to_ALLOW() {
+        val allow = listOf("npm test", "./gradlew", "pytest")
+        // exact + prefix matches auto-run
+        assertEquals(Verdict.ALLOW, v("npm test", allow))
+        assertEquals(Verdict.ALLOW, v("npm test -- --watch=false", allow))   // token-prefix
+        assertEquals(Verdict.ALLOW, v("./gradlew build", allow))
+        assertEquals(Verdict.ALLOW, v("pytest -q tests/", allow))
+        // and a path-prefixed binary matches by basename on the head token
+        assertEquals(Verdict.ALLOW, v("/usr/local/bin/pytest -q", allow))
+    }
+
+    @Test
+    fun whitelist_matches_whole_tokens_only_never_a_substring() {
+        val allow = listOf("npm", "git push")
+        assertEquals(Verdict.ALLOW, v("npm run build", allow))
+        assertEquals(Verdict.ASK, v("npmevil --hack", allow))   // "npm" must not match "npmevil"
+        // a 2-token entry needs both tokens: "git push" does NOT auto-run "git pull"
+        assertEquals(Verdict.ALLOW, v("git push origin main", allow))
+        assertEquals(Verdict.ASK, v("git pull", allow))
+    }
+
+    @Test
+    fun the_two_hard_walls_are_never_punched_through_by_the_whitelist() {
+        // even if the owner (foolishly) whitelists the head, DANGEROUS still DENYs and metacharacters ASK —
+        // the allow-list can only WIDEN autonomy on a proven-plain command, never override a security wall
+        assertEquals(Verdict.DENY, v("rm -rf /", listOf("rm")))
+        assertEquals(Verdict.DENY, v("git push --force origin main", listOf("git push")))
+        assertEquals(Verdict.DENY, v("npm test && rm -rf x", listOf("npm test")))   // a dangerous tail still DENYs
+        assertEquals(Verdict.ASK, v("npm test && echo done", listOf("npm test")))   // plain chain → ASK (metachar)
+        assertEquals(Verdict.ASK, v("npm test > /etc/hosts", listOf("npm test")))   // redirect → ASK
+        assertEquals(Verdict.ASK, v("pytest \$SECRET", listOf("pytest")))           // expansion → ASK
+    }
+
+    @Test
+    fun an_empty_whitelist_is_the_pre_existing_behaviour() {
+        assertEquals(Verdict.ASK, v("npm test", emptyList()))
+        assertEquals(Verdict.ALLOW, v("git status", emptyList()))   // built-in read-only set unaffected
+    }
+
+    @Test
+    fun the_whitelist_never_reopens_gits_unsafe_flags_or_config() {
+        // crypto review #91: a whitelisted `git diff` / `git log` / bare `git` must NOT promote the arbitrary
+        // read (--no-index), arbitrary write (--output=), or config→RCE class to a zero-prompt ALLOW.
+        assertEquals(Verdict.ASK, v("git diff --no-index /Users/v/.ssh/id_rsa /dev/null", listOf("git diff")))
+        assertEquals(Verdict.ASK, v("git log --output=/Users/v/.bashrc", listOf("git log")))
+        assertEquals(Verdict.ASK, v("git config diff.external /tmp/e.sh", listOf("git")))
+        assertEquals(Verdict.ASK, v("git branch -D main", listOf("git branch")))
+        // but a plain whitelisted git command the owner deliberately granted still auto-runs
+        assertEquals(Verdict.ALLOW, v("git diff HEAD", listOf("git diff")))
+        assertEquals(Verdict.ALLOW, v("git push origin main", listOf("git push")))   // owner may widen to push
+    }
 }

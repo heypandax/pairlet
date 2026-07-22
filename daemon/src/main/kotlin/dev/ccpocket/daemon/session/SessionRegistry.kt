@@ -131,13 +131,19 @@ class SessionRegistry(
     /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
      *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
      *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
-     *  PermissionBridge denies any Read/Write/Edit whose target escapes them; null = unrestricted (owner). */
+     *  PermissionBridge denies any Read/Write/Edit whose target escapes them; null = unrestricted (owner).
+     *  [bridgeAllowedCommands] (issue #91) is a BRIDGE's owner-configured Bash allow-list — the conversation's
+     *  PermissionBridge auto-runs a matching command without a phone prompt; empty for owner/guest. */
     suspend fun open(
         open: OpenSession,
         sink: OutboundSink,
         origin: String? = null,
         pathScope: List<String>? = null,
         peerSupportsOpencode: Boolean = true,
+        bridgeAllowedCommands: List<String> = emptyList(),
+        // issue #91 OWNER BYPASS: this session is the bridge owner's OWN dedicated session → its whole
+        // PermissionBridge auto-allows. Passed ONLY by trusted in-process code (the built-in engine).
+        ownerBypass: Boolean = false,
     ): String {
         val resume = open.resumeId
         if (resume != null) {
@@ -212,7 +218,7 @@ class SessionRegistry(
         val c = Conversation(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
-            pathScope = pathScope,
+            pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
         )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`

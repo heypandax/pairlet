@@ -132,6 +132,7 @@ class BridgeService(
             val spec = BridgeSpec.clamped(
                 name, roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) },
                 req.maxSessions, req.opensPerMin, req.promptsPerMin, tier = req.tier,
+                allowedCommands = req.allowedCommands,
             )
             rs.attachInProcess(spec.name, runnerSpec, spec)
             val startErr = rs.start(spec.name)
@@ -156,6 +157,7 @@ class BridgeService(
             roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) },
             req.maxSessions, req.opensPerMin, req.promptsPerMin,
             tier = req.tier,
+            allowedCommands = req.allowedCommands,
         )
         val ticket = mintTicket(true) ?: return BridgeCreated(ok = false, error = "can't reach the relay — check the connection")
         if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + BridgeRegistry.INTENT_GRACE_MS)) {
@@ -196,8 +198,11 @@ class BridgeService(
             }
             roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) }
         }
+        // editing the Bash command allow-list (issue #91): null = unchanged; a list REPLACES it. Normalized
+        // (trim/dedupe/cap) the same way create does; still gated per-command by BridgeCommandPolicy at run time.
+        val newAllowedCommands = req.allowedCommands?.let { BridgeSpec.normalizeAllowedCommands(it) }
         val wasRunning = rs.state(req.name)?.running == true
-        rs.reconfigure(req.name, req.spec, req.mergeEnv, canonicalWorkdirs)?.let { return BridgeRunnerStatus(req.name, ok = false, error = it) }
+        rs.reconfigure(req.name, req.spec, req.mergeEnv, canonicalWorkdirs, newAllowedCommands)?.let { return BridgeRunnerStatus(req.name, ok = false, error = it) }
         // a config change that isn't applied to the RUNNING adapter would be a lie on the page. Note the
         // running check happens BEFORE reconfigure: an in-process engine is torn down by the edit itself,
         // so probing afterwards would always read "stopped" and skip the restart.
@@ -238,6 +243,7 @@ class BridgeService(
                 maxSessions = spec.maxSessions,
                 createdAt = createdAt,
                 tier = spec.tier,
+                allowedCommands = spec.allowedCommands,
                 runner = runners?.state(spec.name, BridgeRunners.LIST_LOG_LINES),
             )
         }
@@ -250,6 +256,7 @@ class BridgeService(
                 BridgeInfo(
                     name = spec.name, workdirs = spec.workdirs, deviceId = null, pendingTicket = true,
                     maxSessions = spec.maxSessions, createdAt = now(), tier = spec.tier,
+                    allowedCommands = spec.allowedCommands,
                     runner = runners?.state(spec.name, BridgeRunners.LIST_LOG_LINES),
                 )
             }
@@ -263,7 +270,8 @@ class BridgeService(
                 BridgeInfo(
                     name = spec.name, workdirs = spec.workdirs, deviceId = null, pendingTicket = false,
                     online = state?.running == true, activeSessions = active,
-                    maxSessions = spec.maxSessions, createdAt = 0, tier = spec.tier, runner = state,
+                    maxSessions = spec.maxSessions, createdAt = 0, tier = spec.tier,
+                    allowedCommands = spec.allowedCommands, runner = state,
                 )
             }
         return BridgeListing(confirmed + pending + inProcess)

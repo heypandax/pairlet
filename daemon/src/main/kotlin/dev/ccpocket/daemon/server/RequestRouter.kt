@@ -149,8 +149,15 @@ class RequestRouter(
      *  null for every interactive owner client. [guestScope] (issue #115) is non-null ONLY for a GUEST:
      *  it clamps the project/session VISIBILITY to the shared root + the guest's own sessions, and rides
      *  into [SessionRegistry.open] as the conversation's tool path guard. [caps] is the connection's
-     *  capability holder — null (legacy ingress / bridges) filters like an undeclared client. */
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, onOpened: suspend (String) -> Unit = {}) {
+     *  capability holder — null (legacy ingress / bridges) filters like an undeclared client.
+     *  [bridgeAllowedCommands] (issue #91) is a BRIDGE's owner-configured Bash allow-list, ridden down to the
+     *  new conversation's PermissionBridge so whitelisted commands auto-run without a phone prompt; empty for
+     *  every owner/guest client. */
+    // [ownerBypass] (issue #91): this OpenSession is the bridge's CONFIGURED OWNER's OWN dedicated session, so
+    // the WHOLE session auto-allows (per-session ⇒ race-free). Passed ONLY by trusted in-process code (the
+    // built-in engine); the relay/LAN ingress never sets it, so an external adapter can never claim it.
+    // Ignored for non-OpenSession frames.
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), ownerBypass: Boolean = false, onOpened: suspend (String) -> Unit = {}) {
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
             // next list request answers unfiltered. Ingress handlers may process frames concurrently,
@@ -264,6 +271,8 @@ class RequestRouter(
                             frame.copy(workdir = wd.toString()), sink, origin, pathScope = guestScope?.roots,
                             // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
                             peerSupportsOpencode = caps?.supportsOpencode == true,
+                            bridgeAllowedCommands = bridgeAllowedCommands,
+                            ownerBypass = ownerBypass, // trusted in-process open flag ⇒ owner's own session
                         )
                         if (convoId.isNotEmpty()) onOpened(convoId) // "" = backend unavailable (PocketError already sent)
                     }

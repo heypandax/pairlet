@@ -50,6 +50,17 @@ class PermissionBridge(
     //  2. structured file tools (Read/Write/Edit/Glob/Grep) confined to the bound [workdir] — a bridge has
     //     no pathScope, so without this a Read of ~/.ssh/id_rsa would exfiltrate it to the chat.
     private val bridgeSession: Boolean = false,
+    // issue #91 OWNER BYPASS: this whole conversation is the CONFIGURED OWNER's OWN dedicated session (only
+    // ever driven by the owner — the built-in engine routes non-owner messages to a SEPARATE session), so its
+    // execution asks auto-allow: the owner asked in the chat, that IS the approval, on their own machine. A
+    // PER-SESSION property (race-free — no attributing individual tool calls to a sender), set at OPEN by
+    // TRUSTED in-process code only, never the wire. Bridge-only. neverRemember gates still reach a human.
+    private val ownerBypassSession: Boolean = false,
+    // issue #91 "一次授权跑完全程": the owner-configured Bash allow-list for this bridge. A command that
+    // matches (and is neither DANGEROUS nor carrying shell metacharacters) is auto-run with NO phone prompt,
+    // so a whitelisted multi-step task isn't chopped up by per-command approvals in an async IM channel.
+    // Empty for owner/guest sessions and for a bridge whose owner whitelisted nothing (→ prior behaviour).
+    private val bridgeAllowedCommands: List<String> = emptyList(),
     // issue #115: a GUEST folder-share's canonical shared roots. Non-null → a file tool (Read/Write/Edit/…)
     // whose target lands OUTSIDE the roots is HARD-DENIED here, before any ask and regardless of mode — so
     // the guest can't reach the owner's other files even under acceptEdits, and can't be tricked into
@@ -68,6 +79,18 @@ class PermissionBridge(
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
+        val meta = ToolMetadata.of(ev.toolName, ev.input)
+        // OWNER BYPASS (issue #91): this whole conversation is the bridge OWNER's OWN dedicated session (the
+        // built-in engine opens a separate session for the owner and never lets anyone else drive it), so its
+        // tool calls run with NO approval and NO bridge Bash gate — the owner asked in the chat, that IS the
+        // approval, on their own machine. The flag is set at OPEN by TRUSTED in-process code only, never the
+        // wire, so an external adapter cannot forge it. Being per-SESSION it is race-free (no need to attribute
+        // a tool call to a sender). Still exempts the neverRemember gates — a plan approval, and AskUserQuestion
+        // whose answer rides the verdict — exactly like the user-chosen bypass below.
+        if (bridgeSession && ownerBypassSession && !meta.neverRemember) {
+            respond(ev.requestId, true, false, ev.input, null, null)
+            return
+        }
         // GUEST folder-share path guard (issue #115): a built-in file tool whose target escapes the shared
         // root is denied HERE — before the auto-allow / remembered-rule / ask paths below — so it is refused
         // under EVERY mode (even acceptEdits/bypass) and the guest is never shown an ask for it. Bash is not
@@ -82,7 +105,7 @@ class PermissionBridge(
         // Bridge-only (anyone in a chat drives it); the owner's own sessions never reach this.
         if (bridgeSession && ev.toolName == "Bash") {
             val command = (ev.input?.get("command") as? JsonPrimitive)?.content.orEmpty()
-            when (BridgeCommandPolicy.classify(command)) {
+            when (BridgeCommandPolicy.classify(command, bridgeAllowedCommands)) {
                 BridgeCommandPolicy.Verdict.DENY -> {
                     respond(ev.requestId, false, false, ev.input, null, "denied — this command is blocked for a bridge (destructive/high-risk)")
                     return
@@ -94,7 +117,6 @@ class PermissionBridge(
                 BridgeCommandPolicy.Verdict.ASK -> {} // fall through to the phone approval below
             }
         }
-        val meta = ToolMetadata.of(ev.toolName, ev.input)
         // bypassPermissions auto-allows ordinary tools — but NOT the neverRemember class (issue #156): those
         // are human-decision gates that must survive every skip-the-ask path (the ToolMeta contract).
         // ExitPlanMode, because approving a plan is always an explicit, per-plan decision; AskUserQuestion,

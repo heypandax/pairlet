@@ -11,6 +11,7 @@ import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.bridge.BridgeVerdict
 import dev.ccpocket.daemon.bridge.InProcessBridgeEngine
 import dev.ccpocket.daemon.util.logger
+import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionAsk
@@ -61,6 +62,10 @@ class FeishuEngine(
     private val appId = env["FEISHU_APP_ID"].orEmpty()
     private val appSecret = env["FEISHU_APP_SECRET"].orEmpty()
     private val adminOpenId = env["FEISHU_ADMIN_OPEN_ID"]
+    // OWNER BYPASS (issue #91): when ON and a message's sender == the configured owner (adminOpenId), that
+    // turn runs with NO approval (full trust). Default off; meaningless without an adminOpenId set. Only the
+    // BUILT-IN engine may claim this — it reads feishu's attested sender directly (an external adapter can't).
+    private val ownerBypassEnabled = env["FEISHU_OWNER_BYPASS"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on")
     private val routes = FeishuRoutes(File(stateDir, "feishu-routes.json"))
     private val commands = FeishuCommands(routes, spec.workdirs, adminOpenId, chatOwnerOf = { chatOwners[it] })
     private val guard = BridgeGuard(spec)
@@ -253,6 +258,48 @@ class FeishuEngine(
     private fun firstSeen(messageId: String): Boolean =
         synchronized(seenMessages) { seenMessages.put(messageId, true) == null }
 
+    /**
+     * Requirement 2: prepend the QUOTED message (and, when distinct, the thread ROOT) ahead of the user's
+     * own line, so Claude sees the original text the reply points at rather than a bare one-liner. Returns
+     * [prompt] unchanged when there's nothing to quote or the fetch fails/isn't permitted — a quote is
+     * additive context, never a gate: its absence must not block the turn. Full-thread history is a bounded
+     * follow-up; MVP carries the direct parent plus the root anchor (two gets at most).
+     */
+    private suspend fun withQuotedContext(prompt: String, parentId: String?, rootId: String?): String {
+        if (parentId.isNullOrBlank()) return prompt
+        val quoted = fetchMessageText(parentId)
+        // the root only adds signal when it's a DIFFERENT message than the direct parent (a 2-deep reply)
+        val root = rootId?.takeIf { it.isNotBlank() && it != parentId }?.let { fetchMessageText(it) }
+        if (quoted == null && root == null) {
+            logLine("[chat] couldn't read the quoted message ($parentId) — sending without it (check im:message read scope)")
+            return prompt
+        }
+        return buildString {
+            root?.let { appendLine("[所在话题的起始消息]").appendLine(it).appendLine() }
+            quoted?.let { appendLine("[用户引用的消息]").appendLine(it).appendLine() }
+            appendLine("[用户本次的指令]")
+            append(prompt)
+        }
+    }
+
+    /** Fetch one message's plain text by id (GET /im/v1/messages/:id → data.items[0]) — the quoted-context
+     *  reader. Null on any failure (no token, HTTP error, empty items, parse miss) so the caller degrades to
+     *  "no quote". Reuses the engine's tenant-token + raw-HTTP path; runs on Dispatchers.IO via the caller. */
+    private suspend fun fetchMessageText(messageId: String): String? = runCatching {
+        // defense-in-depth: the id comes from Feishu's own event (om_…-shaped, not user-typed), but validate
+        // its charset before it lands in the URL path so a malformed/crafted id can never alter the request.
+        if (!messageId.matches(Regex("^[A-Za-z0-9_-]+$"))) return null
+        val token = tenantToken() ?: return null
+        val req = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/im/v1/messages/$messageId"))
+            .header("Authorization", "Bearer $token").GET().build()
+        val item = Json.parseToJsonElement(http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
+            .jsonObject["data"]?.jsonObject?.get("items")?.let { it as? kotlinx.serialization.json.JsonArray }
+            ?.firstOrNull()?.jsonObject ?: return null
+        val msgType = item["msg_type"]?.jsonPrimitive?.content
+        val content = item["body"]?.jsonObject?.get("content")?.jsonPrimitive?.content
+        FeishuMessageText.plainText(msgType, content).takeIf { it.isNotBlank() }
+    }.getOrNull()
+
     private fun onMessage(event: P2MessageReceiveV1) {
         val data = event.event ?: return
         val msg = data.message ?: return
@@ -272,19 +319,30 @@ class FeishuEngine(
         if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
         val sender = data.sender?.senderId?.openId.orEmpty()
         val replyTo = msg.messageId ?: return
+        // requirement 2: when this message REPLIES to an earlier one, parentId is the quoted message and
+        // rootId the thread root — pulled below so Claude sees the original the user is pointing at, not
+        // just their new one-liner. Absent on a plain new message. Only used for natural-language turns.
+        val parentId = msg.parentId
+        val rootId = msg.rootId
         // Feishu delivers events at-least-once — the SAME message can arrive again on a retry / reconnect,
         // and without dedup that re-runs the prompt (issue #91). Drop a message id we've already handled.
         if (!firstSeen(replyTo)) return
+
+        // OWNER BYPASS (issue #91): the CONFIGURED owner's OWN messages run in a SEPARATE, dedicated session
+        // (keyed apart from the group's) that auto-allows — race-free, because a session never mixes senders.
+        // Everyone else drives the shared, approval-gated session. Gated on the toggle + a set admin id.
+        val ownerTurn = ownerBypassEnabled && !adminOpenId.isNullOrBlank() && sender == adminOpenId
+        val convoKey = if (ownerTurn) "$chatId owner" else chatId
 
         when (val action = commands.handle(text, chatId, sender)) {
             is ChatAction.Ignore -> {}
             is ChatAction.Reply -> reply(replyTo, action.text)
             is ChatAction.Reset -> scope.launch {
-                // drop the chat's conversation under the same per-chat lock a turn holds, so /new can't
-                // race a running turn and leave a half-cleared mapping
-                val lock = mutex.withLock { chatLocks.getOrPut(chatId) { Mutex() } }
+                // drop the SENDER's conversation (owner and group have SEPARATE sessions per chat — see
+                // convoKey) under the same per-session lock a turn holds, so /new can't race a running turn
+                val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
                 lock.withLock { mutex.withLock {
-                    convoByKey.remove(chatId)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
+                    convoByKey.remove(convoKey)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
                 } }
                 reply(replyTo, action.note)
             }
@@ -292,13 +350,17 @@ class FeishuEngine(
                 // an auto-bind's feedback posts NOW — the turn behind it can take minutes
                 action.note?.let { reply(replyTo, it) }
                 logLine("[chat] ${FeishuRoutes.projectName(action.workdir)} ← $chatId: ${text.take(80)}")
+                // requirement 2: a natural-language reply carries the QUOTED message (+ thread root) into the
+                // prompt. Skipped for slash pass-throughs ("/clear" etc.) — those act on the user's own line,
+                // not the quoted one. Network fetch here, safely inside the coroutine (never the lark thread).
+                val prompt = if (!text.startsWith("/")) withQuotedContext(action.prompt, parentId, rootId) else action.prompt
                 // ONE conversation per chat (context carries across messages), one turn at a time per
                 // chat (see chatLocks) — a second message queues instead of clobbering the first's waiter.
                 // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
                 // survives an out-of-band owner tap; we only surface a hard failure to open/drive the turn.
-                val lock = mutex.withLock { chatLocks.getOrPut(chatId) { Mutex() } }
+                val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
                 lock.withLock {
-                    runCatching { ask(chatId, action.workdir, action.prompt, replyTo) }
+                    runCatching { ask(convoKey, action.workdir, prompt, replyTo, ownerTurn) }
                         .onFailure { e ->
                             log.warn("feishu turn failed: ${e.message}")
                             reply(replyTo, "⚠️ 出错了：${e.message}")
@@ -337,8 +399,8 @@ class FeishuEngine(
      *  - never approved within the wait → the reply slot stays armed and [onFrame] posts the eventual
      *    TurnDone whenever the owner finally taps approve — no more "timed out, ask again".
      */
-    private suspend fun ask(key: String, workdir: String, prompt: String, replyTo: String) {
-        val convoId = openOrReuse(key, workdir)
+    private suspend fun ask(key: String, workdir: String, prompt: String, replyTo: String, ownerBypass: Boolean = false) {
+        val convoId = openOrReuse(key, workdir, ownerBypass)
             ?: run { reply(replyTo, "⚠️ 无法打开会话（超出并发/频率限制或目录不可用）"); return }
         val done = CompletableDeferred<TurnDone>()
         mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo) }
@@ -385,18 +447,26 @@ class FeishuEngine(
     private fun turnText(t: TurnDone): String =
         t.error?.let { "⚠️ $it" } ?: t.finalText?.takeIf { it.isNotBlank() } ?: "(无回复)"
 
-    private suspend fun openOrReuse(key: String, workdir: String): String? {
+    private suspend fun openOrReuse(key: String, workdir: String, ownerBypass: Boolean = false): String? {
         mutex.withLock { convoByKey[key] }?.let { existing ->
             // still live? reuse. Reaped? fall through to a resume-open with its sessionId.
             if (core.registry.liveCountOf(listOf(existing)) > 0) return existing
         }
         val resume = mutex.withLock { convoByKey[key]?.let { sessionOf[it] } }
-        val open = vet(OpenSession(workdir = workdir, resumeId = resume)) as? OpenSession ?: return null
+        // open at the bridge's GRANTED ceiling, not the wire default DEFAULT — else a COLLABORATE/AUTONOMOUS
+        // bridge still prompts the owner for every file edit (the mode never got raised; the guard's clamp
+        // only ever LOWERS). vet()/BridgeGuard re-clamps to the tier ceiling, so this can't exceed the grant.
+        val open = vet(OpenSession(workdir = workdir, resumeId = resume, mode = AccessTier.ceiling(spec.tier))) as? OpenSession ?: return null
         val opened = CompletableDeferred<String>()
         val openKey = "open-${System.nanoTime()}"
         mutex.withLock { openWaiters[openKey] = opened }
         try {
-            core.router.handle(open, sink, spec.name) { convoId ->
+            // spec.allowedCommands rides down beside origin so the session's PermissionBridge can auto-run the
+            // owner-whitelisted Bash commands without a phone prompt (issue #91 "一次授权跑完全程").
+            // ownerBypass (issue #91): the owner's DEDICATED session opens with the trusted in-process
+            // full-trust flag → its PermissionBridge auto-allows. Never set for the shared / group session,
+            // and impossible for an external adapter to set (it never reaches this in-process handle call).
+            core.router.handle(open, sink, spec.name, bridgeAllowedCommands = spec.allowedCommands, ownerBypass = ownerBypass) { convoId ->
                 guard.noteOpened(convoId)
                 openWaiters[openKey]?.complete(convoId)
             }

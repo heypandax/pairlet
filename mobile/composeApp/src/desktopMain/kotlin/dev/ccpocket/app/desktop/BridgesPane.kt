@@ -116,8 +116,8 @@ fun BridgesPane(model: DesktopModel) {
         when {
             creating -> NewBridgeForm(
                 onCancel = { creating = false },
-                onCreate = { name, dirs, tier, runner ->
-                    model.createBridge(name, dirs, tier, maxSessions = null, runner = runner)
+                onCreate = { name, dirs, tier, allowedCommands, runner ->
+                    model.createBridge(name, dirs, tier, maxSessions = null, runner = runner, allowedCommands = allowedCommands)
                     creating = false
                 },
             )
@@ -186,8 +186,10 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
             EditRunnerForm(
                 envKeys = b.runner?.envKeys.orEmpty(),
                 workdirs = b.workdirs,
+                allowedCommands = b.allowedCommands,
+                ownerBypass = b.runner?.ownerBypass ?: false,
                 onCancel = { editing = false },
-                onSave = { appId, appSecret, adminId, workdirs ->
+                onSave = { appId, appSecret, adminId, workdirs, allowedCommands, ownerBypass ->
                     // merge semantics: only what was typed lands; blank fields keep the stored values —
                     // the app secret is never echoed back out, so "retype everything" isn't even possible
                     model.configureBridgeRunner(
@@ -198,6 +200,8 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                                 if (appId.isNotBlank()) put("FEISHU_APP_ID", appId.trim())
                                 if (appSecret.isNotBlank()) put("FEISHU_APP_SECRET", appSecret.trim())
                                 if (adminId.isNotBlank()) put("FEISHU_ADMIN_OPEN_ID", adminId.trim())
+                                // overlay the bypass flag only when it changed (merge keeps the rest untouched)
+                                if (ownerBypass != (b.runner?.ownerBypass ?: false)) put("FEISHU_OWNER_BYPASS", if (ownerBypass) "1" else "0")
                             },
                             kind = b.runner?.kind ?: dev.ccpocket.protocol.RUNNER_KIND_FEISHU,
                             autostart = b.runner?.autostart ?: true,
@@ -205,6 +209,7 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                         mergeEnv = true,
                         // only send the allow-list when it actually changed — null = daemon leaves it as-is
                         workdirs = workdirs.takeIf { it != b.workdirs },
+                        allowedCommands = allowedCommands.takeIf { it != b.allowedCommands },
                     )
                     editing = false
                 },

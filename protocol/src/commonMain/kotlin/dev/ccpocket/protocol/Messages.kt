@@ -478,6 +478,16 @@ data class CreateBridge(
      *  edits must be opted into, not inherited. Never reaches bypassPermissions at any tier. */
     val tier: AccessTier = AccessTier.REVIEW,
     /**
+     * Owner-configured Bash allow-list (issue #91 follow-up "一次授权跑完全程"): command prefixes that run
+     * with ZERO owner interaction on a bridge session, so a whitelisted multi-step task isn't chopped up by
+     * a per-command phone prompt in an async IM channel. Only ever WIDENS the tiny built-in read-only set —
+     * it can never override the DANGEROUS deny-list, and a command carrying shell metacharacters
+     * (redirect/pipe/chain/expansion) still routes to the owner's phone regardless (see BridgeCommandPolicy).
+     * Empty/absent = the pre-existing behaviour (only provably read-only commands auto-run). The daemon holds
+     * this in its own bridge spec (the credential holder can't write it), so it stays an owner-only grant.
+     */
+    val allowedCommands: List<String> = emptyList(),
+    /**
      * Non-null = the daemon MANAGES the adapter process for this bridge (starts it, restarts it, keeps it
      * alive across reboots) instead of the owner running it themselves.
      *
@@ -534,6 +544,14 @@ data class ConfigureBridgeRunner(
      * Absent on an OLD daemon → ignored → the allow-list simply stays as-is (safe).
      */
     val workdirs: List<String>? = null,
+    /**
+     * New Bash command allow-list for the bridge, or null = leave it unchanged (issue #91 "一次授权跑完全程").
+     * Same override semantics as [workdirs]: an explicit list REPLACES the stored one; null keeps it. Like
+     * the project allow-list this is a bridge's AUTHORITY, not runner config, so it rides here rather than in
+     * [BridgeRunnerSpec], and only a BUILT-IN (in-process) bridge keeps its spec daemon-side. Absent on an
+     * OLD daemon → ignored → the command allow-list stays as-is (safe).
+     */
+    val allowedCommands: List<String>? = null,
 ) : ToDaemon
 
 /** owner -> daemon: start / stop / restart bridge [name]'s managed runner. Reply: [BridgeRunnerStatus].

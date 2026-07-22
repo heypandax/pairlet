@@ -1680,6 +1680,38 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun bridge_allowedCommands_is_optional_and_back_compatible_on_every_carrier() {
+        // issue #91 "一次授权跑完全程": the Bash allow-list is additive on CreateBridge (non-null default
+        // empty), ConfigureBridgeRunner (nullable override, null = leave as-is), and the BridgeInfo listing.
+        // CreateBridge: present when set, and defaults to empty (a legacy daemon that ignores it = no extra
+        // autonomy, the safe direction)
+        val create = CreateBridge(name = "feishu-bot", workdirs = listOf("/p/a"), allowedCommands = listOf("npm test", "./gradlew"))
+        val createJson = PocketJson.encodeToString(Envelope(id = "c1", ts = 0, body = create))
+        assertTrue("\"allowedCommands\":[\"npm test\",\"./gradlew\"]" in createJson, createJson)
+        assertEquals(create, PocketJson.decodeFromString<Envelope>(createJson).body)
+        assertEquals(emptyList<String>(), CreateBridge(name = "x", workdirs = listOf("/p")).allowedCommands)
+        // "new peer reads OLD frame": a legacy pocket/bridge.create with no allowedCommands key → empty (no
+        // extra autonomy — the safe direction), not a decode failure
+        val legacyCreate = """{"id":"c0","ts":0,"to":"PEER","body":{"t":"pocket/bridge.create","name":"feishu-bot","workdirs":["/p/a"]}}"""
+        assertEquals(emptyList<String>(), (PocketJson.decodeFromString<Envelope>(legacyCreate).body as CreateBridge).allowedCommands)
+
+        // ConfigureBridgeRunner: nullable override — round-trips when set, omitted (→ null = unchanged) otherwise
+        val spec = BridgeRunnerSpec(scriptPath = "", env = emptyMap())
+        val edit = ConfigureBridgeRunner("feishu-bot", spec, mergeEnv = true, allowedCommands = listOf("pytest"))
+        assertEquals(edit, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "c2", ts = 0, body = edit))).body)
+        assertFalse("allowedCommands" in PocketJson.encodeToString(Envelope(id = "c3", ts = 0, body = ConfigureBridgeRunner("feishu-bot", spec))))
+        val legacy = """{"id":"c4","ts":0,"to":"PEER","body":{"t":"pocket/bridge.runner.configure","name":"feishu-bot","spec":{"scriptPath":""}}}"""
+        assertEquals(null, (PocketJson.decodeFromString<Envelope>(legacy).body as ConfigureBridgeRunner).allowedCommands)
+
+        // BridgeInfo listing: echoes the set list; an old daemon's row (no key) decodes to empty
+        val info = BridgeInfo(name = "feishu-bot", allowedCommands = listOf("npm test"))
+        assertEquals(info, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "c5", ts = 0, body = BridgeListing(listOf(info))))).let { (it.body as BridgeListing).items.single() })
+        // "new app reads an OLD daemon's row" (no allowedCommands key) → empty list, the edit form shows none
+        val legacyInfo = """{"id":"c6","ts":0,"to":"PEER","body":{"t":"pocket/bridge.listing","items":[{"name":"feishu-bot"}]}}"""
+        assertEquals(emptyList<String>(), (PocketJson.decodeFromString<Envelope>(legacyInfo).body as BridgeListing).items.single().allowedCommands)
+    }
+
+    @Test
     fun a_managed_bridge_returns_a_runner_and_no_credential_to_copy() {
         // the managed path's whole point: the ticket never leaves the machine
         val managed = BridgeCreated(ok = true, runner = BridgeRunnerState(kind = RUNNER_KIND_FEISHU, scriptPath = "/x.py", running = true, pid = 7))

@@ -120,16 +120,18 @@ internal fun OneShotCredentialCard(name: String, ttlSec: Int, json: String, onDo
 @Composable
 internal fun NewBridgeForm(
     onCancel: () -> Unit,
-    onCreate: (name: String, workdirs: List<String>, tier: AccessTier, runner: BridgeRunnerSpec?) -> Unit,
+    onCreate: (name: String, workdirs: List<String>, tier: AccessTier, allowedCommands: List<String>, runner: BridgeRunnerSpec?) -> Unit,
 ) {
     var name by remember { mutableStateOf("feishu-bot") }
     var tier by remember { mutableStateOf(AccessTier.REVIEW) }
     val picked = remember { mutableStateListOf<String>() }
+    var allowCmds by remember { mutableStateOf("") }
     var manage by remember { mutableStateOf(true) }
     var scriptPath by remember { mutableStateOf("") }
     var appId by remember { mutableStateOf("") }
     var appSecret by remember { mutableStateOf("") }
     var adminId by remember { mutableStateOf("") }
+    var ownerBypass by remember { mutableStateOf(false) }
 
     // scriptPath is NOT required: blank = the built-in Feishu adapter (the normal case)
     val canCreate = name.isNotBlank() && picked.isNotEmpty() &&
@@ -151,6 +153,10 @@ internal fun NewBridgeForm(
             TierChoice("Ask me first", "shell, writes and edits all prompt your phone", tier == AccessTier.REVIEW) { tier = AccessTier.REVIEW }
             TierChoice("Edit files silently", "edits apply unprompted; shell still asks", tier == AccessTier.COLLABORATE) { tier = AccessTier.COLLABORATE }
         }
+
+        Spacer(Modifier.height(14.dp))
+        FieldLabel("RUN THESE WITHOUT ASKING", "one command per line (e.g.  npm test  /  ./gradlew build  /  pytest). Matching commands run with no phone prompt so a task finishes in one go. Dangerous commands and anything with a pipe / redirect / \$var still ask you.")
+        MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
 
         Spacer(Modifier.height(16.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -177,6 +183,18 @@ internal fun NewBridgeForm(
             TextInput(appSecret, { appSecret = it }, "App Secret", secret = true)
             Spacer(Modifier.height(6.dp))
             TextInput(adminId, { adminId = it }, "your open_id — optional; leave empty and the bot tells you yours")
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { ownerBypass = !ownerBypass }) {
+                Check(ownerBypass)
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text("Run MY own messages without approval", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                    Text(
+                        "Only the open_id above skips approval — full trust, your own machine. Everyone else still asks. Needs your open_id set.",
+                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             // custom adapter script = the advanced escape hatch. Blank (the default) runs the adapter the
             // daemon has BUILT IN — no python, no checkout, nothing else to install.
@@ -205,9 +223,10 @@ internal fun NewBridgeForm(
                                 put("FEISHU_APP_ID", appId.trim())
                                 put("FEISHU_APP_SECRET", appSecret.trim())
                                 if (adminId.isNotBlank()) put("FEISHU_ADMIN_OPEN_ID", adminId.trim())
+                                if (ownerBypass) put("FEISHU_OWNER_BYPASS", "1")
                             },
                         )
-                        onCreate(name.trim(), picked.toList(), tier, runner)
+                        onCreate(name.trim(), picked.toList(), tier, parseCommandLines(allowCmds), runner)
                     }
                     .padding(horizontal = 14.dp, vertical = 7.dp),
             )
@@ -235,17 +254,22 @@ internal fun NewBridgeForm(
 internal fun EditRunnerForm(
     envKeys: List<String>,
     workdirs: List<String>,
+    allowedCommands: List<String>,
+    ownerBypass: Boolean,
     onCancel: () -> Unit,
-    onSave: (appId: String, appSecret: String, adminId: String, workdirs: List<String>) -> Unit,
+    onSave: (appId: String, appSecret: String, adminId: String, workdirs: List<String>, allowedCommands: List<String>, ownerBypass: Boolean) -> Unit,
 ) {
     var appId by remember { mutableStateOf("") }
     var appSecret by remember { mutableStateOf("") }
     var adminId by remember { mutableStateOf("") }
+    var ownerBypassOn by remember { mutableStateOf(ownerBypass) }
     val picked = remember { mutableStateListOf<String>().apply { addAll(workdirs) } }
+    var allowCmds by remember { mutableStateOf(allowedCommands.joinToString("\n")) }
     val projectsChanged = picked.toList() != workdirs
+    val commandsChanged = parseCommandLines(allowCmds) != allowedCommands
     // save is live once SOMETHING changed AND at least one project remains (a bridge with no allow-listed
     // directory can open nothing — the daemon rejects it too, this just greys the button first)
-    val dirty = (appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank() || projectsChanged) && picked.isNotEmpty()
+    val dirty = (appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank() || projectsChanged || commandsChanged || ownerBypassOn != ownerBypass) && picked.isNotEmpty()
 
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
@@ -254,12 +278,27 @@ internal fun EditRunnerForm(
         FieldLabel("PROJECTS", "the directories this bot may open sessions in — add or remove, then Save & restart")
         PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
         Spacer(Modifier.height(14.dp))
+        FieldLabel("RUN THESE WITHOUT ASKING", "one command per line — matching commands run with no phone prompt. Dangerous commands and anything with a pipe / redirect / \$var still ask you.")
+        MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
+        Spacer(Modifier.height(14.dp))
         FieldLabel("ADAPTER CONFIG", "blank fields keep their current values — set: ${envKeys.joinToString(", ").ifEmpty { "(nothing yet)" }}")
         TextInput(adminId, { adminId = it }, "FEISHU_ADMIN_OPEN_ID — paste the open_id the bot echoed after /bind")
         Spacer(Modifier.height(6.dp))
         TextInput(appId, { appId = it }, "FEISHU_APP_ID (unchanged if blank)")
         Spacer(Modifier.height(6.dp))
         TextInput(appSecret, { appSecret = it }, "FEISHU_APP_SECRET (unchanged if blank)", secret = true)
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { ownerBypassOn = !ownerBypassOn }) {
+            Check(ownerBypassOn)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("Run MY own messages without approval", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                Text(
+                    "Only the owner open_id skips approval — full trust, your own machine. Everyone else still asks.",
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                )
+            }
+        }
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -267,7 +306,7 @@ internal fun EditRunnerForm(
                 fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (dirty) Tok.accent else Tok.muted).copy(alpha = 0.12f))
-                    .clickable(enabled = dirty) { onSave(appId, appSecret, adminId, picked.toList()) }
+                    .clickable(enabled = dirty) { onSave(appId, appSecret, adminId, picked.toList(), parseCommandLines(allowCmds), ownerBypassOn) }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
             Text(
@@ -298,6 +337,29 @@ private fun TextInput(value: String, onChange: (String) -> Unit, placeholder: St
             textStyle = TextStyle(color = Tok.tx, fontFamily = if (secret) Dk.mono else Dk.ui, fontSize = 11.sp),
             cursorBrush = SolidColor(Tok.accent),
             visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** Split a textarea into command-allow-list entries: one per line, trimmed, blanks dropped. The daemon
+ *  normalizes again (dedupe + cap) and BridgeCommandPolicy still gates each against the danger/metachar
+ *  walls, so this is only display-side hygiene. */
+private fun parseCommandLines(text: String): List<String> =
+    text.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+
+@Composable
+private fun MultilineInput(value: String, onChange: (String) -> Unit, placeholder: String) {
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(6.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 9.dp, vertical = 8.dp),
+    ) {
+        if (value.isEmpty()) Text(placeholder, color = Tok.muted.copy(alpha = 0.6f), fontFamily = Dk.mono, fontSize = 11.sp)
+        BasicTextField(
+            value = value,
+            onValueChange = onChange,
+            textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp),
+            cursorBrush = SolidColor(Tok.accent),
             modifier = Modifier.fillMaxWidth(),
         )
     }

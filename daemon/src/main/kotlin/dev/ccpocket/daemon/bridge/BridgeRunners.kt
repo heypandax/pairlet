@@ -121,7 +121,7 @@ class BridgeRunners(
      * owner types only what changes and the app secret (never echoed back) must survive untouched.
      * Deleting a key needs a full replace (mergeEnv=false); the edit form has no delete affordance yet.
      */
-    fun reconfigure(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, newWorkdirs: List<String>? = null): String? {
+    fun reconfigure(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, newWorkdirs: List<String>? = null, newAllowedCommands: List<String>? = null): String? {
         val cur = entries[name] ?: return "\"$name\" has no managed adapter — bridges created without one " +
             "can't gain it later (the daemon no longer holds their credential); revoke and re-create it instead"
         val merged = if (!mergeEnv) spec else spec.copy(
@@ -134,7 +134,14 @@ class BridgeRunners(
         // an owner may edit the PROJECT allow-list (its authority). Only an in-process bridge keeps its spec
         // here; [newWorkdirs] is already validated + canonicalized by BridgeService. Replace just the
         // workdirs, preserving tier / rate limits. The engine is rebuilt below, so it re-guards on the new set.
-        val newSpec = if (newWorkdirs != null && cur.bridgeSpec != null) cur.bridgeSpec.copy(workdirs = newWorkdirs) else cur.bridgeSpec
+        // the Bash command allow-list (issue #91) is likewise the bridge's authority — same in-process-only,
+        // already-normalized, null=unchanged rules as [newWorkdirs]. Applied on top of the workdirs edit.
+        val newSpec = cur.bridgeSpec?.let { base ->
+            var s = base
+            if (newWorkdirs != null) s = s.copy(workdirs = newWorkdirs)
+            if (newAllowedCommands != null) s = s.copy(allowedCommands = newAllowedCommands)
+            s
+        }
         entries[name] = cur.copy(spec = merged, bridgeSpec = newSpec)
         persist()
         // an in-process ENGINE binds its env at construction — a cached instance would keep serving the
@@ -279,6 +286,7 @@ class BridgeRunners(
             lastError = lastError[name] ?: engine?.lastError,
             envKeys = e.spec.env.keys.sorted(),
             logTail = logs[name]?.let { ring -> synchronized(ring) { ring.toList() } }?.takeLast(logLines).orEmpty(),
+            ownerBypass = e.spec.env["FEISHU_OWNER_BYPASS"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on"),
         )
     }
 
