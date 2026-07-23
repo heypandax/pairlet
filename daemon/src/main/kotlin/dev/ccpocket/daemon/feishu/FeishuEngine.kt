@@ -78,6 +78,11 @@ class FeishuEngine(
     // survives idle-reap so a later message resumes with full context.
     private val mutex = Mutex()
     private val convoByKey = HashMap<String, String>()
+    // the workdir each key's convo was opened against. A /bind can move a chat to another project mid-life,
+    // and the chat's key still maps to the OLD project's convo — reusing/resuming it would keep sending
+    // prompts to the old workdir (the "rebind took no effect until restart/​/new" bug). openOrReuse compares
+    // this against the now-requested workdir and, on a mismatch, opens CLEAN instead of reusing or resuming.
+    private val keyWorkdir = HashMap<String, String>()
     private val sessionOf = HashMap<String, String>()
     private val turnWaiters = HashMap<String, CompletableDeferred<TurnDone>>()
     private val openWaiters = HashMap<String, CompletableDeferred<String>>() // openId -> convoId
@@ -343,6 +348,7 @@ class FeishuEngine(
                 val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
                 lock.withLock { mutex.withLock {
                     convoByKey.remove(convoKey)?.let { sessionOf.remove(it); replySlots.remove(it); pendingAsk.remove(it) }
+                    keyWorkdir.remove(convoKey)
                 } }
                 reply(replyTo, action.note)
             }
@@ -448,11 +454,18 @@ class FeishuEngine(
         t.error?.let { "⚠️ $it" } ?: t.finalText?.takeIf { it.isNotBlank() } ?: "(无回复)"
 
     private suspend fun openOrReuse(key: String, workdir: String, ownerBypass: Boolean = false): String? {
-        mutex.withLock { convoByKey[key] }?.let { existing ->
-            // still live? reuse. Reaped? fall through to a resume-open with its sessionId.
-            if (core.registry.liveCountOf(listOf(existing)) > 0) return existing
+        // Only a convo opened against THIS SAME workdir may be reused or resumed. After a /bind moves the
+        // chat to another project, the key still points at the old project's convo; reusing (or resuming
+        // its session) would land prompts in the old workdir — the rebind-doesn't-take-effect bug. A
+        // workdir change ⇒ don't reuse, don't resume, open clean below (keyWorkdir gets rewritten on open).
+        val sameWorkdir = mutex.withLock { keyWorkdir[key] } == workdir
+        if (sameWorkdir) {
+            mutex.withLock { convoByKey[key] }?.let { existing ->
+                // still live? reuse. Reaped? fall through to a resume-open with its sessionId.
+                if (core.registry.liveCountOf(listOf(existing)) > 0) return existing
+            }
         }
-        val resume = mutex.withLock { convoByKey[key]?.let { sessionOf[it] } }
+        val resume = if (sameWorkdir) mutex.withLock { convoByKey[key]?.let { sessionOf[it] } } else null
         // open at the bridge's GRANTED ceiling, not the wire default DEFAULT — else a COLLABORATE/AUTONOMOUS
         // bridge still prompts the owner for every file edit (the mode never got raised; the guard's clamp
         // only ever LOWERS). vet()/BridgeGuard re-clamps to the tier ceiling, so this can't exceed the grant.
@@ -471,7 +484,7 @@ class FeishuEngine(
                 openWaiters[openKey]?.complete(convoId)
             }
             val convoId = withTimeoutOrNull(OPEN_TIMEOUT_MS) { opened.await() } ?: return null
-            mutex.withLock { convoByKey[key] = convoId }
+            mutex.withLock { convoByKey[key] = convoId; keyWorkdir[key] = workdir }
             return convoId
         } finally {
             mutex.withLock { openWaiters.remove(openKey) }
