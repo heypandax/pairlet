@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -77,6 +78,7 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
@@ -105,6 +107,8 @@ import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.ui.CheckMiniGlyph
 import dev.ccpocket.app.ui.ModelChip
 import dev.ccpocket.app.ui.modelChipLabel
+import dev.ccpocket.app.diaCdpSupported
+import dev.ccpocket.app.launchDiaCdp
 import dev.ccpocket.app.ui.RetryGlyph
 import dev.ccpocket.app.ui.SpinnerRing
 import dev.ccpocket.app.ui.VideoPoster
@@ -714,6 +718,12 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                 }
                 val composerFocus = remember { FocusRequester() }
                 var composerFocused by remember { mutableStateOf(false) }
+                // CDP: relaunch Dia with the debug port so an agent can drive the browser (docs-dia-cdp-launch-需求.md).
+                // Killing the running Dia is the price of reusing its logged-in profile, so gate the tap behind a confirm.
+                val diaSupported = remember { diaCdpSupported() }
+                var diaConfirm by remember { mutableStateOf(false) }
+                var diaBusy by remember { mutableStateOf(false) }
+                var diaStatus by remember { mutableStateOf<String?>(null) } // last launch result → transient line under the hints
                 // Land ready-to-type: focus the composer whenever a session becomes current — a brand-new
                 // session (#72) or a pin-jump / palette / sidebar switch (#46). Only the keyboard-owning pane
                 // renders a Composer (the read-only WatchPane has none), so there's no split gate here —
@@ -937,6 +947,69 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                     Key("⏎"); Text("send", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
                     Key("⇧⏎"); Text("newline", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
                     if (model.streaming) { Key("esc"); Text("stop", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
+                    // CDP: relaunch Dia with the debug port — a small pill at the far right of the hint row,
+                    // directly under the send button (outside the input box). Confirm popover anchors above it.
+                    if (diaSupported) {
+                        Spacer(Modifier.weight(1f))
+                        diaStatus?.let { msg ->
+                            LaunchedEffect(msg) { delay(3500); diaStatus = null } // auto-dismiss the last result
+                            Text(msg, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Box {
+                            Row(
+                                Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
+                                    .let { if (diaBusy) it else it.clickable { diaConfirm = true } }
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                if (diaBusy) SpinnerRing(11.dp, 1.5.dp)
+                                else Icon(Icons.Outlined.Language, null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
+                                // trim=Both 去掉字体默认行距，让文字视觉中心与图标（12dp 对称盒）在 CenterVertically 下真正对齐
+                                Text(
+                                    if (diaBusy) "Dia 重启中…" else "启动 Dia :9222",
+                                    color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
+                                    style = TextStyle(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
+                                )
+                            }
+                            if (diaConfirm) {
+                                val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+                                Popup(
+                                    popupPositionProvider = remember(gap) { AboveAnchorEndPopupPositionProvider(gap) },
+                                    onDismissRequest = { diaConfirm = false },
+                                    properties = PopupProperties(focusable = true),
+                                ) {
+                                    Column(
+                                        Modifier.width(248.dp).clip(RoundedCornerShape(12.dp)).background(Tok.raised)
+                                            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Text("以调试端口重开 Dia", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            "会先关闭当前 Dia（未保存的窗口状态会丢失），再以 :9222 重新打开——这样能复用它已登录的会话。",
+                                            color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp,
+                                        )
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Box(
+                                                Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                                                    .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
+                                                    .clickable { diaConfirm = false }.padding(vertical = 7.dp),
+                                                contentAlignment = Alignment.Center,
+                                            ) { Text("取消", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
+                                            Box(
+                                                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.accent)
+                                                    .clickable {
+                                                        diaConfirm = false; diaBusy = true; diaStatus = null
+                                                        scope.launch { val r = launchDiaCdp(); diaBusy = false; diaStatus = r.message }
+                                                    }.padding(vertical = 7.dp),
+                                                contentAlignment = Alignment.Center,
+                                            ) { Text("启动", color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
