@@ -61,7 +61,7 @@ class PerModelWindowUiTest {
     private fun s(res: StringResource, vararg args: Any): String =
         runBlocking { if (args.isEmpty()) getString(res) else getString(res, *args) }
 
-    /** Same hazard as ContextWindowOverrideTest: the desktop SecureStore is a real file shared by the JVM,
+    /** Same hazard as ContextWindowOverrideTest: the task-private desktop SecureStore is shared by this JVM,
      *  and both override keys are read at repo CONSTRUCTION. Clear up front so cases stay order-independent. */
     @BeforeTest
     fun clearPersistedOverrides() {

@@ -174,7 +174,7 @@ class AppLockControllerTest {
     }
 }
 
-/** The real [SecureStore]-backed prefs — proves the "1"/"0" + enum-name encoding round-trips. */
+/** The task-private [SecureStore]-backed prefs — proves the "1"/"0" + enum-name encoding round-trips. */
 class SecureStoreLockPrefsTest {
     @Test fun roundTripsThroughSecureStore() {
         try {

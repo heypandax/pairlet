@@ -29,11 +29,9 @@ import kotlin.test.assertTrue
 class ContextWindowOverrideTest {
 
     /**
-     * The desktop SecureStore is a real properties file shared by every test in this JVM, and BOTH override
-     * keys are read at repo CONSTRUCTION. Without this reset the suite is order-dependent: whichever test
-     * writes an override first leaks it into the next test's "fresh" repo and flips its assertion. That
-     * hazard predates #169 (the three #159 cases below already wrote through to disk) — it only passed on
-     * the luck of JUnit's method ordering. Clearing up front makes each case hermetic regardless of order.
+     * The desktop SecureStore is shared by every test in this JVM (but Gradle redirects it to a task-private
+     * scratch file), and BOTH override keys are read at repo CONSTRUCTION. Clear up front so whichever case
+     * ran previously cannot leak an override into this case's "fresh" repository.
      */
     @BeforeTest
     fun clearPersistedOverrides() {

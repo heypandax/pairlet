@@ -176,6 +176,14 @@ compose.desktop {
 
 // Forward -PccpocketLive=1 to the test JVM. Gates DesktopLiveTest, which connects to a real daemon and so
 // must stay opt-in (skipped by default in local + CI runs).
+//
+// The desktop SecureStore actual normally writes ~/.cc-pocket-app/store.properties. Repository/UI tests
+// exercise that actual and used to mutate the developer's live settings: the last context-window test left
+// a 200k catch-all behind, so a real 628k / 1M Opus session displayed 316%. Give each Test task a private,
+// freshly-cleared store instead. A task-specific path also keeps parallel test tasks from sharing state.
 tasks.withType(org.gradle.api.tasks.testing.Test::class.java).configureEach {
     systemProperty("ccpocket.live", providers.gradleProperty("ccpocketLive").getOrElse("0"))
+    val testStore = temporaryDir.resolve("secure-store.properties")
+    systemProperty("ccpocket.secureStore.file", testStore.absolutePath)
+    doFirst { testStore.delete() }
 }

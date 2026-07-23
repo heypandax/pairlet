@@ -97,8 +97,8 @@ class ShowcaseRender {
 
     private companion object {
         init {
-            // isolation: a scratch HOME so SecureStore never reads/writes the developer's real
-            // ~/.cc-pocket-app; preview flag hides the demo banner (the marketing-capture switch)
+            // Generated-media scratch paths still use HOME; SecureStore itself is separately redirected
+            // by the desktopTest task. Preview flag hides the demo banner (the marketing-capture switch).
             System.setProperty("user.home", createTempDirPath())
             System.setProperty("ccpPreview", "true")
         }
