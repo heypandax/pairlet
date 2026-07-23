@@ -5,6 +5,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ContextMenuArea
+import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -468,12 +470,20 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         // model segment falls back to "default" (never a dangling " · ") for a pre-first-turn session the
         // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96)
         val modelLabel = model.chatModel.ifBlank { "default" }
-        Text(
-            pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel$ctx"),
-            color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),
-        )
+        // pathLinked left-clicks OPEN the workdir (when it's local); right-click adds "Copy path" so the
+        // cwd is grabbable even on a remote session where it isn't a link at all. Copies the bare workdir,
+        // not the whole machine·branch·model meta line.
+        val clipboard = LocalClipboardManager.current
+        ContextMenuArea(items = {
+            listOf(ContextMenuItem("Copy path") { clipboard.setText(AnnotatedString(model.chatWorkdir)) })
+        }) {
+            Text(
+                pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel$ctx"),
+                color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, bottom = 10.dp),
+            )
+        }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
     }
 }
