@@ -40,7 +40,10 @@ import dev.ccpocket.app.desktop.MacWindow
 import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
 import dev.ccpocket.app.desktop.toggleEmbeddedTerminal
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.notify_turn_complete
 import dev.ccpocket.app.secure.SecureStore
+import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
 import kotlinx.coroutines.delay
@@ -220,12 +223,14 @@ fun main() = application {
         }
         // keyed on the CURRENT primary: a machine switch promotes another repo instance (issue #103), and
         // the turn-finished seam must ride along or notifications/badges silently die after the first switch
+        // (resolved at composable scope: the callback below is a plain lambda and can't call stringResource)
+        val turnCompleteFallback = stringResource(Res.string.notify_turn_complete)
         DisposableEffect(repo) {
             repo.onTurnFinished = { title, preview, sessionId ->
                 if (!windowFocused) {
                     unseenDone++
                     DesktopNotify.badge(unseenDone)
-                    DesktopNotify.notify(title, preview ?: "Turn complete", sessionId)
+                    DesktopNotify.notify(title, preview ?: turnCompleteFallback, sessionId)
                 }
             }
             // banner clicked (issue #99): the OS already activated the app (bundle identity); surface the

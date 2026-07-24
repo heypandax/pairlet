@@ -41,7 +41,20 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.WorkflowPhaseGroup
 import dev.ccpocket.app.data.WorkflowPhaseStatus
 import dev.ccpocket.app.data.WorkflowUi
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.file_queued
+import dev.ccpocket.app.resources.wf_agents_count
+import dev.ccpocket.app.resources.wf_agents_duration
+import dev.ccpocket.app.resources.wf_agents_queued
+import dev.ccpocket.app.resources.wf_error
+import dev.ccpocket.app.resources.wf_more_queued
+import dev.ccpocket.app.resources.wf_passed_failed
+import dev.ccpocket.app.resources.wf_phase_pos
+import dev.ccpocket.app.resources.wf_phases_agents
+import dev.ccpocket.app.resources.wf_return
+import dev.ccpocket.app.resources.wf_waiting
 import dev.ccpocket.app.theme.Tok
+import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.ui.AgentStateGlyph
 import dev.ccpocket.app.ui.ChevronRight
 import dev.ccpocket.app.ui.FailChip
@@ -85,7 +98,7 @@ internal fun WorkflowPanel(model: DesktopModel, run: WorkflowRun, modifier: Modi
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        run.runId.take(10) + "…" + if (terminal) " · ${run.agents.size} agents" else "",
+                        run.runId.take(10) + "…" + if (terminal) " · " + stringResource(Res.string.wf_agents_count, run.agents.size) else "",
                         color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
@@ -103,12 +116,12 @@ internal fun WorkflowPanel(model: DesktopModel, run: WorkflowRun, modifier: Modi
             ) {
                 val failed = WorkflowUi.failedCount(run)
                 if (terminal) {
-                    Text("${groups.size} phases · ${run.agents.size} agents", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
+                    Text(stringResource(Res.string.wf_phases_agents, groups.size, run.agents.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
                 } else {
                     val cur = WorkflowUi.currentPhase(groups)
                     if (cur != null) {
                         val (pos, total) = WorkflowUi.phasePosition(groups, cur)
-                        Text("phase $pos/$total · ${cur.title}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(stringResource(Res.string.wf_phase_pos, pos, total, cur.title), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("·", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
                     }
                     Text("${WorkflowUi.doneCount(run)}/${run.agents.size}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
@@ -178,7 +191,8 @@ private fun DeskPhaseSection(model: DesktopModel, run: WorkflowRun, g: WorkflowP
                 ) {
                     WfCheckGlyph(Tok.ok, 11.dp)
                     Text(
-                        if (g.failed > 0) "${g.done} passed · ${g.failed} failed" else "${g.total} agents · ${WorkflowUi.formatDuration(g.durationMs)}",
+                        if (g.failed > 0) stringResource(Res.string.wf_passed_failed, g.done, g.failed)
+                        else stringResource(Res.string.wf_agents_duration, g.total, WorkflowUi.formatDuration(g.durationMs)),
                         color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
                     )
                 }
@@ -187,7 +201,7 @@ private fun DeskPhaseSection(model: DesktopModel, run: WorkflowRun, g: WorkflowP
                 }
             }
             pending -> Text(
-                if (g.total > 0) "${g.total} agents queued" else "waiting",
+                if (g.total > 0) stringResource(Res.string.wf_agents_queued, g.total) else stringResource(Res.string.wf_waiting),
                 color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp,
                 modifier = Modifier.alpha(0.6f).padding(start = 42.dp, bottom = 9.dp),
             )
@@ -231,7 +245,7 @@ private fun DeskAgentRow(model: DesktopModel, run: WorkflowRun, a: WorkflowAgent
             Text(
                 when (a.state) {
                     WorkflowAgentState.RUNNING -> a.startedAt?.let { workflowElapsed(it) } ?: "…"
-                    WorkflowAgentState.QUEUED -> "queued"
+                    WorkflowAgentState.QUEUED -> stringResource(Res.string.file_queued)
                     else -> WorkflowUi.formatDuration(a.durationMs)
                 },
                 color = if (queued) Tok.muted else Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
@@ -249,7 +263,7 @@ private fun DeskAgentRow(model: DesktopModel, run: WorkflowRun, a: WorkflowAgent
                     .border(1.dp, if (failed) Tok.danger.copy(alpha = 0.4f) else Tok.hair, shape),
             ) {
                 Text(
-                    if (failed) "ERROR" else "RETURN",
+                    stringResource(if (failed) Res.string.wf_error else Res.string.wf_return).uppercase(),
                     color = if (failed) Tok.danger else Tok.muted, fontFamily = Dk.mono, fontSize = 9.sp, letterSpacing = 1.2.sp,
                     modifier = Modifier.padding(start = 11.dp, top = 7.dp),
                 )
@@ -282,7 +296,7 @@ private fun DeskQueuedRow(queued: List<WorkflowAgentSnap>) {
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Box(Modifier.width(14.dp), contentAlignment = Alignment.Center) { HollowDot(7.dp) }
-            Text("+ ${queued.size} queued", color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.wf_more_queued, queued.size), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
             Box(Modifier.rotate(if (open) 180f else 90f)) { ChevronRight(Tok.muted, 12.dp) }
         }
         if (open) queued.forEach { a ->
@@ -292,7 +306,7 @@ private fun DeskQueuedRow(queued: List<WorkflowAgentSnap>) {
             ) {
                 Box(Modifier.width(14.dp), contentAlignment = Alignment.Center) { HollowDot(7.dp) }
                 Text(a.label, color = Tok.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text("queued", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+                Text(stringResource(Res.string.file_queued), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
             }
         }
     }

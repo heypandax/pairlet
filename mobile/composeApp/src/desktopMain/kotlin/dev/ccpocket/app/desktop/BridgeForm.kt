@@ -35,10 +35,55 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.action_browse
+import dev.ccpocket.app.resources.action_create
+import dev.ccpocket.app.resources.bridge_adapter_config
+import dev.ccpocket.app.resources.bridge_add_project
+import dev.ccpocket.app.resources.bridge_allow_cmds
+import dev.ccpocket.app.resources.bridge_allow_cmds_hint
+import dev.ccpocket.app.resources.bridge_allow_cmds_hint_create
+import dev.ccpocket.app.resources.bridge_autonomy
+import dev.ccpocket.app.resources.bridge_autonomy_hint
+import dev.ccpocket.app.resources.bridge_bind_hint
+import dev.ccpocket.app.resources.bridge_cred_note
+import dev.ccpocket.app.resources.bridge_cred_title
+import dev.ccpocket.app.resources.bridge_custom_adapter
+import dev.ccpocket.app.resources.bridge_custom_hint
+import dev.ccpocket.app.resources.bridge_edit_appid_ph
+import dev.ccpocket.app.resources.bridge_edit_hint
+import dev.ccpocket.app.resources.bridge_edit_projects_hint
+import dev.ccpocket.app.resources.bridge_edit_save
+import dev.ccpocket.app.resources.bridge_edit_secret_ph
+import dev.ccpocket.app.resources.bridge_feishu_app
+import dev.ccpocket.app.resources.bridge_feishu_hint
+import dev.ccpocket.app.resources.bridge_manage_off
+import dev.ccpocket.app.resources.bridge_manage_on
+import dev.ccpocket.app.resources.bridge_manage_toggle
+import dev.ccpocket.app.resources.bridge_name_hint
+import dev.ccpocket.app.resources.bridge_none_yet
+import dev.ccpocket.app.resources.bridge_owner_bypass
+import dev.ccpocket.app.resources.bridge_owner_bypass_hint_create
+import dev.ccpocket.app.resources.bridge_owner_bypass_hint_edit
+import dev.ccpocket.app.resources.bridge_ph_admin
+import dev.ccpocket.app.resources.bridge_ph_admin_edit
+import dev.ccpocket.app.resources.bridge_ph_appid
+import dev.ccpocket.app.resources.bridge_projects
+import dev.ccpocket.app.resources.bridge_projects_hint
+import dev.ccpocket.app.resources.bridge_tier_ask_sub
+import dev.ccpocket.app.resources.bridge_tier_ask_title
+import dev.ccpocket.app.resources.bridge_tier_edit_sub
+import dev.ccpocket.app.resources.bridge_tier_edit_title
+import dev.ccpocket.app.resources.cancel
+import dev.ccpocket.app.resources.cmd_source_builtin
+import dev.ccpocket.app.resources.device_remove
+import dev.ccpocket.app.resources.done
+import dev.ccpocket.app.resources.form_name
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.BridgeCredential
 import dev.ccpocket.protocol.BridgeRunnerSpec
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Pick a project root. macOS's AWT dialog only offers DIRECTORIES under this property — without it the
@@ -87,15 +132,15 @@ internal fun OneShotCredentialCard(name: String, ttlSec: Int, json: String, onDo
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Credential for \"$name\" — copy it NOW",
+                stringResource(Res.string.bridge_cred_title, name),
                 color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.weight(1f))
-            Text("Done", color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, modifier = Modifier.clickable(onClick = onDone))
+            Text(stringResource(Res.string.done), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, modifier = Modifier.clickable(onClick = onDone))
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "Single-use, expires in ${ttlSec}s. Save it as bridge-credential.json next to the adapter and start it.",
+            stringResource(Res.string.bridge_cred_note, ttlSec),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
         )
         Spacer(Modifier.height(8.dp))
@@ -140,22 +185,22 @@ internal fun NewBridgeForm(
     // no inner verticalScroll: the Settings pane container already scrolls, and a nested unbounded
     // scrollable measures with infinite max height — an immediate crash, not a layout quirk
     Column(Modifier.fillMaxWidth()) {
-        FieldLabel("NAME", "shown as \"via <name>\" on any session it starts")
+        FieldLabel(stringResource(Res.string.form_name).uppercase(), stringResource(Res.string.bridge_name_hint))
         TextInput(name, { name = it }, "feishu-bot")
 
         Spacer(Modifier.height(14.dp))
-        FieldLabel("PROJECTS", "the ONLY directories it may open sessions in — pick dedicated, low-sensitivity checkouts")
+        FieldLabel(stringResource(Res.string.bridge_projects).uppercase(), stringResource(Res.string.bridge_projects_hint))
         PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
 
         Spacer(Modifier.height(14.dp))
-        FieldLabel("AUTONOMY", "anyone in the chat can send it prompts — this is what it may do without asking you")
+        FieldLabel(stringResource(Res.string.bridge_autonomy).uppercase(), stringResource(Res.string.bridge_autonomy_hint))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TierChoice("Ask me first", "shell, writes and edits all prompt your phone", tier == AccessTier.REVIEW) { tier = AccessTier.REVIEW }
-            TierChoice("Edit files silently", "edits apply unprompted; shell still asks", tier == AccessTier.COLLABORATE) { tier = AccessTier.COLLABORATE }
+            TierChoice(stringResource(Res.string.bridge_tier_ask_title), stringResource(Res.string.bridge_tier_ask_sub), tier == AccessTier.REVIEW) { tier = AccessTier.REVIEW }
+            TierChoice(stringResource(Res.string.bridge_tier_edit_title), stringResource(Res.string.bridge_tier_edit_sub), tier == AccessTier.COLLABORATE) { tier = AccessTier.COLLABORATE }
         }
 
         Spacer(Modifier.height(14.dp))
-        FieldLabel("RUN THESE WITHOUT ASKING", "one command per line (e.g.  npm test  /  ./gradlew build  /  pytest). Matching commands run with no phone prompt so a task finishes in one go. Dangerous commands and anything with a pipe / redirect / \$var still ask you.")
+        FieldLabel(stringResource(Res.string.bridge_allow_cmds).uppercase(), stringResource(Res.string.bridge_allow_cmds_hint_create))
         MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
 
         Spacer(Modifier.height(16.dp))
@@ -166,10 +211,9 @@ internal fun NewBridgeForm(
             Check(manage)
             Spacer(Modifier.width(8.dp))
             Column {
-                Text("Let the daemon run the adapter", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                Text(stringResource(Res.string.bridge_manage_toggle), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
                 Text(
-                    if (manage) "It starts on boot, restarts on crash, and the credential never leaves this machine."
-                    else "You'll get a credential to copy into an adapter you run yourself.",
+                    stringResource(if (manage) Res.string.bridge_manage_on else Res.string.bridge_manage_off),
                     color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
                 )
             }
@@ -177,20 +221,20 @@ internal fun NewBridgeForm(
 
         if (manage) {
             Spacer(Modifier.height(14.dp))
-            FieldLabel("FEISHU APP", "from open.feishu.cn — the bot needs im:message + im:message:send_as_bot, and event subscription im.message.receive_v1 in long-connection mode")
-            TextInput(appId, { appId = it }, "cli_xxx  (App ID)")
+            FieldLabel(stringResource(Res.string.bridge_feishu_app).uppercase(), stringResource(Res.string.bridge_feishu_hint))
+            TextInput(appId, { appId = it }, stringResource(Res.string.bridge_ph_appid))
             Spacer(Modifier.height(6.dp))
             TextInput(appSecret, { appSecret = it }, "App Secret", secret = true)
             Spacer(Modifier.height(6.dp))
-            TextInput(adminId, { adminId = it }, "your open_id — optional; leave empty and the bot tells you yours")
+            TextInput(adminId, { adminId = it }, stringResource(Res.string.bridge_ph_admin))
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { ownerBypass = !ownerBypass }) {
                 Check(ownerBypass)
                 Spacer(Modifier.width(8.dp))
                 Column {
-                    Text("Run MY own messages without approval", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                    Text(stringResource(Res.string.bridge_owner_bypass), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
                     Text(
-                        "Only the open_id above skips approval — full trust, your own machine. Everyone else still asks. Needs your open_id set.",
+                        stringResource(Res.string.bridge_owner_bypass_hint_create),
                         color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
                     )
                 }
@@ -198,12 +242,12 @@ internal fun NewBridgeForm(
             Spacer(Modifier.height(12.dp))
             // custom adapter script = the advanced escape hatch. Blank (the default) runs the adapter the
             // daemon has BUILT IN — no python, no checkout, nothing else to install.
-            FieldLabel("CUSTOM ADAPTER (optional)", "leave empty to use the built-in Feishu adapter — no python needed. Set a script path only to run your own.")
+            FieldLabel(stringResource(Res.string.bridge_custom_adapter).uppercase(), stringResource(Res.string.bridge_custom_hint))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { TextInput(scriptPath, { scriptPath = it }, "built-in") }
+                Box(Modifier.weight(1f)) { TextInput(scriptPath, { scriptPath = it }, stringResource(Res.string.cmd_source_builtin)) }
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "Browse", color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
+                    stringResource(Res.string.action_browse), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
                     modifier = Modifier.clickable { pickAdapterScript()?.let { scriptPath = it } },
                 )
             }
@@ -212,7 +256,7 @@ internal fun NewBridgeForm(
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                "Create", color = if (canCreate) Tok.accent else Tok.muted.copy(alpha = 0.5f),
+                stringResource(Res.string.action_create), color = if (canCreate) Tok.accent else Tok.muted.copy(alpha = 0.5f),
                 fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (canCreate) Tok.accent else Tok.muted).copy(alpha = 0.12f))
@@ -231,13 +275,13 @@ internal fun NewBridgeForm(
                     .padding(horizontal = 14.dp, vertical = 7.dp),
             )
             Text(
-                "Cancel", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
+                stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
                 modifier = Modifier.clickable(onClick = onCancel).padding(horizontal = 8.dp, vertical = 7.dp),
             )
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "After it connects, @mention the bot in a chat and send  /bind <project>  to point that chat at one of these projects.",
+            stringResource(Res.string.bridge_bind_hint),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
         )
     }
@@ -275,26 +319,29 @@ internal fun EditRunnerForm(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
             .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(12.dp),
     ) {
-        FieldLabel("PROJECTS", "the directories this bot may open sessions in — add or remove, then Save & restart")
+        FieldLabel(stringResource(Res.string.bridge_projects).uppercase(), stringResource(Res.string.bridge_edit_projects_hint))
         PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
         Spacer(Modifier.height(14.dp))
-        FieldLabel("RUN THESE WITHOUT ASKING", "one command per line — matching commands run with no phone prompt. Dangerous commands and anything with a pipe / redirect / \$var still ask you.")
+        FieldLabel(stringResource(Res.string.bridge_allow_cmds).uppercase(), stringResource(Res.string.bridge_allow_cmds_hint))
         MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
         Spacer(Modifier.height(14.dp))
-        FieldLabel("ADAPTER CONFIG", "blank fields keep their current values — set: ${envKeys.joinToString(", ").ifEmpty { "(nothing yet)" }}")
-        TextInput(adminId, { adminId = it }, "FEISHU_ADMIN_OPEN_ID — paste the open_id the bot echoed after /bind")
+        FieldLabel(
+            stringResource(Res.string.bridge_adapter_config).uppercase(),
+            stringResource(Res.string.bridge_edit_hint, envKeys.joinToString(", ").ifEmpty { stringResource(Res.string.bridge_none_yet) }),
+        )
+        TextInput(adminId, { adminId = it }, stringResource(Res.string.bridge_ph_admin_edit))
         Spacer(Modifier.height(6.dp))
-        TextInput(appId, { appId = it }, "FEISHU_APP_ID (unchanged if blank)")
+        TextInput(appId, { appId = it }, stringResource(Res.string.bridge_edit_appid_ph))
         Spacer(Modifier.height(6.dp))
-        TextInput(appSecret, { appSecret = it }, "FEISHU_APP_SECRET (unchanged if blank)", secret = true)
+        TextInput(appSecret, { appSecret = it }, stringResource(Res.string.bridge_edit_secret_ph), secret = true)
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { ownerBypassOn = !ownerBypassOn }) {
             Check(ownerBypassOn)
             Spacer(Modifier.width(8.dp))
             Column {
-                Text("Run MY own messages without approval", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                Text(stringResource(Res.string.bridge_owner_bypass), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
                 Text(
-                    "Only the owner open_id skips approval — full trust, your own machine. Everyone else still asks.",
+                    stringResource(Res.string.bridge_owner_bypass_hint_edit),
                     color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
                 )
             }
@@ -302,7 +349,7 @@ internal fun EditRunnerForm(
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                "Save & restart", color = if (dirty) Tok.accent else Tok.muted.copy(alpha = 0.5f),
+                stringResource(Res.string.bridge_edit_save), color = if (dirty) Tok.accent else Tok.muted.copy(alpha = 0.5f),
                 fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (dirty) Tok.accent else Tok.muted).copy(alpha = 0.12f))
@@ -310,7 +357,7 @@ internal fun EditRunnerForm(
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
             Text(
-                "Cancel", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+                stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
                 modifier = Modifier.clickable(onClick = onCancel).padding(horizontal = 6.dp, vertical = 6.dp),
             )
         }
@@ -378,12 +425,12 @@ private fun PickedDirs(picked: List<String>, onAdd: () -> Unit, onRemove: (Strin
                 Spacer(Modifier.width(8.dp))
                 Text(p, color = Tok.muted.copy(alpha = 0.7f), fontFamily = Dk.mono, fontSize = 9.sp)
                 Spacer(Modifier.weight(1f))
-                Text("Remove", color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp, modifier = Modifier.clickable { onRemove(p) })
+                Text(stringResource(Res.string.device_remove), color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp, modifier = Modifier.clickable { onRemove(p) })
             }
         }
         Spacer(Modifier.height(4.dp))
         Text(
-            "+ Add project", color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
+            stringResource(Res.string.bridge_add_project), color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp,
             modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.12f))
                 .clickable(onClick = onAdd).padding(horizontal = 9.dp, vertical = 5.dp),
         )

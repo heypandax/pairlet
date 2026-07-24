@@ -9,6 +9,12 @@ import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.allow
+import dev.ccpocket.app.resources.auto_denied_no_response
+import dev.ccpocket.app.resources.deny
+import dev.ccpocket.app.resources.dismiss
+import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.protocol.AgentKind
@@ -52,14 +58,14 @@ class PermissionTimeoutTest {
         // the request stays visible (greyed, not vanished) so the returning user sees what happened…
         assertPresent("rm -rf ./build && ./gradlew clean", substring = true)
         // …under a terminal danger note + a dismiss-only control
-        assertPresent("Auto-denied", substring = true)
-        assertPresent("Dismiss")
+        assertPresent(str(Res.string.auto_denied_no_response))
+        assertPresent(str(Res.string.dismiss))
         // Allow/Deny are gone — the flipped card can no longer fire a verdict the CLI stopped waiting for
-        assertFalse(present("Allow"), "a timed-out card offers no Allow")
-        assertFalse(present("Deny"), "a timed-out card offers no Deny")
+        assertFalse(present(str(Res.string.allow)), "a timed-out card offers no Allow")
+        assertFalse(present(str(Res.string.deny)), "a timed-out card offers no Deny")
 
         // a late tap: the only live control is Dismiss, and it sends no allow/deny
-        onAllNodes(hasText("Dismiss")).onFirst().performClick()
+        onAllNodes(hasText(str(Res.string.dismiss))).onFirst().performClick()
         assertTrue(dismissed, "Dismiss retires the card")
         assertFalse(allowed, "a late click never allows")
         assertFalse(denied, "a late click never denies")
@@ -77,9 +83,9 @@ class PermissionTimeoutTest {
                 )
             }
         }
-        assertPresent("Allow")
-        assertPresent("Deny")
-        assertFalse(present("Auto-denied", substring = true), "a live card shows no terminal note")
+        assertPresent(str(Res.string.allow))
+        assertPresent(str(Res.string.deny))
+        assertFalse(present(str(Res.string.auto_denied_no_response)), "a live card shows no terminal note")
     }
 
     // ── the terminal state reads in light mode too (Tok palette is theme-aware) ───────────────────
@@ -94,8 +100,8 @@ class PermissionTimeoutTest {
                 )
             }
         }
-        assertPresent("Auto-denied", substring = true)
-        assertPresent("Dismiss")
+        assertPresent(str(Res.string.auto_denied_no_response))
+        assertPresent(str(Res.string.dismiss))
     }
 
     // ── the desktop model forwards the repo's timeout signal + retires the dead ask from attention ─

@@ -36,7 +36,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.allow
+import dev.ccpocket.app.resources.attention_empty
+import dev.ccpocket.app.resources.attention_footer
+import dev.ccpocket.app.resources.attention_open_session
+import dev.ccpocket.app.resources.attention_stats
+import dev.ccpocket.app.resources.deny
+import dev.ccpocket.app.resources.tray_needs_you
+import dev.ccpocket.app.resources.watch_review
+import dev.ccpocket.app.resources.watch_waiting
 import dev.ccpocket.app.theme.Tok
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Fleet overlays + panes ("Fleet Desktop" board ⑦ and the split-pane half of ⑥): the bell's Attention
@@ -66,18 +77,18 @@ fun AttentionPopover(model: DesktopModel) {
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("Needs you", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(Res.string.tray_needs_you), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             val online = model.machines.count { it.computer.online }
             Text(
-                "${model.machines.size} machines · $online online · ${model.attention.size} waiting",
+                stringResource(Res.string.attention_stats, model.machines.size, online, model.attention.size),
                 color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
             )
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         if (model.attention.isEmpty()) {
             Text(
-                "All clear — approvals from any machine queue here.",
+                stringResource(Res.string.attention_empty),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 18.dp),
             )
@@ -100,7 +111,7 @@ fun AttentionPopover(model: DesktopModel) {
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Text(
-            "Approve here only for previews you can fully read — click through for diffs.",
+            stringResource(Res.string.attention_footer),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp, lineHeight = 15.sp,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
         )
@@ -140,15 +151,15 @@ private fun AttentionRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> Unit
             Modifier.fillMaxWidth().padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (hovered) Text("Open session ↗", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp)
+            if (hovered) Text(stringResource(Res.string.attention_open_session), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 10.5.sp)
             Spacer(Modifier.weight(1f))
             Text(
-                "Deny", color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.danger.copy(alpha = 0.33f), RoundedCornerShape(7.dp))
                     .clickable(onClick = onDeny).padding(horizontal = 12.dp, vertical = 4.dp),
             )
             Text(
-                "Allow", color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent)
                     .clickable(onClick = onAllow).padding(horizontal = 12.dp, vertical = 4.dp),
             )
@@ -201,7 +212,7 @@ fun WatchPane(watch: DkWatch, model: DesktopModel, modifier: Modifier = Modifier
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
                     Icon(Icons.Outlined.Shield, null, tint = Tok.accent, modifier = Modifier.size(14.dp))
-                    Text("⏸ waiting approval — ", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                    Text(stringResource(Res.string.watch_waiting), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
                     Text(
                         "${w.tool}: ${w.preview}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
@@ -210,7 +221,7 @@ fun WatchPane(watch: DkWatch, model: DesktopModel, modifier: Modifier = Modifier
                         Text("${s / 60}:${(s % 60).toString().padStart(2, '0')}", color = Tok.warn, fontFamily = Dk.mono, fontSize = 11.sp)
                     }
                     Text(
-                        "Review", color = Tok.base, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+                        stringResource(Res.string.watch_review), color = Tok.base, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent)
                             .clickable { model.showAttention = true }.padding(horizontal = 12.dp, vertical = 4.dp),
                     )

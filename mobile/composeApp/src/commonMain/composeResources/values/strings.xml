@@ -832,6 +832,7 @@
     <string name="update_downloading">Downloading v%1$s… the app restarts when it\'s ready.</string>
     <string name="update_reach_failed">Couldn\'t reach GitHub releases — check your network.</string>
     <string name="update_failed">Update failed.</string>
+    <string name="notify_turn_complete">Turn complete</string>
 
     <!-- chat pane -->
     <string name="chat_no_session">No session open</string>
@@ -1002,6 +1003,12 @@
     <string name="bridge_none_yet">(nothing yet)</string>
     <string name="bridge_ph_admin_edit">FEISHU_ADMIN_OPEN_ID — paste the open_id the bot echoed after /bind</string>
     <string name="bridge_add_project">+ Add project</string>
+    <string name="bridge_owner_bypass">Run MY own messages without approval</string>
+    <string name="bridge_owner_bypass_hint_create">Only the open_id above skips approval — full trust, your own machine. Everyone else still asks. Needs your open_id set.</string>
+    <string name="bridge_owner_bypass_hint_edit">Only the owner open_id skips approval — full trust, your own machine. Everyone else still asks.</string>
+    <string name="bridge_allow_cmds">Run these without asking</string>
+    <string name="bridge_allow_cmds_hint_create">one command per line (e.g.  npm test  /  ./gradlew build  /  pytest). Matching commands run with no phone prompt so a task finishes in one go. Dangerous commands and anything with a pipe / redirect / $var still ask you.</string>
+    <string name="bridge_allow_cmds_hint">one command per line — matching commands run with no phone prompt. Dangerous commands and anything with a pipe / redirect / $var still ask you.</string>
 
     <!-- window chrome & misc -->
     <string name="exit_fullscreen">Exit Full Screen</string>
@@ -1009,4 +1016,16 @@
     <string name="qa_terminal">Open terminal</string>
     <string name="qa_clear_armed">Clear chat — tap again</string>
     <string name="popover_where">Where</string>
+    <string name="menu_copy_path">Copy path</string>
+
+    <!-- dia cdp relaunch (composer hint row) -->
+    <string name="dia_launch">Launch Dia :9222</string>
+    <string name="dia_restarting">Restarting Dia…</string>
+    <string name="dia_confirm_title">Reopen Dia with the debug port</string>
+    <string name="dia_confirm_body">This quits the running Dia first (unsaved window state is lost), then reopens it with :9222 — so it can reuse your signed-in session.</string>
+    <string name="action_launch">Launch</string>
+    <string name="dia_not_supported">Dia isn\'t installed (or this isn\'t macOS)</string>
+    <string name="dia_ready">Dia debug port :%1$s is ready</string>
+    <string name="dia_no_answer">Dia relaunched, but :%1$s never answered (timeout)</string>
+    <string name="dia_launch_failed">Launch failed: %1$s</string>
 </resources>

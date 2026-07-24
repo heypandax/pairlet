@@ -55,12 +55,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.close
+import dev.ccpocket.app.resources.copy_path
 import dev.ccpocket.app.resources.diff_stale_hint
 import dev.ccpocket.app.resources.diff_stale_title
 import dev.ccpocket.app.resources.file_open
 import dev.ccpocket.app.resources.file_save_as
 import dev.ccpocket.app.resources.files_empty
 import dev.ccpocket.app.resources.files_title
+import dev.ccpocket.app.resources.key_close
+import dev.ccpocket.app.resources.key_collapse_hunk
+import dev.ccpocket.app.resources.key_switch_file
 import dev.ccpocket.app.share.exportBytesOf
 import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.share.shareFile
@@ -149,7 +154,7 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             if (files.isNotEmpty()) FilesSummaryText(files, fontSize = 12.sp)
             Box(Modifier.weight(1f))
             Icon(
-                Icons.Rounded.Close, null, tint = Tok.tx2,
+                Icons.Rounded.Close, stringResource(Res.string.close), tint = Tok.tx2,
                 modifier = Modifier.size(24.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onDismiss).padding(3.dp),
             )
         }
@@ -187,9 +192,9 @@ fun ChangesOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            FootHint("↑↓", "switch file")
-            FootHint("click @@", "collapse hunk")
-            FootHint("esc", "close")
+            FootHint("↑↓", stringResource(Res.string.key_switch_file))
+            FootHint("click @@", stringResource(Res.string.key_collapse_hunk))
+            FootHint("esc", stringResource(Res.string.key_close))
         }
     }
 }
@@ -320,9 +325,10 @@ private fun SelectedFilePane(model: DesktopModel, file: ChangedFile) {
 @Composable
 private fun CopyPathButton(path: String) {
     val (copied, copy) = rememberCopied()
-    HeaderIconBox("copy path", onClick = { copy(path) }) { hovered ->
+    val label = stringResource(Res.string.copy_path)
+    HeaderIconBox(label, onClick = { copy(path) }) { hovered ->
         if (copied) Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(14.dp))
-        else Icon(Icons.Rounded.ContentCopy, "copy path", tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(14.dp))
+        else Icon(Icons.Rounded.ContentCopy, label, tint = if (hovered) Tok.tx2 else Tok.muted, modifier = Modifier.size(14.dp))
     }
 }
 

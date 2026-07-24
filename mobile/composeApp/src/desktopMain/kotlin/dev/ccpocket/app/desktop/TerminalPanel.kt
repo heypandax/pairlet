@@ -54,9 +54,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.term_close
+import dev.ccpocket.app.resources.term_collapse
+import dev.ccpocket.app.resources.term_default_hint
+import dev.ccpocket.app.resources.term_default_hint_link
+import dev.ccpocket.app.resources.term_embedded_sub
+import dev.ccpocket.app.resources.term_engine_unavailable
+import dev.ccpocket.app.resources.term_external_sub
+import dev.ccpocket.app.resources.term_menu
+import dev.ccpocket.app.resources.term_one_running
+import dev.ccpocket.app.resources.term_open_embedded
+import dev.ccpocket.app.resources.term_open_external
+import dev.ccpocket.app.resources.term_open_ghostty
+import dev.ccpocket.app.resources.term_open_system
+import dev.ccpocket.app.resources.term_open_title
+import dev.ccpocket.app.resources.term_restore
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.tilde
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
 
 // ═══════════════════════════ state (issue #153) ═══════════════════════════
 // The embedded terminal dock: ONE local shell, docked at the bottom of the ChatPane of the session
@@ -304,13 +321,13 @@ private fun TerminalPanelView(
                 tp.branch?.let { TermBranchChip(it) }
             }
             TermHeaderIconButton(onClick = { tp.cwd?.let { TerminalLauncher.open(model.terminalApp, it) } }) {
-                Icon(Icons.Rounded.OpenInNew, "Open in external terminal", tint = Tok.tx2, modifier = Modifier.size(14.dp))
+                Icon(Icons.Rounded.OpenInNew, stringResource(Res.string.term_open_external), tint = Tok.tx2, modifier = Modifier.size(14.dp))
             }
             TermHeaderIconButton(onClick = { tp.collapse() }) {
-                Icon(Icons.Rounded.KeyboardArrowDown, "Collapse terminal", tint = Tok.tx2, modifier = Modifier.size(16.dp))
+                Icon(Icons.Rounded.KeyboardArrowDown, stringResource(Res.string.term_collapse), tint = Tok.tx2, modifier = Modifier.size(16.dp))
             }
             TermHeaderIconButton(onClick = { tp.close() }) {
-                Icon(Icons.Rounded.Close, "Close terminal", tint = Tok.muted, modifier = Modifier.size(14.dp))
+                Icon(Icons.Rounded.Close, stringResource(Res.string.term_close), tint = Tok.muted, modifier = Modifier.size(14.dp))
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -330,7 +347,7 @@ private fun TerminalPanelView(
                 }
             } else if (engine == null) {
                 Text(
-                    "shell engine unavailable — use the header's open-external instead",
+                    stringResource(Res.string.term_engine_unavailable),
                     color = TermInkText, fontFamily = Dk.mono, fontSize = 11.sp,
                     modifier = Modifier.align(Alignment.Center),
                 )
@@ -365,9 +382,9 @@ private fun TerminalCollapsedStrip(
             }
             if (tp.engine?.running == true) {
                 PulseDot(Tok.ok, 6.dp)
-                Text("1 running", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(stringResource(Res.string.term_one_running), color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
             }
-            Icon(Icons.Rounded.KeyboardArrowUp, "Restore terminal", tint = Tok.muted, modifier = Modifier.size(15.dp))
+            Icon(Icons.Rounded.KeyboardArrowUp, stringResource(Res.string.term_restore), tint = Tok.muted, modifier = Modifier.size(15.dp))
         }
     }
 }
@@ -382,7 +399,7 @@ private fun TermGlyphButton(menuOpen: Boolean, size: androidx.compose.ui.unit.Dp
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            Icons.Rounded.Terminal, "Terminal menu",
+            Icons.Rounded.Terminal, stringResource(Res.string.term_menu),
             tint = if (menuOpen) Tok.tx else Tok.tx2, modifier = Modifier.size(size - 9.dp),
         )
     }
@@ -463,32 +480,35 @@ fun TerminalMenuOverlay(
  *  app, the check marking whichever is the user's DEFAULT, plus the Settings pointer. */
 @Composable
 fun TerminalOpenModeMenu(model: DesktopModel, onEmbedded: () -> Unit, onExternal: () -> Unit) {
-    val externalLabel = if (model.terminalApp == TerminalApp.GHOSTTY) "Open in Ghostty" else "Open in system terminal"
+    val externalLabel = stringResource(if (model.terminalApp == TerminalApp.GHOSTTY) Res.string.term_open_ghostty else Res.string.term_open_system)
     Column(
         Modifier.width(300.dp).clip(RoundedCornerShape(13.dp)).background(Tok.raised)
             .border(1.dp, Tok.hair, RoundedCornerShape(13.dp)),
     ) {
         Text(
-            "OPEN TERMINAL", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+            stringResource(Res.string.term_open_title).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp,
             modifier = Modifier.padding(start = 13.dp, end = 13.dp, top = 12.dp, bottom = 6.dp),
         )
         Column(Modifier.padding(start = 6.dp, end = 6.dp, bottom = 4.dp)) {
             TermMenuRow(
-                title = "Open embedded", sub = "Docked in this session", hint = "⌘J",
+                title = stringResource(Res.string.term_open_embedded), sub = stringResource(Res.string.term_embedded_sub), hint = "⌘J",
                 primary = model.terminalDefaultEmbedded, onClick = onEmbedded,
             ) { tint -> Icon(Icons.Rounded.Terminal, null, tint = tint, modifier = Modifier.size(15.dp)) }
             TermMenuRow(
-                title = externalLabel, sub = "Your system terminal", hint = null,
+                title = externalLabel, sub = stringResource(Res.string.term_external_sub), hint = null,
                 primary = !model.terminalDefaultEmbedded, onClick = onExternal,
             ) { tint -> Icon(Icons.Rounded.OpenInNew, null, tint = tint, modifier = Modifier.size(15.dp)) }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Text(
             buildAnnotatedString {
-                append("Default can be changed in ")
-                withStyle(SpanStyle(color = Tok.tx2)) { append("Settings → Terminal") }
-                append(".")
+                // the sentence is one localized template; the styled span is spliced in at its %1$s slot,
+                // so word order stays free per language ("Default can be changed in X." / "默认方式可在 X 里修改。")
+                val cut = stringResource(Res.string.term_default_hint).split("%1\$s", limit = 2)
+                append(cut.getOrElse(0) { "" })
+                withStyle(SpanStyle(color = Tok.tx2)) { append(stringResource(Res.string.term_default_hint_link)) }
+                append(cut.getOrElse(1) { "" })
             },
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 16.sp,
             modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),

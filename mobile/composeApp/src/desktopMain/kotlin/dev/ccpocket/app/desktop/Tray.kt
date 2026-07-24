@@ -36,9 +36,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.allow
+import dev.ccpocket.app.resources.deny
+import dev.ccpocket.app.resources.running
+import dev.ccpocket.app.resources.settings_title
+import dev.ccpocket.app.resources.tray_all_clear
+import dev.ccpocket.app.resources.tray_answer_in_session
+import dev.ccpocket.app.resources.tray_computers_many
+import dev.ccpocket.app.resources.tray_computers_one
+import dev.ccpocket.app.resources.tray_more_sessions
+import dev.ccpocket.app.resources.tray_more_waiting
+import dev.ccpocket.app.resources.tray_needs_you
+import dev.ccpocket.app.resources.tray_no_running
+import dev.ccpocket.app.resources.tray_open_app
+import dev.ccpocket.app.resources.tray_sessions_many
+import dev.ccpocket.app.resources.tray_sessions_one
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.protocol.AgentKind
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * The tray popover — the title-bar status dot's "what needs me / what's running" glance, wired to the live
@@ -101,9 +118,9 @@ fun TrayPopover(
                 CcGlyphMark(Tok.tx, 16.dp)
                 Text("cc-pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
-                Text(trayStatsLabel(computers, sessions), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(trayStatsLine(computers, sessions), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
                 Icon(
-                    Icons.Outlined.Settings, "Settings", tint = Tok.tx2,
+                    Icons.Outlined.Settings, stringResource(Res.string.settings_title), tint = Tok.tx2,
                     // Settings lives in the main window, so the gear surfaces it too (from the menu-bar
                     // popover the window may be buried — a modal opening off-screen would read as a dead click)
                     modifier = Modifier.size(24.dp).clip(RoundedCornerShape(7.dp))
@@ -112,9 +129,9 @@ fun TrayPopover(
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
             Column(Modifier.padding(14.dp)) {
-                TrayGroupLabel("Needs you", count = approvals.size)
+                TrayGroupLabel(stringResource(Res.string.tray_needs_you), count = approvals.size)
                 if (approvals.isEmpty()) {
-                    TrayEmpty(Icons.Rounded.Check, Tok.ok, "Nothing needs you")
+                    TrayEmpty(Icons.Rounded.Check, Tok.ok, stringResource(Res.string.tray_all_clear))
                 } else {
                     val (shown, hidden) = trayVisible(approvals, TRAY_MAX_APPROVALS)
                     shown.forEach { a ->
@@ -126,12 +143,12 @@ fun TrayPopover(
                         )
                     }
                     // overflow → the bell popover, which lists the whole fleet attention queue
-                    TrayMore(hidden, "waiting") { openMain(); model.showAttention = true }
+                    TrayMore(hidden) { openMain(); model.showAttention = true }
                 }
                 Spacer(Modifier.height(14.dp))
-                TrayGroupLabel("Running")
+                TrayGroupLabel(stringResource(Res.string.running))
                 if (running.isEmpty()) {
-                    TrayEmpty(null, Tok.muted, "No running sessions")
+                    TrayEmpty(null, Tok.muted, stringResource(Res.string.tray_no_running))
                 } else {
                     val (shown, _) = trayVisible(running, TRAY_MAX_RUNNING)
                     shown.forEach { (m, p) ->
@@ -148,7 +165,7 @@ fun TrayPopover(
                 val hiddenRunning = (running.size - TRAY_MAX_RUNNING).coerceAtLeast(0)
                 if (hiddenRunning > 0) {
                     Text(
-                        "+$hiddenRunning more sessions",
+                        stringResource(Res.string.tray_more_sessions, hiddenRunning),
                         color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp,
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).hoverFill(RoundedCornerShape(9.dp))
                             .clickable(onClick = openMain).padding(horizontal = 8.dp, vertical = 8.dp),
@@ -159,7 +176,7 @@ fun TrayPopover(
                         .clickable(onClick = openMain).padding(horizontal = 8.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Open cc-pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.tray_open_app), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.weight(1f))
                     if (keyHint) Key("⌘⏎")
                 }
@@ -185,9 +202,11 @@ internal fun <T> trayVisible(all: List<T>, max: Int): Pair<List<T>, Int> =
 internal fun trayHeaderCounts(model: DesktopModel): Pair<Int, Int> =
     model.machines.count { it.computer.online } to model.running.size
 
-/** "N computer(s) · M session(s)", singular/plural aware — the header's mono subtitle. */
-internal fun trayStatsLabel(computers: Int, sessions: Int): String =
-    "$computers ${if (computers == 1) "computer" else "computers"} · $sessions ${if (sessions == 1) "session" else "sessions"}"
+/** "N computer(s) · M session(s)", singular/plural aware — the header's mono subtitle (localized). */
+@Composable
+internal fun trayStatsLine(computers: Int, sessions: Int): String =
+    stringResource(if (computers == 1) Res.string.tray_computers_one else Res.string.tray_computers_many, computers) +
+        " · " + stringResource(if (sessions == 1) Res.string.tray_sessions_one else Res.string.tray_sessions_many, sessions)
 
 /** Switch the active binding to the machine that owns an approval (its single live ask then surfaces inline).
  *  [DkAttention] carries no session id, so this is the honest "jump" — exactly what the bell popover does. */
@@ -277,16 +296,16 @@ private fun TrayApprovalRow(a: DkAttention, onDeny: () -> Unit, onAllow: () -> U
         )
         if (a.question) {
             Text(
-                "Answer in session ↗", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                stringResource(Res.string.tray_answer_in_session), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).clickable(onClick = onOpen).padding(vertical = 7.dp),
             )
         } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                "Deny", color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(8.dp)).clickable(onClick = onDeny).padding(vertical = 7.dp),
             )
             Text(
-                "Allow", color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.accent).clickable(onClick = onAllow).padding(vertical = 7.dp),
             )
         }
@@ -315,12 +334,12 @@ private fun TrayRunning(title: String, computer: String, os: DkOs, elapsed: Stri
     }
 }
 
-/** "+N more …" — the overflow escape hatch when a section is capped; click opens the full surface. */
+/** "+N more waiting …" — the overflow escape hatch when the approvals section is capped; click opens the bell. */
 @Composable
-private fun TrayMore(hidden: Int, verb: String, onClick: () -> Unit) {
+private fun TrayMore(hidden: Int, onClick: () -> Unit) {
     if (hidden <= 0) return
     Text(
-        "+$hidden more $verb — open cc-pocket",
+        stringResource(Res.string.tray_more_waiting, hidden),
         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 7.dp),
     )

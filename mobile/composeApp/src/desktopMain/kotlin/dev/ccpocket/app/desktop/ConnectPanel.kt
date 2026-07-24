@@ -50,8 +50,26 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.decodeShareInvite
 import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.action_back
+import dev.ccpocket.app.resources.add_computer_sub
+import dev.ccpocket.app.resources.add_device
+import dev.ccpocket.app.resources.cancel
+import dev.ccpocket.app.resources.choose_computer
+import dev.ccpocket.app.resources.connect
+import dev.ccpocket.app.resources.connect_computer_header
+import dev.ccpocket.app.resources.join_cta
+import dev.ccpocket.app.resources.join_invalid
+import dev.ccpocket.app.resources.join_paste_placeholder
+import dev.ccpocket.app.resources.join_scan_title
+import dev.ccpocket.app.resources.pair_code_invalid
+import dev.ccpocket.app.resources.run_code_prefix
+import dev.ccpocket.app.resources.run_code_suffix
+import dev.ccpocket.app.resources.status_connecting
+import dev.ccpocket.app.resources.status_pairing
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.resolve
+import org.jetbrains.compose.resources.stringResource
 
 /** Not-connected state: pick a paired computer, or pair a new one with the 6-digit code it prints. */
 @Composable
@@ -75,24 +93,24 @@ private fun JoinSharedFolder(repo: PocketRepository) {
     var error by remember { mutableStateOf(false) }
     if (!open) {
         Text(
-            "Join a shared folder", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+            stringResource(Res.string.join_scan_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(horizontal = 12.dp, vertical = 6.dp),
         )
         return
     }
     Column(Modifier.fillMaxWidth()) {
-        Text("JOIN A SHARED FOLDER", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+        Text(stringResource(Res.string.join_scan_title).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
         Spacer(Modifier.height(10.dp))
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface).border(1.dp, if (error) Tok.danger else Tok.hair, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 11.dp)) {
-            if (blob.isEmpty()) Text("Paste invite code", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
+            if (blob.isEmpty()) Text(stringResource(Res.string.join_paste_placeholder), color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
             BasicTextField(blob, { blob = it; error = false }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
         }
         if (error) {
             Spacer(Modifier.height(8.dp))
-            Text("This invite is invalid or has expired. Ask for a new one.", color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)
+            Text(stringResource(Res.string.join_invalid), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp)
         }
         Spacer(Modifier.height(12.dp))
-        PrimaryButton("Join folder", enabled = blob.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+        PrimaryButton(stringResource(Res.string.join_cta), enabled = blob.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
             val inv = decodeShareInvite(blob)
             if (inv != null) repo.redeemShareInvite(inv) else error = true
         }
@@ -102,11 +120,11 @@ private fun JoinSharedFolder(repo: PocketRepository) {
 @Composable
 private fun PairingForm(repo: PocketRepository) {
     var code by remember { mutableStateOf("") }
-    Text("CONNECT A COMPUTER", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    Text(stringResource(Res.string.connect_computer_header).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
     Spacer(Modifier.height(16.dp))
     CodeField(code, big = true) { v -> code = v; if (v.length == 6) repo.pairWithCode(v) }
     Spacer(Modifier.height(18.dp))
-    PrimaryButton("Connect", enabled = code.length == 6, modifier = Modifier.fillMaxWidth()) { repo.pairWithCode(code) }
+    PrimaryButton(stringResource(Res.string.connect), enabled = code.length == 6, modifier = Modifier.fillMaxWidth()) { repo.pairWithCode(code) }
     Spacer(Modifier.height(14.dp))
     PairHint()
     Spacer(Modifier.height(12.dp))
@@ -114,7 +132,7 @@ private fun PairingForm(repo: PocketRepository) {
     if (repo.pairedList.isNotEmpty()) {
         Spacer(Modifier.height(8.dp))
         Text(
-            "Back", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+            stringResource(Res.string.action_back), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { repo.cancelAddDevice() }.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
@@ -122,7 +140,7 @@ private fun PairingForm(repo: PocketRepository) {
 
 @Composable
 private fun DevicePicker(repo: PocketRepository) {
-    Text("CHOOSE A COMPUTER", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    Text(stringResource(Res.string.choose_computer).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
     Spacer(Modifier.height(13.dp))
     repo.pairedList.forEach { d ->
         Row(
@@ -142,7 +160,7 @@ private fun DevicePicker(repo: PocketRepository) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
-        Text("Add computer", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -189,9 +207,9 @@ private fun CodeField(code: String, big: Boolean = false, onCodeChange: (String)
 private fun PairHint() {
     Text(
         buildAnnotatedString {
-            append("Run ")
+            append(stringResource(Res.string.run_code_prefix) + " ")
             withStyle(SpanStyle(fontFamily = Dk.mono, fontSize = 12.sp, background = Tok.surface, color = Tok.tx2)) { append(" cc-pocket pair ") }
-            append(" on the other computer to get a code.")
+            append(" " + stringResource(Res.string.run_code_suffix))
         },
         color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 19.sp, textAlign = TextAlign.Center,
     )
@@ -250,9 +268,9 @@ fun AddComputerModal(repo: PocketRepository, onClose: () -> Unit) {
                 .border(1.dp, Tok.hair, RoundedCornerShape(16.dp)).clickable(interactionSource = card, indication = null) {}.padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Add a computer", color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth())
+            Text(stringResource(Res.string.add_device), color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth())
             Text(
-                "Pair another computer — your current session stays connected.",
+                stringResource(Res.string.add_computer_sub),
                 color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().padding(top = 5.dp, bottom = 20.dp),
             )
             CodeField(code) { v -> code = v; errored = false; if (v.length == 6) submit() }
@@ -261,15 +279,15 @@ fun AddComputerModal(repo: PocketRepository, onClose: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Cancel", color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+                    stringResource(Res.string.cancel), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).clickable { onClose() }.padding(vertical = 11.dp),
                 )
-                PrimaryButton(if (busy) "Pairing…" else "Connect", enabled = code.length == 6 && !busy, modifier = Modifier.weight(1f)) { submit() }
+                PrimaryButton(stringResource(if (busy) Res.string.status_pairing else Res.string.connect), enabled = code.length == 6 && !busy, modifier = Modifier.weight(1f)) { submit() }
             }
             Spacer(Modifier.height(12.dp))
             when {
-                busy -> StatusLine("connecting…", Tok.tx2, spinner = true)
-                errored -> StatusLine("invalid or expired code", Tok.danger)
+                busy -> StatusLine(stringResource(Res.string.status_connecting), Tok.tx2, spinner = true)
+                errored -> StatusLine(stringResource(Res.string.pair_code_invalid), Tok.danger)
                 else -> StatusLine(repo.status.value.resolve(), Tok.muted)
             }
         }

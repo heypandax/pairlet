@@ -42,6 +42,29 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.bridge_adapter
+import dev.ccpocket.app.resources.bridge_adapter_log
+import dev.ccpocket.app.resources.bridge_configured
+import dev.ccpocket.app.resources.bridge_edit
+import dev.ccpocket.app.resources.bridge_exited
+import dev.ccpocket.app.resources.bridge_intro
+import dev.ccpocket.app.resources.bridge_last_error
+import dev.ccpocket.app.resources.bridge_live_count
+import dev.ccpocket.app.resources.bridge_merge_lost
+import dev.ccpocket.app.resources.bridge_new
+import dev.ccpocket.app.resources.bridge_projects
+import dev.ccpocket.app.resources.bridge_runner_restart
+import dev.ccpocket.app.resources.bridge_runner_start
+import dev.ccpocket.app.resources.bridge_runner_stop
+import dev.ccpocket.app.resources.bridge_runner_unmanaged
+import dev.ccpocket.app.resources.bridge_tier_asks
+import dev.ccpocket.app.resources.bridge_tier_silent
+import dev.ccpocket.app.resources.bridge_waiting_adapter
+import dev.ccpocket.app.resources.bridges_empty
+import dev.ccpocket.app.resources.bridges_stale
+import dev.ccpocket.app.resources.bridges_title
+import dev.ccpocket.app.resources.share_revoke
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.BridgeInfo
@@ -49,6 +72,7 @@ import dev.ccpocket.protocol.BridgeRunnerSpec
 import dev.ccpocket.protocol.RUNNER_RESTART
 import dev.ccpocket.protocol.RUNNER_START
 import dev.ccpocket.protocol.RUNNER_STOP
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * The owner's headless-bridge manager (issue #91 follow-up).
@@ -69,17 +93,16 @@ fun BridgesPane(model: DesktopModel) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
             Text(
-                "Bridges", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
+                stringResource(Res.string.bridges_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.width(10.dp))
             if (model.bridgeBusy) CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 2.dp)
             Spacer(Modifier.weight(1f))
-            if (!creating && model.bridgesLoaded) PillButton("New bridge", accent = true) { creating = true }
+            if (!creating && model.bridgesLoaded) PillButton(stringResource(Res.string.bridge_new), accent = true) { creating = true }
         }
         Text(
-            "IM bots that can drive this machine. They only ever open sessions in the projects you pick, " +
-                "and they can never approve their own permission prompts \u2014 those come to your phone.",
+            stringResource(Res.string.bridge_intro),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 16.sp,
             modifier = Modifier.padding(bottom = 12.dp),
         )
@@ -99,8 +122,7 @@ fun BridgesPane(model: DesktopModel) {
 
         model.bridgeMergeLost?.let { lost ->
             Text(
-                "This daemon is too old for partial edits \u2014 it CLEARED these values instead of keeping them: " +
-                    lost.joinToString(", ") + ". Update the daemon, then edit again and re-enter them.",
+                stringResource(Res.string.bridge_merge_lost, lost.joinToString(", ")),
                 color = Tok.danger, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
                     .background(Tok.danger.copy(alpha = 0.10f)).padding(10.dp),
@@ -122,12 +144,12 @@ fun BridgesPane(model: DesktopModel) {
                 },
             )
             model.bridgesStale -> Text(
-                "This daemon is too old to manage bridges \u2014 update it, then reopen Settings.",
+                stringResource(Res.string.bridges_stale),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
             )
             !model.bridgesLoaded -> CircularProgressIndicator(Modifier.size(16.dp), color = Tok.accent, strokeWidth = 2.dp)
             model.bridges.isEmpty() -> Text(
-                "No bridges yet.",
+                stringResource(Res.string.bridges_empty),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
             )
             // the pane container scrolls; a second unbounded scrollable here would crash at measure
@@ -156,30 +178,30 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
             TierPill(b.tier)
             if (b.pendingTicket) {
                 Spacer(Modifier.width(6.dp))
-                Tag("waiting for the adapter", Tok.muted)
+                Tag(stringResource(Res.string.bridge_waiting_adapter), Tok.muted)
             }
             Spacer(Modifier.weight(1f))
             if (b.activeSessions > 0) {
                 Text(
-                    "${b.activeSessions}/${b.maxSessions} live", color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                    stringResource(Res.string.bridge_live_count, b.activeSessions, b.maxSessions), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
                 )
                 Spacer(Modifier.width(10.dp))
             }
             b.runner?.let { r ->
-                PillButton(if (r.running) "Stop" else "Start") {
+                PillButton(stringResource(if (r.running) Res.string.bridge_runner_stop else Res.string.bridge_runner_start)) {
                     model.controlBridgeRunner(b.name, if (r.running) RUNNER_STOP else RUNNER_START)
                 }
                 Spacer(Modifier.width(6.dp))
                 if (r.running) {
-                    PillButton("Restart") { model.controlBridgeRunner(b.name, RUNNER_RESTART) }
+                    PillButton(stringResource(Res.string.bridge_runner_restart)) { model.controlBridgeRunner(b.name, RUNNER_RESTART) }
                     Spacer(Modifier.width(6.dp))
                 }
                 // the edit path exists chiefly for the /bind bootstrap: the bot echoes your open_id in the
                 // chat, and THIS is where it goes (the daemon restarts the adapter with the new config)
-                PillButton("Edit") { editing = true }
+                PillButton(stringResource(Res.string.bridge_edit)) { editing = true }
                 Spacer(Modifier.width(6.dp))
             }
-            PillButton("Revoke", danger = true) { model.revokeBridge(b.name) }
+            PillButton(stringResource(Res.string.share_revoke), danger = true) { model.revokeBridge(b.name) }
         }
         if (editing) {
             Spacer(Modifier.height(10.dp))
@@ -225,18 +247,18 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
             Spacer(Modifier.height(10.dp))
             SelectionContainer {
                 Column {
-                    Detail("Projects", b.workdirs.joinToString("\n"))
+                    Detail(stringResource(Res.string.bridge_projects), b.workdirs.joinToString("\n"))
                     val r = b.runner
                     if (r == null) {
-                        Detail("Adapter", "You run it yourself — this bridge has no managed process.")
+                        Detail(stringResource(Res.string.bridge_adapter), stringResource(Res.string.bridge_runner_unmanaged))
                     } else {
-                        Detail("Adapter", "${r.scriptPath}${r.pid?.let { "   (pid $it)" } ?: ""}")
-                        if (r.envKeys.isNotEmpty()) Detail("Configured", r.envKeys.joinToString(", "))
-                        r.exitCode?.takeIf { !r.running }?.let { Detail("Exited", "code $it") }
-                        r.lastError?.let { Detail("Last error", it) }
+                        Detail(stringResource(Res.string.bridge_adapter), "${r.scriptPath}${r.pid?.let { "   (pid $it)" } ?: ""}")
+                        if (r.envKeys.isNotEmpty()) Detail(stringResource(Res.string.bridge_configured), r.envKeys.joinToString(", "))
+                        r.exitCode?.takeIf { !r.running }?.let { Detail(stringResource(Res.string.bridge_exited), "code $it") }
+                        r.lastError?.let { Detail(stringResource(Res.string.bridge_last_error), it) }
                         if (r.logTail.isNotEmpty()) {
                             Text(
-                                "ADAPTER LOG", color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp,
+                                stringResource(Res.string.bridge_adapter_log).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 9.sp,
                                 fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp,
                                 modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                             )
@@ -262,8 +284,8 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
 /** What the bot may do WITHOUT asking — the security-relevant fact, so it gets a colour, not a footnote. */
 @Composable
 private fun TierPill(tier: AccessTier) = when (tier) {
-    AccessTier.REVIEW, AccessTier.UNKNOWN -> Tag("asks before anything risky", Tok.ok)
-    AccessTier.COLLABORATE, AccessTier.AUTONOMOUS -> Tag("edits files silently", Tok.warn)
+    AccessTier.REVIEW, AccessTier.UNKNOWN -> Tag(stringResource(Res.string.bridge_tier_asks), Tok.ok)
+    AccessTier.COLLABORATE, AccessTier.AUTONOMOUS -> Tag(stringResource(Res.string.bridge_tier_silent), Tok.warn)
 }
 
 @Composable
