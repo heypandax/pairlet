@@ -8,6 +8,10 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.unit.dp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.bridge_runner_stop
+import dev.ccpocket.app.resources.share_revoke
+import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.BridgeInfo
 import dev.ccpocket.protocol.BridgeRunnerState
@@ -36,12 +40,12 @@ class BridgesPaneUiTest {
         setContent { PocketTheme { Box(Modifier.width(475.dp)) { BridgesPane(model) } } }
         waitForIdle()
 
-        val revokeBounds = onNodeWithText("Revoke").getUnclippedBoundsInRoot()
+        val revokeBounds = onNodeWithText(str(Res.string.share_revoke)).getUnclippedBoundsInRoot()
         assertTrue(
             revokeBounds.right <= 475.dp,
             "Revoke must be fully inside the pane, but its right edge was ${revokeBounds.right}",
         )
-        val stopBounds = onNodeWithText("Stop").getUnclippedBoundsInRoot()
+        val stopBounds = onNodeWithText(str(Res.string.bridge_runner_stop)).getUnclippedBoundsInRoot()
         assertTrue(
             stopBounds.left <= 20.dp,
             "The second-row actions must start at the pane's left padding, but Stop began at ${stopBounds.left}",
