@@ -87,7 +87,7 @@ internal fun SessionRow(repo: PocketRepository, dir: String, s: SessionSummary, 
             ).padding(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             AgentBadge(s.agent, gap = 8.dp) // shows only for Codex (so resume opens the right backend)
             if (s.live || s.busy) { // running, or idle with background work still going
                 Spacer(Modifier.width(8.dp))
