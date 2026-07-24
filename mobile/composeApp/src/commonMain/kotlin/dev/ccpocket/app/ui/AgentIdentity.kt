@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
@@ -106,6 +107,9 @@ fun AgentTag(agent: AgentKind, small: Boolean = true) {
     val c = agentColor(agent)
     Row(
         Modifier
+            // hard ceiling so the chip can never crowd a weighted title out of a list row (#179): the longest
+            // name ("OpenCode") fits comfortably under this cap, so it only bites an extreme-narrow row.
+            .widthIn(max = if (small) 96.dp else 116.dp)
             .background(c.agentTintFill(), RoundedCornerShape(999.dp))
             .border(1.dp, c.agentTintBorder(), RoundedCornerShape(999.dp))
             .padding(horizontal = if (small) 7.dp else 9.dp, vertical = if (small) 2.dp else 3.dp),
@@ -113,8 +117,9 @@ fun AgentTag(agent: AgentKind, small: Boolean = true) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AgentGlyph(agent, c, if (small) 12 else 14)
-        // trim the text's asymmetric ascent/descent so the glyph optically centers against the letters
-        Text(agentName(agent), color = c, fontSize = if (small) 10.5.sp else 12.sp, fontWeight = FontWeight.SemiBold, style = TightCenter)
+        // trim the text's asymmetric ascent/descent so the glyph optically centers against the letters;
+        // single-line + ellipsis so a squeezed chip degrades gracefully instead of wrapping the name
+        Text(agentName(agent), color = c, fontSize = if (small) 10.5.sp else 12.sp, fontWeight = FontWeight.SemiBold, style = TightCenter, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

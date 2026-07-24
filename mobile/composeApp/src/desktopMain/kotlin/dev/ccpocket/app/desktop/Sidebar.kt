@@ -856,7 +856,8 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
             if (!hovered) {
                 s.model?.let { m ->
                     modelAlias(m).takeIf { it.isNotBlank() }?.let {
-                        Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1)
+                        // bounded like the pinned row's machine name so a long alias can't steal the title's room (#179)
+                        Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp))
                     }
                 }
             }

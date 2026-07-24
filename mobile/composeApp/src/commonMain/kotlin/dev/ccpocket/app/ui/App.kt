@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
@@ -1390,8 +1391,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // without leaving the chat (the surrounding column still opens session info)
                         repo.paired.value?.let { d ->
                             Text(
-                                d.displayName(), color = Tok.tx2, style = metaStyle, maxLines = 1,
+                                d.displayName(), color = Tok.tx2, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier
+                                    // bound the machine name so it yields the line to the project folder (#179)
+                                    .widthIn(max = 88.dp)
                                     .clip(RoundedCornerShape(4.dp))
                                     .clickable { showSwitcher = true }
                                     .padding(horizontal = 2.dp),
@@ -1410,7 +1413,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         // init names the CLI/account default (issue #96)
                         val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
                         Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                        Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1)
+                        Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 88.dp))
                         AgentBadge(repo.sessionAgent.value) // non-Claude agents get their tag; Claude stays quiet
                         // external trigger source (issue #91): a bridge-opened session says so — the owner
                         // should know an IM bot, not a person, is driving this conversation

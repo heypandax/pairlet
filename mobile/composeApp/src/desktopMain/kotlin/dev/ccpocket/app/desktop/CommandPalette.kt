@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -250,6 +251,8 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
                 highlight(item.label, query),
                 color = if (item.accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                // cap the (unweighted) label so a long title can't swallow the whole row and hide the weighted detail (#179)
+                modifier = Modifier.widthIn(max = 280.dp),
             )
             if (item.agent != null && item.agent != AgentKind.CLAUDE) AgentTag(item.agent)
             Text(
