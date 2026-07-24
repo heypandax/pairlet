@@ -251,6 +251,8 @@ class ShowcaseRender {
                         UsageModel("gpt-5-codex", 3_100_000, AgentKind.CODEX),
                     ),
                     tokensToday = 1_840_000, requestsToday = 214, costUsdToday = 4.20,
+                    // 30d window sub-metrics (issue #174): the cards follow the window, labeled "· 30d"
+                    requestsWindow = 5_128, cacheHitPctWindow = 82, costUsdWindow = 128.40,
                 )
                 usageLoading.value = false
             },
