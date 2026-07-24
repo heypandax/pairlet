@@ -2,9 +2,29 @@ package dev.ccpocket.daemon.opencode
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class OpenCodeTranscriptScannerTest {
+    // issue #172: OpenCode's task tool spawns sub-agent runs as CHILD sessions (parent_id → the
+    // enclosing session). Those are internal sub-runs, not resumable top-level conversations, and
+    // must be filtered from the phone's session list. Detection is by OpenCode's own parent/child
+    // column ONLY — never by title text.
+
+    @Test
+    fun sub_agent_child_session_is_filtered_by_parent_id() {
+        assertTrue(OpenCodeTranscriptScanner.isSubAgentSession("ses_7f3aParentEnclosing"))
+    }
+
+    @Test
+    fun top_level_session_without_parent_is_kept() {
+        assertFalse(OpenCodeTranscriptScanner.isSubAgentSession(null))
+        // a blank column (defensive: OpenCode writes NULL, but treat empty as "no parent" too)
+        assertFalse(OpenCodeTranscriptScanner.isSubAgentSession(""))
+        assertFalse(OpenCodeTranscriptScanner.isSubAgentSession("   "))
+    }
+
     @Test
     fun parses_session_model_json_to_provider_slash_model() {
         assertEquals(
