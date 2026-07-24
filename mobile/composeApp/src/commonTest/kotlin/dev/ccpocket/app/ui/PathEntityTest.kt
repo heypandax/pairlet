@@ -82,4 +82,16 @@ class PathEntityTest {
         assertEquals(1, e.size)
         assertEquals(EntityKind.URL, e.single().kind)
     }
+
+    @Test
+    fun url_ends_at_the_markdown_link_paren_and_the_bare_token_stays_prose() {
+        // issue #154 through the recognizer both regexes share: the entity must cover exactly the URL, and
+        // the "（Lp9noe）" beside it — no scheme, no slash — must not come along as clickable content.
+        val text = "Task 1 · Base 执行副本 — [执行副本](https://hellotalk.feishu.cn/base/Lp9noe)（Lp9noe）"
+        val e = kinds(text)
+        assertEquals(1, e.size)
+        assertEquals(EntityKind.URL, e.single().kind)
+        assertEquals("https://hellotalk.feishu.cn/base/Lp9noe", e.single().display)
+        assertEquals("https://hellotalk.feishu.cn/base/Lp9noe", e.single().copyValue) // what share copies
+    }
 }
