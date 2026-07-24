@@ -1,13 +1,19 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
@@ -72,6 +78,40 @@ class MobileNewSessionUiTest {
         repo.openSession(dir, resumeId = "sess-resume")
         waitForIdle()
         assertFalse(repo.autoFocusComposer.value, "resuming an existing session must not pop the keyboard")
+    }
+
+    /**
+     * #178: the three-up agent picker's longest name ("OpenCode") must never wrap to "OpenCod / e" nor
+     * ellipsize — [AutoSizeSingleLineText] shrinks the font to fit its column. Three width ceilings pin
+     * the contract: a too-narrow one shrinks the name below the base size yet keeps it one line and
+     * overflow-free; a roomy one leaves the base 15.5sp untouched; a hopeless sliver bottoms out at the
+     * floor and still stays a single line (never wraps). Floors here are chosen to make the fit
+     * deterministic regardless of the headless JVM's font metrics; the real call sites floor at 9sp.
+     */
+    @Test
+    fun openCodeNameAutoSizesToOneLine() = runComposeUiTest {
+        var narrow: TextLayoutResult? = null
+        var roomy: TextLayoutResult? = null
+        var floored: TextLayoutResult? = null
+        setContent {
+            PocketTheme {
+                Column {
+                    AutoSizeSingleLineText("OpenCode", 15.5.sp, 6.sp, modifier = Modifier.width(44.dp), onTextLayout = { narrow = it })
+                    AutoSizeSingleLineText("OpenCode", 15.5.sp, 9.sp, modifier = Modifier.width(240.dp), onTextLayout = { roomy = it })
+                    AutoSizeSingleLineText("OpenCode", 15.5.sp, 11.sp, modifier = Modifier.width(12.dp), onTextLayout = { floored = it })
+                }
+            }
+        }
+        waitForIdle()
+        val n = assertNotNull(narrow, "narrow card must have laid out")
+        assertEquals(1, n.lineCount, "OpenCode must stay a single line, never wrap to \"OpenCod / e\"")
+        assertFalse(n.hasVisualOverflow, "the font must shrink until OpenCode fully fits — no clip, no ellipsis")
+        assertTrue(n.layoutInput.style.fontSize.value < 15.5f, "a too-narrow card must shrink the name below the base size")
+        val r = assertNotNull(roomy, "roomy card must have laid out")
+        assertEquals(15.5f, r.layoutInput.style.fontSize.value, "a card with room keeps the base 15.5sp")
+        val f = assertNotNull(floored, "floored card must have laid out")
+        assertEquals(11f, f.layoutInput.style.fontSize.value, "shrinking stops at the readable floor, never below")
+        assertEquals(1, f.lineCount, "even past the floor it stays one line — softWrap is off")
     }
 
     @Test

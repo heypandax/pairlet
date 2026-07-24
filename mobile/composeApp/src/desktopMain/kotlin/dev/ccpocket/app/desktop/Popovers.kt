@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
+import dev.ccpocket.app.ui.AutoSizeSingleLineText
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
 import dev.ccpocket.app.ui.EFFORT_OPTIONS
@@ -440,7 +441,11 @@ internal fun AgentCard(agent: AgentKind, selected: Boolean, modifier: Modifier, 
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         AgentGlyph(agent, size = 17)
-        Text(agentName(agent), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        AutoSizeSingleLineText(
+            agentName(agent), fontSize = 13.sp, minFontSize = 9.sp,
+            color = if (selected) Tok.tx else Tok.tx2, fontWeight = FontWeight.SemiBold,
+            style = TextStyle(fontFamily = Dk.ui),
+        )
     }
 }
 

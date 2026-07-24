@@ -342,7 +342,10 @@ private fun AgentOption(agent: AgentKind, selected: Boolean, modifier: Modifier,
                     .border(1.dp, if (selected) c.agentTintBorder() else Tok.hair, RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center,
             ) { AgentGlyph(agent, c, 17) }
-            Text(agentName(agent), color = Tok.tx, fontSize = 15.5.sp, fontWeight = FontWeight.Bold, style = TightCenter, modifier = Modifier.weight(1f))
+            AutoSizeSingleLineText(
+                agentName(agent), fontSize = 15.5.sp, minFontSize = 9.sp, modifier = Modifier.weight(1f),
+                color = Tok.tx, fontWeight = FontWeight.Bold, style = TightCenter,
+            )
             if (selected) Box(Modifier.size(18.dp).clip(CircleShape).background(c), contentAlignment = Alignment.Center) {
                 Icon(Icons.Rounded.Check, null, tint = Tok.base, modifier = Modifier.size(13.dp))
             }
