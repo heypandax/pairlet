@@ -419,10 +419,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
 
-    /** Persisted default model for NEW Claude sessions (null = the CLI's own default). Applied only when the
-     *  new session's agent is Claude — the stored value is a Claude alias/id and would be meaningless to a
-     *  Codex launch. Resumed sessions keep their own model. Stored as "" for the null/default choice. */
+    /** Persisted default model for NEW Claude sessions (null = the CLI's own default). Kept on the original
+     *  storage key so existing installs retain their choice when per-agent defaults are introduced. */
     val defaultModel = mutableStateOf(SecureStore.getString(K_DEFAULT_MODEL)?.takeIf { it.isNotEmpty() })
+
+    /** Backend-scoped defaults: a Claude alias must never leak into Codex/OpenCode, and switching the default
+     *  agent in Settings must not erase the choice the user made for another backend. */
+    private val defaultCodexModel = mutableStateOf(SecureStore.getString(K_DEFAULT_CODEX_MODEL)?.takeIf { it.isNotEmpty() })
+    private val defaultOpenCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_OPENCODE_MODEL)?.takeIf { it.isNotEmpty() })
+
+    fun defaultModelFor(agent: AgentKind): String? = when (agent) {
+        AgentKind.CLAUDE -> defaultModel.value
+        AgentKind.CODEX -> defaultCodexModel.value
+        AgentKind.OPENCODE -> defaultOpenCodeModel.value
+    }
 
     /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
      *  the model-derived / daemon-reported window. Exists because the CLI never reports a CUSTOM model's real
@@ -1254,12 +1264,30 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
     }
 
-    /** Settings: persist the default model for new Claude sessions (null = the CLI's own default). */
+    /** Mobile Settings' legacy Claude-only entry point. */
     fun setDefaultModel(id: String?) {
-        val v = id?.takeIf { it.isNotEmpty() }
-        if (v == defaultModel.value) return
-        defaultModel.value = v
-        SecureStore.putString(K_DEFAULT_MODEL, v ?: "")
+        setDefaultModelFor(AgentKind.CLAUDE, id)
+    }
+
+    /** Settings: persist a backend-scoped default model (null = that CLI's own default). */
+    fun setDefaultModelFor(agent: AgentKind, id: String?) {
+        val v = id?.trim()?.takeIf { it.isNotEmpty() }
+        if (v != null && !isModelCompatibleWithAgent(agent, v)) return
+        val state = when (agent) {
+            AgentKind.CLAUDE -> defaultModel
+            AgentKind.CODEX -> defaultCodexModel
+            AgentKind.OPENCODE -> defaultOpenCodeModel
+        }
+        if (v == state.value) return
+        state.value = v
+        SecureStore.putString(
+            when (agent) {
+                AgentKind.CLAUDE -> K_DEFAULT_MODEL
+                AgentKind.CODEX -> K_DEFAULT_CODEX_MODEL
+                AgentKind.OPENCODE -> K_DEFAULT_OPENCODE_MODEL
+            },
+            v ?: "",
+        )
     }
 
     /** Settings: persist the context-window override (tokens; null or ≤0 = follow the derived window). Sits ahead
@@ -1685,6 +1713,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultMode.value = from.defaultMode.value
         defaultEffort.value = from.defaultEffort.value
         defaultModel.value = from.defaultModel.value
+        defaultCodexModel.value = from.defaultCodexModel.value
+        defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
         contextWindowOverride.value = from.contextWindowOverride.value
         contextWindowOverrides.clear(); contextWindowOverrides.putAll(from.contextWindowOverrides) // #169: per-model table travels with the rest of Settings
         defaultAgent.value = from.defaultAgent.value
@@ -2952,13 +2982,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val openMode = startMode
         val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
-        // new Claude sessions seed from the persisted default model; resumed keep their own, and a Codex launch
-        // never inherits the (Claude-shaped) default id — it would be a meaningless --model to the Codex backend.
-        val openModel = compatibleModelForAgent(openAgent, saved?.model) ?: when (openAgent) {
-            // New OpenCode sessions let the daemon choose from OpenCode config / `opencode models`.
-            AgentKind.OPENCODE -> null
-            else -> defaultModel.value?.takeIf { openAgent == AgentKind.CLAUDE }
-        }
+        // Each backend seeds from its own persisted default. The compatibility guard is the final defence against
+        // an old/corrupt preference crossing agent families; null means that CLI chooses its configured default.
+        val openModel = compatibleModelForAgent(openAgent, saved?.model)
+            ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
         mode.value = openMode; allowRules.clear()
         model.value = openModel; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
@@ -3914,7 +3941,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
-        const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: model id for new Claude sessions ("" = CLI default)
+        const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: Claude model id for new sessions ("" = CLI default)
+        const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
+        const val K_DEFAULT_OPENCODE_MODEL = "default_session_model_opencode" // SecureStore: OpenCode provider/model id for new sessions
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)

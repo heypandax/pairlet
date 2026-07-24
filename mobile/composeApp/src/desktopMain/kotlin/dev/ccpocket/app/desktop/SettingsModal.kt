@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
+import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
 import kotlinx.coroutines.delay
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.agentColor
@@ -172,11 +173,25 @@ private fun GeneralPane(model: DesktopModel) {
                 AgentCardRow(AgentKind.OPENCODE, model.defaultAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.OPENCODE }
             }
         }
-        Group("Default model", "Which model new Claude sessions start on (Codex sessions keep their own).") {
-            // null = follow the CLI's own default; the rest are Claude aliases shared with the ⋯ picker
-            PrefRow("Default", "cli default", selected = model.defaultModel == null) { model.defaultModel = null }
-            CLAUDE_MODEL_OPTIONS.forEach { (label, alias) ->
-                PrefRow(label, alias, selected = model.defaultModel == alias) { model.defaultModel = alias }
+        val defaultAgent = model.defaultAgent
+        val defaultModel = model.defaultModelFor(defaultAgent)
+        LaunchedEffect(defaultAgent) { model.fetchModels(defaultAgent) }
+        Group("Default model", "Which model new ${agentName(defaultAgent)} sessions start on.") {
+            PrefRow("Default", "cli default", selected = defaultModel == null) { model.setDefaultModelFor(defaultAgent, null) }
+            val discovered = model.modelsForAgent(defaultAgent).filter { it.isNotBlank() }
+            val options = when (defaultAgent) {
+                AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS
+                AgentKind.CODEX -> (listOfNotNull(defaultModel) + discovered.ifEmpty { CODEX_MODEL_OPTIONS })
+                    .distinct().map { codexModelLabel(it) to it }
+                // OpenCode's provider/model catalog is installation-specific, so only daemon-reported ids
+                // are valid choices. The selected value leads in case a later catalog no longer lists it.
+                AgentKind.OPENCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+            }
+            options.forEach { (label, id) ->
+                PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
+            }
+            if (defaultAgent == AgentKind.OPENCODE && options.isEmpty()) {
+                Text("OpenCode will use the default from its local configuration.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
             }
         }
         Group("Context window", "The usage statusline's 100% mark. Set this when a custom model's real window isn't 200K — the CLI can't report it.") {
@@ -215,6 +230,15 @@ private fun GeneralPane(model: DesktopModel) {
                 else -> ToggleRow("Notify my phone when a turn finishes", on) { model.setPhonePush(!on) }
             }
         }
+    }
+}
+
+private fun codexModelLabel(id: String): String = id.split('-').joinToString(" ") { part ->
+    when (part.lowercase()) {
+        "gpt" -> "GPT"
+        "codex" -> "Codex"
+        "mini" -> "Mini"
+        else -> part
     }
 }
 

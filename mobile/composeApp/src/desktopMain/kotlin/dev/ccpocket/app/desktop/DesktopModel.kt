@@ -544,8 +544,9 @@ interface DesktopModel {
     val updateReleasesUrl: String get() = DesktopUpdater.RELEASES_URL
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
-    // default model new Claude sessions start under (null = the CLI's own default). Codex sessions ignore it.
-    var defaultModel: String?
+    // Backend-scoped model defaults for new sessions; null follows that CLI's own configured default.
+    fun defaultModelFor(agent: AgentKind): String?
+    fun setDefaultModelFor(agent: AgentKind, model: String?)
     // context-window override (tokens) for the usage statusline's 100% mark; null = follow the derived window (#60)
     var contextWindowOverride: Long?
     var terminalApp: TerminalApp // which terminal the ">_" chat-header button opens (issue #44)
