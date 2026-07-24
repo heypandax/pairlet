@@ -19,7 +19,17 @@ object OpenCodeTranscriptScanner {
     const val LIVE_WINDOW_MS = 20_000L
     private const val PREVIEW_CAP = 200 // 副标题预览截断，够一行显示且不给列表帧塞满
 
-    /** All OpenCode sessions whose directory matches [workdir], newest-first. */
+    /**
+     * True when this OpenCode session is a task-tool sub-agent run rather than a resumable top-level
+     * conversation (issue #172). OpenCode's `task` tool spawns children via `Session.create({ parentID })`,
+     * so the row's `parent_id` column points at the enclosing session (OpenCode even indexes it as
+     * `session_parent_idx`). Identity is taken from that column ONLY — never from title text, which is
+     * brittle and language-dependent. A null/blank parent = top-level, kept in the list.
+     */
+    internal fun isSubAgentSession(parentId: String?): Boolean = !parentId.isNullOrBlank()
+
+    /** All OpenCode top-level sessions whose directory matches [workdir], newest-first.
+     *  Task sub-agent runs (parent_id set) are excluded — see [isSubAgentSession]. */
     fun scan(workdir: String): List<SessionSummary> {
         return runCatching {
             val conn = OpenCodePaths.connectReadOnly() ?: return emptyList()
@@ -30,25 +40,24 @@ object OpenCodeTranscriptScanner {
     /**
      * 用 [conn] 查 [workdir] 下的会话；拆出来让测试能喂 fixture db。
      *
-     * OpenCode 的 task 工具 spawn 的子 agent 是同一 session 表里的 child 行（父列指向发起会话），顶层
-     * 列表不该显示它们（issue #172）。父列拼写在不同 OpenCode 版本间不一（parentID / parent_id），故
-     * 运行时探测：探到就加「父列 IS NULL」，探不到就不过滤——绝不误伤正常会话（fail-open）。
+     * OpenCode 的 task 工具 spawn 的子 agent 是同一 session 表里的 child 行——`parent_id` 列指向发起
+     * 会话（sst/opencode `session/sql.ts` 的既有列，还带 `session_parent_idx` 索引），顶层列表不该
+     * 显示它们（issue #172）。判定走 [isSubAgentSession] 单一事实源，绝不用标题文本启发式。
      */
     internal fun scanConn(conn: Connection, workdir: String): List<SessionSummary> {
-        val parentCol = sessionParentColumn(conn) // 按连接探一次即可
-        val parentFilter = parentCol?.let { "AND s.\"$it\" IS NULL " } ?: ""
         val stmt = conn.prepareStatement(
-            "SELECT s.id, s.title, s.directory, s.model, s.cost, " +
+            "SELECT s.id, s.parent_id, s.title, s.directory, s.model, s.cost, " +
             "s.tokens_input, s.tokens_output, s.time_created, s.time_updated, " +
             "COUNT(m.id) AS msg_count " +
             "FROM session s LEFT JOIN message m ON m.session_id = s.id " +
-            "WHERE s.time_archived IS NULL " + parentFilter +
+            "WHERE s.time_archived IS NULL " +
             "GROUP BY s.id ORDER BY s.time_updated DESC LIMIT 200"
         )
         val rs = stmt.executeQuery()
         val staged = mutableListOf<SessionSummary>()
         while (rs.next()) {
             val sid = rs.getString("id") ?: continue
+            if (isSubAgentSession(rs.getString("parent_id"))) continue
             val directory = rs.getString("directory") ?: ""
             if (workdir.isNotBlank() && directory.isNotBlank()) {
                 if (ProjectPaths.normCwd(directory) != ProjectPaths.normCwd(workdir)) continue
@@ -71,19 +80,6 @@ object OpenCodeTranscriptScanner {
         rs.close()
         // 命中 workdir 的会话收集完再补首条用户消息作副标题——只对留下的会话跑，不给 200 行都做子查询
         return staged.map { it.copy(firstPrompt = firstUserPrompt(conn, it.sessionId)) }
-    }
-
-    /** session 表的父列名（parentID / parent_id），两者都没有则返回 null（不过滤子会话）。 */
-    private fun sessionParentColumn(conn: Connection): String? {
-        val cols = HashSet<String>()
-        conn.prepareStatement("PRAGMA table_info(session)").executeQuery().use { rs ->
-            while (rs.next()) rs.getString("name")?.let { cols.add(it) }
-        }
-        return when {
-            "parentID" in cols -> "parentID"
-            "parent_id" in cols -> "parent_id"
-            else -> null
-        }
     }
 
     /** 该会话第一条用户消息的文本预览（issue #173）；取不到返回空串（副标题行 isNotBlank 守卫自然隐藏）。 */
@@ -139,20 +135,26 @@ object OpenCodeTranscriptScanner {
         }.getOrNull()
     }
 
-    /** Every directory with OpenCode sessions → its newest session mtime. */
+    /** Every directory with a TOP-LEVEL OpenCode session → its newest session mtime.
+     *  Rows are read un-grouped so the same [isSubAgentSession] rule as [scan] drops task sub-agent
+     *  runs (issue #172) before aggregating — a directory that only ever hosted a sub-run must not
+     *  masquerade as its own project, nor bump a real project's newest mtime. */
     fun cwdsByNewest(): Map<String, Long> {
         return runCatching {
             val conn = OpenCodePaths.connectReadOnly() ?: return emptyMap()
             conn.use {
                 val stmt = it.prepareStatement(
-                    "SELECT directory, MAX(time_updated) as mtime FROM session WHERE time_archived IS NULL AND directory IS NOT NULL GROUP BY directory"
+                    "SELECT directory, parent_id, time_updated FROM session WHERE time_archived IS NULL AND directory IS NOT NULL"
                 )
                 val rs = stmt.executeQuery()
                 val out = HashMap<String, Long>()
                 while (rs.next()) {
+                    if (isSubAgentSession(rs.getString("parent_id"))) continue
                     val dir = rs.getString("directory") ?: continue
-                    val mtime = rs.getLong("mtime")
-                    if (dir.isNotBlank()) out[dir] = mtime
+                    if (dir.isBlank()) continue
+                    val mtime = rs.getLong("time_updated")
+                    val prev = out[dir]
+                    if (prev == null || mtime > prev) out[dir] = mtime
                 }
                 out
             }
