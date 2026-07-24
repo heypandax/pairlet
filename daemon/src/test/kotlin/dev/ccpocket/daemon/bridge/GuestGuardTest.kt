@@ -122,6 +122,19 @@ class GuestGuardTest {
     }
 
     @Test
+    fun a_filesystem_root_anchor_outside_the_share_is_denied() {
+        // the #176 root switcher browses via ListPathEntries(workdir = "<fs root>") — for a guest that
+        // must stay exactly as closed as any other out-of-scope absolute path: a share is always a
+        // subtree, so its machine's filesystem root sits ABOVE it and containment rejects the anchor
+        // (a guest walking "/" or "C:\" would see the whole disk). The roots LIST itself never reaches
+        // a guest either — it rides only "~" replies, which the previous test shows are denied outright.
+        val fsRoot = root.toPath().root.toString() // "/" on Unix, "C:\" on Windows — portable either way
+        deny(guard().vet(ListPathEntries(fsRoot), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        deny(guard().vet(ListPathEntries(fsRoot, "Users"), now = 0), BridgeDenyCode.BAD_WORKDIR)
+        deny(guard().vet(OpenSession(fsRoot), now = 0), BridgeDenyCode.BAD_WORKDIR)
+    }
+
+    @Test
     fun tilde_is_denied_even_when_the_jvm_cwd_sits_inside_the_shared_root() {
         // the narrow hole the hard reject closes: canonical("~") = "<cwd>/~" (tilde is NOT expanded),
         // so a daemon started — against the rules — from inside a shared root would find "~" under

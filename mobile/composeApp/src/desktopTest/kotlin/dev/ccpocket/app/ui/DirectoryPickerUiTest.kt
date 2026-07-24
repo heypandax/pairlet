@@ -76,4 +76,21 @@ class DirectoryPickerUiTest {
         assertNotNull(repo.convoId.value, "start-here must open the conversation")
         assertEquals("~/src", repo.workdir.value, "the session opens at the raw ~-anchored dir (daemon expands it)")
     }
+
+    @Test
+    fun switching_the_filesystem_root_rebases_the_browse_and_start_here() = runComposeUiTest {
+        // #176: the demo "~" reply reports one filesystem root ("/") → the root crumb gains a ▾ switcher.
+        // Picking a root re-anchors the browse there, and "start here" opens the session at that root.
+        val repo = composePicker()
+        onAllNodes(hasText("▾")).onFirst().performClick()   // open the root switcher on the "~" crumb
+        waitForIdle()
+        onAllNodes(hasText("/")).onFirst().performClick()    // switch the anchor to the filesystem root
+        waitForIdle()
+
+        val useHere = runBlocking { getString(Res.string.dir_picker_use_here) }
+        onAllNodes(hasText(useHere)).onFirst().performClick()
+        waitForIdle()
+
+        assertEquals("/", repo.workdir.value, "start-here after a root switch opens the session at that root")
+    }
 }

@@ -727,8 +727,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val viewedFileDiff = mutableStateOf<FileDiff?>(null)      // the loaded line-level diff; ok=false = none/too-old daemon
     val exportWaiting = mutableStateOf(false)                 // an ExportFile awaits the owner's approval/reply (issue #67 v2)
     val pathListing = mutableStateOf<PathEntries?>(null)     // latest @-file completion listing (issue #75); match its subPath before use
-    val browseListing = mutableStateOf<PathEntries?>(null)   // latest home-anchored folder-browse listing (issue #152); match its subPath before use
-    private var lastBrowseSub: String? = null                // subPath of the LATEST browseHomeDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
+    val browseListing = mutableStateOf<PathEntries?>(null)   // latest anchored folder-browse listing (issue #152); match its (workdir, subPath) before use
+    val browseRoots = mutableStateOf<List<String>>(emptyList()) // #176: fs roots latched from the "~" home-anchor reply (owner-only; empty on old daemon / guest → root switcher hidden)
+    private var lastBrowseAnchor: String = BROWSE_HOME       // #176: anchor of the LATEST browseDirs request — a real fs root ("/", "C:\") routes its reply by matching this
+    private var lastBrowseSub: String? = null                // subPath of the LATEST browseDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
@@ -1836,6 +1838,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         "src" -> listOf(PathEntry("main", true), PathEntry("App.kt", false))
                         else -> listOf(PathEntry("Main.kt", false))
                     },
+                    // #176: the "~" home-anchor reply reports the machine's fs roots so the demo shows the
+                    // root switcher (the real daemon sends the actual roots; here a stand-in filesystem root)
+                    roots = if (frame.workdir == BROWSE_HOME) listOf("/") else emptyList(),
                 ),
             )
             is ListSessions -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
@@ -2309,9 +2314,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // workdir is always a real absolute path, so the two listings can't collide on the key. Browser
             // replies additionally pass the latest-request gate: replies can arrive out of order, and a
             // drilled-past level's late reply must not clobber the fresh one (#152 复核, [foldBrowseReply]).
-            is PathEntries -> when (f.workdir) {
-                BROWSE_HOME -> browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
-                workdir.value -> pathListing.value = f
+            // #176: the browser can also anchor at a filesystem root ("/", "C:\") once the switcher picks
+            // one — those replies route by matching [lastBrowseAnchor]. @-completion (workdir.value) is
+            // checked FIRST so a real session's listing is never mistaken for a root browse. The "~" reply
+            // uniquely carries the machine's fs roots (owner-only) — latch them so the switcher survives
+            // switching away from home.
+            is PathEntries -> when {
+                f.workdir == BROWSE_HOME -> {
+                    browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
+                    if (f.roots.isNotEmpty()) browseRoots.value = f.roots
+                }
+                f.workdir == workdir.value -> pathListing.value = f
+                f.workdir == lastBrowseAnchor -> browseListing.value = foldBrowseReply(browseListing.value, f, lastBrowseSub)
             }
             // ── folder-share (issue #115): owner control-plane replies ──
             is ShareCreated -> { lastShareCreated.value = f; sharesRefreshing.value = false }
@@ -3396,17 +3410,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(ListPathEntries(wd, subPath)) }
     }
 
-    /** Ask the daemon for the children under its HOME + [subPath] ('/'-joined, "" = home itself) for the
-     *  "open a project folder" browser (issue #152). Reuses the #75 listing frame anchored at the literal
-     *  "~" — only the daemon knows the remote machine's home, and its NIO resolve accepts '/' on Windows
-     *  too. The reply lands in [browseListing] only while it answers the LATEST request — a stale reply
-     *  from a drilled-past level is dropped at fold time (#152 复核), and the picker additionally keys
-     *  rendering on its own subPath. A guest credential gets a PocketError instead (GuestGuard denies the
-     *  "~" anchor), which the picker never sees — the entry is owner-only client-side and the daemon
-     *  stays the authority. */
-    fun browseHomeDirs(subPath: String) {
+    /** Ask the daemon for the children under [anchor] + [subPath] ('/'-joined, "" = the anchor itself) for
+     *  the "open a project folder" browser (issue #152, #176). [anchor] is the literal "~" (the daemon
+     *  home — only it knows the remote machine's home) or, once the #176 root switcher picks one, a
+     *  filesystem root ("/", "C:\") the daemon reported; its NIO resolve accepts '/'-keyed subPaths on
+     *  Windows too. The reply lands in [browseListing] only while it answers the LATEST request — a stale
+     *  reply from a drilled-past level is dropped at fold time (#152 复核), and the picker additionally
+     *  keys rendering on its own (anchor, subPath). A guest credential gets a PocketError instead
+     *  (GuestGuard denies the "~" anchor and any out-of-scope root), which the picker never sees — the
+     *  entry is owner-only client-side and the daemon stays the authority. */
+    fun browseDirs(anchor: String, subPath: String) {
+        lastBrowseAnchor = anchor
         lastBrowseSub = subPath
-        scope.launch { send(ListPathEntries(BROWSE_HOME, subPath)) }
+        scope.launch { send(ListPathEntries(anchor, subPath)) }
     }
 
     // ── voice input actions ───────────────────────────────────────────────
