@@ -1192,7 +1192,16 @@ data class SessionFiles(
 /** daemon -> phone: reply to [ListPathEntries] — the children under (workdir, subPath). Matched
  *  client-side on (workdir, subPath). [truncated] = more children than [ListPathEntries.limit] existed
  *  and the tail was dropped. On failure (subPath escaped the workdir / not a readable dir) [ok] is
- *  false, [error] carries why, and [entries] is empty. */
+ *  false, [error] carries why, and [entries] is empty.
+ *
+ *  [roots] (issue #176, trailing optional): the daemon machine's filesystem roots in native form
+ *  ("/" on Unix; "C:\", "D:\" … on Windows), populated ONLY on an OWNER's reply to the "~" home-anchor
+ *  listing (the #152 folder browser's opening request) — the picker's root switcher feeds off it, and
+ *  browsing a chosen root then rides the ordinary [ListPathEntries] with that root as the workdir
+ *  (validateWorkdir already accepts any absolute path). An old daemon never sets it, so a new app sees
+ *  the default empty list and hides the switcher (the manual-path escape hatch still covers off-home);
+ *  an old app ignores the unknown key (ignoreUnknownKeys). Guest replies never carry it — their "~"
+ *  anchor is denied outright by GuestGuard and the router additionally gates on the owner. */
 @Serializable
 @SerialName("pocket/path.entries")
 data class PathEntries(
@@ -1202,6 +1211,7 @@ data class PathEntries(
     val truncated: Boolean = false,
     val ok: Boolean = true,
     val error: String? = null,
+    val roots: List<String> = emptyList(),
 ) : ToPhone
 
 /**

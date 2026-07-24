@@ -8,6 +8,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import java.nio.file.FileSystems
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.bufferedReader
@@ -189,6 +190,16 @@ class DirectoryService {
         val cap = limit.coerceIn(1, 2_000)
         return sorted.take(cap) to (sorted.size > cap)
     }
+
+    /**
+     * The machine's filesystem roots in native form ("/" on Unix; "C:\", "D:\" … on Windows) — the #176
+     * root switcher's source, riding as [dev.ccpocket.protocol.PathEntries.roots] on the owner's "~"
+     * home-anchor reply. Enumeration only, no readability probe: touching an unready removable drive can
+     * block for seconds on Windows, and a root that turns out unreadable simply answers ok=false when the
+     * picker lists it (the same error row any unreadable folder gets).
+     */
+    fun listFsRoots(): List<String> =
+        runCatching { FileSystems.getDefault().rootDirectories.map { it.toString() } }.getOrDefault(emptyList())
 
     /**
      * Like [validateWorkdir], but for STARTING A NEW PROJECT (issue #7 follow-up): if [path] doesn't exist yet,

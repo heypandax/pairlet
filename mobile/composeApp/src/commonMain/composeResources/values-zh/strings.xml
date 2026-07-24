@@ -285,6 +285,7 @@
     <string name="dir_picker_use_here">在此目录开会话</string>
     <string name="dir_picker_empty">没有子目录</string>
     <string name="dir_picker_error">读不了这个目录</string>
+    <string name="dir_picker_home">家目录</string>
     <string name="ob_open">还没在电脑上安装 cc-pocket？</string>
     <string name="ob_title">连接你的电脑</string>
     <string name="ob_sub">在你要驱动的电脑上安装 cc-pocket daemon。</string>

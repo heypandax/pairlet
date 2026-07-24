@@ -285,6 +285,7 @@
     <string name="dir_picker_use_here">Start session here</string>
     <string name="dir_picker_empty">No subfolders</string>
     <string name="dir_picker_error">Can\'t read this folder</string>
+    <string name="dir_picker_home">Home</string>
     <string name="ob_open">Need to install cc-pocket on your computer?</string>
     <string name="ob_title">Connect your computer</string>
     <string name="ob_sub">Install the cc-pocket daemon on the computer you want to drive.</string>
