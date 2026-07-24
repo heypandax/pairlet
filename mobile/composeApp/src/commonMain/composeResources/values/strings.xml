@@ -313,10 +313,10 @@
     <string name="model_section_anthropic">Anthropic API</string>
     <string name="model_gateway_alias_note">Recommended: your gateway maps these aliases onto its own models, so they keep working when the vendor renames or replaces one.</string>
     <string name="af_show_from">Show sessions from</string>
-    <string name="af_both">Both</string>
-    <string name="af_claude_only">Claude only</string>
-    <string name="af_codex_only">Codex only</string>
-    <string name="af_opencode_only">OpenCode only</string>
+    <string name="af_both">All</string>
+    <string name="af_claude_only">Claude</string>
+    <string name="af_codex_only">Codex</string>
+    <string name="af_opencode_only">OpenCode</string>
     <string name="opencode_mode_short">Full access</string>
     <string name="opencode_mode_title">Full access (auto-approved)</string>
     <string name="opencode_mode_note">OpenCode runs with auto-approval: every tool call (file edits, shell commands) is approved by the CLI itself. Remote approvals and permission modes don\'t apply to OpenCode sessions.</string>

@@ -18,11 +18,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -246,18 +247,26 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 )
                 afOpts.forEach { (key, label, dot) ->
                     val sel = repo.agentFilter.value == key
+                    // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).
+                    // Labels dropped their "only/仅 " prefix so all four read in full at the default size; the
+                    // colored dot already carries the "which agent" meaning. Ellipsis is the large-font fallback.
                     Box(
                         Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
-                            .then(if (sel) Modifier.background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(7.dp)) else Modifier)
+                            .then(if (sel) Modifier.background(Tok.accent) else Modifier)
                             .clickable { repo.setAgentFilter(key) }.padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             dot?.let {
-                                Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(it))
+                                // dot inverts to Tok.base on the accent thumb so the Claude dot (itself accent) stays visible
+                                Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (sel) Tok.base else it))
                                 Spacer(Modifier.width(5.dp))
                             }
-                            Text(label, color = if (sel) Tok.tx else Tok.muted, fontSize = 12.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                            Text(
+                                label, color = if (sel) Tok.base else Tok.tx2, fontSize = 12.sp,
+                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
@@ -482,19 +491,31 @@ private fun ContextWindowCustomRow(repo: PocketRepository, onEdit: () -> Unit = 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(stringResource(Res.string.context_window_custom), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        OutlinedTextField(
-            draft,
-            { new ->
-                draft = new.filter(Char::isDigit).take(9)
-                onEdit()
-                repo.setContextWindowOverride(draft.toLongOrNull()?.takeIf { it > 0 })
-            },
-            placeholder = { Text(stringResource(Res.string.context_window_tokens), color = Tok.muted, fontSize = 12.sp) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
-            modifier = Modifier.width(130.dp),
-        )
+        // Tok-native input matching the desktop settings field (SettingsModal Box+BasicTextField): a single
+        // Tok.hair-bordered well on Tok.base with an accent cursor — no M3 OutlinedTextField (its 56dp min
+        // height dwarfed the ~40dp segments above and its focus stroke drew in Material primary, not Tok.accent).
+        Box(
+            Modifier.width(130.dp).clip(RoundedCornerShape(8.dp)).background(Tok.base)
+                .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 7.dp),
+        ) {
+            if (draft.isEmpty()) Text(
+                stringResource(Res.string.context_window_tokens),
+                color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
+            )
+            BasicTextField(
+                draft,
+                { new ->
+                    draft = new.filter(Char::isDigit).take(9)
+                    onEdit()
+                    repo.setContextWindowOverride(draft.toLongOrNull()?.takeIf { it > 0 })
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, color = Tok.tx),
+                cursorBrush = SolidColor(Tok.accent),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
