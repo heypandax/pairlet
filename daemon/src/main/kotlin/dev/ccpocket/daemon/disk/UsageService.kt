@@ -28,7 +28,7 @@ import kotlin.io.path.isDirectory
  *    `.jsonl` isn't double counted.
  *  - Codex rollouts under ~/.codex/sessions — `event_msg`/`token_count` records carry the turn's delta
  *    (`last_token_usage`) with a timestamp, and `turn_context` carries the model. Codex stamps no cost, so
- *    `costUsdToday` remains Claude-only.
+ *    `costUsdToday`/`costUsdWindow` stay Claude-only.
  */
 object UsageService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -58,6 +58,14 @@ object UsageService {
         var cacheReadToday = 0L
         var costToday = 0.0
         var costSeen = false
+        // Full-WINDOW counterparts of the today sub-metrics (issue #174): every in-window turn feeds these,
+        // today or not, so the 7d/30d ranges get real requests/cache-hit/cost instead of today's repeated.
+        // Same semantics as the today set: cost stays null unless a transcript costUSD was actually seen.
+        var requestsWindow = 0L
+        var inputWindow = 0L
+        var cacheReadWindow = 0L
+        var costWindow = 0.0
+        var costWindowSeen = false
 
         if (projectsRoot.isDirectory()) Files.newDirectoryStream(projectsRoot).use { dirs ->
             for (dir in dirs) {
@@ -84,6 +92,10 @@ object UsageService {
                             if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
                             perDay[date] = (perDay[date] ?: 0) + total
                             perModel[msg.str("model") ?: "unknown"] = (perModel[msg.str("model") ?: "unknown"] ?: 0) + total
+                            requestsWindow++
+                            inputWindow += input
+                            cacheReadWindow += cacheRead
+                            (obj["costUSD"] as? JsonPrimitive)?.doubleOrNull?.let { costWindow += it; costWindowSeen = true }
                             if (date == today) {
                                 perHour[when_.hour] += total
                                 tokensToday += total
@@ -131,6 +143,10 @@ object UsageService {
                     if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
                     perDay[date] = (perDay[date] ?: 0) + total
                     perModel[model] = (perModel[model] ?: 0) + total
+                    requestsWindow++
+                    val cachedWin = last.long("cached_input_tokens")
+                    inputWindow += (last.long("input_tokens") - cachedWin).coerceAtLeast(0)
+                    cacheReadWindow += cachedWin
                     if (date == today) {
                         perHour[when_.hour] += total
                         tokensToday += total
@@ -156,6 +172,8 @@ object UsageService {
             UsageModel(it.key, it.value, if (codex) AgentKind.CODEX else AgentKind.CLAUDE)
         }
         val cacheHit = (inputToday + cacheReadToday).takeIf { it > 0 }?.let { ((cacheReadToday * 100) / it).toInt() }
+        // window cache-hit: the exact today formula over the window accumulators (cacheRead / (input + cacheRead))
+        val cacheHitWindow = (inputWindow + cacheReadWindow).takeIf { it > 0 }?.let { ((cacheReadWindow * 100) / it).toInt() }
 
         return Usage(
             days = trend,
@@ -166,6 +184,9 @@ object UsageService {
             costUsdToday = if (costSeen) costToday else null,
             hours = hours,
             prevWindowTokens = prevWindowTokens,
+            requestsWindow = requestsWindow,
+            cacheHitPctWindow = cacheHitWindow,
+            costUsdWindow = if (costWindowSeen) costWindow else null,
         )
     }
 

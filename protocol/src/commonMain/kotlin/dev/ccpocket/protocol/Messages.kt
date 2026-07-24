@@ -635,6 +635,11 @@ data class Sessions(
  * [prevWindowTokens] is the total of the PREVIOUS equal-width window (span 1 → yesterday, 7 → the 7 days
  * before the window, 30 → the 30 days before), so the hero delta compares like-for-like windows (issue #128).
  * A trailing optional: an old daemon omits it (the app shows no delta), an old app ignores it.
+ * [requestsWindow]/[cacheHitPctWindow]/[costUsdWindow] are the SAME-WINDOW counterparts of the three today
+ * sub-metrics (issue #174), spanning the whole requested range ([days]); for a span-1 reply they simply mirror
+ * the today values. [costUsdWindow] keeps [costUsdToday]'s semantics: null unless a transcript costUSD was
+ * actually seen (Max/Pro subscriptions and Codex record none). Trailing optionals: an old daemon omits them
+ * (the app falls back to the today values + "· today" label), an old app ignores them.
  */
 @Serializable
 @SerialName("pocket/usage")
@@ -647,6 +652,9 @@ data class Usage(
     val costUsdToday: Double? = null,
     val hours: List<UsageDay>? = null,
     val prevWindowTokens: Long? = null,
+    val requestsWindow: Long? = null,
+    val cacheHitPctWindow: Int? = null,
+    val costUsdWindow: Double? = null,
 ) : ToPhone
 
 /**

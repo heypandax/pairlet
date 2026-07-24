@@ -242,6 +242,42 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun usage_window_sub_metrics_are_trailing_optionals() {
+        // new daemon → new app: the same-window requests / cache-hit / cost ride along (issue #174)
+        val env = Envelope(
+            id = "u7", ts = 0,
+            body = Usage(
+                days = listOf(UsageDay("Mon", 100, date = "2026-07-06")),
+                requestsWindow = 428, cacheHitPctWindow = 73, costUsdWindow = 4.2,
+            ),
+        )
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"requestsWindow\":428" in json, json)
+        assertTrue("\"cacheHitPctWindow\":73" in json, json)
+        assertTrue("\"costUsdWindow\":4.2" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // new app ← OLD daemon (no keys) → null defaults; the app falls back to the today values + "· today"
+        val old = """{"id":"u8","ts":0,"to":"PEER","body":{"t":"pocket/usage","days":[{"label":"Mon","tokens":100}],"models":[],"tokensToday":100,"requestsToday":2}}"""
+        val back = PocketJson.decodeFromString<Envelope>(old).body as Usage
+        assertEquals(null, back.requestsWindow)
+        assertEquals(null, back.cacheHitPctWindow)
+        assertEquals(null, back.costUsdWindow)
+
+        // costUsdWindow keeps costUsdToday's null-means-unknown semantics: a window with requests but no recorded
+        // cost omits ONLY costUsdWindow (subscriptions/Codex), while requests/cache-hit still ride the wire
+        val noCost = PocketJson.encodeToString(Envelope(id = "u9", ts = 0, body = Usage(days = listOf(UsageDay("Mon", 1)), requestsWindow = 5, cacheHitPctWindow = 60)))
+        assertTrue("\"requestsWindow\":5" in noCost, noCost)
+        assertFalse("costUsdWindow" in noCost, noCost)
+
+        // unset (all null) is omitted on the wire (explicitNulls=false) — byte-identical to an old daemon's frame
+        val unset = PocketJson.encodeToString(Envelope(id = "u10", ts = 0, body = Usage(days = listOf(UsageDay("Mon", 1)))))
+        assertFalse("requestsWindow" in unset, unset)
+        assertFalse("cacheHitPctWindow" in unset, unset)
+        assertFalse("costUsdWindow" in unset, unset)
+    }
+
+    @Test
     fun sessionGone_roundtrips() {
         val env = Envelope(id = "3", ts = 0, body = SessionGone("c9"))
         val json = PocketJson.encodeToString(env)

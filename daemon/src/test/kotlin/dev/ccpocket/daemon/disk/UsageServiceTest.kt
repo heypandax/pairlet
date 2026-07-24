@@ -119,4 +119,70 @@ class UsageServiceTest {
             assertEquals(300L, u.models.single().tokens, "prev-window turns never feed the model bars")
         }
     }
+
+    /** One assistant turn [daysAgo] days back carrying [input] input, [cacheRead] cache-read tokens and a
+     *  top-level [costUsd] — enough to exercise the requests/cache-hit/cost sub-metrics (issue #174). */
+    private fun richTurn(daysAgo: Long, input: Long, cacheRead: Long, costUsd: Double, id: String): String {
+        val ts = LocalDate.now(ZoneId.systemDefault()).minusDays(daysAgo).atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant()
+        return """{"type":"assistant","timestamp":"$ts","requestId":"r-$id","costUSD":$costUsd,""" +
+            """"message":{"id":"m-$id","model":"claude-opus-4-8","usage":{"input_tokens":$input,"output_tokens":0,"cache_read_input_tokens":$cacheRead}}}"""
+    }
+
+    @Test
+    fun window_sub_metrics_span_the_whole_window_not_just_today() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(
+                listOf(
+                    richTurn(0, 100, 100, 0.10, "a"),  // today
+                    richTurn(3, 300, 100, 0.30, "b"),  // mid-window
+                    richTurn(6, 200, 200, 0.20, "c"),  // oldest in-window day
+                    richTurn(8, 999, 999, 9.90, "d"),  // prev window — must NOT feed either window/today set
+                ).joinToString("\n") + "\n",
+            )
+            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            // the today sub-metrics stay today-only (unchanged behaviour)
+            assertEquals(1L, u.requestsToday)
+            assertEquals(50, u.cacheHitPct, "today cache-hit = 100 / (100 + 100)")
+            assertEquals(0.10, u.costUsdToday!!, 1e-9)
+            // the window sub-metrics accumulate across ALL three in-window days, never the prev-window turn
+            assertEquals(3L, u.requestsWindow, "requests span the whole 7d window, not just today")
+            assertEquals(40, u.cacheHitPctWindow, "window cache-hit = 400 / (600 + 400)")
+            assertEquals(0.60, u.costUsdWindow!!, 1e-9, "window cost sums every in-window transcript costUSD")
+        }
+    }
+
+    @Test
+    fun span_1_window_sub_metrics_mirror_the_today_values() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            proj.resolve("s1.jsonl").writeText(
+                listOf(
+                    richTurn(0, 100, 100, 0.10, "a"),  // today
+                    richTurn(1, 999, 999, 9.90, "b"),  // yesterday → prev window for span 1, excluded
+                ).joinToString("\n") + "\n",
+            )
+            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList())
+            // for the Today range the window IS today, so the window fields are filled and equal the today ones
+            assertEquals(1L, u.requestsWindow)
+            assertEquals(u.requestsToday, u.requestsWindow)
+            assertEquals(u.cacheHitPct, u.cacheHitPctWindow)
+            assertEquals(u.costUsdToday, u.costUsdWindow)
+        }
+    }
+
+    @Test
+    fun window_cost_is_null_when_no_transcript_records_a_cost() {
+        withProjects { root ->
+            val proj = root.resolve("-Users-x-proj").also { it.createDirectories() }
+            // a subscription-shaped transcript: usage tokens but NO top-level costUSD on any turn
+            proj.resolve("s1.jsonl").writeText(
+                listOf(turn(0, 200, "a"), turn(2, 400, "b")).joinToString("\n") + "\n",
+            )
+            val u = UsageService.aggregate(7, projectsRoot = root, codexFiles = emptyList())
+            assertNull(u.costUsdToday, "no costUSD recorded → today cost stays null")
+            assertNull(u.costUsdWindow, "no costUSD recorded → window cost stays null too")
+            assertEquals(2L, u.requestsWindow, "requests still count even when cost is unknown")
+        }
+    }
 }
