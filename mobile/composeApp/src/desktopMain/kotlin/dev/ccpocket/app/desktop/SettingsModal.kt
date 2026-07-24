@@ -545,8 +545,13 @@ private fun AccountPane(model: DesktopModel) {
                             TextBtn("Cancel", Tok.muted) { confirmSwitch = false }
                         }
                     } else Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TextBtn("Switch account…", Tok.accent) { confirmSwitch = true }
-                        TextBtn("Log out", Tok.danger) { model.logoutAccount() }
+                        // only a real OAuth login (which always carries an email) can actually be switched or
+                        // logged out. An env-token / gateway auth reports loggedIn=true with a null email and no
+                        // apiKeySource (so it lands here, not the API-key branch), yet `claude auth login/logout`
+                        // can't touch it — grey these out rather than leave them as no-ops the user keeps poking.
+                        val canManage = s.email != null
+                        TextBtn("Switch account…", Tok.accent, enabled = canManage) { confirmSwitch = true }
+                        TextBtn("Log out", Tok.danger, enabled = canManage) { model.logoutAccount() }
                     }
                 }
 
@@ -648,7 +653,7 @@ private fun PresetAuthCard(p: PresetSummary, onDeactivate: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         // the way back to the computer's own login/env — same switch semantics as activating (blockers may refuse)
-        Row { TextBtn("Deactivate", Tok.muted, onDeactivate) }
+        Row { TextBtn("Deactivate", Tok.muted, onClick = onDeactivate) }
     }
 }
 
@@ -780,8 +785,8 @@ private fun PresetRow(
                 modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.13f)).padding(horizontal = 7.dp, vertical = 2.dp),
             )
             hovered -> Row {
-                TextBtn("Edit", Tok.tx2, onEdit)
-                TextBtn("Delete", Tok.danger, onDelete)
+                TextBtn("Edit", Tok.tx2, onClick = onEdit)
+                TextBtn("Delete", Tok.danger, onClick = onDelete)
             }
         }
     }
@@ -982,7 +987,7 @@ private fun WorkingBlockersCard(
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextBtn("Stop all & switch", Tok.danger, onForce)
+            TextBtn("Stop all & switch", Tok.danger, onClick = onForce)
             Text("Sessions can be resumed afterwards; their background tasks end.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
         }
     }
@@ -1159,11 +1164,15 @@ private fun ComputersPane(model: DesktopModel) {
     }
 }
 
+// enabled=false greys the label to the palette's weakest text (Tok.muted), drops the click, and skips the
+// hover-fill so a dead action reads as dead instead of a no-op the user keeps poking (env-token account case)
 @Composable
-private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
-        label, color = color, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-        modifier = Modifier.clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 9.dp, vertical = 5.dp),
+        label, color = if (enabled) color else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.clip(RoundedCornerShape(7.dp))
+            .then(if (enabled) Modifier.hoverFill(RoundedCornerShape(7.dp)) else Modifier)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 9.dp, vertical = 5.dp),
     )
 }
 
@@ -1450,7 +1459,7 @@ private fun UpdatesSection(model: DesktopModel) {
 private fun UpdateActionRow(label: String, action: String, actionColor: Color, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        TextBtn(action, actionColor, onAction)
+        TextBtn(action, actionColor, onClick = onAction)
     }
 }
 
