@@ -41,6 +41,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.agent_needs_permission
+import dev.ccpocket.app.resources.agent_wants_edit
+import dev.ccpocket.app.resources.allow
+import dev.ccpocket.app.resources.auto_denied_body
+import dev.ccpocket.app.resources.auto_denied_no_response
+import dev.ccpocket.app.resources.deny
+import dev.ccpocket.app.resources.dismiss
+import dev.ccpocket.app.resources.perm_on_computer
+import dev.ccpocket.app.resources.perm_remember_session
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
@@ -51,6 +61,7 @@ import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.oneOff
+import org.jetbrains.compose.resources.stringResource
 
 /** Countdown ring — a hairline track with a [fraction] arc in [color] (terracotta, ambering as it nears 0). */
 @Composable
@@ -96,7 +107,7 @@ private fun canRemember(ask: PermissionAsk): Boolean = ask.rule != null && !ask.
 @Composable
 private fun DenyButton(big: Boolean = false, onClick: () -> Unit) {
     Text(
-        "Deny", color = Tok.danger, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.SemiBold,
+        stringResource(Res.string.deny), color = Tok.danger, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.SemiBold,
         modifier = Modifier.clip(RoundedCornerShape(if (big) 10.dp else 9.dp))
             .border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(if (big) 10.dp else 9.dp))
             .clickable(onClick = onClick).padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
@@ -110,7 +121,7 @@ private fun AllowButton(big: Boolean = false, key: Boolean = true, onClick: () -
             .padding(horizontal = if (big) 18.dp else 16.dp, vertical = if (big) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text("Allow", color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(Res.string.allow), color = Tok.base, fontFamily = Dk.ui, fontSize = if (big) 13.5.sp else 13.sp, fontWeight = FontWeight.Bold)
         if (key) Key("⌘⏎")
     }
 }
@@ -187,7 +198,7 @@ fun InlinePermCard(
                 Column(Modifier.alpha(bodyAlpha)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         Text(
-                            if (isDiff) "${agentName(agent)} wants to edit files" else "${agentName(agent)} needs permission",
+                            stringResource(if (isDiff) Res.string.agent_wants_edit else Res.string.agent_needs_permission, agentName(agent)),
                             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
                         )
                         AgentBadge(agent)
@@ -218,7 +229,7 @@ fun InlinePermCard(
                     TimedOutBlock(onDismiss)
                 } else {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (canRemember(ask)) RememberCheck("Remember for this session", rememberRule) { rememberRule = !rememberRule }
+                        if (canRemember(ask)) RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
                         Spacer(Modifier.weight(1f))
                         CountdownRing(26.dp, 2.2.dp, color)
                         DenyButton(onClick = onDeny)
@@ -242,11 +253,11 @@ private fun TimedOutBlock(onDismiss: () -> Unit) {
     ) {
         Box(Modifier.size(8.dp).clip(RoundedCornerShape(999.dp)).background(Tok.danger))
         Column(Modifier.weight(1f)) {
-            Text("Auto-denied (no response)", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Text("No response within the time limit.", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+            Text(stringResource(Res.string.auto_denied_no_response), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.auto_denied_body), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
         }
         Text(
-            "Dismiss", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            stringResource(Res.string.dismiss), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onDismiss).padding(horizontal = 10.dp, vertical = 6.dp),
         )
     }
@@ -269,13 +280,13 @@ fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir
                 .border(1.dp, Tok.hair, RoundedCornerShape(16.dp)).clickable(enabled = false) {},
         ) {
             Row(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("on $computer", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
+                Text(stringResource(Res.string.perm_on_computer, computer), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp)
             }
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 20.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
                     ShieldChip(color, box = 40.dp, glyph = 21.dp)
                     Column(Modifier.weight(1f)) {
-                        Text("${agentName(agent)} needs permission", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp)
+                        Text(stringResource(Res.string.agent_needs_permission, agentName(agent)), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp)
                         Text("${ask.title} · ${ask.tool}".trim().removePrefix("· "), color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     }
                     CountdownRing(34.dp, 2.6.dp, color)
@@ -286,7 +297,7 @@ fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir
                 DirBranchLine(workdir, branch, 11f)
                 Spacer(Modifier.size(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (canRemember(ask)) RememberCheck("Remember for this session", rememberRule) { rememberRule = !rememberRule }
+                    if (canRemember(ask)) RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
                     Spacer(Modifier.weight(1f))
                     DenyButton(big = true, onClick = onDeny)
                     AllowButton(big = true, onClick = { onAllow(rememberRule) })

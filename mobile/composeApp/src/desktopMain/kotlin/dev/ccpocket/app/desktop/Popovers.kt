@@ -56,9 +56,40 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.label_agent
+import dev.ccpocket.app.resources.label_effort
+import dev.ccpocket.app.resources.label_mode
+import dev.ccpocket.app.resources.label_model
+import dev.ccpocket.app.resources.mode_accept_short
+import dev.ccpocket.app.resources.mode_bypass_short
+import dev.ccpocket.app.resources.mode_default_short
+import dev.ccpocket.app.resources.mode_plan_short
+import dev.ccpocket.app.resources.model_custom_label
+import dev.ccpocket.app.resources.model_gateway_alias_note
+import dev.ccpocket.app.resources.model_gateway_note
+import dev.ccpocket.app.resources.model_gateway_section
+import dev.ccpocket.app.resources.model_gateway_show
+import dev.ccpocket.app.resources.model_gateway_suggested
+import dev.ccpocket.app.resources.model_next_turn_note
+import dev.ccpocket.app.resources.model_section_anthropic
+import dev.ccpocket.app.resources.new_path_start
+import dev.ccpocket.app.resources.new_session_title
+import dev.ccpocket.app.resources.opencode_mode_note
+import dev.ccpocket.app.resources.opencode_mode_title
+import dev.ccpocket.app.resources.opencode_models_loading
+import dev.ccpocket.app.resources.popover_where
+import dev.ccpocket.app.resources.qa_clear
+import dev.ccpocket.app.resources.qa_clear_armed
+import dev.ccpocket.app.resources.qa_compact
+import dev.ccpocket.app.resources.qa_terminal
+import dev.ccpocket.app.resources.quick_actions_title
+import dev.ccpocket.app.resources.value_default
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
 import dev.ccpocket.app.ui.AutoSizeSingleLineText
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
 import dev.ccpocket.app.ui.EFFORT_OPTIONS
@@ -76,13 +107,13 @@ import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionMode
 
-internal data class DkMode(val label: String, val token: String, val mode: PermissionMode, val dot: Color, val danger: Boolean = false)
+internal data class DkMode(val label: StringResource, val token: String, val mode: PermissionMode, val dot: Color, val danger: Boolean = false)
 
 internal val CLAUDE_MODES = listOf(
-    DkMode("Ask each step", "default", PermissionMode.DEFAULT, Tok.tx2),
-    DkMode("Accept edits", "acceptEdits", PermissionMode.ACCEPT_EDITS, Tok.ok),
-    DkMode("Plan", "plan", PermissionMode.PLAN, Tok.info),
-    DkMode("Full auto", "bypass", PermissionMode.BYPASS_PERMISSIONS, Tok.warn, danger = true),
+    DkMode(Res.string.mode_default_short, "default", PermissionMode.DEFAULT, Tok.tx2),
+    DkMode(Res.string.mode_accept_short, "acceptEdits", PermissionMode.ACCEPT_EDITS, Tok.ok),
+    DkMode(Res.string.mode_plan_short, "plan", PermissionMode.PLAN, Tok.info),
+    DkMode(Res.string.mode_bypass_short, "bypass", PermissionMode.BYPASS_PERMISSIONS, Tok.warn, danger = true),
 )
 
 /**
@@ -114,9 +145,9 @@ fun NewSessionPopover(
                 } else false
             },
     ) {
-        Text("New session", color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 15.dp, end = 15.dp, top = 13.dp))
+        Text(stringResource(Res.string.new_session_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 15.dp, end = 15.dp, top = 13.dp))
         Column(Modifier.padding(15.dp)) {
-            PopoverLabel("Where")
+            PopoverLabel(stringResource(Res.string.popover_where))
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 14.dp).clip(RoundedCornerShape(8.dp))
                     .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
@@ -130,13 +161,13 @@ fun NewSessionPopover(
                     modifier = Modifier.weight(1f).focusRequester(pathFocus),
                 )
             }
-            PopoverLabel("Agent")
+            PopoverLabel(stringResource(Res.string.label_agent))
             Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 AgentCard(AgentKind.CLAUDE, agent == AgentKind.CLAUDE, Modifier.weight(1f)) { agent = AgentKind.CLAUDE }
                 AgentCard(AgentKind.CODEX, agent == AgentKind.CODEX, Modifier.weight(1f)) { agent = AgentKind.CODEX }
                 AgentCard(AgentKind.OPENCODE, agent == AgentKind.OPENCODE, Modifier.weight(1f)) { agent = AgentKind.OPENCODE }
             }
-            PopoverLabel("Mode")
+            PopoverLabel(stringResource(Res.string.label_mode))
             if (agent == AgentKind.OPENCODE) {
                 // no selectable ladder: opencode has no approval protocol (daemon runs it --auto),
                 // so every mode row here would promise approvals that never come — same honesty
@@ -149,10 +180,10 @@ fun NewSessionPopover(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
-                        Text("Full access (auto-approved)", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(Res.string.opencode_mode_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
                     }
                     Text(
-                        "OpenCode auto-approves every tool call — permission modes and remote approvals don't apply.",
+                        stringResource(Res.string.opencode_mode_note),
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -165,14 +196,14 @@ fun NewSessionPopover(
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Dot(m.dot, 7.dp)
-                    Text(m.label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp)
+                    Text(stringResource(m.label), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp)
                     if (m.danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
                     Spacer(Modifier.weight(1f))
                     Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
                 }
             }
             Text(
-                "Start session", color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                stringResource(Res.string.new_path_start), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
                     .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
                     .clickable(enabled = looksAbsolute) {
@@ -199,37 +230,37 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
     ) {
         when (page) {
             QaPage.MAIN -> {
-                PopoverLabel("Quick actions")
+                PopoverLabel(stringResource(Res.string.quick_actions_title))
                 // Model is a plain shortcut now (issue #157): closes this menu and opens the SAME anchored
                 // popover the composer chip owns — no second-level page. Hidden while observing: the read-only
                 // view has no composer (no chip to anchor at), and you can't drive that session anyway.
                 if (!model.observing) {
-                    QaRow("Model", value = modelChipLabel(model.chatModelId).ifBlank { "default" }) { onDismiss(); model.showModelPopover = true }
+                    QaRow(stringResource(Res.string.label_model), value = modelChipLabel(model.chatModelId).ifBlank { stringResource(Res.string.value_default) }) { onDismiss(); model.showModelPopover = true }
                 }
-                QaRow("Effort", value = model.chatEffort ?: "default", chevron = true) { page = QaPage.EFFORT }
-                QaRow("Mode", value = CLAUDE_MODES.first { it.mode == model.chatMode }.token, chevron = true) { page = QaPage.MODE }
+                QaRow(stringResource(Res.string.label_effort), value = model.chatEffort ?: stringResource(Res.string.value_default), chevron = true) { page = QaPage.EFFORT }
+                QaRow(stringResource(Res.string.label_mode), value = CLAUDE_MODES.first { it.mode == model.chatMode }.token, chevron = true) { page = QaPage.MODE }
                 // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every
                 // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader.
                 // Routes by the user's default (issue #153): embedded dock unless Settings says external.
                 val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
                 if (canOpenTerminal) {
-                    QaRow("Open terminal") { model.openTerminalPreferred(); onDismiss() }
+                    QaRow(stringResource(Res.string.qa_terminal)) { model.openTerminalPreferred(); onDismiss() }
                 }
-                QaRow("Compact context") { model.compactConversation(); onDismiss() }
+                QaRow(stringResource(Res.string.qa_compact)) { model.compactConversation(); onDismiss() }
                 QaRow(
-                    if (clearArmed) "Clear chat — tap again" else "Clear chat", danger = true,
+                    stringResource(if (clearArmed) Res.string.qa_clear_armed else Res.string.qa_clear), danger = true,
                 ) { if (clearArmed) { model.clearConversation(); onDismiss() } else clearArmed = true }
             }
             QaPage.EFFORT -> {
-                QaBack("Effort") { page = QaPage.MAIN }
+                QaBack(stringResource(Res.string.label_effort)) { page = QaPage.MAIN }
                 EFFORT_OPTIONS.forEach { opt ->
                     QaOption(opt, opt.equals(model.chatEffort, true)) { model.switchEffort(opt); onDismiss() }
                 }
             }
             QaPage.MODE -> {
-                QaBack("Mode") { page = QaPage.MAIN }
+                QaBack(stringResource(Res.string.label_mode)) { page = QaPage.MAIN }
                 CLAUDE_MODES.forEach { m ->
-                    QaOption(m.label, m.mode == model.chatMode, dot = m.dot, danger = m.danger, token = m.token) {
+                    QaOption(stringResource(m.label), m.mode == model.chatMode, dot = m.dot, danger = m.danger, token = m.token) {
                         model.switchMode(m.mode); onDismiss()
                     }
                 }
@@ -254,7 +285,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 if (e.type == KeyEventType.KeyDown && e.key == Key.Escape) { onDismiss(); true } else false
             },
     ) {
-        PopoverLabel("Model")
+        PopoverLabel(stringResource(Res.string.label_model))
         LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
         val options = when (model.chatAgent) {
             AgentKind.CODEX -> model.modelsForAgent(AgentKind.CODEX).ifEmpty { CODEX_MODEL_OPTIONS }.map { it to it }
@@ -267,7 +298,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         }
         if (model.chatAgent == AgentKind.OPENCODE && options.isEmpty()) {
             Text(
-                "Loading models from opencode…", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                stringResource(Res.string.opencode_models_loading), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
         }
@@ -287,13 +318,13 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             // generations while a hand-written native id rots (#168). Header keeps the
             // "· host" + live dot (0714 design); the vendor rows drop one group below.
             Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("ANTHROPIC API", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+                Text(stringResource(Res.string.model_section_anthropic).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
                 Text("· ${gatewayHostLabel(gatewayUrl) ?: "?"}", color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp)
                 Spacer(Modifier.weight(1f))
                 Dot(Tok.ok, 5.dp)
             }
             Text(
-                "Recommended: your gateway maps these onto its own models.",
+                stringResource(Res.string.model_gateway_alias_note),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
             )
         }
@@ -301,16 +332,16 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             QaOption(label, isActive(pick)) { model.switchModel(pick); onDismiss() }
         }
         if (gatewayUrl != null) {
-            PopoverLabel("Gateway models")
+            PopoverLabel(stringResource(Res.string.model_gateway_section))
             gatewayRows()
             Text(
-                "Which model an id reaches is decided by your gateway.",
+                stringResource(Res.string.model_gateway_note),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(bottom = 8.dp),
             )
         }
         if (gatewayUrl == null && model.chatAgent == AgentKind.CLAUDE) {
             var showGateway by remember { mutableStateOf(false) }
-            QaRow("Gateway presets", chevron = !showGateway) { showGateway = !showGateway }
+            QaRow(stringResource(Res.string.model_gateway_show), chevron = !showGateway) { showGateway = !showGateway }
             if (showGateway) gatewayRows()
         }
         // custom id (issue #54): third-party gateways route ids the preset list can't know;
@@ -320,7 +351,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         var custom by remember {
             mutableStateOf(if (!presetActive) model.chatModelId.ifBlank { model.chatModel } else "")
         }
-        PopoverLabel("Custom")
+        PopoverLabel(stringResource(Res.string.model_custom_label))
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                 .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
@@ -344,7 +375,7 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
         }
         // mid-turn (issue #157): the running turn keeps its model — say the pick lands on the NEXT turn
         if (model.streaming) Text(
-            "Switch applies to the next turn.",
+            stringResource(Res.string.model_next_turn_note),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(top = 10.dp),
         )
     }
@@ -417,7 +448,7 @@ private fun GatewayPresetRow(p: GatewayModelPreset, active: Boolean, suggested: 
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(p.vendor, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                if (suggested) Text("✓ suggested", color = Tok.accent, fontFamily = Dk.ui, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
+                if (suggested) Text("✓ " + stringResource(Res.string.model_gateway_suggested), color = Tok.accent, fontFamily = Dk.ui, fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold)
             }
             Text(p.id, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
         }
