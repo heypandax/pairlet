@@ -6,7 +6,9 @@ import dev.ccpocket.protocol.HistoryMessage
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.sql.Connection
 
 /**
@@ -21,18 +23,20 @@ import java.sql.Connection
  * The tool NAME is mapped through [ToolNameMapper] to its Claude-shaped form (bash → Bash …) so the row
  * reuses the exact card the live [OpenCodeStreamParser] path produces; the row's `text` is the tool's
  * `state.input` (the bash command etc.) as the compact input preview, matching how the live card and the
- * Claude/Codex replays fill a tool card's preview.
+ * Claude/Codex replays fill a tool card's preview. A SETTLED call also carries its `output` and ok/failed
+ * verdict (the live parser's rule), so the folded card expands to the same information live left behind.
  */
 object OpenCodeTranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    // Per-text-row char cap applied before ReplayBudget's frame-level limit (4000 chars ≈ 8KB in
-    // multi-byte UTF-8). Keeps a single huge assistant text part from dominating the history frame.
-    private const val MAX_TEXT_PER_MESSAGE = 4000
-
     // Tool input preview cap — the compact "command"/input line shown on the card (display-on-tap, not a
     // reply body). Mirrors the Claude replay's MAX_TOOL_TEXT so all three backends cap tool previews alike.
     private const val MAX_TOOL_TEXT = 1000
+
+    // Tool output cap — matches the Claude replay's sub-agent report cap (SUBAGENT_OUTPUT_MAX = 4000) so one
+    // large tool result can't dominate the history frame; [ReplayBudget] stays the outer frame-level guard.
+    // Reply-body text is deliberately NOT per-row capped (issue #81 parity with the Claude/Codex replays).
+    private const val MAX_TOOL_OUTPUT = 4000
 
     fun read(sessionId: String, maxMessages: Int = 100, maxFrameTextBytes: Long = ReplayBudget.MAX_FRAME_TEXT_BYTES): List<HistoryMessage> {
         return runCatching {
@@ -75,7 +79,8 @@ object OpenCodeTranscriptReplay {
      * One message's parts, in recorded order, as interleaved history rows: consecutive text parts fold
      * into a single [role] bubble, and each `tool` part is flushed as its own [ChatRole.TOOL] card row
      * between the surrounding text. A tool part in any state (running / completed / error) yields a card —
-     * only its `state.input` preview is read, never its output, so an in-flight or failed call never throws.
+     * an in-flight or malformed part degrades to a bare preview card, it never throws. Text is folded
+     * whole: a long reply replays intact ([ReplayBudget] bounds the frame total), matching Claude/Codex.
      */
     private fun messageRows(conn: Connection, sessionId: String, messageId: String, role: ChatRole): List<HistoryMessage> {
         val partStmt = conn.prepareStatement(
@@ -88,7 +93,7 @@ object OpenCodeTranscriptReplay {
         val rows = mutableListOf<HistoryMessage>()
         val textRun = StringBuilder()
         fun flushText() {
-            if (textRun.isNotBlank()) rows.add(HistoryMessage(role, textRun.toString().take(MAX_TEXT_PER_MESSAGE)))
+            if (textRun.isNotBlank()) rows.add(HistoryMessage(role, textRun.toString()))
             textRun.setLength(0)
         }
         while (partRs.next()) {
@@ -101,13 +106,36 @@ object OpenCodeTranscriptReplay {
                 }
                 "tool" -> {
                     flushText() // preserve "text · card · text" ordering
-                    val tool = ToolNameMapper.map(partData["tool"]?.jsonPrimitive?.contentOrNull ?: "tool")
-                    rows.add(HistoryMessage(ChatRole.TOOL, toolPreview(partData), tool = tool))
+                    rows.add(toolRow(partData))
                 }
             }
         }
         flushText()
         return rows
+    }
+
+    /** One persisted `tool` part → a TOOL card row shaped like the live card: the name runs through
+     *  [ToolNameMapper], the label is the collapsed [toolPreview], and — only once the call has SETTLED
+     *  (`state.status == "completed"`) — its outcome mirrors [OpenCodeStreamParser]'s rule: an error is a
+     *  completed call that produced NO output and had a non-zero (or absent) exit code; `ok` is its negation.
+     *  An unsettled part (running / still-erroring / just-started) carries no verdict and no partial output,
+     *  so a card never replays a stale outcome. */
+    private fun toolRow(partData: JsonObject): HistoryMessage {
+        val tool = ToolNameMapper.map(partData["tool"]?.jsonPrimitive?.contentOrNull ?: "tool")
+        val state = partData["state"] as? JsonObject
+        val output = state?.get("output")?.jsonPrimitive?.contentOrNull
+        val completed = state?.get("status")?.jsonPrimitive?.contentOrNull == "completed"
+        val ok: Boolean? = if (completed) {
+            val exit = state?.get("metadata")?.jsonObject?.get("exit")?.jsonPrimitive?.longOrNull
+            !(output == null && exit != 0L)
+        } else null
+        return HistoryMessage(
+            role = ChatRole.TOOL,
+            text = toolPreview(partData),
+            tool = tool,
+            ok = ok,
+            output = if (completed) output?.take(MAX_TOOL_OUTPUT) else null,
+        )
     }
 
     /** The tool card's input preview: the tool's `state.input` object (bash → `{"command":…}`, read →

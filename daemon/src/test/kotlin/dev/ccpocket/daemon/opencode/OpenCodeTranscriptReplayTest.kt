@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.opencode
 
 import dev.ccpocket.protocol.ChatRole
+import dev.ccpocket.protocol.HistoryMessage
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -12,12 +13,14 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
  * Drives [OpenCodeTranscriptReplay.readFrom] over an in-memory opencode.db (the injected-Connection seam)
  * — verifying a tool part replays as its own structured `ChatRole.TOOL` card, interleaved with the
- * surrounding assistant text, instead of the old `[bash] …output…` line flattened into the bubble (#177).
+ * surrounding assistant text, instead of the old `[bash] …output…` line flattened into the bubble (#177),
+ * and that a SETTLED call's card carries the live parser's output + ok/failed verdict.
  */
 class OpenCodeTranscriptReplayTest {
     private lateinit var conn: Connection
@@ -60,13 +63,14 @@ class OpenCodeTranscriptReplayTest {
         put("text", text)
     }
 
-    private fun toolPart(tool: String, status: String = "completed", input: JsonObject? = null, output: String? = null) = buildJsonObject {
+    private fun toolPart(tool: String, status: String = "completed", input: JsonObject? = null, output: String? = null, exit: Long? = null) = buildJsonObject {
         put("type", "tool")
         put("tool", tool)
         putJsonObject("state") {
             put("status", status)
             if (input != null) put("input", input)
             if (output != null) put("output", output)
+            if (exit != null) putJsonObject("metadata") { put("exit", exit) }
         }
     }
 
@@ -90,6 +94,8 @@ class OpenCodeTranscriptReplayTest {
         assertEquals(ChatRole.TOOL, rows[1].role)
         assertEquals("Bash", rows[1].tool)
         assertTrue(rows[1].text.contains("ls -la"), "tool card preview should reveal the command")
+        assertEquals(true, rows[1].ok, "a completed call with output replays as ok")
+        assertEquals("file1\nfile2", rows[1].output, "the card carries the output it produced live")
         assertEquals(ChatRole.ASSISTANT, rows[2].role)
         assertEquals("Two files.", rows[2].text)
         // regression: the tool OUTPUT must no longer be flattened into any assistant bubble …
@@ -114,17 +120,20 @@ class OpenCodeTranscriptReplayTest {
     }
 
     @Test
-    fun caps_tool_preview_and_text_length() {
+    fun long_text_replays_whole_while_tool_preview_and_output_cap() {
         message(
             "s1", "m1", "assistant",
             listOf(
                 textPart("y".repeat(9000)),
-                toolPart("bash", input = buildJsonObject { put("command", "x".repeat(5000)) }),
+                toolPart("bash", input = buildJsonObject { put("command", "x".repeat(5000)) }, output = "z".repeat(5000)),
             ),
         )
         val rows = read("s1")
-        assertEquals(4000, rows.first { it.role == ChatRole.ASSISTANT }.text.length, "text capped at MAX_TEXT_PER_MESSAGE")
+        // issue #81 parity with the Claude/Codex replays: reply-body text is NOT per-row clipped —
+        // a long answer replays intact and ReplayBudget bounds the frame total instead
+        assertEquals(9000, rows.first { it.role == ChatRole.ASSISTANT }.text.length, "long reply text replays whole")
         assertTrue(rows.first { it.role == ChatRole.TOOL }.text.length <= 1000, "tool preview capped at MAX_TOOL_TEXT")
+        assertEquals(4000, rows.first { it.role == ChatRole.TOOL }.output?.length, "tool output capped at MAX_TOOL_OUTPUT")
     }
 
     @Test
@@ -143,6 +152,11 @@ class OpenCodeTranscriptReplayTest {
         assertTrue(toolRows[1].text.contains("false"))
         assertEquals("", toolRows[2].text, "an input-less tool part is still a card, just with an empty preview")
         assertEquals("Grep", toolRows[2].tool)
+        // only a SETTLED (status=completed) call carries a verdict — running/error-in-flight rows stay open
+        assertNull(toolRows[0].ok, "a running call must not replay a stale verdict")
+        assertNull(toolRows[0].output)
+        assertNull(toolRows[1].ok, "an unsettled (non-completed) error state carries no verdict either")
+        assertNull(toolRows[1].output)
     }
 
     @Test
@@ -169,5 +183,62 @@ class OpenCodeTranscriptReplayTest {
         assertEquals(2, rows.size)
         assertEquals(ChatRole.TOOL, rows[0].role)
         assertEquals("three", rows[1].text)
+    }
+
+    // ---- settled-call outcome: the card replays the same output + ok/failed verdict the live parser gave ----
+
+    /** Inserts one assistant message holding a single tool part and returns its replayed TOOL row. */
+    private fun oneTool(part: JsonObject): HistoryMessage {
+        val sid = "one-${clock}"
+        message(sid, "m", "assistant", listOf(part))
+        return read(sid).single()
+    }
+
+    @Test
+    fun completed_tool_with_output_is_ok_and_carries_the_output() {
+        val t = oneTool(toolPart("read", input = buildJsonObject { put("file_path", "/f") }, output = "body"))
+        assertEquals(ChatRole.TOOL, t.role)
+        assertEquals(true, t.ok)
+        assertEquals("body", t.output)
+    }
+
+    @Test
+    fun errored_tool_no_output_nonzero_exit_is_not_ok() {
+        // mirrors the live parser: a completed call that produced NO output AND had a non-zero exit is an error
+        val t = oneTool(toolPart("bash", input = buildJsonObject { put("command", "false") }, exit = 1L))
+        assertEquals(false, t.ok)
+        assertNull(t.output)
+    }
+
+    @Test
+    fun completed_tool_without_output_and_absent_exit_is_not_ok() {
+        // live-parser parity: an absent exit code counts as non-zero, so completed + no output = failed
+        val t = oneTool(toolPart("bash", input = buildJsonObject { put("command", "x") }))
+        assertEquals(false, t.ok)
+        assertNull(t.output)
+    }
+
+    @Test
+    fun output_present_wins_even_with_nonzero_exit() {
+        // an error needs NO output, so a non-zero exit that still printed something replays as ok (live parity)
+        val t = oneTool(toolPart("bash", input = buildJsonObject { put("command", "grep x") }, output = "no match", exit = 1L))
+        assertEquals(true, t.ok)
+        assertEquals("no match", t.output)
+    }
+
+    @Test
+    fun unsettled_tool_carries_no_outcome_nor_partial_output() {
+        // a running part may already hold partial output in the db — neither it nor a verdict may leak
+        val t = oneTool(toolPart("read", status = "running", input = buildJsonObject { put("file_path", "/f") }, output = "partial"))
+        assertEquals(ChatRole.TOOL, t.role)
+        assertEquals("Read", t.tool)
+        assertNull(t.ok)
+        assertNull(t.output)
+    }
+
+    @Test
+    fun blank_only_text_parts_yield_no_row() {
+        message("s1", "m1", "assistant", listOf(textPart("   "), textPart("")))
+        assertTrue(read("s1").isEmpty(), "a message whose text run is all blank folds to nothing")
     }
 }
