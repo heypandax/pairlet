@@ -84,8 +84,9 @@ private fun money(v: Double): String {
  * Usage — a calm token dashboard (design issue #26, redesigned #89). Reached from Settings. Four states:
  * loading / offline / empty / populated. The range switch (Today/7d/30d) re-fetches and re-scopes the whole
  * summary: the Tokens hero is the WINDOW total (sum of the trend), with its range baked into the label and a
- * period sub-caption, so the headline and the trend tell one story. The three sub-metrics the daemon only
- * knows for today (requests / est. cost / cache hit) stay explicitly "· today"-labeled — never ambiguous.
+ * period sub-caption, so the headline and the trend tell one story. The three sub-metrics (requests / est.
+ * cost / cache hit) FOLLOW the same window (issue #174) — labeled "· 7d"/"· 30d" — falling back to the today
+ * values under "· today" only for an old daemon; est. cost hides entirely when no cost is recorded.
  * All views branch on the reply's own shape (u.days.size), so a stale reply keeps rendering coherently while
  * the next fetch is in flight. Data is aggregated by the daemon from Claude/Codex transcripts.
  */
@@ -159,16 +160,24 @@ private fun Populated(u: Usage) {
 
         HeroCard(windowTokens, scope, periodCaption(u), deltaPct, zeroToday, span = n)
 
-        // The three metrics the daemon only knows for TODAY. Kept, but each carries "· today" so its baseline
-        // is unmistakable even while the hero above reads a wider window. A missing sub-metric shows a labeled
-        // "not available yet" placeholder — never a bare "—".
+        // The three sub-metrics now FOLLOW THE WINDOW (issue #174): a new daemon sends same-window requests /
+        // cache-hit / cost, so switching Today/7d/30d re-scopes them too and the label reads "· 7d"/"· 30d".
+        // requestsWindow is the daemon-generation signal — it's non-null (≥ 0) on any new daemon; an OLD daemon
+        // leaves all three window fields null and we fall back to the today values under the old "· today" tag.
+        // The est.-cost card is DROPPED entirely when its value is null (subscriptions/Codex record no cost) —
+        // a "$—" placeholder reads as broken; the requests card then restacks full-width, which is fine.
+        val windowMode = u.requestsWindow != null
+        val metricScope = if (windowMode) scope else "today"
+        val requests = u.requestsWindow ?: u.requestsToday
+        val cacheHit = if (windowMode) u.cacheHitPctWindow else u.cacheHitPct
+        val cost = if (windowMode) u.costUsdWindow else u.costUsdToday
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatCard(Modifier.weight(1f), todayLabel(stringResource(Res.string.usage_requests)), u.requestsToday.toString())
-            StatCard(Modifier.weight(1f), todayLabel(stringResource(Res.string.usage_cost)), u.costUsdToday?.let { money(it) })
+            StatCard(Modifier.weight(1f), scopeLabel(stringResource(Res.string.usage_requests), metricScope), requests.toString())
+            if (cost != null) StatCard(Modifier.weight(1f), scopeLabel(stringResource(Res.string.usage_cost), metricScope), money(cost))
         }
         Spacer(Modifier.height(10.dp))
-        StatCard(Modifier.fillMaxWidth(), todayLabel(stringResource(Res.string.usage_cache)), u.cacheHitPct?.let { "$it%" }, arcPct = u.cacheHitPct)
+        StatCard(Modifier.fillMaxWidth(), scopeLabel(stringResource(Res.string.usage_cache), metricScope), cacheHit?.let { "$it%" }, arcPct = cacheHit)
 
         // Each range answers its own question: Today → hourly bars, 7d → daily bars, 30d → a calendar heatmap.
         // Branch on the reply's own shape (span == days.size), not the selected tab — while a fetch is in flight
@@ -240,8 +249,10 @@ private fun HeroCard(tokens: Long, scope: String, period: String, deltaPct: Int?
 }
 
 /**
- * A secondary "· today"-scoped metric. [value] null → a labeled "not available yet" placeholder (never a bare
- * dash), so a missing cost / cache-hit reads as calm-not-broken. Optional [arcPct] draws the cache-hit gauge.
+ * A secondary scope-tagged metric (its label carries "· today"/"· 7d"/"· 30d"). [value] null → a labeled "not
+ * available yet" placeholder (never a bare dash), so a missing cache-hit reads as calm-not-broken; the caller
+ * drops the cost card entirely instead (a null cost is common — subscriptions/Codex record none). Optional
+ * [arcPct] draws the cache-hit gauge.
  */
 @Composable
 private fun StatCard(modifier: Modifier, label: String, value: String?, arcPct: Int? = null) {
@@ -259,8 +270,9 @@ private fun StatCard(modifier: Modifier, label: String, value: String?, arcPct: 
     }
 }
 
-/** "Requests" -> "Requests · today": pins a today-only sub-metric's baseline right in its label. */
-private fun todayLabel(metric: String) = "$metric · today"
+/** "Requests" -> "Requests · 7d": pins a sub-metric's baseline in its label — the window scope ("today"/"7d"/
+ *  "30d"), or "today" when falling back to an old daemon's today-only values. */
+private fun scopeLabel(metric: String, scope: String) = "$metric · $scope"
 
 private val MONTHS = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
