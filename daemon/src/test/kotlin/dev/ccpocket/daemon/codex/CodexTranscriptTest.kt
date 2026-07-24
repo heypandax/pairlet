@@ -43,6 +43,27 @@ class CodexTranscriptTest {
     }
 
     @Test
+    fun summarize_matches_cwd_across_symlink_and_trailing_separator_variants() {
+        // issue #184: the merged project row hands the scan its realpath'd workdir; a rollout that recorded
+        // the SYMLINKED spelling must still match — same canonical key the directory list merges rows by
+        // (a weaker compare deduped the row but silently lost its codex sessions)
+        val work = Files.createTempDirectory("ccp-cxwork")
+        val link = work.parent.resolve("${work.fileName}-lnk").also { Files.createSymbolicLink(it, work) }
+        try {
+            val f = Files.createTempFile("rollout-2026-06-24T00-00-00-thr-sym", ".jsonl").also {
+                it.writeText(
+                    """{"timestamp":"t0","type":"session_meta","payload":{"id":"thr-sym","cwd":"$link/","cli_version":"0.124.0"}}""" + "\n" +
+                        """{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}""",
+                )
+            }
+            assertEquals("thr-sym", CodexTranscriptScanner.summarize(f, work.toRealPath().toString(), emptyMap())?.sessionId)
+        } finally {
+            Files.deleteIfExists(link)
+            work.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun summarize_prefers_codex_thread_title_over_first_prompt() {
         // Codex records the session's title in session_index.jsonl (not the rollout) — the scanner must
         // surface it instead of the prompt's first line (issue #64)

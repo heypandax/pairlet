@@ -67,7 +67,7 @@ class FileExportService(
             emit(fail("the session is no longer open on the computer — reopen it to export files"))
             return
         }
-        if (ProjectPaths.normCwd(live.toString()) != ProjectPaths.normCwd(req.workdir)) {
+        if (ProjectPaths.canonicalKey(live.toString()) != ProjectPaths.canonicalKey(req.workdir)) {
             emit(fail("exports are scoped to the open session's own project folder"))
             return
         }

@@ -17,11 +17,17 @@ object OpenCodeTranscriptScanner {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     const val LIVE_WINDOW_MS = 20_000L
 
-    /** All OpenCode sessions whose directory matches [workdir], newest-first. */
-    fun scan(workdir: String): List<SessionSummary> {
+    /** All OpenCode sessions whose directory matches [workdir], newest-first. Canonical-key compare
+     *  (issue #184): opencode records its own spelling of the dir (tilde/trailing-sep/symlink variants),
+     *  and the merged project row's realpath'd workdir must still find these sessions — the same key
+     *  [dev.ccpocket.daemon.disk.DirectoryService] merges rows by. [conn] is a test seam (same pattern
+     *  as [CodexTranscriptScanner.cwdsByNewest][dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest]'s
+     *  `files`); production uses the default. */
+    fun scan(workdir: String, conn: java.sql.Connection? = OpenCodePaths.connectReadOnly()): List<SessionSummary> {
+        val target = workdir.takeIf { it.isNotBlank() }?.let(ProjectPaths::canonicalKey)
         return runCatching {
-            val conn = OpenCodePaths.connectReadOnly() ?: return emptyList()
-            conn.use {
+            val c = conn ?: return emptyList()
+            c.use {
                 val stmt = it.prepareStatement(
                     "SELECT s.id, s.title, s.directory, s.model, s.cost, " +
                     "s.tokens_input, s.tokens_output, s.time_created, s.time_updated, " +
@@ -38,8 +44,8 @@ object OpenCodeTranscriptScanner {
                     val model = parseModel(rs.getString("model"))
                     val timeUpdated = rs.getLong("time_updated")
                     val msgCount = rs.getInt("msg_count")
-                    if (workdir.isNotBlank() && directory.isNotBlank()) {
-                        if (ProjectPaths.normCwd(directory) != ProjectPaths.normCwd(workdir)) continue
+                    if (target != null && directory.isNotBlank()) {
+                        if (ProjectPaths.canonicalKey(directory) != target) continue
                     }
                     out.add(SessionSummary(
                         sessionId = sid,

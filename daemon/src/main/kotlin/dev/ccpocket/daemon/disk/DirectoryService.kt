@@ -17,8 +17,14 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isReadable
 import kotlin.io.path.isWritable
 
-/** Enumerate candidate working directories + validate a chosen cwd. M0 = in-memory recents. */
-class DirectoryService {
+/** Enumerate candidate working directories + validate a chosen cwd. M0 = in-memory recents.
+ *  The constructor params are test seams only (issue #184: the cross-backend merge/dedup needs
+ *  controllable sources); production always uses the defaults. */
+class DirectoryService(
+    private val projectsRoot: () -> Path = ProjectPaths::projectsRoot,
+    private val codexCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() },
+    private val opencodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() },
+) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
 
@@ -37,37 +43,55 @@ class DirectoryService {
     /**
      * List directories that have agent history: Claude's (from ~/.claude/projects, the authoritative
      * `cwd` read from each project's newest .jsonl rather than the lossy dir-key) merged with Codex's
-     * (cwds recorded in ~/.codex/sessions rollouts). A dir the user only ever ran Codex in has no
-     * Claude project folder — without the merge it never appears at all, so its Codex sessions are
-     * unreachable from the app.
+     * (cwds recorded in ~/.codex/sessions rollouts) and OpenCode's (directories in its SQLite session
+     * table). A dir the user only ever ran Codex in has no Claude project folder — without the merge it
+     * never appears at all, so its Codex sessions are unreachable from the app.
+     *
+     * Cross-source identity is [ProjectPaths.canonicalKey] (realpath-based): each source records the SAME
+     * dir in its own spelling (tilde, trailing/doubled separators, macOS /var↔/private/var symlinks), and
+     * the weaker string compare let every variant through as its own row — issue #184's duplicate "~"
+     * project, whose second row then listed nothing because the session match used the same weak key.
+     *
+     * [includeOpencode]=false — a client that never declared AgentKind.OPENCODE support — skips the
+     * OpenCode source entirely: that client's session list strips opencode sessions anyway (emitSessions),
+     * so a row ONLY opencode sustains would open onto a bare "New session" screen (#184 mechanism ②). A dir
+     * that also has claude/codex history keeps its row through those sources.
      */
     fun listDirectories(
         root: String?,
         busyCwds: Set<String> = emptySet(),
         // the daemon's OWN live conversations per cwd (exact turn state, any backend) — see SessionRegistry.liveByCwd
         liveByCwd: Map<String, List<ActiveSession>> = emptyMap(),
+        includeOpencode: Boolean = true,
     ): List<DirectoryEntry> {
-        // normCwd-keyed so a tilde/absolute mismatch between OpenSession's workdir and a transcript's cwd still matches
-        val liveNorm = liveByCwd.entries.groupBy({ ProjectPaths.normCwd(it.key) }, { it.value }).mapValues { (_, v) -> v.flatten() }
+        // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
+        // workdir and a transcript's recorded cwd still matches
+        val liveNorm = liveByCwd.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value }).mapValues { (_, v) -> v.flatten() }
         val claude = claudeDirectories(busyCwds, liveNorm)
-        val codex = runCatching { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() }.getOrDefault(emptyMap())
-        val opencode = runCatching { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() }.getOrDefault(emptyMap())
-        // Merge all three sources
-        val allExternal = codex + opencode.mapValues { (k, v) -> maxOf(v, codex[k] ?: 0L) }
+        val codex = runCatching(codexCwds).getOrDefault(emptyMap())
+        val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
+        // merge both external sources; keys keep each source's raw spelling here — grouped canonically below
+        val allExternal = HashMap<String, Long>()
+        codex.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
+        opencode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         if (allExternal.isEmpty()) return claude
-        val known = claude.mapTo(HashSet()) { ProjectPaths.normCwd(it.path) }
-        val externalByNorm = allExternal.entries.groupBy({ ProjectPaths.normCwd(it.key) }, { it.value })
+        val known = claude.mapTo(HashSet()) { ProjectPaths.canonicalKey(it.path) }
+        // spelling variants of one dir collapse into a group; the group's mtime is its max
+        val externalByKey = allExternal.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
         val externalOnly = allExternal.entries
-            .filter { (cwd, _) -> ProjectPaths.normCwd(cwd) !in known }
-            .map { (cwd, mtime) ->
-                val live = liveNorm[ProjectPaths.normCwd(cwd)].orEmpty().sortedByDescending { it.executing }
+            .sortedByDescending { it.value } // the newest variant's spelling becomes the row identity
+            .distinctBy { ProjectPaths.canonicalKey(it.key) }
+            .filter { (cwd, _) -> ProjectPaths.canonicalKey(cwd) !in known }
+            .map { (cwd, _) ->
+                val key = ProjectPaths.canonicalKey(cwd)
+                val live = liveNorm[key].orEmpty().sortedByDescending { it.executing }
                 DirectoryEntry(
                     path = cwd,
                     name = Path.of(cwd).fileName?.toString() ?: cwd,
                     isDir = true,
                     hasSessions = true,
                     recent = cwd in recents,
-                    lastModified = mtime,
+                    lastModified = externalByKey[key]?.max() ?: 0L,
                     open = live.isNotEmpty(),
                     executing = live.any { it.executing },
                     busy = cwd in busyCwds,
@@ -76,19 +100,18 @@ class DirectoryService {
                     activeSessions = live,
                 )
             }
-            .distinctBy { ProjectPaths.normCwd(it.path) }
         // a dir with both histories sorts by whichever agent wrote last
         val merged = claude.map { e ->
-            val extM = externalByNorm[ProjectPaths.normCwd(e.path)]?.max() ?: 0L
+            val extM = externalByKey[ProjectPaths.canonicalKey(e.path)]?.max() ?: 0L
             if (extM > e.lastModified) e.copy(lastModified = extM) else e
         }
         return (merged + externalOnly).sortedByDescending { it.lastModified }
     }
 
     /** Directories with Claude history, newest-first, deduped per cwd. [liveNorm] = daemon conversations
-     *  keyed by normCwd (from [listDirectories]). */
+     *  keyed by [ProjectPaths.canonicalKey] (from [listDirectories]). */
     private fun claudeDirectories(busyCwds: Set<String>, liveNorm: Map<String, List<ActiveSession>>): List<DirectoryEntry> {
-        val projects = ProjectPaths.projectsRoot()
+        val projects = projectsRoot()
         if (!projects.isDirectory()) return emptyList()
         val dirs = Files.newDirectoryStream(projects).use { it.toList() }.filter { it.isDirectory() }
         val now = System.currentTimeMillis()
@@ -102,7 +125,7 @@ class DirectoryService {
                 // below can't see turn boundaries, which kept "running" on for ~30s after a turn finished.
                 // Claude ones get their title/branch from their own transcript; Codex rollouts live outside
                 // ~/.claude/projects, so those rows fall back to the client's generic label.
-                val daemonLive = liveNorm[ProjectPaths.normCwd(cwd)].orEmpty().map { s ->
+                val daemonLive = liveNorm[ProjectPaths.canonicalKey(cwd)].orEmpty().map { s ->
                     if (s.agent == AgentKind.CLAUDE) {
                         val sum = runCatching { TranscriptScanner.summarize(newest.resolveSibling("${s.sessionId}.jsonl")) }.getOrNull()
                         s.copy(title = sum?.title, gitBranch = sum?.gitBranch)
@@ -137,7 +160,9 @@ class DirectoryService {
                 )
             }
             .sortedByDescending { it.lastModified }
-            .distinctBy { it.path } // keep the newest entry per cwd
+            // keep the newest entry per cwd — canonical, since two project dirs can record variant
+            // spellings of one real dir (e.g. a claude launched via a symlinked path)
+            .distinctBy { ProjectPaths.canonicalKey(it.path) }
     }
 
     /** The dir's `cwd` (from its newest transcript), that transcript's mtime, and the transcript file. */
@@ -154,16 +179,8 @@ class DirectoryService {
         return null
     }
 
-    /** `~` / `~/...` → the daemon user's home. Clients accept `~` paths in their "new session" inputs and may
-     *  send them raw; the daemon owns the expansion because only it knows the remote machine's home. */
-    private fun expandTilde(path: String): String = when {
-        path == "~" -> System.getProperty("user.home")
-        path.startsWith("~/") || path.startsWith("~\\") -> System.getProperty("user.home") + path.drop(1)
-        else -> path
-    }
-
     fun validateWorkdir(path: String): Path? {
-        val p = runCatching { Path.of(expandTilde(path)).toRealPath() }.getOrNull() ?: return null
+        val p = runCatching { Path.of(ProjectPaths.expandTilde(path)).toRealPath() }.getOrNull() ?: return null
         return if (p.isDirectory() && p.isReadable()) p else null
     }
 
@@ -203,7 +220,7 @@ class DirectoryService {
      */
     fun validateOrCreateWorkdir(path: String): Path? {
         validateWorkdir(path)?.let { return it }                       // already a readable directory → done
-        val raw = runCatching { Path.of(expandTilde(path)).normalize() }.getOrNull() ?: return null
+        val raw = runCatching { Path.of(ProjectPaths.expandTilde(path)).normalize() }.getOrNull() ?: return null
         if (raw.exists()) return null                                  // exists but not a readable dir (e.g. a file)
         val leaf = raw.fileName ?: return null                         // need a leaf name to create
         val parent = raw.parent?.let { p -> runCatching { p.toRealPath() }.getOrNull() } ?: return null
