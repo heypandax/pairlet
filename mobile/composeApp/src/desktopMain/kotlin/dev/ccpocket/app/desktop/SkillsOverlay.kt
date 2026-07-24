@@ -57,10 +57,37 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.close
+import dev.ccpocket.app.resources.cmd_source_project
+import dev.ccpocket.app.resources.cmd_source_skill
+import dev.ccpocket.app.resources.cmd_source_user
+import dev.ccpocket.app.resources.fact_author
+import dev.ccpocket.app.resources.fact_commands
+import dev.ccpocket.app.resources.fact_homepage
+import dev.ccpocket.app.resources.fact_marketplace
+import dev.ccpocket.app.resources.fact_path
+import dev.ccpocket.app.resources.fact_scope
+import dev.ccpocket.app.resources.fact_version
+import dev.ccpocket.app.resources.key_close
+import dev.ccpocket.app.resources.key_switch_entry
+import dev.ccpocket.app.resources.plugins_section
+import dev.ccpocket.app.resources.skills_count
+import dev.ccpocket.app.resources.skills_empty_body
+import dev.ccpocket.app.resources.skills_empty_title
+import dev.ccpocket.app.resources.skills_kind_plugin
+import dev.ccpocket.app.resources.skills_loading
+import dev.ccpocket.app.resources.skills_loading_from
+import dev.ccpocket.app.resources.skills_section
+import dev.ccpocket.app.resources.skills_stale_body
+import dev.ccpocket.app.resources.skills_stale_title
+import dev.ccpocket.app.resources.skills_title
+import dev.ccpocket.app.resources.skills_trimmed
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.PluginInfo
 import dev.ccpocket.protocol.SkillInfo
 import dev.ccpocket.protocol.SkillScope
+import org.jetbrains.compose.resources.stringResource
 
 // ════════════════════════════════════════════════════════════════════
 //  Skills — the desktop installed skills/plugins browser (issue #132).
@@ -118,16 +145,16 @@ fun SkillsOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Skills & plugins", color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.skills_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             catalog?.takeIf { rows.isNotEmpty() }?.let {
                 Text(
-                    "${it.skills.size} skills · ${it.plugins.size} plugins",
+                    stringResource(Res.string.skills_count, it.skills.size, it.plugins.size),
                     color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.5.sp,
                 )
             }
             Box(Modifier.weight(1f))
             Icon(
-                Icons.Rounded.Close, null, tint = Tok.tx2,
+                Icons.Rounded.Close, stringResource(Res.string.close), tint = Tok.tx2,
                 modifier = Modifier.size(24.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onDismiss).padding(3.dp),
             )
         }
@@ -138,29 +165,29 @@ fun SkillsOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                 model.skillCatalogLoading && catalog == null -> LoadingPane(model.activeComputer?.name)
                 catalog == null && model.skillCatalogStale -> CenterStatePane(
                     icon = Icons.Rounded.WarningAmber, tint = Tok.warn,
-                    title = "Can't browse skills",
-                    sub = "The cc-pocket daemon on this computer is too old. Update it to read installed skills and plugins.",
+                    title = stringResource(Res.string.skills_stale_title),
+                    sub = stringResource(Res.string.skills_stale_body),
                 )
                 rows.isEmpty() -> CenterStatePane(
                     icon = Icons.Rounded.Bolt, tint = Tok.muted,
-                    title = "Nothing installed",
-                    sub = "No skills or plugins found on this computer. Add a SKILL.md under .claude/skills or install a plugin from a marketplace.",
+                    title = stringResource(Res.string.skills_empty_title),
+                    sub = stringResource(Res.string.skills_empty_body),
                 )
                 else -> Row(Modifier.fillMaxSize()) {
                     LazyColumn(Modifier.width(280.dp).fillMaxHeight().background(Tok.surface)) {
                         val skills = rows.filterIsInstance<SkillRow.Skill>()
                         val plugins = rows.filterIsInstance<SkillRow.Plugin>()
-                        if (skills.isNotEmpty()) item(key = "hdr:skills") { RailHeader("SKILLS") }
+                        if (skills.isNotEmpty()) item(key = "hdr:skills") { RailHeader(stringResource(Res.string.skills_section).uppercase()) }
                         items(skills, key = { it.key }) { row ->
                             RailRow(
                                 name = row.info.name,
                                 detail = row.info.description,
-                                tag = if (row.info.scope == SkillScope.PROJECT) "project" else null,
+                                tag = if (row.info.scope == SkillScope.PROJECT) stringResource(Res.string.cmd_source_project) else null,
                                 tagAccent = true,
                                 selected = row.key == selectedKey,
                             ) { selectedKey = row.key }
                         }
-                        if (plugins.isNotEmpty()) item(key = "hdr:plugins") { RailHeader("PLUGINS") }
+                        if (plugins.isNotEmpty()) item(key = "hdr:plugins") { RailHeader(stringResource(Res.string.plugins_section).uppercase()) }
                         items(plugins, key = { it.key }) { row ->
                             RailRow(
                                 name = row.info.name,
@@ -191,9 +218,9 @@ fun SkillsOverlay(model: DesktopModel, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            FootHintText("↑↓", "switch entry")
+            FootHintText("↑↓", stringResource(Res.string.key_switch_entry))
             Text("·", color = Tok.hair, fontFamily = Dk.ui, fontSize = 12.sp)
-            FootHintText("esc", "close")
+            FootHintText("esc", stringResource(Res.string.key_close))
         }
     }
 }
@@ -261,11 +288,11 @@ private fun RailRow(name: String, detail: String, tag: String?, tagAccent: Boole
 private fun SkillDetail(s: SkillInfo) {
     DetailScaffold(
         title = s.name,
-        kind = "skill",
+        kind = stringResource(Res.string.cmd_source_skill),
         lede = s.description,
         facts = buildList {
-            add(Fact("scope", if (s.scope == SkillScope.PROJECT) "project" else "user", FactKind.UI))
-            add(Fact("path", s.path ?: "—", if (s.path != null) FactKind.MONO else FactKind.MUTED))
+            add(Fact(stringResource(Res.string.fact_scope), stringResource(if (s.scope == SkillScope.PROJECT) Res.string.cmd_source_project else Res.string.cmd_source_user), FactKind.UI))
+            add(Fact(stringResource(Res.string.fact_path), s.path ?: "—", if (s.path != null) FactKind.MONO else FactKind.MUTED))
             s.meta.forEach { (k, v) -> add(Fact(k, v, FactKind.MONO)) }
         },
         commands = emptyList(),
@@ -279,16 +306,16 @@ private fun SkillDetail(s: SkillInfo) {
 private fun PluginDetail(p: PluginInfo) {
     DetailScaffold(
         title = p.name,
-        kind = "plugin",
+        kind = stringResource(Res.string.skills_kind_plugin),
         lede = p.description,
         facts = buildList {
-            add(Fact("scope", p.scope ?: "—", if (p.scope != null) FactKind.UI else FactKind.MUTED))
-            add(Fact("path", p.path ?: "—", if (p.path != null) FactKind.MONO else FactKind.MUTED))
-            add(Fact("version", p.version ?: "—", if (p.version != null) FactKind.MONO else FactKind.MUTED))
-            add(Fact("marketplace", p.marketplace ?: "—", if (p.marketplace != null) FactKind.MONO else FactKind.MUTED))
-            add(Fact("author", p.author ?: "—", if (p.author != null) FactKind.UI else FactKind.MUTED))
-            if (p.commands.isNotEmpty()) add(Fact("commands", "", FactKind.CMDS))
-            p.homepage?.let { add(Fact("homepage", it, FactKind.MONO)) }
+            add(Fact(stringResource(Res.string.fact_scope), p.scope ?: "—", if (p.scope != null) FactKind.UI else FactKind.MUTED))
+            add(Fact(stringResource(Res.string.fact_path), p.path ?: "—", if (p.path != null) FactKind.MONO else FactKind.MUTED))
+            add(Fact(stringResource(Res.string.fact_version), p.version ?: "—", if (p.version != null) FactKind.MONO else FactKind.MUTED))
+            add(Fact(stringResource(Res.string.fact_marketplace), p.marketplace ?: "—", if (p.marketplace != null) FactKind.MONO else FactKind.MUTED))
+            add(Fact(stringResource(Res.string.fact_author), p.author ?: "—", if (p.author != null) FactKind.UI else FactKind.MUTED))
+            if (p.commands.isNotEmpty()) add(Fact(stringResource(Res.string.fact_commands), "", FactKind.CMDS))
+            p.homepage?.let { add(Fact(stringResource(Res.string.fact_homepage), it, FactKind.MONO)) }
         },
         commands = p.commands.map { "/$it" },
         bodyTitle = "README.md",
@@ -388,7 +415,7 @@ private fun DetailScaffold(
                 }
                 if (truncated) {
                     Text(
-                        "trimmed — open the file on the computer for the rest", color = Tok.muted,
+                        stringResource(Res.string.skills_trimmed), color = Tok.muted,
                         fontFamily = Dk.ui, fontSize = 12.5.sp, fontStyle = FontStyle.Italic,
                         modifier = Modifier.padding(top = 4.dp),
                     )
@@ -425,7 +452,7 @@ private fun LoadingPane(machine: String?) {
     ) {
         CircularProgressIndicator(color = Tok.accent, trackColor = Tok.hair, strokeWidth = 2.6.dp, modifier = Modifier.size(30.dp))
         Text(
-            machine?.let { "Reading skills from $it…" } ?: "Reading skills…",
+            machine?.let { stringResource(Res.string.skills_loading_from, it) } ?: stringResource(Res.string.skills_loading),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.5.sp,
             modifier = Modifier.padding(top = 16.dp),
         )

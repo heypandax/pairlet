@@ -39,7 +39,11 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.pairing.encode
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.ui.share.DEFAULT_TIER
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.ui.share.SHARE_TIERS
 import dev.ccpocket.app.ui.share.ShareExpiryOption
 import dev.ccpocket.app.ui.share.ShareStatus
@@ -94,15 +98,15 @@ import dev.ccpocket.protocol.PresetEnv
 import dev.ccpocket.protocol.PresetSummary
 import dev.ccpocket.protocol.PresetsState
 
-private enum class SettingsTab(val label: String, val icon: ImageVector) {
-    GENERAL("General", Icons.Outlined.Tune),
-    ACCOUNT("Account", Icons.Rounded.Person),
-    COMPUTERS("Computers", Icons.Rounded.Devices),
-    SCHEDULES("Schedules", Icons.Rounded.Schedule),
-    SHARES("Shared", Icons.Rounded.Share),
-    BRIDGES("Bridges", Icons.Rounded.SmartToy),
-    SHORTCUTS("Shortcuts", Icons.Rounded.Keyboard),
-    ABOUT("About", Icons.Outlined.Info),
+private enum class SettingsTab(val label: StringResource, val icon: ImageVector) {
+    GENERAL(Res.string.settings_tab_general, Icons.Outlined.Tune),
+    ACCOUNT(Res.string.settings_tab_account, Icons.Rounded.Person),
+    COMPUTERS(Res.string.settings_tab_computers, Icons.Rounded.Devices),
+    SCHEDULES(Res.string.settings_tab_schedules, Icons.Rounded.Schedule),
+    SHARES(Res.string.settings_tab_shared, Icons.Rounded.Share),
+    BRIDGES(Res.string.settings_bridges, Icons.Rounded.SmartToy),
+    SHORTCUTS(Res.string.settings_tab_shortcuts, Icons.Rounded.Keyboard),
+    ABOUT(Res.string.settings_tab_about, Icons.Outlined.Info),
 }
 
 /**
@@ -117,8 +121,8 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
         Modifier.width(700.dp).height(500.dp).shadow(30.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp)).background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(16.dp)),
     ) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Settings", color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Icon(Icons.Rounded.Close, "Close", tint = Tok.tx2, modifier = Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(2.dp))
+            Text(stringResource(Res.string.settings_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Icon(Icons.Rounded.Close, stringResource(Res.string.close), tint = Tok.tx2, modifier = Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onDismiss).padding(2.dp))
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(Modifier.fillMaxWidth().weight(1f)) {
@@ -146,7 +150,7 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
 private fun RailItem(tab: SettingsTab, selected: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().selectableRow(selected).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Icon(tab.icon, null, tint = if (selected) Tok.accent else Tok.tx2, modifier = Modifier.size(16.dp))
-        Text(tab.label, color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text(stringResource(tab.label), color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
@@ -163,10 +167,10 @@ private fun Group(title: String, sub: String? = null, content: @Composable () ->
 @Composable
 private fun GeneralPane(model: DesktopModel) {
     Column {
-        Group("Appearance", "Light or dark theme for this app.") {
+        Group(stringResource(Res.string.settings_appearance), stringResource(Res.string.settings_appearance_sub)) {
             AppearanceRow(model)
         }
-        Group("Default agent", "Which backend new sessions start with.") {
+        Group(stringResource(Res.string.settings_default_agent), stringResource(Res.string.settings_default_agent_sub)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
                 AgentCardRow(AgentKind.CODEX, model.defaultAgent == AgentKind.CODEX, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CODEX }
@@ -176,8 +180,15 @@ private fun GeneralPane(model: DesktopModel) {
         val defaultAgent = model.defaultAgent
         val defaultModel = model.defaultModelFor(defaultAgent)
         LaunchedEffect(defaultAgent) { model.fetchModels(defaultAgent) }
-        Group("Default model", "Which model new ${agentName(defaultAgent)} sessions start on.") {
-            PrefRow("Default", "cli default", selected = defaultModel == null) { model.setDefaultModelFor(defaultAgent, null) }
+        Group(
+            stringResource(Res.string.settings_default_model),
+            stringResource(Res.string.settings_default_model_sub, agentName(defaultAgent)),
+        ) {
+            PrefRow(
+                stringResource(Res.string.settings_option_default),
+                stringResource(Res.string.settings_option_cli_default),
+                selected = defaultModel == null,
+            ) { model.setDefaultModelFor(defaultAgent, null) }
             val discovered = model.modelsForAgent(defaultAgent).filter { it.isNotBlank() }
             val options = when (defaultAgent) {
                 AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS
@@ -191,43 +202,48 @@ private fun GeneralPane(model: DesktopModel) {
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
             }
             if (defaultAgent == AgentKind.OPENCODE && options.isEmpty()) {
-                Text("OpenCode will use the default from its local configuration.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                Text(
+                    stringResource(Res.string.settings_opencode_local_default),
+                    color = Tok.muted,
+                    fontFamily = Dk.ui,
+                    fontSize = 11.5.sp,
+                )
             }
         }
-        Group("Context window", "The usage statusline's 100% mark. Set this when a custom model's real window isn't 200K — the CLI can't report it.") {
+        Group(stringResource(Res.string.settings_context_window), stringResource(Res.string.settings_context_window_sub)) {
             ContextWindowRows(model)
         }
-        Group("Default permission mode", "How much a new session may do before it asks.") {
+        Group(stringResource(Res.string.settings_default_mode), stringResource(Res.string.settings_default_mode_sub)) {
             CLAUDE_MODES.forEach { m -> ModeRow(m, selected = m.mode == model.defaultMode) { model.defaultMode = m.mode } }
         }
         // how a terminal opens (issue #153: embedded dock is the default) + which external app (issue #44 —
         // only terminals actually present on this machine are offered)
-        Group("Terminal", "How the chat header's >_ opens a terminal at the session's folder.") {
-            PrefRow("Embedded panel", "⌘J · docked in the session", selected = model.terminalDefaultEmbedded) {
+        Group(stringResource(Res.string.settings_terminal), stringResource(Res.string.settings_terminal_sub)) {
+            PrefRow(stringResource(Res.string.settings_term_embedded), stringResource(Res.string.settings_term_embedded_hint), selected = model.terminalDefaultEmbedded) {
                 model.terminalDefaultEmbedded = true
             }
-            PrefRow("External window", "opens the app below", selected = !model.terminalDefaultEmbedded) {
+            PrefRow(stringResource(Res.string.settings_term_external), stringResource(Res.string.settings_term_external_hint), selected = !model.terminalDefaultEmbedded) {
                 model.terminalDefaultEmbedded = false
             }
             Spacer(Modifier.height(8.dp))
-            Text("External app", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 7.dp))
+            Text(stringResource(Res.string.settings_term_external_app), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(bottom = 7.dp))
             TerminalApp.entries.filter(TerminalLauncher::installed).forEach { t ->
                 TerminalRow(t, selected = t == model.terminalApp) { model.terminalApp = t }
             }
         }
         // menu-bar presence (issue #151): the OS status glyph + anchored popover, on by default
-        Group("Menu bar", "A persistent status glyph — approvals and running sessions at a glance, without raising this window.") {
-            ToggleRow("Show cc-pocket in the menu bar", model.menuBarEnabled) { model.menuBarEnabled = !model.menuBarEnabled }
+        Group(stringResource(Res.string.settings_menu_bar), stringResource(Res.string.settings_menu_bar_sub)) {
+            ToggleRow(stringResource(Res.string.settings_menu_bar_toggle), model.menuBarEnabled) { model.menuBarEnabled = !model.menuBarEnabled }
         }
         // daemon-side switch: silence phone alerts while working at the computer. Null = old daemon.
         LaunchedEffect(Unit) { model.refreshPushPrefs() }
-        Group("Notifications", "Turn-complete alerts pushed to your phone by this computer.") {
+        Group(stringResource(Res.string.settings_notifications), stringResource(Res.string.settings_notifications_sub)) {
             when (val on = model.phonePush) {
                 null -> Text(
-                    "Phone alerts need the computer's daemon updated first.",
+                    stringResource(Res.string.settings_push_stale),
                     color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
                 )
-                else -> ToggleRow("Notify my phone when a turn finishes", on) { model.setPhonePush(!on) }
+                else -> ToggleRow(stringResource(Res.string.settings_push_toggle), on) { model.setPhonePush(!on) }
             }
         }
     }
@@ -247,9 +263,9 @@ private fun codexModelLabel(id: String): String = id.split('-').joinToString(" "
 @Composable
 private fun AppearanceRow(model: DesktopModel) {
     val modes = listOf(
-        ThemeMode.SYSTEM to "System",
-        ThemeMode.LIGHT to "Light",
-        ThemeMode.DARK to "Dark",
+        ThemeMode.SYSTEM to stringResource(Res.string.appearance_system),
+        ThemeMode.LIGHT to stringResource(Res.string.appearance_light),
+        ThemeMode.DARK to stringResource(Res.string.appearance_dark),
     )
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
@@ -285,8 +301,15 @@ private fun ToggleRow(label: String, on: Boolean, onClick: () -> Unit) {
         Dot(if (on) Tok.ok else Tok.muted, 8.dp)
         Text(label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
         Spacer(Modifier.weight(1f))
-        Text(if (on) "on" else "off", color = if (on) Tok.ok else Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+        Text(stringResource(if (on) Res.string.toggle_on else Res.string.toggle_off), color = if (on) Tok.ok else Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
     }
+}
+
+/** The user-facing name of a terminal choice — SYSTEM localizes; Ghostty is a product name and stays. */
+@Composable
+internal fun terminalAppLabel(t: TerminalApp): String = when (t) {
+    TerminalApp.SYSTEM -> stringResource(Res.string.term_app_system)
+    TerminalApp.GHOSTTY -> t.label
 }
 
 @Composable
@@ -299,7 +322,7 @@ private fun TerminalRow(t: TerminalApp, selected: Boolean, onClick: () -> Unit) 
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(">_", color = if (selected) Tok.tx else Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp)
-        Text(t.label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(terminalAppLabel(t), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
         Spacer(Modifier.weight(1f))
         Text(t.id, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
     }
@@ -344,7 +367,7 @@ private fun PrefRow(label: String, trailing: String, selected: Boolean, onClick:
 private fun ContextWindowRows(model: DesktopModel) {
     val current = model.contextWindowOverride
     val custom = current != null && current != DEFAULT_CONTEXT_WINDOW && current != LARGE_CONTEXT_WINDOW
-    PrefRow("Default", "follow model", selected = current == null) { model.contextWindowOverride = null }
+    PrefRow(stringResource(Res.string.settings_option_default), "follow model", selected = current == null) { model.contextWindowOverride = null }
     PrefRow("200K", "200,000", selected = current == DEFAULT_CONTEXT_WINDOW) { model.contextWindowOverride = DEFAULT_CONTEXT_WINDOW }
     PrefRow("1M", "1,000,000", selected = current == LARGE_CONTEXT_WINDOW) { model.contextWindowOverride = LARGE_CONTEXT_WINDOW }
     var draft by remember { mutableStateOf(if (custom) current.toString() else "") }
@@ -355,13 +378,13 @@ private fun ContextWindowRows(model: DesktopModel) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("Custom", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(stringResource(Res.string.context_window_custom), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
         Spacer(Modifier.weight(1f))
         Box(
             Modifier.width(108.dp).clip(RoundedCornerShape(7.dp)).background(Tok.base)
                 .border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 6.dp),
         ) {
-            if (draft.isEmpty()) Text("tokens", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+            if (draft.isEmpty()) Text(stringResource(Res.string.context_window_tokens), color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
             BasicTextField(
                 draft,
                 { new -> draft = new.filter(Char::isDigit).take(9); model.contextWindowOverride = draft.toLongOrNull()?.takeIf { it > 0 } },
@@ -384,7 +407,7 @@ private fun ModeRow(m: DkMode, selected: Boolean, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Dot(m.dot, 8.dp)
-        Text(m.label, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
+        Text(stringResource(m.label), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp)
         if (m.danger) Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
         Spacer(Modifier.weight(1f))
         Text(m.token, color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
@@ -467,14 +490,16 @@ private fun AccountPane(model: DesktopModel) {
     }
 
     Column {
-        Group("Authentication", "How this computer's Claude CLI signs in.") {
+        Group(stringResource(Res.string.settings_auth), stringResource(Res.string.settings_auth_sub)) {
             when {
                 s == null -> Text(
-                    when {
-                        !model.connected -> "Connect a computer to see its account."
-                        timedOut -> "No reply — the daemon on this computer predates account management. Update it to switch accounts from here."
-                        else -> "Loading account…"
-                    },
+                    stringResource(
+                        when {
+                            !model.connected -> Res.string.settings_auth_disconnected
+                            timedOut -> Res.string.settings_auth_stale
+                            else -> Res.string.settings_auth_loading
+                        },
+                    ),
                     color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 19.sp,
                 )
 
@@ -482,9 +507,9 @@ private fun AccountPane(model: DesktopModel) {
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                         .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
                 ) {
-                    Text("Finish signing in", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.settings_login_finish), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "A browser window opened on the computer. Authorize there, copy the code, and paste it below.",
+                        stringResource(Res.string.settings_login_browser),
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
                     )
                     s.loginUrl?.let { url ->
@@ -493,8 +518,8 @@ private fun AccountPane(model: DesktopModel) {
                                 url, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                             )
-                            TextBtn("Open here", Tok.accent) { runCatching { uriHandler.openUri(url) } }
-                            TextBtn("Copy", Tok.tx2) { clipboard.setText(AnnotatedString(url)) }
+                            TextBtn(stringResource(Res.string.settings_login_open_here), Tok.accent) { runCatching { uriHandler.openUri(url) } }
+                            TextBtn(stringResource(Res.string.path_copy), Tok.tx2) { clipboard.setText(AnnotatedString(url)) }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -502,15 +527,15 @@ private fun AccountPane(model: DesktopModel) {
                             Modifier.weight(1f).clip(RoundedCornerShape(7.dp)).background(Tok.base)
                                 .border(1.dp, Tok.hair, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 7.dp),
                         ) {
-                            if (code.isEmpty()) Text("Paste authorization code", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
+                            if (code.isEmpty()) Text(stringResource(Res.string.settings_login_paste_code), color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
                             BasicTextField(
                                 code, { code = it }, singleLine = true,
                                 textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp),
                                 cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth(),
                             )
                         }
-                        TextBtn("Submit", Tok.accent) { if (code.isNotBlank()) { model.submitAuthCode(code); code = "" } }
-                        TextBtn("Cancel", Tok.muted) { code = ""; model.cancelAuthLogin() }
+                        TextBtn(stringResource(Res.string.settings_login_submit), Tok.accent) { if (code.isNotBlank()) { model.submitAuthCode(code); code = "" } }
+                        TextBtn(stringResource(Res.string.cancel), Tok.muted) { code = ""; model.cancelAuthLogin() }
                     }
                 }
 
@@ -528,15 +553,14 @@ private fun AccountPane(model: DesktopModel) {
                     val keySource = s.apiKeySource.orEmpty() // non-blank per the branch guard (a protocol prop can't smart-cast cross-module)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
-                        Text("API key", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(Res.string.settings_api_key), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
                         MonoPill("env · $keySource", accent = false)
                     }
                     Hairline(vertical = 13.dp)
                     Text(
-                        "Set in the computer's environment ($keySource / ANTHROPIC_BASE_URL), not a Claude login. " +
-                            if (ps != null) "Activate a preset below to run new sessions on a saved endpoint instead, or edit the variables on the computer."
-                            else "To change the key or endpoint, edit the variables on the computer and reconnect.",
+                        stringResource(Res.string.settings_env_key_body, keySource) + " " +
+                            stringResource(if (ps != null) Res.string.settings_env_key_presets else Res.string.settings_env_key_computer),
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp,
                     )
                 }
@@ -548,7 +572,7 @@ private fun AccountPane(model: DesktopModel) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Person, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(s.email ?: "Signed in", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(s.email ?: stringResource(Res.string.settings_signed_in), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             s.orgName?.let { Text(it, color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                         }
                         s.subscriptionType?.let { plan ->
@@ -561,16 +585,21 @@ private fun AccountPane(model: DesktopModel) {
                     Spacer(Modifier.height(12.dp))
                     if (confirmSwitch) {
                         Text(
-                            "Switching signs this account out first. Idle sessions on that computer are closed (resume them anytime); a session still working on a task blocks the switch.",
+                            stringResource(Res.string.settings_switch_warning),
                             color = Tok.warn, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 8.dp),
                         )
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextBtn("Continue", Tok.accent) { confirmSwitch = false; model.switchAccount() }
-                            TextBtn("Cancel", Tok.muted) { confirmSwitch = false }
+                            TextBtn(stringResource(Res.string.action_continue), Tok.accent) { confirmSwitch = false; model.switchAccount() }
+                            TextBtn(stringResource(Res.string.cancel), Tok.muted) { confirmSwitch = false }
                         }
                     } else Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TextBtn("Switch account…", Tok.accent) { confirmSwitch = true }
-                        TextBtn("Log out", Tok.danger) { model.logoutAccount() }
+                        // only a real OAuth login (which always carries an email) can actually be switched or
+                        // logged out. An env-token / gateway auth reports loggedIn=true with a null email and no
+                        // apiKeySource (so it lands here, not the API-key branch), yet `claude auth login/logout`
+                        // can't touch it — grey these out rather than leave them as no-ops the user keeps poking.
+                        val canManage = s.email != null
+                        TextBtn(stringResource(Res.string.settings_switch_account), Tok.accent, enabled = canManage) { confirmSwitch = true }
+                        TextBtn(stringResource(Res.string.settings_log_out), Tok.danger, enabled = canManage) { model.logoutAccount() }
                     }
                 }
 
@@ -582,18 +611,17 @@ private fun AccountPane(model: DesktopModel) {
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Icon(Icons.Rounded.Lock, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
-                        Text("No account or API key set on this computer", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(Res.string.settings_no_auth_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
                         MonoPill("unconfigured", accent = false)
                     }
                     Hairline(vertical = 13.dp)
                     Text(
-                        "This computer's Claude CLI has no login and no base URL or auth token in its environment. " +
-                            if (ps != null) "Sign in with Claude, or save a preset below to point new sessions at an endpoint."
-                            else "Sign in with Claude to get started.",
+                        stringResource(Res.string.settings_no_auth_body) + " " +
+                            stringResource(if (ps != null) Res.string.settings_no_auth_presets else Res.string.settings_no_auth_signin),
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 8.dp),
                     )
-                    Row { TextBtn("Sign in…", Tok.accent) { model.switchAccount() } }
+                    Row { TextBtn(stringResource(Res.string.settings_sign_in), Tok.accent) { model.switchAccount() } }
                 }
             }
             // mid-task refusal with structure: name each blocker and offer to stop it — per row or all at
@@ -608,7 +636,7 @@ private fun AccountPane(model: DesktopModel) {
 
         // design 1a-1d: the presets group lives on the SAME pane for every auth flavor — OAuth users
         // see it too (1c), which is exactly how a subscription user discovers third-party endpoints
-        Group("API presets", "Saved endpoints you can switch between. New sessions use the active one.") {
+        Group(stringResource(Res.string.settings_presets), stringResource(Res.string.settings_presets_sub)) {
             PresetsSection(
                 ps = ps,
                 timedOut = timedOut,
@@ -650,7 +678,7 @@ private fun PresetAuthCard(p: PresetSummary, onDeactivate: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Rounded.Lock, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
-            Text("API key", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.settings_api_key), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
             MonoPill("preset · ${p.name}", accent = true)
         }
@@ -663,7 +691,7 @@ private fun PresetAuthCard(p: PresetSummary, onDeactivate: () -> Unit) {
             Text(" · ${p.tokenMask}", color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp)
         }
         if (p.model != null || p.smallFastModel != null) {
-            CapLabel("Model route", topPad = 12.dp)
+            CapLabel(stringResource(Res.string.settings_model_route), topPad = 12.dp)
             val route = listOfNotNull(
                 p.model?.let { "model → $it" },
                 p.smallFastModel?.let { "fast → $it" },
@@ -672,7 +700,7 @@ private fun PresetAuthCard(p: PresetSummary, onDeactivate: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         // the way back to the computer's own login/env — same switch semantics as activating (blockers may refuse)
-        Row { TextBtn("Deactivate", Tok.muted, onDeactivate) }
+        Row { TextBtn(stringResource(Res.string.settings_preset_deactivate), Tok.muted, onClick = onDeactivate) }
     }
 }
 
@@ -695,11 +723,13 @@ private fun PresetsSection(
 ) {
     if (ps == null) {
         Text(
-            when {
-                !connected -> "Connect a computer to manage API presets."
-                timedOut -> "Presets need the computer's daemon updated first."
-                else -> "Loading presets…"
-            },
+            stringResource(
+                when {
+                    !connected -> Res.string.settings_presets_disconnected
+                    timedOut -> Res.string.settings_presets_stale
+                    else -> Res.string.settings_presets_loading
+                },
+            ),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 19.sp,
         )
         return
@@ -709,11 +739,7 @@ private fun PresetsSection(
             // 1b empty vs 1c OAuth-coexist: same slot, different explanation
             InfoBox(
                 withIcon = oauthActive,
-                text = if (oauthActive) {
-                    "Presets are for third-party API endpoints. Activating one runs new sessions on that key instead of your Claude login."
-                } else {
-                    "No presets yet. Save an endpoint to switch base URLs and keys without editing the computer's environment."
-                },
+                text = stringResource(if (oauthActive) Res.string.settings_presets_info_oauth else Res.string.settings_presets_empty),
             )
         } else {
             val activating = (inFlight as? PresetOp.Activate)?.id
@@ -737,18 +763,18 @@ private fun PresetsSection(
         ) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
             Spacer(Modifier.width(7.dp))
-            Text("New preset", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(Res.string.settings_preset_new), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
         }
         if (ps.activeId != null) Text(
-            "New sessions on ${computerName ?: "this computer"} use this preset. Sessions already open keep the endpoint they started with.",
+            stringResource(Res.string.settings_presets_active_note, computerName ?: stringResource(Res.string.this_computer)),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 12.dp),
         )
         if (ps.blockers.isNotEmpty()) WorkingBlockersCard(ps.blockers, onStopOne = onStopOne, onForce = onForce)
-        else if (reachError) ErrorRow("Couldn't reach the computer — try again.")
+        else if (reachError) ErrorRow(stringResource(Res.string.settings_reach_error))
         else ps.error?.let { ErrorRow(it) }
         // the secrets red line, stated where the secrets are handled
         Text(
-            "Tokens are stored on the computer and never sent back to this app.",
+            stringResource(Res.string.settings_presets_secret_note),
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, modifier = Modifier.padding(top = 16.dp),
         )
     }
@@ -797,15 +823,15 @@ private fun PresetRow(
         when {
             activating -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 CircularProgressIndicator(Modifier.size(11.dp), color = Tok.accent, strokeWidth = 1.5.dp)
-                Text("Activating…", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                Text(stringResource(Res.string.settings_preset_activating), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
             }
             active -> Text(
-                "active", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp,
+                stringResource(Res.string.settings_preset_active), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.sp,
                 modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(Tok.accent.copy(alpha = 0.13f)).padding(horizontal = 7.dp, vertical = 2.dp),
             )
             hovered -> Row {
-                TextBtn("Edit", Tok.tx2, onEdit)
-                TextBtn("Delete", Tok.danger, onDelete)
+                TextBtn(stringResource(Res.string.bridge_edit), Tok.tx2, onClick = onEdit)
+                TextBtn(stringResource(Res.string.per_model_delete), Tok.danger, onClick = onDelete)
             }
         }
     }
@@ -851,41 +877,41 @@ private fun PresetForm(
 
     val others = ps?.presets.orEmpty().filter { it.id != initial?.id }
     val nameError = when {
-        name.isNotBlank() && others.any { it.name.equals(name.trim(), ignoreCase = true) } -> "A preset named '${name.trim()}' already exists."
-        nameTouched && name.isBlank() -> "Name is required."
+        name.isNotBlank() && others.any { it.name.equals(name.trim(), ignoreCase = true) } -> stringResource(Res.string.settings_preset_name_dup, name.trim())
+        nameTouched && name.isBlank() -> stringResource(Res.string.settings_preset_name_required)
         else -> daemonError?.takeIf { it.first == "name" }?.second
     }
     val urlError = when {
-        baseUrl.isNotBlank() && !isHttpUrl(baseUrl.trim()) -> "Enter a valid http(s) URL."
-        urlTouched && baseUrl.isBlank() -> "Enter a valid http(s) URL."
+        baseUrl.isNotBlank() && !isHttpUrl(baseUrl.trim()) -> stringResource(Res.string.settings_preset_url_invalid)
+        urlTouched && baseUrl.isBlank() -> stringResource(Res.string.settings_preset_url_invalid)
         else -> daemonError?.takeIf { it.first == "baseUrl" }?.second
     }
     val tokenError =
-        if (initial == null && tokenTouched && token.isBlank()) "Paste the API key or token."
+        if (initial == null && tokenTouched && token.isBlank()) stringResource(Res.string.settings_preset_token_required)
         else daemonError?.takeIf { it.first == "token" }?.second
     val valid = name.isNotBlank() && nameError == null && isHttpUrl(baseUrl.trim()) && (initial != null || token.isNotBlank())
 
     Column {
         Text(
-            "‹ Presets", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+            stringResource(Res.string.settings_presets_back), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
             modifier = Modifier.clip(RoundedCornerShape(6.dp)).hoverFill(RoundedCornerShape(6.dp)).clickable(onClick = onClose).padding(horizontal = 4.dp, vertical = 2.dp),
         )
         Text(
-            if (initial == null) "New preset" else "Edit preset",
+            stringResource(if (initial == null) Res.string.settings_preset_new else Res.string.settings_preset_edit),
             color = Tok.tx, fontFamily = Dk.ui, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(top = 8.dp, bottom = 18.dp),
         )
 
-        Text("Name", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(Res.string.form_name), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
-        FormInput(name, { name = it; nameTouched = true; daemonError = null }, mono = false, error = nameError != null, placeholder = "Work proxy")
+        FormInput(name, { name = it; nameTouched = true; daemonError = null }, mono = false, error = nameError != null, placeholder = stringResource(Res.string.settings_preset_name_ph))
         FieldError(nameError)
 
         Text("Base URL", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 14.dp))
         Spacer(Modifier.height(6.dp))
         FormInput(baseUrl, { baseUrl = it; urlTouched = true; daemonError = null }, mono = true, error = urlError != null, placeholder = "https://api.example-proxy.com/v1")
         FieldError(urlError)
-        if (urlError == null) HelperLine(PresetEnv.BASE_URL, "— where the CLI sends requests.")
+        if (urlError == null) HelperLine(PresetEnv.BASE_URL, stringResource(Res.string.settings_helper_baseurl))
 
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 14.dp)) {
             Text("Auth token", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -901,19 +927,20 @@ private fun PresetForm(
         Spacer(Modifier.height(6.dp))
         FormInput(
             token, { token = it; tokenTouched = true; daemonError = null }, mono = true, error = tokenError != null,
-            placeholder = if (initial == null) "Paste token" else "•••• stored — leave blank to keep",
+            placeholder = stringResource(if (initial == null) Res.string.settings_preset_token_ph else Res.string.settings_preset_token_stored),
             visualTransformation = if (reveal) VisualTransformation.None else PasswordVisualTransformation('•'),
             accent = reveal,
             trailing = {
                 Icon(
-                    if (reveal) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, if (reveal) "Hide token" else "Reveal token",
+                    if (reveal) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                    stringResource(if (reveal) Res.string.settings_token_hide else Res.string.settings_token_reveal),
                     tint = if (reveal) Tok.accent else Tok.tx2,
                     modifier = Modifier.size(15.dp).clip(RoundedCornerShape(4.dp)).clickable { reveal = !reveal },
                 )
             },
         )
         FieldError(tokenError)
-        if (tokenError == null) HelperLine(tokenVar, "— stored on the computer, never shown here again.")
+        if (tokenError == null) HelperLine(tokenVar, stringResource(Res.string.settings_helper_token))
 
         // model routing (optional): the two env vars the CLI reads for model steering
         Row(
@@ -922,34 +949,34 @@ private fun PresetForm(
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(if (routingOpen) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight, null, tint = Tok.muted, modifier = Modifier.size(14.dp))
-            Text("Model routing", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
+            Text(stringResource(Res.string.settings_model_routing), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp)
             Text(
-                if (routeModel.isBlank() && routeFast.isBlank()) "(optional)" else "(set)",
+                stringResource(if (routeModel.isBlank() && routeFast.isBlank()) Res.string.settings_optional else Res.string.settings_set),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
             )
         }
         if (routingOpen) {
-            Text("Model", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 12.dp))
+            Text(stringResource(Res.string.label_model), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 12.dp))
             Spacer(Modifier.height(6.dp))
             FormInput(routeModel, { routeModel = it }, mono = true, error = false, placeholder = "gpt-4o")
-            HelperLine(PresetEnv.MODEL, "— what new sessions run on.")
-            Text("Small / fast model", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 12.dp))
+            HelperLine(PresetEnv.MODEL, stringResource(Res.string.settings_helper_model))
+            Text(stringResource(Res.string.settings_small_fast_model), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 12.dp))
             Spacer(Modifier.height(6.dp))
             FormInput(routeFast, { routeFast = it }, mono = true, error = false, placeholder = "gpt-4o-mini")
-            HelperLine(PresetEnv.SMALL_FAST_MODEL, "— for the CLI's quick internal calls.")
+            HelperLine(PresetEnv.SMALL_FAST_MODEL, stringResource(Res.string.settings_helper_fast))
         }
 
         daemonError?.takeIf { it.first !in listOf("name", "baseUrl", "token") }?.let { ErrorRow(it.second) }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 20.dp)) {
-            if (initial != null) TextBtn("Delete", Tok.danger) { onDelete(initial.id) } // pinned left (2b)
+            if (initial != null) TextBtn(stringResource(Res.string.per_model_delete), Tok.danger) { onDelete(initial.id) } // pinned left (2b)
             Spacer(Modifier.weight(1f))
             Text(
-                "Cancel", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
                 modifier = Modifier.clip(RoundedCornerShape(7.dp)).border(1.dp, Tok.hair, RoundedCornerShape(7.dp))
                     .hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClose).padding(horizontal = 14.dp, vertical = 8.dp),
             )
-            FilledBtn("Save preset", enabled = valid && !awaitingSave) {
+            FilledBtn(stringResource(Res.string.settings_preset_save), enabled = valid && !awaitingSave) {
                 awaitingSave = true
                 daemonError = null
                 model.savePreset(
@@ -980,7 +1007,7 @@ private fun WorkingBlockersCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Rounded.Warning, null, tint = Tok.warn, modifier = Modifier.size(13.dp))
-            Text("These sessions are still working and block the switch:", color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.settings_blockers_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
         }
         blockers.forEach { b ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
@@ -991,23 +1018,25 @@ private fun WorkingBlockersCard(
                     )
                     Text(
                         when (b.reason) {
-                            dev.ccpocket.protocol.AuthBlockReason.EXECUTING -> "Mid-turn right now"
+                            dev.ccpocket.protocol.AuthBlockReason.EXECUTING -> stringResource(Res.string.settings_blocker_midturn)
                             dev.ccpocket.protocol.AuthBlockReason.BACKGROUND_JOBS ->
-                                "${b.jobLabels.size.coerceAtLeast(1)} background task${if (b.jobLabels.size == 1) "" else "s"}" +
-                                    (b.jobLabels.firstOrNull()?.let { ": $it" } ?: "")
-                            dev.ccpocket.protocol.AuthBlockReason.UNKNOWN -> "Still working" // newer daemon's reason
+                                stringResource(
+                                    if (b.jobLabels.size == 1) Res.string.settings_blocker_bg_one else Res.string.settings_blocker_bg_many,
+                                    b.jobLabels.size.coerceAtLeast(1),
+                                ) + (b.jobLabels.firstOrNull()?.let { ": $it" } ?: "")
+                            dev.ccpocket.protocol.AuthBlockReason.UNKNOWN -> stringResource(Res.string.settings_blocker_working) // newer daemon's reason
                         },
                         color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
                 // stops this one (background shells die with it; transcript persists) and retries the switch
-                TextBtn("Stop", Tok.danger) { onStopOne(b.convoId) }
+                TextBtn(stringResource(Res.string.bridge_runner_stop), Tok.danger) { onStopOne(b.convoId) }
             }
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextBtn("Stop all & switch", Tok.danger, onForce)
-            Text("Sessions can be resumed afterwards; their background tasks end.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            TextBtn(stringResource(Res.string.settings_stop_all_switch), Tok.danger, onClick = onForce)
+            Text(stringResource(Res.string.settings_stop_all_note), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
         }
     }
 }
@@ -1139,9 +1168,9 @@ private fun ComputersPane(model: DesktopModel) {
     var editingId by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
     Column {
-        Text("Paired computers", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
+        Text(stringResource(Res.string.settings_paired_computers), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
         if (model.computers.isEmpty()) {
-            Text("No paired computers yet.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+            Text(stringResource(Res.string.settings_no_computers), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
         }
         model.computers.forEach { c ->
             Row(
@@ -1157,18 +1186,18 @@ private fun ComputersPane(model: DesktopModel) {
                         if (draft.isEmpty()) Text(c.name, color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
                         BasicTextField(draft, { draft = it }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
                     }
-                    TextBtn("Save", Tok.accent) { model.renameComputer(c, draft.ifBlank { null }); editingId = null }
-                    TextBtn("Cancel", Tok.muted) { editingId = null }
+                    TextBtn(stringResource(Res.string.device_save), Tok.accent) { model.renameComputer(c, draft.ifBlank { null }); editingId = null }
+                    TextBtn(stringResource(Res.string.cancel), Tok.muted) { editingId = null }
                 } else {
                     Column(Modifier.weight(1f)) {
                         Text(c.name, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(c.accountId, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (c.online) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        PulseDot(Tok.ok, 6.dp); Text("online", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.sp)
-                    } else Text("offline", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
-                    TextBtn("Rename", Tok.tx2) { editingId = c.accountId; draft = "" }
-                    TextBtn("Revoke", Tok.danger) { model.revokeComputer(c) }
+                        PulseDot(Tok.ok, 6.dp); Text(stringResource(Res.string.presence_online), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.sp)
+                    } else Text(stringResource(Res.string.presence_offline), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+                    TextBtn(stringResource(Res.string.device_rename), Tok.tx2) { editingId = c.accountId; draft = "" }
+                    TextBtn(stringResource(Res.string.share_revoke), Tok.danger) { model.revokeComputer(c) }
                 }
             }
         }
@@ -1178,16 +1207,20 @@ private fun ComputersPane(model: DesktopModel) {
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
-            Text("Add computer", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
 
+// enabled=false greys the label to the palette's weakest text (Tok.muted), drops the click, and skips the
+// hover-fill so a dead action reads as dead instead of a no-op the user keeps poking (env-token account case)
 @Composable
-private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+private fun TextBtn(label: String, color: androidx.compose.ui.graphics.Color, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
-        label, color = color, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-        modifier = Modifier.clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp)).clickable(onClick = onClick).padding(horizontal = 9.dp, vertical = 5.dp),
+        label, color = if (enabled) color else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.clip(RoundedCornerShape(7.dp))
+            .then(if (enabled) Modifier.hoverFill(RoundedCornerShape(7.dp)) else Modifier)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 9.dp, vertical = 5.dp),
     )
 }
 
@@ -1200,24 +1233,24 @@ private fun SchedulesPane(model: DesktopModel) {
     LaunchedEffect(Unit) { model.refreshSchedules() }
     val now = epochMillis()
     Column {
-        Text("Scheduled tasks", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
+        Text(stringResource(Res.string.schedule_tasks_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
         when {
             model.schedulesStale -> Text(
-                "Update the computer's cc-pocket to use scheduled tasks.",
+                stringResource(Res.string.settings_schedules_stale),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
             )
             model.schedulesLoaded && model.schedules.isEmpty() -> Text(
-                "No scheduled tasks. Schedule one from the phone composer (long-press send).",
+                stringResource(Res.string.settings_schedules_empty),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
             )
             else -> model.schedules.forEach { s ->
                 val next = s.nextRunAtMs
                 val status = when {
-                    next != null && next <= now -> "due now"
-                    next != null -> "next in " + dev.ccpocket.app.ui.etaShort(next - now)
-                    s.lastOutcome == "missed" -> "missed"
+                    next != null && next <= now -> stringResource(Res.string.schedule_due_now)
+                    next != null -> stringResource(Res.string.schedule_next_run, dev.ccpocket.app.ui.etaShort(next - now))
+                    s.lastOutcome == "missed" -> stringResource(Res.string.schedule_missed)
                     s.lastOutcome != null && s.lastOutcome != "ok" -> s.lastOutcome!!
-                    else -> "done"
+                    else -> stringResource(Res.string.schedule_done)
                 }
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(10.dp))
@@ -1232,7 +1265,7 @@ private fun SchedulesPane(model: DesktopModel) {
                                 fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                             if (s.repeat != null) {
-                                Text("  ·  repeats", color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                                Text("  ·  " + stringResource(Res.string.schedule_repeats), color = Tok.accent, fontFamily = Dk.mono, fontSize = 10.5.sp)
                             }
                         }
                         Text(
@@ -1241,7 +1274,7 @@ private fun SchedulesPane(model: DesktopModel) {
                         )
                     }
                     Text(
-                        "Remove", color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        stringResource(Res.string.schedule_remove), color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                         modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.cancelSchedule(s.id) }.padding(6.dp),
                     )
                 }
@@ -1256,7 +1289,7 @@ private fun SharesPane(model: DesktopModel) {
     val now = epochMillis()
     val invite = model.lastShareInvite
     Column {
-        Text("Shared folders", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
+        Text(stringResource(Res.string.shared_folders_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
         if (invite != null) {
             InviteResultCard(invite.folderName, tierLabel(invite.tier), invite.encode()) { model.clearLastShare() }
         } else {
@@ -1266,23 +1299,24 @@ private fun SharesPane(model: DesktopModel) {
 
         val groups = groupShares(model.shares, now)
         if (model.shares.isEmpty()) {
-            Text("You haven't shared any folders yet.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+            Text(stringResource(Res.string.shared_folders_empty), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
         }
         groups.active.forEach { s ->
             ShareCard(
-                path = s.path, guest = s.guestLabel ?: "someone", tier = tierLabel(s.tier),
-                expires = "expires in " + countdown(s.expiresAt, now),
+                path = s.path, guest = s.guestLabel ?: stringResource(Res.string.share_guest_someone), tier = tierLabel(s.tier),
+                expires = stringResource(Res.string.share_expires_in, countdown(s.expiresAt, now)),
                 active = shareStatus(s, now) == ShareStatus.ACTIVE_NOW,
                 onRevoke = { model.revokeShare(s.deviceId) },
             )
         }
         if (groups.history.isNotEmpty()) {
-            Text("History", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+            Text(stringResource(Res.string.share_history_label), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
             groups.history.forEach { s ->
                 ShareCard(
-                    path = s.path, guest = s.guestLabel ?: "someone", tier = if (s.revoked) "Revoked" else "Expired",
+                    path = s.path, guest = s.guestLabel ?: stringResource(Res.string.share_guest_someone),
+                    tier = stringResource(if (s.revoked) Res.string.share_revoked_label else Res.string.share_expired_label),
                     expires = "", active = false, ended = true,
-                    onRevoke = { model.createShare(s.path, s.tier, s.expiresAt - s.createdAt) }, revokeLabel = "Share again", revokeColor = Tok.tx2,
+                    onRevoke = { model.createShare(s.path, s.tier, s.expiresAt - s.createdAt) }, revokeLabel = stringResource(Res.string.share_share_again), revokeColor = Tok.tx2,
                 )
             }
         }
@@ -1295,8 +1329,8 @@ private fun ShareCreateForm(model: DesktopModel) {
     var tier by remember { mutableStateOf(DEFAULT_TIER) }
     var expiry by remember { mutableStateOf(ShareExpiryOption.DEFAULT) }
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp)) {
-        Text("Share a folder", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Text("Type the absolute path to a folder on this computer.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
+        Text(stringResource(Res.string.share_composer_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(Res.string.share_path_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp)) {
             if (path.isEmpty()) Text("/Users/me/project", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
             BasicTextField(path, { path = it }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
@@ -1311,7 +1345,7 @@ private fun ShareCreateForm(model: DesktopModel) {
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            "Create invite", color = if (path.isBlank()) Tok.muted else Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
+            stringResource(Res.string.share_create), color = if (path.isBlank()) Tok.muted else Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(if (path.isBlank()) Tok.surface else Tok.accent)
                 .then(if (path.isBlank()) Modifier else Modifier.clickable { model.createShare(path.trim(), tier, expiry.seconds) }).padding(vertical = 10.dp),
         )
@@ -1331,12 +1365,12 @@ private fun SegPill(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun InviteResultCard(folder: String, tier: String, code: String, onDone: () -> Unit) {
     val clipboard = LocalClipboardManager.current
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.06f)).border(1.dp, Tok.accent.copy(alpha = 0.3f), RoundedCornerShape(12.dp)).padding(14.dp)) {
-        Text("Invite ready", color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Text("$folder · $tier — paste this code into CC Pocket ▸ Connect to join. Works once.", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
+        Text(stringResource(Res.string.share_invite_ready), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text("$folder · $tier — " + stringResource(Res.string.share_invite_hint), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, modifier = Modifier.padding(top = 3.dp, bottom = 10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(code, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
-            TextBtn("Copy", Tok.accent) { clipboard.setText(AnnotatedString(code)) }
-            TextBtn("Done", Tok.tx2, onClick = onDone)
+            TextBtn(stringResource(Res.string.path_copy), Tok.accent) { clipboard.setText(AnnotatedString(code)) }
+            TextBtn(stringResource(Res.string.share_done), Tok.tx2, onClick = onDone)
         }
     }
 }
@@ -1344,7 +1378,7 @@ private fun InviteResultCard(folder: String, tier: String, code: String, onDone:
 @Composable
 private fun ShareCard(
     path: String, guest: String, tier: String, expires: String, active: Boolean,
-    ended: Boolean = false, revokeLabel: String = "Revoke", revokeColor: androidx.compose.ui.graphics.Color = Tok.danger, onRevoke: () -> Unit,
+    ended: Boolean = false, revokeLabel: String? = null, revokeColor: androidx.compose.ui.graphics.Color = Tok.danger, onRevoke: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(12.dp)).background(if (ended) Tok.base else Tok.surface)
@@ -1359,23 +1393,23 @@ private fun ShareCard(
                 color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
-        TextBtn(revokeLabel, revokeColor, onClick = onRevoke)
+        TextBtn(revokeLabel ?: stringResource(Res.string.share_revoke), revokeColor, onClick = onRevoke)
     }
 }
 
 @Composable
 private fun ShortcutsPane() {
     val rows = listOf(
-        "Command palette" to listOf("⌘", "K"),
-        "New session" to listOf("⌘", "N"),
-        "Send message" to listOf("⏎"),
-        "New line" to listOf("⇧", "⏎"),
-        "Approve permission" to listOf("⌘", "⏎"),
-        "Open settings" to listOf("⌘", ","),
-        "Close / dismiss" to listOf("esc"),
+        stringResource(Res.string.shortcut_palette) to listOf("⌘", "K"),
+        stringResource(Res.string.new_session_title) to listOf("⌘", "N"),
+        stringResource(Res.string.shortcut_send) to listOf("⏎"),
+        stringResource(Res.string.shortcut_newline) to listOf("⇧", "⏎"),
+        stringResource(Res.string.shortcut_approve) to listOf("⌘", "⏎"),
+        stringResource(Res.string.shortcut_open_settings) to listOf("⌘", ","),
+        stringResource(Res.string.shortcut_close) to listOf("esc"),
     )
     Column {
-        Text("Keyboard shortcuts", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 14.dp))
+        Text(stringResource(Res.string.settings_shortcuts_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 14.dp))
         rows.forEachIndexed { i, row ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(row.first, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
@@ -1397,10 +1431,14 @@ private fun AboutPane(model: DesktopModel) {
             Text("cc-pocket", color = Tok.tx, fontFamily = Dk.ui, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
         Text(
-            "Desktop edition — one host driving Claude Code / Codex on another, over an end-to-end encrypted link.",
+            stringResource(Res.string.about_desktop_blurb),
             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.width(380.dp).padding(bottom = 18.dp),
         )
-        val info = listOf("Version" to model.appVersion, "Relay" to model.relayUrl.ifBlank { "—" }, "License" to "MIT")
+        val info = listOf(
+            stringResource(Res.string.about_version) to model.appVersion,
+            stringResource(Res.string.about_relay) to model.relayUrl.ifBlank { "—" },
+            stringResource(Res.string.about_license) to "MIT",
+        )
         info.forEachIndexed { i, row ->
             InfoRow(row.first, row.second)
             if (i < info.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -1419,17 +1457,17 @@ private fun UpdatesSection(model: DesktopModel) {
     Column(Modifier.padding(top = 18.dp)) {
         when (val s = model.updateState) {
             DkUpdateState.Idle ->
-                UpdateActionRow("Check for updates", "Check", Tok.accent) { model.checkForUpdates() }
+                UpdateActionRow(stringResource(Res.string.update_check_row), stringResource(Res.string.update_check_action), Tok.accent) { model.checkForUpdates() }
 
-            DkUpdateState.Checking -> UpdateBusy("Checking for updates…")
+            DkUpdateState.Checking -> UpdateBusy(stringResource(Res.string.update_checking))
 
             is DkUpdateState.UpToDate ->
-                UpdateActionRow("You're on the latest version (v${s.current})", "Check again", Tok.tx2) { model.checkForUpdates() }
+                UpdateActionRow(stringResource(Res.string.update_latest, s.current), stringResource(Res.string.update_check_again), Tok.tx2) { model.checkForUpdates() }
 
             is DkUpdateState.Available -> {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Dot(Tok.accent, 8.dp)
-                    Text("Update available", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.update_available), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.weight(1f))
                     Text("v${model.appVersion} → v${s.latest}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
                 }
@@ -1437,26 +1475,26 @@ private fun UpdatesSection(model: DesktopModel) {
                 when (s.source) {
                     // standalone: one click downloads, verifies, replaces this app and relaunches
                     DkInstallSource.STANDALONE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextBtn("Download & restart", Tok.accent) { model.applyUpdate() }
-                        Text("Replaces this app and relaunches it.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                        TextBtn(stringResource(Res.string.update_download_restart), Tok.accent) { model.applyUpdate() }
+                        Text(stringResource(Res.string.update_replace_note), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
                     }
                     // package-manager copies never self-overwrite (two updaters, one tree) — show the command
                     DkInstallSource.BREW, DkInstallSource.SCOOP -> Column {
                         Text(
-                            "Installed with ${if (s.source == DkInstallSource.BREW) "Homebrew" else "Scoop"} — update it from a terminal:",
+                            stringResource(Res.string.update_installed_with, if (s.source == DkInstallSource.BREW) "Homebrew" else "Scoop"),
                             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 8.dp),
                         )
                         CommandBox(model.updateCommand.orEmpty(), clipboard)
                     }
                     // can't tell how this was installed (dev run / unusual layout) — hand off to the web
                     DkInstallSource.UNKNOWN -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextBtn("View release", Tok.accent) { runCatching { uriHandler.openUri(model.updateReleasesUrl) } }
-                        Text("Open the releases page to update.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                        TextBtn(stringResource(Res.string.update_view_release), Tok.accent) { runCatching { uriHandler.openUri(model.updateReleasesUrl) } }
+                        Text(stringResource(Res.string.update_open_releases), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
                     }
                 }
             }
 
-            is DkUpdateState.Downloading -> UpdateBusy("Downloading v${s.latest}… the app restarts when it's ready.")
+            is DkUpdateState.Downloading -> UpdateBusy(stringResource(Res.string.update_downloading, s.latest))
 
             is DkUpdateState.Failed -> Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1464,7 +1502,7 @@ private fun UpdatesSection(model: DesktopModel) {
                     Text(s.message, color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(6.dp))
-                Row { TextBtn("Retry", Tok.accent) { model.checkForUpdates() } }
+                Row { TextBtn(stringResource(Res.string.action_retry), Tok.accent) { model.checkForUpdates() } }
             }
         }
     }
@@ -1474,7 +1512,7 @@ private fun UpdatesSection(model: DesktopModel) {
 private fun UpdateActionRow(label: String, action: String, actionColor: Color, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.weight(1f))
-        TextBtn(action, actionColor, onAction)
+        TextBtn(action, actionColor, onClick = onAction)
     }
 }
 
@@ -1495,7 +1533,7 @@ private fun CommandBox(cmd: String, clipboard: androidx.compose.ui.platform.Clip
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(cmd, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        TextBtn("Copy", Tok.accent) { clipboard.setText(AnnotatedString(cmd)) }
+        TextBtn(stringResource(Res.string.path_copy), Tok.accent) { clipboard.setText(AnnotatedString(cmd)) }
     }
 }
 

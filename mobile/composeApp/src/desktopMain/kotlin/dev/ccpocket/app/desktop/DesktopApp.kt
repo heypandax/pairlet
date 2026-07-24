@@ -30,9 +30,13 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.show_sidebar
+import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.isQuestion
+import org.jetbrains.compose.resources.stringResource
 
 /** The two-pane content (sidebar + chat) plus the popover/modal overlays. Window chrome lives in [Main].
  *  [onActivateWindow] raises/focuses the OS window — the tray's "Open cc-pocket" / row-jump hooks (issue #111);
@@ -141,7 +145,7 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             // the focused modal is for permission gates only; an AskUserQuestion docks inline in ChatPane (#57)
             model.ask?.takeIf { !it.isQuestion }?.let { ask ->
                 FocusedModal(
-                    computer = model.activeComputer?.name ?: "your computer",
+                    computer = model.activeComputer?.name ?: stringResource(Res.string.your_computer),
                     ask = ask, agent = model.chatAgent, workdir = model.chatWorkdir, branch = model.chatBranch,
                     onAllow = { rem -> model.resolve(allow = true, remember = rem) },
                     onDeny = { model.resolve(allow = false, remember = false) },
@@ -185,7 +189,7 @@ private fun SidebarRevealStrip(onExpand: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(12.dp))
-        Icon(Icons.Rounded.KeyboardArrowRight, "Show sidebar", tint = Tok.muted, modifier = Modifier.width(15.dp).height(15.dp))
+        Icon(Icons.Rounded.KeyboardArrowRight, stringResource(Res.string.show_sidebar), tint = Tok.muted, modifier = Modifier.width(15.dp).height(15.dp))
     }
 }
 

@@ -91,6 +91,8 @@ import androidx.compose.ui.zIndex
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.add_device
+import dev.ccpocket.app.resources.dir_pinned
 import dev.ccpocket.app.resources.group_delete
 import dev.ccpocket.app.resources.group_delete_confirm
 import dev.ccpocket.app.resources.group_move_out
@@ -99,8 +101,22 @@ import dev.ccpocket.app.resources.group_name_hint
 import dev.ccpocket.app.resources.group_new
 import dev.ccpocket.app.resources.group_rename
 import dev.ccpocket.app.resources.group_ungrouped
+import dev.ccpocket.app.resources.new_session_title
+import dev.ccpocket.app.resources.open_folder
+import dev.ccpocket.app.resources.running
 import dev.ccpocket.app.resources.session_rename
 import dev.ccpocket.app.resources.session_rename_hint
+import dev.ccpocket.app.resources.settings_title
+import dev.ccpocket.app.resources.sidebar_clear
+import dev.ccpocket.app.resources.sidebar_clear_confirm
+import dev.ccpocket.app.resources.sidebar_no_computer
+import dev.ccpocket.app.resources.sidebar_no_sessions_here
+import dev.ccpocket.app.resources.sidebar_pins_full
+import dev.ccpocket.app.resources.sidebar_recent_empty
+import dev.ccpocket.app.resources.status_reconnecting
+import dev.ccpocket.app.resources.switcher_all_projects
+import dev.ccpocket.app.resources.switcher_recent
+import dev.ccpocket.app.resources.this_machine
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
@@ -175,10 +191,10 @@ private fun SwitcherHeader(model: DesktopModel) {
                     if (c.online) PulseDot(Tok.ok, 6.dp)
                     else {
                         Dot(Tok.muted, 6.dp)
-                        Text("reconnecting…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+                        Text(stringResource(Res.string.status_reconnecting), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
                     }
                 } else {
-                    Text("No computer", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f, fill = false))
+                    Text(stringResource(Res.string.sidebar_no_computer), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f, fill = false))
                 }
                 Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
             }
@@ -203,7 +219,7 @@ private fun PinnedZone(model: DesktopModel) {
     val pins = model.pins
     if (pins.isEmpty()) return // pinning is discoverable from the hover pin on any session row
     Column(Modifier.fillMaxWidth()) {
-        SectionLabel("Pinned", trailing = { Key("⌘1–9") })
+        SectionLabel(stringResource(Res.string.dir_pinned), trailing = { Key("⌘1–9") })
         var dragFrom by remember(pins.size) { mutableStateOf(-1) }
         var dragDy by remember { mutableStateOf(0f) }
         val rowPx = with(LocalDensity.current) { 32.dp.toPx() }
@@ -229,7 +245,7 @@ private fun PinnedZone(model: DesktopModel) {
         }
         if (model.pinsFull) {
             Text(
-                "Pinned is full (${DesktopModel.MAX_PINS}) — unpin a session to add another.",
+                stringResource(Res.string.sidebar_pins_full, DesktopModel.MAX_PINS),
                 color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 16.sp,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     .clip(RoundedCornerShape(8.dp)).background(Tok.base)
@@ -331,7 +347,7 @@ private fun RunningZone(model: DesktopModel) {
     val running = model.runningVisible
     if (running.isEmpty()) return
     Column(Modifier.fillMaxWidth()) {
-        SectionLabel("Running")
+        SectionLabel(stringResource(Res.string.running))
         running.forEach { (m, p) -> RunningRow(m, p, onBrowse = { model.browseRunning(m, p) }) { model.openRunning(m, p) } }
     }
 }
@@ -386,7 +402,7 @@ private fun RecentHeader(model: DesktopModel) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "RECENT", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
+            stringResource(Res.string.switcher_recent).uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
         )
         Spacer(Modifier.width(8.dp))
@@ -395,7 +411,7 @@ private fun RecentHeader(model: DesktopModel) {
         if (hovered && model.sessionGroups.isNotEmpty()) {
             Spacer(Modifier.width(8.dp))
             Text(
-                if (arm) "sure?" else "clear",
+                stringResource(if (arm) Res.string.sidebar_clear_confirm else Res.string.sidebar_clear),
                 color = if (arm) Tok.accent else Tok.tx2,
                 fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(4.dp))
@@ -413,7 +429,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
         val groups = renderedGroups(model)
         if (groups.isEmpty()) {
             Text(
-                "No sessions yet — open a project from All projects below, or start a new session.",
+                stringResource(Res.string.sidebar_recent_empty),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 17.sp,
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
@@ -485,7 +501,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                         if (g.sessions.isEmpty()) {
                             item(key = "e:${g.path}") {
                                 Text(
-                                    "No sessions here yet",
+                                    stringResource(Res.string.sidebar_no_sessions_here),
                                     color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp,
                                     modifier = Modifier.padding(start = 32.dp, top = 2.dp, bottom = 6.dp),
                                 )
@@ -736,7 +752,7 @@ private fun AllProjectsRow(onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
-            Text("All projects…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.switcher_all_projects) + "…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -749,7 +765,7 @@ private fun NewSessionRow(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
-        Text("New session", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Text(stringResource(Res.string.new_session_title), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         Key("⌘N")
     }
 }
@@ -764,7 +780,7 @@ private fun OpenFolderRow(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(Icons.Rounded.FolderOpen, null, tint = Tok.tx2, modifier = Modifier.size(13.dp))
-        Text("Open Folder…", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        Text(stringResource(Res.string.open_folder), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
         Key("⌘O")
     }
 }
@@ -856,7 +872,8 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
             if (!hovered) {
                 s.model?.let { m ->
                     modelAlias(m).takeIf { it.isNotBlank() }?.let {
-                        Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1)
+                        // bounded like the pinned row's machine name so a long alias can't steal the title's room (#179)
+                        Text(it, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp))
                     }
                 }
             }
@@ -903,7 +920,7 @@ private fun SettingsFooter(onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Icon(Icons.Outlined.Settings, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
-            Text("Settings", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text(stringResource(Res.string.settings_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, modifier = Modifier.weight(1f))
             Text("v$APP_VERSION", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
         }
     }
@@ -931,7 +948,7 @@ fun MachineSwitcher(model: DesktopModel) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(13.dp))
-                Text("Add computer", color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -961,7 +978,7 @@ private fun SwitcherRow(m: DkMachine, keyHint: String, onClick: () -> Unit) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
             if (m.computer.online) PulseDot(Tok.ok, 5.dp) else Dot(Tok.muted, 5.dp)
-            if (m.thisMachine) OutlinePill("this Mac", Tok.muted)
+            if (m.thisMachine) OutlinePill(stringResource(Res.string.this_machine), Tok.muted)
             Spacer(Modifier.weight(1f))
             if (m.pending > 0) AttentionBadge(m.pending)
             Key(keyHint)

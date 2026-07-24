@@ -105,6 +105,54 @@ import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.ImgState
 import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.SentFile
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.action_launch
+import dev.ccpocket.app.resources.allow_chip_prefix
+import dev.ccpocket.app.resources.attach_menu
+import dev.ccpocket.app.resources.cancel
+import dev.ccpocket.app.resources.cancel_upload
+import dev.ccpocket.app.resources.chat_no_session
+import dev.ccpocket.app.resources.chat_no_session_hint
+import dev.ccpocket.app.resources.chat_opening
+import dev.ccpocket.app.resources.chat_opening_named
+import dev.ccpocket.app.resources.chat_you
+import dev.ccpocket.app.resources.cmd_source_builtin
+import dev.ccpocket.app.resources.cmd_source_project
+import dev.ccpocket.app.resources.cmd_source_skill
+import dev.ccpocket.app.resources.cmd_source_user
+import dev.ccpocket.app.resources.composer_uploading
+import dev.ccpocket.app.resources.continue_here
+import dev.ccpocket.app.resources.ctx_nearly_full
+import dev.ccpocket.app.resources.device_remove
+import dev.ccpocket.app.resources.dia_confirm_body
+import dev.ccpocket.app.resources.dia_confirm_title
+import dev.ccpocket.app.resources.dia_launch
+import dev.ccpocket.app.resources.dia_restarting
+import dev.ccpocket.app.resources.drop_sub
+import dev.ccpocket.app.resources.drop_title
+import dev.ccpocket.app.resources.file_failed_retry
+import dev.ccpocket.app.resources.file_queued
+import dev.ccpocket.app.resources.key_newline
+import dev.ccpocket.app.resources.key_send
+import dev.ccpocket.app.resources.key_stop
+import dev.ccpocket.app.resources.menu_copy_path
+import dev.ccpocket.app.resources.menu_more
+import dev.ccpocket.app.resources.message_agent_hint
+import dev.ccpocket.app.resources.msg_delivered_short
+import dev.ccpocket.app.resources.msg_no_response_click
+import dev.ccpocket.app.resources.msg_queued
+import dev.ccpocket.app.resources.msg_sending
+import dev.ccpocket.app.resources.msg_undelivered_reconnecting
+import dev.ccpocket.app.resources.observe_readonly
+import dev.ccpocket.app.resources.qa_model
+import dev.ccpocket.app.resources.question_answered_label
+import dev.ccpocket.app.resources.questions_withdrawn
+import dev.ccpocket.app.resources.session_degraded_banner
+import dev.ccpocket.app.resources.thinking_streaming
+import dev.ccpocket.app.resources.thought_for
+import dev.ccpocket.app.resources.turn_done_marker
+import dev.ccpocket.app.resources.value_default
+import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.share.previewFile
 import dev.ccpocket.app.ui.CheckMiniGlyph
 import dev.ccpocket.app.ui.ModelChip
@@ -325,7 +373,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // delivered but the agent started no turn within the deadline (issue #104) —
                                 // replace the blinking caret with a restrained, clickable resend cue.
                                 Text(
-                                    "no response yet — click to resend", color = Tok.warn,
+                                    stringResource(Res.string.msg_no_response_click), color = Tok.warn,
                                     fontFamily = Dk.mono, fontSize = 11.sp,
                                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { model.resendStalled() }
                                         .padding(vertical = 3.dp, horizontal = 6.dp),
@@ -334,7 +382,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // sent mid-turn and the running turn went quiet: queued (healthy), not swallowed —
                                 // status only, no resend affordance (the queued original would double-run).
                                 Text(
-                                    "queued — the current turn is still running", color = Tok.muted,
+                                    stringResource(Res.string.msg_queued), color = Tok.muted,
                                     fontFamily = Dk.mono, fontSize = 11.sp,
                                     modifier = Modifier.padding(vertical = 3.dp, horizontal = 6.dp),
                                 )
@@ -375,10 +423,9 @@ private fun SessionHealthStrip(model: DesktopModel) {
     val used = model.contextUsed
     val window = model.contextWindow
     val (color, text) = when {
-        degraded -> Tok.danger to
-            "Session looks over its context limit — recent replies were API failures. Start a new session or send /clear."
+        degraded -> Tok.danger to stringResource(Res.string.session_degraded_banner)
         used != null && window != null && used.toFloat() / window >= 0.9f ->
-            Tok.warn to "Context ${(used * 100 / window)}% full — consider a new session or /compact soon"
+            Tok.warn to stringResource(Res.string.ctx_nearly_full, (used * 100 / window).toInt())
         else -> return
     }
     Row(
@@ -401,8 +448,8 @@ private fun CenteredStreamRow(content: @Composable () -> Unit) {
 private fun EmptyChat() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("No session open", color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("Pick a project on the left, then open or start a session.", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Text(stringResource(Res.string.chat_no_session), color = Tok.tx, fontFamily = Dk.ui, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(Res.string.chat_no_session_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, textAlign = TextAlign.Center)
         }
     }
 }
@@ -416,7 +463,7 @@ private fun OpeningChat(title: String) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             CircularProgressIndicator(color = Tok.accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
             Text(
-                if (title.isBlank()) "Opening session…" else "Opening $title…",
+                if (title.isBlank()) stringResource(Res.string.chat_opening) else stringResource(Res.string.chat_opening_named, title),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
                 textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
@@ -469,13 +516,14 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
         } ?: ""
         // model segment falls back to "default" (never a dangling " · ") for a pre-first-turn session the
         // daemon couldn't eager-resolve — mirrors mobile's placeholder + the ⋯ Model row (issue #96)
-        val modelLabel = model.chatModel.ifBlank { "default" }
+        val modelLabel = model.chatModel.ifBlank { stringResource(Res.string.value_default) }
         // pathLinked left-clicks OPEN the workdir (when it's local); right-click adds "Copy path" so the
         // cwd is grabbable even on a remote session where it isn't a link at all. Copies the bare workdir,
         // not the whole machine·branch·model meta line.
         val clipboard = LocalClipboardManager.current
+        val copyPath = stringResource(Res.string.menu_copy_path)
         ContextMenuArea(items = {
-            listOf(ContextMenuItem("Copy path") { clipboard.setText(AnnotatedString(model.chatWorkdir)) })
+            listOf(ContextMenuItem(copyPath) { clipboard.setText(AnnotatedString(model.chatWorkdir)) })
         }) {
             Text(
                 pathLinked("$machine${model.chatWorkdir}$branch  ·  $modelLabel$ctx"),
@@ -501,7 +549,7 @@ private fun MessageRow(
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
             Column {
-                Text("You", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
+                Text(stringResource(Res.string.chat_you), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
                 Spacer(Modifier.height(7.dp))
                 // sent attachments (issue #85): the compressed JPEG bytes ride ChatItem.User.images from
                 // send (sendPrompt), so an image-only prompt no longer renders as a blank turn. Reuses the
@@ -539,15 +587,15 @@ private fun MessageRow(
                 // warns honestly instead of pulsing "sending…" forever.
                 if (item.pending && undelivered) {
                     Text(
-                        "not delivered yet — reconnecting…", color = Tok.warn,
+                        stringResource(Res.string.msg_undelivered_reconnecting), color = Tok.warn,
                         fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp),
                     )
                 } else if (item.pending) {
                     var slow by remember(item) { mutableStateOf(false) }
                     LaunchedEffect(item) { kotlinx.coroutines.delay(1200); slow = true }
-                    if (slow) Text("sending…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+                    if (slow) Text(stringResource(Res.string.msg_sending), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
                 } else if (item.delivered && isLast) {
-                    Text("✓ delivered", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+                    Text(stringResource(Res.string.msg_delivered_short), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
                 }
             }
         }
@@ -555,7 +603,7 @@ private fun MessageRow(
         is ChatItem.Thinking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Text("💭", fontSize = 12.sp)
             Text(
-                item.seconds?.let { "Thought for ${it}s" } ?: "Thinking…",
+                item.seconds?.let { stringResource(Res.string.thought_for, it) } ?: stringResource(Res.string.thinking_streaming),
                 color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp,
             )
         }
@@ -574,21 +622,21 @@ private fun MessageRow(
                 .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 11.dp, vertical = 8.dp),
         )
         is ChatItem.RuleChip -> Text(
-            "Always allowing  ${item.rule}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp,
+            stringResource(Res.string.allow_chip_prefix) + "  ${item.rule}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp,
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
         )
         // question-exchange residue (AskUserQuestion); desktop still answers via the generic flow for now
         is ChatItem.QuestionsAnswered -> Text(
-            "?  Answered" + if (item.items.isEmpty()) "" else "  ·  ${item.items.joinToString(" · ") { it.second }}",
+            "?  " + stringResource(Res.string.question_answered_label) + if (item.items.isEmpty()) "" else "  ·  ${item.items.joinToString(" · ") { it.second }}",
             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
         is ChatItem.QuestionsWithdrawn -> Text(
-            "Claude moved on — answers no longer needed", color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
+            stringResource(Res.string.questions_withdrawn), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
         )
         // a live turn's end: quiet ✓ divider so "finished" stays visible after the caret stops blinking
         is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
-            Text("✓ done" + (item.seconds?.let { "  ·  ${turnDurLabel(it)}" } ?: ""), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.sp)
+            Text("✓ " + stringResource(Res.string.turn_done_marker) + (item.seconds?.let { "  ·  ${turnDurLabel(it)}" } ?: ""), color = Tok.ok, fontFamily = Dk.mono, fontSize = 11.sp)
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
         }
     }
@@ -698,11 +746,11 @@ private fun ObserveBar(model: DesktopModel) {
         ) {
             Dot(Tok.warn, 7.dp)
             Text(
-                "Read-only — this session is running in a terminal on the computer",
+                stringResource(Res.string.observe_readonly),
                 color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f),
             )
             Text(
-                "Continue here", color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                stringResource(Res.string.continue_here), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Tok.accent)
                     .clickable { model.takeOver() }.padding(horizontal = 12.dp, vertical = 7.dp),
             )
@@ -822,14 +870,14 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                             }
                         },
                         contentAlignment = Alignment.Center,
-                    ) { Icon(AttachImageIcon, "attach files", tint = Tok.tx2, modifier = Modifier.size(18.dp)) }
+                    ) { Icon(AttachImageIcon, stringResource(Res.string.attach_menu), tint = Tok.tx2, modifier = Modifier.size(18.dp)) }
                     Box(Modifier.weight(1f).padding(vertical = 6.dp)) {
                         // ONE explicit style for the field AND its placeholder: material3 Text otherwise
                         // merges bodyLarge's line height + letter spacing into the placeholder while
                         // BasicTextField renders the raw style — the two never sat on the same baseline
                         val fieldStyle = TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 14.sp, lineHeight = 20.sp)
                         if (model.composer.isEmpty()) {
-                            Text("Message ${agentName(model.chatAgent)}…", style = fieldStyle.copy(color = Tok.muted))
+                            Text(stringResource(Res.string.message_agent_hint, agentName(model.chatAgent)), style = fieldStyle.copy(color = Tok.muted))
                         }
                         // the model's ComposerState is the ONE source of truth: onValueChange is the only
                         // path user/IME edits take, and external writes call its explicit methods directly.
@@ -902,10 +950,10 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                     // while the field grows). Dimmed mid-turn — a switch lands on the next turn anyway.
                     Box(Modifier.height(34.dp), contentAlignment = Alignment.Center) {
                         ModelChip(
-                            label = modelChipLabel(model.chatModelId).ifBlank { "default" },
+                            label = modelChipLabel(model.chatModelId).ifBlank { stringResource(Res.string.value_default) },
                             open = model.showModelPopover,
                             enabled = !model.streaming,
-                            contentDescription = "Switch model",
+                            contentDescription = stringResource(Res.string.qa_model),
                         ) { model.showModelPopover = true }
                         if (model.showModelPopover) {
                             val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
@@ -949,14 +997,14 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                         val active = model.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued }
                         Box(Modifier.size(5.dp).clip(RoundedCornerShape(999.dp)).background(Tok.accent))
                         Text(
-                            "uploading $active of ${model.pendingFiles.size} — send waits",
+                            stringResource(Res.string.composer_uploading, active, model.pendingFiles.size),
                             color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp,
                         )
                         Spacer(Modifier.weight(1f))
                     }
-                    Key("⏎"); Text("send", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
-                    Key("⇧⏎"); Text("newline", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
-                    if (model.streaming) { Key("esc"); Text("stop", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
+                    Key("⏎"); Text(stringResource(Res.string.key_send), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                    Key("⇧⏎"); Text(stringResource(Res.string.key_newline), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+                    if (model.streaming) { Key("esc"); Text(stringResource(Res.string.key_stop), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp) }
                     // CDP: relaunch Dia with the debug port — a small pill at the far right of the hint row,
                     // directly under the send button (outside the input box). Confirm popover anchors above it.
                     if (diaSupported) {
@@ -977,7 +1025,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                 else Icon(Icons.Outlined.Language, null, tint = Tok.tx2, modifier = Modifier.size(12.dp))
                                 // trim=Both 去掉字体默认行距，让文字视觉中心与图标（12dp 对称盒）在 CenterVertically 下真正对齐
                                 Text(
-                                    if (diaBusy) "Dia 重启中…" else "启动 Dia :9222",
+                                    if (diaBusy) stringResource(Res.string.dia_restarting) else stringResource(Res.string.dia_launch),
                                     color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp,
                                     style = TextStyle(lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.Both)),
                                 )
@@ -994,9 +1042,9 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                             .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
                                         verticalArrangement = Arrangement.spacedBy(10.dp),
                                     ) {
-                                        Text("以调试端口重开 Dia", color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(stringResource(Res.string.dia_confirm_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                                         Text(
-                                            "会先关闭当前 Dia（未保存的窗口状态会丢失），再以 :9222 重新打开——这样能复用它已登录的会话。",
+                                            stringResource(Res.string.dia_confirm_body),
                                             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, lineHeight = 17.sp,
                                         )
                                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1005,7 +1053,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                                     .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
                                                     .clickable { diaConfirm = false }.padding(vertical = 7.dp),
                                                 contentAlignment = Alignment.Center,
-                                            ) { Text("取消", color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
+                                            ) { Text(stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp) }
                                             Box(
                                                 Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(Tok.accent)
                                                     .clickable {
@@ -1013,7 +1061,7 @@ private fun Composer(model: DesktopModel, suppressAutoFocus: Boolean = false) {
                                                         scope.launch { val r = launchDiaCdp(); diaBusy = false; diaStatus = r.message }
                                                     }.padding(vertical = 7.dp),
                                                 contentAlignment = Alignment.Center,
-                                            ) { Text("启动", color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                                            ) { Text(stringResource(Res.string.action_launch), color = Tok.base, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                                         }
                                     }
                                 }
@@ -1058,12 +1106,14 @@ private fun SlashMenu(commands: List<SlashCommand>, selected: Int, onPick: (Slas
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
                 Text(
-                    when (cmd.source) {
-                        CommandSource.BUILTIN -> "built-in"
-                        CommandSource.USER -> "user"
-                        CommandSource.PROJECT -> "project"
-                        CommandSource.SKILL -> "skill"
-                    },
+                    stringResource(
+                        when (cmd.source) {
+                            CommandSource.BUILTIN -> Res.string.cmd_source_builtin
+                            CommandSource.USER -> Res.string.cmd_source_user
+                            CommandSource.PROJECT -> Res.string.cmd_source_project
+                            CommandSource.SKILL -> Res.string.cmd_source_skill
+                        },
+                    ),
                     color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp,
                 )
             }
@@ -1093,7 +1143,7 @@ private fun FileMenu(
     ) {
         // which directory (relative to the cwd) these entries live in — "@ ." at the project root
         Text(
-            "@ " + (dir.ifEmpty { "." }) + if (truncated) "   · more…" else "",
+            "@ " + (dir.ifEmpty { "." }) + if (truncated) "   " + stringResource(Res.string.menu_more) else "",
             color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 7.dp, bottom = 3.dp),
         )
@@ -1171,8 +1221,8 @@ private fun DesktopPendingFileChip(f: PendingFile, model: DesktopModel) {
                 )
                 Text(
                     when (f.state) {
-                        FileUpState.Failed -> "upload failed · retry"
-                        FileUpState.Queued -> "queued  ·  ${fmtSize(f.size)}"
+                        FileUpState.Failed -> stringResource(Res.string.file_failed_retry)
+                        FileUpState.Queued -> stringResource(Res.string.file_queued) + "  ·  ${fmtSize(f.size)}"
                         FileUpState.Landed -> "✓  ·  ${fmtSize(f.size)}"
                         FileUpState.Uploading -> "${(f.progress * 100).toInt()}%  ·  ${fmtSize(f.size)}"
                     },
@@ -1190,7 +1240,7 @@ private fun DesktopPendingFileChip(f: PendingFile, model: DesktopModel) {
                 contentAlignment = Alignment.Center,
             ) {
                 if (failed) Icon(RetryGlyph, null, tint = Tok.danger, modifier = Modifier.size(12.dp))
-                else Icon(Icons.Rounded.Close, "cancel upload", tint = Tok.tx2, modifier = Modifier.size(12.dp))
+                else Icon(Icons.Rounded.Close, stringResource(Res.string.cancel_upload), tint = Tok.tx2, modifier = Modifier.size(12.dp))
             }
         }
         // thin linear progress along the chip base
@@ -1271,11 +1321,11 @@ private fun DropOverlay() {
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Rounded.ArrowUpward, null, tint = Tok.accent, modifier = Modifier.size(28.dp)) }
             Text(
-                "Drop to add to this session's workspace",
+                stringResource(Res.string.drop_title),
                 color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
             Text(
-                "images · files · videos — up to 200 MB",
+                stringResource(Res.string.drop_sub),
                 color = Tok.tx2, fontFamily = Dk.mono, fontSize = 12.sp,
             )
         }
@@ -1308,7 +1358,7 @@ private fun PendingImagesRow(model: DesktopModel) {
                     Modifier.align(Alignment.TopEnd).padding(2.dp).size(16.dp).clip(RoundedCornerShape(999.dp))
                         .background(Tok.base.copy(alpha = 0.75f)).clickable { model.removePendingImage(img.id) },
                     contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.Close, "remove", tint = Tok.tx, modifier = Modifier.size(10.dp)) }
+                ) { Icon(Icons.Rounded.Close, stringResource(Res.string.device_remove), tint = Tok.tx, modifier = Modifier.size(10.dp)) }
             }
         }
     }

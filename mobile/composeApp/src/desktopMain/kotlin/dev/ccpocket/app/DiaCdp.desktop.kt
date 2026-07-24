@@ -1,8 +1,14 @@
 package dev.ccpocket.app
 
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.dia_launch_failed
+import dev.ccpocket.app.resources.dia_no_answer
+import dev.ccpocket.app.resources.dia_not_supported
+import dev.ccpocket.app.resources.dia_ready
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.getString
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
@@ -13,7 +19,9 @@ private val diaApp = File("/Applications/Dia.app")
 actual fun diaCdpSupported(): Boolean = isMac && diaApp.isDirectory
 
 actual suspend fun launchDiaCdp(port: Int): DiaCdpResult = withContext(Dispatchers.IO) {
-    if (!diaCdpSupported()) return@withContext DiaCdpResult(false, "Dia 未安装或非 macOS")
+    // messages surface in the composer hint row — resolved via suspend getString (non-composable context,
+    // same pattern as RepoDesktopModel's update failures)
+    if (!diaCdpSupported()) return@withContext DiaCdpResult(false, getString(Res.string.dia_not_supported))
     runCatching {
         // 1. QUIT any running Dia first. A flag-carrying launch is IGNORED while an instance is alive
         //    (Chromium forwards it to the existing process and the debug port never opens) — the key trap.
@@ -41,10 +49,10 @@ actual suspend fun launchDiaCdp(port: Int): DiaCdpResult = withContext(Dispatche
                 val code = try { conn.responseCode } finally { conn.disconnect() }
                 code == 200
             }.getOrDefault(false)
-            if (up) return@withContext DiaCdpResult(true, "Dia 调试端口 :$port 已就绪")
+            if (up) return@withContext DiaCdpResult(true, getString(Res.string.dia_ready, port))
         }
-        DiaCdpResult(false, "Dia 已重启，但 :$port 一直没响应（超时）")
-    }.getOrElse { DiaCdpResult(false, "启动失败：${it.message}") }
+        DiaCdpResult(false, getString(Res.string.dia_no_answer, port))
+    }.getOrElse { DiaCdpResult(false, getString(Res.string.dia_launch_failed, it.message ?: "?")) }
 }
 
 /** True if a process named exactly "Dia" (the app's main process) is alive. */

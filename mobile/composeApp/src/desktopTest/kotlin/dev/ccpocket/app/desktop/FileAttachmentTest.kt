@@ -8,6 +8,10 @@ import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.PendingFile
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.SentFile
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.composer_uploading
+import dev.ccpocket.app.resources.file_failed_retry
+import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.ui.FileGlyphKind
 import dev.ccpocket.app.ui.fileGlyphKind
@@ -110,8 +114,8 @@ class FileAttachmentTest {
         }
         setContent { PocketTheme { DesktopApp(model) } }
         assertPresent("server.log")
-        assertPresent("upload failed · retry")
-        assertPresent("send waits", substring = true) // "uploading 1 of 2 — send waits"
+        assertPresent(str(Res.string.file_failed_retry))
+        assertPresent(str(Res.string.composer_uploading, 1, 2)) // "uploading 1 of 2 — send waits"
     }
 
     // ---- delivered turn: dense chip with the @inbox landing path ------------------------------

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -58,6 +59,28 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.dir_no_matches
+import dev.ccpocket.app.resources.key_navigate
+import dev.ccpocket.app.resources.key_open
+import dev.ccpocket.app.resources.open_folder
+import dev.ccpocket.app.resources.palette_approve_on
+import dev.ccpocket.app.resources.palette_browse
+import dev.ccpocket.app.resources.palette_current
+import dev.ccpocket.app.resources.palette_new_at_path
+import dev.ccpocket.app.resources.palette_new_on
+import dev.ccpocket.app.resources.palette_on_machine
+import dev.ccpocket.app.resources.palette_open_project
+import dev.ccpocket.app.resources.palette_placeholder
+import dev.ccpocket.app.resources.palette_results_many
+import dev.ccpocket.app.resources.palette_results_one
+import dev.ccpocket.app.resources.palette_skills
+import dev.ccpocket.app.resources.palette_switch_to
+import dev.ccpocket.app.resources.tag_action
+import dev.ccpocket.app.resources.tag_machine
+import dev.ccpocket.app.resources.tag_project
+import dev.ccpocket.app.resources.tag_session
+import dev.ccpocket.app.resources.this_machine
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.fleet.AttentionBadge
@@ -65,8 +88,30 @@ import dev.ccpocket.app.ui.fmtMmSs
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import kotlinx.coroutines.CoroutineScope
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
 
-private enum class PKind(val tag: String) { MACHINE("machine"), ACTION("action"), PROJECT("project"), SESSION("session") }
+private enum class PKind(val tag: StringResource) {
+    MACHINE(Res.string.tag_machine), ACTION(Res.string.tag_action), PROJECT(Res.string.tag_project), SESSION(Res.string.tag_session)
+}
+
+/** The localized labels [buildItems] needs, resolved at composable scope (buildItems runs inside remember{},
+ *  which can't call stringResource). Data class so it's a stable remember key across recompositions. */
+private data class PaletteL10n(
+    val newAtPath: String,
+    val openFolder: String,
+    val browse: String,
+    val switchTo: String,   // "%1$s" template
+    val thisMac: String,
+    val current: String,
+    val newOn: String,      // "%1$s" template
+    val skills: String,
+    val onMachine: String,  // "%1$s" template
+    val approveOn: String,  // "%1$s" template
+)
+
+/** Minimal "%1$s" fill-in for templates resolved outside a composable (mirrors compose-resources' own token). */
+private fun fmt(template: String, arg: String) = template.replace("%1\$s", arg)
 
 private class PItem(
     val kind: PKind,
@@ -82,14 +127,14 @@ private class PItem(
 )
 
 /** Flatten the model into palette rows: machine verbs lead (Fleet ⑧), then projects and sessions. */
-private fun buildItems(model: DesktopModel, scope: CoroutineScope): List<PItem> = buildList {
+private fun buildItems(model: DesktopModel, scope: CoroutineScope, l10n: PaletteL10n): List<PItem> = buildList {
     fun projectItem(p: DkProject) = PItem(PKind.PROJECT, p.name, tilde(p.path), Icons.Outlined.Folder) { model.openProject(p) }
     // scoped mode ("All projects…"): the full project list plus the type-any-path entry, nothing else
     if (model.palette == PaletteScope.PROJECTS) {
         // type any path — the daemon creates a missing leaf folder
-        add(PItem(PKind.ACTION, "New session at path…", "~/", Icons.Outlined.Folder) { model.openNewSession("~/") })
+        add(PItem(PKind.ACTION, l10n.newAtPath, "~/", Icons.Outlined.Folder) { model.openNewSession("~/") })
         // issue #163: the same destination reached by browsing instead of typing
-        add(PItem(PKind.ACTION, "Open Folder…", "browse", Icons.Outlined.FolderOpen, hint = "⌘O") { openFolderAction(scope, model) })
+        add(PItem(PKind.ACTION, l10n.openFolder, l10n.browse, Icons.Outlined.FolderOpen, hint = "⌘O") { openFolderAction(scope, model) })
         model.projects.forEach { add(projectItem(it)) }
         return@buildList
     }
@@ -97,13 +142,13 @@ private fun buildItems(model: DesktopModel, scope: CoroutineScope): List<PItem> 
     model.machines.forEachIndexed { i, m ->
         val c = m.computer
         val detail = when {
-            m.thisMachine -> "this Mac"
-            m.active -> "current"
+            m.thisMachine -> l10n.thisMac
+            m.active -> l10n.current
             else -> c.meta.ifBlank { c.accountId }
         }
         add(
             PItem(
-                PKind.MACHINE, "Switch to ${c.name}", detail, osIcon(c.os),
+                PKind.MACHINE, fmt(l10n.switchTo, c.name), detail, osIcon(c.os),
                 hint = if (i < 9) "⌘0 ${i + 1}" else null, badge = m.pending, id = c.accountId,
             ) { model.selectComputer(c) },
         )
@@ -111,18 +156,18 @@ private fun buildItems(model: DesktopModel, scope: CoroutineScope): List<PItem> 
     // ACTIONS — start work on a machine / clear what's waiting, straight from the keyboard
     model.activeComputer?.let { c ->
         val where = model.newSessionDir?.let { tilde(it) } ?: "" // the dir it will actually start in
-        add(PItem(PKind.ACTION, "New session on ${c.name}…", where, Icons.Outlined.Folder, null) { model.openNewSession() })
+        add(PItem(PKind.ACTION, fmt(l10n.newOn, c.name), where, Icons.Outlined.Folder, null) { model.openNewSession() })
         // NOTE (issue #163): "Open Folder…" deliberately does NOT get a row here. The blank-query list is
         // the palette's front page, and a third action pushes the project rows below the lazy viewport —
         // a cost paid on every ⌘K for an entry that is already global (⌘O), visible in the sidebar, and
         // present one scope over in "All projects…", right beside the path-typing row it mirrors.
         // the installed skills/plugins browser (issue #132) — a machine fact, so it rides the active computer
-        add(PItem(PKind.ACTION, "Browse skills & plugins", "on ${c.name}", Icons.Outlined.AutoAwesome, null) { model.openSkills() })
+        add(PItem(PKind.ACTION, l10n.skills, fmt(l10n.onMachine, c.name), Icons.Outlined.AutoAwesome, null) { model.openSkills() })
     }
     model.attention.forEach { a ->
         add(
             PItem(
-                PKind.ACTION, "Approve pending on ${a.machine}", "${a.tool} · ${a.preview}", Icons.Outlined.Shield,
+                PKind.ACTION, fmt(l10n.approveOn, a.machine), "${a.tool} · ${a.preview}", Icons.Outlined.Shield,
                 hint = a.seconds?.let(::fmtMmSs), accent = true, id = "ask:${a.id}",
             ) { model.showAttention = true },
         )
@@ -154,7 +199,19 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
     var query by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(0) }
     val paletteScope = rememberCoroutineScope()
-    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.palette) { buildItems(model, paletteScope) }
+    val l10n = PaletteL10n(
+        newAtPath = stringResource(Res.string.palette_new_at_path),
+        openFolder = stringResource(Res.string.open_folder),
+        browse = stringResource(Res.string.palette_browse),
+        switchTo = stringResource(Res.string.palette_switch_to),
+        thisMac = stringResource(Res.string.this_machine),
+        current = stringResource(Res.string.palette_current),
+        newOn = stringResource(Res.string.palette_new_on),
+        skills = stringResource(Res.string.palette_skills),
+        onMachine = stringResource(Res.string.palette_on_machine),
+        approveOn = stringResource(Res.string.palette_approve_on),
+    )
+    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.palette, l10n) { buildItems(model, paletteScope, l10n) }
     val items = remember(all, query) {
         if (query.isBlank()) all.take(60) // blank query keeps source order — skip the score/sort/strip pass
         else all.mapNotNull { it.score(query).takeIf { s -> s > 0 }?.let { s -> it to s } }
@@ -182,7 +239,7 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
             Box(Modifier.weight(1f)) {
                 if (query.isEmpty()) {
                     Text(
-                        if (model.palette == PaletteScope.PROJECTS) "Open a project…" else "Jump to a project, session, or computer…",
+                        stringResource(if (model.palette == PaletteScope.PROJECTS) Res.string.palette_open_project else Res.string.palette_placeholder),
                         color = Tok.muted, fontFamily = Dk.ui, fontSize = 14.5.sp,
                     )
                 }
@@ -208,7 +265,7 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         // results
         if (items.isEmpty()) {
-            Text("No matches", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp))
+            Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp))
         } else {
             LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).padding(6.dp)) {
                 itemsIndexed(items, key = { _, it -> it.kind.name + (it.id ?: (it.label + it.detail)) }) { i, it ->
@@ -222,11 +279,11 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
             Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Key("↑"); Key("↓"); Text("navigate", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            Key("↑"); Key("↓"); Text(stringResource(Res.string.key_navigate), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
             Spacer(Modifier.width(6.dp))
-            Key("⏎"); Text("open", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            Key("⏎"); Text(stringResource(Res.string.key_open), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
             Spacer(Modifier.weight(1f))
-            Text("${items.size} result${if (items.size == 1) "" else "s"}", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+            Text(stringResource(if (items.size == 1) Res.string.palette_results_one else Res.string.palette_results_many, items.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
         }
     }
 }
@@ -250,6 +307,8 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
                 highlight(item.label, query),
                 color = if (item.accent) Tok.accent else Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                // cap the (unweighted) label so a long title can't swallow the whole row and hide the weighted detail (#179)
+                modifier = Modifier.widthIn(max = 280.dp),
             )
             if (item.agent != null && item.agent != AgentKind.CLAUDE) AgentTag(item.agent)
             Text(
@@ -259,7 +318,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
             if (item.badge > 0) AttentionBadge(item.badge)
             when {
                 item.hint != null -> Key(item.hint)
-                else -> Text(item.kind.tag, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                else -> Text(stringResource(item.kind.tag), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
             }
         }
     }

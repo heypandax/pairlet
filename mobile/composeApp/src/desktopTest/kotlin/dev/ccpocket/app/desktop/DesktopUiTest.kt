@@ -22,10 +22,8 @@ import androidx.compose.ui.test.withKeyDown
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
-import dev.ccpocket.app.resources.group_new
-import dev.ccpocket.app.resources.group_ungrouped
-import dev.ccpocket.app.resources.share_left_days
-import dev.ccpocket.app.resources.shared_badge
+import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.protocol.AgentKind
@@ -48,10 +46,10 @@ class DesktopUiTest {
     @Test
     fun shellShowsCoreNavigation() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        assertPresent("RECENT")                // the grouped sessions zone replaced PROJECTS + docked SESSIONS
-        assertPresent("PINNED")
-        assertPresent("New session")           // the single entry point under the header
-        assertPresent("All projects…")         // the browse escape hatch docked above Settings
+        assertPresent(str(Res.string.switcher_recent).uppercase()) // the grouped sessions zone replaced PROJECTS + docked SESSIONS
+        assertPresent(str(Res.string.dir_pinned).uppercase())
+        assertPresent(str(Res.string.new_session_title))           // the single entry point under the header
+        assertPresent(str(Res.string.switcher_all_projects) + "…") // the browse escape hatch docked above Settings
         assertPresent("Lidapeng-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
@@ -234,8 +232,8 @@ class DesktopUiTest {
         assertPresent("mac-studio")            // every paired machine, in the dropdown now
         assertPresent("devbox-linux")
         assertPresent("win-desktop")
-        assertPresent("this Mac")              // local-daemon tag on the active row
-        assertPresent("Add computer")          // pairing entry docked at the dropdown's bottom
+        assertPresent(str(Res.string.this_machine))   // local-daemon tag on the active row
+        assertPresent(str(Res.string.add_device))     // pairing entry docked at the dropdown's bottom
         // "mac-studio" also labels a RUNNING row behind the scrim — the dropdown's node composes last
         onAllNodes(hasText("mac-studio")).onLast().performClick()
         waitForIdle()
@@ -247,7 +245,7 @@ class DesktopUiTest {
     fun pinnedZoneRendersAndJumps() = runComposeUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { DesktopApp(model) } }
-        assertPresent("PINNED")
+        assertPresent(str(Res.string.dir_pinned).uppercase())
         assertPresent("Port parser to Rust")   // a pinned session living on mac-studio
         model.jumpPin(2)                       // ⌘3 → remote pin switches the active machine
         waitForIdle()
@@ -306,7 +304,7 @@ class DesktopUiTest {
     fun runningSectionAggregatesAcrossMachines() = runComposeUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { DesktopApp(model) } }
-        assertPresent("RUNNING")
+        assertPresent(str(Res.string.running).uppercase())
         assertPresent("api-server")            // mac-studio's live project — visible with NO group expanded
         assertPresent("relay")                 // devbox-linux's live project
         onAllNodes(hasText("api-server")).onFirst().performClick() // remote row → switch over to that machine
@@ -319,14 +317,14 @@ class DesktopUiTest {
         val model = SeedDesktopModel().apply { showQuickActions = true }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertPresent("QUICK ACTIONS") // the ⋯ popover's label (was a dead icon — this pins the wiring)
-        assertPresent("Model")
-        assertPresent("Compact context")
-        onAllNodes(hasText("Mode")).onLast().performClick()          // drill into the mode page
+        assertPresent(str(Res.string.quick_actions_title).uppercase()) // the ⋯ popover's label (was a dead icon — this pins the wiring)
+        assertPresent(str(Res.string.label_model))
+        assertPresent(str(Res.string.qa_compact))
+        onAllNodes(hasText(str(Res.string.label_mode))).onLast().performClick() // drill into the mode page
         waitForIdle()
-        assertPresent("Ask each step")                               // the four CLAUDE_MODES rows
-        assertPresent("Full auto")
-        onAllNodes(hasText("Full auto")).onLast().performClick()     // picking one closes the popover
+        assertPresent(str(Res.string.mode_default_short))            // the four CLAUDE_MODES rows
+        assertPresent(str(Res.string.mode_bypass_short))
+        onAllNodes(hasText(str(Res.string.mode_bypass_short))).onLast().performClick() // picking one closes the popover
         waitForIdle()
         assertTrue(!model.showQuickActions, "picking a mode dismisses the quick-actions popover")
     }
@@ -341,12 +339,12 @@ class DesktopUiTest {
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
         assertPresent("sonnet")                                                // the chip carries the current model
-        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        onAllNodes(hasContentDescription(str(Res.string.qa_model))).onFirst().performClick()
         waitForIdle()
         assertTrue(model.showModelPopover, "clicking the chip opens the model popover")
         assertPresent("Fable")            // the alias rows render in the anchored popover
-        assertPresent("Gateway presets")  // collapsed presets row (no gateway in the seed)
-        assertPresent("CUSTOM")           // the custom-id section
+        assertPresent(str(Res.string.model_gateway_show))          // collapsed presets row (no gateway in the seed)
+        assertPresent(str(Res.string.model_custom_label).uppercase()) // the custom-id section
     }
 
     @Test
@@ -361,12 +359,12 @@ class DesktopUiTest {
         }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        onAllNodes(hasContentDescription(str(Res.string.qa_model))).onFirst().performClick()
         waitForIdle()
         assertTrue(!model.showModelPopover, "the dimmed chip must not open the popover mid-turn")
         streamingState.value = false // the turn ends
         waitForIdle()
-        onAllNodes(hasContentDescription("Switch model")).onFirst().performClick()
+        onAllNodes(hasContentDescription(str(Res.string.qa_model))).onFirst().performClick()
         waitForIdle()
         assertTrue(model.showModelPopover, "once streaming ends the chip re-enables and opens the popover")
     }
@@ -378,12 +376,12 @@ class DesktopUiTest {
         val model = SeedDesktopModel().apply { showQuickActions = true }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        onAllNodes(hasText("Model")).onLast().performClick()
+        onAllNodes(hasText(str(Res.string.label_model))).onLast().performClick()
         waitForIdle()
         assertTrue(!model.showQuickActions, "the shortcut closes the ⋯ menu")
         assertTrue(model.showModelPopover, "…and opens the shared model popover")
-        assertPresent("Fable")                              // popover content anchored at the chip
-        assertPresent("Switch applies to the next turn.")   // seed streams → the next-turn note shows
+        assertPresent("Fable")                                // popover content anchored at the chip
+        assertPresent(str(Res.string.model_next_turn_note))   // seed streams → the next-turn note shows
     }
 
     @Test
@@ -391,7 +389,7 @@ class DesktopUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
         assertPresent("Run integration tests")                          // watch pane header
         assertPresent("pytest -x tests/integration", substring = true)  // its read-only stream
-        assertPresent("waiting approval", substring = true)             // the ⏸ strip
+        assertPresent(str(Res.string.watch_waiting), substring = true)  // the ⏸ strip
     }
 
     @Test
@@ -399,10 +397,10 @@ class DesktopUiTest {
         val model = SeedDesktopModel().apply { showAttention = true }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertPresent("Needs you")
+        assertPresent(str(Res.string.tray_needs_you))
         assertPresent("rm -rf ./build && ./gradlew clean") // mac-studio's Bash ask
         assertEquals(2, model.attention.size)
-        onAllNodes(hasText("Allow")).onFirst().performClick() // rows compose in queue order — first Allow = first row
+        onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick() // rows compose in queue order — first Allow = first row
         waitForIdle()
         assertEquals(1, model.attention.size) // a resolved row leaves the queue (and the badges)
     }
@@ -420,34 +418,35 @@ class DesktopUiTest {
     @Test
     fun selectingCodexSessionRevealsDiffApprovalAndModel() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        assertTrue(!present("Codex wants to edit files"), "no Codex diff before selecting it")
+        val codexWantsEdit = str(Res.string.agent_wants_edit, "Codex")
+        assertTrue(!present(codexWantsEdit), "no Codex diff before selecting it")
         onAllNodes(hasText("Tidy CI workflow")).onFirst().performClick()
         waitForIdle()
-        assertPresent("Codex wants to edit files")       // inline diff approval card
+        assertPresent(codexWantsEdit)                    // inline diff approval card
         assertPresent("gpt-5.1-codex", substring = true) // header model flipped to Codex
     }
 
     @Test
     fun newSessionOpensPopover() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        assertTrue(!present("Start session"), "popover closed initially")
-        onAllNodes(hasText("New session")).onFirst().performClick() // the Sessions-pane row (exact match)
+        assertTrue(!present(str(Res.string.new_path_start)), "popover closed initially")
+        onAllNodes(hasText(str(Res.string.new_session_title))).onFirst().performClick() // the Sessions-pane row (exact match)
         waitForIdle()
-        assertPresent("Start session")
-        assertPresent("Ask each step")
+        assertPresent(str(Res.string.new_path_start))
+        assertPresent(str(Res.string.mode_default_short))
         assertPresent("~/code/cc-pocket") // path field seeded with the current project
     }
 
     @Test
     fun newSessionPopoverStartsOnEnter() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
-        onAllNodes(hasText("New session")).onFirst().performClick()
+        onAllNodes(hasText(str(Res.string.new_session_title))).onFirst().performClick()
         waitForIdle()
-        assertPresent("Start session")
+        assertPresent(str(Res.string.new_path_start))
         // the path field is auto-focused on open; Enter = the Start button
         onAllNodes(hasText("~/code/cc-pocket")).onFirst().performKeyInput { pressKey(Key.Enter) }
         waitForIdle()
-        assertTrue(!present("Start session"), "Enter submits and closes the popover")
+        assertTrue(!present(str(Res.string.new_path_start)), "Enter submits and closes the popover")
     }
 
     @Test
@@ -455,9 +454,9 @@ class DesktopUiTest {
         val model = SeedDesktopModel().apply { browseProjects() } // "All projects…" → project-scoped palette
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        onAllNodes(hasText("New session at path…")).onFirst().performClick() // the scoped palette's lead action
+        onAllNodes(hasText(str(Res.string.palette_new_at_path))).onFirst().performClick() // the scoped palette's lead action
         waitForIdle()
-        assertPresent("Start session")
+        assertPresent(str(Res.string.new_path_start))
         assertPresent("~/") // path field seeded at the daemon host's home, ready to type into
     }
 
@@ -465,11 +464,11 @@ class DesktopUiTest {
     fun allProjectsOpensProjectScopedPalette() = runComposeUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { DesktopApp(model) } }
-        onAllNodes(hasText("All projects…")).onFirst().performClick()
+        onAllNodes(hasText(str(Res.string.switcher_all_projects) + "…")).onFirst().performClick()
         waitForIdle()
-        assertPresent("Open a project", substring = true)  // the scoped placeholder
-        assertPresent("dotfiles")                          // every project row, even ones without sessions
-        assertTrue(!present("Switch to mac-studio"), "machine verbs stay out of the project browser")
+        assertPresent(str(Res.string.palette_open_project))  // the scoped placeholder
+        assertPresent("dotfiles")                            // every project row, even ones without sessions
+        assertTrue(!present(str(Res.string.palette_switch_to, "mac-studio")), "machine verbs stay out of the project browser")
     }
 
     @Test
@@ -478,15 +477,15 @@ class DesktopUiTest {
         // also carry session titles and make a global text query meaningless)
         setContent { PocketTheme { CommandPalette(SeedDesktopModel()) {} } }
         waitForIdle()
-        assertPresent("Jump to a project", substring = true) // placeholder
-        assertPresent("Switch to mac-studio")                // machine verbs lead the blank-query list
+        assertPresent(str(Res.string.palette_placeholder))                // placeholder
+        assertPresent(str(Res.string.palette_switch_to, "mac-studio"))    // machine verbs lead the blank-query list
         assertPresent("cc-pocket")                           // a project row
         // sessions sit below the lazy viewport on a blank query (machine verbs push them down) —
         // filtering brings one into view, which is also the real usage path
         onAllNodes(hasSetTextAction()).onFirst().performTextInput("parser")
         waitForIdle()
         assertPresent("Fix stream parser test")              // label matches "parser"
-        assertPresent("session")                             // per-row type tag (machine rows carry ⌘n keycaps instead)
+        assertPresent(str(Res.string.tag_session))           // per-row type tag (machine rows carry ⌘n keycaps instead)
         assertTrue(!present("Tidy CI workflow"), "non-matching session filtered out")
         assertTrue(!present("dotfiles"), "non-matching project filtered out")
     }
@@ -495,11 +494,11 @@ class DesktopUiTest {
     fun commandPaletteCarriesMachineVerbs() = runComposeUiTest {
         setContent { PocketTheme { CommandPalette(SeedDesktopModel()) {} } }
         waitForIdle()
-        assertPresent("Switch to mac-studio")                     // machine verb + ⌘n hint
+        assertPresent(str(Res.string.palette_switch_to, "mac-studio"))         // machine verb + ⌘n hint
         assertPresent("⌘0 2") // switcher chord: ⌘0 opens it, the digit picks the machine
-        assertPresent("New session on Lidapeng-MacBook…")         // machine-scoped action
-        assertPresent("Approve pending on mac-studio")            // the "needs you" verb from the attention queue
-        assertPresent("this Mac")                                 // local machine detail
+        assertPresent(str(Res.string.palette_new_on, "Lidapeng-MacBook"))      // machine-scoped action
+        assertPresent(str(Res.string.palette_approve_on, "mac-studio"))        // the "needs you" verb from the attention queue
+        assertPresent(str(Res.string.this_machine))                            // local machine detail
     }
 
     @Test
@@ -507,8 +506,8 @@ class DesktopUiTest {
         val model = SeedDesktopModel().apply { palette = PaletteScope.ALL }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertPresent("Jump to a project", substring = true) // palette-unique placeholder
-        assertPresent("navigate")                            // palette-unique footer hint
+        assertPresent(str(Res.string.palette_placeholder))   // palette-unique placeholder
+        assertPresent(str(Res.string.key_navigate))          // palette-unique footer hint
     }
 
     @Test
@@ -516,13 +515,13 @@ class DesktopUiTest {
         val model = SeedDesktopModel().apply { showSettings = true }
         setContent { PocketTheme { DesktopApp(model) } }
         waitForIdle()
-        assertPresent("Default agent")            // General pane (default tab)
-        assertPresent("Default permission mode")
-        onAllNodes(hasText("Computers")).onFirst().performClick() // left-rail navigation
+        assertPresent(str(Res.string.settings_default_agent))     // General pane (default tab)
+        assertPresent(str(Res.string.settings_default_mode))
+        onAllNodes(hasText(str(Res.string.settings_tab_computers))).onFirst().performClick() // left-rail navigation
         waitForIdle()
-        assertPresent("Paired computers")
-        assertPresent("Rename")                   // per-computer actions (also fixes the accountId-label gap)
-        assertPresent("Revoke")
+        assertPresent(str(Res.string.settings_paired_computers))
+        assertPresent(str(Res.string.device_rename))              // per-computer actions (also fixes the accountId-label gap)
+        assertPresent(str(Res.string.share_revoke))
     }
 
     @Test
@@ -531,11 +530,11 @@ class DesktopUiTest {
         // persists it and Main.kt feeds it to PocketTheme, so wiring the click through is the whole feature
         val model = SeedDesktopModel()
         setContent { PocketTheme { SettingsModal(model) {} } } // opens on the General tab; Appearance sits at its top
-        assertPresent("Appearance")
-        onAllNodes(hasText("Light")).onFirst().performClick()
+        assertPresent(str(Res.string.settings_appearance))
+        onAllNodes(hasText(str(Res.string.appearance_light))).onFirst().performClick()
         waitForIdle()
         assertEquals(ThemeMode.LIGHT, model.themeMode)
-        onAllNodes(hasText("Dark")).onFirst().performClick()
+        onAllNodes(hasText(str(Res.string.appearance_dark))).onFirst().performClick()
         waitForIdle()
         assertEquals(ThemeMode.DARK, model.themeMode)
     }
@@ -565,13 +564,14 @@ class DesktopUiTest {
         // live-shaped SeedDesktopModel, so every row is real fleet state
         val model = SeedDesktopModel()
         setContent { PocketTheme { TrayPopover(model) } }
-        assertPresent("NEEDS YOU")                           // menubar-presence handoff section grammar (#151)
-        assertPresent("RUNNING")
+        assertPresent(str(Res.string.tray_needs_you).uppercase())  // menubar-presence handoff section grammar (#151)
+        assertPresent(str(Res.string.running).uppercase())
         assertPresent("rm -rf ./build && ./gradlew clean") // a REAL fleet approval preview (mac-studio's Bash)
         assertPresent("mac-studio")                          // the owning machine chip, not a hardcoded name
         assertPresent("api-server")                          // a REAL running project on another machine
-        assertPresent("3 computers · 3 sessions")            // header derived from live fleet state
-        assertPresent("Open cc-pocket")
+        // header derived from live fleet state — plural forms via the same resources the popover reads
+        assertPresent(str(Res.string.tray_computers_many, 3) + " · " + str(Res.string.tray_sessions_many, 3))
+        assertPresent(str(Res.string.tray_open_app))
         // (elapsed labels ride the process-wide TrayRunningSince clock — value coverage lives in
         // MenuBarStateTest, since "now" vs "1m" here would depend on suite timing)
         assertTrue(!present("⌘⏎"), "the keycap hint hides where the shortcut isn't wired (in-window overlay)")
@@ -591,7 +591,7 @@ class DesktopUiTest {
         val model = SeedDesktopModel()
         setContent { PocketTheme { TrayPopover(model) } }
         assertEquals(2, model.attention.size)
-        onAllNodes(hasText("Allow")).onFirst().performClick() // rows compose in queue order — first Allow = first row
+        onAllNodes(hasText(str(Res.string.allow))).onFirst().performClick() // rows compose in queue order — first Allow = first row
         waitForIdle()
         assertEquals(1, model.attention.size)
     }
@@ -600,7 +600,7 @@ class DesktopUiTest {
     fun trayOpenMainDismissesThePopover() = runComposeUiTest {
         val model = SeedDesktopModel().apply { showTray = true }
         setContent { PocketTheme { TrayPopover(model) } }
-        onAllNodes(hasText("Open cc-pocket")).onFirst().performClick()
+        onAllNodes(hasText(str(Res.string.tray_open_app))).onFirst().performClick()
         waitForIdle()
         assertTrue(!model.showTray, "Open cc-pocket dismisses the tray popover")
     }
@@ -611,7 +611,7 @@ class DesktopUiTest {
         var raised = false
         setContent { PocketTheme { TrayPopover(model, onOpenMain = { raised = true }) } }
         assertTrue(!model.showSettings)
-        onAllNodes(hasContentDescription("Settings")).onFirst().performClick()
+        onAllNodes(hasContentDescription(str(Res.string.settings_title))).onFirst().performClick()
         waitForIdle()
         assertTrue(model.showSettings, "the gear opens Settings (was a dead clickable)")
         // Settings lives in the main window — from the menu-bar popover the gear must surface it too,
@@ -626,10 +626,10 @@ class DesktopUiTest {
         setContent { PocketTheme { SettingsModal(model) {} } }
         assertTrue(model.menuBarEnabled, "menu-bar presence defaults on")
         // the group sits below the General pane's first viewport — scroll it in before clicking
-        onAllNodes(hasText("Show cc-pocket in the menu bar")).onFirst().performScrollTo().performClick()
+        onAllNodes(hasText(str(Res.string.settings_menu_bar_toggle))).onFirst().performScrollTo().performClick()
         waitForIdle()
         assertTrue(!model.menuBarEnabled)
-        onAllNodes(hasText("Show cc-pocket in the menu bar")).onFirst().performClick()
+        onAllNodes(hasText(str(Res.string.settings_menu_bar_toggle))).onFirst().performClick()
         waitForIdle()
         assertTrue(model.menuBarEnabled)
     }
@@ -644,10 +644,18 @@ class DesktopUiTest {
     }
 
     @Test
-    fun trayStatsLabelPluralizes() {
-        assertEquals("3 computers · 3 sessions", trayStatsLabel(3, 3))
-        assertEquals("1 computer · 1 session", trayStatsLabel(1, 1))
-        assertEquals("0 computers · 0 sessions", trayStatsLabel(0, 0))
+    fun trayStatsLabelPluralizes() = runComposeUiTest {
+        // singular counts flow through the *_one resources (the plural path is pinned by
+        // trayPopoverShowsRealApprovalsAndSessions above) — assert through real composition, since
+        // the label now resolves compose-resources and no longer exists as a pure function.
+        val base = SeedDesktopModel()
+        val model = object : DesktopModel by base {
+            override val machines = base.machines.filter { it.computer.online }.take(1)
+            override val running = base.running.take(1)
+        }
+        setContent { PocketTheme { TrayPopover(model) } }
+        waitForIdle()
+        assertPresent(str(Res.string.tray_computers_one, 1) + " · " + str(Res.string.tray_sessions_one, 1))
     }
 
     @Test
@@ -672,8 +680,8 @@ class DesktopUiTest {
             override val attention = listOf(q)
         }
         setContent { PocketTheme { TrayPopover(model) } }
-        assertPresent("Answer in session ↗")
-        assertTrue(!present("Deny"), "question rows must not offer a bare Deny/Allow")
+        assertPresent(str(Res.string.tray_answer_in_session))
+        assertTrue(!present(str(Res.string.deny)), "question rows must not offer a bare Deny/Allow")
     }
 
     @Test
@@ -684,10 +692,10 @@ class DesktopUiTest {
                 FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code/cc-pocket", "main", onAllow = {}, onDeny = {}, onDismiss = {})
             }
         }
-        assertPresent("Claude needs permission")
+        assertPresent(str(Res.string.agent_needs_permission, "Claude"))
         assertPresent("devbox-linux", substring = true)
-        assertPresent("Allow")
-        assertPresent("Deny")
+        assertPresent(str(Res.string.allow))
+        assertPresent(str(Res.string.deny))
     }
 
     @Test
@@ -700,10 +708,10 @@ class DesktopUiTest {
                 FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code", null, onAllow = { allowedRemember = it }, onDeny = {}, onDismiss = {})
             }
         }
-        assertPresent("Remember for this session")
-        onAllNodes(hasText("Remember for this session")).onLast().performClick()
+        assertPresent(str(Res.string.perm_remember_session))
+        onAllNodes(hasText(str(Res.string.perm_remember_session))).onLast().performClick()
         waitForIdle()
-        onAllNodes(hasText("Allow")).onLast().performClick()
+        onAllNodes(hasText(str(Res.string.allow))).onLast().performClick()
         waitForIdle()
         assertEquals(true, allowedRemember)
     }
@@ -717,7 +725,7 @@ class DesktopUiTest {
                 FocusedModal("devbox-linux", ask, AgentKind.CLAUDE, "~/code", null, onAllow = {}, onDeny = {}, onDismiss = {})
             }
         }
-        assertTrue(!present("Remember for this session"), "plan approvals must not offer remember")
+        assertTrue(!present(str(Res.string.perm_remember_session)), "plan approvals must not offer remember")
     }
 
     // ── model logic (no composition) ─────────────────────────────────────────
@@ -772,7 +780,7 @@ class DesktopUiTest {
             }
         }
         waitForIdle()
-        assertPresent("AUTONOMY")
-        assertPresent("Let the daemon run the adapter")
+        assertPresent(str(Res.string.bridge_autonomy).uppercase())
+        assertPresent(str(Res.string.bridge_manage_toggle))
     }
 }

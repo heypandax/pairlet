@@ -673,4 +673,361 @@
     <string name="limit_autocontinue">Auto-continue</string>
     <string name="limit_confirmed">Will continue at %1$s</string>
     <string name="limit_undo">Undo</string>
+
+    <!-- ── desktop shell (issue #181) ─────────────────────────────── -->
+    <!-- generic actions & tokens -->
+    <string name="close">Close</string>
+    <string name="allow">Allow</string>
+    <string name="search">Search</string>
+    <string name="action_continue">Continue</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_back">Back</string>
+    <string name="action_browse">Browse</string>
+    <string name="action_create">Create</string>
+    <string name="toggle_on">on</string>
+    <string name="toggle_off">off</string>
+    <string name="presence_online">online</string>
+    <string name="presence_offline">offline</string>
+    <string name="this_machine">this Mac</string>
+    <string name="this_computer">this computer</string>
+    <string name="your_computer">your computer</string>
+    <string name="menu_more">· more…</string>
+
+    <!-- settings: tabs -->
+    <string name="settings_tab_general">General</string>
+    <string name="settings_tab_account">Account</string>
+    <string name="settings_tab_computers">Computers</string>
+    <string name="settings_tab_schedules">Schedules</string>
+    <string name="settings_tab_shared">Shared</string>
+    <string name="settings_tab_shortcuts">Shortcuts</string>
+    <string name="settings_tab_about">About</string>
+
+    <!-- settings: general pane -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_sub">Light or dark theme for this app.</string>
+    <string name="settings_default_agent">Default agent</string>
+    <string name="settings_default_agent_sub">Which backend new sessions start with.</string>
+    <string name="settings_default_model">Default model</string>
+    <string name="settings_default_model_sub">Which model new %1$s sessions start on.</string>
+    <string name="settings_option_default">Default</string>
+    <string name="settings_option_cli_default">CLI default</string>
+    <string name="settings_opencode_local_default">OpenCode will use the default from its local configuration.</string>
+    <string name="settings_context_window">Context window</string>
+    <string name="settings_context_window_sub">The usage statusline\'s 100% mark. Set this when a custom model\'s real window isn\'t 200K — the CLI can\'t report it.</string>
+    <string name="settings_default_mode">Default permission mode</string>
+    <string name="settings_default_mode_sub">How much a new session may do before it asks.</string>
+    <string name="settings_terminal">Terminal</string>
+    <string name="settings_terminal_sub">How the chat header\'s &gt;_ opens a terminal at the session\'s folder.</string>
+    <string name="settings_term_embedded">Embedded panel</string>
+    <string name="settings_term_embedded_hint">⌘J · docked in the session</string>
+    <string name="settings_term_external">External window</string>
+    <string name="settings_term_external_hint">opens the app below</string>
+    <string name="settings_term_external_app">External app</string>
+    <string name="term_app_system">System terminal</string>
+    <string name="settings_menu_bar">Menu bar</string>
+    <string name="settings_menu_bar_sub">A persistent status glyph — approvals and running sessions at a glance, without raising this window.</string>
+    <string name="settings_menu_bar_toggle">Show cc-pocket in the menu bar</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_notifications_sub">Turn-complete alerts pushed to your phone by this computer.</string>
+    <string name="settings_push_stale">Phone alerts need the computer\'s daemon updated first.</string>
+    <string name="settings_push_toggle">Notify my phone when a turn finishes</string>
+
+    <!-- settings: account / auth -->
+    <string name="settings_auth">Authentication</string>
+    <string name="settings_auth_sub">How this computer\'s Claude CLI signs in.</string>
+    <string name="settings_auth_disconnected">Connect a computer to see its account.</string>
+    <string name="settings_auth_stale">No reply — the daemon on this computer predates account management. Update it to switch accounts from here.</string>
+    <string name="settings_auth_loading">Loading account…</string>
+    <string name="settings_login_finish">Finish signing in</string>
+    <string name="settings_login_browser">A browser window opened on the computer. Authorize there, copy the code, and paste it below.</string>
+    <string name="settings_login_open_here">Open here</string>
+    <string name="settings_login_paste_code">Paste authorization code</string>
+    <string name="settings_login_submit">Submit</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_env_key_body">Set in the computer\'s environment (%1$s / ANTHROPIC_BASE_URL), not a Claude login.</string>
+    <string name="settings_env_key_presets">Activate a preset below to run new sessions on a saved endpoint instead, or edit the variables on the computer.</string>
+    <string name="settings_env_key_computer">To change the key or endpoint, edit the variables on the computer and reconnect.</string>
+    <string name="settings_signed_in">Signed in</string>
+    <string name="settings_switch_warning">Switching signs this account out first. Idle sessions on that computer are closed (resume them anytime); a session still working on a task blocks the switch.</string>
+    <string name="settings_switch_account">Switch account…</string>
+    <string name="settings_log_out">Log out</string>
+    <string name="settings_no_auth_title">No account or API key set on this computer</string>
+    <string name="settings_no_auth_body">This computer\'s Claude CLI has no login and no base URL or auth token in its environment.</string>
+    <string name="settings_no_auth_presets">Sign in with Claude, or save a preset below to point new sessions at an endpoint.</string>
+    <string name="settings_no_auth_signin">Sign in with Claude to get started.</string>
+    <string name="settings_sign_in">Sign in…</string>
+
+    <!-- settings: API presets -->
+    <string name="settings_presets">API presets</string>
+    <string name="settings_presets_sub">Saved endpoints you can switch between. New sessions use the active one.</string>
+    <string name="settings_presets_disconnected">Connect a computer to manage API presets.</string>
+    <string name="settings_presets_stale">Presets need the computer\'s daemon updated first.</string>
+    <string name="settings_presets_loading">Loading presets…</string>
+    <string name="settings_presets_info_oauth">Presets are for third-party API endpoints. Activating one runs new sessions on that key instead of your Claude login.</string>
+    <string name="settings_presets_empty">No presets yet. Save an endpoint to switch base URLs and keys without editing the computer\'s environment.</string>
+    <string name="settings_preset_new">New preset</string>
+    <string name="settings_presets_active_note">New sessions on %1$s use this preset. Sessions already open keep the endpoint they started with.</string>
+    <string name="settings_reach_error">Couldn\'t reach the computer — try again.</string>
+    <string name="settings_presets_secret_note">Tokens are stored on the computer and never sent back to this app.</string>
+    <string name="settings_preset_activating">Activating…</string>
+    <string name="settings_preset_active">active</string>
+    <string name="settings_presets_back">‹ Presets</string>
+    <string name="settings_preset_edit">Edit preset</string>
+    <string name="settings_preset_deactivate">Deactivate</string>
+    <string name="form_name">Name</string>
+    <string name="settings_preset_name_ph">Work proxy</string>
+    <string name="settings_preset_name_dup">A preset named \'%1$s\' already exists.</string>
+    <string name="settings_preset_name_required">Name is required.</string>
+    <string name="settings_preset_url_invalid">Enter a valid http(s) URL.</string>
+    <string name="settings_preset_token_required">Paste the API key or token.</string>
+    <string name="settings_preset_token_ph">Paste token</string>
+    <string name="settings_preset_token_stored">•••• stored — leave blank to keep</string>
+    <string name="settings_token_reveal">Reveal token</string>
+    <string name="settings_token_hide">Hide token</string>
+    <string name="settings_helper_baseurl">— where the CLI sends requests.</string>
+    <string name="settings_helper_token">— stored on the computer, never shown here again.</string>
+    <string name="settings_helper_model">— what new sessions run on.</string>
+    <string name="settings_helper_fast">— for the CLI\'s quick internal calls.</string>
+    <string name="settings_model_routing">Model routing</string>
+    <string name="settings_model_route">Model route</string>
+    <string name="settings_optional">(optional)</string>
+    <string name="settings_set">(set)</string>
+    <string name="settings_small_fast_model">Small / fast model</string>
+    <string name="settings_preset_save">Save preset</string>
+
+    <!-- settings: working-session blockers -->
+    <string name="settings_blockers_title">These sessions are still working and block the switch:</string>
+    <string name="settings_blocker_midturn">Mid-turn right now</string>
+    <string name="settings_blocker_bg_one">%1$d background task</string>
+    <string name="settings_blocker_bg_many">%1$d background tasks</string>
+    <string name="settings_blocker_working">Still working</string>
+    <string name="settings_stop_all_switch">Stop all &amp; switch</string>
+    <string name="settings_stop_all_note">Sessions can be resumed afterwards; their background tasks end.</string>
+
+    <!-- settings: computers / schedules / shares / shortcuts / about -->
+    <string name="settings_paired_computers">Paired computers</string>
+    <string name="settings_no_computers">No paired computers yet.</string>
+    <string name="settings_schedules_stale">Update the computer\'s cc-pocket to use scheduled tasks.</string>
+    <string name="settings_schedules_empty">No scheduled tasks. Schedule one from the phone composer (long-press send).</string>
+    <string name="schedule_repeats">repeats</string>
+    <string name="share_path_hint">Type the absolute path to a folder on this computer.</string>
+    <string name="settings_shortcuts_title">Keyboard shortcuts</string>
+    <string name="shortcut_palette">Command palette</string>
+    <string name="shortcut_send">Send message</string>
+    <string name="shortcut_newline">New line</string>
+    <string name="shortcut_approve">Approve permission</string>
+    <string name="shortcut_open_settings">Open settings</string>
+    <string name="shortcut_close">Close / dismiss</string>
+    <string name="about_desktop_blurb">Desktop edition — one host driving Claude Code / Codex on another, over an end-to-end encrypted link.</string>
+    <string name="about_relay">Relay</string>
+    <string name="update_check_row">Check for updates</string>
+    <string name="update_check_action">Check</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_latest">You\'re on the latest version (v%1$s)</string>
+    <string name="update_check_again">Check again</string>
+    <string name="update_available">Update available</string>
+    <string name="update_download_restart">Download &amp; restart</string>
+    <string name="update_replace_note">Replaces this app and relaunches it.</string>
+    <string name="update_installed_with">Installed with %1$s — update it from a terminal:</string>
+    <string name="update_view_release">View release</string>
+    <string name="update_open_releases">Open the releases page to update.</string>
+    <string name="update_downloading">Downloading v%1$s… the app restarts when it\'s ready.</string>
+    <string name="update_reach_failed">Couldn\'t reach GitHub releases — check your network.</string>
+    <string name="update_failed">Update failed.</string>
+    <string name="notify_turn_complete">Turn complete</string>
+
+    <!-- chat pane -->
+    <string name="chat_no_session">No session open</string>
+    <string name="chat_no_session_hint">Pick a project on the left, then open or start a session.</string>
+    <string name="chat_opening">Opening session…</string>
+    <string name="chat_opening_named">Opening %1$s…</string>
+    <string name="chat_you">You</string>
+    <string name="msg_no_response_click">no response yet — click to resend</string>
+    <string name="msg_undelivered_reconnecting">not delivered yet — reconnecting…</string>
+    <string name="msg_delivered_short">✓ delivered</string>
+    <string name="ctx_nearly_full">Context %1$d% full — consider a new session or /compact soon</string>
+    <string name="question_answered_label">Answered</string>
+    <string name="observe_readonly">Read-only — this session is running in a terminal on the computer</string>
+    <string name="message_agent_hint">Message %1$s…</string>
+    <string name="composer_uploading">uploading %1$d of %2$d — send waits</string>
+    <string name="key_send">send</string>
+    <string name="key_newline">newline</string>
+    <string name="key_stop">stop</string>
+    <string name="key_open">open</string>
+    <string name="key_navigate">navigate</string>
+    <string name="key_close">close</string>
+    <string name="key_switch_entry">switch entry</string>
+    <string name="key_switch_file">switch file</string>
+    <string name="key_collapse_hunk">collapse hunk</string>
+    <string name="copy_path">copy path</string>
+    <string name="file_failed_retry">upload failed · retry</string>
+    <string name="cancel_upload">cancel upload</string>
+    <string name="drop_title">Drop to add to this session\'s workspace</string>
+    <string name="drop_sub">images · files · videos — up to 200 MB</string>
+    <string name="agent_needs_permission">%1$s needs permission</string>
+    <string name="agent_wants_edit">%1$s wants to edit files</string>
+    <string name="perm_remember_session">Remember for this session</string>
+    <string name="auto_denied_no_response">Auto-denied (no response)</string>
+    <string name="perm_on_computer">on %1$s</string>
+
+    <!-- sidebar -->
+    <string name="sidebar_no_computer">No computer</string>
+    <string name="sidebar_pins_full">Pinned is full (%1$d) — unpin a session to add another.</string>
+    <string name="sidebar_clear">clear</string>
+    <string name="sidebar_clear_confirm">sure?</string>
+    <string name="sidebar_recent_empty">No sessions yet — open a project from All projects below, or start a new session.</string>
+    <string name="sidebar_no_sessions_here">No sessions here yet</string>
+    <string name="open_folder">Open Folder…</string>
+
+    <!-- command palette -->
+    <string name="palette_new_at_path">New session at path…</string>
+    <string name="palette_browse">browse</string>
+    <string name="palette_switch_to">Switch to %1$s</string>
+    <string name="palette_current">current</string>
+    <string name="palette_new_on">New session on %1$s…</string>
+    <string name="palette_skills">Browse skills &amp; plugins</string>
+    <string name="palette_on_machine">on %1$s</string>
+    <string name="palette_approve_on">Approve pending on %1$s</string>
+    <string name="palette_open_project">Open a project…</string>
+    <string name="palette_placeholder">Jump to a project, session, or computer…</string>
+    <string name="palette_results_one">%1$d result</string>
+    <string name="palette_results_many">%1$d results</string>
+    <string name="tag_machine">machine</string>
+    <string name="tag_action">action</string>
+    <string name="tag_project">project</string>
+    <string name="tag_session">session</string>
+
+    <!-- connect panel -->
+    <string name="connect_computer_header">Connect a computer</string>
+    <string name="add_computer_sub">Pair another computer — your current session stays connected.</string>
+    <string name="pair_code_invalid">invalid or expired code</string>
+
+    <!-- attention / tray / fleet -->
+    <string name="tray_needs_you">Needs you</string>
+    <string name="attention_stats">%1$d machines · %2$d online · %3$d waiting</string>
+    <string name="attention_empty">All clear — approvals from any machine queue here.</string>
+    <string name="attention_footer">Approve here only for previews you can fully read — click through for diffs.</string>
+    <string name="attention_open_session">Open session ↗</string>
+    <string name="watch_waiting">⏸ waiting approval —</string>
+    <string name="watch_review">Review</string>
+    <string name="tray_all_clear">Nothing needs you</string>
+    <string name="tray_no_running">No running sessions</string>
+    <string name="tray_more_sessions">+%1$d more sessions</string>
+    <string name="tray_open_app">Open cc-pocket</string>
+    <string name="tray_more_waiting">+%1$d more waiting — open cc-pocket</string>
+    <string name="tray_answer_in_session">Answer in session ↗</string>
+    <string name="tray_computers_one">%1$d computer</string>
+    <string name="tray_computers_many">%1$d computers</string>
+    <string name="tray_sessions_one">%1$d session</string>
+    <string name="tray_sessions_many">%1$d sessions</string>
+
+    <!-- skills & plugins overlay -->
+    <string name="skills_title">Skills &amp; plugins</string>
+    <string name="skills_count">%1$d skills · %2$d plugins</string>
+    <string name="skills_stale_title">Can\'t browse skills</string>
+    <string name="skills_stale_body">The cc-pocket daemon on this computer is too old. Update it to read installed skills and plugins.</string>
+    <string name="skills_empty_title">Nothing installed</string>
+    <string name="skills_empty_body">No skills or plugins found on this computer. Add a SKILL.md under .claude/skills or install a plugin from a marketplace.</string>
+    <string name="skills_section">Skills</string>
+    <string name="plugins_section">Plugins</string>
+    <string name="skills_kind_plugin">plugin</string>
+    <string name="fact_scope">scope</string>
+    <string name="fact_path">path</string>
+    <string name="fact_version">version</string>
+    <string name="fact_marketplace">marketplace</string>
+    <string name="fact_author">author</string>
+    <string name="fact_commands">commands</string>
+    <string name="fact_homepage">homepage</string>
+    <string name="skills_trimmed">trimmed — open the file on the computer for the rest</string>
+    <string name="skills_loading_from">Reading skills from %1$s…</string>
+    <string name="skills_loading">Reading skills…</string>
+
+    <!-- workflow panel -->
+    <string name="wf_agents_count">%1$d agents</string>
+    <string name="wf_phases_agents">%1$d phases · %2$d agents</string>
+    <string name="wf_phase_pos">phase %1$d/%2$d · %3$s</string>
+    <string name="wf_passed_failed">%1$d passed · %2$d failed</string>
+    <string name="wf_agents_duration">%1$d agents · %2$s</string>
+    <string name="wf_agents_queued">%1$d agents queued</string>
+    <string name="wf_waiting">waiting</string>
+    <string name="wf_more_queued">+ %1$d queued</string>
+    <string name="wf_error">Error</string>
+    <string name="wf_return">Return</string>
+
+    <!-- embedded terminal dock -->
+    <string name="term_engine_unavailable">shell engine unavailable — use the header\'s open-external instead</string>
+    <string name="term_open_external">Open in external terminal</string>
+    <string name="term_collapse">Collapse terminal</string>
+    <string name="term_close">Close terminal</string>
+    <string name="term_restore">Restore terminal</string>
+    <string name="term_menu">Terminal menu</string>
+    <string name="term_one_running">1 running</string>
+    <string name="term_open_title">Open terminal</string>
+    <string name="term_open_embedded">Open embedded</string>
+    <string name="term_embedded_sub">Docked in this session</string>
+    <string name="term_open_ghostty">Open in Ghostty</string>
+    <string name="term_open_system">Open in system terminal</string>
+    <string name="term_external_sub">Your system terminal</string>
+    <string name="term_default_hint">Default can be changed in %1$s.</string>
+    <string name="term_default_hint_link">Settings → Terminal</string>
+
+    <!-- bridges: desktop manager -->
+    <string name="bridge_new">New bridge</string>
+    <string name="bridge_intro">IM bots that can drive this machine. They only ever open sessions in the projects you pick, and they can never approve their own permission prompts — those come to your phone.</string>
+    <string name="bridge_live_count">%1$d/%2$d live</string>
+    <string name="bridge_adapter">Adapter</string>
+    <string name="bridge_configured">Configured</string>
+    <string name="bridge_exited">Exited</string>
+    <string name="bridge_tier_asks">asks before anything risky</string>
+    <string name="bridge_tier_silent">edits files silently</string>
+    <string name="bridge_cred_title">Credential for “%1$s” — copy it NOW</string>
+    <string name="bridge_cred_note">Single-use, expires in %1$ds. Save it as bridge-credential.json next to the adapter and start it.</string>
+    <string name="bridge_name_hint">shown as “via &lt;name&gt;” on any session it starts</string>
+    <string name="bridge_projects_hint">the ONLY directories it may open sessions in — pick dedicated, low-sensitivity checkouts</string>
+    <string name="bridge_autonomy">Autonomy</string>
+    <string name="bridge_autonomy_hint">anyone in the chat can send it prompts — this is what it may do without asking you</string>
+    <string name="bridge_tier_ask_title">Ask me first</string>
+    <string name="bridge_tier_ask_sub">shell, writes and edits all prompt your phone</string>
+    <string name="bridge_tier_edit_title">Edit files silently</string>
+    <string name="bridge_tier_edit_sub">edits apply unprompted; shell still asks</string>
+    <string name="bridge_manage_toggle">Let the daemon run the adapter</string>
+    <string name="bridge_manage_on">It starts on boot, restarts on crash, and the credential never leaves this machine.</string>
+    <string name="bridge_manage_off">You\'ll get a credential to copy into an adapter you run yourself.</string>
+    <string name="bridge_feishu_app">Feishu app</string>
+    <string name="bridge_feishu_hint">from open.feishu.cn — the bot needs im:message + im:message:send_as_bot, and event subscription im.message.receive_v1 in long-connection mode</string>
+    <string name="bridge_ph_appid">cli_xxx  (App ID)</string>
+    <string name="bridge_ph_admin">your open_id — optional; leave empty and the bot tells you yours</string>
+    <string name="bridge_custom_adapter">Custom adapter (optional)</string>
+    <string name="bridge_custom_hint">leave empty to use the built-in Feishu adapter — no python needed. Set a script path only to run your own.</string>
+    <string name="bridge_bind_hint">After it connects, @mention the bot in a chat and send  /bind &lt;project&gt;  to point that chat at one of these projects.</string>
+    <string name="bridge_edit_projects_hint">the directories this bot may open sessions in — add or remove, then Save &amp; restart</string>
+    <string name="bridge_adapter_config">Adapter config</string>
+    <string name="bridge_none_yet">(nothing yet)</string>
+    <string name="bridge_ph_admin_edit">FEISHU_ADMIN_OPEN_ID — paste the open_id the bot echoed after /bind</string>
+    <string name="bridge_add_project">+ Add project</string>
+    <string name="bridge_owner_bypass">Run MY own messages without approval</string>
+    <string name="bridge_owner_bypass_hint_create">Only the open_id above skips approval — full trust, your own machine. Everyone else still asks. Needs your open_id set.</string>
+    <string name="bridge_owner_bypass_hint_edit">Only the owner open_id skips approval — full trust, your own machine. Everyone else still asks.</string>
+    <string name="bridge_allow_cmds">Run these without asking</string>
+    <string name="bridge_allow_cmds_hint_create">one command per line (e.g.  npm test  /  ./gradlew build  /  pytest). Matching commands run with no phone prompt so a task finishes in one go. Dangerous commands and anything with a pipe / redirect / $var still ask you.</string>
+    <string name="bridge_allow_cmds_hint">one command per line — matching commands run with no phone prompt. Dangerous commands and anything with a pipe / redirect / $var still ask you.</string>
+
+    <!-- window chrome & misc -->
+    <string name="exit_fullscreen">Exit Full Screen</string>
+    <string name="show_sidebar">Show sidebar</string>
+    <string name="qa_terminal">Open terminal</string>
+    <string name="qa_clear_armed">Clear chat — tap again</string>
+    <string name="popover_where">Where</string>
+    <string name="menu_copy_path">Copy path</string>
+
+    <!-- dia cdp relaunch (composer hint row) -->
+    <string name="dia_launch">Launch Dia :9222</string>
+    <string name="dia_restarting">Restarting Dia…</string>
+    <string name="dia_confirm_title">Reopen Dia with the debug port</string>
+    <string name="dia_confirm_body">This quits the running Dia first (unsaved window state is lost), then reopens it with :9222 — so it can reuse your signed-in session.</string>
+    <string name="action_launch">Launch</string>
+    <string name="dia_not_supported">Dia isn\'t installed (or this isn\'t macOS)</string>
+    <string name="dia_ready">Dia debug port :%1$s is ready</string>
+    <string name="dia_no_answer">Dia relaunched, but :%1$s never answered (timeout)</string>
+    <string name="dia_launch_failed">Launch failed: %1$s</string>
 </resources>

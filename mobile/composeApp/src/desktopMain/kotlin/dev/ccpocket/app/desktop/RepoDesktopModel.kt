@@ -14,6 +14,9 @@ import dev.ccpocket.app.data.FleetRuntime
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.update_failed
+import dev.ccpocket.app.resources.update_reach_failed
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.ui.ComposerState
@@ -40,6 +43,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.jetbrains.compose.resources.getString
 
 /** Persisted form of a [DkPin] — decoupled from the view type so the store format stays stable. */
 @Serializable
@@ -855,7 +859,9 @@ class RepoDesktopModel(
         updateScope.launch {
             val rel = DesktopUpdater.latest()
             updateStateInternal = when {
-                rel == null -> DkUpdateState.Failed("Couldn't reach GitHub releases — check your network.")
+                // suspend getString: the model isn't composable, but the failure line IS user-facing UI copy
+                // (same non-composable localization route PocketRepository already uses for preview asks)
+                rel == null -> DkUpdateState.Failed(getString(Res.string.update_reach_failed))
                 ReleaseVersions.isNewer(rel.version, APP_VERSION) -> {
                     pendingRelease = rel
                     DkUpdateState.Available(rel.version, DesktopUpdater.currentSource())
@@ -873,7 +879,7 @@ class RepoDesktopModel(
         updateScope.launch {
             // applyStandalone() does not return on success — it exits so the swap helper / installer can proceed
             runCatching { DesktopUpdater.applyStandalone(rel) }
-                .onFailure { updateStateInternal = DkUpdateState.Failed(it.message ?: "Update failed.") }
+                .onFailure { updateStateInternal = DkUpdateState.Failed(it.message ?: getString(Res.string.update_failed)) }
         }
     }
     override var defaultAgent: AgentKind

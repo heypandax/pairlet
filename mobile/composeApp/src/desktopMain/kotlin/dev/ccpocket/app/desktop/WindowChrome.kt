@@ -41,7 +41,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.FrameWindowScope
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.exit_fullscreen
+import dev.ccpocket.app.resources.search
 import dev.ccpocket.app.theme.Tok
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * The custom (undecorated) title bar — draggable, with platform-appropriate window controls: macOS traffic
@@ -102,7 +106,7 @@ fun FrameWindowScope.DkTitleBar(
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Rounded.Search, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                Text("Search", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                Text(stringResource(Res.string.search), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
                 Key("⌘K")
             }
             Box(Modifier.size(14.dp).clip(RoundedCornerShape(999.dp)).clickable(onClick = onTray), contentAlignment = Alignment.Center) {
@@ -166,7 +170,7 @@ fun FullscreenExitStrip(onExit: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Rounded.FullscreenExit, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                Text("Exit Full Screen", color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
+                Text(stringResource(Res.string.exit_fullscreen), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.5.sp)
             }
         }
     }
