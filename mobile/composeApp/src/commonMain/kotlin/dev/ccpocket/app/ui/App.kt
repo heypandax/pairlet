@@ -1085,8 +1085,19 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
 /** Removable filter chip pinned atop the Sessions list when a single agent is selected (issue #31). */
 @Composable
 private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
-    val color = if (filter == "codex") Tok.codex else Tok.accent
-    val label = stringResource(if (filter == "codex") Res.string.af_codex_only else Res.string.af_claude_only)
+    // one arm per non-"both" filter: opencode used to fall through to the Claude label + accent (mislabeled)
+    val color = when (filter) {
+        "codex" -> Tok.codex
+        "opencode" -> Tok.opencode
+        else -> Tok.accent
+    }
+    val label = stringResource(
+        when (filter) {
+            "codex" -> Res.string.af_codex_only
+            "opencode" -> Res.string.af_opencode_only
+            else -> Res.string.af_claude_only
+        }
+    )
     Row(
         Modifier.clip(RoundedCornerShape(999.dp)).background(color.copy(alpha = 0.12f))
             .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
