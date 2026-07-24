@@ -673,4 +673,340 @@
     <string name="limit_autocontinue">自动继续</string>
     <string name="limit_confirmed">将于 %1$s 自动继续</string>
     <string name="limit_undo">撤销</string>
+
+    <!-- ── 桌面端（issue #181）──────────────────────────────────── -->
+    <!-- 通用动作与状态词 -->
+    <string name="close">关闭</string>
+    <string name="allow">允许</string>
+    <string name="search">搜索</string>
+    <string name="action_continue">继续</string>
+    <string name="action_retry">重试</string>
+    <string name="action_back">返回</string>
+    <string name="action_browse">浏览</string>
+    <string name="action_create">创建</string>
+    <string name="toggle_on">开</string>
+    <string name="toggle_off">关</string>
+    <string name="presence_online">在线</string>
+    <string name="presence_offline">离线</string>
+    <string name="this_machine">本机</string>
+    <string name="this_computer">这台电脑</string>
+    <string name="your_computer">你的电脑</string>
+    <string name="menu_more">· 更多…</string>
+
+    <!-- 设置：标签页 -->
+    <string name="settings_tab_general">通用</string>
+    <string name="settings_tab_account">账号</string>
+    <string name="settings_tab_computers">电脑</string>
+    <string name="settings_tab_schedules">定时任务</string>
+    <string name="settings_tab_shared">共享</string>
+    <string name="settings_tab_shortcuts">快捷键</string>
+    <string name="settings_tab_about">关于</string>
+
+    <!-- 设置：通用页 -->
+    <string name="settings_appearance">外观</string>
+    <string name="settings_appearance_sub">选择应用的浅色或深色主题。</string>
+    <string name="settings_default_agent">默认智能体</string>
+    <string name="settings_default_agent_sub">新会话默认使用哪个后端。</string>
+    <string name="settings_default_model">默认模型</string>
+    <string name="settings_default_model_sub">新建 Claude 会话默认使用的模型（Codex 会话不受影响）。</string>
+    <string name="settings_option_default">默认</string>
+    <string name="settings_context_window">上下文窗口</string>
+    <string name="settings_context_window_sub">用量状态条的 100% 基准。自定义模型的真实窗口不是 200K 时在这里设置——CLI 报不出来。</string>
+    <string name="settings_default_mode">默认权限模式</string>
+    <string name="settings_default_mode_sub">新会话在询问之前可以做多少事。</string>
+    <string name="settings_terminal">终端</string>
+    <string name="settings_terminal_sub">会话头的 &gt;_ 以何种方式在会话目录打开终端。</string>
+    <string name="settings_term_embedded">内嵌面板</string>
+    <string name="settings_term_embedded_hint">⌘J · 停靠在会话内</string>
+    <string name="settings_term_external">外部窗口</string>
+    <string name="settings_term_external_hint">用下方选择的应用打开</string>
+    <string name="settings_term_external_app">外部应用</string>
+    <string name="term_app_system">系统终端</string>
+    <string name="settings_menu_bar">菜单栏</string>
+    <string name="settings_menu_bar_sub">常驻状态图标——不用唤起窗口，也能一眼看到审批与运行中的会话。</string>
+    <string name="settings_menu_bar_toggle">在菜单栏显示 cc-pocket</string>
+    <string name="settings_notifications">通知</string>
+    <string name="settings_notifications_sub">由这台电脑推送到手机的任务完成提醒。</string>
+    <string name="settings_push_stale">需要先更新电脑上的 daemon，才能推送手机提醒。</string>
+    <string name="settings_push_toggle">回复完成时通知我的手机</string>
+
+    <!-- 设置：账号 / 登录 -->
+    <string name="settings_auth">登录方式</string>
+    <string name="settings_auth_sub">这台电脑上的 Claude CLI 如何登录。</string>
+    <string name="settings_auth_disconnected">连接电脑后即可查看其账号。</string>
+    <string name="settings_auth_stale">没有响应——这台电脑的 daemon 版本过旧，不支持账号管理。升级后即可在这里切换账号。</string>
+    <string name="settings_auth_loading">正在读取账号…</string>
+    <string name="settings_login_finish">完成登录</string>
+    <string name="settings_login_browser">电脑上已打开浏览器窗口。请在那里授权，复制代码并粘贴到下方。</string>
+    <string name="settings_login_open_here">在本机打开</string>
+    <string name="settings_login_paste_code">粘贴授权码</string>
+    <string name="settings_login_submit">提交</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_env_key_body">由电脑的环境变量（%1$s / ANTHROPIC_BASE_URL）配置，不是 Claude 登录。</string>
+    <string name="settings_env_key_presets">可在下方启用一个预设，让新会话改用保存的端点；或直接在电脑上修改环境变量。</string>
+    <string name="settings_env_key_computer">如需更换 key 或端点，请在电脑上修改环境变量后重新连接。</string>
+    <string name="settings_signed_in">已登录</string>
+    <string name="settings_switch_warning">切换会先退出当前账号。这台电脑上空闲的会话会被关闭（随时可恢复）；仍在执行任务的会话会阻止切换。</string>
+    <string name="settings_switch_account">切换账号…</string>
+    <string name="settings_log_out">退出登录</string>
+    <string name="settings_no_auth_title">这台电脑尚未设置账号或 API key</string>
+    <string name="settings_no_auth_body">这台电脑的 Claude CLI 没有登录，环境里也没有 base URL 或 auth token。</string>
+    <string name="settings_no_auth_presets">用 Claude 登录，或在下方保存一个预设，让新会话指向某个端点。</string>
+    <string name="settings_no_auth_signin">用 Claude 登录即可开始。</string>
+    <string name="settings_sign_in">登录…</string>
+
+    <!-- 设置：API 预设 -->
+    <string name="settings_presets">API 预设</string>
+    <string name="settings_presets_sub">保存多个端点随时切换，新会话使用当前启用的那个。</string>
+    <string name="settings_presets_disconnected">连接电脑后即可管理 API 预设。</string>
+    <string name="settings_presets_stale">需要先更新电脑上的 daemon，才能使用预设。</string>
+    <string name="settings_presets_loading">正在读取预设…</string>
+    <string name="settings_presets_info_oauth">预设用于第三方 API 端点。启用后，新会话将改用该 key，而不是你的 Claude 登录。</string>
+    <string name="settings_presets_empty">还没有预设。保存一个端点，切换 base URL 和 key 就不用再改电脑的环境变量。</string>
+    <string name="settings_preset_new">新建预设</string>
+    <string name="settings_presets_active_note">%1$s 上的新会话将使用此预设；已打开的会话保持原来的端点。</string>
+    <string name="settings_reach_error">联系不上电脑——请重试。</string>
+    <string name="settings_presets_secret_note">token 只保存在电脑上，绝不会回传到本应用。</string>
+    <string name="settings_preset_activating">启用中…</string>
+    <string name="settings_preset_active">使用中</string>
+    <string name="settings_presets_back">‹ 预设</string>
+    <string name="settings_preset_edit">编辑预设</string>
+    <string name="settings_preset_deactivate">停用</string>
+    <string name="form_name">名称</string>
+    <string name="settings_preset_name_ph">例：公司代理</string>
+    <string name="settings_preset_name_dup">已存在名为“%1$s”的预设。</string>
+    <string name="settings_preset_name_required">名称必填。</string>
+    <string name="settings_preset_url_invalid">请输入有效的 http(s) 地址。</string>
+    <string name="settings_preset_token_required">请粘贴 API key 或 token。</string>
+    <string name="settings_preset_token_ph">粘贴 token</string>
+    <string name="settings_preset_token_stored">•••• 已保存——留空则不变</string>
+    <string name="settings_token_reveal">显示 token</string>
+    <string name="settings_token_hide">隐藏 token</string>
+    <string name="settings_helper_baseurl">——CLI 的请求发送到这里。</string>
+    <string name="settings_helper_token">——保存在电脑上，此处不再显示。</string>
+    <string name="settings_helper_model">——新会话使用的模型。</string>
+    <string name="settings_helper_fast">——供 CLI 内部快速调用。</string>
+    <string name="settings_model_routing">模型路由</string>
+    <string name="settings_model_route">模型路由</string>
+    <string name="settings_optional">（选填）</string>
+    <string name="settings_set">（已设置）</string>
+    <string name="settings_small_fast_model">小型 / 快速模型</string>
+    <string name="settings_preset_save">保存预设</string>
+
+    <!-- 设置：切换被占用会话阻塞 -->
+    <string name="settings_blockers_title">这些会话仍在执行任务，阻止了切换：</string>
+    <string name="settings_blocker_midturn">正在回复中</string>
+    <string name="settings_blocker_bg_one">%1$d 个后台任务</string>
+    <string name="settings_blocker_bg_many">%1$d 个后台任务</string>
+    <string name="settings_blocker_working">仍在执行</string>
+    <string name="settings_stop_all_switch">全部停止并切换</string>
+    <string name="settings_stop_all_note">会话之后可以恢复；它们的后台任务会随之结束。</string>
+
+    <!-- 设置：电脑 / 定时任务 / 共享 / 快捷键 / 关于 -->
+    <string name="settings_paired_computers">已配对的电脑</string>
+    <string name="settings_no_computers">还没有配对的电脑。</string>
+    <string name="settings_schedules_stale">更新电脑上的 cc-pocket 后才能使用定时任务。</string>
+    <string name="settings_schedules_empty">暂无定时任务。在手机端长按发送键即可创建。</string>
+    <string name="schedule_repeats">重复</string>
+    <string name="share_path_hint">输入这台电脑上某个文件夹的绝对路径。</string>
+    <string name="settings_shortcuts_title">键盘快捷键</string>
+    <string name="shortcut_palette">命令面板</string>
+    <string name="shortcut_send">发送消息</string>
+    <string name="shortcut_newline">换行</string>
+    <string name="shortcut_approve">批准权限请求</string>
+    <string name="shortcut_open_settings">打开设置</string>
+    <string name="shortcut_close">关闭 / 收起</string>
+    <string name="about_desktop_blurb">桌面版——在一台电脑上驱动另一台电脑的 Claude Code / Codex，全程端到端加密。</string>
+    <string name="about_relay">中继</string>
+    <string name="update_check_row">检查更新</string>
+    <string name="update_check_action">检查</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_latest">已是最新版本（v%1$s）</string>
+    <string name="update_check_again">再查一次</string>
+    <string name="update_available">有可用更新</string>
+    <string name="update_download_restart">下载并重启</string>
+    <string name="update_replace_note">替换本应用并自动重新启动。</string>
+    <string name="update_installed_with">通过 %1$s 安装——请在终端里更新：</string>
+    <string name="update_view_release">查看发布页</string>
+    <string name="update_open_releases">打开发布页手动更新。</string>
+    <string name="update_downloading">正在下载 v%1$s……完成后应用会自动重启。</string>
+    <string name="update_reach_failed">连不上 GitHub releases——请检查网络。</string>
+    <string name="update_failed">更新失败。</string>
+
+    <!-- 对话面板 -->
+    <string name="chat_no_session">没有打开的会话</string>
+    <string name="chat_no_session_hint">在左侧选择项目，然后打开或新建一个会话。</string>
+    <string name="chat_opening">正在打开会话…</string>
+    <string name="chat_opening_named">正在打开 %1$s…</string>
+    <string name="chat_you">你</string>
+    <string name="msg_no_response_click">还没有响应——点击重发</string>
+    <string name="msg_undelivered_reconnecting">尚未送达——正在重连…</string>
+    <string name="msg_delivered_short">✓ 已送达</string>
+    <string name="ctx_nearly_full">上下文已用 %1$d%——建议尽快开新会话或 /compact</string>
+    <string name="question_answered_label">已回答</string>
+    <string name="observe_readonly">只读——此会话正在电脑的终端里运行</string>
+    <string name="message_agent_hint">给 %1$s 发消息…</string>
+    <string name="composer_uploading">正在上传 %1$d/%2$d——完成后发送</string>
+    <string name="key_send">发送</string>
+    <string name="key_newline">换行</string>
+    <string name="key_stop">停止</string>
+    <string name="key_open">打开</string>
+    <string name="key_navigate">导航</string>
+    <string name="key_close">关闭</string>
+    <string name="key_switch_entry">切换条目</string>
+    <string name="key_switch_file">切换文件</string>
+    <string name="key_collapse_hunk">折叠改动块</string>
+    <string name="copy_path">复制路径</string>
+    <string name="file_failed_retry">上传失败 · 点击重试</string>
+    <string name="cancel_upload">取消上传</string>
+    <string name="drop_title">松开即加入此会话的工作区</string>
+    <string name="drop_sub">图片 · 文件 · 视频——上限 200 MB</string>
+    <string name="agent_needs_permission">%1$s 请求权限</string>
+    <string name="agent_wants_edit">%1$s 想要编辑文件</string>
+    <string name="perm_remember_session">本会话内记住</string>
+    <string name="auto_denied_no_response">已自动拒绝（无响应）</string>
+    <string name="perm_on_computer">在 %1$s 上</string>
+
+    <!-- 侧栏 -->
+    <string name="sidebar_no_computer">未连接电脑</string>
+    <string name="sidebar_pins_full">置顶已满（%1$d 个）——先取消一个再置顶其它会话。</string>
+    <string name="sidebar_clear">清除</string>
+    <string name="sidebar_clear_confirm">确定？</string>
+    <string name="sidebar_recent_empty">还没有会话——从下方「全部项目」打开一个项目，或直接新建会话。</string>
+    <string name="sidebar_no_sessions_here">这里还没有会话</string>
+    <string name="open_folder">打开文件夹…</string>
+
+    <!-- 命令面板 -->
+    <string name="palette_new_at_path">按路径新建会话…</string>
+    <string name="palette_browse">浏览</string>
+    <string name="palette_switch_to">切换到 %1$s</string>
+    <string name="palette_current">当前</string>
+    <string name="palette_new_on">在 %1$s 上新建会话…</string>
+    <string name="palette_skills">浏览技能与插件</string>
+    <string name="palette_on_machine">位于 %1$s</string>
+    <string name="palette_approve_on">处理 %1$s 上的待审批</string>
+    <string name="palette_open_project">打开项目…</string>
+    <string name="palette_placeholder">跳转到项目、会话或电脑…</string>
+    <string name="palette_results_one">%1$d 个结果</string>
+    <string name="palette_results_many">%1$d 个结果</string>
+    <string name="tag_machine">电脑</string>
+    <string name="tag_action">操作</string>
+    <string name="tag_project">项目</string>
+    <string name="tag_session">会话</string>
+
+    <!-- 连接面板 -->
+    <string name="connect_computer_header">连接电脑</string>
+    <string name="add_computer_sub">配对另一台电脑——当前会话保持连接。</string>
+    <string name="pair_code_invalid">配对码无效或已过期</string>
+
+    <!-- 审批 / 托盘 / 机群 -->
+    <string name="tray_needs_you">需要你处理</string>
+    <string name="attention_stats">%1$d 台电脑 · %2$d 台在线 · %3$d 个待处理</string>
+    <string name="attention_empty">一切正常——任何电脑的审批都会排到这里。</string>
+    <string name="attention_footer">只有预览能看全时才在这里批准——要看改动请点进会话。</string>
+    <string name="attention_open_session">打开会话 ↗</string>
+    <string name="watch_waiting">⏸ 等待批准——</string>
+    <string name="watch_review">查看</string>
+    <string name="tray_all_clear">没有需要你处理的事</string>
+    <string name="tray_no_running">没有运行中的会话</string>
+    <string name="tray_more_sessions">还有 %1$d 个会话</string>
+    <string name="tray_open_app">打开 cc-pocket</string>
+    <string name="tray_more_waiting">还有 %1$d 个待处理——打开 cc-pocket</string>
+    <string name="tray_answer_in_session">到会话里回答 ↗</string>
+    <string name="tray_computers_one">%1$d 台电脑</string>
+    <string name="tray_computers_many">%1$d 台电脑</string>
+    <string name="tray_sessions_one">%1$d 个会话</string>
+    <string name="tray_sessions_many">%1$d 个会话</string>
+
+    <!-- 技能与插件浏览器 -->
+    <string name="skills_title">技能与插件</string>
+    <string name="skills_count">%1$d 个技能 · %2$d 个插件</string>
+    <string name="skills_stale_title">无法浏览技能</string>
+    <string name="skills_stale_body">这台电脑上的 cc-pocket daemon 版本过旧。升级后才能读取已安装的技能与插件。</string>
+    <string name="skills_empty_title">什么都还没装</string>
+    <string name="skills_empty_body">这台电脑上没有找到技能或插件。在 .claude/skills 下添加 SKILL.md，或从市场安装一个插件。</string>
+    <string name="skills_section">技能</string>
+    <string name="plugins_section">插件</string>
+    <string name="skills_kind_plugin">插件</string>
+    <string name="fact_scope">作用域</string>
+    <string name="fact_path">路径</string>
+    <string name="fact_version">版本</string>
+    <string name="fact_marketplace">市场</string>
+    <string name="fact_author">作者</string>
+    <string name="fact_commands">命令</string>
+    <string name="fact_homepage">主页</string>
+    <string name="skills_trimmed">已截断——完整内容请在电脑上打开该文件</string>
+    <string name="skills_loading_from">正在从 %1$s 读取技能…</string>
+    <string name="skills_loading">正在读取技能…</string>
+
+    <!-- 工作流面板 -->
+    <string name="wf_agents_count">%1$d 个 agent</string>
+    <string name="wf_phases_agents">%1$d 个阶段 · %2$d 个 agent</string>
+    <string name="wf_phase_pos">阶段 %1$d/%2$d · %3$s</string>
+    <string name="wf_passed_failed">%1$d 个通过 · %2$d 个失败</string>
+    <string name="wf_agents_duration">%1$d 个 agent · %2$s</string>
+    <string name="wf_agents_queued">%1$d 个 agent 排队中</string>
+    <string name="wf_waiting">等待中</string>
+    <string name="wf_more_queued">+ %1$d 个排队中</string>
+    <string name="wf_error">错误</string>
+    <string name="wf_return">返回结果</string>
+
+    <!-- 内嵌终端 -->
+    <string name="term_engine_unavailable">终端引擎不可用——请改用标题栏的「外部打开」</string>
+    <string name="term_open_external">在外部终端打开</string>
+    <string name="term_collapse">收起终端</string>
+    <string name="term_close">关闭终端</string>
+    <string name="term_restore">展开终端</string>
+    <string name="term_menu">终端菜单</string>
+    <string name="term_one_running">1 个运行中</string>
+    <string name="term_open_title">打开终端</string>
+    <string name="term_open_embedded">打开内嵌终端</string>
+    <string name="term_embedded_sub">停靠在此会话内</string>
+    <string name="term_open_ghostty">在 Ghostty 打开</string>
+    <string name="term_open_system">在系统终端打开</string>
+    <string name="term_external_sub">你的系统终端</string>
+    <string name="term_default_hint">默认方式可在 %1$s 里修改。</string>
+    <string name="term_default_hint_link">设置 → 终端</string>
+
+    <!-- 机器人桥接：桌面管理端 -->
+    <string name="bridge_new">新建桥接</string>
+    <string name="bridge_intro">可驱动这台电脑的 IM 机器人。它们只能在你选定的项目里开会话，且永远无法自行批准权限请求——那些会发到你的手机。</string>
+    <string name="bridge_live_count">%1$d/%2$d 进行中</string>
+    <string name="bridge_adapter">适配器</string>
+    <string name="bridge_configured">已配置</string>
+    <string name="bridge_exited">已退出</string>
+    <string name="bridge_tier_asks">有风险的操作先询问</string>
+    <string name="bridge_tier_silent">会静默编辑文件</string>
+    <string name="bridge_cred_title">“%1$s”的凭证——请立即复制</string>
+    <string name="bridge_cred_note">仅可用一次，%1$d 秒后过期。保存为适配器旁的 bridge-credential.json，然后启动适配器。</string>
+    <string name="bridge_name_hint">会显示为它所开会话上的 “via &lt;名称&gt;”</string>
+    <string name="bridge_projects_hint">它唯一能开会话的目录——建议用专用的低敏感度检出</string>
+    <string name="bridge_autonomy">自主权</string>
+    <string name="bridge_autonomy_hint">群里任何人都能给它发指令——这里决定它无需询问就能做什么</string>
+    <string name="bridge_tier_ask_title">先问我</string>
+    <string name="bridge_tier_ask_sub">命令、写入和编辑都会请求你的手机</string>
+    <string name="bridge_tier_edit_title">静默编辑文件</string>
+    <string name="bridge_tier_edit_sub">编辑直接生效；命令仍会询问</string>
+    <string name="bridge_manage_toggle">让 daemon 运行适配器</string>
+    <string name="bridge_manage_on">开机自启、崩溃自动重启，凭证不会离开这台电脑。</string>
+    <string name="bridge_manage_off">你会拿到一份凭证，复制给自己运行的适配器。</string>
+    <string name="bridge_feishu_app">飞书应用</string>
+    <string name="bridge_feishu_hint">在 open.feishu.cn 创建——机器人需要 im:message 与 im:message:send_as_bot 权限，并以长连接模式订阅 im.message.receive_v1 事件</string>
+    <string name="bridge_ph_appid">cli_xxx（App ID）</string>
+    <string name="bridge_ph_admin">你的 open_id——选填；留空的话机器人会告诉你</string>
+    <string name="bridge_custom_adapter">自定义适配器（选填）</string>
+    <string name="bridge_custom_hint">留空即使用内置飞书适配器——无需 python。只有要运行自己的适配器时才填脚本路径。</string>
+    <string name="bridge_bind_hint">连接成功后，在群里 @机器人 并发送 /bind &lt;项目&gt;，把该群指到其中一个项目。</string>
+    <string name="bridge_edit_projects_hint">机器人可开会话的目录——增删后点「保存并重启」</string>
+    <string name="bridge_adapter_config">适配器配置</string>
+    <string name="bridge_none_yet">（尚未设置）</string>
+    <string name="bridge_ph_admin_edit">FEISHU_ADMIN_OPEN_ID——粘贴 /bind 后机器人回显的 open_id</string>
+    <string name="bridge_add_project">+ 添加项目</string>
+
+    <!-- 窗口边框及杂项 -->
+    <string name="exit_fullscreen">退出全屏</string>
+    <string name="show_sidebar">显示侧栏</string>
+    <string name="qa_terminal">打开终端</string>
+    <string name="qa_clear_armed">清空会话——再点一次确认</string>
+    <string name="popover_where">位置</string>
 </resources>
