@@ -1,15 +1,16 @@
-What's new in 1.5.0
+What's new in 1.5.1
 
 New
-• OpenCode support: a third agent alongside Claude Code and Codex — sessions, permissions and model selection all wired up
-• Switch sessions across projects: a session chip beside the composer jumps straight to a session in another project, instead of backing out through the list
-• Context usage moved into the composer: the debug-looking badge that floated over the message stream is retired, replaced by a steady readout next to the input — tappable for detail, and the first thing to yield when space is tight
-• Per-model context window: a window belongs to the model, not to the phone — set the real size for each model right in the session info sheet, review and clear them in Settings
-• Gateway model list now comes from the gateway itself: no more relying on a built-in table of vendor ids — you see what your gateway actually serves, and vendor generation changes follow automatically
-• Desktop "Open Folder…": pick a project with the native directory chooser instead of typing a path
+• Open documents from chat: tap file paths or Write/Edit cards to read Markdown and other workspace files on your phone
+• Browse beyond the home folder: switch filesystem roots, including Windows C: and D: drives, in the directory picker
+• Per-agent default models: Claude Code, Codex and OpenCode now remember independent defaults
+• Full desktop localization: the desktop app now follows your system language in English or Simplified Chinese
+• Bridge controls: update allowed projects, enable owner bypass and configure command allowlists
 
 Fixed
-• A context-window size you typed is no longer overridden by automatic inference
-• Switching sessions lands on the latest message reliably, even after scrolling back through history
-• Gateway model presets corrected: two retired ids removed, one updated to the current generation
-• Fixed older app versions showing OpenCode session rows that couldn't be opened
+• OpenCode sub-agent sessions are hidden; titles, previews and replayed tool calls now match the other backends
+• Usage requests, cache hit rate and cost now follow the selected Today, 7d or 30d range
+• Duplicate or empty project rows caused by path variants are merged correctly
+• Links no longer swallow trailing Markdown or parenthesis text
+• Long agent, model and bridge names no longer push important controls off screen
+• Fixed a macOS 26 crash when opening the menu-bar popover
