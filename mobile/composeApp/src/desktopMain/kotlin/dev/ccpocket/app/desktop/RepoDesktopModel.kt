@@ -882,9 +882,8 @@ class RepoDesktopModel(
     override var defaultMode: PermissionMode
         get() = repo.defaultMode.value
         set(v) { repo.setDefaultMode(v) }
-    override var defaultModel: String?
-        get() = repo.defaultModel.value
-        set(v) { repo.setDefaultModel(v) }
+    override fun defaultModelFor(agent: AgentKind): String? = repo.defaultModelFor(agent)
+    override fun setDefaultModelFor(agent: AgentKind, model: String?) { repo.setDefaultModelFor(agent, model) }
     override var contextWindowOverride: Long?
         get() = repo.contextWindowOverride.value
         set(v) { repo.setContextWindowOverride(v) }

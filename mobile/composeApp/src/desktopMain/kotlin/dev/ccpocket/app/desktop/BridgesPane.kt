@@ -144,21 +144,30 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
         Modifier.fillMaxWidth().background(Tok.surface).padding(horizontal = 16.dp, vertical = 12.dp)
             .clickable { expanded = !expanded },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             // a live dot only when the adapter's link is actually up — the owner's "is it working" glance
             Box(
                 Modifier.size(7.dp).clip(RoundedCornerShape(4.dp))
                     .background(if (b.online) Tok.ok else Tok.muted.copy(alpha = 0.5f)),
             )
             Spacer(Modifier.width(9.dp))
-            Text(b.name, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(
+                b.name, color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
             Spacer(Modifier.width(8.dp))
             TierPill(b.tier)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Start,
+        ) {
             if (b.pendingTicket) {
-                Spacer(Modifier.width(6.dp))
                 Tag("waiting for the adapter", Tok.muted)
+                Spacer(Modifier.width(8.dp))
             }
-            Spacer(Modifier.weight(1f))
             if (b.activeSessions > 0) {
                 Text(
                     "${b.activeSessions}/${b.maxSessions} live", color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,

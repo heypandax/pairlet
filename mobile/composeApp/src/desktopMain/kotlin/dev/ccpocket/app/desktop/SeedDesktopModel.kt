@@ -185,7 +185,11 @@ class SeedDesktopModel : DesktopModel {
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
-    override var defaultModel: String? by mutableStateOf(null)
+    private val defaultModels = mutableStateMapOf<AgentKind, String>()
+    override fun defaultModelFor(agent: AgentKind): String? = defaultModels[agent]
+    override fun setDefaultModelFor(agent: AgentKind, model: String?) {
+        if (model == null) defaultModels.remove(agent) else defaultModels[agent] = model
+    }
     override var contextWindowOverride: Long? by mutableStateOf(null)
     override var terminalApp by mutableStateOf(TerminalApp.SYSTEM)
     override var terminalDefaultEmbedded by mutableStateOf(true) // issue #153; no engine factory → chrome only

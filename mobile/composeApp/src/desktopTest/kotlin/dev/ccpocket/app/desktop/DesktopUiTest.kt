@@ -541,6 +541,25 @@ class DesktopUiTest {
     }
 
     @Test
+    fun defaultModelOptionsFollowTheSelectedAgent() = runComposeUiTest {
+        val model = SeedDesktopModel().apply {
+            setDefaultModelFor(AgentKind.CLAUDE, "opus")
+        }
+        setContent { PocketTheme { SettingsModal(model) {} } }
+
+        assertPresent("Fable")
+        onAllNodes(hasText("Codex")).onFirst().performClick()
+        waitForIdle()
+        assertPresent("GPT 5.1 Codex")
+        assertTrue(!present("Fable"), "Codex must not show Claude model choices")
+        onAllNodes(hasText("GPT 5.1 Codex")).onFirst().performScrollTo().performClick()
+        waitForIdle()
+
+        assertEquals("gpt-5.1-codex", model.defaultModelFor(AgentKind.CODEX))
+        assertEquals("opus", model.defaultModelFor(AgentKind.CLAUDE), "each agent keeps its own default")
+    }
+
+    @Test
     fun trayPopoverShowsRealApprovalsAndSessions() = runComposeUiTest {
         // was a static mockup showing the developer's own machine names (issue #111) — now driven by the
         // live-shaped SeedDesktopModel, so every row is real fleet state
