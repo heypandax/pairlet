@@ -6,6 +6,7 @@ import kotlin.io.path.exists
 import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class ProjectPathsTest {
@@ -92,6 +93,91 @@ class ProjectPathsTest {
             assertEquals(root.resolve(ProjectPaths.dirKey(workdir)), ProjectPaths.dirForUnder(root, workdir))
         } finally {
             root.toFile().deleteRecursively()
+        }
+    }
+
+    // ── canonicalKey (issue #184): the cross-backend project identity every merge/match keys by ──
+
+    @Test
+    fun canonicalKey_merges_trailing_and_doubled_separators_of_an_existing_dir() {
+        val dir = Files.createTempDirectory("ccp-canon")
+        try {
+            val key = ProjectPaths.canonicalKey(dir.toString())
+            assertEquals(key, ProjectPaths.canonicalKey("$dir/"))
+            assertEquals(key, ProjectPaths.canonicalKey("$dir//"))
+            assertEquals(key, ProjectPaths.canonicalKey("${dir.parent}//${dir.fileName}/"))
+            // the key is the filesystem's own answer (realpath), not any of the input spellings
+            assertEquals(ProjectPaths.normCwd(dir.toRealPath().toString()), key)
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun canonicalKey_resolves_a_symlink_to_the_same_identity_as_its_target() {
+        // the /var ↔ /private/var class of variant: two backends record the same dir through different links
+        val parent = Files.createTempDirectory("ccp-canon")
+        try {
+            val real = parent.resolve("real").also { it.createDirectories() }
+            val link = parent.resolve("link")
+            Files.createSymbolicLink(link, real)
+            assertEquals(ProjectPaths.canonicalKey(real.toString()), ProjectPaths.canonicalKey(link.toString()))
+            assertEquals(ProjectPaths.canonicalKey(real.toString()), ProjectPaths.canonicalKey("$link/"))
+        } finally {
+            parent.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun canonicalKey_expands_tilde_to_the_daemon_users_home() {
+        // issue #184's exact shape: OpenCode logging home one way, Claude another
+        assertEquals(ProjectPaths.canonicalKey(System.getProperty("user.home")), ProjectPaths.canonicalKey("~"))
+        assertEquals(
+            ProjectPaths.canonicalKey(System.getProperty("user.home") + "/Desktop"),
+            ProjectPaths.canonicalKey("~/Desktop"),
+        )
+    }
+
+    @Test
+    fun canonicalKey_falls_back_to_string_normalization_for_missing_paths() {
+        // deleted projects still in history: no realpath to ask, so variants must still normalize together…
+        assertEquals(ProjectPaths.canonicalKey("/no/such/ccp184/x"), ProjectPaths.canonicalKey("/no/such/ccp184//x/"))
+        assertEquals(ProjectPaths.canonicalKey("/no/such/ccp184/x"), ProjectPaths.canonicalKey("/no/such/ccp184/./x"))
+        // …while genuinely different dirs stay apart (conservative: no guessing)
+        assertNotEquals(ProjectPaths.canonicalKey("/no/such/ccp184/x"), ProjectPaths.canonicalKey("/no/such/ccp184/y"))
+    }
+
+    @Test
+    fun canonicalKey_missing_path_is_not_cached_stale_across_creation() {
+        // memoization must never freeze a pre-creation fallback key: once the dir exists, the key is its realpath
+        val parent = Files.createTempDirectory("ccp-canon") // on macOS: /var/… whose realpath is /private/var/…
+        try {
+            val child = parent.resolve("later")
+            ProjectPaths.canonicalKey(child.toString()) // fallback answer — must NOT stick
+            child.createDirectories()
+            assertEquals(ProjectPaths.normCwd(child.toRealPath().toString()), ProjectPaths.canonicalKey(child.toString()))
+        } finally {
+            parent.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun dirForUnder_matches_recorded_cwd_across_symlink_variants() {
+        // issue #184: the merged project row is realpath'd before the claude scan; a claude that recorded
+        // the SYMLINKED spelling must still be found — else the deduped row lists no claude sessions
+        val root = Files.createTempDirectory("ccp-proj")
+        val work = Files.createTempDirectory("ccp-work")
+        val link = work.parent.resolve("${work.fileName}-lnk").also { Files.createSymbolicLink(it, work) }
+        try {
+            val realDir = root.resolve("claude-dir").also { it.createDirectories() }
+            realDir.resolve("s1.jsonl").writeText("""{"cwd":"$link"}""" + "\n")
+            val asked = work.toRealPath().toString()
+            assertTrue(!root.resolve(ProjectPaths.dirKey(asked)).exists(), "precondition: the dirKey fast path misses")
+            assertEquals(realDir, ProjectPaths.dirForUnder(root, asked))
+        } finally {
+            root.toFile().deleteRecursively()
+            Files.deleteIfExists(link)
+            work.toFile().deleteRecursively()
         }
     }
 }

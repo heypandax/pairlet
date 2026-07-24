@@ -29,11 +29,12 @@ object OpenCodeTranscriptScanner {
     internal fun isSubAgentSession(parentId: String?): Boolean = !parentId.isNullOrBlank()
 
     /** All OpenCode top-level sessions whose directory matches [workdir], newest-first.
-     *  Task sub-agent runs (parent_id set) are excluded — see [isSubAgentSession]. */
-    fun scan(workdir: String): List<SessionSummary> {
+     *  Task sub-agent runs (parent_id set) are excluded — see [isSubAgentSession].
+     *  [conn] is a test seam; production uses the default. */
+    fun scan(workdir: String, conn: Connection? = OpenCodePaths.connectReadOnly()): List<SessionSummary> {
         return runCatching {
-            val conn = OpenCodePaths.connectReadOnly() ?: return emptyList()
-            conn.use { scanConn(it, workdir) }
+            val c = conn ?: return emptyList()
+            c.use { scanConn(it, workdir) }
         }.getOrElse { emptyList() }
     }
 
@@ -43,8 +44,13 @@ object OpenCodeTranscriptScanner {
      * OpenCode 的 task 工具 spawn 的子 agent 是同一 session 表里的 child 行——`parent_id` 列指向发起
      * 会话（sst/opencode `session/sql.ts` 的既有列，还带 `session_parent_idx` 索引），顶层列表不该
      * 显示它们（issue #172）。判定走 [isSubAgentSession] 单一事实源，绝不用标题文本启发式。
+     *
+     * 目录匹配用 [ProjectPaths.canonicalKey]（issue #184）：opencode 记的是自己拼写的目录（波浪号/
+     * 尾分隔符/符号链接变体），合并后的项目行发来的是 realpath 过的 workdir——必须用目录列表合并行
+     * 所用的同一把键比对，弱字符串比对会「行并上了、会话丢了」。
      */
     internal fun scanConn(conn: Connection, workdir: String): List<SessionSummary> {
+        val target = workdir.takeIf { it.isNotBlank() }?.let(ProjectPaths::canonicalKey)
         val stmt = conn.prepareStatement(
             "SELECT s.id, s.parent_id, s.title, s.directory, s.model, s.cost, " +
             "s.tokens_input, s.tokens_output, s.time_created, s.time_updated, " +
@@ -59,8 +65,8 @@ object OpenCodeTranscriptScanner {
             val sid = rs.getString("id") ?: continue
             if (isSubAgentSession(rs.getString("parent_id"))) continue
             val directory = rs.getString("directory") ?: ""
-            if (workdir.isNotBlank() && directory.isNotBlank()) {
-                if (ProjectPaths.normCwd(directory) != ProjectPaths.normCwd(workdir)) continue
+            if (target != null && directory.isNotBlank()) {
+                if (ProjectPaths.canonicalKey(directory) != target) continue
             }
             val title = rs.getString("title") ?: sid
             val timeUpdated = rs.getLong("time_updated")

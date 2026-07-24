@@ -64,12 +64,51 @@ object ProjectPaths {
         return if (onWindows) s.lowercase() else s
     }
 
-    /** The project dir whose newest transcript records [workdir] as its `cwd` (OS-normalized match), or null. */
+    /** `~` / `~/...` → the daemon user's home. Clients accept `~` paths in their "new session" inputs and may
+     *  send them raw; the daemon owns the expansion because only it knows this machine's home. */
+    internal fun expandTilde(path: String): String = when {
+        path == "~" -> System.getProperty("user.home")
+        path.startsWith("~/") || path.startsWith("~\\") -> System.getProperty("user.home") + path.drop(1)
+        else -> path
+    }
+
+    // canonicalKey memo — toRealPath() is an IO syscall and the directory list recomputes keys for every row
+    // on every refresh. An EXISTING dir's real path is stable, so successes cache forever (cardinality here is
+    // "projects the user has", i.e. tiny). Misses are deliberately NOT cached: a dir created later must pick
+    // up its real path, or a pre-creation fallback key would split it from its own real spelling forever.
+    private val canonicalCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * The cross-backend identity key for a working directory (issue #184). Each backend records the SAME dir
+     * in its own spelling — tilde vs absolute, trailing/doubled separators, symlinked forms like macOS
+     * `/var` ↔ `/private/var` — and key-equality is what merges their project rows AND matches a row to each
+     * backend's sessions, so anything weaker than the filesystem's own verdict shows one project twice (or,
+     * worse, hides a backend's sessions from the merged row). Both sides of every dir↔session compare must
+     * use THIS key: mixing it with [normCwd] would deduplicate rows while losing their sessions.
+     *
+     * Existing paths resolve through [java.nio.file.Path.toRealPath] (symlinks followed; case canonicalized
+     * by case-insensitive filesystems). Paths that no longer exist (deleted projects still in history)
+     * degrade to pure string normalization: tilde-expanded, `.`/`..`/doubled separators collapsed by
+     * [java.nio.file.Path.normalize], then [normCwd]'s slash / trailing-separator / Windows-lowercase rules —
+     * deliberately conservative, no case folding beyond what the real filesystem answered.
+     */
+    internal fun canonicalKey(p: String): String {
+        val expanded = expandTilde(p)
+        if (expanded.isBlank()) return normCwd(expanded) // never realpath "" — it would resolve to the daemon's own cwd
+        canonicalCache[expanded]?.let { return it }
+        val parsed = runCatching { Path.of(expanded) }.getOrNull() ?: return normCwd(expanded)
+        val real = runCatching { parsed.toRealPath() }.getOrNull()
+            ?: return normCwd(parsed.normalize().toString())
+        return normCwd(real.toString()).also { canonicalCache[expanded] = it }
+    }
+
+    /** The project dir whose newest transcript records [workdir] as its `cwd` (canonical-key match — claude
+     *  may have recorded a symlinked/variant spelling of the resume path's realpath'd workdir), or null. */
     private fun findByRecordedCwd(root: Path, workdir: String): Path? {
         if (!root.isDirectory()) return null
-        val target = normCwd(workdir)
+        val target = canonicalKey(workdir)
         return Files.newDirectoryStream(root).use { stream ->
-            stream.firstOrNull { dir -> dir.isDirectory() && recordedCwd(dir)?.let(::normCwd) == target }
+            stream.firstOrNull { dir -> dir.isDirectory() && recordedCwd(dir)?.let(::canonicalKey) == target }
         }
     }
 

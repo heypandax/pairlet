@@ -98,10 +98,12 @@ object CodexTranscriptScanner {
         file.bufferedReader().use { r ->
             val meta = metaPayload(r) ?: return null
             id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
-            // OS-normalized compare (slashes / trailing sep / Windows case): codex records the cwd its own
-            // way, and an exact string compare silently dropped sessions on Windows (issue #19's sibling)
+            // Canonical-key compare (slashes / trailing sep / Windows case / symlinks / tilde): codex records
+            // the cwd its own way, and an exact string compare silently dropped sessions on Windows (issue
+            // #19's sibling). Since #184 merges spelling variants into ONE project row, the row's realpath'd
+            // workdir must still match a variant-spelled rollout — same key DirectoryService merges by.
             val recorded = cwd
-            if (workdir != null && (recorded == null || ProjectPaths.normCwd(recorded) != ProjectPaths.normCwd(workdir))) return null
+            if (workdir != null && (recorded == null || ProjectPaths.canonicalKey(recorded) != ProjectPaths.canonicalKey(workdir))) return null
             var line = r.readLine()
             while (line != null) {
                 val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject

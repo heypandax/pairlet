@@ -115,6 +115,12 @@ class RequestRouter(
          * [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
          * enrichment carries [AgentKind] — strip the opencode entries, keep the row.
          *
+         * Row-level symmetry (issue #184 mechanism ②) lives UPSTREAM: this filter can't tell what backed a
+         * row, so [DirectoryService.listDirectories]'s `includeOpencode=false` (fed from the SAME caps bit)
+         * already dropped rows only opencode history sustains — an undeclared client's session list strips
+         * opencode sessions, so such a row would open onto a bare "New session" screen. Here we handle the
+         * remainder: live opencode enrichment riding on rows other backends keep alive.
+         *
          * The SCALARS must be recomputed with them, not just the list. [DirectoryService] fills
          * `activeSessionId` / `activeSessionTitle` / `gitBranch` / `open` / `executing` from
          * `live.firstOrNull()` regardless of agent, so filtering the list alone left an old client holding
@@ -166,8 +172,8 @@ class RequestRouter(
             is ClientCaps -> caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
 
             is ListDirectories ->
-                if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope), caps)))
-                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd()), caps)))
+                if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
+                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true), caps)))
 
             is ListSessions -> emitSessions(frame.workdir, sink, guestScope, caps)
 
@@ -413,10 +419,11 @@ class RequestRouter(
      * label + expiry + tier for the "Shared" row — and never any of the owner's other project folders. The
      * live-session enrichment is filtered to the guest's OWN sessions, so the owner's activity under the
      * same root never leaks into the guest's row. A root with no history yet still appears (the guest can
-     * start there), so the shared folder shows up the moment the guest joins.
+     * start there), so the shared folder shows up the moment the guest joins. [caps] gates opencode-only
+     * rows exactly like the owner path (issue #184 mechanism ②).
      */
-    private suspend fun scopedDirectories(scope: GuestScope): List<DirectoryEntry> {
-        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd())
+    private suspend fun scopedDirectories(scope: GuestScope, caps: ClientCapsHolder?): List<DirectoryEntry> {
+        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true)
         val underScope = all
             .filter { e -> PathScope.contains(scope.roots, e.path) }
             .map { it.stampShare(scope) }
