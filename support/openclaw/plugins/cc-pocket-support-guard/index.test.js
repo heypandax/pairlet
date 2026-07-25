@@ -24,6 +24,11 @@ test("revises standalone internal narration", () => {
   assert.equal(revision?.key, "cc-pocket-support-remove-internal-narration");
 });
 
+test("revises Chinese retrieval narration", () => {
+  const revision = revisionFor("这次搜到了手册中的正式隐私说明，回答更准确：不会记录正文。");
+  assert.equal(revision?.key, "cc-pocket-support-remove-internal-narration");
+});
+
 test("suppresses tool diagnostics only", () => {
   assert.equal(shouldSuppressDelivery("⚠️ 🛠️ `rg` failed"), true);
   assert.equal(shouldSuppressDelivery("请先打开 CC Pocket。"), false);

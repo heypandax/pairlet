@@ -20,6 +20,7 @@ const INTERNAL_NARRATION = [
   /\bI now have (?:enough|sufficient) evidence\b/i,
   /\bNo .{0,100} references? .{0,100}(?:codebase|documentation)\b/i,
   /按照 .{0,30}(?:指引|规则|策略)/,
+  /这次.{0,20}(?:搜到|检索到|找到).{0,40}(?:手册|说明|答案)/,
   /(?:手册|代码库).{0,40}(?:没有任何|未找到).{0,40}(?:内容|结果|功能)/,
 ];
 
