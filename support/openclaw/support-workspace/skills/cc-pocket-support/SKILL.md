@@ -1,7 +1,7 @@
 ---
 name: cc-pocket-support
 description: Answer CC Pocket setup, usage, safety, and troubleshooting questions from the public manual and current code evidence.
-homepage: https://heypandax.github.io/cc-pocket/manual/
+homepage: https://pocket.ark-nexus.cc/manual/
 ---
 
 # CC Pocket support

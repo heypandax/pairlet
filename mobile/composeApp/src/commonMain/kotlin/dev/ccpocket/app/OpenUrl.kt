@@ -1,6 +1,8 @@
 package dev.ccpocket.app
 
-const val USER_MANUAL_URL = "https://heypandax.github.io/cc-pocket/manual/"
+// Operational help is mirrored on the relay origin so an Actions/Pages deployment incident cannot
+// strand the in-app help buttons on a stale manual. The marketing site remains on GitHub Pages.
+const val USER_MANUAL_URL = "https://pocket.ark-nexus.cc/manual/"
 const val USER_MANUAL_TROUBLESHOOTING_URL = "${USER_MANUAL_URL}?q=offline"
 // Public browser-based support; it must never require membership in a messaging team.
 const val SUPPORT_URL = "https://pocket.ark-nexus.cc/support/"
