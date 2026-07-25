@@ -29,6 +29,8 @@ jobs:
         run: |
           python3 -m unittest support.tests.test_support_kb
           node --test support/openclaw/plugins/cc-pocket-support-guard/index.test.js
+          bash -n scripts/activate-openclaw-support-channel.sh
+          bash scripts/activate-openclaw-support-channel.sh --help
           python3 scripts/build-manual.py
           python3 scripts/check-site-seo.py
           git diff --exit-code -- site/manual site/sitemap.xml

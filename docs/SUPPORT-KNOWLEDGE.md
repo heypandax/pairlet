@@ -85,8 +85,20 @@ OpenClaw Control UI 的 Gateway token 是管理员凭证，不能放到官网、
 完成后只把该 bot account 绑定到 `cc-pocket-support`：
 
 ```bash
-openclaw agents bind --agent cc-pocket-support --bind feishu:<account-id>
+bash scripts/activate-openclaw-support-channel.sh \
+  --channel feishu \
+  --account <account-id>
+
+bash scripts/activate-openclaw-support-channel.sh \
+  --channel feishu \
+  --account <account-id> \
+  --apply \
+  --allowlist-confirmed \
+  --rate-limit-confirmed
 ```
+
+第一条只读检查账号是否已配置、隐私声明是否可达、reviewer 是否保持无绑定；
+第二条才执行精确账号绑定。脚本不接收或输出渠道凭据。
 
 不要使用 `channel:*` 的宽泛绑定，除非该渠道上的所有账号都明确用于公开客服。
 
