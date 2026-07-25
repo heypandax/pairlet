@@ -8,7 +8,8 @@ Usage:
     --channel CHANNEL \
     --account ACCOUNT_ID \
     [--privacy-url URL] \
-    [--apply --allowlist-confirmed --rate-limit-confirmed]
+    [--apply --allowlist-confirmed --rate-limit-confirmed] \
+    [--force-restart-confirmed]
 
 Without --apply this is a read-only preflight. The script never accepts or
 prints channel credentials; configure the dedicated bot account in OpenClaw
@@ -22,6 +23,7 @@ PRIVACY_URL="https://heypandax.github.io/cc-pocket/privacy.html"
 APPLY=false
 ALLOWLIST_CONFIRMED=false
 RATE_LIMIT_CONFIRMED=false
+FORCE_RESTART_CONFIRMED=false
 
 while (($#)); do
   case "$1" in
@@ -47,6 +49,10 @@ while (($#)); do
       ;;
     --rate-limit-confirmed)
       RATE_LIMIT_CONFIRMED=true
+      shift
+      ;;
+    --force-restart-confirmed)
+      FORCE_RESTART_CONFIRMED=true
       shift
       ;;
     --help|-h)
@@ -185,6 +191,96 @@ openclaw agents bind \
   --agent cc-pocket-support \
   --bind "$CHANNEL:$ACCOUNT_ID" \
   --json
+
+gateway_before_json="$(openclaw gateway status --json --no-probe)"
+gateway_before_pid="$(
+  CC_POCKET_GATEWAY_STATUS_JSON="$gateway_before_json" python3 - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["CC_POCKET_GATEWAY_STATUS_JSON"])
+pid = data.get("service", {}).get("runtime", {}).get("pid")
+if not isinstance(pid, int) or pid <= 0:
+    raise SystemExit("could not determine the running gateway PID before restart")
+print(pid)
+PY
+)"
+
+restart_json="$(openclaw gateway restart --safe --json 2>&1)"
+restart_state="$(
+  CC_POCKET_GATEWAY_RESTART_JSON="$restart_json" python3 - <<'PY'
+import json
+import os
+
+try:
+    data = json.loads(os.environ["CC_POCKET_GATEWAY_RESTART_JSON"])
+except json.JSONDecodeError as error:
+    raise SystemExit(f"gateway restart did not return valid JSON: {error}")
+blockers = data.get("preflight", {}).get("blockers", [])
+if not data.get("ok"):
+    raise SystemExit(data.get("message", "gateway restart request failed"))
+print("blocked" if blockers else "ready")
+PY
+)"
+
+if [[ "$restart_state" == "blocked" ]]; then
+  if [[ "$FORCE_RESTART_CONFIRMED" != true ]]; then
+    printf '%s\n' \
+      "Binding is saved, but the safe gateway restart was deferred by active reply delivery." \
+      "Wait for active work to drain and re-run, or explicitly add --force-restart-confirmed." >&2
+    exit 2
+  fi
+
+  force_restart_json="$(openclaw gateway restart --force --json 2>&1)"
+  if ! CC_POCKET_GATEWAY_RESTART_JSON="$force_restart_json" python3 - <<'PY'
+import json
+import os
+
+try:
+    data = json.loads(os.environ["CC_POCKET_GATEWAY_RESTART_JSON"])
+except json.JSONDecodeError as error:
+    raise SystemExit(f"forced gateway restart did not return valid JSON: {error}")
+if not data.get("ok") or data.get("result") != "restarted":
+    raise SystemExit(data.get("message", "forced gateway restart failed"))
+PY
+  then
+    exit 2
+  fi
+fi
+
+gateway_restarted=false
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  if gateway_after_json="$(openclaw gateway status --json --require-rpc 2>/dev/null)" &&
+    CC_POCKET_GATEWAY_STATUS_JSON="$gateway_after_json" python3 - "$gateway_before_pid" <<'PY'
+import json
+import os
+import sys
+
+before_pid = int(sys.argv[1])
+data = json.loads(os.environ["CC_POCKET_GATEWAY_STATUS_JSON"])
+runtime = data.get("service", {}).get("runtime", {})
+pid = runtime.get("pid")
+raise SystemExit(
+    0
+    if isinstance(pid, int)
+    and pid > 0
+    and pid != before_pid
+    and runtime.get("status") == "running"
+    else 1
+)
+PY
+  then
+    gateway_restarted=true
+    break
+  fi
+  sleep 2
+done
+
+[[ "$gateway_restarted" == true ]] || {
+  printf '%s\n' \
+    "Binding is saved, but the gateway did not restart in time; runtime routing may still be stale." >&2
+  exit 1
+}
 
 for attempt in 1 2 3 4 5; do
   if openclaw agents list --bindings --json | python3 -c '

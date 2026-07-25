@@ -99,8 +99,34 @@ bash scripts/activate-openclaw-support-channel.sh \
 
 第一条只读检查账号是否已配置、隐私声明是否可达、reviewer 是否保持无绑定；
 第二条才执行精确账号绑定。脚本不接收或输出渠道凭据。
+绑定后脚本会请求一次安全的 Gateway 重启，并校验进程 PID 已变化；若仍有正在
+投递的回复，脚本会明确报“配置已保存、运行时尚未生效”，不会误报上线成功。
+确认可以中断这些待投递回复时，才可额外传入 `--force-restart-confirmed`。
 
 不要使用 `channel:*` 的宽泛绑定，除非该渠道上的所有账号都明确用于公开客服。
+
+### 飞书最小配置
+
+当前已验证的飞书自建应用配置如下：
+
+- 能力：Bot；
+- 订阅方式：长连接；
+- 事件：`im.message.receive_v1`；
+- 应用身份权限：
+  `im:message.p2p_msg:readonly`、`im:message.group_at_msg:readonly`、
+  `im:message:send_as_bot`、`contact:contact.base:readonly`、
+  `im:message.reactions:write_only`；
+- OpenClaw：独立命名账号、`connectionMode = websocket`，群聊关闭或限制为
+  allowlist，且只精确绑定到 `cc-pocket-support`；
+- 凭据：App Secret 使用 OpenClaw file SecretRef，不能明文提交到仓库。
+
+后两项权限用于官方连接器解析发件人昵称和维护“正在输入”反应；缺少时，实际
+答案仍可能发出，但用户会额外收到权限错误回复。
+
+飞书个人版自建应用默认只对应用所有者及最多 5 名选定成员开放，外部私聊和外部群
+不可用。这适合作为灰度验证，不等于面向所有 CC Pocket 用户的公开客服。正式公开
+前需要选择支持外部分发的飞书应用形态，或改用可公开触达的独立客服渠道，再重新
+执行隐私、限流和滥用测试。
 
 ## 例行命令
 

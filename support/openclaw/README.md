@@ -56,11 +56,24 @@ The script deliberately does not bind a channel. After provisioning:
    supported channel.
 3. Set channel allowlists, group mention rules, rate limits, and a short privacy
    notice.
-4. Bind only that bot account:
+4. Bind only that bot account with the guarded activation command:
 
    ```bash
-   openclaw agents bind --agent cc-pocket-support --bind feishu:<account-id>
+   bash scripts/activate-openclaw-support-channel.sh \
+     --channel feishu \
+     --account <account-id> \
+     --apply \
+     --allowlist-confirmed \
+     --rate-limit-confirmed
    ```
+
+The activation command safely restarts the gateway and verifies that its PID
+changed before reporting success. This matters because a binding can be present
+in `openclaw agents list --bindings` while the still-running gateway continues
+to route messages with its old configuration. If active reply delivery blocks
+the safe restart, the command stops without claiming success. Use
+`--force-restart-confirmed` only when interrupting those pending deliveries is
+acceptable.
 
 Never expose the Control UI gateway token as a customer chat token, and never
 bind the public channel to the default personal agent.
