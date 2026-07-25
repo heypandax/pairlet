@@ -18,9 +18,11 @@ import kotlinx.serialization.json.jsonObject
 /**
  * Builds the installed skills/plugins catalog for the desktop browse page (issue #132).
  *
- * Skills: `~/.claude/skills/<name>/SKILL.md` (user) + `<workdir>/.claude/skills/<name>/SKILL.md`
- * (project) — the FULL top-level frontmatter plus a capped body excerpt, a superset of what
- * [SlashCommandScanner] extracts for the composer autocomplete.
+ * Skills: Claude Code's `.claude/skills` and Codex's `.agents/skills`, at both user and project
+ * scope — the FULL top-level frontmatter plus a capped body excerpt, a superset of what
+ * [SlashCommandScanner] extracts for the composer autocomplete. The browse request predates
+ * agent selection, so this catalog intentionally unions both layouts. A `(scope, name)` collision
+ * is one row in the desktop rail; `.agents` wins because it is the provider-neutral layout.
  *
  * Plugins: `~/.claude/plugins/installed_plugins.json` — the CLI's install ledger (v2 maps
  * `"name@marketplace"` → a list of install records carrying `installPath`). Each record's manifest
@@ -32,10 +34,20 @@ import kotlinx.serialization.json.jsonObject
 object SkillCatalogService {
 
     fun build(workdir: Path?, home: Path = Path.of(System.getProperty("user.home"))): SkillCatalog {
-        val skills = skillsIn(home.resolve(".claude/skills"), SkillScope.USER) +
-            (workdir?.let { skillsIn(it.resolve(".claude/skills"), SkillScope.PROJECT) } ?: emptyList())
+        val skills = LinkedHashMap<Pair<SkillScope, String>, SkillInfo>()
+        fun add(root: Path, scope: SkillScope) {
+            skillsIn(root, scope).forEach { skill ->
+                skills[scope to skill.name.lowercase()] = skill
+            }
+        }
+        add(home.resolve(".claude").resolve("skills"), SkillScope.USER)
+        add(home.resolve(".agents").resolve("skills"), SkillScope.USER)
+        workdir?.let {
+            add(it.resolve(".claude").resolve("skills"), SkillScope.PROJECT)
+            add(it.resolve(".agents").resolve("skills"), SkillScope.PROJECT)
+        }
         return SkillCatalog(
-            skills = skills.sortedWith(compareBy({ it.scope != SkillScope.USER }, { it.name.lowercase() })),
+            skills = skills.values.sortedWith(compareBy({ it.scope != SkillScope.USER }, { it.name.lowercase() })),
             plugins = plugins(home.resolve(".claude/plugins")).sortedBy { it.name.lowercase() },
         )
     }

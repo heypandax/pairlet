@@ -73,6 +73,34 @@ class SkillCatalogServiceTest {
     }
 
     @Test
+    fun codex_user_and_project_skills_are_discovered_from_agents_dirs() {
+        val home = tmp()
+        val work = tmp()
+        write(home.resolve(".agents/skills/user-codex/SKILL.md"), "---\ndescription: user codex\n---\n")
+        write(work.resolve(".agents/skills/project-codex/SKILL.md"), "---\ndescription: project codex\n---\n")
+
+        val skills = SkillCatalogService.build(workdir = work, home = home).skills
+
+        assertEquals(listOf("user-codex", "project-codex"), skills.map { it.name })
+        assertEquals(SkillScope.USER, skills[0].scope)
+        assertEquals(SkillScope.PROJECT, skills[1].scope)
+        assertEquals(work.resolve(".agents/skills/project-codex").toAbsolutePath().toString(), skills[1].path)
+    }
+
+    @Test
+    fun same_scope_name_is_deduplicated_with_agents_layout_winning() {
+        val home = tmp()
+        write(home.resolve(".claude/skills/shared/SKILL.md"), "---\ndescription: claude copy\n---\n")
+        write(home.resolve(".agents/skills/shared/SKILL.md"), "---\ndescription: agents copy\n---\n")
+
+        val skill = SkillCatalogService.build(workdir = null, home = home).skills.single()
+
+        assertEquals("shared", skill.name)
+        assertEquals("agents copy", skill.description)
+        assertEquals(home.resolve(".agents/skills/shared").toAbsolutePath().toString(), skill.path)
+    }
+
+    @Test
     fun long_body_is_truncated_and_flagged() {
         val home = tmp()
         val body = "x".repeat(10_000)

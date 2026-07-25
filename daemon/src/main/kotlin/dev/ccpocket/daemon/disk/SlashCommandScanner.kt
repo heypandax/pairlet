@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import dev.ccpocket.protocol.SlashCommand
 import java.nio.file.Files
@@ -13,10 +14,11 @@ import kotlin.io.path.nameWithoutExtension
  * Discovers the slash commands a conversation can offer in the phone's composer:
  *
  *  - daemon/claude built-ins that survive `-p --input-format stream-json`
- *  - custom command files: `~/.claude/commands/<name>.md` (user) and `<workdir>/.claude/commands/<name>.md` (project)
- *  - skills: `~/.claude/skills/<name>/SKILL.md` and `<workdir>/.claude/skills/<name>/SKILL.md`
+ *  - Claude custom command files: `~/.claude/commands/<name>.md` (user) and
+ *    `<workdir>/.claude/commands/<name>.md` (project)
+ *  - skills from the active agent's layout: Claude `.claude/skills`, Codex `.agents/skills`
  *
- * Custom commands and skills are *expanded by claude itself* when their text lands on stdin;
+ * Custom commands and skills are expanded by the active agent when their text lands on stdin;
  * the daemon only needs the names + descriptions for autocomplete. `/model` is the exception —
  * it is intercepted and handled by [dev.ccpocket.daemon.conversation.Conversation].
  */
@@ -48,17 +50,34 @@ object SlashCommandScanner {
         SlashCommand("fewer-permission-prompts", "Allowlist common read-only tools to cut permission prompts"),
     )
 
-    fun scan(workdir: Path, home: Path = Path.of(System.getProperty("user.home"))): List<SlashCommand> {
+    fun scan(
+        workdir: Path,
+        home: Path = Path.of(System.getProperty("user.home")),
+        agent: AgentKind = AgentKind.CLAUDE,
+    ): List<SlashCommand> {
         val byName = LinkedHashMap<String, SlashCommand>()
-        builtins.forEach { byName[it.name] = it }
-        // project commands shadow user commands of the same name (claude's own precedence)
-        commandFiles(home.resolve(".claude/commands"), CommandSource.USER).forEach { byName[it.name] = it }
-        commandFiles(workdir.resolve(".claude/commands"), CommandSource.PROJECT).forEach { byName[it.name] = it }
-        // skills never shadow an explicit command file
-        (skills(home.resolve(".claude/skills")) + skills(workdir.resolve(".claude/skills")))
-            .forEach { byName.putIfAbsent(it.name, it) }
+        builtins.forEach { byName[skillKey(it.name)] = it }
+        // Claude custom commands are not a Codex/OpenCode capability. Preserve the legacy OpenCode
+        // listing until that backend has its own command discovery contract.
+        if (agent != AgentKind.CODEX) {
+            // project commands shadow user commands of the same name (claude's own precedence)
+            commandFiles(home.resolve(".claude").resolve("commands"), CommandSource.USER)
+                .forEach { byName[skillKey(it.name)] = it }
+            commandFiles(workdir.resolve(".claude").resolve("commands"), CommandSource.PROJECT)
+                .forEach { byName[skillKey(it.name)] = it }
+        }
+        // A project skill shadows its user-level namesake, but skills never shadow an explicit
+        // command file or a daemon builtin.
+        val skillDir = if (agent == AgentKind.CODEX) ".agents" else ".claude"
+        val skillsByName = LinkedHashMap<String, SlashCommand>()
+        skills(home.resolve(skillDir).resolve("skills")).forEach { skillsByName[skillKey(it.name)] = it }
+        skills(workdir.resolve(skillDir).resolve("skills")).forEach { skillsByName[skillKey(it.name)] = it }
+        skillsByName.forEach { (name, skill) -> byName.putIfAbsent(name, skill) }
         return byName.values.sortedWith(compareBy({ it.source != CommandSource.BUILTIN }, { it.name }))
     }
+
+    /** Windows paths are case-insensitive by default; make cross-root precedence stable there too. */
+    private fun skillKey(name: String): String = name.lowercase()
 
     private fun commandFiles(root: Path, source: CommandSource): List<SlashCommand> {
         if (!root.isDirectory()) return emptyList()

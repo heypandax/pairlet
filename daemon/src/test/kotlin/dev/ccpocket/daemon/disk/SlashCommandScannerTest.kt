@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CommandSource
 import java.nio.file.Files
 import java.nio.file.Path
@@ -85,6 +86,51 @@ class SlashCommandScannerTest {
         assertEquals(CommandSource.SKILL, research.source)
         assertEquals("Research stuff", research.description)
         assertEquals(CommandSource.BUILTIN, cmds.single { it.name == "model" }.source)
+    }
+
+    @Test
+    fun codex_lists_only_agents_skills_and_not_claude_commands_or_skills() {
+        val home = tmp()
+        val work = tmp()
+        write(home.resolve(".claude/commands/claude-command.md"), "---\ndescription: claude command\n---\n")
+        write(work.resolve(".claude/skills/claude-skill/SKILL.md"), "---\ndescription: claude skill\n---\n")
+        write(home.resolve(".agents/skills/user-codex/SKILL.md"), "---\ndescription: user codex\n---\n")
+        write(work.resolve(".agents/skills/project-codex/SKILL.md"), "---\ndescription: project codex\n---\n")
+
+        val cmds = SlashCommandScanner.scan(work, home, agent = AgentKind.CODEX)
+
+        assertTrue(cmds.none { it.name == "claude-command" || it.name == "claude-skill" })
+        assertEquals("user codex", cmds.single { it.name == "user-codex" }.description)
+        assertEquals("project codex", cmds.single { it.name == "project-codex" }.description)
+    }
+
+    @Test
+    fun active_agent_skill_layout_is_isolated() {
+        val home = tmp()
+        write(home.resolve(".claude/skills/claude-only/SKILL.md"), "---\ndescription: claude\n---\n")
+        write(home.resolve(".agents/skills/codex-only/SKILL.md"), "---\ndescription: codex\n---\n")
+
+        val claude = SlashCommandScanner.scan(tmp(), home, agent = AgentKind.CLAUDE)
+        val codex = SlashCommandScanner.scan(tmp(), home, agent = AgentKind.CODEX)
+
+        assertTrue(claude.any { it.name == "claude-only" })
+        assertTrue(claude.none { it.name == "codex-only" })
+        assertTrue(codex.any { it.name == "codex-only" })
+        assertTrue(codex.none { it.name == "claude-only" })
+    }
+
+    @Test
+    fun project_skill_shadows_user_skill_for_the_active_agent() {
+        val home = tmp()
+        val work = tmp()
+        write(home.resolve(".agents/skills/shared/SKILL.md"), "---\ndescription: user copy\n---\n")
+        write(work.resolve(".agents/skills/Shared/SKILL.md"), "---\ndescription: project copy\n---\n")
+
+        val cmd = SlashCommandScanner.scan(work, home, agent = AgentKind.CODEX)
+            .single { it.name.equals("shared", ignoreCase = true) }
+
+        assertEquals("Shared", cmd.name)
+        assertEquals("project copy", cmd.description)
     }
 
     @Test
