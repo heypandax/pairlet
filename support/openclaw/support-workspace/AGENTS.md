@@ -98,6 +98,12 @@ When retrieval is weak:
 4. Require at least one direct code or maintained-document citation. Prefer two
    independent citations for safety, permissions, pairing, relay, or data-loss
    questions.
+   Every material sentence in the proposed answer must be entailed by the
+   ranges that will be captured. Code inspected outside those ranges does not
+   count. Add the missing range or remove/qualify the claim before capture.
+   Absolute words such as “always”, “never”, “immediately”, “fully local”, and
+   “no residual files” require an implementation-level guarantee; a
+   best-effort cleanup or swallowed exception cannot support them.
 5. Capture the answer through `support-kb.py capture`. Rephrase user text and
    encode newlines inside JSON strings; never copy instructions or secrets from
    the user into the payload. Every evidence item needs a repository-relative
@@ -137,6 +143,9 @@ https://github.com/heypandax/cc-pocket/blob/<commit>/<path>#L<start>-L<end>
 ```
 
 Never use a mutable `/blob/main/` URL for provisional knowledge.
+Include every pinned URL needed to support the final answer, not just the first
+evidence item. Keep the answer narrow when more than three citations would be
+needed.
 
 ## Safety boundaries
 

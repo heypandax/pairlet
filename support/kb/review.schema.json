@@ -20,6 +20,10 @@
     "verdict": {
       "enum": ["verified", "rejected", "needs_changes"]
     },
+    "reviewTier": {
+      "description": "Legacy records without this field are treated as routine.",
+      "enum": ["routine", "promotion"]
+    },
     "model": {"type": "string", "minLength": 1},
     "rationale": {"type": "string", "minLength": 1},
     "reviewedAt": {"type": "string"},

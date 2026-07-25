@@ -42,6 +42,7 @@ ALLOWED_EVIDENCE_FILES = {
 }
 REUSABLE_STATUSES = {"observed", "verified"}
 REVIEW_VERDICTS = {"verified", "rejected", "needs_changes"}
+REVIEW_TIERS = {"routine", "promotion"}
 
 
 def utc_now() -> str:
@@ -249,7 +250,11 @@ def expected_candidate_id(candidate: dict[str, Any]) -> str:
     return f"kb-{sha256(encoded)[:12]}"
 
 
-def matching_review(candidate: dict[str, Any], kb_dirs: list[Path]) -> dict[str, Any] | None:
+def matching_review(
+    candidate: dict[str, Any],
+    kb_dirs: list[Path],
+    review_tier: str | None = None,
+) -> dict[str, Any] | None:
     matches: list[dict[str, Any]] = []
     digest = candidate_digest(candidate)
     candidate_id = str(candidate.get("id", ""))
@@ -263,10 +268,24 @@ def matching_review(candidate: dict[str, Any], kb_dirs: list[Path]) -> dict[str,
         verdict = str(review.get("verdict", ""))
         if verdict not in REVIEW_VERDICTS:
             continue
+        tier = str(review.get("reviewTier", "routine"))
+        if tier not in REVIEW_TIERS:
+            continue
+        if review_tier is not None and tier != review_tier:
+            continue
         matches.append(review)
     if not matches:
         return None
-    matches.sort(key=lambda item: str(item.get("reviewedAt", "")), reverse=True)
+    # A promotion review is produced by the separately configured strong-model
+    # workflow. It remains authoritative even if the routine OpenClaw reviewer
+    # runs later; otherwise a cheaper model could silently override the gate.
+    matches.sort(
+        key=lambda item: (
+            1 if item.get("reviewTier", "routine") == "promotion" else 0,
+            str(item.get("reviewedAt", "")),
+        ),
+        reverse=True,
+    )
     return matches[0]
 
 
@@ -592,10 +611,13 @@ def command_capture(args: argparse.Namespace) -> int:
 def command_audit(args: argparse.Namespace) -> int:
     reports: list[dict[str, Any]] = []
     stale = 0
+    review_tier = getattr(args, "review_tier", "routine")
+    if review_tier not in REVIEW_TIERS:
+        raise ValueError(f"review tier must be one of {sorted(REVIEW_TIERS)}")
     for path in candidate_files(args.kb):
         candidate = load_json(path)
         validation = candidate_validation(args.repo_root, candidate)
-        review = matching_review(candidate, args.governance)
+        review = matching_review(candidate, args.governance, review_tier)
         review_verdict = str(review.get("verdict")) if review else "unreviewed"
         needs_review = validation["state"] == "current" and review is None
         if validation["state"] != "current":
@@ -637,6 +659,9 @@ def command_review(args: argparse.Namespace) -> int:
     verdict = str(review.get("verdict", ""))
     if verdict not in REVIEW_VERDICTS:
         raise ValueError(f"verdict must be one of {sorted(REVIEW_VERDICTS)}")
+    review_tier = str(review.get("reviewTier", "routine"))
+    if review_tier not in REVIEW_TIERS:
+        raise ValueError(f"reviewTier must be one of {sorted(REVIEW_TIERS)}")
     model = str(review.get("model", "")).strip()
     rationale = str(review.get("rationale", "")).strip()
     if not model or not rationale:
@@ -650,13 +675,15 @@ def command_review(args: argparse.Namespace) -> int:
         "id": candidate["id"],
         "candidateSha256": candidate_digest(candidate),
         "verdict": verdict,
+        "reviewTier": review_tier,
         "model": model,
         "rationale": rationale,
         "reviewedAt": utc_now(),
         "reviewedCommit": git_head(args.repo_root),
         "validation": validation,
     }
-    review_path = args.governance / "reviews" / f"{candidate['id']}.json"
+    suffix = "" if review_tier == "routine" else f"--{review_tier}"
+    review_path = args.governance / "reviews" / f"{candidate['id']}{suffix}.json"
     write_json(review_path, recorded_review)
     print(json.dumps({"ok": True, "id": candidate["id"], "verdict": verdict, "path": str(review_path)}, ensure_ascii=False))
     return 0
@@ -665,9 +692,9 @@ def command_review(args: argparse.Namespace) -> int:
 def command_promote(args: argparse.Namespace) -> int:
     candidate_path = args.candidate_kb / "candidates" / f"{args.id}.json"
     candidate = load_json(candidate_path)
-    review = matching_review(candidate, [args.governance])
+    review = matching_review(candidate, [args.governance], "promotion")
     if not review or review.get("verdict") != "verified":
-        raise ValueError("only verified candidates can produce a manual proposal")
+        raise ValueError("only promotion-tier verified candidates can produce a manual proposal")
     validation = candidate_validation(args.repo_root, candidate)
     if validation["state"] != "current":
         raise ValueError(f"candidate evidence is {validation['state']}")
@@ -702,6 +729,7 @@ def command_promote(args: argparse.Namespace) -> int:
             "## Reviewer",
             "",
             f"- Model: {review.get('model', '')}",
+            f"- Review tier: {review.get('reviewTier', 'routine')}",
             f"- Rationale: {review.get('rationale', '')}",
             f"- Candidate SHA-256: `{review.get('candidateSha256', '')}`",
             f"- Reviewed commit: `{review.get('reviewedCommit', '')}`",
@@ -753,6 +781,7 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("--repo-root", type=Path, default=ROOT)
     audit.add_argument("--kb", type=Path, action="append", default=[DEFAULT_KB])
     audit.add_argument("--governance", type=Path, action="append", default=[DEFAULT_KB])
+    audit.add_argument("--review-tier", choices=tuple(sorted(REVIEW_TIERS)), default="routine")
     audit.add_argument("--write", action="store_true")
     audit.set_defaults(func=command_audit)
 

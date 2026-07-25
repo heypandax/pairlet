@@ -45,7 +45,11 @@
 
 ### 3. 已复核知识与手册晋升
 
-独立的 reviewer Agent 使用显式配置的更强模型，重新读取当前代码和测试。它只能在独立治理区写入 `verified`、`rejected` 或 `needs_changes` 结论，并为 `verified` 项生成 Markdown 提案。每个结论都绑定候选内容的完整 SHA-256；客服 Agent 无权写治理区，也无法在不使结论失效的情况下修改已复核答案。真正的手册更新仍需维护者修改双语内容、跑生成器和测试，并通过正常 PR/提交发布。
+线上独立 reviewer Agent 先做每周常规预审，重新读取当前代码和测试，并在独立治理区写入 `verified`、`rejected` 或 `needs_changes` 结论。常规预审可以让当前候选继续复用，但不能生成手册提案。
+
+另一个每周 Codex 强模型任务读取同一候选，执行更严格的逐声明复核。只有它写入的 `reviewTier: promotion` 且结论为 `verified`，才能生成 Markdown 提案并创建双语手册 PR；PR 不会自动合并。强审结论优先级永久高于常规预审，避免后续便宜模型覆盖强模型的拒绝或修改意见。每个结论都绑定候选内容的完整 SHA-256；客服 Agent 无权写治理区，也无法在不使结论失效的情况下修改已复核答案。
+
+强模型流程与验收标准见 `docs/STRONG-SUPPORT-REVIEW.md`。
 
 ## OpenClaw 隔离
 
@@ -56,7 +60,7 @@
 | Agent | 用途 | 对外渠道 |
 |---|---|---|
 | `cc-pocket-support` | 手册检索、只读代码取证、候选捕获 | 只绑定专用客服 bot |
-| `cc-pocket-support-review` | 周期性强模型复核与提案 | 不绑定 |
+| `cc-pocket-support-review` | 周期性常规预审（不能晋升手册） | 不绑定 |
 
 两者都必须：
 
@@ -136,6 +140,9 @@ python3 scripts/support-kb.py search '配对 离线' --locale zh
 
 # 审计所有候选；写回 stale 状态
 python3 scripts/support-kb.py audit --write
+
+# 找出尚未经过强模型晋升审的候选
+python3 scripts/support-kb.py audit --review-tier promotion
 
 # 构建公开 AI 索引
 python3 scripts/support-kb.py build-index

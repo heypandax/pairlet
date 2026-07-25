@@ -271,7 +271,7 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
                 governance=governance,
                 output=None,
             )
-            with self.assertRaisesRegex(ValueError, "only verified"):
+            with self.assertRaisesRegex(ValueError, "promotion-tier"):
                 support_kb.command_promote(args)
 
             review_input = governance / "review-input" / f"{candidate['id']}.json"
@@ -292,9 +292,113 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
                     governance=governance,
                 )
             )
+            with self.assertRaisesRegex(ValueError, "promotion-tier"):
+                support_kb.command_promote(args)
+
+            support_kb.write_json(
+                review_input,
+                {
+                    "id": candidate["id"],
+                    "verdict": "verified",
+                    "reviewTier": "promotion",
+                    "model": "provider/strong-model",
+                    "rationale": "The strong-model promotion review confirmed the maintained documentation.",
+                },
+            )
+            support_kb.command_review(
+                SimpleNamespace(
+                    input=review_input,
+                    repo_root=repo,
+                    candidate_kb=queue,
+                    governance=governance,
+                )
+            )
             self.assertEqual(0, support_kb.command_promote(args))
             proposal = governance / "promotions" / f"{candidate['id']}.md"
             self.assertIn("Candidate SHA-256", proposal.read_text(encoding="utf-8"))
+            self.assertIn("Review tier: promotion", proposal.read_text(encoding="utf-8"))
+
+    def test_promotion_review_outranks_later_routine_review(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            queue = Path(directory) / "queue"
+            governance = Path(directory) / "governance"
+            evidence_file = repo / "docs" / "privacy.md"
+            evidence_file.parent.mkdir(parents=True)
+            evidence_file.write_text("Temporary files are deleted on a best-effort basis.\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "support@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Support Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True)
+            candidate_path = support_kb.capture_candidate(
+                repo,
+                queue,
+                {
+                    "questions": {"zh": ["临时文件一定不会残留吗？"]},
+                    "answer": {"zh": "临时文件绝对不会残留。"},
+                    "evidence": [
+                        {
+                            "path": "docs/privacy.md",
+                            "startLine": 1,
+                            "endLine": 1,
+                            "note": "The source only promises best-effort deletion.",
+                        }
+                    ],
+                },
+            )
+            candidate = support_kb.load_json(candidate_path)
+            review_input = governance / "review-input" / f"{candidate['id']}.json"
+
+            support_kb.write_json(
+                review_input,
+                {
+                    "id": candidate["id"],
+                    "verdict": "needs_changes",
+                    "reviewTier": "promotion",
+                    "model": "provider/strong-model",
+                    "rationale": "The answer overstates a best-effort cleanup guarantee.",
+                },
+            )
+            support_kb.command_review(
+                SimpleNamespace(
+                    input=review_input,
+                    repo_root=repo,
+                    candidate_kb=queue,
+                    governance=governance,
+                )
+            )
+
+            support_kb.write_json(
+                review_input,
+                {
+                    "id": candidate["id"],
+                    "verdict": "verified",
+                    "reviewTier": "routine",
+                    "model": "provider/routine-model",
+                    "rationale": "A later routine review incorrectly accepted the overstatement.",
+                },
+            )
+            support_kb.command_review(
+                SimpleNamespace(
+                    input=review_input,
+                    repo_root=repo,
+                    candidate_kb=queue,
+                    governance=governance,
+                )
+            )
+
+            self.assertEqual([], support_kb.candidate_records(repo, [queue, governance], "zh"))
+            with self.assertRaisesRegex(ValueError, "promotion-tier"):
+                support_kb.command_promote(
+                    SimpleNamespace(
+                        id=candidate["id"],
+                        repo_root=repo,
+                        candidate_kb=queue,
+                        governance=governance,
+                        output=None,
+                    )
+                )
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ default agent:
 
 - `cc-pocket-support`: routine public answers, manual retrieval, read-only code
   inspection, and candidate capture.
-- `cc-pocket-support-review`: unbound scheduled reviewer using a separately
-  configured stronger model.
+- `cc-pocket-support-review`: unbound scheduled routine reviewer. It can reject
+  or provisionally verify a candidate, but cannot authorize manual promotion.
 
 Both agents run every tool turn inside Docker with no network. Provisioning
 first creates a `git archive` snapshot containing tracked files only, so ignored
@@ -32,12 +32,12 @@ On the OpenClaw host, clone or update the public CC Pocket repository, then:
 ```bash
 bash scripts/provision-openclaw-support.sh
 
-CC_POCKET_REVIEW_MODEL=openai/gpt-5.6-sol \
+CC_POCKET_REVIEW_MODEL=deepseek/deepseek-v4-pro \
   bash scripts/provision-openclaw-support.sh --apply
 ```
 
 The first command is a dry run. `--apply` is required for any OpenClaw state
-change. If a stronger model is not configured, omit
+change. If a separate routine review model is not configured, omit
 `CC_POCKET_REVIEW_MODEL`; the public support agent is provisioned, while the
 reviewer and weekly cron stay disabled.
 
@@ -45,8 +45,9 @@ The default public model is `deepseek/deepseek-v4-pro`. It is the smallest
 model currently configured on the production host that passed the canonical,
 code-only, unknown-answer, language, and prompt-injection contract tests.
 Override `CC_POCKET_SUPPORT_MODEL` only after the replacement passes the same
-suite. The review model is configured separately and should be stronger than
-the public model when the provider offers one.
+suite. The routine review model is configured separately. Manual promotion is
+gated by the weekly Codex workflow in `docs/STRONG-SUPPORT-REVIEW.md`, which
+records a distinct `promotion` review and opens a PR without merging it.
 
 The script deliberately does not bind a channel. After provisioning:
 
@@ -91,5 +92,6 @@ openclaw skills list
 openclaw cron list --all
 ```
 
-The reviewer job must use an explicit strong model, `--tools exec,read`, an
-isolated session, and no fallback delivery.
+The routine reviewer job must use an explicit model, `--tools exec,read`, an
+isolated session, and no fallback delivery. It must record only `routine`
+reviews. A `promotion` review is reserved for the separate Codex automation.

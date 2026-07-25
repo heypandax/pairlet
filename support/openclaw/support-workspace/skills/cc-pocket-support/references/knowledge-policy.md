@@ -25,6 +25,7 @@ and a relevant test when available.
 
 ## Manual promotion
 
-A verified candidate may generate a promotion proposal, but no agent edits the
-manual directly. A maintainer must review the current code, bilingual wording,
-generated pages, and tests through the normal repository workflow.
+Only a candidate with a separate promotion-tier strong-model review may
+generate a promotion proposal. No OpenClaw agent edits the manual directly. A
+maintainer must review the current code, bilingual wording, generated pages,
+and tests through the normal repository workflow.

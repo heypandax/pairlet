@@ -14,7 +14,7 @@ usage() {
     "" \
     "Environment:" \
     "  CC_POCKET_SUPPORT_MODEL  public answer model (default: deepseek/deepseek-v4-pro)" \
-    "  CC_POCKET_REVIEW_MODEL   stronger review model; omit to skip reviewer + cron" \
+    "  CC_POCKET_REVIEW_MODEL   routine review model; omit to skip reviewer + cron" \
     "  CC_POCKET_REVIEW_CRON    cron expression (default: 0 3 * * 1)" \
     "  CC_POCKET_REVIEW_TZ      timezone (default: UTC)" \
     "  CC_POCKET_REVIEW_THINKING  provider-supported level (default: off)"
