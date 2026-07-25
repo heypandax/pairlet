@@ -29,6 +29,13 @@ test("revises Chinese retrieval narration", () => {
   assert.equal(revision?.key, "cc-pocket-support-remove-internal-narration");
 });
 
+test("revises narration about canonical search results", () => {
+  const revision = revisionFor(
+    "看起来手册是作为 URL 引用的。搜索结果命中 canonical，这已经足够回答，不需要再查看代码。",
+  );
+  assert.equal(revision?.key, "cc-pocket-support-remove-internal-narration");
+});
+
 test("revises an overstated credential fallback", () => {
   const revision = revisionFor(
     "如果隔离准备失败，daemon 会直接使用你终端 Claude 的凭据。",

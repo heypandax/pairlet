@@ -6,7 +6,7 @@
 
 **Your coding agent, in your pocket.** CC Pocket drives Claude Code — or OpenAI Codex, or OpenCode — running on your computer, from your phone or from another computer, from anywhere (not just your LAN). Watch the agent work in real time, answer its tool-permission requests in two taps, and pick up any session exactly where you left it. Traffic flows through a **zero-knowledge relay** that only ever forwards end-to-end-encrypted ciphertext — no account, no content logging. Clean-room Kotlin, MIT.
 
-**🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **💬 Help & support:** [support](https://heypandax.github.io/cc-pocket/support/) · **📖 User manual:** [manual](https://heypandax.github.io/cc-pocket/manual/en/) · **📋 Full feature list:** [features](https://heypandax.github.io/cc-pocket/features.html)
+**🌐 Website:** <https://heypandax.github.io/cc-pocket/> · **💬 Smart support:** [ask without signing in](https://pocket.ark-nexus.cc/support/) · **📖 User manual:** [manual](https://heypandax.github.io/cc-pocket/manual/en/) · **📋 Full feature list:** [features](https://heypandax.github.io/cc-pocket/features.html)
 
 <p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/og-image.png" alt="CC Pocket — drive Claude Code on your computer from your phone" width="720"></a></p>
 
@@ -139,7 +139,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 ## Docs
 
 - Website / landing page — <https://heypandax.github.io/cc-pocket/>
-- Help and support — <https://heypandax.github.io/cc-pocket/support/>
+- Public smart support (no sign-in required) — <https://pocket.ark-nexus.cc/support/>
 - Public user manual (shareable with AI assistants) — <https://heypandax.github.io/cc-pocket/manual/en/>
 - Full feature list — <https://heypandax.github.io/cc-pocket/features.html>
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)

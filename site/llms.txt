@@ -74,7 +74,7 @@ The architecture is three parts plus the agent:
 ## Links
 
 - [Website](https://heypandax.github.io/cc-pocket/)
-- [Help and support](https://heypandax.github.io/cc-pocket/support/)
+- [Public smart support — no sign-in required](https://pocket.ark-nexus.cc/support/)
 - [User manual — English](https://heypandax.github.io/cc-pocket/manual/en/)
 - [用户手册 — 中文](https://heypandax.github.io/cc-pocket/manual/zh/)
 - [Manual AI index — structured JSON](https://heypandax.github.io/cc-pocket/manual/ai-index.json)

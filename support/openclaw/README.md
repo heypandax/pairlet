@@ -25,6 +25,22 @@ retrieval/policy narration or adds prose around the fixed escalation response.
 Its outbound hook drops tool diagnostic payloads before a configured public
 channel can deliver them.
 
+## Public web support
+
+The public entry is `https://pocket.ark-nexus.cc/support/`. It does not use a
+messaging app and does not require an account or organization membership.
+`support/web/server.py` is the narrow HTTP boundary: it accepts a question,
+applies per-visitor and concurrency limits, derives an opaque session key, and
+runs only the `cc-pocket-support` agent. It returns only the final visible
+answer and public source URLs; the OpenClaw Gateway, gateway token, tool output,
+and agent metadata are never exposed.
+
+The API listens on loopback on the OpenClaw host. The relay host reaches that
+single port through the restricted SSH forward in
+`deploy/cc-pocket-support-tunnel.service`, and Caddy publishes only
+`/support-api/*`. Keep the administrative Gateway on its existing private
+boundary.
+
 ## Provision
 
 On the OpenClaw host, clone or update the public CC Pocket repository, then:

@@ -23,7 +23,7 @@ BUNDLE_ID="com.panda.ccpocket"
 LOG=/tmp/ios-device-build.log
 
 echo "── 0/4 设备在线检查 ──"
-if ! xcrun devicectl list devices | grep "$DEVICE" | grep -q "available"; then
+if ! xcrun devicectl list devices | grep "$DEVICE" | grep -Eq '(^|[[:space:]])(available|connected)([[:space:]]|$)'; then
   echo "❌ 设备不在线：$DEVICE"
   xcrun devicectl list devices
   exit 1

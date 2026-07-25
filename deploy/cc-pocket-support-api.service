@@ -1,0 +1,33 @@
+[Unit]
+Description=CC Pocket public support API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+Environment=HOME=/home/admin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=CC_SUPPORT_HOST=127.0.0.1
+Environment=CC_SUPPORT_PORT=10966
+EnvironmentFile=/etc/cc-pocket-support-api/env
+ExecStart=/usr/bin/python3 /opt/cc-pocket-support-api/server.py
+Restart=always
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/admin/.openclaw
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

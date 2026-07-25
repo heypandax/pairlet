@@ -8,8 +8,49 @@
 }
 
 pocket.ark-nexus.cc {
+	# Public support is deliberately split from the OpenClaw admin Gateway. The API reaches the
+	# isolated support host through a loopback-only, key-restricted SSH tunnel; static help files
+	# are served here too so the App never depends on a messaging-team permission or Pages cache.
+	handle_path /support-api/* {
+		reverse_proxy 127.0.0.1:10966 {
+			transport http {
+				read_timeout 150s
+				response_header_timeout 135s
+			}
+		}
+	}
+	handle /support/* {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
+	handle /manual/* {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
+	handle /styles.css {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
+	handle /app.js {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
+	handle /favicon.svg {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
+	handle /favicon-32.png {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
+	handle /apple-touch-icon.png {
+		root * /var/www/cc-pocket-site
+		file_server
+	}
 	# Caddy auto-provisions a Let's Encrypt cert (needs inbound 80/443 from the
 	# internet for the ACME challenge) and auto-handles the WebSocket upgrade,
 	# so the relay's /v1/daemon and /v1/device WS endpoints just work.
-	reverse_proxy 127.0.0.1:9000
+	handle {
+		reverse_proxy 127.0.0.1:9000
+	}
 }
