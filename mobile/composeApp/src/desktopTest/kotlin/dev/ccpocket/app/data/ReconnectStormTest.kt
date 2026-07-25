@@ -13,23 +13,28 @@ import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.SendPrompt
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import kotlin.test.fail
 
 /**
  * The 07-13 disconnect-storm batch, phone side:
@@ -41,13 +46,18 @@ import kotlin.test.fail
  *  - #145 a PeerPresence(false→true) edge on a HEALTHY transport re-syncs over the live socket instead of
  *    tearing it down, and escalates to a real reconnect only when the probe gets no answer.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ReconnectStormTest {
 
     private lateinit var scope: CoroutineScope
+    private lateinit var scheduler: TestCoroutineScheduler
+    private lateinit var dispatcher: TestDispatcher
 
     @BeforeTest
     fun setUp() {
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        scheduler = TestCoroutineScheduler()
+        dispatcher = UnconfinedTestDispatcher(scheduler)
+        scope = CoroutineScope(SupervisorJob() + dispatcher)
     }
 
     @AfterTest
@@ -62,11 +72,6 @@ class ReconnectStormTest {
         )
         useRelay = true
         sessionActive.value = true
-    }
-
-    private suspend fun awaitCue(what: String, cond: () -> Boolean) {
-        repeat(150) { if (cond()) return; delay(20) }
-        fail("$what did not surface within the 3s ceiling")
     }
 
     // ── #143: outbox backlog dedup ───────────────────────────────────────────────────────────────
@@ -111,34 +116,42 @@ class ReconnectStormTest {
     @Test
     fun retireWaitsForTheOldConnectionToActuallyFinishClosing() = runBlocking {
         var closed = false
-        val ext = CoroutineScope(Job() + Dispatchers.Default)
-        val prev = ext.launch {
+        val closeStarted = CompletableDeferred<Unit>()
+        val permitClose = CompletableDeferred<Unit>()
+        val ext = CoroutineScope(Job() + dispatcher)
+        val prev = ext.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {
-                withContext(NonCancellable) { delay(120) } // a slow (but not wedged) socket close
+                closeStarted.complete(Unit)
+                withContext(NonCancellable) { permitClose.await() } // the socket reports that close is finished
                 closed = true
             }
         }
-        awaitCue("previous job start") { prev.isActive }
-        retireJobBounded(prev, 5_000)
+        val retire = launch { retireJobBounded(prev, 5_000) }
+        closeStarted.await()
+        assertFalse(retire.isCompleted, "retire must wait for the old connection's close signal")
+        permitClose.complete(Unit)
+        retire.join()
         assertTrue(closed, "retire must not return before the previous connection finished closing — cancel() alone was the #142 overlap")
+        ext.cancel()
     }
 
     @Test
     fun retireIsBoundedSoAWedgedCloseCannotStallReconnecting() = runBlocking {
-        val ext = CoroutineScope(Job() + Dispatchers.Default)
-        val prev = ext.launch {
+        val permitClose = CompletableDeferred<Unit>()
+        val ext = CoroutineScope(Job() + dispatcher)
+        val prev = ext.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 awaitCancellation()
             } finally {
-                withContext(NonCancellable) { delay(30_000) } // a wedged close (network-switch zombie)
+                withContext(NonCancellable) { permitClose.await() } // a wedged close (network-switch zombie)
             }
         }
-        awaitCue("previous job start") { prev.isActive }
-        val t0 = System.currentTimeMillis()
-        retireJobBounded(prev, 150)
-        assertTrue(System.currentTimeMillis() - t0 < 5_000, "retire must give up at the bound, not wait out the zombie")
+        retireJobBounded(prev, 0)
+        assertFalse(prev.isCompleted, "retire must give up at its bound, not wait out the zombie")
+        permitClose.complete(Unit)
+        prev.join()
         ext.cancel()
     }
 
@@ -153,7 +166,9 @@ class ReconnectStormTest {
         r.receiveForTest(Directories(emptyList()))
         assertEquals(4, r.retryAttempts, "one Directories round-trip must NOT reset the ladder (#144 — that kept a flapping link at 1s forever)")
 
-        awaitCue("the stability reset") { r.retryAttempts == 0 } // the link staying up past the window DOES reset it
+        scheduler.advanceTimeBy(r.stableLinkResetMs)
+        scheduler.runCurrent()
+        assertEquals(0, r.retryAttempts, "the link staying up past the window resets the ladder")
     }
 
     // ── #145: presence edge on a healthy transport re-syncs instead of tearing down ─────────────
@@ -176,7 +191,8 @@ class ReconnectStormTest {
         assertTrue(sent.any { it is ListDirectories }, "the healthy path re-syncs the page over the live socket")
 
         r.receiveForTest(Directories(emptyList())) // the computer answered — the probe must stand down
-        delay(500)
+        scheduler.advanceTimeBy(r.presenceProbeMs)
+        scheduler.runCurrent()
         assertEquals(launches, r.transportLaunches, "an answered probe never escalates")
     }
 
@@ -193,7 +209,9 @@ class ReconnectStormTest {
         r.receiveControlForTest(PeerPresence(true))
         // no Directories reply: the daemon really restarted (our E2E session died with it) — the probe
         // must escalate to a full re-handshake, or the phone would sit deaf on a "healthy" socket
-        awaitCue("the probe escalation") { r.transportLaunches > launches }
+        scheduler.advanceTimeBy(r.presenceProbeMs)
+        scheduler.runCurrent()
+        assertEquals(launches + 1, r.transportLaunches, "the unanswered probe escalates exactly once")
     }
 
     // ── #146: a live-but-deaf E2E socket forces a mid-turn re-handshake ──────────────────────────

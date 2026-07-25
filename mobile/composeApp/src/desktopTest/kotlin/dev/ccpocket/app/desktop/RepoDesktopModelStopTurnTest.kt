@@ -37,7 +37,11 @@ class RepoDesktopModelStopTurnTest {
     @Test
     fun stopInsideWindowRefillsTheComposer() {
         val (repo, m) = demoModel()
+        m.stopRefillElapsedMsForTest = { 0 }
         assertTrue(repo.sendPrompt("fix the login bug"))
+        // The stop-refill unit owns its transcript input. Demo streaming is intentionally async and
+        // other desktop tests can advance it, so do not rely on its delayed echo retaining this row.
+        repo.messages.add(ChatItem.User("fix the login bug"))
         m.stopTurn()
         assertEquals("fix the login bug", m.composer)
     }
@@ -47,7 +51,7 @@ class RepoDesktopModelStopTurnTest {
         val (repo, m) = demoModel()
         m.stopRefillWindowMs = 50
         assertTrue(repo.sendPrompt("fix the login bug"))
-        Thread.sleep(200) // outlive the shrunken window — the anchor is monotonic, no frame traffic needed
+        m.stopRefillElapsedMsForTest = { 50 } // exactly at the exclusive boundary; no wall-clock sleep
         m.stopTurn()
         assertEquals("", m.composer)
     }
@@ -55,7 +59,9 @@ class RepoDesktopModelStopTurnTest {
     @Test
     fun stopNeverClobbersATypedDraft() {
         val (repo, m) = demoModel()
+        m.stopRefillElapsedMsForTest = { 0 } // exercise the refill branch; the non-blank draft must still win
         assertTrue(repo.sendPrompt("fix the login bug"))
+        repo.messages.add(ChatItem.User("fix the login bug"))
         m.composer = "actually, try the signup flow"
         m.stopTurn()
         assertEquals("actually, try the signup flow", m.composer)
