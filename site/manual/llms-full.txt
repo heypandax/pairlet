@@ -1,7 +1,7 @@
 # CC Pocket User Manual — full AI index
 
 Canonical source: https://heypandax.github.io/cc-pocket/manual/
-Content verified: 2026-07-24
+Content verified: 2026-07-25
 
 Use the matching article URL as the citation. Do not invent steps that are absent from the article.
 
@@ -84,6 +84,22 @@ URL: https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/
 在创建会话时选择 Agent。一个会话从头到尾绑定同一个后端；模型可在该后端和你的网关实际提供的选项中切换。
 
 agent 创建会话时选择后端 Claude Code 支持 Claude 权限模式与模型别名。 Codex 使用 Cautious、Balanced、Autonomous 或 Full auto 预设，映射到审批策略与沙箱设置。 OpenCode 的运行命令没有交互式审批协议，因此始终是完全访问。 不能把进行中的会话从一个 Agent 后端切换到另一个；需要换后端时，请新建会话。 model 选择模型 在会话中使用模型选择器。如果 Claude Code 通过 Anthropic 兼容网关路由，自定义 ID 和已保存的网关预设会传给本机 CLI；这个 ID 最终对应哪个模型，由网关决定。
+
+## What a separate Claude login shares (en)
+
+URL: https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/
+
+A separate daemon login isolates only Claude credentials. Session history, CLAUDE.md , skills, plugins, settings, and MCP configuration remain shared with the computer’s normal Claude setup.
+
+isolated What is isolated Only the credential store is private to the daemon. Logging in or out from CC Pocket changes the daemon’s Claude credentials without replacing the terminal Claude login. shared What stays shared Session history under projects, so resume and device handoff keep working. CLAUDE.md , settings, agents, commands, skills, plugins, and todos. MCP server configuration and project trust stored in .claude.json . This is credential isolation, not a separate Claude workspace or multi-profile session store.
+
+## 独立 Claude 登录会共享什么 (zh)
+
+URL: https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/
+
+daemon 的独立登录只隔离 Claude 凭据；会话历史、 CLAUDE.md 、skills、plugins、settings 和 MCP 配置仍与电脑上的普通 Claude 环境共享。
+
+isolated 哪些内容会隔离 只有凭据存储归 daemon 独立使用。在 CC Pocket 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。 shared 哪些内容仍然共享 会话历史 （projects），因此恢复会话和跨设备接续仍然有效。 CLAUDE.md 、settings、agents、commands、skills、plugins 和 todos。 保存在 .claude.json 中的 MCP 服务器配置 与项目信任信息。 这是“凭据隔离”，不是另建一套 Claude 工作区或多账号会话库。
 
 ## Share one folder with a collaborator (en)
 

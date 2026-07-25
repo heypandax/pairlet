@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>独立 Claude 登录会共享什么 — CC Pocket 用户手册</title>
+<meta name="description" content="daemon 只隔离 Claude 登录凭据；会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置仍然共享。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="独立 Claude 登录会共享什么 — CC Pocket 用户手册" />
+<meta property="og:description" content="daemon 只隔离 Claude 登录凭据；会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置仍然共享。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="独立 Claude 登录会共享什么 — CC Pocket 用户手册" />
+<meta name="twitter:description" content="daemon 只隔离 Claude 登录凭据；会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置仍然共享。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"独立 Claude 登录会共享什么",
+  "description":"daemon 只隔离 Claude 登录凭据；会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置仍然共享。",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/",
+  "dateModified":"2026-07-25",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/zh/"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← 全部指南</a>
+    <span>Agent 与模型</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>Agent 与模型</span></div>
+    <div class="platform-tags"><span>电脑 daemon · Claude Code</span></div>
+    <h1>独立 Claude 登录会共享什么</h1>
+    <div class="short-answer"><span>简短答案</span><p>daemon 的独立登录只隔离 Claude 凭据；会话历史、<code>CLAUDE.md</code>、skills、plugins、settings 和 MCP 配置仍与电脑上的普通 Claude 环境共享。</p></div>
+    <div class="article-meta"><span>最近核验 2026-07-25</span><span>·</span><span>公开链接 · 无需登录</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/">复制链接</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" data-copy-prompt="打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
+    </div>
+    <section id="isolated"><h2>哪些内容会隔离</h2><p>只有凭据存储归 daemon 独立使用。在 CC Pocket 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。</p></section><section id="shared"><h2>哪些内容仍然共享</h2><ul><li><strong>会话历史</strong>（projects），因此恢复会话和跨设备接续仍然有效。</li><li><strong>CLAUDE.md</strong>、settings、agents、commands、skills、plugins 和 todos。</li><li>保存在 <code>.claude.json</code> 中的 <strong>MCP 服务器配置</strong>与项目信任信息。</li></ul><aside class="article-note">这是“凭据隔离”，不是另建一套 Claude 工作区或多账号会话库。</aside></section>
+    <section class="related-articles"><h2>相关指南</h2><div><a href="../choose-agent-and-model/"><strong>选择 Agent 与模型</strong><span>创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。</span></a><a href="../take-over-a-terminal-session/"><strong>无分叉接管终端会话</strong><span>先只读旁观终端会话；终端不再写入后，再原地接管继续。</span></a></div></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>本页内容</strong><a href="#isolated">哪些内容会隔离</a><a href="#shared">哪些内容仍然共享</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>What a separate Claude login shares — CC Pocket Manual</title>
+<meta name="description" content="The daemon keeps its Claude credentials separate while continuing to share session history, CLAUDE.md, skills, plugins, settings, and MCP configuration." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="What a separate Claude login shares — CC Pocket Manual" />
+<meta property="og:description" content="The daemon keeps its Claude credentials separate while continuing to share session history, CLAUDE.md, skills, plugins, settings, and MCP configuration." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="What a separate Claude login shares — CC Pocket Manual" />
+<meta name="twitter:description" content="The daemon keeps its Claude credentials separate while continuing to share session history, CLAUDE.md, skills, plugins, settings, and MCP configuration." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"What a separate Claude login shares",
+  "description":"The daemon keeps its Claude credentials separate while continuing to share session history, CLAUDE.md, skills, plugins, settings, and MCP configuration.",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/",
+  "dateModified":"2026-07-25",
+  "inLanguage":"en",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/en/"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← All guides</a>
+    <span>Agents &amp; models</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">Manual</a><span>/</span><span>Agents &amp; models</span></div>
+    <div class="platform-tags"><span>Computer daemon · Claude Code</span></div>
+    <h1>What a separate Claude login shares</h1>
+    <div class="short-answer"><span>SHORT ANSWER</span><p>A separate daemon login isolates only Claude credentials. Session history, <code>CLAUDE.md</code>, skills, plugins, settings, and MCP configuration remain shared with the computer’s normal Claude setup.</p></div>
+    <div class="article-meta"><span>Last verified 2026-07-25</span><span>·</span><span>Public URL · no sign-in</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/">Copy link</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" data-copy-prompt="Open this public CC Pocket manual page and answer my question using only the verified steps on the page.">Copy for AI</button>
+    </div>
+    <section id="isolated"><h2>What is isolated</h2><p>Only the credential store is private to the daemon. Logging in or out from CC Pocket changes the daemon’s Claude credentials without replacing the terminal Claude login.</p></section><section id="shared"><h2>What stays shared</h2><ul><li><strong>Session history</strong> under projects, so resume and device handoff keep working.</li><li><strong>CLAUDE.md</strong>, settings, agents, commands, skills, plugins, and todos.</li><li><strong>MCP server configuration</strong> and project trust stored in <code>.claude.json</code>.</li></ul><aside class="article-note">This is credential isolation, not a separate Claude workspace or multi-profile session store.</aside></section>
+    <section class="related-articles"><h2>Related guides</h2><div><a href="../choose-agent-and-model/"><strong>Choose an agent and model</strong><span>Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id.</span></a><a href="../take-over-a-terminal-session/"><strong>Take over a terminal session without forking</strong><span>Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing.</span></a></div></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>On this page</strong><a href="#isolated">What is isolated</a><a href="#shared">What stays shared</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

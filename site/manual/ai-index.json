@@ -32,7 +32,7 @@
         }
       },
       "slug": "install-and-pair",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -67,7 +67,7 @@
         }
       },
       "slug": "schedule-a-prompt",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -101,7 +101,7 @@
         }
       },
       "slug": "take-over-a-terminal-session",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -137,7 +137,7 @@
         }
       },
       "slug": "approve-from-another-computer",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -173,7 +173,45 @@
         }
       },
       "slug": "choose-agent-and-model",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "separate Claude login",
+            "isolated Claude auth",
+            "credentials",
+            "CLAUDE.md",
+            "skills",
+            "MCP",
+            "session history"
+          ],
+          "shortAnswer": "A separate daemon login isolates only Claude credentials. Session history, CLAUDE.md , skills, plugins, settings, and MCP configuration remain shared with the computer’s normal Claude setup.",
+          "summary": "The daemon keeps its Claude credentials separate while continuing to share session history, CLAUDE.md, skills, plugins, settings, and MCP configuration.",
+          "text": "isolated What is isolated Only the credential store is private to the daemon. Logging in or out from CC Pocket changes the daemon’s Claude credentials without replacing the terminal Claude login. shared What stays shared Session history under projects, so resume and device handoff keep working. CLAUDE.md , settings, agents, commands, skills, plugins, and todos. MCP server configuration and project trust stored in .claude.json . This is credential isolation, not a separate Claude workspace or multi-profile session store.",
+          "title": "What a separate Claude login shares",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/"
+        },
+        "zh": {
+          "aliases": [
+            "独立 Claude 登录",
+            "隔离 Claude 凭据",
+            "账号隔离",
+            "CLAUDE.md",
+            "skills",
+            "MCP",
+            "会话历史"
+          ],
+          "shortAnswer": "daemon 的独立登录只隔离 Claude 凭据；会话历史、 CLAUDE.md 、skills、plugins、settings 和 MCP 配置仍与电脑上的普通 Claude 环境共享。",
+          "summary": "daemon 只隔离 Claude 登录凭据；会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置仍然共享。",
+          "text": "isolated 哪些内容会隔离 只有凭据存储归 daemon 独立使用。在 CC Pocket 中登录或退出，只会改变 daemon 的 Claude 凭据，不会替换终端中 Claude 的登录状态。 shared 哪些内容仍然共享 会话历史 （projects），因此恢复会话和跨设备接续仍然有效。 CLAUDE.md 、settings、agents、commands、skills、plugins 和 todos。 保存在 .claude.json 中的 MCP 服务器配置 与项目信任信息。 这是“凭据隔离”，不是另建一套 Claude 工作区或多账号会话库。",
+          "title": "独立 Claude 登录会共享什么",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/"
+        }
+      },
+      "slug": "separate-claude-login",
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -209,7 +247,7 @@
         }
       },
       "slug": "share-a-folder",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -245,7 +283,7 @@
         }
       },
       "slug": "fix-offline-computer",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     },
     {
       "locales": {
@@ -281,11 +319,11 @@
         }
       },
       "slug": "update-daemon",
-      "verifiedAt": "2026-07-24"
+      "verifiedAt": "2026-07-25"
     }
   ],
   "canonical": "https://heypandax.github.io/cc-pocket/manual/",
   "schemaVersion": 1,
   "source": "site/manual/manual-content.json",
-  "verifiedAt": "2026-07-24"
+  "verifiedAt": "2026-07-25"
 }

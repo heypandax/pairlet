@@ -69,133 +69,147 @@
   <!-- MANUAL_START -->
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/schedule-a-prompt/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/approve-from-another-computer/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/approve-from-another-computer/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/approve-from-another-computer/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/approve-from-another-computer/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
   </url>
   <url>
+    <loc>https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/</loc>
+    <lastmod>2026-07-25</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+  </url>
+  <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/share-a-folder/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/fix-offline-computer/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/en/update-daemon/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/schedule-a-prompt/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/schedule-a-prompt/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/approve-from-another-computer/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/approve-from-another-computer/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/approve-from-another-computer/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/approve-from-another-computer/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
   </url>
   <url>
+    <loc>https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/</loc>
+    <lastmod>2026-07-25</lastmod>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/separate-claude-login/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/separate-claude-login/" />
+  </url>
+  <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/share-a-folder/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/share-a-folder/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/fix-offline-computer/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/fix-offline-computer/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/" />
   </url>
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/</loc>
-    <lastmod>2026-07-24</lastmod>
+    <lastmod>2026-07-25</lastmod>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" />
     <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
     <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />

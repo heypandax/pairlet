@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import html
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -13,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANUAL = ROOT / "site" / "manual"
 CONTENT = MANUAL / "manual-content.json"
 PUBLIC_BASE = "https://heypandax.github.io/cc-pocket/manual"
-VERIFIED = "2026-07-24"
+VERIFIED = ""
 
 
 def text(value: str) -> str:
@@ -397,11 +399,13 @@ def update_sitemap(data: dict) -> None:
 
 
 def main() -> None:
+    global VERIFIED
     data = json.loads(CONTENT.read_text())
-    if data.get("verifiedAt") != VERIFIED:
-        raise ValueError(
-            f"manual-content.json verifiedAt ({data.get('verifiedAt')!r}) must match builder VERIFIED ({VERIFIED})"
-        )
+    VERIFIED = str(data.get("verifiedAt", ""))
+    try:
+        dt.date.fromisoformat(VERIFIED)
+    except ValueError as exc:
+        raise ValueError(f"manual-content.json verifiedAt must be an ISO date: {VERIFIED!r}") from exc
     MANUAL.mkdir(parents=True, exist_ok=True)
     (MANUAL / "index.html").write_text(root_page())
     for locale in ("en", "zh"):
@@ -423,6 +427,18 @@ def main() -> None:
         ],
         check=True,
     )
+    llms_path = ROOT / "site" / "llms.txt"
+    llms_text = llms_path.read_text(encoding="utf-8")
+    llms_text, replacements = re.subn(
+        r"^Last verified: \d{4}-\d{2}-\d{2}\.",
+        f"Last verified: {VERIFIED}.",
+        llms_text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if replacements != 1:
+        raise ValueError("site/llms.txt must contain exactly one Last verified date")
+    llms_path.write_text(llms_text, encoding="utf-8")
     print(f"built {3 + len(data['articles']) * 2} manual pages and AI indexes")
 
 
