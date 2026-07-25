@@ -19,3 +19,5 @@ If code inspection is necessary, follow
 `{baseDir}/references/knowledge-policy.md`. Do not change the repository or
 OpenClaw configuration. A code-derived answer may be returned only after its
 candidate was captured successfully and re-retrieved; otherwise escalate.
+No match is not proof that a feature is unsupported: without direct evidence,
+return the compact escalation response instead of making a product claim.
