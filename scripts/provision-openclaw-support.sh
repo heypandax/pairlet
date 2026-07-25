@@ -258,7 +258,6 @@ for item in data:
       --session isolated \
       --agent cc-pocket-support-review \
       --model "$REVIEW_MODEL" \
-      --fallbacks "" \
       --thinking high \
       --tools exec,read \
       --no-deliver
