@@ -45,6 +45,7 @@ import dev.ccpocket.app.resources.tray_all_clear
 import dev.ccpocket.app.resources.tray_answer_in_session
 import dev.ccpocket.app.resources.tray_computers_many
 import dev.ccpocket.app.resources.tray_computers_one
+import dev.ccpocket.app.resources.tray_exit_app
 import dev.ccpocket.app.resources.tray_more_sessions
 import dev.ccpocket.app.resources.tray_more_waiting
 import dev.ccpocket.app.resources.tray_needs_you
@@ -81,6 +82,7 @@ import org.jetbrains.compose.resources.stringResource
 fun TrayPopover(
     model: DesktopModel,
     onOpenMain: () -> Unit = {},
+    onExitApp: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     showPointer: Boolean = true,
     elevated: Boolean = false,
@@ -179,6 +181,21 @@ fun TrayPopover(
                     Text(stringResource(Res.string.tray_open_app), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.weight(1f))
                     if (keyHint) Key("⌘⏎")
+                }
+                if (onExitApp != null) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).hoverFill(RoundedCornerShape(9.dp))
+                            .clickable {
+                                model.showTray = false
+                                onExitApp()
+                            }.padding(horizontal = 8.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(Res.string.tray_exit_app),
+                            color = Tok.danger, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }

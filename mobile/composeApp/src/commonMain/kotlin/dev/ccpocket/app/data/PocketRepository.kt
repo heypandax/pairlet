@@ -487,8 +487,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.getString(K_DEFAULT_AGENT)?.let { s -> AgentKind.entries.firstOrNull { it.name == s } } ?: AgentKind.CLAUDE,
     )
 
-    /** Session-list agent filter: "both" | "claude" | "codex" (persisted). Hides the other agent's sessions
-     *  from the Sessions list; each row keeps its own identity color (issue #31). */
+    /** Project + session agent filter: "both" | "claude" | "codex" | "opencode" (persisted). Session rows
+     *  were covered by #31; project rows consume DirectoryEntry.sessionAgents as of issue #188. */
     val agentFilter = mutableStateOf(SecureStore.getString(K_AGENT_FILTER)?.takeIf { it.isNotEmpty() } ?: "both")
 
     /** Projects screen: tree (drill-down) vs flat. Persisted (default tree). */
@@ -1382,7 +1382,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_DEFAULT_AGENT, a.name)
     }
 
-    /** Settings: persist the session-list agent filter ("both" | "claude" | "codex"). */
+    /** Settings: persist the project/session agent filter ("both" | "claude" | "codex" | "opencode"). */
     fun setAgentFilter(v: String) {
         if (v == agentFilter.value) return
         agentFilter.value = v
@@ -4157,7 +4157,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)
-        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" — Sessions-list filter (issue #31)
+        const val K_AGENT_FILTER = "sessions_agent_filter"    // SecureStore: "both" | "claude" | "codex" | "opencode" — project/session filter (#31/#188)
         const val K_VIEW_MODE = "projects_view_mode"          // SecureStore: "tree" | "flat" for the Projects screen
         const val K_PINNED = "pinned_projects"                 // SecureStore: '\n'-joined project paths pinned to the top
         const val K_WORKING_SET_PREFIX = "working_set_mru:"    // SecureStore: "working_set_mru:<accountId>" → TSV dirKey\tsessionId\ttitle\tproject\tat\tagent — that computer's switcher MRU (issue #165)

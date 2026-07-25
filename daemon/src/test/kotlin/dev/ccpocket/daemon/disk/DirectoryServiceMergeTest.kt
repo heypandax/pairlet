@@ -55,6 +55,11 @@ class DirectoryServiceMergeTest {
         val rows = svc.listDirectories(null)
         assertEquals(1, rows.size, "all three spellings are ONE directory, got: ${rows.map { it.path }}")
         assertEquals(future + 1, rows.single().lastModified, "the merged row sorts by the newest source")
+        assertEquals(
+            listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE),
+            rows.single().sessionAgents,
+            "the merged row reports every backend with resumable history for project-level filtering",
+        )
     }
 
     @Test
@@ -68,6 +73,7 @@ class DirectoryServiceMergeTest {
         assertEquals(200L, row.lastModified, "the group keeps its max mtime")
         assertEquals("$work/", row.path, "the newest variant's spelling is the row identity")
         assertTrue(row.hasSessions)
+        assertEquals(listOf(AgentKind.CODEX, AgentKind.OPENCODE), row.sessionAgents)
     }
 
     @Test
@@ -84,6 +90,7 @@ class DirectoryServiceMergeTest {
             )
             val with = svc.listDirectories(null, includeOpencode = true)
             assertEquals(setOf(work.toString(), ocOnly.toString()), with.map { it.path }.toSet())
+            assertEquals(listOf(AgentKind.OPENCODE), with.single { it.path == ocOnly.toString() }.sessionAgents)
         } finally {
             ocOnly.toFile().deleteRecursively()
         }

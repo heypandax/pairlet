@@ -502,11 +502,13 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
 
     val tree = repo.treeView.value
     val dirsSnapshot = repo.directories.toList()
-    val root = remember(dirsSnapshot) { treeRoot(dirsSnapshot) }
+    val agentFilter = repo.agentFilter.value
+    val visibleDirs = remember(dirsSnapshot, agentFilter) { filterDirectoriesByAgent(dirsSnapshot, agentFilter) }
+    val root = remember(visibleDirs) { treeRoot(visibleDirs) }
     val browse = repo.browsePath.value
     // a browse path the daemon no longer has (dirs changed) falls back to root
-    val base = remember(dirsSnapshot, browse, root) {
-        browse?.takeIf { b -> dirsSnapshot.any { it.path == b || it.path.startsWith(b + sepOf(b)) } } ?: root // sep-aware: a Windows daemon's paths use '\' (issue #19/#22 — tree drill-in)
+    val base = remember(visibleDirs, browse, root) {
+        browse?.takeIf { b -> visibleDirs.any { it.path == b || it.path.startsWith(b + sepOf(b)) } } ?: root // sep-aware: a Windows daemon's paths use '\' (issue #19/#22 — tree drill-in)
     }
     val treeMode = tree && query.isBlank() // filtering or flat mode both render the flat grouped list
 
@@ -520,20 +522,20 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     // Reuse crumbs() (the breadcrumb's helper) so the title and breadcrumb tail stay identical by construction.
     val headerTitle = if (treeMode && base != root) crumbs(base).lastOrNull() ?: projectsLabel else projectsLabel
     val pinnedSnapshot = repo.pinnedPaths.toList()
-    val flatRows = remember(dirsSnapshot, query, pinnedSnapshot, openSessionsLabel, projectsLabel) {
-        buildDirRows(repo.directories, query, pinnedSnapshot, pinnedLabel, openSessionsLabel, projectsLabel)
+    val flatRows = remember(visibleDirs, query, pinnedSnapshot, openSessionsLabel, projectsLabel) {
+        buildDirRows(visibleDirs, query, pinnedSnapshot, pinnedLabel, openSessionsLabel, projectsLabel)
     }
     // at the root, also surface projects OUTSIDE it (other drives / off-home) as plain leaves
-    val treeRows = remember(dirsSnapshot, base, root) { buildTree(repo.directories, base, includeOrphans = base == root) }
+    val treeRows = remember(visibleDirs, base, root) { buildTree(visibleDirs, base, includeOrphans = base == root) }
     // when drilled into a folder that is itself a project, buildTree leads with its own leaf — split it out
     // as the "current project" row (the rest are its subfolders). Computed once here, not per recomposition.
     val currentLeaf = remember(treeRows, base, root) {
         (treeRows.firstOrNull() as? TreeRow.Leaf)?.takeIf { base != root && it.entry.path == base }
     }
     val childRows = remember(treeRows, currentLeaf) { if (currentLeaf != null) treeRows.drop(1) else treeRows }
-    val live = remember(dirsSnapshot) { dirsSnapshot.filter { it.open || it.busy }.flatMap(::expandLiveSessions) } // ACTIVE: one row per live session
+    val live = remember(visibleDirs) { visibleDirs.filter { it.open || it.busy }.flatMap(::expandLiveSessions) } // ACTIVE: one row per live session
     // pinned projects shown at the tree root (in pin order, present-only) — mirrors the flat Pinned section
-    val pinned = remember(dirsSnapshot, pinnedSnapshot) { pinnedEntries(dirsSnapshot, pinnedSnapshot) }
+    val pinned = remember(visibleDirs, pinnedSnapshot) { pinnedEntries(visibleDirs, pinnedSnapshot) }
     // long-press a project → a small sheet to pin/unpin it
     var actionTarget by remember { mutableStateOf<DirectoryEntry?>(null) }
     // "+" → type an arbitrary path to start a session in a folder with no prior history (issue #7)
@@ -609,6 +611,10 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             when {
                 repo.directories.isEmpty() && repo.directoriesLoaded.value && query.isBlank() ->
                     EmptyDirectories { repo.refreshDirectories() }
+                visibleDirs.isEmpty() && repo.directoriesLoaded.value ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
+                    }
                 !treeMode && flatRows.isEmpty() && repo.directoriesLoaded.value ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)

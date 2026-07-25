@@ -1,5 +1,7 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.protocol.ActiveSession
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -65,5 +67,41 @@ class DirListTest {
         val targets = crumbTargets("/Users/x/code/app", "/Users/x")
         assertEquals(listOf("~", "code", "app"), targets.map { it.first })
         assertEquals(listOf("/Users/x", "/Users/x/code", "/Users/x/code/app"), targets.map { it.second })
+    }
+
+    @Test
+    fun agent_filter_hides_projects_without_that_backends_history_but_keeps_legacy_unknowns() {
+        val dirs = listOf(
+            d("/p/claude").copy(sessionAgents = listOf(AgentKind.CLAUDE)),
+            d("/p/opencode").copy(sessionAgents = listOf(AgentKind.OPENCODE)),
+            d("/p/mixed").copy(sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.OPENCODE)),
+            d("/p/old-daemon"), // no sessionAgents field on the wire → fail open until daemon upgrade
+            DirectoryEntry("/shared/new", "new", isDir = true, hasSessions = false, sharedBy = "owner"),
+        )
+
+        assertEquals(
+            listOf("/p/opencode", "/p/mixed", "/p/old-daemon", "/shared/new"),
+            filterDirectoriesByAgent(dirs, "opencode").map { it.path },
+        )
+        assertEquals(dirs, filterDirectoriesByAgent(dirs, "both"))
+    }
+
+    @Test
+    fun agent_filter_removes_other_backends_live_rows_and_recomputes_legacy_scalars() {
+        val claude = ActiveSession("c1", "Claude turn", executing = true, agent = AgentKind.CLAUDE)
+        val opencode = ActiveSession("o1", "OpenCode turn", busy = true, agent = AgentKind.OPENCODE)
+        val row = d("/p/mixed").copy(
+            sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.OPENCODE),
+            open = true, executing = true, busy = true,
+            activeSessionId = claude.sessionId, activeSessionTitle = claude.title,
+            activeSessions = listOf(claude, opencode),
+        )
+
+        val filtered = filterDirectoriesByAgent(listOf(row), "opencode").single()
+        assertEquals(listOf(opencode), filtered.activeSessions)
+        assertEquals("o1", filtered.activeSessionId)
+        assertEquals("OpenCode turn", filtered.activeSessionTitle)
+        assertEquals(false, filtered.executing)
+        assertEquals(true, filtered.busy)
     }
 }

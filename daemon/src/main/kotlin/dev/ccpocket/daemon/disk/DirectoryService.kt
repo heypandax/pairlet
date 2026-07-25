@@ -71,6 +71,16 @@ class DirectoryService(
         val claude = claudeDirectories(busyCwds, liveNorm)
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
+        // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
+        // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
+        // persisted filter without turning that preference into daemon-global state.
+        val externalAgentsByKey = HashMap<String, MutableSet<AgentKind>>()
+        codex.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.CODEX)
+        }
+        opencode.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.OPENCODE)
+        }
         // merge both external sources; keys keep each source's raw spelling here — grouped canonically below
         val allExternal = HashMap<String, Long>()
         codex.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
@@ -99,12 +109,19 @@ class DirectoryService(
                     activeSessionId = live.firstOrNull()?.sessionId,
                     activeSessionTitle = live.firstOrNull()?.title,
                     activeSessions = live,
+                    sessionAgents = (externalAgentsByKey[key].orEmpty() + live.map { it.agent })
+                        .distinct().sortedBy { it.ordinal },
                 )
             }
         // a dir with both histories sorts by whichever agent wrote last
         val merged = claude.map { e ->
-            val extM = externalByKey[ProjectPaths.canonicalKey(e.path)]?.max() ?: 0L
-            if (extM > e.lastModified) e.copy(lastModified = extM) else e
+            val key = ProjectPaths.canonicalKey(e.path)
+            val extM = externalByKey[key]?.max() ?: 0L
+            e.copy(
+                lastModified = maxOf(e.lastModified, extM),
+                sessionAgents = (e.sessionAgents + externalAgentsByKey[key].orEmpty() + e.activeSessions.map { it.agent })
+                    .distinct().sortedBy { it.ordinal },
+            )
         }
         return (merged + externalOnly).sortedByDescending { it.lastModified }
     }
@@ -158,6 +175,8 @@ class DirectoryService(
                     activeSessionTitle = first?.title,
                     gitBranch = first?.gitBranch,
                     activeSessions = active,
+                    sessionAgents = (listOf(AgentKind.CLAUDE) + active.map { it.agent })
+                        .distinct().sortedBy { it.ordinal },
                 )
             }
             .sortedByDescending { it.lastModified }

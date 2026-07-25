@@ -119,6 +119,45 @@ fun liveAgent(e: DirectoryEntry): AgentKind =
 fun liveOrigin(e: DirectoryEntry): String? =
     e.activeSessions.firstOrNull { it.sessionId == e.activeSessionId }?.origin
 
+/**
+ * Apply the persisted session-agent filter to PROJECT rows too (issue #188). [DirectoryEntry.sessionAgents]
+ * is history provenance from a new daemon; empty means an older daemon, so fail open and keep the row rather
+ * than hiding projects on an app-only upgrade. Live rows can still be filtered exactly because every
+ * [dev.ccpocket.protocol.ActiveSession] carries its backend.
+ *
+ * Shared/bare roots with no history stay reachable: the filter governs existing sessions, not whether the
+ * user may start a new one in an explicitly shared folder.
+ */
+internal fun filterDirectoriesByAgent(dirs: List<DirectoryEntry>, filter: String): List<DirectoryEntry> {
+    val target = when (filter) {
+        "claude" -> AgentKind.CLAUDE
+        "codex" -> AgentKind.CODEX
+        "opencode" -> AgentKind.OPENCODE
+        else -> return dirs
+    }
+    return dirs.mapNotNull { entry ->
+        val visibleLive = entry.activeSessions.filter { it.agent == target }
+        val historyKnown = entry.sessionAgents.isNotEmpty()
+        val hasVisibleHistory = !entry.hasSessions || !historyKnown || target in entry.sessionAgents
+        if (!hasVisibleHistory && visibleLive.isEmpty()) return@mapNotNull null
+
+        // A pre-activeSessions daemon may expose only the legacy scalar fields. With no provenance either,
+        // preserve that row untouched — it is unknowable, and keeping it matches the pre-#188 fallback.
+        if (!historyKnown && entry.activeSessions.isEmpty()) return@mapNotNull entry
+
+        val first = visibleLive.firstOrNull()
+        entry.copy(
+            activeSessions = visibleLive,
+            open = first != null,
+            executing = visibleLive.any { it.executing },
+            busy = visibleLive.any { it.busy },
+            activeSessionId = first?.sessionId,
+            activeSessionTitle = first?.title,
+            gitBranch = first?.gitBranch,
+        )
+    }
+}
+
 fun buildDirRows(
     dirs: List<DirectoryEntry>,
     query: String,

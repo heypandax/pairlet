@@ -8,6 +8,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
@@ -55,11 +56,17 @@ import org.jetbrains.skiko.currentSystemTheme
  * behavior is unchanged.
  */
 @Composable
-internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
+internal fun MenuBarExtra(
+    model: DesktopModel,
+    onActivateWindow: () -> Unit,
+    onExitApplication: (() -> Unit)? = null,
+    onAvailabilityChanged: (Boolean) -> Unit = {},
+) {
     val supported = remember {
         runCatching { !GraphicsEnvironment.isHeadless() && java.awt.SystemTray.isSupported() }.getOrDefault(false)
     }
     if (!supported) return
+    val reportAvailability by rememberUpdatedState(onAvailabilityChanged)
 
     // ── five-state machine: snapshot fold + the time-boxed done-flash bit ──
     val snapshot = menuBarSnapshot(model)
@@ -120,7 +127,9 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
         trayIcon.addMouseListener(mouse)
         trayIcon.addActionListener(action)
         val added = runCatching { java.awt.SystemTray.getSystemTray().add(trayIcon) }.isSuccess
+        reportAvailability(added)
         onDispose {
+            reportAvailability(false)
             trayIcon.removeMouseListener(mouse)
             trayIcon.removeActionListener(action)
             if (added) runCatching { java.awt.SystemTray.getSystemTray().remove(trayIcon) }
@@ -193,6 +202,7 @@ internal fun MenuBarExtra(model: DesktopModel, onActivateWindow: () -> Unit) {
                     TrayPopover(
                         model,
                         onOpenMain = { anchor = null; onActivateWindow() },
+                        onExitApp = onExitApplication?.let { exit -> { anchor = null; exit() } },
                         showPointer = false,
                         elevated = false,
                         keyHint = true,

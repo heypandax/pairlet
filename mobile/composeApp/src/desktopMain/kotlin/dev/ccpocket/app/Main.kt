@@ -54,6 +54,12 @@ import java.awt.Toolkit
 
 private const val K_WIN_BOUNDS = "desktop_window_bounds" // "x,y,w,h[,zoomed]" — restored on the next launch
 
+/** Issue #189: close-to-tray is safe only when Windows can actually keep a reachable tray icon alive.
+ *  Disabling the menu-bar setting or running without SystemTray support preserves the old exit behavior,
+ *  so a hidden window can never strand an un-exitable process. */
+internal fun shouldCloseMainWindowToTray(isWindows: Boolean, menuBarEnabled: Boolean, trayReady: Boolean): Boolean =
+    isWindows && menuBarEnabled && trayReady
+
 /**
  * Desktop entry point — the two-pane "mission control": one host driving Claude Code / Codex on another.
  * Backed by the live [PocketRepository] via [RepoDesktopModel]; shows [ConnectPanel] until the relay is up,
@@ -67,7 +73,14 @@ fun main() = application {
     // the same repo; AppLaunch is the one exception — the shared App() composable that fires it on mobile
     // isn't used here, so we track it explicitly below.
     remember { dev.ccpocket.app.telemetry.initDesktopTelemetry() }
-    val mac = System.getProperty("os.name").lowercase().contains("mac")
+    val osName = System.getProperty("os.name").lowercase()
+    val mac = osName.contains("mac")
+    val windows = osName.contains("windows")
+    val traySupported = remember {
+        runCatching {
+            !java.awt.GraphicsEnvironment.isHeadless() && java.awt.SystemTray.isSupported()
+        }.getOrDefault(false)
+    }
     // restore last window bounds (the off-screen guard below re-centers if displays changed since);
     // a 5th field marks "was zoomed" — the first four stay the PRE-zoom bounds so un-zoom has a target
     val savedBounds = remember {
@@ -111,8 +124,28 @@ fun main() = application {
     // (menu-bar green button, Mission Control, ⌃⌘F) stay in sync. This is DISTINCT from double-click "zoom"
     // (maximize), which keeps its own onToggleMax path.
     var fullscreen by remember { mutableStateOf(false) }
+    var mainWindowVisible by remember { mutableStateOf(true) }
+    var trayReady by remember { mutableStateOf(false) }
     var awtWindow by remember { mutableStateOf<java.awt.Window?>(null) }
     var fsRestore by remember { mutableStateOf<Rectangle?>(null) } // Win/Linux borderless-FS restore bounds
+    val activateMainWindow: () -> Unit = {
+        mainWindowVisible = true
+        windowState.isMinimized = false
+        awtWindow?.let { window ->
+            window.isVisible = true
+            window.toFront()
+            window.requestFocus()
+        }
+    }
+    val closeMainWindow: () -> Unit = {
+        if (shouldCloseMainWindowToTray(windows, model.menuBarEnabled, trayReady)) {
+            // Keep the Window composed so repo/fleet state, terminal state, and the tray all survive.
+            // `visible=false` removes it from the taskbar; the tray's Open action flips it back in place.
+            mainWindowVisible = false
+        } else {
+            exitApplication()
+        }
+    }
     val toggleFullscreen: () -> Unit = tf@{
         val w = awtWindow ?: return@tf
         // Native macOS fullscreen first (async — `fullscreen` flips when the listener fires). false means
@@ -130,21 +163,24 @@ fun main() = application {
     // menu-bar presence (issue #151, direction 1): the OS status glyph + anchored popover live at
     // application scope, so they outlast minimize/unfocus — the whole point of the environment layer.
     // Composed to nothing where the platform has no tray (headless / some Linux desktops).
-    if (model.menuBarEnabled) {
-        dev.ccpocket.app.desktop.MenuBarExtra(model) {
-            windowState.isMinimized = false
-            awtWindow?.toFront()
-            awtWindow?.requestFocus()
-        }
+    if (model.menuBarEnabled && traySupported) {
+        dev.ccpocket.app.desktop.MenuBarExtra(
+            model = model,
+            onActivateWindow = activateMainWindow,
+            // #189 changes Windows only. macOS/Linux keep their existing menu-bar shape and close semantics.
+            onExitApplication = if (windows) ::exitApplication else null,
+            onAvailabilityChanged = { trayReady = it },
+        )
     }
 
     Window(
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = closeMainWindow,
         title = "CC Pocket",
         // taskbar/window icon on Windows & Linux and the dev-run (gradle :run) Dock icon on macOS;
         // the packaged macOS Dock icon comes from the bundle's .icns (build.gradle.kts iconFile)
         icon = androidx.compose.ui.res.painterResource("app-icon.png"),
         state = windowState,
+        visible = mainWindowVisible,
         undecorated = true,
         resizable = true,
         onPreviewKeyEvent = { e ->
@@ -238,9 +274,7 @@ fun main() = application {
             // the AppKit main thread — hop to the EDT before touching the window or Compose state.
             DesktopNotify.onActivate = { sessionId ->
                 java.awt.EventQueue.invokeLater {
-                    windowState.isMinimized = false
-                    window.toFront()
-                    window.requestFocus()
+                    activateMainWindow()
                     if (sessionId != null && repo.sessionActive.value && repo.sessionKey.value != sessionId) {
                         model.liveSession(sessionId)?.let(model::selectSession)
                     }
@@ -311,7 +345,7 @@ fun main() = application {
                 if (!fullscreen) {
                     DkTitleBar(
                         mac = mac,
-                        onClose = ::exitApplication,
+                        onClose = closeMainWindow,
                         onMinimize = { windowState.isMinimized = true },
                         onToggleMax = {
                             val restore = zoomRestore
@@ -334,11 +368,7 @@ fun main() = application {
                     // the tray's "Open cc-pocket" / row-jump raise the window (issue #111): un-minimize, then
                     // bring the AWT window to front and focus it — a real menu-bar action once the tray leaves
                     // the title bar, and harmless (already-frontmost) while it lives there.
-                    if (connected) DesktopApp(model, onActivateWindow = {
-                        windowState.isMinimized = false
-                        window.toFront()
-                        window.requestFocus()
-                    }) else ConnectPanel(repo)
+                    if (connected) DesktopApp(model, onActivateWindow = activateMainWindow) else ConnectPanel(repo)
                     // "Add computer" pairs a new daemon in a modal over the live shell (no disconnect)
                     if (model.showAddComputer) AddComputerModal(repo) { model.showAddComputer = false }
                 }

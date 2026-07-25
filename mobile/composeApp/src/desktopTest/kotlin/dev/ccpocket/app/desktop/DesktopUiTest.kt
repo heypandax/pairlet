@@ -606,6 +606,18 @@ class DesktopUiTest {
     }
 
     @Test
+    fun trayExitIsExplicitAndCallsTheApplicationExitPath() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showTray = true }
+        var exited = false
+        setContent { PocketTheme { TrayPopover(model, onExitApp = { exited = true }) } }
+
+        onAllNodes(hasText(str(Res.string.tray_exit_app))).onFirst().performClick()
+        waitForIdle()
+        assertTrue(exited, "Exit cc-pocket must call the application-level exit callback")
+        assertTrue(!model.showTray, "the in-window tray state is cleared before exiting")
+    }
+
+    @Test
     fun traySettingsGearOpensSettings() = runComposeUiTest {
         val model = SeedDesktopModel()
         var raised = false

@@ -188,7 +188,7 @@ data class DirectoryEntry(
     val path: String,
     val name: String,
     val isDir: Boolean,
-    /** true if resumable Claude history exists for this dir. */
+    /** true if resumable agent history exists for this dir. */
     val hasSessions: Boolean = false,
     /** true if in the recents list. */
     val recent: Boolean = false,
@@ -217,6 +217,10 @@ data class DirectoryEntry(
     val shareExpiresAt: Long? = null,
     /** the access tier the owner granted this share (Review / Collaborate / Autonomous) — the guest's badge. */
     val shareTier: AccessTier? = null,
+    /** Backends with resumable history in this directory (issue #188). A trailing additive field: an old
+     *  daemon omits it and the new app treats empty as "unknown" (keeps the row); an old app ignores it.
+     *  Live sessions remain separately authoritative in [activeSessions]. */
+    val sessionAgents: List<AgentKind> = emptyList(),
 )
 
 /** One filesystem child under a session's cwd, for the composer's `@`-file completion ([PathEntries],
