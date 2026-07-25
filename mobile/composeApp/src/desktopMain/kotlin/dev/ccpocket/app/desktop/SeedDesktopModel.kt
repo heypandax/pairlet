@@ -310,7 +310,7 @@ class SeedDesktopModel : DesktopModel {
     override fun selectSession(s: DkSession) { sessions.indexOfFirst { it.sessionId == s.sessionId }.takeIf { it >= 0 }?.let { selectedIndex = it; askResolved = false } }
     override val newSessionDir = "~/code/cc-pocket"
     override var newSessionSeed: String? by mutableStateOf(null)
-    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode) { showNewSession = false }
+    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?) { showNewSession = false }
     override fun send(text: String) { composer = "" }
 
     override val pendingImages: List<dev.ccpocket.app.data.PendingImage> = emptyList()

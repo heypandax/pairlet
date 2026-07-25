@@ -29,6 +29,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,11 +64,9 @@ import dev.ccpocket.app.ui.share.JoinFolderScreen
 import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
+import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import org.jetbrains.compose.resources.stringResource
-
-// new-session default effort: the canonical levels (shared with the live /effort picker) + a leading
-// null = "model default". Hoisted so it isn't rebuilt on every Settings recomposition.
-private val EFFORT_DEFAULT_OPTS: List<String?> = listOf(null) + EFFORT_OPTIONS
 
 // new-session default model: the shared Claude aliases + a leading null = "CLI default". Claude-only —
 // a Codex launch never inherits it (see PocketRepository.openSession), so Codex needs no row here.
@@ -88,6 +87,9 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
  */
 @Composable
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
+    // Capability rows come from the installed CLI/model cache. A recomposition after the reply replaces
+    // the loading/empty state; no global max/ultra list is guessed in the client.
+    LaunchedEffect(repo.defaultAgent.value) { repo.fetchModels(repo.defaultAgent.value) }
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) { UsageScreen(repo, onBack = { showUsage = false }); return } // full-screen usage dashboard (#26)
     // scheduled tasks (issue #137): list + cancel, full-screen like usage
@@ -190,11 +192,18 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
 
             SectionLabel(stringResource(Res.string.default_mode_section))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                MODES.forEachIndexed { i, m ->
+                val modeOptions = MODES + if (
+                    repo.defaultAgent.value == AgentKind.CLAUDE &&
+                    repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
+                ) listOf(AUTO_MODE) else emptyList()
+                modeOptions.forEachIndexed { i, m ->
                     if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                    val sel = repo.defaultMode.value == m.key
+                    val sel = repo.defaultMode.value == m.key && repo.defaultPermissionMode.value == m.nativeMode
                     Row(
-                        Modifier.fillMaxWidth().clickable { repo.setDefaultMode(m.key) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                        Modifier.fillMaxWidth().clickable {
+                            if (m.nativeMode == CLAUDE_PERMISSION_MODE_AUTO) repo.setDefaultAutoMode()
+                            else repo.setDefaultMode(m.key)
+                        }.padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("●", color = m.color, fontSize = 9.sp, modifier = Modifier.padding(end = 10.dp))
@@ -214,7 +223,24 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
 
             SectionLabel(stringResource(Res.string.default_effort_section))
             val effortDefaultLabel = stringResource(Res.string.value_default)
-            SegmentedRow(EFFORT_DEFAULT_OPTS, repo.defaultEffort.value, label = { it ?: effortDefaultLabel }) { repo.setDefaultEffort(it) }
+            val defaultAgent = repo.defaultAgent.value
+            val effortOptions = (listOf<String?>(null) + repo.effortOptions(defaultAgent, repo.defaultModelFor(defaultAgent)))
+                .let { opts -> if (repo.defaultEffort.value != null && repo.defaultEffort.value !in opts) opts + repo.defaultEffort.value else opts }
+                .distinct()
+            SegmentedRow(effortOptions, repo.defaultEffort.value, label = { it ?: effortDefaultLabel }) { repo.setDefaultEffort(it) }
+            if (defaultAgent == AgentKind.CODEX && repo.serviceTierOptions(defaultAgent, repo.defaultModelFor(defaultAgent)).any { it.id == "priority" }) {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp))
+                        .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
+                ) {
+                    ToggleRow(
+                        label = stringResource(Res.string.fast_mode),
+                        sub = stringResource(Res.string.fast_mode_detail),
+                        checked = repo.defaultServiceTier.value == "priority",
+                        onChange = { repo.setDefaultServiceTier(if (it) "priority" else null) },
+                    )
+                }
+            }
 
             SectionLabel(stringResource(Res.string.context_window_section))
             val ctxDefaultLabel = stringResource(Res.string.value_default)

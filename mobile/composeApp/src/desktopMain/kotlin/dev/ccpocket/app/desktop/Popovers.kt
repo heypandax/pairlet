@@ -62,6 +62,7 @@ import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
 import dev.ccpocket.app.resources.label_model
 import dev.ccpocket.app.resources.mode_accept_short
+import dev.ccpocket.app.resources.mode_auto_short
 import dev.ccpocket.app.resources.mode_bypass_short
 import dev.ccpocket.app.resources.mode_default_short
 import dev.ccpocket.app.resources.mode_plan_short
@@ -84,6 +85,9 @@ import dev.ccpocket.app.resources.qa_clear_armed
 import dev.ccpocket.app.resources.qa_compact
 import dev.ccpocket.app.resources.qa_terminal
 import dev.ccpocket.app.resources.quick_actions_title
+import dev.ccpocket.app.resources.fast_mode
+import dev.ccpocket.app.resources.value_off
+import dev.ccpocket.app.resources.value_on
 import dev.ccpocket.app.resources.value_default
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentGlyph
@@ -92,7 +96,6 @@ import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import dev.ccpocket.app.ui.CLAUDE_MODEL_OPTIONS
 import dev.ccpocket.app.ui.CODEX_MODEL_OPTIONS
-import dev.ccpocket.app.ui.EFFORT_OPTIONS
 import dev.ccpocket.app.ui.GatewayModelPreset
 import dev.ccpocket.app.ui.GatewayVendorMonogram
 import dev.ccpocket.app.ui.gatewayRowsFrom
@@ -105,9 +108,17 @@ import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionMode
 
-internal data class DkMode(val label: StringResource, val token: String, val mode: PermissionMode, val dot: Color, val danger: Boolean = false)
+internal data class DkMode(
+    val label: StringResource,
+    val token: String,
+    val mode: PermissionMode,
+    val dot: Color,
+    val danger: Boolean = false,
+    val nativeMode: String? = null,
+)
 
 internal val CLAUDE_MODES = listOf(
     DkMode(Res.string.mode_default_short, "default", PermissionMode.DEFAULT, Tok.tx2),
@@ -115,6 +126,8 @@ internal val CLAUDE_MODES = listOf(
     DkMode(Res.string.mode_plan_short, "plan", PermissionMode.PLAN, Tok.info),
     DkMode(Res.string.mode_bypass_short, "bypass", PermissionMode.BYPASS_PERMISSIONS, Tok.warn, danger = true),
 )
+internal val CLAUDE_AUTO_MODE =
+    DkMode(Res.string.mode_auto_short, CLAUDE_PERMISSION_MODE_AUTO, PermissionMode.DEFAULT, Tok.accent, nativeMode = CLAUDE_PERMISSION_MODE_AUTO)
 
 /**
  * Agent + mode picker with an EDITABLE path field seeded by whoever opened it (the current project from
@@ -126,10 +139,17 @@ fun NewSessionPopover(
     initialPath: String,
     defaultAgent: AgentKind = AgentKind.CLAUDE,
     defaultMode: PermissionMode = PermissionMode.DEFAULT,
-    onStart: (String, AgentKind, PermissionMode) -> Unit,
+    defaultPermissionMode: String? = null,
+    autoAvailable: Boolean = false,
+    onStart: (String, AgentKind, PermissionMode, String?) -> Unit,
 ) {
     var agent by remember { mutableStateOf(defaultAgent) }
-    var modeIdx by remember { mutableStateOf(CLAUDE_MODES.indexOfFirst { it.mode == defaultMode }.coerceAtLeast(0)) }
+    val availableModes = CLAUDE_MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
+    var modeIdx by remember {
+        mutableStateOf(
+            availableModes.indexOfFirst { it.mode == defaultMode && it.nativeMode == defaultPermissionMode }.coerceAtLeast(0),
+        )
+    }
     var path by remember(initialPath) { mutableStateOf(TextFieldValue(initialPath, selection = TextRange(initialPath.length))) }
     val trimmed = path.text.trim()
     // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
@@ -141,7 +161,14 @@ fun NewSessionPopover(
             // Enter anywhere in the popover = the Start button (the path field holds focus)
             .onPreviewKeyEvent { e ->
                 if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter) && looksAbsolute) {
-                    onStart(trimmed, agent, if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else CLAUDE_MODES[modeIdx].mode); true
+                    val selected = availableModes.getOrElse(modeIdx) { CLAUDE_MODES.first() }
+                    onStart(
+                        trimmed,
+                        agent,
+                        if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else selected.mode,
+                        selected.nativeMode.takeIf { agent == AgentKind.CLAUDE },
+                    )
+                    true
                 } else false
             },
     ) {
@@ -187,7 +214,7 @@ fun NewSessionPopover(
                         color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.padding(top = 4.dp),
                     )
                 }
-            } else CLAUDE_MODES.forEachIndexed { i, m ->
+            } else availableModes.forEachIndexed { i, m ->
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp))
                         .background(if (i == modeIdx) Tok.surface else Color.Transparent)
@@ -207,7 +234,13 @@ fun NewSessionPopover(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp).alpha(if (looksAbsolute) 1f else 0.45f)
                     .clip(RoundedCornerShape(10.dp)).background(Tok.accent)
                     .clickable(enabled = looksAbsolute) {
-                        onStart(trimmed, agent, if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else CLAUDE_MODES[modeIdx].mode)
+                        val selected = availableModes.getOrElse(modeIdx) { CLAUDE_MODES.first() }
+                        onStart(
+                            trimmed,
+                            agent,
+                            if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else selected.mode,
+                            selected.nativeMode.takeIf { agent == AgentKind.CLAUDE },
+                        )
                     }.padding(vertical = 10.dp),
             )
         }
@@ -224,6 +257,7 @@ private enum class QaPage { MAIN, EFFORT, MODE }
 fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
     var page by remember { mutableStateOf(QaPage.MAIN) }
     var clearArmed by remember { mutableStateOf(false) }
+    LaunchedEffect(model.chatAgent) { model.fetchModels(model.chatAgent) }
     Column(
         Modifier.width(280.dp).clip(RoundedCornerShape(14.dp)).background(Tok.raised)
             .border(1.dp, Tok.hair, RoundedCornerShape(14.dp)).padding(15.dp),
@@ -237,8 +271,26 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 if (!model.observing) {
                     QaRow(stringResource(Res.string.label_model), value = modelChipLabel(model.chatModelId).ifBlank { stringResource(Res.string.value_default) }) { onDismiss(); model.showModelPopover = true }
                 }
-                QaRow(stringResource(Res.string.label_effort), value = model.chatEffort ?: stringResource(Res.string.value_default), chevron = true) { page = QaPage.EFFORT }
-                QaRow(stringResource(Res.string.label_mode), value = CLAUDE_MODES.first { it.mode == model.chatMode }.token, chevron = true) { page = QaPage.MODE }
+                if (model.effortOptions().isNotEmpty()) {
+                    QaRow(stringResource(Res.string.label_effort), value = model.chatEffort ?: stringResource(Res.string.value_default), chevron = true) { page = QaPage.EFFORT }
+                }
+                if (model.serviceTierOptions().any { it.id == "priority" }) {
+                    QaRow(
+                        stringResource(Res.string.fast_mode),
+                        value = stringResource(if (model.chatServiceTier == "priority") Res.string.value_on else Res.string.value_off),
+                    ) {
+                        model.switchServiceTier(if (model.chatServiceTier == "priority") null else "priority")
+                        onDismiss()
+                    }
+                }
+                val modeChoices = CLAUDE_MODES + if (
+                    model.chatAgent == AgentKind.CLAUDE &&
+                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO)
+                ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                val activeMode = modeChoices.firstOrNull {
+                    it.mode == model.chatMode && it.nativeMode == model.chatPermissionMode
+                } ?: modeChoices.first()
+                QaRow(stringResource(Res.string.label_mode), value = activeMode.token, chevron = true) { page = QaPage.MODE }
                 // canOpen() stats the filesystem — key it on the workdir so it isn't re-run every
                 // recomposition (this popover recomposes on every page/arm toggle); same as ChatSubHeader.
                 // Routes by the user's default (issue #153): embedded dock unless Settings says external.
@@ -253,15 +305,28 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
             }
             QaPage.EFFORT -> {
                 QaBack(stringResource(Res.string.label_effort)) { page = QaPage.MAIN }
-                EFFORT_OPTIONS.forEach { opt ->
+                val defaultLabel = stringResource(Res.string.value_default)
+                QaOption(defaultLabel, model.chatEffort == null) { model.switchEffort(null); onDismiss() }
+                model.effortOptions().forEach { opt ->
                     QaOption(opt, opt.equals(model.chatEffort, true)) { model.switchEffort(opt); onDismiss() }
                 }
             }
             QaPage.MODE -> {
                 QaBack(stringResource(Res.string.label_mode)) { page = QaPage.MAIN }
-                CLAUDE_MODES.forEach { m ->
-                    QaOption(stringResource(m.label), m.mode == model.chatMode, dot = m.dot, danger = m.danger, token = m.token) {
-                        model.switchMode(m.mode); onDismiss()
+                val choices = CLAUDE_MODES + if (
+                    model.chatAgent == AgentKind.CLAUDE &&
+                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO)
+                ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                choices.forEach { m ->
+                    QaOption(
+                        stringResource(m.label),
+                        m.mode == model.chatMode && m.nativeMode == model.chatPermissionMode,
+                        dot = m.dot,
+                        danger = m.danger,
+                        token = m.token,
+                    ) {
+                        model.switchMode(m.mode, m.nativeMode)
+                        onDismiss()
                     }
                 }
             }

@@ -213,8 +213,49 @@ private fun GeneralPane(model: DesktopModel) {
         Group(stringResource(Res.string.settings_context_window), stringResource(Res.string.settings_context_window_sub)) {
             ContextWindowRows(model)
         }
+        val reasoningOptions = model.effortOptionsFor(defaultAgent, defaultModel)
+        if (reasoningOptions.isNotEmpty()) {
+            Group(stringResource(Res.string.default_effort_section)) {
+                PrefRow(
+                    stringResource(Res.string.settings_option_default),
+                    stringResource(Res.string.settings_option_cli_default),
+                    selected = model.defaultEffort == null,
+                ) { model.defaultEffort = null }
+                reasoningOptions.forEach { effort ->
+                    PrefRow(effort, "--effort $effort", selected = model.defaultEffort == effort) {
+                        model.defaultEffort = effort
+                    }
+                }
+            }
+        }
+        if (
+            defaultAgent == AgentKind.CODEX &&
+            model.serviceTierOptionsFor(defaultAgent, defaultModel).any { it.id == "priority" }
+        ) {
+            Group(stringResource(Res.string.fast_mode), stringResource(Res.string.fast_mode_detail)) {
+                PrefRow(
+                    stringResource(Res.string.value_off),
+                    stringResource(Res.string.settings_option_cli_default),
+                    selected = model.defaultServiceTier == null,
+                ) { model.defaultServiceTier = null }
+                PrefRow(
+                    stringResource(Res.string.value_on),
+                    "serviceTier = priority",
+                    selected = model.defaultServiceTier == "priority",
+                ) { model.defaultServiceTier = "priority" }
+            }
+        }
         Group(stringResource(Res.string.settings_default_mode), stringResource(Res.string.settings_default_mode_sub)) {
-            CLAUDE_MODES.forEach { m -> ModeRow(m, selected = m.mode == model.defaultMode) { model.defaultMode = m.mode } }
+            val modes = CLAUDE_MODES + if (
+                defaultAgent == AgentKind.CLAUDE &&
+                model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO)
+            ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+            modes.forEach { m ->
+                ModeRow(
+                    m,
+                    selected = m.mode == model.defaultMode && m.nativeMode == model.defaultPermissionMode,
+                ) { model.setDefaultMode(m.mode, m.nativeMode) }
+            }
         }
         // how a terminal opens (issue #153: embedded dock is the default) + which external app (issue #44 —
         // only terminals actually present on this machine are offered)

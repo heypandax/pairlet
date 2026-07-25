@@ -154,6 +154,9 @@
     <string name="mode_bypass_short">全自动</string>
     <string name="mode_bypass_label">全自动 · 放手干</string>
     <string name="mode_bypass_detail">自动允许所有操作 · 不再询问</string>
+    <string name="mode_auto_short">自动判断</string>
+    <string name="mode_auto_label">自动判断 · 需要时询问</string>
+    <string name="mode_auto_detail">Claude 会判断每项操作，确实需要你授权时再询问</string>
     <string name="exec_mode_title">执行模式</string>
     <string name="exec_mode_subtitle">Claude 行动前需要问到什么程度？</string>
     <string name="mode_switching">正在重启会话以应用新模式…</string>
@@ -423,6 +426,10 @@
     <string name="session_info_title">会话</string>
     <string name="label_model">模型</string>
     <string name="label_effort">思考深度</string>
+    <string name="fast_mode">快速模式</string>
+    <string name="fast_mode_detail">Codex priority 服务档位 · 响应更快，但用量更高</string>
+    <string name="value_on">开</string>
+    <string name="value_off">关</string>
     <string name="label_mode">模式</string>
     <string name="label_workdir">目录</string>
     <string name="label_context">上下文</string>

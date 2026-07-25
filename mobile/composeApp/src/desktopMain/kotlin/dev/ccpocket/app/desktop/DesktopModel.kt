@@ -336,7 +336,7 @@ interface DesktopModel {
         showNewSession = true
     }
     /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home). */
-    fun newSession(dir: String, agent: AgentKind, mode: PermissionMode)
+    fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String? = null)
     /**
      * True when the ACTIVE computer is the one this desktop app runs on (issue #163). Gates the native
      * directory chooser: a local Finder panel can only browse local disk, so a remote machine has to fall
@@ -365,7 +365,9 @@ interface DesktopModel {
     /** Raw model id (unaliased) — the quick-actions picker compares options against this. */
     val chatModelId: String get() = chatModel
     val chatMode: PermissionMode
+    val chatPermissionMode: String? get() = null
     val chatEffort: String? get() = null
+    val chatServiceTier: String? get() = null
     /** The daemon's third-party ANTHROPIC_BASE_URL (issue #139) — non-null puts the gateway model
      *  presets first in the ⋯ model picker. Default null keeps Seed/test fakes compiling. */
     val gatewayBaseUrl: String? get() = null
@@ -414,8 +416,15 @@ interface DesktopModel {
 
     // live-session switches (the ⋯ quick-actions popover; same repo verbs mobile's sheet drives)
     fun switchMode(m: PermissionMode) {}
+    fun switchMode(m: PermissionMode, permissionMode: String?) { switchMode(m) }
     fun switchModel(name: String) {}
-    fun switchEffort(level: String) {}
+    fun switchEffort(level: String?) {}
+    fun switchServiceTier(tier: String?) {}
+    fun effortOptions(): List<String> = emptyList()
+    fun serviceTierOptions(): List<dev.ccpocket.protocol.ModelServiceTier> = emptyList()
+    fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = emptyList()
+    fun serviceTierOptionsFor(agent: AgentKind, model: String?): List<dev.ccpocket.protocol.ModelServiceTier> = emptyList()
+    fun permissionModeAvailable(id: String): Boolean = false
     /** Agent model lists from the daemon — fetched by [fetchModels]. */
     fun modelsForAgent(agent: AgentKind): List<String> = emptyList()
     fun fetchModels(agent: AgentKind) {}
@@ -544,6 +553,14 @@ interface DesktopModel {
     val updateReleasesUrl: String get() = DesktopUpdater.RELEASES_URL
     var defaultAgent: AgentKind
     var defaultMode: PermissionMode
+    val defaultPermissionMode: String? get() = null
+    fun setDefaultMode(mode: PermissionMode, permissionMode: String?) { defaultMode = mode }
+    var defaultEffort: String?
+        get() = null
+        set(_) {}
+    var defaultServiceTier: String?
+        get() = null
+        set(_) {}
     // Backend-scoped model defaults for new sessions; null follows that CLI's own configured default.
     fun defaultModelFor(agent: AgentKind): String?
     fun setDefaultModelFor(agent: AgentKind, model: String?)

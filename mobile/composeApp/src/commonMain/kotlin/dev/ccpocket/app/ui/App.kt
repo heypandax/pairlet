@@ -685,11 +685,18 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
         )
         // wants a different agent/mode for the new path → the standard picker, then open the session there
         newPathTarget?.let { path ->
+            LaunchedEffect(path) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(
                 workdir = path,
                 selected = repo.defaultMode.value,
+                selectedNativeMode = repo.defaultPermissionMode.value,
                 agent = repo.defaultAgent.value,
-                onPick = { m, a -> newPathTarget = null; repo.setDefaultAgent(a); repo.openSession(path, startMode = m, agent = a) },
+                autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                onPick = { m, a, native ->
+                    newPathTarget = null
+                    repo.setDefaultAgent(a)
+                    repo.openSession(path, startMode = m, agent = a, startPermissionMode = native)
+                },
                 onDismiss = { newPathTarget = null },
             )
         }
@@ -1219,11 +1226,18 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
             }
         }
         if (pickMode) {
+            LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(
                 workdir = dir,
                 selected = repo.defaultMode.value,
+                selectedNativeMode = repo.defaultPermissionMode.value,
                 agent = repo.defaultAgent.value,
-                onPick = { m, a -> pickMode = false; repo.setDefaultAgent(a); repo.openSession(dir, startMode = m, agent = a) },
+                autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                onPick = { m, a, native ->
+                    pickMode = false
+                    repo.setDefaultAgent(a)
+                    repo.openSession(dir, startMode = m, agent = a, startPermissionMode = native)
+                },
                 onDismiss = { pickMode = false },
             )
         }
@@ -1798,7 +1812,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             ModeSheet(
                 current = repo.mode.value, rules = repo.allowRules, switching = repo.switching.value, workdir = repo.workdir.value,
                 agent = repo.sessionAgent.value, // OpenCode renders the immutable full-access notice, not a ladder
-                onSelect = { repo.switchMode(it) }, // keep the sheet open so the "switching" state shows
+                nativeMode = repo.permissionMode.value,
+                autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                onSelect = { mode, native -> repo.switchMode(mode, native) }, // keep the sheet open so the "switching" state shows
                 onClearRule = { repo.clearRule(it) }, onClearAll = { repo.clearAllRules() },
                 onDismiss = { showModeSheet = false },
             )

@@ -65,6 +65,7 @@ import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import androidx.compose.runtime.LaunchedEffect
@@ -79,7 +80,6 @@ internal val CODEX_MODEL_OPTIONS = CODEX_MODEL_IDS // Codex sessions get Codex m
 // and every wrong row is a launch failure. The picker shows the daemon's `opencode models` answer
 // (FetchModels) or an explicit empty/error state, never a guess.
 internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku") // display name → alias; shared by both shells' pickers
-internal val EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max") // shared: live /effort picker + Settings default
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
 fun modelAlias(model: String?): String {
@@ -140,6 +140,9 @@ fun contextColor(frac: Float, base: Color = Tok.accent): Color = when {
 // ════════════════════════════════════════════════════════════════════
 @Composable
 fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
+    val modeLabel =
+        if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) stringResource(AUTO_MODE.short)
+        else MODE_BY[repo.mode.value]?.tech ?: repo.mode.value.name
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp, top = 4.dp)) {
             Text(stringResource(Res.string.session_info_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -158,8 +161,12 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                 AboutRow(stringResource(Res.string.label_model), repo.model.value ?: stringResource(Res.string.value_default))
                 Hairline()
                 AboutRow(stringResource(Res.string.label_effort), repo.effort.value ?: stringResource(Res.string.value_default))
+                if (repo.serviceTier.value == "priority") {
+                    Hairline()
+                    AboutRow(stringResource(Res.string.fast_mode), stringResource(Res.string.value_on))
+                }
                 Hairline()
-                AboutRow(stringResource(Res.string.label_mode), MODE_BY[repo.mode.value]?.tech ?: repo.mode.value.name)
+                AboutRow(stringResource(Res.string.label_mode), modeLabel)
             }
             ContextBar(used = repo.contextUsed.value, total = repo.contextWindow.value)
             PerModelWindowRow(repo)
@@ -298,12 +305,23 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: ()
                     Text(stringResource(Res.string.quick_actions_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         ActionRow(stringResource(Res.string.qa_model), value = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
-                        ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
+                        if (repo.effortOptions().isNotEmpty()) {
+                            ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
+                        }
+                        if (repo.serviceTierOptions().any { it.id == "priority" }) {
+                            ActionRow(
+                                stringResource(Res.string.fast_mode),
+                                value = stringResource(if (repo.serviceTier.value == "priority") Res.string.value_on else Res.string.value_off),
+                            ) { repo.switchServiceTier(if (repo.serviceTier.value == "priority") null else "priority") }
+                        }
                         // the permission-mode switch lives here now (was a persistent header badge — one
                         // more thing crowding the top bar for a setting touched a few times per session)
                         ActionRow(
                             stringResource(Res.string.label_mode),
-                            value = (MODE_BY[repo.mode.value]?.short ?: MODES[0].short).let { stringResource(it) },
+                            value = stringResource(
+                                if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
+                                else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
+                            ),
                             chevron = true,
                         ) { onMode(); onDismiss() }
                         ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
@@ -322,10 +340,10 @@ fun QuickActionsSheet(repo: PocketRepository, onTerminal: () -> Unit, onMode: ()
                 QaSub.MODEL -> ModelPicker(repo, onBack = { sub = QaSub.MAIN }, onDone = onDismiss)
                 QaSub.EFFORT -> OptionPicker(
                     title = stringResource(Res.string.label_effort),
-                    options = EFFORT_OPTIONS,
-                    selected = repo.effort.value,
+                    options = listOf("default") + repo.effortOptions(),
+                    selected = repo.effort.value ?: "default",
                     onBack = { sub = QaSub.MAIN },
-                ) { repo.switchEffort(it); onDismiss() }
+                ) { repo.switchEffort(it.takeUnless { value -> value == "default" }); onDismiss() }
             }
         }
     }

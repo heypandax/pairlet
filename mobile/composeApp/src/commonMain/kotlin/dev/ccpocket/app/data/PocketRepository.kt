@@ -92,6 +92,7 @@ import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PermissionAsk
@@ -140,6 +141,7 @@ import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
+import dev.ccpocket.protocol.SwitchServiceTier
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowRun
@@ -414,10 +416,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val defaultMode = mutableStateOf(
         SecureStore.getString(K_DEFAULT_MODE)?.let { s -> PermissionMode.entries.firstOrNull { it.name == s } } ?: PermissionMode.DEFAULT,
     )
+    /** Backend-native companion to [defaultMode]. `auto` is valid only for Claude and keeps DEFAULT as
+     *  its legacy fallback/security rank. */
+    val defaultPermissionMode = mutableStateOf(
+        SecureStore.getString(K_DEFAULT_PERMISSION_MODE)?.takeIf { it == CLAUDE_PERMISSION_MODE_AUTO },
+    )
 
     /** Persisted default reasoning effort for NEW sessions (null = the model's own default). Resumed sessions
      *  keep their own. Stored as "" for the null/default choice (SecureStore can't hold null). */
     val defaultEffort = mutableStateOf(SecureStore.getString(K_DEFAULT_EFFORT)?.takeIf { it.isNotEmpty() })
+    /** Default Codex service tier for new sessions (`priority` = Fast); null follows the account default. */
+    val defaultServiceTier = mutableStateOf(SecureStore.getString(K_DEFAULT_SERVICE_TIER)?.takeIf { it.isNotEmpty() })
 
     /** Persisted default model for NEW Claude sessions (null = the CLI's own default). Kept on the original
      *  storage key so existing installs retain their choice when per-agent defaults are introduced. */
@@ -742,9 +751,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var lastBrowseAnchor: String = BROWSE_HOME       // #176: anchor of the LATEST browseDirs request — a real fs root ("/", "C:\") routes its reply by matching this
     private var lastBrowseSub: String? = null                // subPath of the LATEST browseDirs request — only its reply may land in browseListing (#152 复核: stale out-of-order replies dropped)
     val mode = mutableStateOf(PermissionMode.DEFAULT)        // current execution/permission mode
+    val permissionMode = mutableStateOf<String?>(null)       // backend-native mode: Claude `auto`
     val model = mutableStateOf<String?>(null)                // daemon's actual model for this session (header + info sheet)
     val sessionAgent = mutableStateOf<AgentKind?>(null)      // backend driving this session (Claude/Codex) — header badge
     val effort = mutableStateOf<String?>(null)               // reasoning effort: low|medium|high|xhigh|max (null = default)
+    val serviceTier = mutableStateOf<String?>(null)          // Codex `priority` = Fast (independent from effort)
     val sessionOrigin = mutableStateOf<String?>(null)        // external trigger source, e.g. "feishu-bot" → header "via …" chip (issue #91)
     val contextWindow = mutableStateOf<Long?>(null)          // context capacity in tokens (derived from model if daemon omits it)
     val contextUsed = mutableStateOf<Long?>(null)            // ~tokens occupying the window (from the last turn's usage)
@@ -981,14 +992,28 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // session closes its process; reopening resumes a FRESH process that would otherwise default these.
     // Remember the last-known set per sessionId so a reopen restores the badge + relaunches under them.
     // Persisted (TSV in SecureStore, last 100) so an app restart doesn't reset every session to defaults.
-    private data class SessionParams(val mode: PermissionMode, val model: String?, val effort: String?, val agent: AgentKind = AgentKind.CLAUDE)
+    private data class SessionParams(
+        val mode: PermissionMode,
+        val model: String?,
+        val effort: String?,
+        val agent: AgentKind = AgentKind.CLAUDE,
+        val permissionMode: String? = null,
+        val serviceTier: String? = null,
+    )
     private val sessionParams = mutableMapOf<String, SessionParams>()
 
     init {
         SecureStore.getString(K_SESSION_PARAMS)?.lineSequence()?.forEach { line ->
             val t = line.split('\t')
             if (t.size >= 5) runCatching {
-                sessionParams[t[0]] = SessionParams(PermissionMode.valueOf(t[1]), t[2].ifEmpty { null }, t[3].ifEmpty { null }, AgentKind.valueOf(t[4]))
+                sessionParams[t[0]] = SessionParams(
+                    PermissionMode.valueOf(t[1]),
+                    t[2].ifEmpty { null },
+                    t[3].ifEmpty { null },
+                    AgentKind.valueOf(t[4]),
+                    t.getOrNull(5)?.ifEmpty { null },
+                    t.getOrNull(6)?.ifEmpty { null },
+                )
             }
         }
         loadWorkingSet() // #165: keyed on [paired], which only exists this far down the constructor
@@ -996,7 +1021,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     private fun persistSessionParams() {
         val lines = sessionParams.entries.toList().takeLast(100)
-            .joinToString("\n") { (sid, p) -> listOf(sid, p.mode.name, p.model ?: "", p.effort ?: "", p.agent.name).joinToString("\t") }
+            .joinToString("\n") { (sid, p) ->
+                listOf(
+                    sid, p.mode.name, p.model ?: "", p.effort ?: "", p.agent.name,
+                    p.permissionMode ?: "", p.serviceTier ?: "",
+                ).joinToString("\t")
+            }
         SecureStore.putString(K_SESSION_PARAMS, lines)
     }
 
@@ -1244,9 +1274,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Settings: persist the default execution mode for new sessions. Takes effect on the next new session. */
     fun setDefaultMode(m: PermissionMode) {
-        if (m == defaultMode.value) return
+        if (m == defaultMode.value && defaultPermissionMode.value == null) return
         defaultMode.value = m
+        defaultPermissionMode.value = null
         SecureStore.putString(K_DEFAULT_MODE, m.name)
+        SecureStore.putString(K_DEFAULT_PERMISSION_MODE, "")
+    }
+
+    /** Settings: persist Claude Code's classifier-driven `auto` permission mode. */
+    fun setDefaultAutoMode() {
+        defaultMode.value = PermissionMode.DEFAULT // safe fallback for an old daemon
+        defaultPermissionMode.value = CLAUDE_PERMISSION_MODE_AUTO
+        SecureStore.putString(K_DEFAULT_MODE, PermissionMode.DEFAULT.name)
+        SecureStore.putString(K_DEFAULT_PERMISSION_MODE, CLAUDE_PERMISSION_MODE_AUTO)
     }
 
     /** Projects screen: persist the browse mode (true = tree, false = flat). */
@@ -1262,6 +1302,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (v == defaultEffort.value) return
         defaultEffort.value = v
         SecureStore.putString(K_DEFAULT_EFFORT, v ?: "")
+    }
+
+    fun setDefaultServiceTier(tier: String?) {
+        val v = tier?.trim()?.takeIf { it.isNotEmpty() }
+        if (v == defaultServiceTier.value) return
+        defaultServiceTier.value = v
+        SecureStore.putString(K_DEFAULT_SERVICE_TIER, v ?: "")
     }
 
     /** Mobile Settings' legacy Claude-only entry point. */
@@ -1280,6 +1327,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
         if (v == state.value) return
         state.value = v
+        if (agent == AgentKind.CODEX) {
+            modelCapabilities(agent, v)?.let { caps ->
+                if (defaultEffort.value != null && defaultEffort.value !in caps.reasoningEfforts) {
+                    setDefaultEffort(null)
+                }
+                if (defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }) {
+                    setDefaultServiceTier(null)
+                }
+            }
+        }
         SecureStore.putString(
             when (agent) {
                 AgentKind.CLAUDE -> K_DEFAULT_MODEL
@@ -1711,7 +1768,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     internal fun adoptShellState(from: PocketRepository) {
         notificationsOn.value = from.notificationsOn.value
         defaultMode.value = from.defaultMode.value
+        defaultPermissionMode.value = from.defaultPermissionMode.value
         defaultEffort.value = from.defaultEffort.value
+        defaultServiceTier.value = from.defaultServiceTier.value
         defaultModel.value = from.defaultModel.value
         defaultCodexModel.value = from.defaultCodexModel.value
         defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
@@ -1885,13 +1944,46 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is RenameSession -> handle(Sessions(frame.workdir, DemoData.sessions(frame.workdir)))
             is OpenSession -> {
                 val cid = "demo-convo-${frame.resumeId ?: "new"}"
-                handle(SessionLive(cid, frame.workdir, frame.resumeId ?: DemoData.LIVE_SESSION_ID, mode = frame.mode, executing = false))
+                handle(
+                    SessionLive(
+                        cid,
+                        frame.workdir,
+                        frame.resumeId ?: DemoData.LIVE_SESSION_ID,
+                        mode = frame.mode,
+                        executing = false,
+                        permissionMode = frame.permissionMode,
+                        serviceTier = frame.serviceTier,
+                    ),
+                )
                 handle(CommandList(cid, DemoData.commands()))
                 if (frame.resumeId != null) handle(ConvoHistory(cid, DemoData.history())) // resumed = preloaded transcript
             }
             is SendPrompt -> demoHandlePrompt(frame.convoId)
             is PermissionVerdict -> if (demoPendingReply) { demoPendingReply = false; demoStream(frame.convoId, DemoData.REPLY_CHUNKS, thinking = false) }
-            is SwitchMode -> handle(SessionLive(frame.convoId, workdir.value ?: DemoData.LIVE_DIR, currentSessionId, mode = frame.mode, executing = false))
+            is SwitchMode -> handle(
+                SessionLive(
+                    frame.convoId,
+                    workdir.value ?: DemoData.LIVE_DIR,
+                    currentSessionId,
+                    mode = frame.mode,
+                    executing = false,
+                    permissionMode = frame.permissionMode,
+                    effort = effort.value,
+                    serviceTier = serviceTier.value,
+                ),
+            )
+            is SwitchServiceTier -> handle(
+                SessionLive(
+                    frame.convoId,
+                    workdir.value ?: DemoData.LIVE_DIR,
+                    currentSessionId,
+                    mode = mode.value,
+                    executing = false,
+                    permissionMode = permissionMode.value,
+                    effort = effort.value,
+                    serviceTier = frame.serviceTier,
+                ),
+            )
             is CancelTurn -> handle(TurnDone(frame.convoId))
             is AudioChunk -> if (frame.last) handle(Transcript(frame.convoId, frame.captureId, text = "show me the open files", ok = true))
             // file upload (issue #90): pretend the file landed in the demo workspace's inbox
@@ -2040,10 +2132,22 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // list, so a refresh can carry good `models` and an empty `gatewayModels`. Taking that
                 // verbatim would flip the picker from the gateway's real ids back to the seed table
                 // mid-session — the model the user was reaching for vanishing under their finger.
-                agentModels[f.agent] =
+                val accepted =
                     if (merged.gatewayModels.isEmpty() && !prev?.gatewayModels.isNullOrEmpty()) {
-                        merged.copy(gatewayModels = prev!!.gatewayModels)
+                        merged.copy(
+                            gatewayModels = prev!!.gatewayModels,
+                            gatewayModelsSource = prev.gatewayModelsSource,
+                        )
                     } else merged
+                agentModels[f.agent] = accepted
+                if (f.agent == AgentKind.CODEX) {
+                    modelCapabilities(AgentKind.CODEX, defaultModelFor(AgentKind.CODEX))?.let { caps ->
+                        if (defaultEffort.value != null && defaultEffort.value !in caps.reasoningEfforts) setDefaultEffort(null)
+                        if (defaultServiceTier.value != null && caps.serviceTiers.none { it.id == defaultServiceTier.value }) {
+                            setDefaultServiceTier(null)
+                        }
+                    }
+                }
             }
             is PushPrefs -> pushPrefs.value = f.enabled
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
@@ -2069,7 +2173,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
                 f.mode?.let { mode.value = it } // daemon is the source of truth — corrects the optimistic badge
-                f.effort?.let { effort.value = it }
+                permissionMode.value = f.permissionMode // unconditional: a normal mode clears a prior `auto`
+                effort.value = f.effort // unconditional: `/effort default` must clear an optimistic explicit level
+                serviceTier.value = f.serviceTier // unconditional: null restores account/default tier
                 f.agent?.let { sessionAgent.value = it } // daemon truth for the backend badge
                 val liveAgent = f.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
                 // daemon truth verbatim: filtering the REPORTED model through the compat guard nulled
@@ -2100,7 +2206,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 opening.value = false; switchingSession.value = false // the open (or reattach) landed
                 openTimedOut.value = false
                 // remember this session's launch flags so a close+reopen cycle can restore (and relaunch under) them
-                f.sessionId?.let { sessionParams[it] = SessionParams(mode.value, model.value, effort.value, sessionAgent.value ?: AgentKind.CLAUDE) }
+                f.sessionId?.let {
+                    sessionParams[it] = SessionParams(
+                        mode.value,
+                        model.value,
+                        effort.value,
+                        sessionAgent.value ?: AgentKind.CLAUDE,
+                        permissionMode.value,
+                        serviceTier.value,
+                    )
+                }
                 persistSessionParams() // survive app restarts too — reopening tomorrow restores mode/effort/agent
                 // #165: daemon-authoritative identity for the working set (a fork/lock-heal corrected the id
                 // we opened with, so this — not the optimistic resumeId — is what the switcher remembers)
@@ -2552,6 +2667,31 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  beyond the static presets. Keyed by agent so a late reply can't cross-pollute another backend. */
     val agentModels = mutableStateMapOf<AgentKind, ModelsList>()
 
+    fun modelCapabilities(agent: AgentKind, modelId: String? = model.value): dev.ccpocket.protocol.ModelCapabilities? {
+        val listed = agentModels[agent] ?: return null
+        val id = modelId ?: listed.models.firstOrNull()
+        return id?.let { wanted ->
+            listed.modelCapabilities.firstOrNull { it.model.equals(wanted, ignoreCase = true) }
+        }
+    }
+
+    /** Reasoning choices for the active model. Codex is strictly model-specific; Claude's installed CLI
+     *  advertises a backend-wide set. A present per-model row is authoritative even when empty. If both
+     *  capability fields are absent, the daemon predates #183, so retain the picker it already supported. */
+    fun effortOptions(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE, modelId: String? = model.value): List<String> {
+        val listed = agentModels[agent] ?: return emptyList()
+        modelCapabilities(agent, modelId)?.let { return it.reasoningEfforts }
+        return listed.supportedEfforts.ifEmpty { LEGACY_EFFORT_OPTIONS }
+    }
+
+    fun serviceTierOptions(
+        agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE,
+        modelId: String? = model.value,
+    ) = modelCapabilities(agent, modelId)?.serviceTiers.orEmpty()
+
+    fun supportsPermissionMode(id: String, agent: AgentKind = AgentKind.CLAUDE): Boolean =
+        id in agentModels[agent]?.permissionModes.orEmpty()
+
     fun fetchModels(agent: AgentKind = sessionAgent.value ?: AgentKind.CLAUDE) {
         scope.launch { runCatching { send(FetchModels(agent = agent, workdir = workdir.value)) } }
     }
@@ -2946,7 +3086,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun dismissRenameError() { renameError.value = null }
     // startMode defaults to the persisted default mode (mirrors effort), so tapping a session straight from
     // the list applies it too — not just the new-session picker.
-    fun openSession(wd: String, resumeId: String? = null, startMode: PermissionMode = defaultMode.value, title: String? = null, agent: AgentKind = defaultAgent.value) = scope.launch {
+    fun openSession(
+        wd: String,
+        resumeId: String? = null,
+        startMode: PermissionMode = defaultMode.value,
+        title: String? = null,
+        agent: AgentKind = defaultAgent.value,
+        startPermissionMode: String? = defaultPermissionMode.value,
+    ) = scope.launch {
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
         promptPending = false // the pending marker belongs to the previous conversation's transcript
@@ -2980,14 +3127,23 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // (default = the persisted Settings mode), so "continue here" honors what Settings says instead of
         // silently reviving a stale per-session mode (issue #50). Model/effort/agent still restore per-session.
         val openMode = startMode
-        val openEffort = saved?.effort ?: defaultEffort.value // new sessions seed from the persisted default; resumed keep their own
         val openAgent = saved?.agent ?: agent // resumed sessions keep their backend; new ones use the picked default
+        val openPermissionMode =
+            startPermissionMode?.takeIf { openAgent == AgentKind.CLAUDE && it == CLAUDE_PERMISSION_MODE_AUTO }
         // Each backend seeds from its own persisted default. The compatibility guard is the final defence against
         // an old/corrupt preference crossing agent families; null means that CLI chooses its configured default.
         val openModel = compatibleModelForAgent(openAgent, saved?.model)
             ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
-        mode.value = openMode; allowRules.clear()
-        model.value = openModel; effort.value = openEffort; contextUsed.value = null // reconciled by SessionLive
+        val knownCapabilities = modelCapabilities(openAgent, openModel)
+        val openEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->
+            candidate == null || knownCapabilities == null || candidate in knownCapabilities.reasoningEfforts
+        }
+        val openServiceTier = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { candidate ->
+            openAgent == AgentKind.CODEX &&
+                (candidate == null || knownCapabilities == null || knownCapabilities.serviceTiers.any { it.id == candidate })
+        }
+        mode.value = openMode; permissionMode.value = openPermissionMode; allowRules.clear()
+        model.value = openModel; effort.value = openEffort; serviceTier.value = openServiceTier; contextUsed.value = null // reconciled by SessionLive
         sessionAgent.value = openAgent // optimistic; SessionLive corrects from daemon truth
         // Pre-fetch OpenCode model list so the picker has it ready when the user opens it,
         // rather than only fetching on picker-open (SessionSheets.kt ModelPicker LaunchedEffect).
@@ -2996,7 +3152,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
-        send(OpenSession(wd, resumeId, model = openModel, mode = openMode, effort = openEffort, agent = openAgent, lastEventSeq = lastEventSeqFor(resumeId)))
+        send(
+            OpenSession(
+                wd,
+                resumeId,
+                model = openModel,
+                mode = openMode,
+                effort = openEffort,
+                agent = openAgent,
+                lastEventSeq = lastEventSeqFor(resumeId),
+                permissionMode = openPermissionMode,
+                serviceTier = openServiceTier,
+            ),
+        )
         delay(8000) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
             opening.value = false
@@ -3707,13 +3875,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Switch the execution/permission mode — applied on the next turn (issue #84), never interrupting a
      *  running turn (the daemon relaunches Claude before the next send; Codex carries it in-turn). */
-    fun switchMode(m: PermissionMode) {
+    fun switchMode(m: PermissionMode, nativeMode: String? = null) {
         val c = convoId.value ?: return
-        if (m == mode.value) return
+        val normalizedNative =
+            nativeMode?.takeIf {
+                (sessionAgent.value ?: AgentKind.CLAUDE) == AgentKind.CLAUDE &&
+                    it == CLAUDE_PERMISSION_MODE_AUTO
+            }
+        if (m == mode.value && normalizedNative == permissionMode.value) return
         mode.value = m
+        permissionMode.value = normalizedNative
         switching.value = true
         scope.launch {
-            send(SwitchMode(c, m))
+            send(SwitchMode(c, m, permissionMode = normalizedNative))
             delay(8000); switching.value = false // safety: clear if the daemon never re-announces
         }
     }
@@ -3730,15 +3904,34 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (!isModelCompatibleWithAgent(sessionAgent.value ?: AgentKind.CLAUDE, target)) return
         model.value = target // optimistic; the daemon's next SessionLive corrects it to the resolved id
         switchViaCommand("/model $target")
+        // Reasoning and Fast are model capabilities, not global Codex switches. Clear a choice the
+        // target model explicitly does not advertise before the next real turn can be rejected.
+        val caps = modelCapabilities(sessionAgent.value ?: AgentKind.CLAUDE, target)
+        if (caps != null) {
+            if (effort.value != null && effort.value !in caps.reasoningEfforts) switchEffort(null)
+            if (serviceTier.value != null && caps.serviceTiers.none { it.id == serviceTier.value }) switchServiceTier(null)
+        }
     }
 
     /** Switch reasoning effort — routed through the daemon's `/effort` interception; applied on the next
      *  turn (issue #84), never interrupting a running one. */
-    fun switchEffort(level: String) {
-        val target = level.trim().lowercase()
-        if (convoId.value == null || target.isEmpty() || target == effort.value) return
+    fun switchEffort(level: String?) {
+        val target = level?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        if (convoId.value == null || target == effort.value) return
         effort.value = target // optimistic; the daemon's next SessionLive corrects it
-        switchViaCommand("/effort $target")
+        switchViaCommand("/effort ${target ?: "default"}")
+    }
+
+    fun switchServiceTier(tier: String?) {
+        val c = convoId.value ?: return
+        val target = tier?.trim()?.takeIf { it.isNotEmpty() }
+        if (target == serviceTier.value) return
+        serviceTier.value = target
+        switching.value = true
+        scope.launch {
+            send(SwitchServiceTier(c, target))
+            delay(8000); switching.value = false
+        }
     }
 
     /** Send a daemon-intercepted relaunch command and hold the "switching" affordance until the next SessionLive. */
@@ -3858,7 +4051,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             val saved = sessionParams[sid]
             val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
             mode.value = defaultMode.value
-            send(OpenSession(wd, sid, model = compatibleModelForAgent(agent, saved?.model), mode = defaultMode.value, effort = saved?.effort ?: defaultEffort.value, takeOver = true, lastEventSeq = lastEventSeqFor(sid)))
+            permissionMode.value = defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
+            serviceTier.value = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { agent == AgentKind.CODEX }
+            send(
+                OpenSession(
+                    wd,
+                    sid,
+                    model = compatibleModelForAgent(agent, saved?.model),
+                    mode = defaultMode.value,
+                    effort = saved?.effort ?: defaultEffort.value,
+                    takeOver = true,
+                    lastEventSeq = lastEventSeqFor(sid),
+                    permissionMode = permissionMode.value,
+                    serviceTier = serviceTier.value,
+                ),
+            )
         }
     }
 
@@ -3940,10 +4147,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
+        const val K_DEFAULT_PERMISSION_MODE = "default_session_permission_mode" // backend-native mode (`auto`), "" = legacy mode
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
+        const val K_DEFAULT_SERVICE_TIER = "default_session_service_tier" // Codex `priority` = Fast; "" = account default
         const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: Claude model id for new sessions ("" = CLI default)
         const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
         const val K_DEFAULT_OPENCODE_MODEL = "default_session_model_opencode" // SecureStore: OpenCode provider/model id for new sessions
+        private val LEGACY_EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max")
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)
         const val K_DEFAULT_AGENT = "default_session_agent"   // SecureStore: AgentKind.name new sessions start under (default CLAUDE)

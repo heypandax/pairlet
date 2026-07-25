@@ -154,6 +154,9 @@
     <string name="mode_bypass_short">Full auto</string>
     <string name="mode_bypass_label">Full auto · trust it</string>
     <string name="mode_bypass_detail">auto-allows everything · still asks nothing</string>
+    <string name="mode_auto_short">Auto</string>
+    <string name="mode_auto_label">Auto · decides when to ask</string>
+    <string name="mode_auto_detail">Claude classifies each action and asks when it needs your approval</string>
     <string name="exec_mode_title">Execution mode</string>
     <string name="exec_mode_subtitle">How much should Claude ask before acting?</string>
     <string name="mode_switching">Restarting session to apply the new mode…</string>
@@ -423,6 +426,10 @@
     <string name="session_info_title">Session</string>
     <string name="label_model">Model</string>
     <string name="label_effort">Thinking depth</string>
+    <string name="fast_mode">Fast</string>
+    <string name="fast_mode_detail">Codex priority service tier · faster responses with increased usage</string>
+    <string name="value_on">On</string>
+    <string name="value_off">Off</string>
     <string name="label_mode">Mode</string>
     <string name="label_workdir">Directory</string>
     <string name="label_context">Context</string>

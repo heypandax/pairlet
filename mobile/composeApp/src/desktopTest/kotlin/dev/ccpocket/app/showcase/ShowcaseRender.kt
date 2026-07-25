@@ -282,7 +282,7 @@ class ShowcaseRender {
                 key(backendAgent.value) { // 选中 agent 是 sheet 内部 remember——换 key 重建即切换选中态
                     StartSessionModeSheet(
                         workdir = DemoData.LIVE_DIR, agent = backendAgent.value,
-                        onPick = { _, _ -> }, onDismiss = {},
+                        onPick = { _, _, _ -> }, onDismiss = {},
                     )
                 }
             }

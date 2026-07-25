@@ -723,7 +723,7 @@ class RepoDesktopModel(
     override val activeIsThisMachine: Boolean
         get() = machines.firstOrNull { it.active }?.thisMachine == true
 
-    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode) {
+    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?) {
         // "~" ships raw, exactly like mobile's NewPathSheet: the daemon owns the expansion
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
@@ -738,7 +738,7 @@ class RepoDesktopModel(
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
         openProject(DkProject(path = target, name = folderName(target)))
-        repo.openSession(wd = target, startMode = mode, agent = agent)
+        repo.openSession(wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode)
     }
 
     override val hasChat: Boolean get() = repo.convoId.value != null
@@ -750,7 +750,9 @@ class RepoDesktopModel(
     override val chatModel: String get() = modelLabelForAgent(repo.sessionAgent.value, repo.model.value)
     override val chatModelId: String get() = repo.model.value ?: ""
     override val chatMode: PermissionMode get() = repo.mode.value
+    override val chatPermissionMode: String? get() = repo.permissionMode.value
     override val chatEffort: String? get() = repo.effort.value
+    override val chatServiceTier: String? get() = repo.serviceTier.value
     override val gatewayBaseUrl: String? get() = repo.gatewayBaseUrl.value // issue #139: DaemonInfo's gateway hint
     // issue #167 ②: the gateway's own model list, same source the mobile picker reads
     override val gatewayModels: List<String>
@@ -771,8 +773,15 @@ class RepoDesktopModel(
     override fun resendStalled() = repo.resendStalledPrompt()
 
     override fun switchMode(m: PermissionMode) = repo.switchMode(m)
+    override fun switchMode(m: PermissionMode, permissionMode: String?) = repo.switchMode(m, permissionMode)
     override fun switchModel(name: String) = repo.switchModel(name)
-    override fun switchEffort(level: String) = repo.switchEffort(level)
+    override fun switchEffort(level: String?) = repo.switchEffort(level)
+    override fun switchServiceTier(tier: String?) = repo.switchServiceTier(tier)
+    override fun effortOptions(): List<String> = repo.effortOptions()
+    override fun serviceTierOptions() = repo.serviceTierOptions()
+    override fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = repo.effortOptions(agent, model)
+    override fun serviceTierOptionsFor(agent: AgentKind, model: String?) = repo.serviceTierOptions(agent, model)
+    override fun permissionModeAvailable(id: String): Boolean = repo.supportsPermissionMode(id)
     override fun compactConversation() { repo.sendPrompt("/compact") }
     override fun modelsForAgent(agent: AgentKind): List<String> = repo.agentModels[agent]?.models ?: emptyList()
     override fun fetchModels(agent: AgentKind) = repo.fetchModels(agent)
@@ -888,6 +897,17 @@ class RepoDesktopModel(
     override var defaultMode: PermissionMode
         get() = repo.defaultMode.value
         set(v) { repo.setDefaultMode(v) }
+    override val defaultPermissionMode: String? get() = repo.defaultPermissionMode.value
+    override fun setDefaultMode(mode: PermissionMode, permissionMode: String?) {
+        if (permissionMode == dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO) repo.setDefaultAutoMode()
+        else repo.setDefaultMode(mode)
+    }
+    override var defaultEffort: String?
+        get() = repo.defaultEffort.value
+        set(v) { repo.setDefaultEffort(v) }
+    override var defaultServiceTier: String?
+        get() = repo.defaultServiceTier.value
+        set(v) { repo.setDefaultServiceTier(v) }
     override fun defaultModelFor(agent: AgentKind): String? = repo.defaultModelFor(agent)
     override fun setDefaultModelFor(agent: AgentKind, model: String?) { repo.setDefaultModelFor(agent, model) }
     override var contextWindowOverride: Long?
@@ -929,6 +949,7 @@ class RepoDesktopModel(
     // stop-refill (#48) applies only this close to the prompt's own send — the CLI-style "oops" beat
     // (grab it back before the run really gets going), not a revise-anytime affordance. A test seam.
     internal var stopRefillWindowMs = 5_000L
+    internal var stopRefillElapsedMsForTest: (() -> Long?)? = null
 
     override fun stopTurn() {
         // hand the interrupted prompt back for editing/resending (#48) — never clobber a typed draft,
@@ -937,7 +958,7 @@ class RepoDesktopModel(
         // the composer typing by itself. Null elapsed = the turn wasn't sent from this app (attached
         // to an already-running session), so there is nothing of the user's to hand back either.
         // The transcript keeps its User bubble: the daemon-side transcript already recorded the turn.
-        val elapsed = repo.turnElapsedMs()
+        val elapsed = stopRefillElapsedMsForTest?.invoke() ?: repo.turnElapsedMs()
         if (composer.isBlank() && elapsed != null && elapsed < stopRefillWindowMs) {
             (repo.messages.lastOrNull { it is ChatItem.User } as? ChatItem.User)
                 ?.text?.takeIf { it.isNotBlank() }?.let { composer = it }

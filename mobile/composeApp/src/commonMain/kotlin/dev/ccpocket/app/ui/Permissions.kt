@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.oneOff
@@ -75,6 +76,7 @@ import org.jetbrains.compose.resources.stringResource
 data class ModeInfo(
     val key: PermissionMode, val short: StringResource, val label: StringResource, val tech: String,
     val color: Color, val detail: StringResource, val warn: Boolean = false,
+    val nativeMode: String? = null,
 )
 
 // same hue as the semantic info token — a getter so it tracks the light/dark palette (#63)
@@ -89,6 +91,15 @@ val MODES = listOf(
     ModeInfo(PermissionMode.ACCEPT_EDITS, Res.string.mode_accept_short, Res.string.mode_accept_label, "acceptEdits", Tok.ok, Res.string.mode_accept_detail),
     ModeInfo(PermissionMode.PLAN, Res.string.mode_plan_short, Res.string.mode_plan_label, "plan", Indigo, Res.string.mode_plan_detail),
     ModeInfo(PermissionMode.BYPASS_PERMISSIONS, Res.string.mode_bypass_short, Res.string.mode_bypass_label, "bypassPermissions", Tok.warn, Res.string.mode_bypass_detail, warn = true),
+)
+val AUTO_MODE = ModeInfo(
+    PermissionMode.DEFAULT,
+    Res.string.mode_auto_short,
+    Res.string.mode_auto_label,
+    CLAUDE_PERMISSION_MODE_AUTO,
+    Tok.accent,
+    Res.string.mode_auto_detail,
+    nativeMode = CLAUDE_PERMISSION_MODE_AUTO,
 )
 val MODE_BY = MODES.associateBy { it.key }
 
@@ -122,8 +133,8 @@ fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
 @Composable
 fun ModeSheet(
     current: PermissionMode, rules: List<String>, switching: Boolean, workdir: String? = null,
-    agent: AgentKind? = null,
-    onSelect: (PermissionMode) -> Unit, onClearRule: (String) -> Unit, onClearAll: () -> Unit, onDismiss: () -> Unit,
+    agent: AgentKind? = null, nativeMode: String? = null, autoAvailable: Boolean = false,
+    onSelect: (PermissionMode, String?) -> Unit, onClearRule: (String) -> Unit, onClearAll: () -> Unit, onDismiss: () -> Unit,
 ) {
     var confirmBypass by remember { mutableStateOf(false) }
     PocketSheet(onDismiss) {
@@ -134,7 +145,7 @@ fun ModeSheet(
                 OpenCodeAutoApproveNotice(Modifier.padding(top = 12.dp))
             }
         } else if (confirmBypass) {
-            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { confirmBypass = false; onSelect(PermissionMode.BYPASS_PERMISSIONS) })
+            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { confirmBypass = false; onSelect(PermissionMode.BYPASS_PERMISSIONS, null) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
                 Text(stringResource(Res.string.exec_mode_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -153,10 +164,10 @@ fun ModeSheet(
                     Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    MODES.forEach { m ->
-                        ModeRow(m, selected = current == m.key, enabled = !switching) {
+                    (MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
+                        ModeRow(m, selected = current == m.key && nativeMode == m.nativeMode, enabled = !switching) {
                             if (m.key == PermissionMode.BYPASS_PERMISSIONS && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
-                            else onSelect(m.key)
+                            else onSelect(m.key, m.nativeMode)
                         }
                     }
                 }
@@ -199,15 +210,17 @@ private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () 
 fun StartSessionModeSheet(
     workdir: String? = null,
     selected: PermissionMode = PermissionMode.DEFAULT,
+    selectedNativeMode: String? = null,
     agent: AgentKind = AgentKind.CLAUDE,
-    onPick: (PermissionMode, AgentKind) -> Unit,
+    autoAvailable: Boolean = false,
+    onPick: (PermissionMode, AgentKind, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var confirmBypass by remember { mutableStateOf(false) }
     var chosenAgent by remember { mutableStateOf(agent) }
     PocketSheet(onDismiss) {
         if (confirmBypass) {
-            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS, chosenAgent) })
+            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS, chosenAgent, null) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
                 Text(stringResource(Res.string.new_session_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -221,9 +234,10 @@ fun StartSessionModeSheet(
                 SectionLabel(stringResource(Res.string.label_mode))
                 if (chosenAgent == AgentKind.CLAUDE) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        MODES.forEach { m ->
-                            ModeRow(m, selected = m.key == selected, enabled = true) {
-                                if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true else onPick(m.key, AgentKind.CLAUDE)
+                        (MODES + if (autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
+                            ModeRow(m, selected = m.key == selected && m.nativeMode == selectedNativeMode, enabled = true) {
+                                if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
+                                else onPick(m.key, AgentKind.CLAUDE, m.nativeMode)
                             }
                         }
                     }
@@ -235,12 +249,12 @@ fun StartSessionModeSheet(
                     SheetButton(
                         stringResource(Res.string.opencode_mode_start), Modifier.fillMaxWidth().padding(top = 10.dp),
                         bg = Tok.warn, fg = Tok.base,
-                    ) { onPick(PermissionMode.BYPASS_PERMISSIONS, AgentKind.OPENCODE) }
+                    ) { onPick(PermissionMode.BYPASS_PERMISSIONS, AgentKind.OPENCODE, null) }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         CODEX_PRESETS.forEach { p ->
                             PresetRow(p, selected = p.mode == selected) {
-                                if (p.danger) confirmBypass = true else onPick(p.mode, AgentKind.CODEX)
+                                if (p.danger) confirmBypass = true else onPick(p.mode, AgentKind.CODEX, null)
                             }
                         }
                     }

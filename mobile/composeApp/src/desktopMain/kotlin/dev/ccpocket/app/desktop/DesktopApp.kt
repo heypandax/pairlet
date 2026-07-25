@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.show_sidebar
 import dev.ccpocket.app.resources.your_computer
+import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.app.secure.SecureStore
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.isQuestion
@@ -91,9 +93,16 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
             }
         }
         if (model.showNewSession) {
+            LaunchedEffect(Unit) { model.fetchModels(AgentKind.CLAUDE) }
             // anchored under the sidebar's New-session row (header 48 + row 32)
             Overlay(onDismiss = { model.showNewSession = false }, alignment = Alignment.TopStart, padding = PaddingValues(start = 14.dp, top = 84.dp)) {
-                NewSessionPopover(model.newSessionSeed ?: "~/", model.defaultAgent, model.defaultMode) { dir, agent, mode -> model.newSession(dir, agent, mode) }
+                NewSessionPopover(
+                    model.newSessionSeed ?: "~/",
+                    model.defaultAgent,
+                    model.defaultMode,
+                    model.defaultPermissionMode,
+                    model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
+                ) { dir, agent, mode, native -> model.newSession(dir, agent, mode, native) }
             }
         }
         if (model.showQuickActions) {
