@@ -139,7 +139,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 ## Docs
 
 - Website / landing page — <https://heypandax.github.io/cc-pocket/>
-- Help and smart support — <https://heypandax.github.io/cc-pocket/support/>
+- Help and support — <https://heypandax.github.io/cc-pocket/support/>
 - Public user manual (shareable with AI assistants) — <https://heypandax.github.io/cc-pocket/manual/en/>
 - Full feature list — <https://heypandax.github.io/cc-pocket/features.html>
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)

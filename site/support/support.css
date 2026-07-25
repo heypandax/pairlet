@@ -3,7 +3,6 @@
 .support-hero h1{font-size:clamp(44px,6.2vw,72px);font-weight:600;line-height:1.02;letter-spacing:-.045em;margin:0 0 24px;text-wrap:balance}
 .support-deck{max-width:660px;margin:0;color:var(--sec);font-size:clamp(17px,2vw,20px);line-height:1.65}
 .support-cta-row{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px}
-.support-bot-icon{font-size:18px}
 .availability{display:flex;align-items:flex-start;gap:9px;margin:18px 0 0;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.55;max-width:620px}
 .status-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;margin-top:5px;background:var(--warning);box-shadow:0 0 0 4px color-mix(in srgb,var(--warning) 13%,transparent)}
 
@@ -24,6 +23,7 @@
 .support-card-primary{background:linear-gradient(145deg,var(--accent-bg),var(--surface));border-color:color-mix(in srgb,var(--accent) 40%,var(--hair))}
 .support-card-button{width:100%;font:inherit;cursor:pointer}.card-number{font-size:10px;color:var(--muted);letter-spacing:.1em}.card-icon{display:grid;place-items:center;width:44px;height:44px;margin:22px 0 19px;border:1px solid var(--hair);border-radius:13px;background:var(--raised);color:var(--accent);font-size:21px}
 .support-card h3{font-size:21px;line-height:1.2;letter-spacing:-.02em;margin:0 0 10px}.support-card p{color:var(--sec);font-size:14.5px;line-height:1.65;margin:0 0 20px}.card-link{margin-top:auto;color:var(--accent);font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:500}.copy-status{min-height:25px;margin:18px 0 0;color:var(--success);font-family:'JetBrains Mono',monospace;font-size:12px}
+.support-card-muted{cursor:default;background:color-mix(in srgb,var(--surface) 82%,var(--base));border-style:dashed}.support-card-muted:hover{transform:none;border-color:var(--hair);background:color-mix(in srgb,var(--surface) 82%,var(--base))}.card-link-muted{color:var(--muted)}
 
 .support-safety{padding:80px 0;border-top:1px solid var(--hair);background:var(--surface)}
 .safety-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:80px;align-items:start}.safety-grid ul{list-style:none;margin:0;padding:0}.safety-grid li{position:relative;padding:17px 0 17px 30px;border-bottom:1px solid var(--hair);color:var(--sec);font-size:15px;line-height:1.65}.safety-grid li:first-child{padding-top:0}.safety-grid li::before{content:'✓';position:absolute;left:0;color:var(--accent);font-family:'JetBrains Mono',monospace}.safety-grid li:first-child::before{top:0}.safety-grid li:not(:first-child)::before{top:17px}

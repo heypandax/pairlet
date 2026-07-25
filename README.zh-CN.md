@@ -139,7 +139,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
 ## 文档
 
 - 官网 / 落地页 —— <https://heypandax.github.io/cc-pocket/>
-- 帮助与智能客服 —— <https://heypandax.github.io/cc-pocket/support/>
+- 帮助与客服 —— <https://heypandax.github.io/cc-pocket/support/>
 - 公开用户手册（链接可直接发给 AI 助手）—— <https://heypandax.github.io/cc-pocket/manual/zh/>
 - 完整功能列表 —— <https://heypandax.github.io/cc-pocket/features.html>
 - 使用文档（中文）—— [`docs/USAGE.md`](docs/USAGE.md)
