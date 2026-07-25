@@ -80,6 +80,7 @@ import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
+import dev.ccpocket.protocol.SwitchServiceTier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -296,6 +297,7 @@ class RequestRouter(
             // ask — each service claims its own by askId (pending-map membership) before the registry
             is PermissionVerdict -> if (!shell.onVerdict(frame) && !exports.onVerdict(frame)) registry.verdict(frame)
             is SwitchMode -> registry.switchMode(frame)
+            is SwitchServiceTier -> registry.switchServiceTier(frame)
             is ClearAllowRule -> registry.clearRule(frame)
 
             // MUST launch, not await: shell.run suspends on the human approval gate, but the relay transport

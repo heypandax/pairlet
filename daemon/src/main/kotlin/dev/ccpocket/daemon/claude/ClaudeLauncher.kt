@@ -45,7 +45,7 @@ object ClaudeLauncher {
         add("--verbose")
         // ALWAYS pass the mode: omitting it lets claude fall back to the user's global
         // `permissions.defaultMode` (e.g. "auto"), silently breaking the phone's "Ask each step"
-        add("--permission-mode"); add(spec.mode.wireName())
+        add("--permission-mode"); add(spec.permissionMode ?: spec.mode.wireName())
         spec.resumeId?.let {
             add("--resume"); add(it)
             // fork into a fresh id rather than appending to the resumed transcript — guarded by resumeId

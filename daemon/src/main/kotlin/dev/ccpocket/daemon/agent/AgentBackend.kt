@@ -63,6 +63,23 @@ interface AgentBackend {
      *  means "unchanged". */
     fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean
 
+    /** Exact reasoning update, including null = restore model default. Production backends override this
+     *  because the older applySettings contract used null to mean "unchanged". */
+    fun applyEffort(effort: String?): Boolean = applySettings(mode = null, model = null, effort = effort)
+
+    /** Apply a backend-native permission mode that the legacy [PermissionMode] enum cannot carry.
+     *  Default false means unsupported/ignored without forcing a relaunch. */
+    fun applyPermissionMode(permissionMode: String?): Boolean = false
+
+    /** Apply a backend-native service tier. Default false means unsupported/ignored. */
+    fun applyServiceTier(serviceTier: String?): Boolean = false
+
+    /** Capability validation hooks. Null capability means unknown/custom, so the setting passes through;
+     *  a known model can explicitly reject a stale persisted value. */
+    fun normalizeEffort(model: String?, effort: String?): String? = effort
+    fun normalizeServiceTier(model: String?, serviceTier: String?): String? = serviceTier
+    fun supportedEfforts(model: String?): Set<String>? = null
+
     /** Hook fired when the process is shutting down (intentional stop or unexpected exit), once its
      *  transcript is quiet. Claude rewrites the .jsonl so the desktop --resume picker shows it; Codex no-op. */
     suspend fun onProcessEnded(sessionId: String?)

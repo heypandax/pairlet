@@ -5,9 +5,11 @@ import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.protocol.PermissionMode
 import kotlinx.coroutines.runBlocking
+import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -180,6 +182,78 @@ class CodexBackendTest {
         val bypassTurn = wBypass.last { "turn/start" in it }
         assertTrue("\"approvalPolicy\":\"never\"" in bypassTurn, bypassTurn)
         assertTrue("\"dangerFullAccess\"" in bypassTurn, bypassTurn)
+    }
+
+    @Test
+    fun dynamic_ultra_and_priority_are_sent_only_when_the_model_advertises_them() = runBlocking {
+        val dir = Files.createTempDirectory("codex-capabilities-test")
+        val cache = dir.resolve("models_cache.json")
+        val config = dir.resolve("config.toml")
+        Files.writeString(config, "")
+        Files.writeString(
+            cache,
+            """
+            {
+              "models": [
+                {
+                  "slug": "gpt-5.6-sol",
+                  "visibility": "list",
+                  "upgrade": null,
+                  "supported_reasoning_levels": [{"effort":"max"},{"effort":"ultra"}],
+                  "service_tiers": [{"id":"priority","name":"Fast"}]
+                },
+                {
+                  "slug": "gpt-5.5",
+                  "visibility": "list",
+                  "upgrade": null,
+                  "supported_reasoning_levels": [{"effort":"xhigh"}],
+                  "service_tiers": []
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+        val modelService = CodexModelService(cache, config)
+
+        val supportedWrites = mutableListOf<String>()
+        val supported = CodexBackend(null, modelService)
+        supported.attach(
+            AgentIo({ supportedWrites += it }, {}),
+            AgentSpec(
+                Path.of("/repo"),
+                model = "gpt-5.6-sol",
+                effort = "ultra",
+                serviceTier = "priority",
+            ),
+        )
+        supported.parse(initResponse(1))
+        val start = supportedWrites.last { "thread/start" in it }
+        assertTrue("\"serviceTier\":\"priority\"" in start, start)
+        supported.parse(threadStartResponse(2, "thr-sol"))
+        supported.sendPrompt("go", emptyList())
+        val turn = supportedWrites.last { "turn/start" in it }
+        assertTrue("\"effort\":\"ultra\"" in turn, turn)
+        assertTrue("\"serviceTier\":\"priority\"" in turn, turn)
+
+        val rejectedWrites = mutableListOf<String>()
+        val rejected = CodexBackend(null, modelService)
+        rejected.attach(
+            AgentIo({ rejectedWrites += it }, {}),
+            AgentSpec(
+                Path.of("/repo"),
+                model = "gpt-5.5",
+                effort = "ultra",
+                serviceTier = "priority",
+            ),
+        )
+        rejected.parse(initResponse(1))
+        val rejectedStart = rejectedWrites.last { "thread/start" in it }
+        assertFalse("serviceTier" in rejectedStart, rejectedStart)
+        rejected.parse(threadStartResponse(2, "thr-55"))
+        rejected.sendPrompt("go", emptyList())
+        val rejectedTurn = rejectedWrites.last { "turn/start" in it }
+        assertFalse("\"effort\":\"ultra\"" in rejectedTurn, rejectedTurn)
+        assertFalse("serviceTier" in rejectedTurn, rejectedTurn)
     }
 
     @Test

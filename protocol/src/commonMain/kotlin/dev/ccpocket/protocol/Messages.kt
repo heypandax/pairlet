@@ -91,6 +91,13 @@ data class OpenSession(
      * OpenSession per (workdir, resumeId)) stays correct: the newest open carries the freshest cursor.
      */
     val lastEventSeq: Long? = null,
+    /**
+     * Backend-native permission-mode id when it cannot be represented by the legacy [mode] enum.
+     * Currently `"auto"` for Claude Code; [mode] stays DEFAULT as the safe fallback for an older daemon.
+     */
+    val permissionMode: String? = null,
+    /** Backend-native service tier. Codex `"priority"` is the Fast toggle; null follows CLI/account default. */
+    val serviceTier: String? = null,
 ) : ToDaemon
 
 /** Restart the live conversation's claude process under a new cwd. */
@@ -133,10 +140,24 @@ data class PermissionVerdict(
     val response: String? = null,
 ) : ToDaemon
 
-/** Switch the live conversation's permission mode (relaunches claude with --resume + the new mode). */
+/** Switch the live conversation's permission mode (relaunches claude with --resume + the new mode).
+ *  [permissionMode] carries a backend-native mode such as Claude `"auto"`; [mode] remains the legacy
+ *  fallback/security rank so older peers keep a safe, decodable value. */
 @Serializable
 @SerialName("pocket/mode.switch")
-data class SwitchMode(val convoId: String, val mode: PermissionMode) : ToDaemon
+data class SwitchMode(
+    val convoId: String,
+    val mode: PermissionMode,
+    val permissionMode: String? = null,
+) : ToDaemon
+
+/** Switch a backend-native service tier for subsequent turns. Null restores the CLI/account default. */
+@Serializable
+@SerialName("pocket/serviceTier.switch")
+data class SwitchServiceTier(
+    val convoId: String,
+    val serviceTier: String? = null,
+) : ToDaemon
 
 /** Drop a session allow-rule (rule == null clears them all) so it prompts again next time. */
 @Serializable
@@ -709,6 +730,10 @@ data class SessionLive(
     // e.g. "feishu-bot"), so clients can label it "via feishu-bot". Null = opened by an interactive
     // device (today's behavior) or an older daemon; old clients ignore the field.
     val origin: String? = null,
+    /** Backend-native permission mode (currently Claude `"auto"`); null means use legacy [mode]. */
+    val permissionMode: String? = null,
+    /** Backend-native service tier (Codex `"priority"` = Fast); null means account/default tier. */
+    val serviceTier: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */
@@ -1519,15 +1544,40 @@ data class ModelsList(
     val agent: AgentKind = AgentKind.CLAUDE, // default keeps older peers on Claude, like every agent field
     val models: List<String> = emptyList(),
     val error: String? = null,
-    /** #167: ids the GATEWAY ITSELF reported (`/v1/models`), when the user routes through one and it
-     *  answered. Authoritative where present — the client should show these instead of its built-in
-     *  vendor-id table, which can only ever be a guess that rots silently.
+    /** #167: gateway model ids. Normally these are the authoritative `/v1/models` answer; when that
+     *  endpoint fails, a new daemon may fall back to real ids observed in local Claude transcripts.
+     *  [gatewayModelsSource] tells a new client which source produced the rows.
      *
      *  Trailing + defaulted, so the wire stays compatible both ways: an older daemon simply never
      *  sends it and the client falls back to its seed table (today's behaviour), while an older client
-     *  ignores it. Empty means "no authoritative answer", never "the gateway has no models". */
+     *  ignores it. Empty means "no usable answer", never "the gateway has no models". */
     val gatewayModels: List<String> = emptyList(),
+    /** `"gateway"` for `/v1/models`, `"history"` for transcript fallback, null for old daemon/no rows. */
+    val gatewayModelsSource: String? = null,
+    /** Backend-wide reasoning levels when they are not model-specific (Claude CLI's accepted levels). */
+    val supportedEfforts: List<String> = emptyList(),
+    /** Backend-native permission mode ids advertised by the installed CLI (e.g. Claude `"auto"`). */
+    val permissionModes: List<String> = emptyList(),
+    /** Per-model capabilities sourced from the installed backend's own cache/protocol. */
+    val modelCapabilities: List<ModelCapabilities> = emptyList(),
 ) : ToPhone
+
+/** One model's dynamic reasoning and service-tier capability. Unknown/older peers ignore this whole field. */
+@Serializable
+data class ModelCapabilities(
+    val model: String,
+    val reasoningEfforts: List<String> = emptyList(),
+    val defaultReasoningEffort: String? = null,
+    val serviceTiers: List<ModelServiceTier> = emptyList(),
+)
+
+/** A selectable backend service tier. For Codex 0.145.0, `priority` is displayed as “Fast”. */
+@Serializable
+data class ModelServiceTier(
+    val id: String,
+    val name: String = id,
+    val description: String? = null,
+)
 
 // ===========================================================================
 //  control plane  <->  relay   (ToRelay; carried in Envelope{to=RELAY} TEXT frames)

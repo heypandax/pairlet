@@ -25,6 +25,7 @@ import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
+import dev.ccpocket.protocol.SwitchServiceTier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -236,7 +237,18 @@ class SessionRegistry(
         )
         // takeOver → Conversation.open spawns EAGERLY (seize the session now); a plain open starts lazily on the
         // first prompt (issue #61) so merely previewing a session never holds/occupies it for the desktop.
-        val started = runCatching { c.open(open.resumeId, open.model, open.effort, fork = forkForTakeOver, takeOver = open.takeOver, sinceSeq = open.lastEventSeq) }
+        val started = runCatching {
+            c.open(
+                open.resumeId,
+                open.model,
+                open.effort,
+                fork = forkForTakeOver,
+                takeOver = open.takeOver,
+                sinceSeq = open.lastEventSeq,
+                permissionMode = open.permissionMode,
+                serviceTier = open.serviceTier,
+            )
+        }
         if (started.isFailure) {
             mutex.withLock { convos.remove(convoId) }
             runCatching { c.close() }
@@ -396,7 +408,8 @@ class SessionRegistry(
     }
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
-    suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode) ?: Unit
+    suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode, s.permissionMode) ?: Unit
+    suspend fun switchServiceTier(s: SwitchServiceTier) = get(s.convoId)?.switchServiceTier(s.serviceTier) ?: Unit
     suspend fun clearRule(c: ClearAllowRule) = get(c.convoId)?.clearAllowRule(c.rule) ?: Unit
     suspend fun cancelTurn(c: CancelTurn) = get(c.convoId)?.cancelTurn() ?: Unit
     suspend fun stopBackgroundJob(s: StopBackgroundJob) = get(s.convoId)?.stopBackgroundJob(s.jobId) ?: Unit

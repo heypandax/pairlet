@@ -17,6 +17,15 @@ import kotlin.test.assertTrue
 @kotlinx.serialization.Serializable
 private data class OldSessions(val workdir: String, val items: List<SessionSummary> = emptyList())
 
+/** The pre-#183 model-list shape — proves an already-shipped client skips the new nested capability rows. */
+@Serializable
+private data class OldModelsList(
+    val agent: AgentKind = AgentKind.CLAUDE,
+    val models: List<String> = emptyList(),
+    val error: String? = null,
+    val gatewayModels: List<String> = emptyList(),
+)
+
 class SerializationRoundTripTest {
 
     @Test
@@ -28,6 +37,100 @@ class SerializationRoundTripTest {
         assertTrue("\"mode\":\"default\"" in json, json)   // encodeDefaults
         assertFalse("resumeId" in json, json)              // explicitNulls=false
         assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+    }
+
+    @Test
+    fun backend_native_session_settings_are_additive_and_legacy_safe() {
+        val open = OpenSession(
+            workdir = "/x",
+            effort = "ultra",
+            permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
+            serviceTier = "priority",
+        )
+        val openJson = PocketJson.encodeToString(open)
+        assertTrue("\"mode\":\"default\"" in openJson, openJson) // old daemon keeps its safe fallback
+        assertTrue("\"permissionMode\":\"auto\"" in openJson, openJson)
+        assertTrue("\"serviceTier\":\"priority\"" in openJson, openJson)
+        assertEquals(open, PocketJson.decodeFromString<OpenSession>(openJson))
+
+        val live = SessionLive(
+            "c1",
+            "/x",
+            "sid",
+            mode = PermissionMode.DEFAULT,
+            effort = "max",
+            permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
+            serviceTier = "priority",
+        )
+        assertEquals(live, PocketJson.decodeFromString<SessionLive>(PocketJson.encodeToString(live)))
+
+        // Frames sent before #183 omit both native fields and continue to decode to null.
+        val legacy = """{"workdir":"/x","mode":"default","effort":"high"}"""
+        assertEquals(
+            OpenSession(workdir = "/x", effort = "high"),
+            PocketJson.decodeFromString<OpenSession>(legacy),
+        )
+    }
+
+    @Test
+    fun backend_native_switches_roundtrip_and_keep_legacy_defaults() {
+        val mode = Envelope(
+            id = "mode",
+            ts = 1,
+            body = SwitchMode("c1", PermissionMode.DEFAULT, CLAUDE_PERMISSION_MODE_AUTO),
+        )
+        val modeJson = PocketJson.encodeToString(mode)
+        assertTrue("\"t\":\"pocket/mode.switch\"" in modeJson, modeJson)
+        assertTrue("\"permissionMode\":\"auto\"" in modeJson, modeJson)
+        assertEquals(mode, PocketJson.decodeFromString<Envelope>(modeJson))
+        assertEquals(
+            SwitchMode("c1", PermissionMode.DEFAULT),
+            PocketJson.decodeFromString<SwitchMode>("""{"convoId":"c1","mode":"default"}"""),
+        )
+        assertFalse("permissionMode" in PocketJson.encodeToString(SwitchMode("c1", PermissionMode.DEFAULT)))
+
+        val tier = Envelope(id = "tier", ts = 2, body = SwitchServiceTier("c1", "priority"))
+        val tierJson = PocketJson.encodeToString(tier)
+        assertTrue("\"t\":\"pocket/serviceTier.switch\"" in tierJson, tierJson)
+        assertEquals(tier, PocketJson.decodeFromString<Envelope>(tierJson))
+        assertEquals(
+            SwitchServiceTier("c1"),
+            PocketJson.decodeFromString<SwitchServiceTier>("""{"convoId":"c1"}"""),
+        )
+        assertFalse("serviceTier" in PocketJson.encodeToString(SwitchServiceTier("c1")))
+    }
+
+    @Test
+    fun modelsList_roundtrips_dynamic_backend_capabilities() {
+        val fast = ModelServiceTier("priority", "Fast", "Lower latency")
+        val models = ModelsList(
+            agent = AgentKind.CODEX,
+            models = listOf("gpt-5.6-sol"),
+            supportedEfforts = listOf("low", "medium", "high", "xhigh", "max", "ultra"),
+            permissionModes = listOf(CLAUDE_PERMISSION_MODE_AUTO),
+            modelCapabilities = listOf(
+                ModelCapabilities(
+                    model = "gpt-5.6-sol",
+                    reasoningEfforts = listOf("low", "medium", "high", "xhigh", "max", "ultra"),
+                    defaultReasoningEffort = "medium",
+                    serviceTiers = listOf(fast),
+                ),
+            ),
+        )
+        assertEquals(models, PocketJson.decodeFromString<ModelsList>(PocketJson.encodeToString(models)))
+
+        val legacy = """{"agent":"codex","models":["gpt-5.5"]}"""
+        assertEquals(
+            ModelsList(agent = AgentKind.CODEX, models = listOf("gpt-5.5")),
+            PocketJson.decodeFromString<ModelsList>(legacy),
+        )
+
+        // An old phone's concrete serializer must skip the populated array-of-objects, not merely
+        // tolerate an unknown scalar field.
+        assertEquals(
+            OldModelsList(agent = AgentKind.CODEX, models = listOf("gpt-5.6-sol")),
+            PocketJson.decodeFromString<OldModelsList>(PocketJson.encodeToString(models)),
+        )
     }
 
     @Test

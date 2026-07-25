@@ -36,7 +36,10 @@ import java.util.concurrent.atomic.AtomicLong
  * until the thread id lands. Approvals are server→client requests answered by request `id`; mode/model/effort
  * are per-turn params (so a switch needs no relaunch). Provider schema verified against openai/codex app-server.
  */
-class CodexBackend(private val codexBin: String?) : AgentBackend {
+class CodexBackend(
+    private val codexBin: String?,
+    private val modelService: CodexModelService = CodexModelService(),
+) : AgentBackend {
     private val log = logger("CodexBackend")
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val idSeq = AtomicLong(1)
@@ -49,6 +52,7 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
     @Volatile private var model: String? = null
     @Volatile private var effort: String? = null
+    @Volatile private var serviceTier: String? = null
 
     @Volatile private var threadId: String? = null
     @Volatile private var currentTurnId: String? = null
@@ -83,7 +87,8 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         this.resumeId = spec.resumeId
         this.mode = spec.mode
         this.model = spec.model
-        this.effort = spec.effort
+        this.effort = normalizeEffort(spec.model, spec.effort)
+        this.serviceTier = normalizeServiceTier(spec.model, spec.serviceTier)
         // reset per-process protocol state (this runs on every (re)launch)
         threadId = null; currentTurnId = null
         bootstrap.withLock { pendingPrompt = null }
@@ -131,13 +136,18 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
     private suspend fun openThread() {
         val rid = resumeId
         threadOpenId = if (rid != null) {
-            rpcRequest("thread/resume", buildJsonObject { put("threadId", rid); codexModel()?.let { put("model", it) } })
+            rpcRequest("thread/resume", buildJsonObject {
+                put("threadId", rid)
+                codexModel()?.let { put("model", it) }
+                serviceTier?.let { put("serviceTier", it) }
+            })
         } else {
             rpcRequest("thread/start", buildJsonObject {
                 put("cwd", workdir)
                 put("approvalPolicy", approvalPolicy())
                 put("sandbox", sandbox().flat) // thread/start takes the flat SandboxMode string
                 codexModel()?.let { put("model", it) }
+                serviceTier?.let { put("serviceTier", it) }
             })
         }
     }
@@ -317,7 +327,8 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
             put("approvalPolicy", approvalPolicy())
             putJsonObject("sandboxPolicy") { put("type", sandbox().tag) } // turn/start takes the object form
             codexModel()?.let { put("model", it) }
-            effort?.let { put("effort", codexEffort(it)) }
+            effort?.let { put("effort", it) }
+            serviceTier?.let { put("serviceTier", it) }
         })
     }
 
@@ -346,6 +357,29 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
         model?.let { this.model = it }
         effort?.let { this.effort = it }
         return false
+    }
+
+    override fun applyEffort(effort: String?): Boolean {
+        this.effort = effort
+        return false
+    }
+
+    override fun applyServiceTier(serviceTier: String?): Boolean {
+        this.serviceTier = serviceTier
+        return false
+    }
+
+    override fun supportedEfforts(model: String?): Set<String>? =
+        modelService.capabilitiesFor(model)?.reasoningEfforts?.toSet()
+
+    override fun normalizeEffort(model: String?, effort: String?): String? {
+        val supported = supportedEfforts(model) ?: return effort
+        return effort?.takeIf { it in supported }
+    }
+
+    override fun normalizeServiceTier(model: String?, serviceTier: String?): String? {
+        val caps = modelService.capabilitiesFor(model) ?: return serviceTier
+        return serviceTier?.takeIf { wanted -> caps.serviceTiers.any { it.id == wanted } }
     }
 
     override suspend fun onProcessEnded(sessionId: String?) {} // codex rollouts are self-managed; nothing to unhide
@@ -396,9 +430,6 @@ class CodexBackend(private val codexBin: String?) : AgentBackend {
 
     /** Drop Claude model aliases (opus/sonnet/haiku) — they're meaningless to codex and would error. */
     private fun codexModel(): String? = model?.takeIf { it.lowercase() !in CLAUDE_ALIASES }
-
-    /** cc-pocket's effort ladder includes "max"; codex's top tier is "xhigh" — map it so the turn isn't rejected. */
-    private fun codexEffort(e: String): String = if (e == "max") "xhigh" else e
 
     // ---- JSON-RPC plumbing ----
 

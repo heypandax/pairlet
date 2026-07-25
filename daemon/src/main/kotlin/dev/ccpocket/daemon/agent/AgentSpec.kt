@@ -15,6 +15,10 @@ data class AgentSpec(
     val mode: PermissionMode = PermissionMode.DEFAULT,
     val appendSystemPrompt: String? = null,
     val effort: String? = null, // reasoning effort: low|medium|high|xhigh|max
+    /** Backend-native permission-mode id not representable by the legacy protocol enum (Claude `auto`). */
+    val permissionMode: String? = null,
+    /** Backend-native service tier (Codex `priority` = Fast); null follows the CLI/account default. */
+    val serviceTier: String? = null,
     // Claude only: fork the resumed session into a fresh id (--fork-session) instead of appending to the
     // original transcript. Set when the phone takes over / cold-resumes a session another writer may hold.
     val forkSession: Boolean = false,

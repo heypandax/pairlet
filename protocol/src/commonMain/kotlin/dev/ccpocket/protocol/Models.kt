@@ -11,9 +11,10 @@ import kotlinx.serialization.encoding.Encoder
 import kotlin.jvm.JvmInline
 
 /**
- * The autonomy ladder — the four permission modes claude's `--permission-mode` actually accepts,
- * ordered most→least cautious. Serialized names match the CLI flag values exactly.
- * (The earlier `auto`/`dontAsk` were app-invented and not valid CLI values, so they were dropped.)
+ * The legacy autonomy ladder shared by every backend and older cc-pocket peer. Claude Code also has
+ * backend-specific modes (currently `auto`); those ride the additive string fields on OpenSession /
+ * SwitchMode / SessionLive instead of growing this enum. Already-shipped peers hard-fail on unknown enum
+ * values, while they safely ignore an unknown trailing field.
  */
 @Serializable
 enum class PermissionMode {
@@ -22,6 +23,9 @@ enum class PermissionMode {
     @SerialName("plan") PLAN,
     @SerialName("bypassPermissions") BYPASS_PERMISSIONS,
 }
+
+/** Claude Code 2.1.218's classifier-driven permission mode. It is a permission mode, not reasoning effort. */
+const val CLAUDE_PERMISSION_MODE_AUTO = "auto"
 
 /** Outcome of a remote permission prompt. Maps to control_response behavior allow|deny. */
 @Serializable

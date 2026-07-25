@@ -79,7 +79,11 @@ class GuestGuard(
             is CancelTurn -> ownedOr(frame.convoId, frame)
             is CloseSession -> if (owns(frame.convoId)) BridgeVerdict.Allow(frame.copy(force = false)) else notOwn()
             is PermissionVerdict -> ownedOr(frame.convoId, frame) // a guest answers ONLY its own asks
-            is SwitchMode -> if (owns(frame.convoId)) BridgeVerdict.Allow(frame.copy(mode = GuestCaps.clampMode(frame.mode, spec.tier))) else notOwn()
+            is SwitchMode -> if (owns(frame.convoId)) {
+                // Backend-native modes (Claude `auto`) are owner-only: the scoped credential's
+                // tier-clamped legacy mode must remain the sole permission authority.
+                BridgeVerdict.Allow(frame.copy(mode = GuestCaps.clampMode(frame.mode, spec.tier), permissionMode = null))
+            } else notOwn()
             is ClearAllowRule -> ownedOr(frame.convoId, frame)
             is StopBackgroundJob -> ownedOr(frame.convoId, frame)
             is AudioChunk -> ownedOr(frame.convoId, frame)
@@ -113,7 +117,14 @@ class GuestGuard(
         // bypass the clean-room and reach the owner's Codex integrations. Force Claude until Codex gets a
         // clean-room too (v2).
         return BridgeVerdict.Allow(
-            f.copy(workdir = wd, mode = GuestCaps.clampMode(f.mode, spec.tier), takeOver = false, agent = AgentKind.CLAUDE),
+            f.copy(
+                workdir = wd,
+                mode = GuestCaps.clampMode(f.mode, spec.tier),
+                takeOver = false,
+                agent = AgentKind.CLAUDE,
+                permissionMode = null,
+                serviceTier = null,
+            ),
         )
     }
 

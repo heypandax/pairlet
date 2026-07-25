@@ -16,6 +16,7 @@ import dev.ccpocket.daemon.disk.SlashCommandScanner
 import dev.ccpocket.daemon.disk.WorkflowFiles
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.CommandList
@@ -111,6 +112,14 @@ class Conversation(
     // mutable: a phone can switch reasoning effort mid-session via `/effort <level>`
     @Volatile
     private var effort: String? = null
+
+    // Backend-native launch knobs that are deliberately additive strings on the wire: growing the legacy
+    // PermissionMode enum would make already-shipped peers drop the whole SessionLive frame.
+    @Volatile
+    private var permissionMode: String? = null
+
+    @Volatile
+    private var serviceTier: String? = null
 
     // session "Always allow" scopes; survives a mode-switch relaunch (the bridge is recreated, this isn't)
     private val allowRules: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
@@ -415,6 +424,8 @@ class Conversation(
             contextUsed = resumeContextUsed, agent = backend.kind,
             degraded = degraded(),
             origin = origin, // "via <bridge>" label (issue #91); null for interactive sessions
+            permissionMode = permissionMode,
+            serviceTier = serviceTier,
         )
 
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
@@ -433,9 +444,20 @@ class Conversation(
      *  reconnect reattach the live process instead of spawning a second one on the same transcript. */
     val resumeAnchor: String? get() = openedResumeId
 
-    suspend fun open(resumeId: String?, model: String?, effort: String? = null, fork: Boolean = false, takeOver: Boolean = false, sinceSeq: Long? = null) {
+    suspend fun open(
+        resumeId: String?,
+        model: String?,
+        effort: String? = null,
+        fork: Boolean = false,
+        takeOver: Boolean = false,
+        sinceSeq: Long? = null,
+        permissionMode: String? = null,
+        serviceTier: String? = null,
+    ) {
         this.model = model
-        this.effort = effort // restore the session's last reasoning effort on a fresh resume (transcript doesn't carry it)
+        this.effort = backend.normalizeEffort(model, effort) // drop stale persisted levels a known model cannot run
+        this.permissionMode = normalizePermissionMode(permissionMode)
+        this.serviceTier = normalizeServiceTier(serviceTier)
         this.openedResumeId = resumeId
         this.openedWithFork = fork
         // LAZY START (issue #61): a plain open PREVIEWS the session — it announces SessionLive, replays history and
@@ -458,7 +480,12 @@ class Conversation(
             // so a take-over of a disk session resumes it instead of silently forking a fresh one. The
             // eager launch below is still a no-op for OpenCode (argv needs a prompt; the guard in
             // launchProcess defers to the first sendPrompt, which anchors on sessionId ?: openedResumeId).
-            launchProcess(AgentSpec(workdir, resumeId, model, mode, effort = effort, forkSession = fork))
+            launchProcess(
+                AgentSpec(
+                    workdir, resumeId, model, mode, effort = this.effort,
+                    permissionMode = this.permissionMode, serviceTier = this.serviceTier, forkSession = fork,
+                ),
+            )
         }
         // a headless agent (claude `--input-format stream-json`; codex pre-thread) emits NOTHING — not even the
         // init that would drive SessionLive — until the first user turn / handshake lands (and on a lazy open there
@@ -520,7 +547,7 @@ class Conversation(
 
     /** Tell the phone which slash commands its composer can autocomplete (workdir-dependent). */
     private suspend fun emitCommands() {
-        sink.emit(CommandList(convoId, SlashCommandScanner.scan(workdir)))
+        sink.emit(CommandList(convoId, SlashCommandScanner.scan(workdir, agent = backend.kind)))
     }
 
     /** Push the current background-job snapshot to the phone. A job-state change also counts as activity. */
@@ -671,7 +698,11 @@ class Conversation(
         stopProcess() // clears executing — the fresh launch re-arms it (armExecuting) with the right ordering
         val fork = if (sessionId == null) openedWithFork else resumeId != sessionId
         launchProcess(
-            AgentSpec(workdir, resumeId = resumeId, model = model, mode = mode, effort = effort, forkSession = fork, initialPrompt = initialSend?.text),
+            AgentSpec(
+                workdir, resumeId = resumeId, model = model, mode = mode, effort = effort,
+                permissionMode = permissionMode, serviceTier = serviceTier,
+                forkSession = fork, initialPrompt = initialSend?.text,
+            ),
             armExecuting = armExecuting,
             initialSend = initialSend,
         )
@@ -679,14 +710,16 @@ class Conversation(
 
     /** Switch the permission mode — next-turn semantics (issue #84): a running turn is never interrupted.
      *  Claude defers its relaunch to the next sendPrompt; Codex carries the new approval policy next turn. */
-    suspend fun switchMode(newMode: PermissionMode) {
-        if (newMode == mode) {
+    suspend fun switchMode(newMode: PermissionMode, nativeMode: String? = null) {
+        val normalizedNative = normalizePermissionMode(nativeMode)
+        if (newMode == mode && normalizedNative == permissionMode) {
             // no-op, but still announce: an out-of-sync phone badge corrects itself from this
             sink.emit(live(sessionId))
             return
         }
         mode = newMode
-        recordPendingSettings(mode = newMode, model = null, effort = null)
+        permissionMode = normalizedNative
+        recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
     }
 
     /** Switch the model — next-turn semantics (issue #84): the running turn is untouched; the change takes
@@ -694,13 +727,41 @@ class Conversation(
     suspend fun switchModel(newModel: String?) {
         model = newModel
         backfilledModel = null // an explicit choice replaces the transcript guess, even a choice of "default"
-        recordPendingSettings(mode = null, model = newModel, effort = null)
+        val normalizedEffort = backend.normalizeEffort(newModel, effort)
+        val effortChanged = normalizedEffort != effort
+        effort = normalizedEffort
+        val normalizedTier = normalizeServiceTier(serviceTier)
+        val tierChanged = normalizedTier != serviceTier
+        serviceTier = normalizedTier
+        recordPendingSettings(
+            mode = null,
+            model = newModel,
+            effort = null,
+            effortChanged = effortChanged,
+            serviceTierChanged = tierChanged,
+        )
     }
 
     /** Switch reasoning effort — next-turn semantics (issue #84), same deferral as switchModel. */
     suspend fun switchEffort(newEffort: String?) {
-        effort = newEffort
-        recordPendingSettings(mode = null, model = null, effort = newEffort)
+        effort = backend.normalizeEffort(model, newEffort)
+        recordPendingSettings(mode = null, model = null, effort = null, effortChanged = true)
+    }
+
+    /** Switch Codex's service tier independently from reasoning effort (`priority` is the Fast tier). */
+    suspend fun switchServiceTier(newServiceTier: String?) {
+        val normalized = normalizeServiceTier(newServiceTier)
+        if (normalized == serviceTier) {
+            sink.emit(live(sessionId))
+            return
+        }
+        serviceTier = normalized
+        recordPendingSettings(
+            mode = null,
+            model = null,
+            effort = null,
+            serviceTierChanged = true,
+        )
     }
 
     /**
@@ -715,11 +776,41 @@ class Conversation(
      *    relaunches under the new flags FIRST, then sends that turn to the fresh process (relaunch-then-send).
      * Either way the badge is optimistically re-announced; the resolved value confirms on the next init.
      */
-    private suspend fun recordPendingSettings(mode: PermissionMode?, model: String?, effort: String?) {
+    private suspend fun recordPendingSettings(
+        mode: PermissionMode?,
+        model: String?,
+        effort: String?,
+        effortChanged: Boolean = false,
+        permissionModeChanged: Boolean = false,
+        serviceTierChanged: Boolean = false,
+    ) {
         if (recordedPreFirstTurn()) return
-        if (backend.applySettings(mode = mode, model = model, effort = effort)) pendingRelaunch = true
+        val relaunchForSettings = backend.applySettings(mode = mode, model = model, effort = effort)
+        val relaunchForEffort = effortChanged && backend.applyEffort(this.effort)
+        val relaunchForPermissionMode = permissionModeChanged && backend.applyPermissionMode(permissionMode)
+        val relaunchForServiceTier = serviceTierChanged && backend.applyServiceTier(serviceTier)
+        if (relaunchForSettings || relaunchForEffort || relaunchForPermissionMode || relaunchForServiceTier) pendingRelaunch = true
         sink.emit(live(sessionId))
     }
+
+    /** Only the installed Claude CLI's verified backend-native mode is accepted, and never for a scoped
+     *  guest/bridge conversation (their legacy mode is tier-clamped and must remain the sole authority). */
+    private fun normalizePermissionMode(value: String?): String? =
+        value?.trim()?.lowercase()
+            ?.takeIf {
+                backend.kind == AgentKind.CLAUDE &&
+                    pathScope == null && origin == null &&
+                    it == CLAUDE_PERMISSION_MODE_AUTO
+            }
+
+    /** Service tiers are Codex-only and come from its dynamic model cache. Keep the parser future-safe
+     *  without accepting arbitrary control characters or unbounded strings from a wire client. */
+    private fun normalizeServiceTier(value: String?): String? =
+        value?.trim()?.takeIf {
+            backend.kind == AgentKind.CODEX &&
+                it.length in 1..64 &&
+                it.all { ch -> ch.isLetterOrDigit() || ch == '-' || ch == '_' }
+        }?.let { backend.normalizeServiceTier(model, it) }
 
     fun clearAllowRule(rule: String?) {
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
@@ -1135,7 +1226,10 @@ class Conversation(
                     log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
                     runCatching {
                         launchProcess(
-                            AgentSpec(workdir, sessionId ?: openedResumeId, model, mode, effort = effort, initialPrompt = next.text),
+                            AgentSpec(
+                                workdir, sessionId ?: openedResumeId, model, mode, effort = effort,
+                                permissionMode = permissionMode, serviceTier = serviceTier, initialPrompt = next.text,
+                            ),
                             armExecuting = true,
                             initialSend = InitialSend(next.key, next.text, next.images),
                         )
@@ -1214,7 +1308,12 @@ class Conversation(
             // the refused process took the prompt with it — it's still in the unconsumed ledger (no
             // replay ever came), so launchProcess re-injects it into the forked process (issue #122)
             if (hasUnconsumedPrompts()) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FORK_NOTICE)))
-            launchProcess(AgentSpec(workdir, resumeId = anchor, model = model, mode = mode, effort = effort, forkSession = true))
+            launchProcess(
+                AgentSpec(
+                    workdir, resumeId = anchor, model = model, mode = mode, effort = effort,
+                    permissionMode = permissionMode, serviceTier = serviceTier, forkSession = true,
+                ),
+            )
         }
         if (healed.isFailure) {
             sink.emit(
@@ -1334,7 +1433,15 @@ class Conversation(
             val anchor = sessionId ?: openedResumeId
             val fork = if (sessionId == null) openedWithFork else false
             val launched = runCatching {
-                launchProcess(AgentSpec(workdir, anchor, model, mode, effort = effort, forkSession = fork, initialPrompt = text), armExecuting = true, initialSend = initialSend)
+                launchProcess(
+                    AgentSpec(
+                        workdir, anchor, model, mode, effort = effort,
+                        permissionMode = permissionMode, serviceTier = serviceTier,
+                        forkSession = fork, initialPrompt = text,
+                    ),
+                    armExecuting = true,
+                    initialSend = initialSend,
+                )
             }
             if (launched.isFailure) {
                 executing = false // the spawn never started a turn
@@ -1405,19 +1512,22 @@ class Conversation(
     /** Handle the phone's `/effort [level]` — the agent `-p` ignores it, so the daemon honors it. */
     private suspend fun handleEffortCommand(text: String) {
         val arg = text.removePrefix("/effort").trim().lowercase()
+        val supported = backend.supportedEfforts(model) ?: CONSERVATIVE_EFFORT_LEVELS
         if (arg.isEmpty()) {
-            reply("Current reasoning effort: ${effort ?: "default"}.\nUsage: /effort <level> — one of ${EFFORT_LEVELS.joinToString(", ")}.")
+            reply("Current reasoning effort: ${effort ?: "default"}.\nUsage: /effort <level> — one of ${supported.joinToString(", ")}.")
             return
         }
-        if (arg !in EFFORT_LEVELS) {
-            reply("Unknown effort \"$arg\". Choose one of: ${EFFORT_LEVELS.joinToString(", ")}.")
+        if (arg != "default" && arg !in supported) {
+            reply("Unsupported effort \"$arg\" for ${displayModel() ?: backend.kind.name.lowercase()}. Choose one of: ${supported.joinToString(", ")}.")
             return
         }
         val wasExecuting = executing
-        switchEffort(arg)
+        switchEffort(arg.takeUnless { it == "default" })
         // issue #84: as in handleModelCommand — no mid-stream confirmation; the badge is the feedback when a
         // turn is in flight, and the switch still takes effect on the next turn.
-        if (!wasExecuting) reply("✓ Reasoning effort set to \"$arg\" for this session. Your next message will use it.")
+        if (!wasExecuting) {
+            reply("✓ Reasoning effort set to \"${arg.takeUnless { it == "default" } ?: "default"}\" for this session. Your next message will use it.")
+        }
     }
 
     /**
@@ -1438,7 +1548,12 @@ class Conversation(
         // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
         resumeContextUsed = null
         lastCallUsage = null // nor may a killed mid-flight turn's usage leak into the fresh session's first TurnDone
-        launchProcess(AgentSpec(workdir, resumeId = null, model = model, mode = mode, effort = effort))
+        launchProcess(
+            AgentSpec(
+                workdir, resumeId = null, model = model, mode = mode, effort = effort,
+                permissionMode = permissionMode, serviceTier = serviceTier,
+            ),
+        )
         sink.emit(ConvoHistory(convoId, emptyList())) // wipe the phone's transcript
         sink.emit(live(null))                          // sessionId backfills on the next init
     }
@@ -1511,7 +1626,12 @@ class Conversation(
         backfilledModel = null
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
-        launchProcess(AgentSpec(workdir, resumeId = null, model = null, mode = mode, effort = effort))
+        launchProcess(
+            AgentSpec(
+                workdir, resumeId = null, model = null, mode = mode, effort = effort,
+                permissionMode = permissionMode, serviceTier = serviceTier,
+            ),
+        )
         emitCommands() // project commands differ per workdir
     }
 
@@ -1600,7 +1720,7 @@ class Conversation(
     }
 
     companion object {
-        val EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh", "max")
+        val CONSERVATIVE_EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh")
 
         // claude's session-lock refusal on stderr: "Error: Session <id> is currently running as a
         // background agent (<kind>). … add --fork-session to branch off a copy." The kind varies

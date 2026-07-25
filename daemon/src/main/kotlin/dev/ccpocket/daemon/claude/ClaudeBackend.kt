@@ -203,6 +203,11 @@ class ClaudeBackend(
     // claude bakes --permission-mode/--model/--effort at launch, so any change needs a relaunch under --resume.
     override fun applySettings(mode: PermissionMode?, model: String?, effort: String?): Boolean = true
 
+    override fun applyPermissionMode(permissionMode: String?): Boolean = true
+    override fun applyEffort(effort: String?): Boolean = true
+    override fun supportedEfforts(model: String?): Set<String> = CLAUDE_EFFORTS
+    override fun normalizeEffort(model: String?, effort: String?): String? = effort?.takeIf { it in CLAUDE_EFFORTS }
+
     // claude marks `-p` transcripts entrypoint:"sdk-cli" and the desktop --resume picker hides those; once
     // the process is dead the file is safe to rewrite so this session shows up there.
     override suspend fun onProcessEnded(sessionId: String?) {
@@ -249,6 +254,7 @@ class ClaudeBackend(
         TranscriptScanner.syntheticTailStreak(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 
     private companion object {
+        val CLAUDE_EFFORTS = setOf("low", "medium", "high", "xhigh", "max")
         // the CLI appends + acks in one tick; generous so a mid-turn rename survives a busy stdout,
         // bounded so a wedged process fails the rename honestly instead of hanging the router job
         const val RENAME_ACK_TIMEOUT_MS = 10_000L

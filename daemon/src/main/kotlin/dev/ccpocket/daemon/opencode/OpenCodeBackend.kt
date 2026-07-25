@@ -151,6 +151,13 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
         return true // relaunch needed since all flags are baked at launch
     }
 
+    override fun applyEffort(effort: String?): Boolean {
+        this.effort = effort
+        return true
+    }
+
+    override fun supportedEfforts(model: String?): Set<String> = LEGACY_EFFORTS
+
     override suspend fun onProcessEnded(sessionId: String?) {}
 
     // ---- disk: transcript scanning + replay ----
@@ -178,4 +185,8 @@ class OpenCodeBackend(private val opencodeBin: String?) : AgentBackend {
             }
             probedDefault
         }
+
+    private companion object {
+        val LEGACY_EFFORTS = setOf("low", "medium", "high", "xhigh", "max")
+    }
 }

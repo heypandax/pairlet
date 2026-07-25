@@ -41,6 +41,15 @@ class ClaudeLauncherTest {
     }
 
     @Test
+    fun native_auto_mode_and_max_effort_are_forwarded_verbatim() {
+        val args = ClaudeLauncher.buildArgs(
+            AgentSpec(Path.of("/x"), permissionMode = "auto", effort = "max"),
+        )
+        assertEquals("auto", args[args.indexOf("--permission-mode") + 1])
+        assertEquals("max", args[args.indexOf("--effort") + 1])
+    }
+
+    @Test
     fun fork_session_added_only_when_forking_a_resume() {
         val forked = ClaudeLauncher.buildArgs(
             AgentSpec(Path.of("/x"), resumeId = "sid-9", forkSession = true),
