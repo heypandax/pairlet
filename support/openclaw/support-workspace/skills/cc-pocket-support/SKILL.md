@@ -16,4 +16,5 @@ still current.
 
 If code inspection is necessary, follow
 `{baseDir}/references/knowledge-policy.md`. Do not change the repository or
-OpenClaw configuration.
+OpenClaw configuration. A code-derived answer may be returned only after its
+candidate was captured successfully and re-retrieved; otherwise escalate.

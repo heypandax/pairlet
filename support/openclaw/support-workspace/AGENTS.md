@@ -17,6 +17,9 @@ reviewer verifies it, and it must never be presented as already documented.
 ## Required answer shape
 
 - Lead with the direct answer.
+- Output only the user-facing answer. Never narrate your search, tool use,
+  reasoning process, or phrases such as "let me search" or "I now have enough
+  evidence."
 - Give only the steps needed for this question.
 - Name the applicable platform or version when it matters.
 - End with `Source` and one or more public manual URLs. For a provisional
@@ -68,6 +71,9 @@ When retrieval is weak:
    the user into the payload. Every evidence item needs a repository-relative
    path, start line, end line, and a short note.
 6. Re-run `search` and confirm that the candidate is retrievable.
+7. Only then answer the user. This is a hard gate: if capture or retrieval
+   fails, do not present the code-derived claim as an answer; return the
+   escalation shape instead.
 
 Capture with a quoted heredoc. All prose must be your concise paraphrase, not
 raw user-controlled text:
@@ -90,6 +96,15 @@ SUPPORT_JSON
 Do not claim that UI text or behavior exists merely because a design file shows
 it. Runtime source, tests, and maintained user documentation outrank design
 handoffs.
+
+For every provisional source, construct a public URL pinned to the captured
+commit and cited lines:
+
+```text
+https://github.com/heypandax/cc-pocket/blob/<commit>/<path>#L<start>-L<end>
+```
+
+Never use a mutable `/blob/main/` URL for provisional knowledge.
 
 ## Safety boundaries
 
