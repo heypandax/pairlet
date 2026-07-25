@@ -58,6 +58,7 @@ GOVERNANCE_PATH="$STATE_ROOT/cc-pocket-support-kb-governance"
 SOURCE_ROOT="$STATE_ROOT/cc-pocket-support-source"
 SUPPORT_TEMPLATE="$REPO_PATH/support/openclaw/support-workspace"
 REVIEW_TEMPLATE="$REPO_PATH/support/openclaw/reviewer-workspace"
+SUPPORT_GUARD_PLUGIN="$REPO_PATH/support/openclaw/plugins/cc-pocket-support-guard"
 command -v git >/dev/null || {
   printf '%s\n' "Missing required command: git" >&2
   exit 2
@@ -67,6 +68,7 @@ SOURCE_SNAPSHOT="$SOURCE_ROOT/$SOURCE_COMMIT"
 
 test -f "$SUPPORT_TEMPLATE/AGENTS.md"
 test -f "$REVIEW_TEMPLATE/AGENTS.md"
+test -f "$SUPPORT_GUARD_PLUGIN/openclaw.plugin.json"
 test -f "$REPO_PATH/scripts/support-kb.py"
 
 if [[ "$APPLY" != true ]]; then
@@ -244,6 +246,11 @@ retry_openclaw() {
   done
   return 1
 }
+
+openclaw plugins install --force "$SUPPORT_GUARD_PLUGIN"
+retry_openclaw openclaw config set \
+  plugins.entries.cc-pocket-support-guard.hooks.allowConversationAccess \
+  true --strict-json
 
 create_tracked_snapshot
 install -d -m 700 \

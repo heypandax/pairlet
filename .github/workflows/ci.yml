@@ -28,6 +28,7 @@ jobs:
       - name: Verify support knowledge and generated manual
         run: |
           python3 -m unittest support.tests.test_support_kb
+          node --test support/openclaw/plugins/cc-pocket-support-guard/index.test.js
           python3 scripts/build-manual.py
           python3 scripts/check-site-seo.py
           git diff --exit-code -- site/manual site/sitemap.xml

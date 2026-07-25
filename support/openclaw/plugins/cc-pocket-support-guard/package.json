@@ -1,0 +1,12 @@
+{
+  "name": "@cc-pocket/support-guard",
+  "version": "0.1.0",
+  "description": "Final-answer and delivery guard for the public CC Pocket support agent.",
+  "type": "module",
+  "main": "index.js",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
+}

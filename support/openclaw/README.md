@@ -19,6 +19,12 @@ without invalidating that verdict. File mutation outside those mounts,
 browser, messaging, gateway, cron, elevated, node, and agent-spawn tools are
 denied.
 
+The `cc-pocket-support-guard` plugin applies only to the public support agent.
+Its pre-finalize hook asks the model to revise any answer that exposes internal
+retrieval/policy narration or adds prose around the fixed escalation response.
+Its outbound hook drops tool diagnostic payloads before a configured public
+channel can deliver them.
+
 ## Provision
 
 On the OpenClaw host, clone or update the public CC Pocket repository, then:

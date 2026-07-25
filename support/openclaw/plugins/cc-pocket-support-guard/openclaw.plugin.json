@@ -1,0 +1,15 @@
+{
+  "id": "cc-pocket-support-guard",
+  "name": "CC Pocket Support Guard",
+  "description": "Revises internal support narration before finalization and suppresses tool diagnostics on public delivery.",
+  "activation": {
+    "onCapabilities": [
+      "hook"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
