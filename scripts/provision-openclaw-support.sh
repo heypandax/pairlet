@@ -129,10 +129,6 @@ raise SystemExit(f"agent not found in config: {target}")
 ' "$agent_id"
 }
 
-json_string() {
-  python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$1"
-}
-
 copy_workspace() {
   local source="$1"
   local destination="$2"
@@ -219,10 +215,31 @@ print(json.dumps({
     "exec": {"host": "sandbox", "security": "full", "ask": "off"},
     "elevated": {"enabled": false}
   }'
-  openclaw config set "$base.model" "$(json_string "$model")" --strict-json
-  openclaw config set "$base.skills" "[\"$skill\"]" --strict-json
-  openclaw config set "$base.tools" "$tools" --strict-json
-  openclaw config set "$base.sandbox" "$sandbox" --strict-json
+  local batch
+  batch="$(
+    python3 -c '
+import json, sys
+base, model, skill, tools, sandbox = sys.argv[1:6]
+print(json.dumps([
+    {"path": f"{base}.model", "value": model},
+    {"path": f"{base}.skills", "value": [skill]},
+    {"path": f"{base}.tools", "value": json.loads(tools)},
+    {"path": f"{base}.sandbox", "value": json.loads(sandbox)},
+]))
+' "$base" "$model" "$skill" "$tools" "$sandbox"
+  )"
+  openclaw config set --batch-json "$batch"
+}
+
+retry_openclaw() {
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if "$@"; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
 }
 
 create_tracked_snapshot
@@ -249,7 +266,7 @@ raise SystemExit(0 if needle in data else f"review model is not configured: {nee
   openclaw agents set-identity --workspace "$REVIEW_WORKSPACE" --from-identity --json
 
   existing_review_job="$(
-    openclaw cron list --all --json | python3 -c '
+    retry_openclaw openclaw cron list --all --json | python3 -c '
 import json, sys
 data = json.load(sys.stdin)
 if isinstance(data, dict):
@@ -274,11 +291,11 @@ for item in data:
   fi
 fi
 
-openclaw config validate
-openclaw agents list --bindings
-openclaw sandbox explain --agent cc-pocket-support
+retry_openclaw openclaw config validate
+retry_openclaw openclaw agents list --bindings
+retry_openclaw openclaw sandbox explain --agent cc-pocket-support
 if [[ -n "$REVIEW_MODEL" ]]; then
-  openclaw sandbox explain --agent cc-pocket-support-review
+  retry_openclaw openclaw sandbox explain --agent cc-pocket-support-review
 fi
 
 printf '%s\n' \
