@@ -51,7 +51,8 @@ REVIEW_TZ="${CC_POCKET_REVIEW_TZ:-UTC}"
 STATE_ROOT="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
 SUPPORT_WORKSPACE="$STATE_ROOT/workspace-cc-pocket-support"
 REVIEW_WORKSPACE="$STATE_ROOT/workspace-cc-pocket-support-review"
-QUEUE_PATH="$STATE_ROOT/cc-pocket-support-kb"
+CANDIDATE_QUEUE_PATH="$STATE_ROOT/cc-pocket-support-kb-inbox"
+GOVERNANCE_PATH="$STATE_ROOT/cc-pocket-support-kb-governance"
 SOURCE_ROOT="$STATE_ROOT/cc-pocket-support-source"
 SUPPORT_TEMPLATE="$REPO_PATH/support/openclaw/support-workspace"
 REVIEW_TEMPLATE="$REPO_PATH/support/openclaw/reviewer-workspace"
@@ -72,7 +73,8 @@ if [[ "$APPLY" != true ]]; then
     "Repository: $REPO_PATH" \
     "Support workspace: $SUPPORT_WORKSPACE" \
     "Tracked-file snapshot: $SOURCE_SNAPSHOT" \
-    "Queue: $QUEUE_PATH" \
+    "Candidate inbox: $CANDIDATE_QUEUE_PATH" \
+    "Review governance: $GOVERNANCE_PATH" \
     "Support model: $SUPPORT_MODEL"
   if [[ -n "$REVIEW_MODEL" ]]; then
     printf 'Reviewer: %s on %s (%s)\n' "$REVIEW_MODEL" "$REVIEW_CRON" "$REVIEW_TZ"
@@ -168,6 +170,7 @@ configure_agent() {
   local agent_id="$1"
   local model="$2"
   local skill="$3"
+  local role="$4"
   local index
   index="$(agent_index "$agent_id")"
   local base="agents.list[$index]"
@@ -175,7 +178,13 @@ configure_agent() {
   sandbox="$(
     python3 -c '
 import json, sys
-repo, queue = sys.argv[1:3]
+repo, candidates, governance, role = sys.argv[1:5]
+if role == "support":
+    binds = [f"{repo}:/repo:ro", f"{candidates}:/queue:rw", f"{governance}:/governance:ro"]
+elif role == "reviewer":
+    binds = [f"{repo}:/repo:ro", f"{candidates}:/queue:ro", f"{governance}:/governance:rw"]
+else:
+    raise SystemExit(f"unknown agent role: {role}")
 print(json.dumps({
     "mode": "all",
     "backend": "docker",
@@ -183,11 +192,11 @@ print(json.dumps({
     "workspaceAccess": "none",
     "docker": {
         "network": "none",
-        "binds": [f"{repo}:/repo:ro", f"{queue}:/queue:rw"],
+        "binds": binds,
         "dangerouslyAllowExternalBindSources": True,
     },
 }))
-' "$SOURCE_SNAPSHOT" "$QUEUE_PATH"
+' "$SOURCE_SNAPSHOT" "$CANDIDATE_QUEUE_PATH" "$GOVERNANCE_PATH" "$role"
   )"
   local tools
   tools='{
@@ -207,10 +216,14 @@ print(json.dumps({
 }
 
 create_tracked_snapshot
-install -d -m 700 "$QUEUE_PATH/candidates" "$QUEUE_PATH/reviews" "$QUEUE_PATH/promotions"
+install -d -m 700 \
+  "$CANDIDATE_QUEUE_PATH/candidates" \
+  "$GOVERNANCE_PATH/review-input" \
+  "$GOVERNANCE_PATH/reviews" \
+  "$GOVERNANCE_PATH/promotions"
 copy_workspace "$SUPPORT_TEMPLATE" "$SUPPORT_WORKSPACE"
 add_agent_if_missing "cc-pocket-support" "$SUPPORT_WORKSPACE" "$SUPPORT_MODEL"
-configure_agent "cc-pocket-support" "$SUPPORT_MODEL" "cc-pocket-support"
+configure_agent "cc-pocket-support" "$SUPPORT_MODEL" "cc-pocket-support" "support"
 openclaw agents set-identity --agent cc-pocket-support --from-identity --json
 
 if [[ -n "$REVIEW_MODEL" ]]; then
@@ -222,7 +235,7 @@ raise SystemExit(0 if needle in data else f"review model is not configured: {nee
 ' "$REVIEW_MODEL"
   copy_workspace "$REVIEW_TEMPLATE" "$REVIEW_WORKSPACE"
   add_agent_if_missing "cc-pocket-support-review" "$REVIEW_WORKSPACE" "$REVIEW_MODEL"
-  configure_agent "cc-pocket-support-review" "$REVIEW_MODEL" "cc-pocket-support-review"
+  configure_agent "cc-pocket-support-review" "$REVIEW_MODEL" "cc-pocket-support-review" "reviewer"
   openclaw agents set-identity --agent cc-pocket-support-review --from-identity --json
 
   existing_review_job="$(

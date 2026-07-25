@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -83,6 +84,130 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
             evidence_file.write_text("PAIR_CODE_LENGTH = 8\n", encoding="utf-8")
             self.assertEqual("stale", support_kb.candidate_validation(repo, candidate)["state"])
             self.assertEqual([], support_kb.candidate_records(repo, [queue], "zh"))
+
+    def test_external_review_is_digest_bound_and_required_for_verified_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            queue = Path(directory) / "queue"
+            governance = Path(directory) / "governance"
+            evidence_file = repo / "protocol" / "Pairing.kt"
+            evidence_file.parent.mkdir(parents=True)
+            evidence_file.write_text("const val PAIR_CODE_LENGTH = 6\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "support@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Support Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True)
+
+            candidate_path = support_kb.capture_candidate(
+                repo,
+                queue,
+                {
+                    "questions": {"zh": ["配对码有几位？"], "en": ["How long is the pairing code?"]},
+                    "answer": {"zh": "配对码是 6 位。", "en": "The pairing code has 6 digits."},
+                    "evidenceSummary": "The protocol constant defines the length.",
+                    "evidence": [
+                        {
+                            "path": "protocol/Pairing.kt",
+                            "startLine": 1,
+                            "endLine": 1,
+                            "note": "Runtime protocol constant",
+                        }
+                    ],
+                },
+            )
+            candidate = support_kb.load_json(candidate_path)
+            observed = support_kb.candidate_records(repo, [queue, governance], "zh")
+            self.assertEqual("observed", observed[0]["status"])
+
+            review_input = governance / "review-input" / f"{candidate['id']}.json"
+            support_kb.write_json(
+                review_input,
+                {
+                    "id": candidate["id"],
+                    "verdict": "verified",
+                    "model": "provider/strong-model",
+                    "rationale": "The runtime constant directly supports the answer.",
+                },
+            )
+            result = support_kb.command_review(
+                SimpleNamespace(
+                    input=review_input,
+                    repo_root=repo,
+                    candidate_kb=queue,
+                    governance=governance,
+                )
+            )
+            self.assertEqual(0, result)
+            verified = support_kb.candidate_records(repo, [queue, governance], "zh")
+            self.assertEqual("verified", verified[0]["status"])
+
+            tampered = support_kb.load_json(candidate_path)
+            tampered["answer"]["zh"] = "配对码是 8 位。"
+            support_kb.write_json(candidate_path, tampered)
+            self.assertEqual([], support_kb.candidate_records(repo, [queue, governance], "zh"))
+
+    def test_promotion_requires_matching_external_verified_review(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            queue = Path(directory) / "queue"
+            governance = Path(directory) / "governance"
+            evidence_file = repo / "docs" / "fact.md"
+            evidence_file.parent.mkdir(parents=True)
+            evidence_file.write_text("The feature is available on desktop.\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "support@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Support Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True)
+            candidate_path = support_kb.capture_candidate(
+                repo,
+                queue,
+                {
+                    "questions": {"zh": ["在哪个平台可用？"], "en": ["Which platform supports it?"]},
+                    "answer": {"zh": "目前支持桌面端。", "en": "It is currently available on desktop."},
+                    "evidence": [
+                        {
+                            "path": "docs/fact.md",
+                            "startLine": 1,
+                            "endLine": 1,
+                            "note": "Maintained documentation",
+                        }
+                    ],
+                },
+            )
+            candidate = support_kb.load_json(candidate_path)
+            args = SimpleNamespace(
+                id=candidate["id"],
+                repo_root=repo,
+                candidate_kb=queue,
+                governance=governance,
+                output=None,
+            )
+            with self.assertRaisesRegex(ValueError, "only verified"):
+                support_kb.command_promote(args)
+
+            review_input = governance / "review-input" / f"{candidate['id']}.json"
+            support_kb.write_json(
+                review_input,
+                {
+                    "id": candidate["id"],
+                    "verdict": "verified",
+                    "model": "provider/strong-model",
+                    "rationale": "The maintained documentation supports the platform scope.",
+                },
+            )
+            support_kb.command_review(
+                SimpleNamespace(
+                    input=review_input,
+                    repo_root=repo,
+                    candidate_kb=queue,
+                    governance=governance,
+                )
+            )
+            self.assertEqual(0, support_kb.command_promote(args))
+            proposal = governance / "promotions" / f"{candidate['id']}.md"
+            self.assertIn("Candidate SHA-256", proposal.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

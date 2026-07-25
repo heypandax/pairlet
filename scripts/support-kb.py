@@ -181,6 +181,79 @@ def candidate_files(kb_dirs: list[Path]) -> Iterable[Path]:
                 yield path
 
 
+def review_files(kb_dirs: list[Path]) -> Iterable[Path]:
+    seen: set[Path] = set()
+    for kb_dir in kb_dirs:
+        reviews_dir = kb_dir / "reviews" if kb_dir.name != "reviews" else kb_dir
+        if not reviews_dir.exists():
+            continue
+        for path in sorted(reviews_dir.glob("*.json")):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                yield path
+
+
+def candidate_identity(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schemaVersion": candidate.get("schemaVersion"),
+        "questions": candidate.get("questions"),
+        "answer": candidate.get("answer"),
+        "evidenceSummary": candidate.get("evidenceSummary", ""),
+        "evidence": candidate.get("evidence"),
+        "capturedAt": candidate.get("capturedAt"),
+        "capturedBy": candidate.get("capturedBy"),
+    }
+
+
+def candidate_digest(candidate: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        candidate_identity(candidate),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(encoded)
+
+
+def expected_candidate_id(candidate: dict[str, Any]) -> str:
+    identity = {
+        "schemaVersion": candidate.get("schemaVersion"),
+        "questions": candidate.get("questions"),
+        "answer": candidate.get("answer"),
+        "evidenceSummary": candidate.get("evidenceSummary", ""),
+        "evidence": candidate.get("evidence"),
+    }
+    encoded = json.dumps(
+        identity,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"kb-{sha256(encoded)[:12]}"
+
+
+def matching_review(candidate: dict[str, Any], kb_dirs: list[Path]) -> dict[str, Any] | None:
+    matches: list[dict[str, Any]] = []
+    digest = candidate_digest(candidate)
+    candidate_id = str(candidate.get("id", ""))
+    for path in review_files(kb_dirs):
+        try:
+            review = load_json(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if review.get("id") != candidate_id or review.get("candidateSha256") != digest:
+            continue
+        verdict = str(review.get("verdict", ""))
+        if verdict not in REVIEW_VERDICTS:
+            continue
+        matches.append(review)
+    if not matches:
+        return None
+    matches.sort(key=lambda item: str(item.get("reviewedAt", "")), reverse=True)
+    return matches[0]
+
+
 def resolve_evidence_path(repo_root: Path, raw_path: str) -> Path:
     relative = Path(raw_path)
     if relative.is_absolute() or ".." in relative.parts or not relative.parts:
@@ -244,6 +317,15 @@ def validate_evidence(repo_root: Path, evidence: dict[str, Any]) -> dict[str, An
 
 
 def candidate_validation(repo_root: Path, candidate: dict[str, Any]) -> dict[str, Any]:
+    candidate_id = str(candidate.get("id", ""))
+    expected_id = expected_candidate_id(candidate)
+    if candidate_id != expected_id:
+        return {
+            "state": "invalid",
+            "checkedAt": utc_now(),
+            "evidence": [],
+            "reason": f"candidate content digest does not match id {candidate_id!r}",
+        }
     evidence = candidate.get("evidence", [])
     if not isinstance(evidence, list) or not evidence:
         return {"state": "invalid", "checkedAt": utc_now(), "evidence": [], "reason": "no evidence"}
@@ -263,30 +345,38 @@ def candidate_validation(repo_root: Path, candidate: dict[str, Any]) -> dict[str
 def candidate_records(repo_root: Path, kb_dirs: list[Path], locale: str) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for path in candidate_files(kb_dirs):
-        candidate = load_json(path)
+        try:
+            candidate = load_json(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
         status = str(candidate.get("status", ""))
-        if status not in REUSABLE_STATUSES:
+        if status != "observed":
             continue
         validation = candidate_validation(repo_root, candidate)
         if validation["state"] != "current":
+            continue
+        review = matching_review(candidate, kb_dirs)
+        if review and review.get("verdict") in {"rejected", "needs_changes"}:
+            continue
+        effective_status = "verified" if review and review.get("verdict") == "verified" else "observed"
+        if effective_status not in REUSABLE_STATUSES:
             continue
         questions = candidate.get("questions", {})
         question_values = questions.get(locale, []) if isinstance(questions, dict) else []
         if isinstance(question_values, str):
             question_values = [question_values]
         answer = localized(candidate.get("answer"), locale)
-        review = candidate.get("review") or {}
         records.append(
             {
                 "kind": "candidate",
                 "id": str(candidate.get("id", path.stem)),
-                "status": status,
+                "status": effective_status,
                 "title": str(question_values[0]) if question_values else str(candidate.get("id", path.stem)),
                 "summary": strip_markup(answer),
                 "answer": strip_markup(answer),
                 "aliases": [str(item) for item in question_values],
                 "body": " ".join(flatten_strings(candidate.get("evidenceSummary", ""))),
-                "verifiedAt": review.get("reviewedAt") or candidate.get("capturedAt"),
+                "verifiedAt": (review or {}).get("reviewedAt") or candidate.get("capturedAt"),
                 "url": None,
                 "evidence": candidate.get("evidence", []),
             }
@@ -374,16 +464,10 @@ def capture_candidate(repo_root: Path, queue_dir: Path, payload: dict[str, Any])
                 "note": str(raw.get("note", "")).strip(),
             }
         )
-    identity_source = json.dumps(
-        {"questions": payload["questions"], "answer": payload["answer"]},
-        ensure_ascii=False,
-        sort_keys=True,
-    ).encode("utf-8")
-    candidate_id = f"kb-{sha256(identity_source)[:12]}"
     now = utc_now()
     candidate = {
         "schemaVersion": 1,
-        "id": candidate_id,
+        "id": "",
         "status": "observed",
         "questions": payload["questions"],
         "answer": payload["answer"],
@@ -391,9 +475,10 @@ def capture_candidate(repo_root: Path, queue_dir: Path, payload: dict[str, Any])
         "evidence": captured_evidence,
         "capturedAt": now,
         "capturedBy": str(payload.get("capturedBy", "cc-pocket-support")),
-        "review": None,
         "validation": {"state": "current", "checkedAt": now},
     }
+    candidate_id = expected_candidate_id(candidate)
+    candidate["id"] = candidate_id
     candidates_dir = queue_dir / "candidates"
     path = candidates_dir / f"{candidate_id}.json"
     if path.exists():
@@ -501,7 +586,7 @@ def command_audit(args: argparse.Namespace) -> int:
 
 def command_review(args: argparse.Namespace) -> int:
     review = load_json(args.input)
-    candidate_path = args.queue / "candidates" / f"{review.get('id', '')}.json"
+    candidate_path = args.candidate_kb / "candidates" / f"{review.get('id', '')}.json"
     if not candidate_path.is_file():
         raise ValueError(f"candidate not found: {candidate_path}")
     verdict = str(review.get("verdict", ""))
@@ -515,23 +600,28 @@ def command_review(args: argparse.Namespace) -> int:
     validation = candidate_validation(args.repo_root, candidate)
     if verdict == "verified" and validation["state"] != "current":
         raise ValueError(f"cannot verify stale evidence: {validation['state']}")
-    candidate["status"] = verdict if verdict != "needs_changes" else "observed"
-    candidate["validation"] = validation
-    candidate["review"] = {
+    recorded_review = {
+        "schemaVersion": 1,
+        "id": candidate["id"],
+        "candidateSha256": candidate_digest(candidate),
         "verdict": verdict,
         "model": model,
         "rationale": rationale,
-        "reviewedAt": str(review.get("reviewedAt") or utc_now()),
+        "reviewedAt": utc_now(),
+        "reviewedCommit": git_head(args.repo_root),
+        "validation": validation,
     }
-    write_json(candidate_path, candidate)
-    print(json.dumps({"ok": True, "id": candidate["id"], "status": candidate["status"]}, ensure_ascii=False))
+    review_path = args.governance / "reviews" / f"{candidate['id']}.json"
+    write_json(review_path, recorded_review)
+    print(json.dumps({"ok": True, "id": candidate["id"], "verdict": verdict, "path": str(review_path)}, ensure_ascii=False))
     return 0
 
 
 def command_promote(args: argparse.Namespace) -> int:
-    candidate_path = args.queue / "candidates" / f"{args.id}.json"
+    candidate_path = args.candidate_kb / "candidates" / f"{args.id}.json"
     candidate = load_json(candidate_path)
-    if candidate.get("status") != "verified":
+    review = matching_review(candidate, [args.governance])
+    if not review or review.get("verdict") != "verified":
         raise ValueError("only verified candidates can produce a manual proposal")
     validation = candidate_validation(args.repo_root, candidate)
     if validation["state"] != "current":
@@ -566,8 +656,10 @@ def command_promote(args: argparse.Namespace) -> int:
             "",
             "## Reviewer",
             "",
-            f"- Model: {candidate.get('review', {}).get('model', '')}",
-            f"- Rationale: {candidate.get('review', {}).get('rationale', '')}",
+            f"- Model: {review.get('model', '')}",
+            f"- Rationale: {review.get('rationale', '')}",
+            f"- Candidate SHA-256: `{review.get('candidateSha256', '')}`",
+            f"- Reviewed commit: `{review.get('reviewedCommit', '')}`",
             "",
             "## Promotion checklist",
             "",
@@ -579,7 +671,7 @@ def command_promote(args: argparse.Namespace) -> int:
             "",
         ]
     )
-    output = args.output or (args.queue / "promotions" / f"{candidate['id']}.md")
+    output = args.output or (args.governance / "promotions" / f"{candidate['id']}.md")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(content, encoding="utf-8")
     print(json.dumps({"ok": True, "path": str(output)}, ensure_ascii=False))
@@ -618,16 +710,18 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("--write", action="store_true")
     audit.set_defaults(func=command_audit)
 
-    review = subparsers.add_parser("review", help="record a model review decision")
+    review = subparsers.add_parser("review", help="record an external model review bound to candidate content")
     review.add_argument("--input", type=Path, required=True)
     review.add_argument("--repo-root", type=Path, default=ROOT)
-    review.add_argument("--queue", type=Path, default=DEFAULT_KB)
+    review.add_argument("--candidate-kb", type=Path, default=DEFAULT_KB)
+    review.add_argument("--governance", type=Path, default=DEFAULT_KB)
     review.set_defaults(func=command_review)
 
     promote = subparsers.add_parser("promote", help="generate a human-reviewed manual promotion proposal")
     promote.add_argument("id")
     promote.add_argument("--repo-root", type=Path, default=ROOT)
-    promote.add_argument("--queue", type=Path, default=DEFAULT_KB)
+    promote.add_argument("--candidate-kb", type=Path, default=DEFAULT_KB)
+    promote.add_argument("--governance", type=Path, default=DEFAULT_KB)
     promote.add_argument("--output", type=Path)
     promote.set_defaults(func=command_promote)
 

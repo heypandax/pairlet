@@ -11,9 +11,13 @@ default agent:
 Both agents run every tool turn inside Docker with no network. Provisioning
 first creates a `git archive` snapshot containing tracked files only, so ignored
 files such as `.env` can never enter the sandbox. That snapshot is mounted
-read-only at `/repo`; only the dedicated knowledge queue is writable at
-`/queue`. File mutation, browser, messaging, gateway, cron, elevated, node, and
-agent-spawn tools are denied.
+read-only at `/repo`. The public agent can write only candidate files under
+`/queue` and reads `/governance`; the reviewer sees `/queue` read-only and can
+write only `/governance`. Review verdicts are bound to the complete candidate
+SHA-256, so the public agent cannot self-verify or change a reviewed answer
+without invalidating that verdict. File mutation outside those mounts,
+browser, messaging, gateway, cron, elevated, node, and agent-spawn tools are
+denied.
 
 ## Provision
 

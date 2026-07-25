@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CC Pocket support knowledge review",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "id",
+    "candidateSha256",
+    "verdict",
+    "model",
+    "rationale",
+    "reviewedAt",
+    "reviewedCommit",
+    "validation"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^kb-[a-f0-9]{12}$"},
+    "candidateSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "verdict": {
+      "enum": ["verified", "rejected", "needs_changes"]
+    },
+    "model": {"type": "string", "minLength": 1},
+    "rationale": {"type": "string", "minLength": 1},
+    "reviewedAt": {"type": "string"},
+    "reviewedCommit": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+    "validation": {
+      "type": "object",
+      "properties": {
+        "state": {"enum": ["current", "stale", "missing", "invalid"]}
+      },
+      "required": ["state"]
+    }
+  }
+}

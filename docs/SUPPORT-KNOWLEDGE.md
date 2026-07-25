@@ -45,7 +45,7 @@
 
 ### 3. 已复核知识与手册晋升
 
-独立的 reviewer Agent 使用显式配置的更强模型，重新读取当前代码和测试。它只能将候选标记为 `verified`、`rejected` 或 `needs_changes`，并为 `verified` 项生成 Markdown 提案。真正的手册更新仍需维护者修改双语内容、跑生成器和测试，并通过正常 PR/提交发布。
+独立的 reviewer Agent 使用显式配置的更强模型，重新读取当前代码和测试。它只能在独立治理区写入 `verified`、`rejected` 或 `needs_changes` 结论，并为 `verified` 项生成 Markdown 提案。每个结论都绑定候选内容的完整 SHA-256；客服 Agent 无权写治理区，也无法在不使结论失效的情况下修改已复核答案。真正的手册更新仍需维护者修改双语内容、跑生成器和测试，并通过正常 PR/提交发布。
 
 ## OpenClaw 隔离
 
@@ -63,7 +63,9 @@
 - `sandbox.mode = all`、`scope = agent`；
 - Docker 无网络；
 - `/repo` 只读，且由 `git archive` 生成，只包含 tracked 文件，不会带入
-  `.env` 等 ignored 凭证；`/queue` 为唯一可写目录；
+  `.env` 等 ignored 凭证；
+- 客服只写 `/queue` 候选区、只读 `/governance`；复核器只读
+  `/queue`、只写 `/governance`，双方不存在共享可写信任区；
 - 禁止 write/edit/apply_patch、浏览器、消息、Gateway、Cron、Node、提权与 agent spawn；
 - 只允许 `read`、sandbox 内 `exec` 和状态读取。
 
