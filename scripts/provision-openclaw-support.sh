@@ -224,7 +224,7 @@ install -d -m 700 \
 copy_workspace "$SUPPORT_TEMPLATE" "$SUPPORT_WORKSPACE"
 add_agent_if_missing "cc-pocket-support" "$SUPPORT_WORKSPACE" "$SUPPORT_MODEL"
 configure_agent "cc-pocket-support" "$SUPPORT_MODEL" "cc-pocket-support" "support"
-openclaw agents set-identity --agent cc-pocket-support --from-identity --json
+openclaw agents set-identity --workspace "$SUPPORT_WORKSPACE" --from-identity --json
 
 if [[ -n "$REVIEW_MODEL" ]]; then
   openclaw models list --json | python3 -c '
@@ -236,7 +236,7 @@ raise SystemExit(0 if needle in data else f"review model is not configured: {nee
   copy_workspace "$REVIEW_TEMPLATE" "$REVIEW_WORKSPACE"
   add_agent_if_missing "cc-pocket-support-review" "$REVIEW_WORKSPACE" "$REVIEW_MODEL"
   configure_agent "cc-pocket-support-review" "$REVIEW_MODEL" "cc-pocket-support-review" "reviewer"
-  openclaw agents set-identity --agent cc-pocket-support-review --from-identity --json
+  openclaw agents set-identity --workspace "$REVIEW_WORKSPACE" --from-identity --json
 
   existing_review_job="$(
     openclaw cron list --all --json | python3 -c '
