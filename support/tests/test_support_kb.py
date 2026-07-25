@@ -5,6 +5,8 @@ import json
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -174,6 +176,12 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
             candidate = support_kb.load_json(candidate_path)
             observed = support_kb.candidate_records(repo, [queue, governance], "zh")
             self.assertEqual("observed", observed[0]["status"])
+            audit_output = StringIO()
+            with redirect_stdout(audit_output):
+                support_kb.command_audit(
+                    SimpleNamespace(repo_root=repo, kb=[queue], governance=[governance], write=False)
+                )
+            self.assertEqual(1, json.loads(audit_output.getvalue())["needsReview"])
 
             review_input = governance / "review-input" / f"{candidate['id']}.json"
             support_kb.write_json(
@@ -196,6 +204,12 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
             self.assertEqual(0, result)
             verified = support_kb.candidate_records(repo, [queue, governance], "zh")
             self.assertEqual("verified", verified[0]["status"])
+            audit_output = StringIO()
+            with redirect_stdout(audit_output):
+                support_kb.command_audit(
+                    SimpleNamespace(repo_root=repo, kb=[queue], governance=[governance], write=False)
+                )
+            self.assertEqual(0, json.loads(audit_output.getvalue())["needsReview"])
 
             tampered = support_kb.load_json(candidate_path)
             tampered["answer"]["zh"] = "配对码是 8 位。"

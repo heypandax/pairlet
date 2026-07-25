@@ -593,6 +593,9 @@ def command_audit(args: argparse.Namespace) -> int:
     for path in candidate_files(args.kb):
         candidate = load_json(path)
         validation = candidate_validation(args.repo_root, candidate)
+        review = matching_review(candidate, args.governance)
+        review_verdict = str(review.get("verdict")) if review else "unreviewed"
+        needs_review = validation["state"] == "current" and review is None
         if validation["state"] != "current":
             stale += 1
         if args.write:
@@ -600,8 +603,27 @@ def command_audit(args: argparse.Namespace) -> int:
             if validation["state"] in {"stale", "missing", "invalid"} and candidate.get("status") in REUSABLE_STATUSES:
                 candidate["status"] = "stale"
             write_json(path, candidate)
-        reports.append({"id": candidate.get("id", path.stem), "path": str(path), "validation": validation})
-    print(json.dumps({"checked": len(reports), "stale": stale, "reports": reports}, ensure_ascii=False, indent=2))
+        reports.append(
+            {
+                "id": candidate.get("id", path.stem),
+                "path": str(path),
+                "validation": validation,
+                "reviewVerdict": review_verdict,
+                "needsReview": needs_review,
+            }
+        )
+    print(
+        json.dumps(
+            {
+                "checked": len(reports),
+                "stale": stale,
+                "needsReview": sum(1 for report in reports if report["needsReview"]),
+                "reports": reports,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 2 if stale else 0
 
 
@@ -728,6 +750,7 @@ def parser() -> argparse.ArgumentParser:
     audit = subparsers.add_parser("audit", help="check whether candidate code evidence is still current")
     audit.add_argument("--repo-root", type=Path, default=ROOT)
     audit.add_argument("--kb", type=Path, action="append", default=[DEFAULT_KB])
+    audit.add_argument("--governance", type=Path, action="append", default=[DEFAULT_KB])
     audit.add_argument("--write", action="store_true")
     audit.set_defaults(func=command_audit)
 

@@ -161,12 +161,19 @@ Never use a mutable `/blob/main/` URL for provisional knowledge.
 When no supported answer exists, return:
 
 ```text
+Chinese:
+无法从当前 CC Pocket 用户手册或源代码核实这个行为。
+需要的信息：平台 · App 版本 · daemon 版本 · 具体步骤 · 简短报错
+安全的下一步：把这些信息发给 CC Pocket 客服，由维护者核实。
+
+English:
 I couldn't verify this behavior from the current CC Pocket manual or source.
 Needed: platform · app version · daemon version · exact step · short error
 Safe next step: send those details to CC Pocket support for a maintainer check.
 ```
 
-Translate this compact shape into the user's language. Do not claim the feature
-is supported or unsupported, narrate tool use, cite unrelated pages, or hide a
-missing answer behind generic troubleshooting. This template is the complete
-answer, not a footer to append after an unsupported claim.
+Use exactly the three lines for the user's language, with no language mixing.
+Do not claim the feature is supported or unsupported, narrate tool use, cite
+unrelated pages, or hide a missing answer behind generic troubleshooting. This
+template is the complete answer, not a footer to append after an unsupported
+claim.
