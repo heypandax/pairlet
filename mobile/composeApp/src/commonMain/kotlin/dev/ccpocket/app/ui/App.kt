@@ -50,6 +50,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Folder
@@ -124,6 +125,8 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.ccpocket.app.defaultDaemonUrl
+import dev.ccpocket.app.SUPPORT_URL
+import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
@@ -577,6 +580,9 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             }
             ViewToggle(tree) { repo.setTreeView(!tree) }
             Spacer(Modifier.width(4.dp))
+            IconButton({ openWebUrl(SUPPORT_URL) }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
+            }
             IconButton({ showSettings = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
             }
@@ -1157,6 +1163,9 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                         Spacer(Modifier.width(5.dp))
                         TailPathText(dir)
                     }
+                }
+                IconButton({ openWebUrl(SUPPORT_URL) }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
                 IconButton({ showSettings = true }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))

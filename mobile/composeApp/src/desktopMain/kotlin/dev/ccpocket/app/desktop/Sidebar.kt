@@ -34,6 +34,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
@@ -89,7 +90,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.app.SUPPORT_URL
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.add_device
 import dev.ccpocket.app.resources.dir_pinned
@@ -107,6 +110,7 @@ import dev.ccpocket.app.resources.running
 import dev.ccpocket.app.resources.session_rename
 import dev.ccpocket.app.resources.session_rename_hint
 import dev.ccpocket.app.resources.settings_title
+import dev.ccpocket.app.resources.support_title
 import dev.ccpocket.app.resources.sidebar_clear
 import dev.ccpocket.app.resources.sidebar_clear_confirm
 import dev.ccpocket.app.resources.sidebar_no_computer
@@ -159,7 +163,10 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         RunningZone(model)
         RecentZone(model, Modifier.weight(1f))
         AllProjectsRow { model.browseProjects() }
-        SettingsFooter { model.showSettings = true }
+        FooterActions(
+            onHelp = { openWebUrl(SUPPORT_URL) },
+            onSettings = { model.showSettings = true },
+        )
     }
 }
 
@@ -911,17 +918,37 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
 }
 
 @Composable
-private fun SettingsFooter(onClick: () -> Unit) {
+private fun FooterActions(onHelp: () -> Unit, onSettings: () -> Unit) {
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(
-            Modifier.fillMaxWidth().hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            Icon(Icons.Outlined.Settings, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
-            Text(stringResource(Res.string.settings_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text("v$APP_VERSION", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+            Row(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
+                    .clickable(onClick = onHelp).padding(horizontal = 6.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.HelpOutline, null, tint = Tok.tx2, modifier = Modifier.size(15.dp))
+                Text(
+                    stringResource(Res.string.support_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                Modifier.clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
+                    .clickable(onClick = onSettings).padding(horizontal = 6.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.Settings, stringResource(Res.string.settings_title),
+                    tint = Tok.tx2, modifier = Modifier.size(15.dp),
+                )
+                Text("v$APP_VERSION", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+            }
         }
     }
 }

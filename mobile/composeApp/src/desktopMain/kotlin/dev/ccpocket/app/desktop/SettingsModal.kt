@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.SUPPORT_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.pairing.encode
@@ -175,6 +176,11 @@ private fun HelpPane() {
             color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 18.sp,
             modifier = Modifier.padding(top = 5.dp, bottom = 16.dp),
         )
+        HelpActionRow(
+            icon = Icons.Rounded.SmartToy,
+            title = stringResource(Res.string.support_open),
+        ) { openWebUrl(SUPPORT_URL) }
+        Spacer(Modifier.height(7.dp))
         HelpActionRow(
             icon = Icons.Rounded.Search,
             title = stringResource(Res.string.settings_help_search),

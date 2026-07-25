@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.app.SUPPORT_URL
 import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.data.PocketRepository
@@ -147,6 +148,11 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                     .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
             ) {
+                ManualLinkRow(
+                    title = stringResource(Res.string.support_open),
+                    sub = stringResource(Res.string.support_sub),
+                ) { openWebUrl(SUPPORT_URL) }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 ManualLinkRow(
                     title = stringResource(Res.string.settings_manual_title),
                     sub = stringResource(Res.string.settings_manual_sub),

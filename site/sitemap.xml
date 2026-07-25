@@ -66,6 +66,13 @@
     <loc>https://heypandax.github.io/cc-pocket/privacy.html</loc>
     <lastmod>2026-07-13</lastmod>
   </url>
+  <url>
+    <loc>https://heypandax.github.io/cc-pocket/support/</loc>
+    <lastmod>2026-07-25</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/support/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/support/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/support/" />
+  </url>
   <!-- MANUAL_START -->
   <url>
     <loc>https://heypandax.github.io/cc-pocket/manual/</loc>

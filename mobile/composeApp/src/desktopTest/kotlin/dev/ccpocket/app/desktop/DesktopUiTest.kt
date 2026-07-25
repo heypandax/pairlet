@@ -50,6 +50,7 @@ class DesktopUiTest {
         assertPresent(str(Res.string.dir_pinned).uppercase())
         assertPresent(str(Res.string.new_session_title))           // the single entry point under the header
         assertPresent(str(Res.string.switcher_all_projects) + "…") // the browse escape hatch docked above Settings
+        assertPresent(str(Res.string.support_title))               // customer support stays one click from the sidebar
         assertPresent("Lidapeng-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
