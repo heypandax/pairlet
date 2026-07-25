@@ -61,6 +61,21 @@ export function shouldSuppressDelivery(content) {
   return /^(?:⚠️|🛠️|tool (?:error|failure)|diagnostic:)/i.test(candidate);
 }
 
+export function sanitizeFinalText(content) {
+  const candidate = normalize(content);
+  if (candidate.includes(ZH_ESCALATION.split("\n")[0])) return ZH_ESCALATION;
+  if (candidate.includes(EN_ESCALATION.split("\n")[0])) return EN_ESCALATION;
+  return candidate;
+}
+
+function isSupportContext(event, context) {
+  return (
+    event.usageState?.agentId === SUPPORT_AGENT ||
+    event.sessionKey?.startsWith(SUPPORT_SESSION_PREFIX) ||
+    context.sessionKey?.startsWith(SUPPORT_SESSION_PREFIX)
+  );
+}
+
 function register(api) {
   api.on(
     "before_agent_finalize",
@@ -75,6 +90,30 @@ function register(api) {
           instruction: revision.instruction,
           idempotencyKey: revision.key,
           maxAttempts: 3,
+        },
+      };
+    },
+    { priority: 100 },
+  );
+
+  api.on(
+    "reply_payload_sending",
+    (event, context) => {
+      if (!isSupportContext(event, context)) return;
+      const text = event.payload?.text;
+      if (typeof text !== "string") return;
+      if (shouldSuppressDelivery(text)) {
+        return {
+          cancel: true,
+          reason: "Internal tool diagnostic suppressed for public support",
+        };
+      }
+      const sanitized = sanitizeFinalText(text);
+      if (sanitized === normalize(text)) return;
+      return {
+        payload: {
+          ...event.payload,
+          text: sanitized,
         },
       };
     },

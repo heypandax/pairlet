@@ -5,6 +5,7 @@ import {
   EN_ESCALATION,
   ZH_ESCALATION,
   revisionFor,
+  sanitizeFinalText,
   shouldSuppressDelivery,
 } from "./index.js";
 
@@ -26,4 +27,13 @@ test("revises standalone internal narration", () => {
 test("suppresses tool diagnostics only", () => {
   assert.equal(shouldSuppressDelivery("⚠️ 🛠️ `rg` failed"), true);
   assert.equal(shouldSuppressDelivery("请先打开 CC Pocket。"), false);
+});
+
+test("deterministically strips prose around escalation", () => {
+  assert.equal(
+    sanitizeFinalText(`Internal search narration.\n\n${ZH_ESCALATION}`),
+    ZH_ESCALATION,
+  );
+  assert.equal(sanitizeFinalText(`Preface\n\n${EN_ESCALATION}`), EN_ESCALATION);
+  assert.equal(sanitizeFinalText("正常的用户答案。"), "正常的用户答案。");
 });
