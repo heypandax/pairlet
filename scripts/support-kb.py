@@ -575,7 +575,9 @@ def command_search(args: argparse.Namespace) -> int:
             print(f"[{item['kind']}:{item['status']}] score={item['score']} {item['title']}")
             print(f"  {item['answer']}")
             print(f"  {source}")
-    return 0 if results else 1
+    # No match is a normal retrieval outcome. Returning non-zero makes agent
+    # runtimes surface an internal tool-failure warning to the public user.
+    return 0
 
 
 def command_capture(args: argparse.Namespace) -> int:

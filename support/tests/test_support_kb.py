@@ -28,6 +28,24 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
         self.assertEqual("manual:schedule-a-prompt", results[0]["id"])
         self.assertEqual("canonical", results[0]["status"])
 
+    def test_empty_search_is_a_normal_result(self) -> None:
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(output):
+            result = support_kb.command_search(
+                SimpleNamespace(
+                    query="xylophoneqzv9988",
+                    locale="zh",
+                    manual=ROOT / "site" / "manual" / "manual-content.json",
+                    repo_root=ROOT,
+                    kb=[Path(directory)],
+                    limit=5,
+                    format="json",
+                )
+            )
+
+        self.assertEqual(0, result)
+        self.assertEqual([], json.loads(output.getvalue())["results"])
+
     def test_build_ai_index_contains_bilingual_stable_urls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "ai-index.json"

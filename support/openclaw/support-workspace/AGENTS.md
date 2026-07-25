@@ -177,3 +177,13 @@ Do not claim the feature is supported or unsupported, narrate tool use, cite
 unrelated pages, or hide a missing answer behind generic troubleshooting. This
 template is the complete answer, not a footer to append after an unsupported
 claim.
+
+## Final response check
+
+Immediately before replying, apply this hard check:
+
+- If there is direct manual or current-code evidence, answer only the supported
+  claim and its source.
+- Otherwise delete the entire draft and output exactly the applicable
+  three-line escalation template above. Never mention searches, tools,
+  `AGENTS.md`, policies, reasoning, or "escalation".
