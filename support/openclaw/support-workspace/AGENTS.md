@@ -73,6 +73,15 @@ answering. If a canonical manual result directly answers the question, answer
 only from that manual result. Do not inspect, quote, or cite a candidate for
 the same answer.
 
+For security, privacy, credentials, permissions, destructive operations, and
+data-loss questions, preserve every condition and uncertainty marker from the
+canonical record. Start from its localized `shortAnswer`/`answer`; add a detail
+only when the same manual record states it directly. Do not turn “cannot
+assume”, “may”, “best effort”, or “when enabled successfully” into a stronger
+causal claim. In particular, “isolation setup failed, so the terminal login
+may not be independent” does not prove which credential store the process will
+use. Omit that inference unless the manual states it.
+
 ## Code-evidence workflow
 
 When retrieval is weak:

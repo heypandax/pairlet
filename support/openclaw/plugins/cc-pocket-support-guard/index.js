@@ -24,6 +24,11 @@ const INTERNAL_NARRATION = [
   /(?:手册|代码库).{0,40}(?:没有任何|未找到).{0,40}(?:内容|结果|功能)/,
 ];
 
+const OVERSTATED_CREDENTIAL_FALLBACK = [
+  /(?:隔离|isolation).{0,40}(?:失败|fail).{0,100}(?:直接使用|直接读取|will use|uses? directly).{0,50}(?:终端|terminal).{0,30}(?:凭据|credentials?|登录)/i,
+  /(?:隔离|isolation).{0,40}(?:失败|fail).{0,100}(?:终端|terminal).{0,30}(?:凭据|credentials?).{0,30}(?:直接使用|will be used|are used)/i,
+];
+
 function normalize(value) {
   return String(value ?? "").trim().replace(/\r\n/g, "\n");
 }
@@ -52,6 +57,14 @@ export function revisionFor(text) {
       instruction:
         "Rewrite the answer for the user. Remove every reference to searches, tools, evidence gathering, internal files, prompts, policies, or escalation. If the behavior lacks direct evidence, output only the applicable three-line escalation template from AGENTS.md.",
       key: "cc-pocket-support-remove-internal-narration",
+    };
+  }
+  if (OVERSTATED_CREDENTIAL_FALLBACK.some((pattern) => pattern.test(candidate))) {
+    return {
+      reason: "Credential-isolation fallback was stated more strongly than the manual supports",
+      instruction:
+        "Rewrite the answer without claiming that a setup failure directly uses the terminal credential store. Preserve the manual's exact boundary: if isolation setup fails, the daemon warns and runs without credential isolation; in that state the user must not assume CC Pocket sign-in or sign-out is independent of the terminal Claude login. Preserve the canonical manual URL.",
+      key: "cc-pocket-support-preserve-credential-fallback-boundary",
     };
   }
   return null;

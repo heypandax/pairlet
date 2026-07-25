@@ -29,6 +29,22 @@ test("revises Chinese retrieval narration", () => {
   assert.equal(revision?.key, "cc-pocket-support-remove-internal-narration");
 });
 
+test("revises an overstated credential fallback", () => {
+  const revision = revisionFor(
+    "如果隔离准备失败，daemon 会直接使用你终端 Claude 的凭据。",
+  );
+  assert.equal(revision?.key, "cc-pocket-support-preserve-credential-fallback-boundary");
+});
+
+test("accepts the qualified credential fallback", () => {
+  assert.equal(
+    revisionFor(
+      "如果隔离准备失败，daemon 会告警并以未隔离模式运行；此时不能假定 CC Pocket 的登录或退出与终端 Claude 登录相互独立。",
+    ),
+    null,
+  );
+});
+
 test("suppresses tool diagnostics only", () => {
   assert.equal(shouldSuppressDelivery("⚠️ 🛠️ `rg` failed"), true);
   assert.equal(shouldSuppressDelivery("请先打开 CC Pocket。"), false);
