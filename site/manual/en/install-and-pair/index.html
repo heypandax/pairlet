@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Install and pair a computer — CC Pocket Manual</title>
+<meta name="description" content="Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="Install and pair a computer — CC Pocket Manual" />
+<meta property="og:description" content="Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Install and pair a computer — CC Pocket Manual" />
+<meta name="twitter:description" content="Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"Install and pair a computer",
+  "description":"Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"en",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/en/"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← All guides</a>
+    <span>Start here</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">Manual</a><span>/</span><span>Start here</span></div>
+    <div class="platform-tags"><span>All platforms</span></div>
+    <h1>Install and pair a computer</h1>
+    <div class="short-answer"><span>SHORT ANSWER</span><p>Install the daemon on the computer that runs your coding agent, run <code>cc-pocket-daemon pair</code>, then scan the QR code in the CC Pocket app or enter its 6-digit code.</p></div>
+    <div class="article-meta"><span>Last verified 2026-07-24</span><span>·</span><span>Public URL · no sign-in</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/">Copy link</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" data-copy-prompt="Open this public CC Pocket manual page and answer my question using only the verified steps on the page.">Copy for AI</button>
+    </div>
+    <section id="install"><h2>Install the daemon</h2><p>Run the command for your operating system on the computer where Claude Code, Codex, or OpenCode is installed.</p><ol class="article-steps"><li><span class="step-number">1</span><div><h3>macOS or Linux</h3><p>The installer verifies the release, installs the daemon, and registers the login service.</p><pre><code>curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button type="button" data-copy-code="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash">Copy</button></pre></div></li><li><span class="step-number">2</span><div><h3>Windows</h3><p>Run PowerShell as your normal user. The installer registers a logon Scheduled Task.</p><pre><code>irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex</code><button type="button" data-copy-code="irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex">Copy</button></pre></div></li></ol></section><section id="pair"><h2>Pair the app</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>Create a one-time pairing code</h3><p>Run this on the computer. It prints both a QR code and a 6-digit fallback code.</p><pre><code>cc-pocket-daemon pair</code><button type="button" data-copy-code="cc-pocket-daemon pair">Copy</button></pre></div></li><li><span class="step-number">2</span><div><h3>Scan or type the code</h3><p>Open CC Pocket, choose Add computer, and scan the QR. If the camera is unavailable, type the six digits.</p></div></li><li><span class="step-number">3</span><div><h3>Open a project</h3><p>After the computer shows online, choose a project folder and start or resume a session.</p></div></li></ol><aside class="article-note">Pairing is device-to-device. CC Pocket does not create a user account, and the daemon dials out—no inbound internet port is required.</aside></section>
+    <section class="related-articles"><h2>Related guides</h2><div><a href="../choose-agent-and-model/"><strong>Choose an agent and model</strong><span>Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id.</span></a><a href="../fix-offline-computer/"><strong>Fix an offline computer</strong><span>Check daemon status, restore its relay connection, and pair again only if the device credential was removed.</span></a></div></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>On this page</strong><a href="#install">Install the daemon</a><a href="#pair">Pair the app</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

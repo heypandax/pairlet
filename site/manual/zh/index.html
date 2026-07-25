@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CC Pocket 用户手册——安装、会话、审批、Agent、共享与故障排查</title>
+<meta name="description" content="面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、共享文件夹与 daemon 故障排查。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="CC Pocket 用户手册——安装、会话、审批、Agent、共享与故障排查" />
+<meta property="og:description" content="面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、共享文件夹与 daemon 故障排查。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CC Pocket 用户手册——安装、会话、审批、Agent、共享与故障排查" />
+<meta name="twitter:description" content="面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、共享文件夹与 daemon 故障排查。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../styles.css" />
+<link rel="stylesheet" href="../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"CollectionPage",
+  "name":"你想解决什么问题？",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/",
+  "description":"面向用户与 AI 助手的 CC Pocket 公开任务指南：安装配对、控制会话、预约提示词、远程审批、共享文件夹与 daemon 故障排查。",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@id":"https://heypandax.github.io/cc-pocket/#website"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main>
+  <header class="manual-hero manual-wrap">
+    <div class="breadcrumbs"><a href="../../">CC Pocket</a><span>/</span><span>用户手册</span></div>
+    <p class="eyebrow">用户手册</p>
+    <h1>你想解决什么问题？</h1>
+    <p class="hero-lede">按任务找到准确步骤，或排查突然失效的功能。每篇指南都有稳定公开链接，可以直接发给 AI 助手。</p>
+    <div class="manual-search">
+      <label class="sr-only" for="manual-search-input">搜索 CC Pocket 用户手册</label>
+      <span aria-hidden="true">⌕</span>
+      <input id="manual-search-input" type="search" placeholder="搜索安装、审批、Agent、共享…" autocomplete="off" />
+      <kbd>/</kbd>
+    </div>
+    <div id="manual-search-results" class="search-results" hidden aria-live="polite"></div>
+    <div class="quick-links">
+      <a href="schedule-a-prompt/">预约稍后发送提示词</a>
+      <a href="take-over-a-terminal-session/">接管终端会话</a>
+      <a href="fix-offline-computer/">修复离线电脑</a>
+    </div>
+  </header>
+
+  <section class="manual-section manual-wrap">
+    <div class="section-title"><div><p class="eyebrow">从这里开始</p><h2>开始使用 CC Pocket</h2></div><span>3 步 · 约 6 分钟</span></div>
+    <div class="start-grid">
+      <a href="install-and-pair/"><b>1</b><span><strong>安装 daemon</strong><small>在运行编码 Agent 的电脑上执行一条命令。</small></span></a>
+      <a href="install-and-pair/#pair"><b>2</b><span><strong>配对电脑</strong><small>扫描二维码或输入一次 6 位配对码。</small></span></a>
+      <a href="choose-agent-and-model/"><b>3</b><span><strong>开始会话</strong><small>选择 Agent 和项目文件夹。</small></span></a>
+    </div>
+  </section>
+
+  <section class="manual-section manual-wrap">
+    <div class="section-title"><div><p class="eyebrow">按任务浏览</p><h2>按任务浏览</h2></div><span>已核验的首批内容</span></div>
+    <div class="category-grid"><section class="category-card">
+  <h2>开始使用</h2>
+  <p>安装 daemon、配对设备并打开第一个项目。</p>
+  <div class="category-links"><a href="install-and-pair/"><span>安装并配对电脑</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>项目与会话</h2>
+  <p>恢复工作，并安全接管终端中的现有会话。</p>
+  <div class="category-links"><a href="take-over-a-terminal-session/"><span>无分叉接管终端会话</span><span aria-hidden="true">→</span></a><a href="choose-agent-and-model/"><span>选择 Agent 与模型</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>对话与控制</h2>
+  <p>立即发送、运行中排队，或预约稍后执行提示词。</p>
+  <div class="category-links"><a href="schedule-a-prompt/"><span>预约稍后发送提示词</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>审批与安全</h2>
+  <p>决定会话的自主程度，并在任何地方完成审批。</p>
+  <div class="category-links"><a href="approve-from-another-computer/"><span>从另一台设备审批操作</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Agent 与模型</h2>
+  <p>创建会话时选择 Claude、Codex 或 OpenCode。</p>
+  <div class="category-links"><a href="choose-agent-and-model/"><span>选择 Agent 与模型</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>共享</h2>
+  <p>只向可信协作者开放一个文件夹，并可随时撤销。</p>
+  <div class="category-links"><a href="share-a-folder/"><span>向协作者共享一个文件夹</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>故障排查</h2>
+  <p>恢复离线电脑，或更新过旧的 daemon。</p>
+  <div class="category-links"><a href="fix-offline-computer/"><span>修复离线电脑</span><span aria-hidden="true">→</span></a><a href="update-daemon/"><span>更新 daemon</span><span aria-hidden="true">→</span></a></div>
+</section></div>
+  </section>
+
+  <section class="ai-callout manual-wrap">
+    <div><p class="eyebrow">正在使用 AI 助手？</p><h2>把准确资料交给 AI</h2><p>不要凭记忆描述界面，直接复制指南链接。AI 助手可以打开同一篇公开页面，并依据已核验步骤回答。</p></div>
+    <button class="manual-button secondary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/">复制手册链接给 AI</button>
+  </section>
+
+  <section class="manual-section manual-wrap">
+    <div class="section-title"><div><p class="eyebrow">最近核验</p><h2>最近更新的指南</h2></div></div>
+    <div class="updated-list"><a class="updated-row" href="install-and-pair/">
+  <span><strong>安装并配对电脑</strong><small>开始使用</small></span>
+  <span class="verified">已核验 2026-07-24</span>
+</a><a class="updated-row" href="schedule-a-prompt/">
+  <span><strong>预约稍后发送提示词</strong><small>对话与控制</small></span>
+  <span class="verified">已核验 2026-07-24</span>
+</a><a class="updated-row" href="take-over-a-terminal-session/">
+  <span><strong>无分叉接管终端会话</strong><small>项目与会话</small></span>
+  <span class="verified">已核验 2026-07-24</span>
+</a><a class="updated-row" href="approve-from-another-computer/">
+  <span><strong>从另一台设备审批操作</strong><small>审批与安全</small></span>
+  <span class="verified">已核验 2026-07-24</span>
+</a><a class="updated-row" href="choose-agent-and-model/">
+  <span><strong>选择 Agent 与模型</strong><small>Agent 与模型</small></span>
+  <span class="verified">已核验 2026-07-24</span>
+</a></div>
+  </section>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../../features.html">功能</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script id="manual-search-index" type="application/json">[{"title": "安装并配对电脑", "summary": "安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。", "category": "开始使用", "aliases": ["安装", "配对", "二维码", "连接电脑", "开始"], "url": "install-and-pair/"}, {"title": "预约稍后发送提示词", "summary": "长按发送，选择延迟或自定义时间，让已配对电脑稍后执行提示词。", "category": "对话与控制", "aliases": ["定时", "预约", "稍后发送", "每天重复", "长按发送"], "url": "schedule-a-prompt/"}, {"title": "无分叉接管终端会话", "summary": "先只读旁观终端会话；终端不再写入后，再原地接管继续。", "category": "项目与会话", "aliases": ["终端会话", "接管", "继续", "分叉", "恢复"], "url": "take-over-a-terminal-session/"}, {"title": "从另一台设备审批操作", "summary": "在手机或桌面端查看工具请求、核对命令或文件操作，再允许或拒绝。", "category": "审批与安全", "aliases": ["审批", "权限", "允许", "拒绝", "命令", "多电脑"], "url": "approve-from-another-computer/"}, {"title": "选择 Agent 与模型", "summary": "创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。", "category": "Agent 与模型", "aliases": ["Agent", "模型", "Claude", "Codex", "OpenCode", "网关"], "url": "choose-agent-and-model/"}, {"title": "向协作者共享一个文件夹", "summary": "为一个文件夹生成一次性邀请，选择权限和有效期，并可随时撤销。", "category": "共享", "aliases": ["共享", "文件夹", "访客", "邀请", "协作者", "撤销"], "url": "share-a-folder/"}, {"title": "修复离线电脑", "summary": "检查 daemon 状态并恢复中继连接；只有设备凭据被移除时才重新配对。", "category": "故障排查", "aliases": ["离线", "无法连接", "断开", "状态", "中继", "电脑"], "url": "fix-offline-computer/"}, {"title": "更新 daemon", "summary": "使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。", "category": "故障排查", "aliases": ["更新", "升级", "daemon 过旧", "版本过旧", "Homebrew", "Scoop"], "url": "update-daemon/"}]</script>
+<script src="../manual.js"></script>
+</body>
+</html>

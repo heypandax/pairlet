@@ -6,7 +6,7 @@
 
 **你的编程 agent，装进口袋。**CC Pocket 让你用手机——或另一台电脑——操控跑在自己电脑上的 Claude Code、OpenAI Codex 或 OpenCode，走到哪儿管到哪儿，不受局域网限制。实时看它干活，两下点掉工具授权，没聊完的会话随手接起。所有流量都经**零知识中继（zero-knowledge relay）**转发——中继只搬运端到端加密后的密文，无账号，零内容日志。纯净室 Kotlin 实现，MIT 许可。
 
-**🌐 官网：**<https://heypandax.github.io/cc-pocket/> · **📋 完整功能列表：**[features](https://heypandax.github.io/cc-pocket/features.html)
+**🌐 官网：**<https://heypandax.github.io/cc-pocket/> · **📖 用户手册：**[manual](https://heypandax.github.io/cc-pocket/manual/zh/) · **📋 完整功能列表：**[features](https://heypandax.github.io/cc-pocket/features.html)
 
 <p align="center"><a href="https://heypandax.github.io/cc-pocket/"><img src="site/og-image.png" alt="CC Pocket —— 用手机操控电脑上的 Claude Code" width="720"></a></p>
 
@@ -139,6 +139,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
 ## 文档
 
 - 官网 / 落地页 —— <https://heypandax.github.io/cc-pocket/>
+- 公开用户手册（链接可直接发给 AI 助手）—— <https://heypandax.github.io/cc-pocket/manual/zh/>
 - 完整功能列表 —— <https://heypandax.github.io/cc-pocket/features.html>
 - 使用文档（中文）—— [`docs/USAGE.md`](docs/USAGE.md)
 - 运行 / 运维 daemon —— [`docs/RUN.md`](docs/RUN.md)

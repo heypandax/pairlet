@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>更新 daemon — CC Pocket 用户手册</title>
+<meta name="description" content="使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="更新 daemon — CC Pocket 用户手册" />
+<meta property="og:description" content="使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="更新 daemon — CC Pocket 用户手册" />
+<meta name="twitter:description" content="使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"更新 daemon",
+  "description":"使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/zh/"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← 全部指南</a>
+    <span>故障排查</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>故障排查</span></div>
+    <div class="platform-tags"><span>全平台</span></div>
+    <h1>更新 daemon</h1>
+    <div class="short-answer"><span>简短答案</span><p>执行 <code>cc-pocket-daemon update</code>。如果安装由 Homebrew 或 Scoop 管理，请改用对应包管理器。</p></div>
+    <div class="article-meta"><span>最近核验 2026-07-24</span><span>·</span><span>公开链接 · 无需登录</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/">复制链接</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" data-copy-prompt="打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
+    </div>
+    <section id="update"><h2>选择对应更新方式</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>内置安装器</h3><p>通过官方 shell 或 PowerShell 安装脚本安装时，使用此命令。</p><pre><code>cc-pocket-daemon update</code><button type="button" data-copy-code="cc-pocket-daemon update">复制</button></pre></div></li><li><span class="step-number">2</span><div><h3>macOS 的 Homebrew</h3><p>必须使用完整 cask 名；Homebrew 官方仓中存在一个无关的同名 cask。</p><pre><code>brew upgrade --cask heypandax/tap/cc-pocket</code><button type="button" data-copy-code="brew upgrade --cask heypandax/tap/cc-pocket">复制</button></pre></div></li><li><span class="step-number">3</span><div><h3>Windows 的 Scoop</h3><p>daemon 由 Scoop 安装时使用此命令。</p><pre><code>scoop update cc-pocket-daemon</code><button type="button" data-copy-code="scoop update cc-pocket-daemon">复制</button></pre></div></li></ol></section><section id="verify"><h2>确认更新结果</h2><p>执行 <code>cc-pocket-daemon status</code>，再返回 CC Pocket。daemon 重启后，仍有效的设备配对会自动重新连接。</p></section>
+    <section class="related-articles"><h2>相关指南</h2><div><a href="../fix-offline-computer/"><strong>修复离线电脑</strong><span>检查 daemon 状态并恢复中继连接；只有设备凭据被移除时才重新配对。</span></a><a href="../install-and-pair/"><strong>安装并配对电脑</strong><span>安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。</span></a></div></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>本页内容</strong><a href="#update">选择对应更新方式</a><a href="#verify">确认更新结果</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

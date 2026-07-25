@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>无分叉接管终端会话 — CC Pocket 用户手册</title>
+<meta name="description" content="先只读旁观终端会话；终端不再写入后，再原地接管继续。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="无分叉接管终端会话 — CC Pocket 用户手册" />
+<meta property="og:description" content="先只读旁观终端会话；终端不再写入后，再原地接管继续。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="无分叉接管终端会话 — CC Pocket 用户手册" />
+<meta name="twitter:description" content="先只读旁观终端会话；终端不再写入后，再原地接管继续。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"无分叉接管终端会话",
+  "description":"先只读旁观终端会话；终端不再写入后，再原地接管继续。",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/zh/"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← 全部指南</a>
+    <span>项目与会话</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>项目与会话</span></div>
+    <div class="platform-tags"><span>全平台</span></div>
+    <h1>无分叉接管终端会话</h1>
+    <div class="short-answer"><span>简短答案</span><p>在 CC Pocket 中打开终端会话并点击 <strong>Continue here</strong>。终端空闲时会原地恢复；只有终端仍在写入时才分叉，避免两个写入者破坏同一份记录。</p></div>
+    <div class="article-meta"><span>最近核验 2026-07-24</span><span>·</span><span>公开链接 · 无需登录</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/">复制链接</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" data-copy-prompt="打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
+    </div>
+    <section id="observe"><h2>先旁观</h2><p>终端拥有的会话会出现在项目会话列表中。打开后先进入只读旁观，CC Pocket 可以流式显示输出，但不会成为第二个写入者。</p></section><section id="take-over"><h2>从 CC Pocket 继续</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>等待终端本轮结束</h3><p>如果终端仍在持续写入，除非你确实需要安全分叉，否则先让它完成。</p></div></li><li><span class="step-number">2</span><div><h3>点击 Continue here</h3><p>条件安全时，CC Pocket 会在同一个会话中原地接续。</p></div></li><li><span class="step-number">3</span><div><h3>继续工作</h3><p>之后的提示词、审批、打断和实时输出，与普通 CC Pocket 会话一致。</p></div></li></ol><aside class="article-note">对于 Claude Code，之后回到电脑可用 <code>claude --resume</code> 再次接起该会话。</aside></section>
+    <section class="related-articles"><h2>相关指南</h2><div><a href="../choose-agent-and-model/"><strong>选择 Agent 与模型</strong><span>创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。</span></a><a href="../approve-from-another-computer/"><strong>从另一台设备审批操作</strong><span>在手机或桌面端查看工具请求、核对命令或文件操作，再允许或拒绝。</span></a></div></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>本页内容</strong><a href="#observe">先旁观</a><a href="#take-over">从 CC Pocket 继续</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

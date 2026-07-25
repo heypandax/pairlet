@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CC Pocket User Manual — setup, sessions, approvals, agents, sharing, and fixes</title>
+<meta name="description" content="Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, share folders, and troubleshoot the daemon." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="CC Pocket User Manual — setup, sessions, approvals, agents, sharing, and fixes" />
+<meta property="og:description" content="Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, share folders, and troubleshoot the daemon." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="CC Pocket User Manual — setup, sessions, approvals, agents, sharing, and fixes" />
+<meta name="twitter:description" content="Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, share folders, and troubleshoot the daemon." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../styles.css" />
+<link rel="stylesheet" href="../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"CollectionPage",
+  "name":"How can we help?",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/",
+  "description":"Public, task-based CC Pocket guides for people and AI assistants: install and pair, control sessions, schedule prompts, approve work, share folders, and troubleshoot the daemon.",
+  "inLanguage":"en",
+  "isPartOf":{"@id":"https://heypandax.github.io/cc-pocket/#website"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main>
+  <header class="manual-hero manual-wrap">
+    <div class="breadcrumbs"><a href="../../">CC Pocket</a><span>/</span><span>Manual</span></div>
+    <p class="eyebrow">USER MANUAL</p>
+    <h1>How can we help?</h1>
+    <p class="hero-lede">Find the exact steps for a task, or fix something that stopped working. Every guide has a stable public URL you can send to an AI assistant.</p>
+    <div class="manual-search">
+      <label class="sr-only" for="manual-search-input">Search the CC Pocket manual</label>
+      <span aria-hidden="true">⌕</span>
+      <input id="manual-search-input" type="search" placeholder="Search setup, approvals, agents, sharing…" autocomplete="off" />
+      <kbd>/</kbd>
+    </div>
+    <div id="manual-search-results" class="search-results" hidden aria-live="polite"></div>
+    <div class="quick-links">
+      <a href="schedule-a-prompt/">Schedule a prompt for later</a>
+      <a href="take-over-a-terminal-session/">Take over a terminal session</a>
+      <a href="fix-offline-computer/">Fix an offline computer</a>
+    </div>
+  </header>
+
+  <section class="manual-section manual-wrap">
+    <div class="section-title"><div><p class="eyebrow">START HERE</p><h2>Start using CC Pocket</h2></div><span>3 steps · about 6 minutes</span></div>
+    <div class="start-grid">
+      <a href="install-and-pair/"><b>1</b><span><strong>Install the daemon</strong><small>One command on the computer that runs your coding agent.</small></span></a>
+      <a href="install-and-pair/#pair"><b>2</b><span><strong>Pair a computer</strong><small>Scan the QR or type the 6-digit code once.</small></span></a>
+      <a href="choose-agent-and-model/"><b>3</b><span><strong>Start a session</strong><small>Choose an agent and a project folder.</small></span></a>
+    </div>
+  </section>
+
+  <section class="manual-section manual-wrap">
+    <div class="section-title"><div><p class="eyebrow">BROWSE BY TASK</p><h2>Browse by task</h2></div><span>Verified starter coverage</span></div>
+    <div class="category-grid"><section class="category-card">
+  <h2>Start here</h2>
+  <p>Install the daemon, pair a device, and open your first project.</p>
+  <div class="category-links"><a href="install-and-pair/"><span>Install and pair a computer</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Projects &amp; sessions</h2>
+  <p>Resume work and safely take control of a terminal session.</p>
+  <div class="category-links"><a href="take-over-a-terminal-session/"><span>Take over a terminal session without forking</span><span aria-hidden="true">→</span></a><a href="choose-agent-and-model/"><span>Choose an agent and model</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Chat &amp; control</h2>
+  <p>Send now, queue while busy, or schedule a prompt for later.</p>
+  <div class="category-links"><a href="schedule-a-prompt/"><span>Schedule a prompt for later</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Approvals &amp; safety</h2>
+  <p>Choose how much autonomy a session has and approve from anywhere.</p>
+  <div class="category-links"><a href="approve-from-another-computer/"><span>Approve work from another device</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Agents &amp; models</h2>
+  <p>Choose Claude, Codex, or OpenCode when a session starts.</p>
+  <div class="category-links"><a href="choose-agent-and-model/"><span>Choose an agent and model</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Sharing</h2>
+  <p>Grant a trusted collaborator access to one folder, then revoke it.</p>
+  <div class="category-links"><a href="share-a-folder/"><span>Share one folder with a collaborator</span><span aria-hidden="true">→</span></a></div>
+</section><section class="category-card">
+  <h2>Troubleshooting</h2>
+  <p>Recover an offline computer or update an out-of-date daemon.</p>
+  <div class="category-links"><a href="fix-offline-computer/"><span>Fix an offline computer</span><span aria-hidden="true">→</span></a><a href="update-daemon/"><span>Update the daemon</span><span aria-hidden="true">→</span></a></div>
+</section></div>
+  </section>
+
+  <section class="ai-callout manual-wrap">
+    <div><p class="eyebrow">USING AN AI ASSISTANT?</p><h2>Give an AI the exact source</h2><p>Copy a guide URL instead of describing the screen from memory. The assistant can open the same public page and answer from its verified steps.</p></div>
+    <button class="manual-button secondary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/">Copy manual link for AI</button>
+  </section>
+
+  <section class="manual-section manual-wrap">
+    <div class="section-title"><div><p class="eyebrow">RECENTLY VERIFIED</p><h2>Recently updated guides</h2></div></div>
+    <div class="updated-list"><a class="updated-row" href="install-and-pair/">
+  <span><strong>Install and pair a computer</strong><small>Start here</small></span>
+  <span class="verified">Verified 2026-07-24</span>
+</a><a class="updated-row" href="schedule-a-prompt/">
+  <span><strong>Schedule a prompt for later</strong><small>Chat &amp; control</small></span>
+  <span class="verified">Verified 2026-07-24</span>
+</a><a class="updated-row" href="take-over-a-terminal-session/">
+  <span><strong>Take over a terminal session without forking</strong><small>Projects &amp; sessions</small></span>
+  <span class="verified">Verified 2026-07-24</span>
+</a><a class="updated-row" href="approve-from-another-computer/">
+  <span><strong>Approve work from another device</strong><small>Approvals &amp; safety</small></span>
+  <span class="verified">Verified 2026-07-24</span>
+</a><a class="updated-row" href="choose-agent-and-model/">
+  <span><strong>Choose an agent and model</strong><small>Agents &amp; models</small></span>
+  <span class="verified">Verified 2026-07-24</span>
+</a></div>
+  </section>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../../features.html">Features</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script id="manual-search-index" type="application/json">[{"title": "Install and pair a computer", "summary": "Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.", "category": "Start here", "aliases": ["install", "pair", "qr", "setup", "connect"], "url": "install-and-pair/"}, {"title": "Schedule a prompt for later", "summary": "Long-press Send, choose a delay or custom time, and let the paired computer run the prompt later.", "category": "Chat & control", "aliases": ["schedule", "later", "repeat", "daily", "timer", "long press send"], "url": "schedule-a-prompt/"}, {"title": "Take over a terminal session without forking", "summary": "Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing.", "category": "Projects & sessions", "aliases": ["terminal", "continue here", "take over", "fork", "resume"], "url": "take-over-a-terminal-session/"}, {"title": "Approve work from another device", "summary": "Review a tool request on phone or desktop, inspect the command or file action, then allow or deny it.", "category": "Approvals & safety", "aliases": ["approve", "permission", "allow", "deny", "command", "fleet"], "url": "approve-from-another-computer/"}, {"title": "Choose an agent and model", "summary": "Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id.", "category": "Agents & models", "aliases": ["agent", "model", "claude", "codex", "opencode", "gateway"], "url": "choose-agent-and-model/"}, {"title": "Share one folder with a collaborator", "summary": "Create a single-use invite for one folder, choose an access level and expiry, then revoke it at any time.", "category": "Sharing", "aliases": ["share", "folder", "guest", "invite", "collaborator", "revoke"], "url": "share-a-folder/"}, {"title": "Fix an offline computer", "summary": "Check daemon status, restore its relay connection, and pair again only if the device credential was removed.", "category": "Troubleshooting", "aliases": ["offline", "unreachable", "disconnect", "status", "relay", "computer"], "url": "fix-offline-computer/"}, {"title": "Update the daemon", "summary": "Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online.", "category": "Troubleshooting", "aliases": ["update", "upgrade", "old daemon", "stale", "homebrew", "scoop"], "url": "update-daemon/"}]</script>
+<script src="../manual.js"></script>
+</body>
+</html>

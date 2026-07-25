@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Choose an agent and model — CC Pocket Manual</title>
+<meta name="description" content="Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="Choose an agent and model — CC Pocket Manual" />
+<meta property="og:description" content="Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Choose an agent and model — CC Pocket Manual" />
+<meta name="twitter:description" content="Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"Choose an agent and model",
+  "description":"Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id.",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"en",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/en/"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← All guides</a>
+    <span>Agents &amp; models</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">Manual</a><span>/</span><span>Agents &amp; models</span></div>
+    <div class="platform-tags"><span>All platforms</span></div>
+    <h1>Choose an agent and model</h1>
+    <div class="short-answer"><span>SHORT ANSWER</span><p>Choose the agent when the session starts. A session stays bound to that backend; models can be changed within the choices that backend and your gateway expose.</p></div>
+    <div class="article-meta"><span>Last verified 2026-07-24</span><span>·</span><span>Public URL · no sign-in</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/">Copy link</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" data-copy-prompt="Open this public CC Pocket manual page and answer my question using only the verified steps on the page.">Copy for AI</button>
+    </div>
+    <section id="agent"><h2>Choose the backend at session start</h2><ul><li><strong>Claude Code</strong> supports Claude permission modes and model aliases.</li><li><strong>Codex</strong> uses a Cautious, Balanced, Autonomous, or Full auto preset mapped to approval policy and sandbox settings.</li><li><strong>OpenCode</strong> runs full access because its run command has no interactive approval protocol.</li></ul><aside class="article-note">You cannot switch a live session from one agent backend to another. Start a new session when you need a different backend.</aside></section><section id="model"><h2>Choose a model</h2><p>Use the model picker in a session. If Claude Code is routed through an Anthropic-compatible gateway, custom ids and saved gateway presets are passed to that local CLI; the gateway decides which model the id reaches.</p></section>
+    <section class="related-articles"><h2>Related guides</h2><div><a href="../install-and-pair/"><strong>Install and pair a computer</strong><span>Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.</span></a><a href="../approve-from-another-computer/"><strong>Approve work from another device</strong><span>Review a tool request on phone or desktop, inspect the command or file action, then allow or deny it.</span></a></div></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>On this page</strong><a href="#agent">Choose the backend at session start</a><a href="#model">Choose a model</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

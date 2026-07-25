@@ -214,6 +214,22 @@
     <string name="about_license">License</string>
     <string name="about_connection">Connection</string>
     <string name="settings_open">Settings</string>
+    <string name="settings_help_section">HELP</string>
+    <string name="settings_manual_title">Help &amp; manual</string>
+    <string name="settings_manual_sub">Setup, sessions, approvals, agents, sharing, and fixes</string>
+    <string name="settings_troubleshooting">Troubleshooting</string>
+    <string name="settings_troubleshooting_sub">Offline computer, old daemon, pairing failed</string>
+    <string name="settings_tab_help">Help</string>
+    <string name="settings_help_title">Help &amp; manual</string>
+    <string name="settings_help_body">Task-based guides for CC Pocket. Every article is public and can be shared with an AI assistant.</string>
+    <string name="settings_help_search">Search the manual</string>
+    <string name="settings_help_popular">Popular guides</string>
+    <string name="settings_help_takeover">Take over a terminal session without forking</string>
+    <string name="settings_help_approvals">Approve work running on another computer</string>
+    <string name="settings_help_open">Open full manual</string>
+    <string name="settings_help_copy_ai">Copy link for AI</string>
+    <string name="settings_help_copied">Manual link copied</string>
+    <string name="settings_help_ai_prompt">Open this public manual and use it to answer my CC Pocket question.</string>
 
     <!-- ── notifications ─────────────────────────────────────────── -->
     <string name="notifications_section">NOTIFICATIONS</string>

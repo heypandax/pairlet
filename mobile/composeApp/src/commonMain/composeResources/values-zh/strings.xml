@@ -214,6 +214,22 @@
     <string name="about_license">许可证</string>
     <string name="about_connection">连接</string>
     <string name="settings_open">设置</string>
+    <string name="settings_help_section">帮助</string>
+    <string name="settings_manual_title">帮助与用户手册</string>
+    <string name="settings_manual_sub">安装、会话、审批、Agent、共享与故障处理</string>
+    <string name="settings_troubleshooting">故障排查</string>
+    <string name="settings_troubleshooting_sub">电脑离线、daemon 过旧、配对失败</string>
+    <string name="settings_tab_help">帮助</string>
+    <string name="settings_help_title">帮助与用户手册</string>
+    <string name="settings_help_body">按任务整理的 CC Pocket 指南。每篇文章均可公开访问，也可把链接交给 AI 助手检索。</string>
+    <string name="settings_help_search">搜索用户手册</string>
+    <string name="settings_help_popular">常用指南</string>
+    <string name="settings_help_takeover">无分叉接管终端会话</string>
+    <string name="settings_help_approvals">审批另一台电脑上的操作</string>
+    <string name="settings_help_open">打开完整手册</string>
+    <string name="settings_help_copy_ai">复制链接给 AI</string>
+    <string name="settings_help_copied">手册链接已复制</string>
+    <string name="settings_help_ai_prompt">打开这份公开的 CC Pocket 用户手册，并依据其中已核验的步骤回答我的问题。</string>
 
     <!-- ── 通知 ──────────────────────────────────────────────────── -->
     <string name="notifications_section">通知</string>

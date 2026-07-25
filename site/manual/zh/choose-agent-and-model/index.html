@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>选择 Agent 与模型 — CC Pocket 用户手册</title>
+<meta name="description" content="创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="选择 Agent 与模型 — CC Pocket 用户手册" />
+<meta property="og:description" content="创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="选择 Agent 与模型 — CC Pocket 用户手册" />
+<meta name="twitter:description" content="创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"选择 Agent 与模型",
+  "description":"创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/zh/"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← 全部指南</a>
+    <span>Agent 与模型</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>Agent 与模型</span></div>
+    <div class="platform-tags"><span>全平台</span></div>
+    <h1>选择 Agent 与模型</h1>
+    <div class="short-answer"><span>简短答案</span><p>在创建会话时选择 Agent。一个会话从头到尾绑定同一个后端；模型可在该后端和你的网关实际提供的选项中切换。</p></div>
+    <div class="article-meta"><span>最近核验 2026-07-24</span><span>·</span><span>公开链接 · 无需登录</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/">复制链接</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/" data-copy-prompt="打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
+    </div>
+    <section id="agent"><h2>创建会话时选择后端</h2><ul><li><strong>Claude Code</strong> 支持 Claude 权限模式与模型别名。</li><li><strong>Codex</strong> 使用 Cautious、Balanced、Autonomous 或 Full auto 预设，映射到审批策略与沙箱设置。</li><li><strong>OpenCode</strong> 的运行命令没有交互式审批协议，因此始终是完全访问。</li></ul><aside class="article-note">不能把进行中的会话从一个 Agent 后端切换到另一个；需要换后端时，请新建会话。</aside></section><section id="model"><h2>选择模型</h2><p>在会话中使用模型选择器。如果 Claude Code 通过 Anthropic 兼容网关路由，自定义 ID 和已保存的网关预设会传给本机 CLI；这个 ID 最终对应哪个模型，由网关决定。</p></section>
+    <section class="related-articles"><h2>相关指南</h2><div><a href="../install-and-pair/"><strong>安装并配对电脑</strong><span>安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。</span></a><a href="../approve-from-another-computer/"><strong>从另一台设备审批操作</strong><span>在手机或桌面端查看工具请求、核对命令或文件操作，再允许或拒绝。</span></a></div></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>本页内容</strong><a href="#agent">创建会话时选择后端</a><a href="#model">选择模型</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="design_doc_mode" content="canvas" />
+<title>CC Pocket Manual — design frames</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="manual/manual.css" />
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5V5.5A2.5 2.5 0 0 1 6.5 3H20v18H6.5A2.5 2.5 0 0 0 4 19.5"/><path d="M8 7.5h7.5M8 11h5"/></symbol>
+<symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.4 9.3a2.7 2.7 0 1 1 3.3 3c-.6.2-.9.7-.9 1.3v.5"/><path d="M12 17.3h.01"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 3.5h6.5V10"/><path d="M20.5 3.5L11.5 12.5"/><path d="M18 14.5V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 19V7.5A1.5 1.5 0 0 1 5 6h4.5"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="7"/><path d="M15.6 15.6L21 21"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12.5" rx="2.5"/><path d="M15.5 5.5v-1A1.5 1.5 0 0 0 14 3H5A1.5 1.5 0 0 0 3.5 4.5v9A1.5 1.5 0 0 0 5 15h1"/></symbol>
+<symbol id="i-ai" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12.5" rx="2.5"/><path d="M15.5 5.5v-1A1.5 1.5 0 0 0 14 3H5A1.5 1.5 0 0 0 3.5 4.5v9A1.5 1.5 0 0 0 5 15h1"/><path d="M11.9 13.4l1.7 1.7-1.7 1.7"/><path d="M15.3 16.9h2.3"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15.5V3.5"/><path d="M8 7l4-3.5L16 7"/><path d="M5 13v6.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V13"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5L20 7"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.6h8.8A1.5 1.5 0 0 1 21 9.1v9.4A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M7 10l2.5 2.5L7 15"/><path d="M12.5 15.3h4.5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3 8.1-7.5 9.5-4.5-1.4-7.5-4.9-7.5-9.5V6z"/><path d="M9 11.8l2.2 2.2 4-4"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.8" y="9.8" width="4.4" height="4.4" rx="1"/><path d="M12 2.6V6M12 18v3.4M2.6 12H6M18 12h3.4"/></symbol>
+<symbol id="i-flow" viewBox="0 0 24 24"><circle cx="5.5" cy="5.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/><path d="M8 5.5h6A4 4 0 0 1 18 9.5v6.5"/><path d="M16 18.5H5.5V8"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="12.5" rx="2.5"/><path d="M9 20.5h6M12 16.5v4"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24"><path d="M4 7h9.5M17.5 7h2.5M4 17h4M12.5 17h7.5"/><circle cx="15.6" cy="7" r="2.2"/><circle cx="10.4" cy="17" r="2.2"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M6 3v18"/><path d="M6 4.5h11l-2 4 2 4H6z"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.4V12l3.2 2"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.4"/><path d="M12 17.4h.01"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.6 5.6l1.7 1.7M16.7 16.7l1.7 1.7M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2.5"/><path d="M8 11v2M12 11v2M16 11v2"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.4"/><path d="M12 7.6h.01"/></symbol>
+<symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M4 12h15"/><path d="M13.5 6.5L20 12l-6.5 5.5"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.3 9.5h17.4M3.3 14.5h17.4"/><path d="M12 3c-3 3-3 15 0 18M12 3c3 3 3 15 0 18"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 5.5v5.5H15"/><path d="M19.6 11A8 8 0 1 0 17 17.2"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+<symbol id="i-msg" viewBox="0 0 24 24"><path d="M3.5 6A1.5 1.5 0 0 1 5 4.5h14A1.5 1.5 0 0 1 20.5 6v8a1.5 1.5 0 0 1-1.5 1.5h-7l-4.5 4v-4H5A1.5 1.5 0 0 1 3.5 14z"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M4.5 12h15"/><path d="M13 5.5l6.5 6.5L13 18.5"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13.5 3L6 13.5h5l-1.5 7.5L18 10h-5.2z"/></symbol>
+</defs></svg>
+
+<!-- ══════════════ FRAME 1 — mobile app · Settings entry ══════════════ -->
+<div class="flabel" style="left:80px;top:14px;width:460px">Frame 1 · Mobile app — Settings entry<i>390×844 · dark · help entry sits directly under Token usage / Scheduled tasks</i></div>
+<div class="frame app" style="left:80px;top:80px;width:390px;height:844px">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 22px 4px;font:590 15px/1 -apple-system,system-ui;color:#fff"><span>9:41</span><span style="display:flex;gap:5px;align-items:center"><svg width="16" height="11" viewBox="0 0 19 12"><rect y="7.5" width="3.2" height="4.5" rx=".7" fill="#fff"/><rect x="4.8" y="5" width="3.2" height="7" rx=".7" fill="#fff"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx=".7" fill="#fff"/><rect x="14.4" width="3.2" height="12" rx=".7" fill="#fff"/></svg><svg width="24" height="12" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" stroke="#fff" stroke-opacity=".35" fill="none"/><rect x="2" y="2" width="20" height="9" rx="2" fill="#fff"/></svg></span></div>
+  <div style="display:flex;align-items:center;height:44px;padding:0 8px"><span class="tapicon" style="margin:0"><svg class="ic"><use href="#i-chev-l"/></svg></span></div>
+  <div style="padding:2px 16px 0"><div style="font:700 28px/1.2 'Inter';letter-spacing:-.4px;padding:0 4px 18px">Settings</div>
+
+    <div class="grp">
+      <div class="grpl">Usage &amp; tasks</div>
+      <div class="grpbox">
+        <div class="arow"><span class="lead"><svg class="ic ic-16"><use href="#i-bolt"/></svg></span><span class="tx"><span class="tt">Token usage</span><span class="ss">12.4M today · resets in 2h 40m</span></span><span class="tr"><svg class="ic ic-16"><use href="#i-chev-r"/></svg></span></div>
+        <div class="arow"><span class="lead"><svg class="ic ic-16"><use href="#i-clock"/></svg></span><span class="tx"><span class="tt">Scheduled tasks</span><span class="ss">2 scheduled · next in 5h</span></span><span class="tr"><svg class="ic ic-16"><use href="#i-chev-r"/></svg></span></div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="grpl">Help</div>
+      <div class="grpbox">
+        <div class="arow press"><span class="lead"><svg class="ic ic-16"><use href="#i-book"/></svg></span><span class="tx"><span class="tt">Help &amp; manual</span><span class="ss">Setup, sessions, approvals, agents, sharing, and fixes</span></span><span class="tr"><svg class="ic ic-16"><use href="#i-ext"/></svg></span></div>
+        <div class="arow"><span class="lead"><svg class="ic ic-16"><use href="#i-help"/></svg></span><span class="tx"><span class="tt">Troubleshooting</span><span class="ss">Offline computer, old daemon, pairing failed</span></span><span class="tr"><svg class="ic ic-16"><use href="#i-ext"/></svg></span></div>
+      </div>
+      <div style="font:400 11.5px/1.5 'Inter';color:#6B7177;padding:8px 6px 0">Opens the public manual in your browser · heypandax.github.io/cc-pocket/manual/en/</div>
+    </div>
+
+    <div class="grp">
+      <div class="grpl">Default permission mode</div>
+      <div class="grpbox">
+        <div class="arow" style="min-height:52px"><span style="width:22px;height:22px;border-radius:999px;border:2px solid #D97757;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:10px;height:10px;border-radius:999px;background:#D97757"></span></span><span class="tx"><span class="tt" style="font-size:14.5px;font-weight:600">I’m watching · ask each step</span><span class="ss mono" style="font-size:11.5px;color:#9BA1A6">default</span></span></div>
+        <div class="arow" style="min-height:52px"><span style="width:22px;height:22px;border-radius:999px;border:2px solid #2A2E33;flex:none"></span><span class="tx"><span class="tt" style="font-size:14.5px;font-weight:600">Auto-edit files, ask before commands</span><span class="ss mono" style="font-size:11.5px;color:#4FB477">acceptEdits</span></span></div>
+        <div class="arow" style="min-height:52px;opacity:.5"><span style="width:22px;height:22px;border-radius:999px;border:2px solid #2A2E33;flex:none"></span><span class="tx"><span class="tt" style="font-size:14.5px;font-weight:600">Plan first, I’ll approve</span></span></div>
+      </div>
+    </div>
+  </div>
+  <div style="position:absolute;left:0;right:0;bottom:0;height:70px;background:linear-gradient(transparent,#0E0F11 60%)"></div>
+  <div style="position:absolute;left:50%;bottom:9px;transform:translateX(-50%);width:139px;height:5px;border-radius:3px;background:#fff;opacity:.35"></div>
+</div>
+<div class="note" style="left:80px;top:944px;width:390px">Pressed state shown on <b>Help &amp; manual</b>: row background → #1E2125.<br>Terracotta appears only on the 30px leading glyph — no promotional fill.<br>Rows are 56px tall (&gt;44pt). Trailing glyph is <b>external-link</b>, not chevron,<br>so the jump out of the app is honest.</div>
+
+<!-- ══════════════ FRAME 2 — desktop app · Settings > Help ══════════════ -->
+<div class="flabel" style="left:560px;top:14px;width:700px">Frame 2 · Desktop app — Settings › Help<i>700×500 modal · dark · 176px rail + hairline divider + scrollable pane</i></div>
+<div class="frame app" style="left:560px;top:80px;width:700px;height:500px;background:#1E2125;border:1px solid #2A2E33;border-radius:16px;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid #2A2E33;flex:none"><span style="font:700 16px/1 'Inter';color:#ECEDEE">Settings</span><span style="flex:1"></span><svg class="ic ic-16" style="color:#9BA1A6"><use href="#i-x"/></svg></div>
+  <div style="flex:1;min-height:0;display:flex">
+    <div class="dkrail">
+      <div class="r"><svg class="ic ic-16"><use href="#i-gear"/></svg>General</div>
+      <div class="r"><svg class="ic ic-16"><use href="#i-monitor"/></svg>Computers</div>
+      <div class="r"><svg class="ic ic-16"><use href="#i-key"/></svg>Shortcuts</div>
+      <div class="r on"><svg class="ic ic-16"><use href="#i-book"/></svg>Help</div>
+      <div class="r"><svg class="ic ic-16"><use href="#i-info"/></svg>About</div>
+    </div>
+    <div style="flex:1;min-width:0;overflow:hidden;padding:20px 22px">
+      <div style="font:600 13.5px/1 'Inter';color:#ECEDEE">Help &amp; manual</div>
+      <div style="font:400 12px/1.5 'Inter';color:#6B7177;margin:4px 0 14px;max-width:420px">Task-based guides for CC Pocket. Everything opens in your browser at heypandax.github.io/cc-pocket/manual — public, no sign-in.</div>
+      <div style="display:flex;align-items:center;gap:10px;height:40px;padding:0 13px;border:1px solid #2A2E33;border-radius:10px;background:#16181B;color:#6B7177;margin-bottom:16px"><svg class="ic ic-16"><use href="#i-search"/></svg><span style="font:400 13px/1 'Inter';flex:1">Search the manual…</span><span class="kbd" style="--hair:#2A2E33;--raised:#1E2125;--sec:#9BA1A6">/</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+        <a class="qlink"><svg class="ic"><use href="#i-flag"/></svg>Get started</a>
+        <a class="qlink"><svg class="ic"><use href="#i-shield"/></svg>Approvals &amp; safety</a>
+        <a class="qlink"><svg class="ic"><use href="#i-chip"/></svg>Agents &amp; models</a>
+        <a class="qlink"><svg class="ic"><use href="#i-wrench"/></svg>Troubleshooting</a>
+      </div>
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#6B7177;margin-bottom:8px">Popular</div>
+      <div style="display:flex;flex-direction:column;gap:7px;margin-bottom:18px">
+        <a style="display:flex;align-items:center;gap:8px;font:400 12.5px/1 'Inter';color:#9BA1A6"><svg class="ic ic-14" style="color:#6B7177"><use href="#i-arrow-r"/></svg>Take over a terminal session without forking</a>
+        <a style="display:flex;align-items:center;gap:8px;font:400 12.5px/1 'Inter';color:#9BA1A6"><svg class="ic ic-14" style="color:#6B7177"><use href="#i-arrow-r"/></svg>Approve work running on another computer</a>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <button class="btn btn-sm btn-quiet" style="--hair:#2A2E33;--text:#ECEDEE;border-color:#2A2E33;color:#ECEDEE">Open full manual<svg class="ic ic-14"><use href="#i-ext"/></svg></button>
+        <button id="f2copy" style="all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:7px;font:500 12.5px/1 'Inter';color:#9BA1A6"><svg class="ic ic-14"><use href="#i-ai"/></svg><span>Copy link for AI</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:560px;top:600px;width:700px">Click <b>Copy link for AI</b> in the frame → confirmation state: check glyph + “Manual link copied”, reverts after 2.4s.<br>Rail order: General · Computers · Shortcuts · <b>Help</b> · About. No article bodies live inside Settings.</div>
+
+<!-- ══════════════ FRAME 4 — manual home · mobile web ══════════════ -->
+<div class="flabel" style="left:1350px;top:14px;width:460px">Frame 4 · Manual home — mobile web<i>390 viewport · dark · full page height 1980</i></div>
+<div class="frame mn" data-theme="dark" style="left:1350px;top:80px;width:390px;height:2160px">
+  <div class="mtop"><a class="brand"><svg width="22" height="22" viewBox="0 0 30 30" fill="none"><path d="M6 9l5 6-5 6" stroke="#D97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="16.5" y="8" width="7.5" height="14" rx="3.2" fill="#D97757" opacity=".9"/></svg><span class="brand-word">cc-pocket</span></a><span style="font:400 12px/1 'JetBrains Mono',monospace;color:var(--accent);border:1px solid var(--hair);border-radius:6px;padding:4px 7px">Manual</span><span class="sp"></span><span class="tapicon"><svg class="ic"><use href="#i-search"/></svg></span><span class="seg" style="padding:2px"><button>中</button><button class="on">EN</button></span><span class="tapicon"><svg class="ic" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span></div>
+  <div class="mpad" style="padding-top:22px">
+    <div class="crumb"><a>Manual</a><span class="sl">/</span><span>EN</span></div>
+    <h1 style="font-size:30px;font-weight:600;letter-spacing:-.03em;line-height:1.12;margin:12px 0 8px">How can we help?</h1>
+    <p style="font-size:15px;color:var(--sec);margin:0">Find the exact steps for a task, or fix something that stopped working.</p>
+    <div class="msearch" style="height:52px;margin-top:18px"><svg class="ic"><use href="#i-search"/></svg><input placeholder="Search setup, approvals, models…" /></div>
+  </div>
+  <div class="mchips">
+    <a class="chip"><svg class="ic"><use href="#i-clock"/></svg>Schedule a prompt for later</a>
+    <a class="chip"><svg class="ic"><use href="#i-terminal"/></svg>Take over a terminal session</a>
+    <a class="chip"><svg class="ic"><use href="#i-folder"/></svg>Share only one folder</a>
+  </div>
+  <div class="mpad" style="padding-top:26px">
+    <div class="sec-label"><h2 style="font-size:17px">Start here</h2><span style="font-size:12.5px">3 steps · 6 min</span></div>
+    <div class="mstep"><span class="stepn">1</span><span><span style="display:block;font-size:14.5px;font-weight:600">Install the daemon</span><span style="display:block;font-size:12.5px;color:var(--sec);margin-top:3px">One command on the computer that runs Claude Code.</span></span></div>
+    <div class="mstep"><span class="stepn">2</span><span><span style="display:block;font-size:14.5px;font-weight:600">Pair a computer</span><span style="display:block;font-size:12.5px;color:var(--sec);margin-top:3px">Scan or type the 6-digit code once.</span></span></div>
+    <div class="mstep"><span class="stepn">3</span><span><span style="display:block;font-size:14.5px;font-weight:600">Start a session</span><span style="display:block;font-size:12.5px;color:var(--sec);margin-top:3px">Pick a project folder and send your first prompt.</span></span></div>
+
+    <div class="sec-label" style="margin-top:30px"><h2 style="font-size:17px">Browse by task</h2><span style="font-size:12.5px">Planned coverage</span></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-flag"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Start here</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Install, pair, and run your first session.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Install the daemon</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-folder"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Projects &amp; sessions</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Open folders, resume work, switch sessions.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Share only one folder</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-msg"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Chat &amp; control</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Queue prompts, schedule sends, take over a terminal.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Schedule a prompt for later</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-shield"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Approvals &amp; safety</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Permission modes, fleet approvals, app lock.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Approve work on another computer</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-chip"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Agents, models &amp; accounts</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Claude, Codex, OpenCode, and gateway presets.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Use a third-party model gateway</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-flow"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Automate &amp; collaborate</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Workflows, subagents, and the Feishu bridge.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Send prompts from Feishu</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-monitor"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Desktop &amp; multiple computers</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">The desktop app, several machines, the menu bar.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Add a second computer</a></div></div>
+    <div class="mcat"><div class="top" style="display:flex;align-items:center;gap:9px;color:var(--accent)"><svg class="ic"><use href="#i-wrench"/></svg><h3 style="font-size:15px;font-weight:600;color:var(--text);margin:0">Settings &amp; troubleshooting</h3></div><p style="font-size:13px;line-height:1.5;color:var(--sec);margin:9px 0 11px">Offline computers, stale daemons, failed pairing.</p><div class="catlinks" style="padding-top:10px"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Fix an offline computer</a></div></div>
+
+    <div class="aipanel" style="flex-direction:column;align-items:flex-start;gap:14px;padding:18px;margin-top:22px"><div><h3 style="font-size:15px">Using an AI assistant?</h3><p style="font-size:13px">Every page here is a public URL with no sign-in. Copy one and paste it into any assistant that can open web pages — it reads the whole article, commands included.</p></div><div style="display:flex;gap:9px;width:100%"><button class="btn btn-sm btn-ghost" style="flex:1;min-height:44px" data-copy="ai"><svg class="ic ic-14"><use href="#i-ai"/></svg><span>Copy manual link</span></button><a class="btn btn-sm btn-quiet" style="flex:none;min-height:44px">How it works</a></div></div>
+    <div class="mfoot" style="margin-top:24px;padding:18px 0 40px;font-size:11.5px;flex-wrap:wrap;gap:10px"><span>heypandax.github.io/cc-pocket/manual/en/</span><span>·</span><span>MIT</span><span>·</span><span>中文</span></div>
+  </div>
+  <div class="fold" data-fold="844 — first viewport" style="top:844px"></div>
+</div>
+<div class="note" style="left:1350px;top:2264px;width:390px">First viewport ends on the <b>Start here</b> steps: search field, three problem-shaped<br>chips, and a numbered path — reads as help, not a landing page.<br>Mobile cards carry one sample link only, to keep vertical rhythm.</div>
+
+<!-- ══════════════ FRAME 6 — task article · mobile web (light) ══════════════ -->
+<div class="flabel" style="left:1830px;top:14px;width:460px">Frame 6 · Task article — mobile web<i>390 viewport · light · full page 3540 · Copy-for-AI toast open</i></div>
+<div class="frame mn" data-theme="light" style="left:1830px;top:80px;width:390px;height:3540px">
+  <div class="mtop"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span style="flex:1;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Schedule a prompt for later</span><span class="tapicon"><svg class="ic"><use href="#i-search"/></svg></span><span class="tapicon"><svg class="ic"><use href="#i-share"/></svg></span></div>
+  <div class="mpad" style="padding-top:18px">
+    <div class="crumb"><a>Manual</a><span class="sl">/</span><a>Chat &amp; control</a></div>
+    <div class="badges" style="margin-top:12px"><span class="badge">Mobile</span><span class="badge">Desktop</span></div>
+    <h1 style="font-size:28px;font-weight:600;letter-spacing:-.03em;line-height:1.15;margin:12px 0 0">Schedule a prompt for later</h1>
+    <div class="answer" style="padding:15px 17px;margin:18px 0 14px"><span class="lb">Short answer</span><p style="font-size:15.5px">Long-press <b>Send</b> instead of tapping it, choose <b>30m</b>, <b>1h</b>, <b>3h</b>, <b>8h</b>, or <b>Custom time…</b>, then tap <b>Schedule for 23:00</b>. The paired computer’s daemon stores the task and runs it at that time. Turn on <b>Repeat daily</b> first and the button becomes <b>Schedule daily at 23:00</b>.</p></div>
+    <div class="metarow" style="font-size:11.5px;padding-top:4px"><span>CC Pocket 1.4+</span><span class="dot">·</span><span class="ok">Verified Jul 24, 2026</span><span class="dot">·</span><span>3 min</span></div>
+    <div style="display:flex;gap:9px;padding:16px 0 18px;border-bottom:1px solid var(--hair)">
+      <button class="act" style="flex:1;height:44px;justify-content:center" data-copy="link"><svg class="ic"><use href="#i-copy"/></svg><span>Copy link</span></button>
+      <button class="act" style="flex:1;height:44px;justify-content:center" data-copy="ai"><svg class="ic"><use href="#i-ai"/></svg><span>Copy for AI</span></button>
+    </div>
+    <div class="toast" style="margin:12px 0 4px"><svg class="ic"><use href="#i-check"/></svg><p>Copied a public link and a prompt.<span>Paste it into any AI that can open web pages.</span></p></div>
+    <button class="disclose" style="margin-top:16px"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-chev-d"/></svg>On this page<span style="margin-left:auto;font:400 12px/1 'JetBrains Mono',monospace;color:var(--muted)">7</span></button>
+    <div class="prereq" style="margin:18px 0"><svg class="ic ic-16"><use href="#i-info"/></svg><p>You need a paired computer that is online at the scheduled time, and a session already open in that project.</p></div>
+
+    <div class="step" style="grid-template-columns:30px minmax(0,1fr);gap:12px;padding:18px 0 0"><span class="n" style="width:30px;height:30px;font-size:14px">1</span><div>
+      <h3>Long-press the send button</h3>
+      <p style="font-size:15.5px">Type the prompt as usual, then press and hold <kbd class="inl">Send</kbd> for about half a second. A normal tap still sends immediately.</p>
+      <div class="shot">
+        <div class="shotimg" style="height:300px"><span class="callout" style="right:26px;bottom:44px">1</span><span class="sid"><b>manual.schedule-send.long-press</b>390×844 @2x · crop 390×380 (composer)</span></div>
+        <div class="shotcap"><span class="cn">1</span><p>Holding Send raises the schedule sheet; the button dims to its pressed state.</p></div>
+      </div>
+    </div></div>
+
+    <div class="step" style="grid-template-columns:30px minmax(0,1fr);gap:12px;padding:26px 0 0"><span class="n" style="width:30px;height:30px;font-size:14px">2</span><div>
+      <h3>Choose when it should run</h3>
+      <p style="font-size:15.5px">The sheet offers <b>30m</b>, <b>1h</b>, <b>3h</b>, <b>8h</b>, and <b>Custom time…</b>. Times follow your computer’s clock, shown under the picker.</p>
+      <div class="shot">
+        <div class="shotimg" style="height:320px"><span class="callout" style="left:24px;top:120px">2</span><span class="callout" style="left:24px;top:206px">3</span><span class="sid"><b>manual.schedule-send.open-sheet</b>390×844 @2x · crop 390×420 (sheet)</span></div>
+        <div class="shotcap"><span class="cn">2·3</span><p>2 Time presets. 3 Repeat daily toggle — off by default.</p></div>
+      </div>
+    </div></div>
+
+    <div class="step" style="grid-template-columns:30px minmax(0,1fr);gap:12px;padding:26px 0 0"><span class="n" style="width:30px;height:30px;font-size:14px">3</span><div>
+      <h3>Confirm, then check the task list</h3>
+      <p style="font-size:15.5px">Tap <b>Schedule for 23:00</b>. The prompt leaves the composer and becomes a row in <b>Settings › Scheduled tasks</b>, where you can see its status or remove it.</p>
+      <div class="shot shot-missing">
+        <div class="shotimg" style="height:170px"><span class="fb"><svg class="ic ic-16"><use href="#i-alert"/></svg>Image unavailable — steps above are complete without it. Scene <b>manual.schedule-send.created</b></span></div>
+        <div class="shotcap"><span class="cn">4</span><p>Missing-image fallback: caption and step text still carry the whole instruction.</p></div>
+      </div>
+    </div></div>
+
+    <h2 style="font-size:19px;font-weight:600;margin:34px 0 10px">What happens next</h2>
+    <p style="font-size:15.5px">The paired computer’s daemon stores the scheduled task and runs it at the time you chose; repeating tasks run daily. <b>Settings › Scheduled tasks</b> shows each task’s status and lets you remove one. If a run fails, its row shows the last failure reason.</p>
+    <a class="act" style="height:44px;margin:4px 0 6px"><svg class="ic"><use href="#i-clock"/></svg>Manage scheduled tasks</a>
+
+    <div class="tsblock" style="margin-top:24px">
+      <div class="h"><svg class="ic ic-16"><use href="#i-alert"/></svg>If it didn’t work</div>
+      <div class="tsitem"><div class="q">Long-press does nothing</div><div class="a">The composer is empty, or the session is still streaming. Wait for the turn to finish, then hold Send again.</div></div>
+      <div class="tsitem"><div class="q">It ran at the wrong time</div><div class="a">Schedules use the paired computer’s timezone, not the phone’s. The sheet names the computer and zone before you confirm.</div></div>
+    </div>
+
+    <h2 style="font-size:19px;font-weight:600;margin:32px 0 12px">Related</h2>
+    <div class="related" style="grid-template-columns:1fr"><a class="relcard"><div class="t">Queue prompts while Claude is working</div><div class="s">Chat &amp; control</div></a><a class="relcard"><div class="t">Auto-continue after a usage limit</div><div class="s">Chat &amp; control</div></a><a class="relcard"><div class="t">Manage scheduled tasks</div><div class="s">Settings</div></a></div>
+    <div class="feedback" style="margin-top:26px"><span class="q" style="font-size:14.5px">Did this solve it?</span><button class="act" style="height:40px">Yes</button><button class="act" style="height:40px">Not yet</button></div>
+    <div class="mfoot" style="padding:18px 0 40px;font-size:11.5px"><span>heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/</span></div>
+  </div>
+  <div class="fold" data-fold="844 — first viewport" style="top:844px"></div>
+</div>
+<div class="note" style="left:1830px;top:3624px;width:420px">First viewport: title, short answer, metadata, and the two 44pt copy actions.<br>The <b>Copy for AI</b> toast wording is vendor-neutral — no provider name, no in-site bot.<br>“On this page” collapses to a disclosure but every heading stays in the DOM.</div>
+
+<!-- ══════════════ FRAME 3 — manual home · desktop web ══════════════ -->
+<div class="flabel" style="left:80px;top:3854px;width:1440px">Frame 3 · Manual home — desktop web<i>1440 viewport · dark · full page 1860 · existing site shell, compact editorial header (no marketing hero)</i></div>
+<div class="frame mn" data-theme="dark" style="left:80px;top:3900px;width:1440px;height:1860px">
+  <nav class="mnav"><div class="wrap">
+    <a class="brand"><svg width="26" height="26" viewBox="0 0 30 30" fill="none"><path d="M6 9l5 6-5 6" stroke="#D97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="16.5" y="8" width="7.5" height="14" rx="3.2" fill="#D97757" opacity=".9"/></svg><span class="brand-word">cc-pocket</span></a>
+    <div class="mnav-links"><a>Features</a><a>How it works</a><a>Security</a><a class="on">Manual</a><a>Get started</a></div>
+    <div class="nav-right">
+      <div class="seg"><button>中</button><button class="on">EN</button></div>
+      <div class="seg"><button class="on" aria-label="Dark">Dark</button><button>Light</button></div>
+      <a class="btn btn-sm btn-ghost">GitHub</a>
+    </div>
+  </div></nav>
+
+  <div class="wrap mhead">
+    <div class="crumb"><a>cc-pocket</a><span class="sl">/</span><span style="color:var(--accent)">Manual</span><span class="sl">/</span><span>EN</span></div>
+    <h1>How can we help?</h1>
+    <p class="lede">Task-shaped answers for CC Pocket — every page is a public URL you can bookmark, translate, or hand to an AI assistant.</p>
+    <div class="msearch"><svg class="ic ic-20"><use href="#i-search"/></svg><input placeholder="Search setup, approvals, models, sharing…" /><span class="kbd">/</span></div>
+    <div class="chips">
+      <a class="chip"><svg class="ic"><use href="#i-clock"/></svg>Schedule a prompt for later</a>
+      <a class="chip"><svg class="ic"><use href="#i-terminal"/></svg>Take over a terminal session without forking</a>
+      <a class="chip"><svg class="ic"><use href="#i-folder"/></svg>Review every changed file and line-level diff</a>
+      <a class="chip"><svg class="ic"><use href="#i-folder"/></svg>Share only one folder</a>
+      <a class="chip"><svg class="ic"><use href="#i-chip"/></svg>Use a third-party model gateway</a>
+      <a class="chip"><svg class="ic"><use href="#i-shield"/></svg>Approve work on another computer</a>
+    </div>
+  </div>
+
+  <div class="wrap" style="padding-top:44px">
+    <div class="sec-label"><h2>Start here</h2><span>New to CC Pocket — about 6 minutes end to end</span></div>
+    <div class="steps3">
+      <a class="stepc"><span class="stepn">1</span><div><h3>Install the daemon</h3><p>One command on the computer that runs Claude Code.</p></div><svg class="ic arw"><use href="#i-chev-r"/></svg></a>
+      <a class="stepc"><span class="stepn">2</span><div><h3>Pair a computer</h3><p>Scan the QR or type the 6-digit code once.</p></div><svg class="ic arw"><use href="#i-chev-r"/></svg></a>
+      <a class="stepc"><span class="stepn">3</span><div><h3>Start a session</h3><p>Choose a project folder and send your first prompt.</p></div></a>
+    </div>
+  </div>
+
+  <div class="wrap" style="padding-top:46px">
+    <div class="sec-label"><h2>Browse by task</h2><span>Proposed information architecture · EN and 中文</span></div>
+    <div class="catgrid">
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-flag"/></svg><h3>Start here</h3></div><p>Install the daemon, pair a computer, and get through your first session.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Install the daemon</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Pair a computer</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-folder"/></svg><h3>Projects &amp; sessions</h3></div><p>Open project folders, resume yesterday’s work, and switch between sessions.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Share only one folder</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Resume a session from another device</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-msg"/></svg><h3>Chat &amp; control</h3></div><p>Queue prompts, schedule sends, read diffs, and take over a terminal session.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Schedule a prompt for later</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Take over a terminal session</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-shield"/></svg><h3>Approvals &amp; safety</h3></div><p>Permission modes, per-tool rules, fleet approvals, and app lock.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Approve work on another computer</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Turn on app lock</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-chip"/></svg><h3>Agents, models &amp; accounts</h3></div><p>Run Claude, Codex, or OpenCode; choose models and gateway presets.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Use a third-party model gateway</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Choose an agent when starting a session</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-flow"/></svg><h3>Automate &amp; collaborate</h3></div><p>Saved workflows, subagents, the Feishu bridge, and folders shared with teammates.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Send prompts from Feishu</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Run a saved workflow</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-monitor"/></svg><h3>Desktop &amp; multiple computers</h3></div><p>The desktop app, several paired machines, and the menu-bar quick session.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Add a second computer</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Use the menu-bar quick session</a></div></div>
+      <div class="catcard"><div class="top"><svg class="ic ic-20"><use href="#i-wrench"/></svg><h3>Settings &amp; troubleshooting</h3></div><p>Fix offline computers, stale daemons, failed pairing, and notification gaps.</p><div class="catlinks"><a><svg class="ic"><use href="#i-arrow-r"/></svg>Fix an offline computer</a><a><svg class="ic"><use href="#i-arrow-r"/></svg>Update an out-of-date daemon</a></div></div>
+    </div>
+  </div>
+
+  <div class="wrap" style="padding-top:40px">
+    <div class="aipanel"><svg class="ic ic-22" style="color:var(--accent)"><use href="#i-globe"/></svg><div><h3>Using an AI assistant?</h3><p>Every article is a public page with no sign-in and a stable URL, including its version range and last-verified date. Copy a link and paste it into any assistant that can open web pages.</p></div><span class="pacts"><button class="btn btn-sm btn-quiet" data-copy="ai"><svg class="ic ic-14"><use href="#i-ai"/></svg><span>Copy manual link</span></button><a class="btn btn-sm btn-quiet">How AI access works</a></span></div>
+  </div>
+
+  <div class="wrap" style="padding-top:44px">
+    <div class="sec-label"><h2>Recently updated</h2><span>Re-verified against the shipping build</span></div>
+    <div class="ru">
+      <a class="rurow"><span class="t">Schedule a prompt for later</span><span class="badges"><span class="badge">Mobile</span><span class="badge">Desktop</span></span><span class="m">1.4+</span><span class="m" style="color:var(--success)">Jul 24, 2026</span></a>
+      <a class="rurow"><span class="t">Take over a terminal session without forking</span><span class="badges"><span class="badge">Mobile</span></span><span class="m">1.4+</span><span class="m" style="color:var(--success)">Jul 22, 2026</span></a>
+      <a class="rurow"><span class="t">Review every changed file and line-level diff</span><span class="badges"><span class="badge">Mobile</span><span class="badge">Desktop</span></span><span class="m">1.3+</span><span class="m">Jul 19, 2026</span></a>
+      <a class="rurow"><span class="t">Use a third-party model gateway</span><span class="badges"><span class="badge">Desktop</span></span><span class="m">1.4+</span><span class="m">Jul 18, 2026</span></a>
+      <a class="rurow"><span class="t">Fix an offline computer</span><span class="badges"><span class="badge">All</span></span><span class="m stale">1.2+</span><span class="m stale">Apr 23, 2026</span></a>
+    </div>
+    <div class="mfoot"><span>heypandax.github.io/cc-pocket/manual/en/</span><span>·</span><span>中文手册</span><span>·</span><span>MIT</span><span style="flex:1"></span><span>Last index build Jul 24, 2026</span></div>
+  </div>
+  <div class="fold" data-fold="1000 — first viewport" style="top:1000px"></div>
+</div>
+<div class="note" style="left:80px;top:5776px;width:1440px">Header is 46px of padding + H1 + one lede line — no hero art, no glow, no star pill, no store buttons. The last <b>Recently updated</b> row shows the version-stale treatment: amber, dashed underline, because 1.2+ is two minors behind and the verified date is 92 days old.</div>
+
+<!-- ══════════════ FRAME 5 — task article · desktop web (light) ══════════════ -->
+<div class="flabel" style="left:1620px;top:3854px;width:1440px">Frame 5 · Task article — desktop web<i>1440 viewport · light · full page 3720 · 236 / 748 / 208 three-zone editorial layout</i></div>
+<div class="frame mn" data-theme="light" style="left:1620px;top:3900px;width:1440px;height:3720px">
+  <nav class="mnav"><div class="wrap">
+    <a class="brand"><svg width="26" height="26" viewBox="0 0 30 30" fill="none"><path d="M6 9l5 6-5 6" stroke="#C75A38" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="16.5" y="8" width="7.5" height="14" rx="3.2" fill="#C75A38" opacity=".9"/></svg><span class="brand-word">cc-pocket</span></a>
+    <div class="mnav-links"><a>Features</a><a>How it works</a><a>Security</a><a class="on">Manual</a><a>Get started</a></div>
+    <div class="nav-right"><div class="seg"><button>中</button><button class="on">EN</button></div><div class="seg"><button>Dark</button><button class="on">Light</button></div><a class="btn btn-sm btn-ghost">GitHub</a></div>
+  </div></nav>
+
+  <div class="wrap"><div class="artgrid">
+    <aside class="anav">
+      <div class="g"><div class="gl">Manual</div><a>Start here</a><a>Projects &amp; sessions</a></div>
+      <div class="g"><div class="gl">Chat &amp; control</div>
+        <a>Queue prompts while it works</a>
+        <a class="on">Schedule a prompt for later</a>
+        <a>Take over a terminal session</a>
+        <a>Review changed files &amp; diffs</a>
+        <a>Read a long doc inline</a>
+        <a>Voice input</a>
+      </div>
+      <div class="g"><div class="gl">More</div><a>Approvals &amp; safety</a><a>Agents, models &amp; accounts</a><a>Automate &amp; collaborate</a><a>Desktop &amp; multiple computers</a><a>Settings &amp; troubleshooting</a></div>
+    </aside>
+
+    <article class="artbody">
+      <div class="crumb"><a>Manual</a><span class="sl">/</span><a>Chat &amp; control</a><span class="sl">/</span><span>Schedule a prompt</span></div>
+      <div class="badges" style="margin-top:14px"><span class="badge">Mobile</span><span class="badge">Desktop</span></div>
+      <h1>Schedule a prompt for later</h1>
+
+      <div class="answer"><span class="lb">Short answer</span><p>Long-press the <b>Send</b> button instead of tapping it, choose <b>30m</b>, <b>1h</b>, <b>3h</b>, <b>8h</b>, or <b>Custom time…</b> in the sheet that appears, then tap <b>Schedule for 23:00</b>. The paired computer’s daemon stores the task and runs it at that time, even with your phone asleep — and turning on <b>Repeat daily</b> changes the button to <b>Schedule daily at 23:00</b>.</p></div>
+
+      <div class="metarow"><span>Applies to CC Pocket 1.4+</span><span class="dot">·</span><span class="ok">Last verified Jul 24, 2026</span><span class="dot">·</span><span>3 min read</span><span class="dot">·</span><span>EN · <a style="border-bottom:1px solid currentColor">中文</a></span></div>
+      <div class="acts">
+        <button class="act" data-copy="link"><svg class="ic"><use href="#i-copy"/></svg><span>Copy link</span></button>
+        <button class="act" data-copy="ai"><svg class="ic"><use href="#i-ai"/></svg><span>Copy for AI</span></button>
+        <button class="act"><svg class="ic"><use href="#i-share"/></svg><span>Share</span></button>
+        <span class="acthint">“Copy for AI” copies this public URL plus a short instruction — no provider involved.</span>
+      </div>
+
+      <div class="prereq"><svg class="ic ic-16"><use href="#i-info"/></svg><p><b>Before you start:</b> you need a paired computer that will be online at the scheduled time, and a session already open in the project the prompt should run in.</p></div>
+
+      <h2 id="s1">Steps</h2>
+      <div class="step"><span class="n">1</span><div>
+        <h3>Long-press the send button</h3>
+        <p>In the composer, type the prompt exactly as you would send it now. Then press and hold <kbd class="inl">Send</kbd> for about half a second instead of tapping — the schedule sheet slides up from the bottom. A normal tap still sends immediately, so nothing changes for everyday use.</p>
+        <div class="shot">
+          <div class="shotimg" style="height:340px">
+            <span class="callout" style="right:96px;bottom:74px">1</span><span class="calloutline" style="right:120px;bottom:86px;width:120px;transform:rotate(-18deg)"></span>
+            <span class="sid"><b>manual.schedule-send.long-press</b>390×844 @2x · crop 390×420 · composer + held Send</span>
+          </div>
+          <div class="shotcap"><span class="cn">1</span><p><b>1</b> Send held for ~500 ms; the button shows its pressed state and the sheet begins to rise. Callouts are HTML overlays, never baked into the PNG.</p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><span class="n">2</span><div>
+        <h3>Choose when it should run</h3>
+        <p>The sheet offers five choices: <b>30m</b>, <b>1h</b>, <b>3h</b>, <b>8h</b>, and <b>Custom time…</b>. Picking a custom time opens a wheel picker; the line under it names the computer and the timezone the schedule will use — schedules always follow the computer’s clock, not your phone’s. The confirm button reads <b>Schedule for 23:00</b>, or <b>Schedule daily at 23:00</b> when <b>Repeat daily</b> is on.</p>
+        <div class="shot">
+          <div class="shotimg" style="height:380px">
+            <span class="callout" style="left:150px;top:110px">2</span><span class="callout" style="left:150px;top:214px">3</span><span class="callout" style="left:150px;top:300px">4</span>
+            <span class="sid"><b>manual.schedule-send.open-sheet</b>390×844 @2x · crop 390×470 · schedule sheet open</span>
+          </div>
+          <div class="shotcap"><span class="cn">2·3·4</span><p><b>2</b> The five time choices. <b>3</b> Repeat daily toggle, off by default. <b>4</b> Target computer and timezone line, above the confirm button.</p></div>
+        </div>
+      </div></div>
+
+      <div class="step"><span class="n">3</span><div>
+        <h3>Confirm, then check the task list</h3>
+        <p>Tap <b>Schedule for 23:00</b>. The prompt leaves the composer and appears as a row in <b>Settings › Scheduled tasks</b>, with the time it will run, the target project path, and its current status. Repeating tasks carry a <code class="inl">DAILY</code> badge.</p>
+        <div class="shot">
+          <div class="shotimg" style="height:300px">
+            <span class="callout" style="left:150px;top:84px">5</span>
+            <span class="sid"><b>manual.schedule-send.created</b>390×844 @2x · crop 390×360 · Scheduled tasks list</span>
+          </div>
+          <div class="shotcap"><span class="cn">5</span><p><b>5</b> The new task row. <b>Settings › Scheduled tasks</b> is the only place schedules are inspected, changed, or removed.</p></div>
+        </div>
+      </div></div>
+
+      <h2>What happens next</h2>
+      <p>The paired computer’s daemon stores the scheduled task and runs it at the time you selected; nothing is queued on the relay. Repeating tasks run daily at the same time. Permission prompts still apply: if the session’s mode asks before commands, the run waits for your approval instead of proceeding.</p>
+      <p class="sec"><b>Settings › Scheduled tasks</b> shows the status of every task and lets you remove one. If a run fails, that row shows the last failure reason — for example that the computer was offline at the scheduled time.</p>
+      <a class="act" style="margin:4px 0 8px"><svg class="ic"><use href="#i-clock"/></svg>Manage scheduled tasks<svg class="ic ic-14"><use href="#i-arrow-r"/></svg></a>
+
+      <h2>Troubleshooting</h2>
+      <div class="tsblock">
+        <div class="h"><svg class="ic ic-16"><use href="#i-alert"/></svg>Three things that usually explain it</div>
+        <div class="tsitem"><div class="q">Holding Send does nothing</div><div class="a">The composer is empty, or the session is still streaming a turn. Wait for the turn to end, then press and hold <kbd class="inl">Send</kbd> again.</div></div>
+        <div class="tsitem"><div class="q">The task never ran</div><div class="a">Open <b>Settings › Scheduled tasks</b> and read the row’s last failure reason — usually that the paired computer was not reachable at the scheduled time. Remove the task and schedule it again once the computer is online.</div></div>
+        <div class="tsitem"><div class="q">It ran an hour off</div><div class="a">Schedules use the paired computer’s timezone. Check <code class="inl">date</code> there; the sheet shows which zone it will use before you confirm.</div></div>
+      </div>
+
+      <h2>Related articles</h2>
+      <div class="related">
+        <a class="relcard"><div class="t">Queue prompts while Claude is working</div><div class="s">Chat &amp; control · 1.3+</div></a>
+        <a class="relcard"><div class="t">Auto-continue after a usage limit</div><div class="s">Chat &amp; control · 1.4+</div></a>
+        <a class="relcard"><div class="t">Manage scheduled tasks</div><div class="s">Settings · 1.4+</div></a>
+        <a class="relcard"><div class="t">Keep a session running with the phone asleep</div><div class="s">Projects &amp; sessions · 1.2+</div></a>
+      </div>
+
+      <div class="feedback"><span class="q">Did this solve it?</span><button class="act">Yes</button><button class="act">Not yet</button><span class="sp"></span><a class="act"><svg class="ic"><use href="#i-ext"/></svg>Open an issue</a></div>
+      <div class="mfoot" style="margin-top:26px"><span>heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/</span><span>·</span><span>Edit this page on GitHub</span></div>
+    </article>
+
+    <aside class="otp">
+      <div class="gl">On this page</div>
+      <a class="on">Steps</a>
+      <a class="sub">1 · Long-press Send</a>
+      <a class="sub">2 · Choose a time</a>
+      <a class="sub">3 · Confirm</a>
+      <a>What happens next</a>
+      <a>Troubleshooting</a>
+      <a>Related articles</a>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--hair)">
+        <div class="gl">Verified</div>
+        <div class="mono" style="font-size:12px;line-height:1.6;color:var(--muted)">1.4+ · Jul 24, 2026<br>iOS 17+ · macOS 14+</div>
+      </div>
+    </aside>
+  </div></div>
+  <div class="fold" data-fold="1100 — first viewport" style="top:1100px"></div>
+</div>
+<div class="note" style="left:1620px;top:7636px;width:1440px">Reading column is 748px (≈78 characters). Below 1180px the right “On this page” rail collapses into a disclosure above the article — the column never squeezes. Below 900px the left category nav collapses into the top bar. Every instruction lives in text; screenshots only confirm it.</div>
+
+<!-- ══════════════ FRAME 7 — manual search ══════════════ -->
+<div class="flabel" style="left:80px;top:7800px;width:1440px">Frame 7 · Manual search — overlay + states<i>1440 · dark · bilingual matching, grouped by intent, keyboard-first</i></div>
+<div class="frame mn" data-theme="dark" style="left:80px;top:7846px;width:1440px;height:1380px">
+  <div style="position:relative;height:880px;overflow:hidden">
+    <div style="filter:saturate(.7)">
+      <nav class="mnav"><div class="wrap"><a class="brand"><svg width="26" height="26" viewBox="0 0 30 30" fill="none"><path d="M6 9l5 6-5 6" stroke="#D97757" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="16.5" y="8" width="7.5" height="14" rx="3.2" fill="#D97757" opacity=".9"/></svg><span class="brand-word">cc-pocket</span></a><div class="mnav-links"><a>Features</a><a>How it works</a><a>Security</a><a class="on">Manual</a><a>Get started</a></div></div></nav>
+      <div class="wrap mhead"><div class="crumb"><a>cc-pocket</a><span class="sl">/</span><span style="color:var(--accent)">Manual</span></div><h1>How can we help?</h1><p class="lede">Task-shaped answers for CC Pocket.</p><div class="msearch"><svg class="ic ic-20"><use href="#i-search"/></svg><span style="flex:1;color:var(--muted);font-size:16px">Search setup, approvals, models, sharing…</span><span class="kbd">/</span></div><div class="chips"><span class="chip">Schedule a prompt for later</span><span class="chip">Share only one folder</span><span class="chip">Approve work on another computer</span></div></div>
+    </div>
+    <div class="dim"></div>
+    <div style="position:absolute;left:50%;top:74px;transform:translateX(-50%)">
+      <div class="sbox">
+        <div class="q"><svg class="ic ic-20" style="color:var(--muted)"><use href="#i-search"/></svg><span class="qt">电脑离线<span class="car"></span></span><span class="badge">EN results</span><span class="kbd">esc</span></div>
+        <div style="padding:8px 18px 2px;font:400 11.5px/1.5 'JetBrains Mono',monospace;color:var(--muted);border-bottom:1px solid var(--hair)">Matched via alias <span style="color:var(--accent)">电脑离线 → computer offline</span> · 7 results · results shown in EN</div>
+        <div class="sgroup">
+          <div class="sgl"><svg class="ic ic-14"><use href="#i-wrench"/></svg>Fix a problem</div>
+          <a class="sres on"><div class="body"><div class="t">Fix an offline computer</div><div class="ex">If a computer shows <span class="hl">offline</span>, the daemon stopped, the machine slept, or the relay connection dropped. Start with…</div><div class="fm"><span>Settings &amp; troubleshooting</span><span class="badge">All</span><span>verified Apr 23, 2026</span></div></div><span class="kbd">↵</span></a>
+          <a class="sres"><div class="body"><div class="t">A session says “computer unreachable” mid-turn</div><div class="ex">Turns pause instead of failing. The prompt is retried when the <span class="hl">computer</span> comes back <span class="hl">online</span>…</div><div class="fm"><span>Projects &amp; sessions</span><span class="badge">Mobile</span><span>verified Jul 12, 2026</span></div></div></a>
+          <a class="sres"><div class="body"><div class="t">Update an out-of-date daemon</div><div class="ex">A daemon older than the app reports as offline in some builds. Run the update command, then re-pair if…</div><div class="fm"><span>Settings &amp; troubleshooting</span><span class="badge">Desktop</span><span>verified Jul 18, 2026</span></div></div></a>
+        </div>
+        <div class="sgroup" style="border-top:1px solid var(--hair)">
+          <div class="sgl"><svg class="ic ic-14"><use href="#i-book"/></svg>Learn a feature</div>
+          <a class="sres"><div class="body"><div class="t">Keep working while a computer is offline</div><div class="ex">Queued prompts and scheduled tasks stay on the phone until the <span class="hl">computer</span> reconnects…</div><div class="fm"><span>Chat &amp; control</span><span class="badge">Mobile</span><span>verified Jul 20, 2026</span></div></div></a>
+        </div>
+        <div class="sgroup" style="border-top:1px solid var(--hair)">
+          <div class="sgl"><svg class="ic ic-14"><use href="#i-terminal"/></svg>Reference</div>
+          <a class="sres"><div class="body"><div class="t">Computer states: online · idle · offline · stale</div><div class="ex">What each status dot means and how long the daemon waits before it reports <span class="hl">offline</span>.</div><div class="fm"><span>Reference</span><span class="badge">All</span><span>verified Jul 24, 2026</span></div></div></a>
+        </div>
+        <div class="sfoot"><span class="k"><span class="kbd">↑</span><span class="kbd">↓</span>navigate</span><span class="k"><span class="kbd">↵</span>open</span><span class="k"><span class="kbd">esc</span>close</span><span style="flex:1"></span><span>中文结果 <span class="kbd">⌥</span><span class="kbd">L</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:16px;padding:24px 40px 0;border-top:1px solid var(--hair)">
+    <div>
+      <div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:8px">STATE · loading</div>
+      <div class="statecard"><div class="q"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-search"/></svg>computer offline<span style="flex:1"></span><span class="mono" style="font-size:11px;color:var(--muted)">searching…</span></div><div style="padding:14px"><div class="skel" style="width:62%;margin-bottom:9px"></div><div class="skel" style="width:88%;height:8px;margin-bottom:16px"></div><div class="skel" style="width:52%;margin-bottom:9px"></div><div class="skel" style="width:80%;height:8px"></div></div></div>
+    </div>
+    <div>
+      <div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:8px">STATE · zero results</div>
+      <div class="statecard"><div class="q"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-search"/></svg>daemon 心跳超时<span style="flex:1"></span><span class="mono" style="font-size:11px;color:var(--muted)">0 results</span></div>
+        <div style="padding:13px 14px 11px"><div style="font-size:13.5px;color:var(--sec);line-height:1.5">Nothing matches that yet. Your query stays in the field so you can shorten it — or try a nearby topic:</div></div>
+        <div class="zsug"><a><svg class="ic ic-14"><use href="#i-arrow-r"/></svg>Fix an offline computer</a><a><svg class="ic ic-14"><use href="#i-arrow-r"/></svg>Computer states: online · idle · offline</a><a><svg class="ic ic-14"><use href="#i-arrow-r"/></svg>Update an out-of-date daemon</a></div>
+        <div style="padding:11px 14px;border-top:1px solid var(--hair);background:var(--raised)"><button class="act" style="height:34px;font-size:12.5px" data-copy="ai"><svg class="ic ic-14"><use href="#i-ai"/></svg><span>Copy question + manual index link for AI</span></button></div>
+      </div>
+    </div>
+    <div>
+      <div class="mono" style="font-size:11.5px;color:var(--muted);margin-bottom:8px">STATE · offline index fallback</div>
+      <div class="statecard"><div class="q"><svg class="ic ic-16" style="color:var(--warning)"><use href="#i-alert"/></svg>computer offline<span style="flex:1"></span><span class="mono" style="font-size:11px;color:var(--warning)">index unavailable</span></div>
+        <div style="padding:13px 14px"><div style="font-size:13.5px;color:var(--sec);line-height:1.5;margin-bottom:12px">The search index didn’t load. Full category browsing still works — every article is plain static HTML.</div><div style="display:flex;gap:8px"><a class="act" style="height:34px;font-size:12.5px"><svg class="ic ic-14"><use href="#i-book"/></svg>Browse all categories</a><button class="act" style="height:34px;font-size:12.5px"><svg class="ic ic-14"><use href="#i-refresh"/></svg>Retry</button></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:9242px;width:1440px">Bilingual aliases match in both directions (<b>电脑离线 ↔ computer offline</b>, <b>离线 ↔ offline</b>) but results never mix locales — the alias line above the groups says what happened. Selection is a 2px terracotta left edge plus raised background, so it reads without colour vision. No chat bot, no synthesised answer.</div>
+
+<!-- ══════════════ FRAME 8 — contextual entry strip ══════════════ -->
+<div class="flabel" style="left:1620px;top:7800px;width:1440px">Frame 8 · Contextual entry strips — component board<i>dark + light · calm escape hatches inside existing app states</i></div>
+<div class="frame" style="left:1620px;top:7846px;width:1440px;height:700px;background:#111214;border:1px solid #2A2E33">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:#2A2E33;height:100%">
+    <div class="mn" data-theme="dark" style="padding:26px 24px">
+      <div class="mono" style="font-size:11.5px;color:var(--muted);letter-spacing:.06em">A · ONBOARDING FOOTER</div>
+      <div style="font-size:13px;color:var(--sec);margin:8px 0 18px;line-height:1.5">Deep-links to the exact install + pairing article instead of a generic docs root.</div>
+      <div style="border:1px solid var(--hair);border-radius:14px;background:var(--surface);padding:20px;max-width:340px">
+        <div style="font-size:17px;font-weight:600;letter-spacing:-.02em">You’re paired.</div>
+        <div style="font-size:13.5px;color:var(--sec);line-height:1.55;margin:6px 0 16px">Open a project folder to start your first session.</div>
+        <button class="btn" style="width:100%;background:var(--accent);color:#0E0F11">Choose a folder</button>
+        <a style="display:flex;align-items:center;justify-content:center;gap:7px;margin-top:14px;min-height:44px;font-size:13.5px;color:var(--sec)"><svg class="ic ic-14"><use href="#i-book"/></svg>Complete setup guide: install &amp; pair<svg class="ic ic-14"><use href="#i-ext"/></svg></a>
+      </div>
+      <div class="mono" style="font-size:11px;color:var(--muted);margin-top:16px;line-height:1.7">→ /manual/en/install-and-pair/<br>44pt row · secondary weight · never above the primary CTA</div>
+    </div>
+    <div class="mn" data-theme="dark" style="padding:26px 24px">
+      <div class="mono" style="font-size:11.5px;color:var(--muted);letter-spacing:.06em">B · COMPUTER OFFLINE</div>
+      <div style="font-size:13px;color:var(--sec);margin:8px 0 18px;line-height:1.5">The link appears under Retry and names the problem, not the destination.</div>
+      <div style="border:1px solid var(--hair);border-radius:14px;background:var(--surface);padding:20px;max-width:340px">
+        <div style="display:flex;align-items:center;gap:9px"><span style="width:8px;height:8px;border-radius:999px;background:var(--muted)"></span><span style="font-size:15px;font-weight:600">Lidapeng-MBP is offline</span></div>
+        <div class="mono" style="font-size:12px;color:var(--muted);margin:7px 0 16px;line-height:1.6">last seen 14 min ago<br>daemon 1.4.2 · relay ok</div>
+        <button class="btn btn-ghost" style="width:100%"><svg class="ic ic-16"><use href="#i-refresh"/></svg>Retry connection</button>
+        <a style="display:flex;align-items:center;gap:7px;margin-top:12px;min-height:44px;font-size:13.5px;color:var(--accent)">Fix an offline computer<svg class="ic ic-14"><use href="#i-ext"/></svg></a>
+      </div>
+      <div class="mono" style="font-size:11px;color:var(--muted);margin-top:16px;line-height:1.7">→ /manual/en/fix-offline-computer/<br>Terracotta text link · no banner, no card fill</div>
+    </div>
+    <div class="mn" data-theme="light" style="padding:26px 24px">
+      <div class="mono" style="font-size:11.5px;color:var(--muted);letter-spacing:.06em">C · DAEMON TOO OLD · LIGHT</div>
+      <div style="font-size:13px;color:var(--sec);margin:8px 0 18px;line-height:1.5">Same component in the light theme; the command stays copyable and above the link.</div>
+      <div style="border:1px solid var(--hair);border-radius:14px;background:var(--surface);padding:20px;max-width:340px;box-shadow:var(--shadow)">
+        <div style="display:flex;align-items:center;gap:9px"><svg class="ic ic-16" style="color:var(--warning)"><use href="#i-alert"/></svg><span style="font-size:15px;font-weight:600">Daemon is too old</span></div>
+        <div style="font-size:13.5px;color:var(--sec);line-height:1.55;margin:7px 0 14px">This app needs daemon 1.4 or newer. Run this on Lidapeng-MBP:</div>
+        <pre class="cmd" style="font-size:12.5px;padding:11px 13px;margin:0 0 12px">$ cc-pocket-daemon update</pre>
+        <div style="display:flex;gap:8px"><button class="act" style="flex:1;justify-content:center" data-copy="cmd"><svg class="ic ic-14"><use href="#i-copy"/></svg><span>Copy command</span></button></div>
+        <a style="display:flex;align-items:center;gap:7px;margin-top:12px;min-height:44px;font-size:13.5px;color:var(--accent)">Open the daemon update guide<svg class="ic ic-14"><use href="#i-ext"/></svg></a>
+      </div>
+      <div class="mono" style="font-size:11px;color:var(--muted);margin-top:16px;line-height:1.7">→ /manual/en/update-the-daemon/<br>Link text names the problem — never “Learn more”</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ FRAME 9 — components & tokens ══════════════ -->
+<div class="flabel" style="left:80px;top:9320px;width:1440px">Frame 9 · Components, tokens &amp; responsive notes<i>compact handoff board</i></div>
+<div class="frame mn" data-theme="dark" style="left:80px;top:9366px;width:1440px;height:1080px;padding:32px 40px">
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px">
+    <div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:14px">NEW STROKE ICONS · 24×24 · 1.5</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+        <span style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 4px;border:1px solid var(--hair);border-radius:10px;background:var(--surface)"><svg class="ic ic-22" style="color:var(--accent)"><use href="#i-book"/></svg><span class="mono" style="font-size:10px;color:var(--muted)">book</span></span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 4px;border:1px solid var(--hair);border-radius:10px;background:var(--surface)"><svg class="ic ic-22" style="color:var(--accent)"><use href="#i-help"/></svg><span class="mono" style="font-size:10px;color:var(--muted)">help</span></span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 4px;border:1px solid var(--hair);border-radius:10px;background:var(--surface)"><svg class="ic ic-22" style="color:var(--accent)"><use href="#i-ai"/></svg><span class="mono" style="font-size:10px;color:var(--muted)">copy-ai</span></span>
+        <span style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 4px;border:1px solid var(--hair);border-radius:10px;background:var(--surface)"><svg class="ic ic-22" style="color:var(--accent)"><use href="#i-ext"/></svg><span class="mono" style="font-size:10px;color:var(--muted)">external</span></span>
+      </div>
+      <pre class="cmd" style="font-size:11px;line-height:1.65;margin-top:14px;white-space:pre-wrap">book  M4 19.5V5.5A2.5 2.5 0 0 1 6.5 3H20v18H6.5
+      A2.5 2.5 0 0 0 4 19.5 / M8 7.5h7.5 M8 11h5
+help  circle 12,12 r9 / M9.4 9.3a2.7 2.7 0 1 1 3.3 3
+      c-.6.2-.9.7-.9 1.3v.5 / dot 12,17.3
+ai    rect 8.5,8.5 12×12.5 r2.5 / M15.5 5.5v-1A1.5
+      1.5 0 0 0 14 3H5A1.5 1.5 0 0 0 3.5 4.5v9A1.5
+      1.5 0 0 0 5 15h1 / M11.9 13.4l1.7 1.7-1.7 1.7
+      / M15.3 16.9h2.3
+ext   M14 3.5h6.5V10 / M20.5 3.5L11.5 12.5 / M18
+      14.5V19a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1
+      3.5 19V7.5A1.5 1.5 0 0 1 5 6h4.5</pre>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.6;margin-top:10px">Compose-ready: even viewBox, round caps/joins, no fills, single-colour — drop straight into an ImageVector builder.</div>
+    </div>
+
+    <div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:14px">COMPONENT STATES</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+        <button class="act" data-copy="link"><svg class="ic"><use href="#i-copy"/></svg><span>Copy link</span></button>
+        <button class="act done"><svg class="ic"><use href="#i-check"/></svg><span>Link copied</span></button>
+        <button class="act done"><svg class="ic"><use href="#i-check"/></svg><span>Copied for AI</span></button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px"><span class="badge">Mobile</span><span class="badge">Desktop</span><span class="badge">All</span><span class="badge" style="color:var(--warning);border-color:var(--warning)">Beta</span></div>
+      <div class="metarow" style="padding:0 0 14px"><span>1.4+</span><span class="dot">·</span><span class="ok">verified Jul 24, 2026</span></div>
+      <div class="metarow" style="padding:0 0 16px"><span class="stale">1.2+</span><span class="dot">·</span><span class="stale">verified Apr 23, 2026 · re-check</span></div>
+      <div class="shot" style="margin-bottom:12px"><div class="shotimg" style="height:96px"><span class="sid"><b>scene.id.goes-here</b>loaded placeholder</span></div><div class="shotcap"><span class="cn">1</span><p>ScreenshotFrame · 1px hairline, 14px radius, caption below.</p></div></div>
+      <div class="shot shot-missing"><div class="shotimg" style="height:76px"><span class="fb"><svg class="ic ic-16"><use href="#i-alert"/></svg>Image unavailable — the step text above is complete.</span></div><div class="shotcap"><span class="cn">1</span><p>Missing state: same box height class, never a giant blank.</p></div></div>
+      <div class="toast" style="margin-top:14px;max-width:330px"><svg class="ic"><use href="#i-check"/></svg><p>Copied a public link and a prompt.<span>Paste it into any AI that can open web pages.</span></p></div>
+    </div>
+
+    <div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:14px">TOKENS · reused verbatim</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:18px">
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#0E0F11;border:1px solid #2A2E33"></span>base 0E0F11</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#FAF9F7"></span>base FAF9F7</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#16181B;border:1px solid #2A2E33"></span>surface 16181B</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#F4F2EE"></span>raised F4F2EE</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#D97757"></span>accent D97757</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#C75A38"></span>accent C75A38</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#2A2E33"></span>hair 2A2E33</span>
+        <span style="display:flex;align-items:center;gap:8px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec)"><span style="width:22px;height:22px;border-radius:6px;background:#E7E4DF"></span>hair E7E4DF</span>
+      </div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:10px">TYPE</div>
+      <div style="font-size:12.5px;color:var(--sec);line-height:1.85;margin-bottom:18px">Inter — H1 40/1.1 −3%, H2 22/1.3, body 16.5/1.68, small 13.5/1.55<br>JetBrains Mono — metadata 12.5, commands 13.5/1.6, eyebrows 11 @ .1em<br>Reading measure max 748px ≈ 78ch · zh-CN drops letter-spacing to 0</div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:10px">SPACING &amp; RADII</div>
+      <div style="font-size:12.5px;color:var(--sec);line-height:1.85;margin-bottom:18px">4 · 8 · 12 · 16 · 24 · 32 · 44 · 64 · 96<br>Cards 14–16 · chips 999 · fields 12–14 · shots 14<br>Section rhythm 44px desktop / 30px mobile · 1px hairlines only</div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:10px">BREAKPOINTS</div>
+      <div style="font-size:12.5px;color:var(--sec);line-height:1.85;margin-bottom:18px">≥1280 — 236 / 748 / 208 three-zone article; 4-up category grid<br>1024–1279 — right rail → inline disclosure; 3-up grid<br>768–1023 — left nav → top bar sheet; 2-up grid<br>&lt;768 — one column, 16px gutters, 44px targets, chips scroll</div>
+      <div class="mono" style="font-size:11.5px;color:var(--accent);letter-spacing:.1em;margin-bottom:10px">URLS</div>
+      <pre class="cmd" style="font-size:11.5px;line-height:1.7;margin:0">base  heypandax.github.io/cc-pocket/manual/
+/manual/en/&lt;slug&gt;/   /manual/zh/&lt;slug&gt;/
+/manual/en/          index · 8 categories
+copy-for-ai payload:
+  &lt;url&gt; + "Open this page and answer my
+  question using only its steps."</pre>
+    </div>
+  </div>
+</div>
+
+<script src="manual/manual.js"></script>
+</body>
+</html>

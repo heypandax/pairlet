@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>安装并配对电脑 — CC Pocket 用户手册</title>
+<meta name="description" content="安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="安装并配对电脑 — CC Pocket 用户手册" />
+<meta property="og:description" content="安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="安装并配对电脑 — CC Pocket 用户手册" />
+<meta name="twitter:description" content="安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"安装并配对电脑",
+  "description":"安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/zh/"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← 全部指南</a>
+    <span>开始使用</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>开始使用</span></div>
+    <div class="platform-tags"><span>全平台</span></div>
+    <h1>安装并配对电脑</h1>
+    <div class="short-answer"><span>简短答案</span><p>在运行编码 Agent 的电脑上安装 daemon，执行 <code>cc-pocket-daemon pair</code>，再用 CC Pocket App 扫描二维码或输入 6 位配对码。</p></div>
+    <div class="article-meta"><span>最近核验 2026-07-24</span><span>·</span><span>公开链接 · 无需登录</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/">复制链接</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/" data-copy-prompt="打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
+    </div>
+    <section id="install"><h2>安装 daemon</h2><p>在已经安装 Claude Code、Codex 或 OpenCode 的电脑上，执行对应系统的命令。</p><ol class="article-steps"><li><span class="step-number">1</span><div><h3>macOS 或 Linux</h3><p>安装器会校验发行包、安装 daemon，并注册登录后自动启动的服务。</p><pre><code>curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash</code><button type="button" data-copy-code="curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash">复制</button></pre></div></li><li><span class="step-number">2</span><div><h3>Windows</h3><p>用普通用户打开 PowerShell。安装器会注册登录时运行的计划任务。</p><pre><code>irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex</code><button type="button" data-copy-code="irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex">复制</button></pre></div></li></ol></section><section id="pair"><h2>配对 App</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>生成一次性配对码</h3><p>在电脑上执行。命令会同时打印二维码和 6 位备用配对码。</p><pre><code>cc-pocket-daemon pair</code><button type="button" data-copy-code="cc-pocket-daemon pair">复制</button></pre></div></li><li><span class="step-number">2</span><div><h3>扫码或输入配对码</h3><p>打开 CC Pocket，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。</p></div></li><li><span class="step-number">3</span><div><h3>打开项目</h3><p>电脑显示在线后，选择项目文件夹，开始新会话或恢复现有会话。</p></div></li></ol><aside class="article-note">配对发生在设备之间。CC Pocket 不创建用户账号；daemon 主动向外连接，无需开放公网入站端口。</aside></section>
+    <section class="related-articles"><h2>相关指南</h2><div><a href="../choose-agent-and-model/"><strong>选择 Agent 与模型</strong><span>创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。</span></a><a href="../fix-offline-computer/"><strong>修复离线电脑</strong><span>检查 daemon 状态并恢复中继连接；只有设备凭据被移除时才重新配对。</span></a></div></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>本页内容</strong><a href="#install">安装 daemon</a><a href="#pair">配对 App</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

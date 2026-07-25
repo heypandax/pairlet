@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Take over a terminal session without forking — CC Pocket Manual</title>
+<meta name="description" content="Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="Take over a terminal session without forking — CC Pocket Manual" />
+<meta property="og:description" content="Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Take over a terminal session without forking — CC Pocket Manual" />
+<meta name="twitter:description" content="Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"Take over a terminal session without forking",
+  "description":"Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing.",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"en",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/en/"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← All guides</a>
+    <span>Projects &amp; sessions</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">Manual</a><span>/</span><span>Projects &amp; sessions</span></div>
+    <div class="platform-tags"><span>All platforms</span></div>
+    <h1>Take over a terminal session without forking</h1>
+    <div class="short-answer"><span>SHORT ANSWER</span><p>Open the terminal session in CC Pocket and tap <strong>Continue here</strong>. It resumes in place when the terminal is idle; it forks only while the terminal is still writing, which prevents two writers from corrupting one transcript.</p></div>
+    <div class="article-meta"><span>Last verified 2026-07-24</span><span>·</span><span>Public URL · no sign-in</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/">Copy link</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/" data-copy-prompt="Open this public CC Pocket manual page and answer my question using only the verified steps on the page.">Copy for AI</button>
+    </div>
+    <section id="observe"><h2>Observe first</h2><p>Terminal-owned sessions appear in the project’s session list. Opening one starts in read-only observation, so CC Pocket can stream its output without becoming a second writer.</p></section><section id="take-over"><h2>Continue from CC Pocket</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>Wait for the terminal turn to settle</h3><p>If the terminal is still actively writing, let it finish unless you intentionally want a safe fork.</p></div></li><li><span class="step-number">2</span><div><h3>Tap Continue here</h3><p>CC Pocket resumes the same session in place when it is safe to do so.</p></div></li><li><span class="step-number">3</span><div><h3>Keep working</h3><p>Prompts, approvals, interrupts, and live output now behave like any other CC Pocket-controlled session.</p></div></li></ol><aside class="article-note">For Claude Code, you can later return to the computer and use <code>claude --resume</code> to pick the session up again.</aside></section>
+    <section class="related-articles"><h2>Related guides</h2><div><a href="../choose-agent-and-model/"><strong>Choose an agent and model</strong><span>Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id.</span></a><a href="../approve-from-another-computer/"><strong>Approve work from another device</strong><span>Review a tool request on phone or desktop, inspect the command or file action, then allow or deny it.</span></a></div></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>On this page</strong><a href="#observe">Observe first</a><a href="#take-over">Continue from CC Pocket</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

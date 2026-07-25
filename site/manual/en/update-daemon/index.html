@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Update the daemon — CC Pocket Manual</title>
+<meta name="description" content="Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="Update the daemon — CC Pocket Manual" />
+<meta property="og:description" content="Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Update the daemon — CC Pocket Manual" />
+<meta name="twitter:description" content="Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"Update the daemon",
+  "description":"Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online.",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/update-daemon/",
+  "dateModified":"2026-07-24",
+  "inLanguage":"en",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/en/"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← All guides</a>
+    <span>Troubleshooting</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">Manual</a><span>/</span><span>Troubleshooting</span></div>
+    <div class="platform-tags"><span>All platforms</span></div>
+    <h1>Update the daemon</h1>
+    <div class="short-answer"><span>SHORT ANSWER</span><p>Run <code>cc-pocket-daemon update</code>. If the installation is managed by Homebrew or Scoop, use that package manager instead.</p></div>
+    <div class="article-meta"><span>Last verified 2026-07-24</span><span>·</span><span>Public URL · no sign-in</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/">Copy link</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/update-daemon/" data-copy-prompt="Open this public CC Pocket manual page and answer my question using only the verified steps on the page.">Copy for AI</button>
+    </div>
+    <section id="update"><h2>Choose the matching update path</h2><ol class="article-steps"><li><span class="step-number">1</span><div><h3>Built-in installer</h3><p>Use this for installations created by the official shell or PowerShell installer.</p><pre><code>cc-pocket-daemon update</code><button type="button" data-copy-code="cc-pocket-daemon update">Copy</button></pre></div></li><li><span class="step-number">2</span><div><h3>Homebrew on macOS</h3><p>Use the full cask name; Homebrew has an unrelated cask with the same short name.</p><pre><code>brew upgrade --cask heypandax/tap/cc-pocket</code><button type="button" data-copy-code="brew upgrade --cask heypandax/tap/cc-pocket">Copy</button></pre></div></li><li><span class="step-number">3</span><div><h3>Scoop on Windows</h3><p>Use this when Scoop owns the daemon installation.</p><pre><code>scoop update cc-pocket-daemon</code><button type="button" data-copy-code="scoop update cc-pocket-daemon">Copy</button></pre></div></li></ol></section><section id="verify"><h2>Verify the result</h2><p>Run <code>cc-pocket-daemon status</code>, then return to CC Pocket. Existing valid device pairings reconnect automatically after the daemon restarts.</p></section>
+    <section class="related-articles"><h2>Related guides</h2><div><a href="../fix-offline-computer/"><strong>Fix an offline computer</strong><span>Check daemon status, restore its relay connection, and pair again only if the device credential was removed.</span></a><a href="../install-and-pair/"><strong>Install and pair a computer</strong><span>Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.</span></a></div></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>On this page</strong><a href="#update">Choose the matching update path</a><a href="#verify">Verify the result</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/en/update-daemon/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

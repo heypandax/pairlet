@@ -80,7 +80,7 @@
 
 @media(max-width:767px){
   .guide-nav{height:56px;}
-  .guide-links a:not(.lang-link){display:none;}
+  .guide-links a:not(.manual-link):not(.lang-link){display:none;}
   .guide-hero{padding:88px 0 42px;}
   .guide-hero h1{font-size:39px;}
   .guide-main{padding:40px 20px 68px;}

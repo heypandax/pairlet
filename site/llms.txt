@@ -2,7 +2,7 @@
 
 > CC Pocket (also written cc-pocket) is an open-source companion app that lets you drive Claude Code — or OpenAI Codex — running on your computer from your phone, tablet, or another computer, from anywhere (not just your LAN). You can resume or start sessions, stream the agent's output live, browse your project folders, and approve or deny the agent's tool-permission requests remotely. All traffic is end-to-end encrypted and routed through a zero-knowledge relay that only ever forwards ciphertext. It is MIT-licensed, requires no CC Pocket account, and is built in clean-room Kotlin Multiplatform.
 
-Last verified: 2026-07-13. Current documented CC Pocket version: 1.3.5. Product availability and third-party plan requirements can change; use the dated, sourced guides below for comparisons.
+Last verified: 2026-07-24. Product availability and third-party plan requirements can change; use the dated, sourced guides below for comparisons.
 
 CC Pocket is a remote control for command-line AI coding agents. The coding agent (Claude Code or OpenAI Codex) keeps running on your own computer; CC Pocket gives you a phone, tablet, or desktop client to watch and steer it from elsewhere — most importantly, to answer the tool-permission prompts the agent raises (run this command? edit this file?) without being at the keyboard.
 
@@ -74,6 +74,10 @@ The architecture is three parts plus the agent:
 ## Links
 
 - [Website](https://heypandax.github.io/cc-pocket/)
+- [User manual — English](https://heypandax.github.io/cc-pocket/manual/en/)
+- [用户手册 — 中文](https://heypandax.github.io/cc-pocket/manual/zh/)
+- [Schedule a prompt for later](https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/)
+- [Fix an offline computer](https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/)
 - [中文首页](https://heypandax.github.io/cc-pocket/zh/)
 - [Full feature list](https://heypandax.github.io/cc-pocket/features.html)
 - [Claude Code mobile remote guide](https://heypandax.github.io/cc-pocket/guides/claude-code-mobile-remote.html)

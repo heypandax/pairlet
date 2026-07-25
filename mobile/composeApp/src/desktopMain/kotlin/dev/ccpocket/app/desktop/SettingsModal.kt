@@ -21,23 +21,29 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.USER_MANUAL_URL
+import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.pairing.encode
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.*
@@ -106,6 +112,7 @@ private enum class SettingsTab(val label: StringResource, val icon: ImageVector)
     SHARES(Res.string.settings_tab_shared, Icons.Rounded.Share),
     BRIDGES(Res.string.settings_bridges, Icons.Rounded.SmartToy),
     SHORTCUTS(Res.string.settings_tab_shortcuts, Icons.Rounded.Keyboard),
+    HELP(Res.string.settings_tab_help, Icons.AutoMirrored.Outlined.HelpOutline),
     ABOUT(Res.string.settings_tab_about, Icons.Outlined.Info),
 }
 
@@ -139,10 +146,109 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
                     SettingsTab.SHARES -> SharesPane(model)
                     SettingsTab.BRIDGES -> BridgesPane(model)
                     SettingsTab.SHORTCUTS -> ShortcutsPane()
+                    SettingsTab.HELP -> HelpPane()
                     SettingsTab.ABOUT -> AboutPane(model)
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HelpPane() {
+    val clipboard = LocalClipboardManager.current
+    val aiPrompt = stringResource(Res.string.settings_help_ai_prompt)
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(2400)
+            copied = false
+        }
+    }
+    Column {
+        Text(
+            stringResource(Res.string.settings_help_title),
+            color = Tok.tx, fontFamily = Dk.ui, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            stringResource(Res.string.settings_help_body),
+            color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 18.sp,
+            modifier = Modifier.padding(top = 5.dp, bottom = 16.dp),
+        )
+        HelpActionRow(
+            icon = Icons.Rounded.Search,
+            title = stringResource(Res.string.settings_help_search),
+        ) { openWebUrl(USER_MANUAL_URL) }
+        Spacer(Modifier.height(18.dp))
+        Text(
+            stringResource(Res.string.settings_help_popular),
+            color = Tok.tx2, fontFamily = Dk.mono, fontSize = 10.5.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        HelpActionRow(
+            icon = Icons.AutoMirrored.Rounded.OpenInNew,
+            title = stringResource(Res.string.settings_help_takeover),
+        ) { openWebUrl("${USER_MANUAL_URL}?q=take%20over%20terminal") }
+        Spacer(Modifier.height(7.dp))
+        HelpActionRow(
+            icon = Icons.AutoMirrored.Rounded.OpenInNew,
+            title = stringResource(Res.string.settings_help_approvals),
+        ) { openWebUrl("${USER_MANUAL_URL}?q=approve") }
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            HelpButton(
+                label = stringResource(Res.string.settings_help_open),
+                icon = Icons.AutoMirrored.Rounded.OpenInNew,
+                primary = true,
+            ) { openWebUrl(USER_MANUAL_URL) }
+            HelpButton(
+                label = if (copied) stringResource(Res.string.settings_help_copied) else stringResource(Res.string.settings_help_copy_ai),
+                icon = Icons.Rounded.ContentCopy,
+                primary = false,
+            ) {
+                clipboard.setText(AnnotatedString("$USER_MANUAL_URL\n$aiPrompt"))
+                copied = true
+            }
+        }
+    }
+}
+
+@Composable
+private fun HelpActionRow(icon: ImageVector, title: String, onClick: () -> Unit) {
+    val hover = remember { MutableInteractionSource() }
+    val hovered by hover.collectIsHoveredAsState()
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .background(if (hovered) Tok.surface else Color.Transparent)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+            .hoverable(hover).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(icon, null, tint = Tok.accent, modifier = Modifier.size(16.dp))
+        Text(
+            title, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
+        )
+        Icon(Icons.Rounded.ChevronRight, null, tint = Tok.muted, modifier = Modifier.size(15.dp))
+    }
+}
+
+@Composable
+private fun HelpButton(label: String, icon: ImageVector, primary: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(9.dp))
+            .background(if (primary) Tok.accent else Color.Transparent)
+            .border(1.dp, if (primary) Tok.accent else Tok.hair, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(icon, null, tint = if (primary) Tok.base else Tok.tx2, modifier = Modifier.size(14.dp))
+        Text(
+            label, color = if (primary) Tok.base else Tok.tx2,
+            fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

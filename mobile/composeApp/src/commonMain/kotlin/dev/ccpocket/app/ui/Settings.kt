@@ -52,9 +52,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
+import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.AutoLockDelay
+import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.ThemeMode
@@ -137,6 +140,22 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
             ) {
                 Text(stringResource(Res.string.schedule_tasks_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                 Text("›", color = Tok.muted, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            SectionLabel(stringResource(Res.string.settings_help_section))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
+            ) {
+                ManualLinkRow(
+                    title = stringResource(Res.string.settings_manual_title),
+                    sub = stringResource(Res.string.settings_manual_sub),
+                ) { openWebUrl(USER_MANUAL_URL) }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+                ManualLinkRow(
+                    title = stringResource(Res.string.settings_troubleshooting),
+                    sub = stringResource(Res.string.settings_troubleshooting_sub),
+                ) { openWebUrl(USER_MANUAL_TROUBLESHOOTING_URL) }
             }
             Spacer(Modifier.height(8.dp))
             SectionLabel(stringResource(Res.string.settings_sharing_section))
@@ -394,6 +413,23 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 Text(stringResource(Res.string.exit), color = Tok.danger, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
             }
         }
+    }
+}
+
+@Composable
+private fun ManualLinkRow(title: String, sub: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+            Text(
+                sub, color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text("↗", color = Tok.muted, fontSize = 15.sp, modifier = Modifier.padding(start = 10.dp))
     }
 }
 
