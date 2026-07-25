@@ -1,7 +1,12 @@
 import importlib.util
+import http.client
+import json
 import os
 import pathlib
+import threading
+import time
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = pathlib.Path(__file__).parents[1] / "web" / "server.py"
@@ -86,6 +91,37 @@ class SupportWebTest(unittest.TestCase):
                 os.environ["CC_SUPPORT_WEB_SECRET"] = previous
         self.assertNotIn("CC_SUPPORT_WEB_SECRET", environment)
         self.assertEqual("/home/admin", environment["HOME"])
+
+    def test_chat_starts_stream_before_slow_agent_finishes(self):
+        server = support_web.SupportServer(("127.0.0.1", 0), b"s" * 32)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+
+        def slow_agent(_message, _session_key):
+            time.sleep(0.5)
+            return "Public answer", []
+
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        body = json.dumps({"message": "How do I pair?", "sessionId": "browser_session_1234"})
+        try:
+            with mock.patch.object(support_web, "run_agent", side_effect=slow_agent):
+                started = time.monotonic()
+                connection.request(
+                    "POST",
+                    "/chat",
+                    body=body,
+                    headers={"Content-Type": "application/json"},
+                )
+                response = connection.getresponse()
+                self.assertEqual(200, response.status)
+                self.assertLess(time.monotonic() - started, 0.3)
+                payload = json.loads(response.read())
+            self.assertEqual("Public answer", payload["answer"])
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            server_thread.join(timeout=2)
 
 
 if __name__ == "__main__":

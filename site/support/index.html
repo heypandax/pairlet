@@ -29,7 +29,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="../styles.css" />
-<link rel="stylesheet" href="support.css" />
+<link rel="stylesheet" href="support.css?v=20260725-3" />
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -74,7 +74,7 @@
         <h1><span class="i18n-en">Ask a question.<br />Get unstuck.</span><span class="i18n-zh">直接提问，<br />快速解决。</span></h1>
         <p class="support-deck"><span class="i18n-en">Smart support searches the maintained CC Pocket knowledge base and gives you a practical next step. It is public: no account, sign-in, or organization membership is required.</span><span class="i18n-zh">智能客服会检索持续维护的 CC Pocket 知识库，并给出可执行的下一步。它完全公开，无需账号、登录或加入任何组织。</span></p>
         <div class="support-cta-row">
-          <a class="btn btn-primary" href="#smart-support"><span class="i18n-en">Ask smart support</span><span class="i18n-zh">咨询智能客服</span><span aria-hidden="true">→</span></a>
+          <a class="btn btn-primary" href="#smart-support" data-focus-support aria-controls="support-message"><span class="i18n-en">Ask smart support</span><span class="i18n-zh">咨询智能客服</span><span aria-hidden="true">→</span></a>
           <a class="btn btn-ghost" href="../manual/"><span class="i18n-en">Browse the manual</span><span class="i18n-zh">浏览用户手册</span></a>
         </div>
         <p class="availability"><span class="status-dot" aria-hidden="true"></span><span class="i18n-en">Public support is online · no sign-in required</span><span class="i18n-zh">公开客服在线 · 无需登录</span></p>
@@ -87,12 +87,13 @@
             <p><span class="i18n-en">Hi — tell me what you want to do or what went wrong. I can search the CC Pocket manual and walk you through the next step.</span><span class="i18n-zh">你好，请告诉我你想完成什么，或遇到了什么问题。我会检索 CC Pocket 用户手册，并引导你完成下一步。</span></p>
           </div>
         </div>
-        <form class="chat-form" id="support-chat-form">
+        <form class="chat-form" id="support-chat-form" novalidate>
           <label class="sr-only" for="support-message"><span class="i18n-en">Your question</span><span class="i18n-zh">你的问题</span></label>
-          <textarea id="support-message" name="message" rows="3" maxlength="2000" required placeholder="Ask about setup, pairing, offline status…"></textarea>
+          <textarea id="support-message" name="message" rows="3" maxlength="2000" required aria-describedby="chat-status chat-hint" placeholder="Ask about setup, pairing, offline status…"></textarea>
+          <p class="chat-status" id="chat-status" role="status" aria-live="polite"></p>
           <div class="chat-form-bottom">
-            <span class="chat-hint"><span class="i18n-en">Enter to send · Shift+Enter for a new line</span><span class="i18n-zh">回车发送 · Shift+回车换行</span></span>
-            <button class="btn btn-primary chat-send" id="support-send" type="submit"><span class="send-label"><span class="i18n-en">Send</span><span class="i18n-zh">发送</span></span><span aria-hidden="true">↑</span></button>
+            <span class="chat-hint" id="chat-hint"><span class="i18n-en">Enter to send · Shift+Enter for a new line</span><span class="i18n-zh">回车发送 · Shift+回车换行</span></span>
+            <button class="btn btn-primary chat-send" id="support-send" type="submit"><span class="send-label send-label-idle"><span class="i18n-en">Send</span><span class="i18n-zh">发送</span></span><span class="send-label send-label-busy" hidden><span class="i18n-en">Working…</span><span class="i18n-zh">处理中…</span></span><span aria-hidden="true">↑</span></button>
           </div>
         </form>
         <p class="chat-privacy"><span aria-hidden="true">◈</span><span class="i18n-en">Do not send keys, tokens, pairing codes, private code, or unredacted logs.</span><span class="i18n-zh">请勿发送密钥、令牌、配对码、私有代码或未脱敏日志。</span></p>
@@ -107,7 +108,7 @@
         <h2><span class="i18n-en">Use the route that fits.</span><span class="i18n-zh">选择适合你的解决方式。</span></h2>
       </div>
       <div class="support-grid">
-        <a class="support-card support-card-primary" href="#smart-support">
+        <a class="support-card support-card-primary" href="#smart-support" data-focus-support aria-controls="support-message">
           <span class="card-number mono">01</span><span class="card-icon" aria-hidden="true">✦</span>
           <h3><span class="i18n-en">Ask smart support</span><span class="i18n-zh">咨询智能客服</span></h3>
           <p><span class="i18n-en">Describe the symptom in your own words. The public support agent will search maintained CC Pocket guidance.</span><span class="i18n-zh">用自己的话描述现象，公开客服 Agent 会检索持续维护的 CC Pocket 指南。</span></p>
@@ -157,6 +158,6 @@
 
 <script>(function(){try{if(!localStorage.getItem('ccp-lang'))localStorage.setItem('ccp-lang',(navigator.language||'').toLowerCase().startsWith('zh')?'zh':'en');}catch(e){}}());</script>
 <script src="../app.js"></script>
-<script src="support.js"></script>
+<script src="support.js?v=20260725-4"></script>
 </body>
 </html>

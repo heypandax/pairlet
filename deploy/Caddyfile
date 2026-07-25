@@ -13,6 +13,9 @@ pocket.ark-nexus.cc {
 	# are served here too so the App never depends on a messaging-team permission or Pages cache.
 	handle_path /support-api/* {
 		reverse_proxy 127.0.0.1:10966 {
+			# The support agent can need more than a minute for cold or complex queries.
+			# Flush its JSON-stream heartbeats immediately so every proxy hop stays live.
+			flush_interval -1
 			transport http {
 				read_timeout 150s
 				response_header_timeout 135s

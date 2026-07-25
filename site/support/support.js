@@ -2,8 +2,8 @@
   const buttons = [document.getElementById('copy-ai')].filter(Boolean);
   const status = document.getElementById('copy-status');
   const prompts = {
-    en: 'Use this public, maintained CC Pocket manual to answer my question. Prefer the verified steps in the manual, state any limits, and do not ask me to share keys, tokens, pairing codes, or private repository content: https://heypandax.github.io/cc-pocket/manual/llms-full.txt',
-    zh: '请检索这份公开且持续维护的 CC Pocket 用户手册来回答我的问题。优先采用手册中已核验的步骤，说明适用限制，不要让我提供密钥、令牌、配对码或私有仓库内容：https://heypandax.github.io/cc-pocket/manual/llms-full.txt',
+    en: 'Use this public, maintained CC Pocket manual to answer my question. Prefer the verified steps in the manual, state any limits, and do not ask me to share keys, tokens, pairing codes, or private repository content: https://pocket.ark-nexus.cc/manual/llms-full.txt',
+    zh: '请检索这份公开且持续维护的 CC Pocket 用户手册来回答我的问题。优先采用手册中已核验的步骤，说明适用限制，不要让我提供密钥、令牌、配对码或私有仓库内容：https://pocket.ark-nexus.cc/manual/llms-full.txt',
   };
 
   buttons.forEach(function (button) {
@@ -23,7 +23,11 @@
   const input = document.getElementById('support-message');
   const send = document.getElementById('support-send');
   const log = document.getElementById('chat-log');
-  if (!form || !input || !send || !log) return;
+  const consolePanel = document.getElementById('smart-support');
+  const chatStatus = document.getElementById('chat-status');
+  const idleLabel = send && send.querySelector('.send-label-idle');
+  const busyLabel = send && send.querySelector('.send-label-busy');
+  if (!form || !input || !send || !log || !consolePanel || !chatStatus) return;
 
   const apiBase = window.location.hostname === 'pocket.ark-nexus.cc'
     ? '/support-api/chat'
@@ -31,6 +35,8 @@
   const translations = {
     en: {
       placeholder: 'Ask about setup, pairing, offline status…',
+      required: 'Enter a question first.',
+      waiting: 'Searching the manual now · complex questions can take about a minute.',
       you: 'YOU',
       support: 'SUPPORT',
       thinking: 'Searching the CC Pocket manual',
@@ -41,6 +47,8 @@
     },
     zh: {
       placeholder: '询问安装、配对、离线状态等问题…',
+      required: '请先输入你的问题。',
+      waiting: '正在检索用户手册 · 复杂问题可能需要约 1 分钟。',
       you: '你',
       support: '客服',
       thinking: '正在检索 CC Pocket 用户手册',
@@ -68,6 +76,28 @@
   }
 
   const sessionId = makeSessionId();
+
+  function setChatStatus(message, kind) {
+    chatStatus.textContent = message;
+    chatStatus.className = 'chat-status' + (kind ? ' ' + kind : '');
+  }
+
+  function drawAttention() {
+    consolePanel.classList.remove('is-attention');
+    window.requestAnimationFrame(function () { consolePanel.classList.add('is-attention'); });
+    window.setTimeout(function () { consolePanel.classList.remove('is-attention'); }, 1100);
+  }
+
+  document.querySelectorAll('[data-focus-support]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      event.preventDefault();
+      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      consolePanel.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+      try { window.history.replaceState(null, '', '#smart-support'); } catch (error) {}
+      try { input.focus({ preventScroll: true }); } catch (error) { input.focus(); }
+      drawAttention();
+    });
+  });
 
   function appendLinkedText(element, value) {
     const urlPattern = /https:\/\/[^\s<>\])}]+/g;
@@ -105,6 +135,8 @@
     input.disabled = busy;
     send.disabled = busy;
     send.setAttribute('aria-busy', busy ? 'true' : 'false');
+    if (idleLabel) idleLabel.hidden = busy;
+    if (busyLabel) busyLabel.hidden = !busy;
   }
 
   function errorText(code) {
@@ -117,7 +149,16 @@
 
   async function submitQuestion() {
     const message = input.value.trim();
-    if (!message || send.disabled) return;
+    if (send.disabled) return;
+    if (!message) {
+      input.setAttribute('aria-invalid', 'true');
+      setChatStatus(translations[lang()].required, 'error');
+      input.focus();
+      drawAttention();
+      return;
+    }
+    input.removeAttribute('aria-invalid');
+    setChatStatus(translations[lang()].waiting, 'pending');
     addMessage('user', message);
     input.value = '';
     setBusy(true);
@@ -131,13 +172,19 @@
       const data = await response.json().catch(function () { return {}; });
       pending.remove();
       if (!response.ok || typeof data.answer !== 'string') {
-        addMessage('bot', errorText(data.error), 'error');
+        const errorCode = data.error || (response.status === 504 ? 'timeout' : '');
+        const message = errorText(errorCode);
+        addMessage('bot', message, 'error');
+        setChatStatus('', '');
       } else {
         addMessage('bot', data.answer);
+        setChatStatus('', '');
       }
     } catch (error) {
       pending.remove();
-      addMessage('bot', translations[lang()].defaultError, 'error');
+      const message = translations[lang()].defaultError;
+      addMessage('bot', message, 'error');
+      setChatStatus('', '');
     } finally {
       setBusy(false);
       input.focus();
@@ -152,6 +199,12 @@
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       submitQuestion();
+    }
+  });
+  input.addEventListener('input', function () {
+    if (input.value.trim()) {
+      input.removeAttribute('aria-invalid');
+      if (chatStatus.classList.contains('error')) setChatStatus('', '');
     }
   });
   document.querySelectorAll('[data-setlang]').forEach(function (button) {

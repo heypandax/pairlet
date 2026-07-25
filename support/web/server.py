@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 import os
+import queue
 import re
 import secrets
 import subprocess
@@ -39,6 +40,7 @@ MINUTE_LIMIT = int(os.environ.get("CC_SUPPORT_MINUTE_LIMIT", "6"))
 DAY_LIMIT = int(os.environ.get("CC_SUPPORT_DAY_LIMIT", "30"))
 MAX_CONCURRENT = int(os.environ.get("CC_SUPPORT_MAX_CONCURRENT", "3"))
 AGENT_TIMEOUT_SECONDS = int(os.environ.get("CC_SUPPORT_AGENT_TIMEOUT", "120"))
+HEARTBEAT_SECONDS = float(os.environ.get("CC_SUPPORT_HEARTBEAT_SECONDS", "10"))
 
 SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 URL_RE = re.compile(r"https://[^\s<>\])}]+")
@@ -221,6 +223,32 @@ class SupportHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _start_json_stream(self) -> None:
+        """Start a chunked JSON response so slow agent calls can send heartbeats."""
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        origin = self._origin()
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+
+    def _stream_chunk(self, raw: bytes) -> None:
+        self.wfile.write(f"{len(raw):X}\r\n".encode("ascii"))
+        self.wfile.write(raw)
+        self.wfile.write(b"\r\n")
+        self.wfile.flush()
+
+    def _finish_json_stream(self, payload: dict[str, Any]) -> None:
+        raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self._stream_chunk(raw)
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         if self.path != "/chat" or not self._origin():
             self._json(HTTPStatus.FORBIDDEN, {"error": "origin_not_allowed"})
@@ -295,27 +323,41 @@ class SupportHandler(BaseHTTPRequestHandler):
             return
 
         session_key = derive_session_key(self.server.secret, visitor, browser_session)
+        result: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+
+        def run_request() -> None:
+            try:
+                with self.server.session_lock(session_key):
+                    answer, sources = run_agent(message, session_key)
+                result.put({"answer": answer, "sources": sources, "sessionId": browser_session})
+                LOG.info(
+                    "request=%s visitor=%s status=ok duration_ms=%d",
+                    request_id,
+                    visitor[:12],
+                    int((time.monotonic() - started) * 1000),
+                )
+            except subprocess.TimeoutExpired:
+                result.put({"error": "timeout"})
+                LOG.warning("request=%s visitor=%s status=timeout", request_id, visitor[:12])
+            except Exception:
+                result.put({"error": "support_unavailable"})
+                LOG.exception("request=%s visitor=%s status=failed", request_id, visitor[:12])
+            finally:
+                self.server.capacity.release()
+
+        threading.Thread(target=run_request, daemon=True).start()
         try:
-            with self.server.session_lock(session_key):
-                answer, sources = run_agent(message, session_key)
-            self._json(
-                HTTPStatus.OK,
-                {"answer": answer, "sources": sources, "sessionId": browser_session},
-            )
-            LOG.info(
-                "request=%s visitor=%s status=ok duration_ms=%d",
-                request_id,
-                visitor[:12],
-                int((time.monotonic() - started) * 1000),
-            )
-        except subprocess.TimeoutExpired:
-            self._json(HTTPStatus.GATEWAY_TIMEOUT, {"error": "timeout"})
-            LOG.warning("request=%s visitor=%s status=timeout", request_id, visitor[:12])
-        except Exception:
-            self._json(HTTPStatus.BAD_GATEWAY, {"error": "support_unavailable"})
-            LOG.exception("request=%s visitor=%s status=failed", request_id, visitor[:12])
-        finally:
-            self.server.capacity.release()
+            self._start_json_stream()
+            self._stream_chunk(b"\n")
+            while True:
+                try:
+                    payload = result.get(timeout=HEARTBEAT_SECONDS)
+                    break
+                except queue.Empty:
+                    self._stream_chunk(b"\n")
+            self._finish_json_stream(payload)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            LOG.info("request=%s visitor=%s status=client_disconnected", request_id, visitor[:12])
 
 
 def main() -> None:
