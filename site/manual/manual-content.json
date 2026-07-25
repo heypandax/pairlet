@@ -67,7 +67,7 @@
     {
       "title": {"en": "Chat & control", "zh": "对话与控制"},
       "description": {"en": "Send now, queue while busy, or schedule a prompt for later.", "zh": "立即发送、运行中排队，或预约稍后执行提示词。"},
-      "articles": ["schedule-a-prompt"]
+      "articles": ["schedule-a-prompt", "whisper-dictation-privacy"]
     },
     {
       "title": {"en": "Approvals & safety", "zh": "审批与安全"},
@@ -210,6 +210,61 @@
         }
       ],
       "related": ["fix-offline-computer", "update-daemon"]
+    },
+    {
+      "slug": "whisper-dictation-privacy",
+      "sourceCandidateIds": ["kb-30e2ba031a89"],
+      "title": {"en": "How Whisper dictation handles audio", "zh": "Whisper 语音转写如何处理录音"},
+      "summary": {"en": "The app sends audio chunks to the paired computer, where the daemon runs local whisper.cpp, limits operational logging, and cleans temporary files on a best-effort basis.", "zh": "App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。"},
+      "platform": {"en": "App + paired computer daemon", "zh": "App + 已配对电脑 daemon"},
+      "shortAnswer": {
+        "en": "With Whisper enabled, the paired computer’s daemon reassembles the recording and runs local <code>whisper.cpp</code>. It does not log audio or transcript content. Temporary-file deletion is best-effort, so the implementation does not promise that cleanup can never fail.",
+        "zh": "开启 Whisper 后，已配对电脑上的 daemon 会重组录音并运行本地 <code>whisper.cpp</code>。实现不会记录音频或转写正文；临时文件采用尽力删除，因此不能承诺清理绝不会失败。"
+      },
+      "categoryLabel": {"en": "Chat & control", "zh": "对话与控制"},
+      "aliases": {
+        "en": ["Whisper", "dictation", "voice input", "audio privacy", "transcription logs", "temporary files"],
+        "zh": ["Whisper", "语音输入", "语音转写", "录音隐私", "转写日志", "临时文件"]
+      },
+      "sections": [
+        {
+          "id": "flow",
+          "heading": {"en": "Where transcription runs", "zh": "转写在哪里运行"},
+          "bullets": {
+            "en": [
+              "The app base64-encodes the completed recording and sends indexed <code>AudioChunk</code> frames to the paired computer.",
+              "The daemon rejoins and decodes those chunks, then invokes the computer’s local <code>whisper.cpp</code> pipeline.",
+              "The transcription result returns to the device that sent the recording; it is not injected into a separate agent process."
+            ],
+            "zh": [
+              "App 会把完整录音进行 Base64 编码，再以带序号的 <code>AudioChunk</code> 分片发送给已配对电脑。",
+              "daemon 重组并解码这些分片，然后调用电脑本地的 <code>whisper.cpp</code> 流程。",
+              "转写结果只返回给发送录音的设备，不会注入另一个 Agent 进程。"
+            ]
+          }
+        },
+        {
+          "id": "logs-and-files",
+          "heading": {"en": "Logs and temporary files", "zh": "日志与临时文件"},
+          "bullets": {
+            "en": [
+              "The implementation does not write audio bytes or transcript text to daemon logs.",
+              "The normal CLI path logs the exit code and duration. If transcription throws, the error path logs the exception type and up to 120 characters of its message.",
+              "Audio and intermediate output live under a temporary directory. A <code>finally</code> block attempts recursive deletion after the run."
+            ],
+            "zh": [
+              "实现不会把音频字节或转写正文写入 daemon 日志。",
+              "CLI 正常路径记录退出码和耗时；如果转写抛出异常，错误路径会记录异常类型和最多 120 个字符的异常消息。",
+              "音频与中间产物位于临时目录；运行结束后，<code>finally</code> 会尝试递归删除。"
+            ]
+          },
+          "note": {
+            "en": "Deletion errors are swallowed, so cleanup is best-effort—not an absolute guarantee that no temporary file can remain after every failure.",
+            "zh": "删除错误会被忽略，因此这里只能承诺“尽力清理”，不能保证所有异常情况下都绝对没有临时文件残留。"
+          }
+        }
+      ],
+      "related": ["install-and-pair", "schedule-a-prompt"]
     },
     {
       "slug": "take-over-a-terminal-session",

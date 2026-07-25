@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How Whisper dictation handles audio — CC Pocket Manual</title>
+<meta name="description" content="The app sends audio chunks to the paired computer, where the daemon runs local whisper.cpp, limits operational logging, and cleans temporary files on a best-effort basis." />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="How Whisper dictation handles audio — CC Pocket Manual" />
+<meta property="og:description" content="The app sends audio chunks to the paired computer, where the daemon runs local whisper.cpp, limits operational logging, and cleans temporary files on a best-effort basis." />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="en_US" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="How Whisper dictation handles audio — CC Pocket Manual" />
+<meta name="twitter:description" content="The app sends audio chunks to the paired computer, where the daemon runs local whisper.cpp, limits operational logging, and cleans temporary files on a best-effort basis." />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"How Whisper dictation handles audio",
+  "description":"The app sends audio chunks to the paired computer, where the daemon runs local whisper.cpp, limits operational logging, and cleans temporary files on a best-effort basis.",
+  "url":"https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/",
+  "dateModified":"2026-07-25",
+  "inLanguage":"en",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/en/"}
+}
+</script>
+
+<body data-locale="en">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../en/">Manual</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../zh/" hreflang="zh-CN">中文</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← All guides</a>
+    <span>Chat &amp; control</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">Manual</a><span>/</span><span>Chat &amp; control</span></div>
+    <div class="platform-tags"><span>App + paired computer daemon</span></div>
+    <h1>How Whisper dictation handles audio</h1>
+    <div class="short-answer"><span>SHORT ANSWER</span><p>With Whisper enabled, the paired computer’s daemon reassembles the recording and runs local <code>whisper.cpp</code>. It does not log audio or transcript content. Temporary-file deletion is best-effort, so the implementation does not promise that cleanup can never fail.</p></div>
+    <div class="article-meta"><span>Last verified 2026-07-25</span><span>·</span><span>Public URL · no sign-in</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/">Copy link</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" data-copy-prompt="Open this public CC Pocket manual page and answer my question using only the verified steps on the page.">Copy for AI</button>
+    </div>
+    <section id="flow"><h2>Where transcription runs</h2><ul><li>The app base64-encodes the completed recording and sends indexed <code>AudioChunk</code> frames to the paired computer.</li><li>The daemon rejoins and decodes those chunks, then invokes the computer’s local <code>whisper.cpp</code> pipeline.</li><li>The transcription result returns to the device that sent the recording; it is not injected into a separate agent process.</li></ul></section><section id="logs-and-files"><h2>Logs and temporary files</h2><ul><li>The implementation does not write audio bytes or transcript text to daemon logs.</li><li>The normal CLI path logs the exit code and duration. If transcription throws, the error path logs the exception type and up to 120 characters of its message.</li><li>Audio and intermediate output live under a temporary directory. A <code>finally</code> block attempts recursive deletion after the run.</li></ul><aside class="article-note">Deletion errors are swallowed, so cleanup is best-effort—not an absolute guarantee that no temporary file can remain after every failure.</aside></section>
+    <section class="related-articles"><h2>Related guides</h2><div><a href="../install-and-pair/"><strong>Install and pair a computer</strong><span>Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.</span></a><a href="../schedule-a-prompt/"><strong>Schedule a prompt for later</strong><span>Long-press Send, choose a delay or custom time, and let the paired computer run the prompt later.</span></a></div></section>
+    <section class="article-feedback"><strong>Still stuck?</strong><span>Open an issue with the steps you tried.</span><a href="https://github.com/heypandax/cc-pocket/issues/new">Open an issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>On this page</strong><a href="#flow">Where transcription runs</a><a href="#logs-and-files">Logs and temporary files</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/</span><span><a href="../">Manual home</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>

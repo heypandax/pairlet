@@ -73,6 +73,42 @@
       "locales": {
         "en": {
           "aliases": [
+            "Whisper",
+            "dictation",
+            "voice input",
+            "audio privacy",
+            "transcription logs",
+            "temporary files"
+          ],
+          "shortAnswer": "With Whisper enabled, the paired computer’s daemon reassembles the recording and runs local whisper.cpp . It does not log audio or transcript content. Temporary-file deletion is best-effort, so the implementation does not promise that cleanup can never fail.",
+          "summary": "The app sends audio chunks to the paired computer, where the daemon runs local whisper.cpp, limits operational logging, and cleans temporary files on a best-effort basis.",
+          "text": "flow Where transcription runs The app base64-encodes the completed recording and sends indexed AudioChunk frames to the paired computer. The daemon rejoins and decodes those chunks, then invokes the computer’s local whisper.cpp pipeline. The transcription result returns to the device that sent the recording; it is not injected into a separate agent process. logs-and-files Logs and temporary files The implementation does not write audio bytes or transcript text to daemon logs. The normal CLI path logs the exit code and duration. If transcription throws, the error path logs the exception type and up to 120 characters of its message. Audio and intermediate output live under a temporary directory. A finally block attempts recursive deletion after the run. Deletion errors are swallowed, so cleanup is best-effort—not an absolute guarantee that no temporary file can remain after every failure.",
+          "title": "How Whisper dictation handles audio",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/"
+        },
+        "zh": {
+          "aliases": [
+            "Whisper",
+            "语音输入",
+            "语音转写",
+            "录音隐私",
+            "转写日志",
+            "临时文件"
+          ],
+          "shortAnswer": "开启 Whisper 后，已配对电脑上的 daemon 会重组录音并运行本地 whisper.cpp 。实现不会记录音频或转写正文；临时文件采用尽力删除，因此不能承诺清理绝不会失败。",
+          "summary": "App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。",
+          "text": "flow 转写在哪里运行 App 会把完整录音进行 Base64 编码，再以带序号的 AudioChunk 分片发送给已配对电脑。 daemon 重组并解码这些分片，然后调用电脑本地的 whisper.cpp 流程。 转写结果只返回给发送录音的设备，不会注入另一个 Agent 进程。 logs-and-files 日志与临时文件 实现不会把音频字节或转写正文写入 daemon 日志。 CLI 正常路径记录退出码和耗时；如果转写抛出异常，错误路径会记录异常类型和最多 120 个字符的异常消息。 音频与中间产物位于临时目录；运行结束后， finally 会尝试递归删除。 删除错误会被忽略，因此这里只能承诺“尽力清理”，不能保证所有异常情况下都绝对没有临时文件残留。",
+          "title": "Whisper 语音转写如何处理录音",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/"
+        }
+      },
+      "slug": "whisper-dictation-privacy",
+      "verifiedAt": "2026-07-25"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
             "terminal",
             "continue here",
             "take over",

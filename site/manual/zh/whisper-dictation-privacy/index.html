@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Whisper 语音转写如何处理录音 — CC Pocket 用户手册</title>
+<meta name="description" content="App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/" />
+<link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" />
+<link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/whisper-dictation-privacy/" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="CC Pocket" />
+<meta property="og:title" content="Whisper 语音转写如何处理录音 — CC Pocket 用户手册" />
+<meta property="og:description" content="App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。" />
+<meta property="og:url" content="https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/" />
+<meta property="og:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:locale" content="zh_CN" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Whisper 语音转写如何处理录音 — CC Pocket 用户手册" />
+<meta name="twitter:description" content="App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。" />
+<meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<link rel="icon" href="../../../favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="../../../styles.css" />
+<link rel="stylesheet" href="../../manual.css" />
+</head>
+<script type="application/ld+json">
+{
+  "@context":"https://schema.org",
+  "@type":"TechArticle",
+  "headline":"Whisper 语音转写如何处理录音",
+  "description":"App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。",
+  "url":"https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/",
+  "dateModified":"2026-07-25",
+  "inLanguage":"zh-CN",
+  "isPartOf":{"@type":"CollectionPage","url":"https://heypandax.github.io/cc-pocket/manual/zh/"}
+}
+</script>
+
+<body data-locale="zh">
+<nav class="manual-nav">
+  <div class="manual-wrap nav-inner">
+    <a class="brand" href="../../../" aria-label="CC Pocket home"><span class="brand-mark" aria-hidden="true"></span><span class="wordmark mono">CC Pocket</span></a>
+    <span class="nav-slash">/</span>
+    <a class="manual-word" href="../../zh/">用户手册</a>
+    <div class="nav-actions">
+      <a class="locale-link" href="../../en/" hreflang="en">English</a>
+      <button class="theme-toggle" type="button" aria-label="切换主题">◐</button>
+      <a class="github-link" href="https://github.com/heypandax/cc-pocket" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="article-shell">
+  <aside class="article-sidebar">
+    <a href="../">← 全部指南</a>
+    <span>对话与控制</span>
+  </aside>
+  <article class="manual-article">
+    <div class="breadcrumbs"><a href="../">用户手册</a><span>/</span><span>对话与控制</span></div>
+    <div class="platform-tags"><span>App + 已配对电脑 daemon</span></div>
+    <h1>Whisper 语音转写如何处理录音</h1>
+    <div class="short-answer"><span>简短答案</span><p>开启 Whisper 后，已配对电脑上的 daemon 会重组录音并运行本地 <code>whisper.cpp</code>。实现不会记录音频或转写正文；临时文件采用尽力删除，因此不能承诺清理绝不会失败。</p></div>
+    <div class="article-meta"><span>最近核验 2026-07-25</span><span>·</span><span>公开链接 · 无需登录</span></div>
+    <div class="article-actions">
+      <button class="manual-button secondary" type="button" data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/">复制链接</button>
+      <button class="manual-button primary" type="button" data-copy-ai data-copy-url="https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/" data-copy-prompt="打开这篇公开的 CC Pocket 用户手册，只依据页面中已核验的步骤回答我的问题。">复制给 AI</button>
+    </div>
+    <section id="flow"><h2>转写在哪里运行</h2><ul><li>App 会把完整录音进行 Base64 编码，再以带序号的 <code>AudioChunk</code> 分片发送给已配对电脑。</li><li>daemon 重组并解码这些分片，然后调用电脑本地的 <code>whisper.cpp</code> 流程。</li><li>转写结果只返回给发送录音的设备，不会注入另一个 Agent 进程。</li></ul></section><section id="logs-and-files"><h2>日志与临时文件</h2><ul><li>实现不会把音频字节或转写正文写入 daemon 日志。</li><li>CLI 正常路径记录退出码和耗时；如果转写抛出异常，错误路径会记录异常类型和最多 120 个字符的异常消息。</li><li>音频与中间产物位于临时目录；运行结束后，<code>finally</code> 会尝试递归删除。</li></ul><aside class="article-note">删除错误会被忽略，因此这里只能承诺“尽力清理”，不能保证所有异常情况下都绝对没有临时文件残留。</aside></section>
+    <section class="related-articles"><h2>相关指南</h2><div><a href="../install-and-pair/"><strong>安装并配对电脑</strong><span>安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。</span></a><a href="../schedule-a-prompt/"><strong>预约稍后发送提示词</strong><span>长按发送，选择延迟或自定义时间，让已配对电脑稍后执行提示词。</span></a></div></section>
+    <section class="article-feedback"><strong>问题还没解决？</strong><span>把你尝试过的步骤写进 GitHub issue。</span><a href="https://github.com/heypandax/cc-pocket/issues/new">新建 issue →</a></section>
+  </article>
+  <aside class="article-toc"><strong>本页内容</strong><a href="#flow">转写在哪里运行</a><a href="#logs-and-files">日志与临时文件</a></aside>
+</main>
+<footer class="manual-footer"><div class="manual-wrap"><span>https://heypandax.github.io/cc-pocket/manual/zh/whisper-dictation-privacy/</span><span><a href="../">手册首页</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
+<script src="../../manual.js"></script>
+</body>
+</html>
