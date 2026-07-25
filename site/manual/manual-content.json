@@ -349,6 +349,7 @@
     },
     {
       "slug": "separate-claude-login",
+      "sourceCandidateIds": ["kb-d0ef5f36ec37"],
       "title": {"en": "What a separate Claude login shares", "zh": "独立 Claude 登录会共享什么"},
       "summary": {"en": "The daemon keeps its Claude credentials separate while continuing to share session history, CLAUDE.md, skills, plugins, settings, and MCP configuration.", "zh": "daemon 只隔离 Claude 登录凭据；会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置仍然共享。"},
       "platform": {"en": "Computer daemon · Claude Code", "zh": "电脑 daemon · Claude Code"},

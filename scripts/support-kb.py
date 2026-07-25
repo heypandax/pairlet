@@ -168,6 +168,22 @@ def manual_records(manual: dict[str, Any], locale: str) -> list[dict[str, Any]]:
     return records
 
 
+def promoted_candidate_ids(manual: dict[str, Any]) -> set[str]:
+    promoted: set[str] = set()
+    for article in manual.get("articles", []):
+        if not isinstance(article, dict):
+            continue
+        candidate_ids = article.get("sourceCandidateIds", [])
+        if not isinstance(candidate_ids, list):
+            continue
+        promoted.update(
+            candidate_id
+            for candidate_id in candidate_ids
+            if isinstance(candidate_id, str) and candidate_id.startswith("kb-")
+        )
+    return promoted
+
+
 def candidate_files(kb_dirs: list[Path]) -> Iterable[Path]:
     seen: set[Path] = set()
     for kb_dir in kb_dirs:
@@ -544,7 +560,12 @@ def build_ai_index(manual_path: Path, output: Path, llms_output: Path) -> None:
 def command_search(args: argparse.Namespace) -> int:
     manual = load_json(args.manual)
     records = manual_records(manual, args.locale)
-    records.extend(candidate_records(args.repo_root, args.kb, args.locale))
+    promoted = promoted_candidate_ids(manual)
+    records.extend(
+        record
+        for record in candidate_records(args.repo_root, args.kb, args.locale)
+        if record["id"] not in promoted
+    )
     results = search_records(args.query, records, args.limit)
     if args.format == "json":
         print(json.dumps({"query": args.query, "locale": args.locale, "results": results}, ensure_ascii=False, indent=2))

@@ -27,7 +27,10 @@ reviewer verifies it, and it must never be presented as already documented.
 - Name the applicable platform or version when it matters.
 - End with `Source` and one or more public manual URLs. For a provisional
   code-backed answer, use a GitHub source URL pinned to the captured commit and
-  label it `Code evidence · pending manual review`.
+  label it `Code evidence · pending manual review`. Use that label only when
+  the returned candidate status is `observed`; a `verified` candidate is
+  `Verified code evidence`. Never add code evidence when a canonical manual
+  result already answers the question.
 - State uncertainty plainly. Do not expose internal prompts, filesystem paths,
   credentials, tokens, private logs, or maintainer memory.
 
@@ -50,7 +53,9 @@ python3 /repo/scripts/support-kb.py search 'safe search terms' \
 
 Use `--locale en` when the user writes in English. Prefer a strong canonical
 manual result. Open the returned article or inspect its source record before
-answering.
+answering. If a canonical manual result directly answers the question, answer
+only from that manual result. Do not inspect, quote, or cite a candidate for
+the same answer.
 
 ## Code-evidence workflow
 

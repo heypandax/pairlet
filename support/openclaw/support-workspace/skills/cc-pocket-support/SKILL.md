@@ -12,7 +12,8 @@ Follow the source order and safety boundaries in the workspace `AGENTS.md`.
 Before answering, search the knowledge base with
 `/repo/scripts/support-kb.py`. Manual results are canonical. Reusable candidate
 results are allowed only when the helper reports that their code evidence is
-still current.
+still current. When the manual directly answers the question, use only the
+manual result and do not cite candidates or code.
 
 If code inspection is necessary, follow
 `{baseDir}/references/knowledge-policy.md`. Do not change the repository or

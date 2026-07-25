@@ -26,6 +26,9 @@ Runtime OpenClaw deployments use two filesystem trust zones:
   governance root;
 - the reviewer reads the candidate inbox and can write only the governance
   root containing verdicts and promotion proposals.
+- when a verified candidate is incorporated into a canonical manual article,
+  add its ID to that article's `sourceCandidateIds`; search then retires the
+  runtime candidate automatically so users see only the manual answer.
 
 Pass the repository KB, runtime candidate inbox, and runtime governance root to
 `scripts/support-kb.py search`.

@@ -45,6 +45,61 @@ class SupportKnowledgeBaseTest(unittest.TestCase):
             )
             self.assertIn("CC Pocket User Manual", llms.read_text(encoding="utf-8"))
 
+    def test_promoted_candidate_is_retired_from_search(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            queue = Path(directory) / "queue"
+            evidence_file = repo / "docs" / "fact.md"
+            evidence_file.parent.mkdir(parents=True)
+            evidence_file.write_text("The answer is canonical now.\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "support@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Support Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True)
+            candidate_path = support_kb.capture_candidate(
+                repo,
+                queue,
+                {
+                    "questions": {"zh": ["正式答案是什么？"]},
+                    "answer": {"zh": "这是已经写入手册的答案。"},
+                    "evidence": [
+                        {
+                            "path": "docs/fact.md",
+                            "startLine": 1,
+                            "endLine": 1,
+                            "note": "Maintained documentation",
+                        }
+                    ],
+                },
+            )
+            candidate = support_kb.load_json(candidate_path)
+            manual = {
+                "verifiedAt": "2026-07-25",
+                "articles": [
+                    {
+                        "slug": "canonical-answer",
+                        "sourceCandidateIds": [candidate["id"]],
+                        "title": {"zh": "正式答案"},
+                        "summary": {"zh": "这是已经写入手册的答案。"},
+                        "shortAnswer": {"zh": "这是已经写入手册的答案。"},
+                        "aliases": {"zh": ["正式答案是什么"]},
+                        "sections": [],
+                    }
+                ],
+            }
+
+            records = support_kb.manual_records(manual, "zh")
+            promoted = support_kb.promoted_candidate_ids(manual)
+            records.extend(
+                record
+                for record in support_kb.candidate_records(repo, [queue], "zh")
+                if record["id"] not in promoted
+            )
+            results = support_kb.search_records("正式答案是什么", records, 5)
+
+            self.assertEqual(["manual:canonical-answer"], [item["id"] for item in results])
+
     def test_code_candidate_is_reused_only_while_evidence_is_current(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "repo"
