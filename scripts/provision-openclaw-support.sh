@@ -206,6 +206,16 @@ print(json.dumps({
       "message", "cron", "gateway", "nodes", "computer", "skill_workshop",
       "sessions_spawn", "agents_list"
     ],
+    "sandbox": {
+      "tools": {
+        "allow": ["read", "exec", "session_status"],
+        "deny": [
+          "write", "edit", "apply_patch", "process", "browser", "canvas",
+          "message", "cron", "gateway", "nodes", "computer", "skill_workshop",
+          "sessions_spawn", "agents_list"
+        ]
+      }
+    },
     "exec": {"host": "sandbox", "security": "full", "ask": "off"},
     "elevated": {"enabled": false}
   }'
