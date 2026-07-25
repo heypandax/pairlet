@@ -13,7 +13,7 @@ usage() {
     "Usage: $0 [--apply] [--repo PATH]" \
     "" \
     "Environment:" \
-    "  CC_POCKET_SUPPORT_MODEL  routine model (default: deepseek/deepseek-v4-flash)" \
+    "  CC_POCKET_SUPPORT_MODEL  public answer model (default: deepseek/deepseek-v4-pro)" \
     "  CC_POCKET_REVIEW_MODEL   stronger review model; omit to skip reviewer + cron" \
     "  CC_POCKET_REVIEW_CRON    cron expression (default: 0 3 * * 1)" \
     "  CC_POCKET_REVIEW_TZ      timezone (default: UTC)" \
@@ -45,7 +45,7 @@ while (($#)); do
 done
 
 REPO_PATH="$(cd "$REPO_PATH" && pwd)"
-SUPPORT_MODEL="${CC_POCKET_SUPPORT_MODEL:-deepseek/deepseek-v4-flash}"
+SUPPORT_MODEL="${CC_POCKET_SUPPORT_MODEL:-deepseek/deepseek-v4-pro}"
 REVIEW_MODEL="${CC_POCKET_REVIEW_MODEL:-}"
 REVIEW_CRON="${CC_POCKET_REVIEW_CRON:-0 3 * * 1}"
 REVIEW_TZ="${CC_POCKET_REVIEW_TZ:-UTC}"

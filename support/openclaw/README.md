@@ -35,6 +35,13 @@ change. If a stronger model is not configured, omit
 `CC_POCKET_REVIEW_MODEL`; the public support agent is provisioned, while the
 reviewer and weekly cron stay disabled.
 
+The default public model is `deepseek/deepseek-v4-pro`. It is the smallest
+model currently configured on the production host that passed the canonical,
+code-only, unknown-answer, language, and prompt-injection contract tests.
+Override `CC_POCKET_SUPPORT_MODEL` only after the replacement passes the same
+suite. The review model is configured separately and should be stronger than
+the public model when the provider offers one.
+
 The script deliberately does not bind a channel. After provisioning:
 
 1. Test the agent in Control UI with canonical, code-only, unknown, and
