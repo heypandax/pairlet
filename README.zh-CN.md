@@ -144,6 +144,7 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
 - 使用文档（中文）—— [`docs/USAGE.md`](docs/USAGE.md)
 - 运行 / 运维 daemon —— [`docs/RUN.md`](docs/RUN.md)
 - 安全模型与威胁分析 —— [`docs/SECURITY.md`](docs/SECURITY.md)
+- 智能客服知识闭环与 OpenClaw 部署 —— [`docs/SUPPORT-KNOWLEDGE.md`](docs/SUPPORT-KNOWLEDGE.md)
 - iOS 真机构建与安装 —— [`docs/ios-device.md`](docs/ios-device.md)
 - 中继部署（Caddy + Cloudflare + systemd）—— [`deploy/README.md`](deploy/README.md)
 - UI 设计（claude.ai/design 交付）—— [`docs/design/`](docs/design/)

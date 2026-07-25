@@ -25,6 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify support knowledge and generated manual
+        run: |
+          python3 -m unittest support.tests.test_support_kb
+          python3 scripts/build-manual.py
+          python3 scripts/check-site-seo.py
+          git diff --exit-code -- site/manual site/sitemap.xml
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

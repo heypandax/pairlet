@@ -52,6 +52,8 @@ mobile/composeApp/src/desktopMain/resources/ga4.properties
 # fir.im token (local only, never commit)
 scripts/.fir-token
 scripts/__pycache__/
+**/__pycache__/
+*.pyc
 
 # marketing/video v3 pipeline: rendered deliverables, AI footage binaries, runtime state
 /marketing/video/output/

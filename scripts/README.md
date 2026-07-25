@@ -44,3 +44,13 @@ gh workflow run release.yml -f version=<ver>
 签名 / 公证凭证放仓库根的 `.env`（gitignored），脚本自动 `source`：
 `DEVELOPER_ID`、`APPLE_ID`、`APPLE_APP_PASSWORD`、`APPLE_TEAM_ID`（或 `NOTARY_PROFILE` keychain 档）。
 不带 `DEVELOPER_ID` 时桌面脚本出**未签名** dmg（仅本机自测；拷到别的 Mac 会被 Gatekeeper 拦）。
+
+## 智能客服知识工具
+
+| 脚本 | 作用 |
+|---|---|
+| `support-kb.py` | 生成 AI 手册索引、检索、捕获带代码哈希的候选答案、失效审计、记录复核和生成手册提案 |
+| `provision-openclaw-support.sh` | 幂等创建隔离的 OpenClaw 客服 / 复核 Agent；默认只 dry-run，必须显式传 `--apply` |
+
+架构、权限边界与渠道上线清单见
+[`docs/SUPPORT-KNOWLEDGE.md`](../docs/SUPPORT-KNOWLEDGE.md)。

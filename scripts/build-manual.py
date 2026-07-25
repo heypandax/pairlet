@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import html
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -27,6 +28,11 @@ def page_head(*, title: str, description: str, canonical: str, locale: str, dept
     prefix = "../" * depth
     lang = "zh-CN" if locale == "zh" else "en"
     og_locale = "zh_CN" if locale == "zh" else "en_US"
+    x_default = (
+        f"{PUBLIC_BASE}/"
+        if canonical in {f"{PUBLIC_BASE}/en/", f"{PUBLIC_BASE}/zh/"}
+        else canonical.replace(f"/{locale}/", "/en/")
+    )
     return f"""<!DOCTYPE html>
 <html lang="{lang}" data-theme="dark">
 <head>
@@ -37,7 +43,7 @@ def page_head(*, title: str, description: str, canonical: str, locale: str, dept
 <link rel="canonical" href="{canonical}" />
 <link rel="alternate" hreflang="en" href="{canonical.replace(f'/{locale}/', '/en/')}" />
 <link rel="alternate" hreflang="zh-CN" href="{canonical.replace(f'/{locale}/', '/zh/')}" />
-<link rel="alternate" hreflang="x-default" href="{canonical.replace(f'/{locale}/', '/en/')}" />
+<link rel="alternate" hreflang="x-default" href="{x_default}" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta property="og:type" content="{page_type}" />
 <meta property="og:site_name" content="CC Pocket" />
@@ -309,10 +315,10 @@ def root_page() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>CC Pocket User Manual</title>
 <meta name="description" content="Public task-based help for CC Pocket users and AI assistants." />
-<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<link rel="canonical" href="https://heypandax.github.io/cc-pocket/manual/" />
 <link rel="alternate" hreflang="en" href="https://heypandax.github.io/cc-pocket/manual/en/" />
 <link rel="alternate" hreflang="zh-CN" href="https://heypandax.github.io/cc-pocket/manual/zh/" />
-<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/en/" />
+<link rel="alternate" hreflang="x-default" href="https://heypandax.github.io/cc-pocket/manual/" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="CC Pocket" />
@@ -326,6 +332,7 @@ def root_page() -> str:
 <meta name="twitter:title" content="CC Pocket User Manual" />
 <meta name="twitter:description" content="Public, task-based help for CC Pocket users and AI assistants." />
 <meta name="twitter:image" content="https://heypandax.github.io/cc-pocket/manual/og-manual.png" />
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage","name":"CC Pocket User Manual","url":"https://heypandax.github.io/cc-pocket/manual/","inLanguage":["en","zh-CN"],"isPartOf":{"@type":"WebSite","name":"CC Pocket","url":"https://heypandax.github.io/cc-pocket/"}}</script>
 <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
 <link rel="stylesheet" href="../styles.css" />
 <link rel="stylesheet" href="manual.css" />
@@ -348,7 +355,15 @@ def root_page() -> str:
 
 
 def update_sitemap(data: dict) -> None:
-    entries = []
+    entries = [
+        f"""  <url>
+    <loc>{PUBLIC_BASE}/</loc>
+    <lastmod>{VERIFIED}</lastmod>
+    <xhtml:link rel="alternate" hreflang="en" href="{PUBLIC_BASE}/en/" />
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="{PUBLIC_BASE}/zh/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="{PUBLIC_BASE}/" />
+  </url>"""
+    ]
     for locale in ("en", "zh"):
         lang = "zh-CN" if locale == "zh" else "en"
         other = "en" if locale == "zh" else "zh"
@@ -383,6 +398,10 @@ def update_sitemap(data: dict) -> None:
 
 def main() -> None:
     data = json.loads(CONTENT.read_text())
+    if data.get("verifiedAt") != VERIFIED:
+        raise ValueError(
+            f"manual-content.json verifiedAt ({data.get('verifiedAt')!r}) must match builder VERIFIED ({VERIFIED})"
+        )
     MANUAL.mkdir(parents=True, exist_ok=True)
     (MANUAL / "index.html").write_text(root_page())
     for locale in ("en", "zh"):
@@ -394,7 +413,17 @@ def main() -> None:
             article_dir.mkdir(parents=True, exist_ok=True)
             (article_dir / "index.html").write_text(article_page(data, article, locale))
     update_sitemap(data)
-    print(f"built {3 + len(data['articles']) * 2} manual pages")
+    subprocess.run(
+        [
+            "python3",
+            str(ROOT / "scripts" / "support-kb.py"),
+            "build-index",
+            "--manual",
+            str(CONTENT),
+        ],
+        check=True,
+    )
+    print(f"built {3 + len(data['articles']) * 2} manual pages and AI indexes")
 
 
 if __name__ == "__main__":

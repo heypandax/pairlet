@@ -144,6 +144,7 @@ Build the app: Android via `./gradlew :mobile:composeApp:assembleDebug`; iOS via
 - User guide (中文使用文档) — [`docs/USAGE.md`](docs/USAGE.md)
 - Run / operate the daemon — [`docs/RUN.md`](docs/RUN.md)
 - Security model & threat analysis — [`docs/SECURITY.md`](docs/SECURITY.md)
+- AI support knowledge lifecycle & OpenClaw deployment — [`docs/SUPPORT-KNOWLEDGE.md`](docs/SUPPORT-KNOWLEDGE.md)
 - iOS device build & install — [`docs/ios-device.md`](docs/ios-device.md)
 - Relay deployment (Caddy + Cloudflare + systemd) — [`deploy/README.md`](deploy/README.md)
 - UI design (claude.ai/design handoff) — [`docs/design/`](docs/design/)

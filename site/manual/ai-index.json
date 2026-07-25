@@ -1,0 +1,291 @@
+{
+  "articles": [
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "install",
+            "pair",
+            "qr",
+            "setup",
+            "connect"
+          ],
+          "shortAnswer": "Install the daemon on the computer that runs your coding agent, run cc-pocket-daemon pair , then scan the QR code in the CC Pocket app or enter its 6-digit code.",
+          "summary": "Install the CC Pocket daemon, print a one-time QR code, and pair the app without creating an account.",
+          "text": "install Install the daemon Run the command for your operating system on the computer where Claude Code, Codex, or OpenCode is installed. macOS or Linux The installer verifies the release, installs the daemon, and registers the login service. curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash Windows Run PowerShell as your normal user. The installer registers a logon Scheduled Task. irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex pair Pair the app Create a one-time pairing code Run this on the computer. It prints both a QR code and a 6-digit fallback code. cc-pocket-daemon pair Scan or type the code Open CC Pocket, choose Add computer, and scan the QR. If the camera is unavailable, type the six digits. Open a project After the computer shows online, choose a project folder and start or resume a session. Pairing is device-to-device. CC Pocket does not create a user account, and the daemon dials out—no inbound internet port is required.",
+          "title": "Install and pair a computer",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/install-and-pair/"
+        },
+        "zh": {
+          "aliases": [
+            "安装",
+            "配对",
+            "二维码",
+            "连接电脑",
+            "开始"
+          ],
+          "shortAnswer": "在运行编码 Agent 的电脑上安装 daemon，执行 cc-pocket-daemon pair ，再用 CC Pocket App 扫描二维码或输入 6 位配对码。",
+          "summary": "安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。",
+          "text": "install 安装 daemon 在已经安装 Claude Code、Codex 或 OpenCode 的电脑上，执行对应系统的命令。 macOS 或 Linux 安装器会校验发行包、安装 daemon，并注册登录后自动启动的服务。 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash Windows 用普通用户打开 PowerShell。安装器会注册登录时运行的计划任务。 irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex pair 配对 App 生成一次性配对码 在电脑上执行。命令会同时打印二维码和 6 位备用配对码。 cc-pocket-daemon pair 扫码或输入配对码 打开 CC Pocket，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。 打开项目 电脑显示在线后，选择项目文件夹，开始新会话或恢复现有会话。 配对发生在设备之间。CC Pocket 不创建用户账号；daemon 主动向外连接，无需开放公网入站端口。",
+          "title": "安装并配对电脑",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/"
+        }
+      },
+      "slug": "install-and-pair",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "schedule",
+            "later",
+            "repeat",
+            "daily",
+            "timer",
+            "long press send"
+          ],
+          "shortAnswer": "Type the prompt, long-press Send , choose 30m, 1h, 3h, 8h , or Custom time… , then confirm. Turn on Repeat daily for a recurring task.",
+          "summary": "Long-press Send, choose a delay or custom time, and let the paired computer run the prompt later.",
+          "text": "steps Schedule the prompt Write the prompt Open the target session and type the message exactly as you want the agent to receive it. Long-press Send A normal tap still sends immediately. Press and hold Send to open the scheduling sheet. Choose a time Pick 30m, 1h, 3h, 8h, or Custom time…. Optionally turn on Repeat daily. Confirm The button shows the resolved time. Tap Schedule for <time>, or Schedule daily at <time>. manage Manage scheduled tasks Open Settings → Scheduled tasks to see the next run, whether the task resumes a session or starts a new one, the last failure reason, and the Remove action. The paired computer’s daemon stores and runs the task. That computer must be online at the scheduled time. troubleshooting Troubleshooting Holding Send does nothing Make sure the composer contains a message. If Settings says the daemon is too old, update the computer first. The task did not run Open Settings → Scheduled tasks. A failed row shows the last failure reason. Confirm that the paired computer is online.",
+          "title": "Schedule a prompt for later",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/"
+        },
+        "zh": {
+          "aliases": [
+            "定时",
+            "预约",
+            "稍后发送",
+            "每天重复",
+            "长按发送"
+          ],
+          "shortAnswer": "输入提示词后长按 发送 ，选择 30 分钟、1 小时、3 小时、8 小时 或 自定义时间… ，再确认。需要每天执行时打开 每天重复 。",
+          "summary": "长按发送，选择延迟或自定义时间，让已配对电脑稍后执行提示词。",
+          "text": "steps 预约提示词 输入提示词 打开目标会话，按希望 Agent 收到的样子输入完整消息。 长按发送 普通点击仍会立即发送；按住发送键，打开预约面板。 选择时间 选择 30 分钟、1 小时、3 小时、8 小时或自定义时间；也可以打开每天重复。 确认预约 按钮会显示换算后的具体时间。点击“<时间> 发送”或“每天 <时间> 发送”。 manage 管理定时任务 打开 设置 → 定时任务 ，可以查看下次执行时间、任务是接续会话还是新建会话、上次失败原因，以及删除操作。 任务由已配对电脑上的 daemon 保存并执行；到达预约时间时，这台电脑必须在线。 troubleshooting 故障排查 长按发送没有反应 确认输入框中已有消息。如果设置页提示 daemon 版本过旧，请先更新电脑端。 任务没有执行 打开“设置 → 定时任务”。失败条目会显示最近失败原因；同时确认已配对电脑在线。",
+          "title": "预约稍后发送提示词",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/schedule-a-prompt/"
+        }
+      },
+      "slug": "schedule-a-prompt",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "terminal",
+            "continue here",
+            "take over",
+            "fork",
+            "resume"
+          ],
+          "shortAnswer": "Open the terminal session in CC Pocket and tap Continue here . It resumes in place when the terminal is idle; it forks only while the terminal is still writing, which prevents two writers from corrupting one transcript.",
+          "summary": "Observe a terminal-owned session read-only, then continue it in place when the terminal is no longer writing.",
+          "text": "observe Observe first Terminal-owned sessions appear in the project’s session list. Opening one starts in read-only observation, so CC Pocket can stream its output without becoming a second writer. take-over Continue from CC Pocket Wait for the terminal turn to settle If the terminal is still actively writing, let it finish unless you intentionally want a safe fork. Tap Continue here CC Pocket resumes the same session in place when it is safe to do so. Keep working Prompts, approvals, interrupts, and live output now behave like any other CC Pocket-controlled session. For Claude Code, you can later return to the computer and use claude --resume to pick the session up again.",
+          "title": "Take over a terminal session without forking",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/take-over-a-terminal-session/"
+        },
+        "zh": {
+          "aliases": [
+            "终端会话",
+            "接管",
+            "继续",
+            "分叉",
+            "恢复"
+          ],
+          "shortAnswer": "在 CC Pocket 中打开终端会话并点击 Continue here 。终端空闲时会原地恢复；只有终端仍在写入时才分叉，避免两个写入者破坏同一份记录。",
+          "summary": "先只读旁观终端会话；终端不再写入后，再原地接管继续。",
+          "text": "observe 先旁观 终端拥有的会话会出现在项目会话列表中。打开后先进入只读旁观，CC Pocket 可以流式显示输出，但不会成为第二个写入者。 take-over 从 CC Pocket 继续 等待终端本轮结束 如果终端仍在持续写入，除非你确实需要安全分叉，否则先让它完成。 点击 Continue here 条件安全时，CC Pocket 会在同一个会话中原地接续。 继续工作 之后的提示词、审批、打断和实时输出，与普通 CC Pocket 会话一致。 对于 Claude Code，之后回到电脑可用 claude --resume 再次接起该会话。",
+          "title": "无分叉接管终端会话",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/take-over-a-terminal-session/"
+        }
+      },
+      "slug": "take-over-a-terminal-session",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "approve",
+            "permission",
+            "allow",
+            "deny",
+            "command",
+            "fleet"
+          ],
+          "shortAnswer": "When the agent asks for permission, open the waiting session, read the exact command or file action, then choose Allow or Deny . If you do not answer, the request times out to a safe deny.",
+          "summary": "Review a tool request on phone or desktop, inspect the command or file action, then allow or deny it.",
+          "text": "review Review the request Open the waiting session A waiting approval is visible in the session and in the fleet view when multiple computers are paired. Read the action Check the tool name, command, path, and any warning styling. Do not approve an action you do not understand. Allow or deny Allow continues the agent turn. Deny sends the refusal back to the agent so it can adjust. modes Choose the right execution mode Ask each step keeps command and file actions behind approval. Auto-edit allows file edits but still asks before commands. Plan asks the agent to plan before acting. Full auto grants broad autonomy and should only be used when you accept the risk.",
+          "title": "Approve work from another device",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/approve-from-another-computer/"
+        },
+        "zh": {
+          "aliases": [
+            "审批",
+            "权限",
+            "允许",
+            "拒绝",
+            "命令",
+            "多电脑"
+          ],
+          "shortAnswer": "Agent 请求权限时，打开等待中的会话，核对具体命令或文件操作，再选择 允许 或 拒绝 。如果不处理，请求会超时并安全拒绝。",
+          "summary": "在手机或桌面端查看工具请求、核对命令或文件操作，再允许或拒绝。",
+          "text": "review 核对请求 打开等待中的会话 待审批项会显示在会话中；配对多台电脑时，也会出现在总览中。 阅读操作内容 检查工具名、命令、路径和警告样式。不要批准自己不理解的操作。 允许或拒绝 允许后 Agent 继续运行；拒绝会把结果返回给 Agent，让它调整方案。 modes 选择合适的执行模式 每步都问 ：命令和文件操作都需要审批。 自动改文件 ：文件编辑自动放行，命令仍会询问。 计划模式 ：先要求 Agent 制定计划。 全自动 ：授予较大自主权，仅在你接受风险时使用。",
+          "title": "从另一台设备审批操作",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/approve-from-another-computer/"
+        }
+      },
+      "slug": "approve-from-another-computer",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "agent",
+            "model",
+            "claude",
+            "codex",
+            "opencode",
+            "gateway"
+          ],
+          "shortAnswer": "Choose the agent when the session starts. A session stays bound to that backend; models can be changed within the choices that backend and your gateway expose.",
+          "summary": "Pick Claude Code, Codex, or OpenCode when starting a session, then choose a supported model or gateway model id.",
+          "text": "agent Choose the backend at session start Claude Code supports Claude permission modes and model aliases. Codex uses a Cautious, Balanced, Autonomous, or Full auto preset mapped to approval policy and sandbox settings. OpenCode runs full access because its run command has no interactive approval protocol. You cannot switch a live session from one agent backend to another. Start a new session when you need a different backend. model Choose a model Use the model picker in a session. If Claude Code is routed through an Anthropic-compatible gateway, custom ids and saved gateway presets are passed to that local CLI; the gateway decides which model the id reaches.",
+          "title": "Choose an agent and model",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/choose-agent-and-model/"
+        },
+        "zh": {
+          "aliases": [
+            "Agent",
+            "模型",
+            "Claude",
+            "Codex",
+            "OpenCode",
+            "网关"
+          ],
+          "shortAnswer": "在创建会话时选择 Agent。一个会话从头到尾绑定同一个后端；模型可在该后端和你的网关实际提供的选项中切换。",
+          "summary": "创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。",
+          "text": "agent 创建会话时选择后端 Claude Code 支持 Claude 权限模式与模型别名。 Codex 使用 Cautious、Balanced、Autonomous 或 Full auto 预设，映射到审批策略与沙箱设置。 OpenCode 的运行命令没有交互式审批协议，因此始终是完全访问。 不能把进行中的会话从一个 Agent 后端切换到另一个；需要换后端时，请新建会话。 model 选择模型 在会话中使用模型选择器。如果 Claude Code 通过 Anthropic 兼容网关路由，自定义 ID 和已保存的网关预设会传给本机 CLI；这个 ID 最终对应哪个模型，由网关决定。",
+          "title": "选择 Agent 与模型",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/choose-agent-and-model/"
+        }
+      },
+      "slug": "choose-agent-and-model",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "share",
+            "folder",
+            "guest",
+            "invite",
+            "collaborator",
+            "revoke"
+          ],
+          "shortAnswer": "Open Settings → Shared folders , choose the folder, access level, and expiry, then send the single-use invite to a trusted collaborator. Revoke it from the same screen when access should end.",
+          "summary": "Create a single-use invite for one folder, choose an access level and expiry, then revoke it at any time.",
+          "text": "create Create the invite Open Shared folders In Settings, open Shared folders and choose the folder the guest may use. Choose access and expiry Pick Review, Collaborate, or Autonomous, then set how long the invite remains active. Send the invite once The invite is single-use and expires quickly. Send it only to the intended collaborator. boundary Understand the boundary The guest can open sessions only under the shared folder, but shell commands still run as the owner’s operating-system user. Folder scope is an application boundary, not an operating-system sandbox. Use sharing only with people you trust. Revoke the share immediately when collaboration ends.",
+          "title": "Share one folder with a collaborator",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/share-a-folder/"
+        },
+        "zh": {
+          "aliases": [
+            "共享",
+            "文件夹",
+            "访客",
+            "邀请",
+            "协作者",
+            "撤销"
+          ],
+          "shortAnswer": "打开 设置 → 共享文件夹 ，选择文件夹、权限和有效期，再把一次性邀请发给可信协作者。需要结束访问时，在同一页面撤销。",
+          "summary": "为一个文件夹生成一次性邀请，选择权限和有效期，并可随时撤销。",
+          "text": "create 创建邀请 打开共享文件夹 在设置中打开“共享文件夹”，选择允许访客使用的文件夹。 选择权限与有效期 选择 Review、Collaborate 或 Autonomous，并设置邀请有效期。 发送一次性邀请 邀请只能使用一次且很快过期，只应发送给预期协作者。 boundary 理解权限边界 访客只能在共享文件夹下打开会话，但 shell 命令仍以所有者的操作系统用户身份执行。文件夹范围是应用层边界，不是操作系统沙箱。 只与可信的人使用共享；协作结束后立即撤销。",
+          "title": "向协作者共享一个文件夹",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/share-a-folder/"
+        }
+      },
+      "slug": "share-a-folder",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "offline",
+            "unreachable",
+            "disconnect",
+            "status",
+            "relay",
+            "computer"
+          ],
+          "shortAnswer": "On the offline computer, run cc-pocket-daemon status . If the daemon is stopped or cannot reach the relay, restore its service or network first. Re-pair only when the app says the pairing is invalid.",
+          "summary": "Check daemon status, restore its relay connection, and pair again only if the device credential was removed.",
+          "text": "status Check the daemon Inspect status The status command checks the local daemon process and its relay link. cc-pocket-daemon status Restore the service or network Wake the computer, confirm it has internet access, and let the installed login service restart the daemon. Return to CC Pocket The app reconnects automatically when the existing pairing is still valid. pairing Re-pair only when required If the app explicitly says the pairing is invalid or the device was revoked, run cc-pocket-daemon pair and add the computer again. A normal temporary offline state does not require re-pairing.",
+          "title": "Fix an offline computer",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/fix-offline-computer/"
+        },
+        "zh": {
+          "aliases": [
+            "离线",
+            "无法连接",
+            "断开",
+            "状态",
+            "中继",
+            "电脑"
+          ],
+          "shortAnswer": "在离线电脑上执行 cc-pocket-daemon status 。如果 daemon 已停止或无法连接中继，先恢复服务或网络；只有 App 明确提示配对失效时才重新配对。",
+          "summary": "检查 daemon 状态并恢复中继连接；只有设备凭据被移除时才重新配对。",
+          "text": "status 检查 daemon 查看状态 状态命令会检查本机 daemon 进程以及它与中继的连接。 cc-pocket-daemon status 恢复服务或网络 唤醒电脑、确认网络可用，并让已安装的登录服务重新拉起 daemon。 返回 CC Pocket 只要原有配对仍有效，App 会自动重新连接。 pairing 仅在必要时重新配对 如果 App 明确提示配对无效或设备已被撤销，执行 cc-pocket-daemon pair 并重新添加电脑。普通的暂时离线不需要重新配对。",
+          "title": "修复离线电脑",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/fix-offline-computer/"
+        }
+      },
+      "slug": "fix-offline-computer",
+      "verifiedAt": "2026-07-24"
+    },
+    {
+      "locales": {
+        "en": {
+          "aliases": [
+            "update",
+            "upgrade",
+            "old daemon",
+            "stale",
+            "homebrew",
+            "scoop"
+          ],
+          "shortAnswer": "Run cc-pocket-daemon update . If the installation is managed by Homebrew or Scoop, use that package manager instead.",
+          "summary": "Use the built-in updater, or the package manager that installed CC Pocket, then confirm the new daemon is online.",
+          "text": "update Choose the matching update path Built-in installer Use this for installations created by the official shell or PowerShell installer. cc-pocket-daemon update Homebrew on macOS Use the full cask name; Homebrew has an unrelated cask with the same short name. brew upgrade --cask heypandax/tap/cc-pocket Scoop on Windows Use this when Scoop owns the daemon installation. scoop update cc-pocket-daemon verify Verify the result Run cc-pocket-daemon status , then return to CC Pocket. Existing valid device pairings reconnect automatically after the daemon restarts.",
+          "title": "Update the daemon",
+          "url": "https://heypandax.github.io/cc-pocket/manual/en/update-daemon/"
+        },
+        "zh": {
+          "aliases": [
+            "更新",
+            "升级",
+            "daemon 过旧",
+            "版本过旧",
+            "Homebrew",
+            "Scoop"
+          ],
+          "shortAnswer": "执行 cc-pocket-daemon update 。如果安装由 Homebrew 或 Scoop 管理，请改用对应包管理器。",
+          "summary": "使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。",
+          "text": "update 选择对应更新方式 内置安装器 通过官方 shell 或 PowerShell 安装脚本安装时，使用此命令。 cc-pocket-daemon update macOS 的 Homebrew 必须使用完整 cask 名；Homebrew 官方仓中存在一个无关的同名 cask。 brew upgrade --cask heypandax/tap/cc-pocket Windows 的 Scoop daemon 由 Scoop 安装时使用此命令。 scoop update cc-pocket-daemon verify 确认更新结果 执行 cc-pocket-daemon status ，再返回 CC Pocket。daemon 重启后，仍有效的设备配对会自动重新连接。",
+          "title": "更新 daemon",
+          "url": "https://heypandax.github.io/cc-pocket/manual/zh/update-daemon/"
+        }
+      },
+      "slug": "update-daemon",
+      "verifiedAt": "2026-07-24"
+    }
+  ],
+  "canonical": "https://heypandax.github.io/cc-pocket/manual/",
+  "schemaVersion": 1,
+  "source": "site/manual/manual-content.json",
+  "verifiedAt": "2026-07-24"
+}
