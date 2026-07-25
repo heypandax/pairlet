@@ -88,7 +88,7 @@ privacy_status="$(curl --location --silent --show-error --output /dev/null --wri
 }
 
 status_json="$(openclaw channels status --probe --json)"
-CC_POCKET_CHANNEL_STATUS_JSON="$status_json" python3 - "$CHANNEL" "$ACCOUNT_ID" <<'PY'
+if ! CC_POCKET_CHANNEL_STATUS_JSON="$status_json" python3 - "$CHANNEL" "$ACCOUNT_ID" <<'PY'
 import json
 import os
 import sys
@@ -131,9 +131,12 @@ if errors:
 
 print(f"Channel preflight passed: {channel}:{account_id}")
 PY
+then
+  exit 2
+fi
 
 agents_json="$(openclaw agents list --bindings --json)"
-CC_POCKET_AGENTS_JSON="$agents_json" python3 - "$CHANNEL" "$ACCOUNT_ID" <<'PY'
+if ! CC_POCKET_AGENTS_JSON="$agents_json" python3 - "$CHANNEL" "$ACCOUNT_ID" <<'PY'
 import json
 import os
 import sys
@@ -153,6 +156,9 @@ for agent_id, item in by_id.items():
     if any(binding in str(route) for route in item.get("routes", [])):
         raise SystemExit(f"binding already routes to another agent: {agent_id}")
 PY
+then
+  exit 2
+fi
 
 printf '%s\n' \
   "Target agent: cc-pocket-support" \
