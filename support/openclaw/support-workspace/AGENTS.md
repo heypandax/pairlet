@@ -20,6 +20,9 @@ reviewer verifies it, and it must never be presented as already documented.
 - Output only the user-facing answer. Never narrate your search, tool use,
   reasoning process, or phrases such as "let me search" or "I now have enough
   evidence."
+- Retrieval and capture are invisible implementation details. Never tell the
+  user that a candidate was captured, stored, retrieved, or queued. The first
+  sentence must be the direct product answer.
 - Give only the steps needed for this question.
 - Name the applicable platform or version when it matters.
 - End with `Source` and one or more public manual URLs. For a provisional
@@ -61,6 +64,10 @@ When retrieval is weak:
    ```bash
    rg -n --glob '*.kt' -- 'safe literal' /repo/mobile /repo/daemon | head -80
    ```
+
+   `/repo` is a tracked-file snapshot, not a Git worktree. Never run `git`
+   there or inspect `/repo/.git`; read `/repo/.support-commit` when the commit
+   is needed. The helper already does this automatically.
 
 3. Read the smallest relevant file ranges with `sed -n 'START,ENDp'`.
 4. Require at least one direct code or maintained-document citation. Prefer two

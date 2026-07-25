@@ -16,7 +16,8 @@ usage() {
     "  CC_POCKET_SUPPORT_MODEL  routine model (default: deepseek/deepseek-v4-flash)" \
     "  CC_POCKET_REVIEW_MODEL   stronger review model; omit to skip reviewer + cron" \
     "  CC_POCKET_REVIEW_CRON    cron expression (default: 0 3 * * 1)" \
-    "  CC_POCKET_REVIEW_TZ      timezone (default: UTC)"
+    "  CC_POCKET_REVIEW_TZ      timezone (default: UTC)" \
+    "  CC_POCKET_REVIEW_THINKING  provider-supported level (default: off)"
 }
 
 APPLY=false
@@ -48,6 +49,7 @@ SUPPORT_MODEL="${CC_POCKET_SUPPORT_MODEL:-deepseek/deepseek-v4-flash}"
 REVIEW_MODEL="${CC_POCKET_REVIEW_MODEL:-}"
 REVIEW_CRON="${CC_POCKET_REVIEW_CRON:-0 3 * * 1}"
 REVIEW_TZ="${CC_POCKET_REVIEW_TZ:-UTC}"
+REVIEW_THINKING="${CC_POCKET_REVIEW_THINKING:-off}"
 STATE_ROOT="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
 SUPPORT_WORKSPACE="$STATE_ROOT/workspace-cc-pocket-support"
 REVIEW_WORKSPACE="$STATE_ROOT/workspace-cc-pocket-support-review"
@@ -77,7 +79,8 @@ if [[ "$APPLY" != true ]]; then
     "Review governance: $GOVERNANCE_PATH" \
     "Support model: $SUPPORT_MODEL"
   if [[ -n "$REVIEW_MODEL" ]]; then
-    printf 'Reviewer: %s on %s (%s)\n' "$REVIEW_MODEL" "$REVIEW_CRON" "$REVIEW_TZ"
+    printf 'Reviewer: %s on %s (%s), thinking=%s\n' \
+      "$REVIEW_MODEL" "$REVIEW_CRON" "$REVIEW_TZ" "$REVIEW_THINKING"
   else
     printf '%s\n' "Reviewer: skipped until CC_POCKET_REVIEW_MODEL is configured"
   fi
@@ -277,15 +280,29 @@ for item in data:
         break
 '
   )"
-  if [[ -z "$existing_review_job" ]]; then
+  review_message="Audit and review CC Pocket support knowledge. Follow AGENTS.md. Respond in English; keep URLs, code, and product names unchanged."
+  if [[ -n "$existing_review_job" ]]; then
+    retry_openclaw openclaw cron edit "$existing_review_job" \
+      --name "CC Pocket support knowledge review" \
+      --cron "$REVIEW_CRON" \
+      --tz "$REVIEW_TZ" \
+      --session isolated \
+      --agent cc-pocket-support-review \
+      --model "$REVIEW_MODEL" \
+      --thinking "$REVIEW_THINKING" \
+      --tools exec,read \
+      --message "$review_message" \
+      --no-deliver \
+      --enable
+  else
     openclaw cron create "$REVIEW_CRON" \
-      "Audit and review CC Pocket support knowledge. Follow AGENTS.md. Respond in English; keep URLs, code, and product names unchanged." \
+      "$review_message" \
       --name "CC Pocket support knowledge review" \
       --tz "$REVIEW_TZ" \
       --session isolated \
       --agent cc-pocket-support-review \
       --model "$REVIEW_MODEL" \
-      --thinking high \
+      --thinking "$REVIEW_THINKING" \
       --tools exec,read \
       --no-deliver
   fi
@@ -294,8 +311,10 @@ fi
 retry_openclaw openclaw config validate
 retry_openclaw openclaw agents list --bindings
 retry_openclaw openclaw sandbox explain --agent cc-pocket-support
+retry_openclaw openclaw sandbox recreate --agent cc-pocket-support --force
 if [[ -n "$REVIEW_MODEL" ]]; then
   retry_openclaw openclaw sandbox explain --agent cc-pocket-support-review
+  retry_openclaw openclaw sandbox recreate --agent cc-pocket-support-review --force
 fi
 
 printf '%s\n' \
