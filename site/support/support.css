@@ -173,7 +173,7 @@ body.support-direct .support-identity{margin-left:0}
   .chat-workspace-head{min-height:52px;padding:6px 12px;gap:8px}
   .back-to-help{display:none}
   .support-identity{margin-left:0}
-  .public-pill{margin-left:auto;max-width:144px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .public-pill{min-width:0;max-width:min(190px,52vw);margin-left:auto;overflow:visible;text-align:center;text-overflow:clip;white-space:normal}
   .direct-entry-note{justify-content:flex-start;min-height:0;padding:7px 13px;text-align:left;font-size:10px}
   .direct-entry-note-text{flex:1}
   .context-remove{min-height:32px;font-size:10px}

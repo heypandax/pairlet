@@ -66,6 +66,17 @@ class SupportExperienceContractTest(unittest.TestCase):
         )
         self.assertIn("interactive-widget=resizes-content", self.html)
 
+    def test_mobile_public_status_pill_does_not_truncate_privacy_copy(self):
+        self.assertIn("公开 · 无需登录 · 不保存历史", self.html)
+        self.assertRegex(
+            self.css,
+            r"\.public-pill\{[^}]*overflow:visible[^}]*white-space:normal",
+        )
+        self.assertNotIn(
+            "max-width:144px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
+            self.css,
+        )
+
     def test_chat_waiting_and_failure_preserve_the_question(self):
         self.assertIn(
             "Searching the verified manual · complex questions may take about 1 minute",

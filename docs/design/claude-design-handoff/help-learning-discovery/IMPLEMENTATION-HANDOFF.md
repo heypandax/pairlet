@@ -174,10 +174,10 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 
 - `:mobile:composeApp:compileKotlinDesktop`、`:mobile:composeApp:compileKotlinIosArm64` 与 `:mobile:composeApp:compileDebugKotlinAndroid` 通过。
 - 新增原生帮助页与入口 UI 测试通过；上下文直达和非会话场景禁用行为均有覆盖。
-- 本次官网支持体验契约与智能客服后端测试共 17 项通过；支持页 JavaScript 语法检查通过。
+- 本次官网支持体验契约与智能客服后端测试共 18 项通过；支持页 JavaScript 语法检查通过。
 - `:protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:desktopTest` 通过。
 - `scripts/check-site-seo.py` 通过：38 个 HTML 页面、38 条 sitemap URL，站内链接无断链。
 - App 390×844 深色与浅色离屏截图已人工复核。
-- 线上 390×844 真实浏览器已复核：安全会话环境可见、fragment 已从地址栏移除、输入框为 16px，聚焦前后输入框/编辑区/欢迎区几何尺寸完全一致且无横向溢出。
+- 线上 390×844 真实浏览器已复核：安全会话环境可见、fragment 已从地址栏移除、输入框为 16px，聚焦前后输入框/编辑区/欢迎区几何尺寸完全一致且无横向溢出；顶部公开状态不再截断。
 - 线上真实客服请求携带安全环境后成功返回；服务端端到端测试确认未知字段和项目路径不会进入 Agent 消息。
 - `scripts/check-all.sh` 唯一失败项为 `protocol:iosSimulatorArm64Test`：本机 Xcode 缺少 `ios_simulator_arm64` SDK；失败发生在测试设备解析前，不是代码断言失败。

@@ -14,6 +14,7 @@
 - 公开提问原地切换对话工作区，浏览器返回回到帮助首页；App 直达页不自动聚焦、预填或提交。
 - 429、busy、timeout 与 unavailable 均保留问题，提供 Retry 与关键词匹配的已核验指南。
 - 移动输入框固定为 16px 并采用动态视口，避免 iOS 聚焦时自动放大或遮掉页面；桌面 App 已移除「复制手册给 AI」重复动作。
+- 移动端顶部「公开 · 无需登录 · 不保存历史」状态胶囊按可用宽度完整显示，窄屏自然换行，不使用省略号截断。
 - 新增支持体验契约测试，并完成中英文、深浅色、390×844 与 1440×900 的真实浏览器检查。
 
 生产实现位于 `site/support/`、`mobile/composeApp/.../OpenUrl.kt`、`HelpLearning.kt` 与桌面 `SettingsModal.kt`；验证记录汇总在相邻的 [`IMPLEMENTATION-HANDOFF.md`](../help-learning-discovery/IMPLEMENTATION-HANDOFF.md)。
