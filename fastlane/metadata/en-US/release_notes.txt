@@ -1,16 +1,15 @@
-What's new in 1.5.1
+What's new in 1.5.2
 
 New
-• Open documents from chat: tap file paths or Write/Edit cards to read Markdown and other workspace files on your phone
-• Browse beyond the home folder: switch filesystem roots, including Windows C: and D: drives, in the directory picker
-• Per-agent default models: Claude Code, Codex and OpenCode now remember independent defaults
-• Full desktop localization: the desktop app now follows your system language in English or Simplified Chinese
-• Bridge controls: update allowed projects, enable owner bypass and configure command allowlists
+• Approval inbox: pending actions now appear from the daemon even when a push notification is delayed or missed
+• Project and session lists show a compact pending-approval button only when something needs your attention
+• Feishu Bridge now asks once per outsider request; an approval completes that request without becoming a standing permission
+• Built-in Help Center and public smart support make setup, pairing, agents, permissions and troubleshooting easier to discover
+• Agent-specific project skills and dynamic capability controls now reflect what each connected backend actually supports
 
 Fixed
-• OpenCode sub-agent sessions are hidden; titles, previews and replayed tool calls now match the other backends
-• Usage requests, cache hit rate and cost now follow the selected Today, 7d or 30d range
-• Duplicate or empty project rows caused by path variants are merged correctly
-• Links no longer swallow trailing Markdown or parenthesis text
-• Long agent, model and bridge names no longer push important controls off screen
-• Fixed a macOS 26 crash when opening the menu-bar popover
+• Missed approval pushes no longer leave requests invisible; reopening the app reconstructs the daemon's current queue
+• Idle Feishu conversations release their concurrency slot, and open failures now report the precise cause
+• Sensitive data remains blocked from bridge replies even after a request receives full execution approval
+• Windows closes to the tray reliably, while project lists filter agent-only folders more accurately
+• Help and support links preserve context and remain stable during slower answers
