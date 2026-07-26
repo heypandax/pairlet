@@ -46,9 +46,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.ccpocket.app.SUPPORT_CHAT_URL
+import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.openWebUrl
+import dev.ccpocket.app.supportChatUrl
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.help_action_open_changes
 import dev.ccpocket.app.resources.help_all_guides
@@ -185,6 +186,7 @@ internal fun HelpCenterScreen(
     entryPoint: HelpEntryPoint,
     onBack: () -> Unit,
     onOpenChanges: (() -> Unit)? = null,
+    supportContext: SupportContext? = null,
 ) {
     var expanded by remember { mutableStateOf<HelpTaskId?>(null) }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
@@ -211,7 +213,7 @@ internal fun HelpCenterScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
-                SmartSupportCard(entryPoint)
+                SmartSupportCard(entryPoint, supportContext)
             }
             item {
                 HelpSectionLabel(stringResource(Res.string.help_section_tasks))
@@ -269,14 +271,14 @@ private fun HelpSectionLabel(text: String) {
 }
 
 @Composable
-private fun SmartSupportCard(entryPoint: HelpEntryPoint) {
+private fun SmartSupportCard(entryPoint: HelpEntryPoint, supportContext: SupportContext?) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
             .background(Tok.accent.copy(alpha = 0.12f))
             .border(1.dp, Tok.accent.copy(alpha = 0.32f), RoundedCornerShape(14.dp))
             .clickable {
                 Telemetry.track(TelEvent.HelpSupportOpened, mapOf(TelKey.EntryPoint to entryPoint.value))
-                openWebUrl(SUPPORT_CHAT_URL)
+                openWebUrl(supportChatUrl(supportContext))
             }
             .heightIn(min = 64.dp)
             .padding(horizontal = 14.dp, vertical = 12.dp),

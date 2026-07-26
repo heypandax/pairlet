@@ -17,6 +17,9 @@ data class LocalClock(
 /** [epochMs] rendered in the device's current time zone. */
 expect fun localClock(epochMs: Long): LocalClock
 
+/** Coarse OS/device label safe to show in the public-support context preview. */
+expect fun supportPlatformLabel(): String
+
 /**
  * Preview/recording mode for producing App Store preview videos (see marketing/preview). When on, the
  * no-pairing demo gains a connecting → end-to-end-encrypted opener, hides the "demo mode" banner, and

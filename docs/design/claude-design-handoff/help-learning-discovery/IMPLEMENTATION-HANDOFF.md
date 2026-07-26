@@ -20,10 +20,12 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 - 直接访问 `/support/` 显示任务优先的公开帮助首页：唯一问题输入、与 App 对齐的 5 个已核验任务、5 个使用场景、2 个紧凑故障入口，以及手册 / Issue / 隐私出口。
 - 官网已移除营销 Hero、第二个智能客服 CTA、四张等权渠道卡和「把手册交给 AI」。提交问题后原地切换到共用对话工作区，并用 `history.pushState` / `popstate` 支持浏览器原生返回。
 - App 原生「询问智能客服」改为一张完整可点击的行，不再嵌套重复按钮；打开固定 URL `https://pocket.ark-nexus.cc/support/?mode=chat&source=app`。
-- App 只传 `mode=chat` 与 `source=app`，不附带页面、路径、仓库、会话、日志、Agent、模型、机器名、配对码或凭据；直达页不自动聚焦、不自动弹键盘、不预填或自动提交。
+- 从进行中会话打开时，App 会把当前界面、平台、App 版本、Agent、模型、运行状态和可用控件编码到 `#ctx=` fragment；fragment 不进入静态站请求、代理日志或 Referer。网页在首次提问前明确展示并允许一键「不附带」，API 再按固定 schema 白名单校验。
+- 安全上下文不包含会话/对话 ID、标题、仓库名、项目路径、prompt、源码/文件内容、机器身份、原始日志、环境变量、配对材料或凭据；直达页不自动聚焦、不自动弹键盘、不预填或自动提交。
 - 等待态如实显示「检索已核验手册，复杂问题可能约 1 分钟」；限流、繁忙、超时和不可用状态均保留原问题，提供 Retry、最贴近的已核验指南与 Issue 升级路径。
 - 桌面 App 的智能客服入口同样使用直达 URL，并移除重复的「复制手册链接给 AI」动作；桌面侧栏的普通 Help 入口仍打开任务首页。
-- 支持页保持中英文、深浅色、390px/桌面响应式、44pt 级触控目标、safe area 与 reduced-motion；未改智能客服后端、知识治理、daemon、relay 或 protocol wire。
+- 支持页保持中英文、深浅色、390px/桌面响应式、44pt 级触控目标、safe area 与 reduced-motion；移动输入框固定使用 16px，并用动态视口避免 iOS 聚焦自动缩放或输入态挤走页面。
+- 公开支持 API 只新增安全上下文的白名单解析与提示封装；知识治理、daemon、relay 与 protocol wire 均未改动。
 
 实现文件：
 
@@ -44,7 +46,7 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 - 新增公开手册文章 `review-changed-files`，并重新生成中英文页面、AI 索引、全文索引和 sitemap。
 - 遥测只增加固定枚举级入口/任务/动作事件，不包含问题文本、路径、会话内容或学习状态。
 
-本轮明确未实现：跨页 coach、教学状态机、学习进度/徽章、行为触发提示、上下文上传、App 内开放式聊天、桌面 440px 完整新面板。桌面端继续使用已上线的智能客服和常用指南入口。
+移动端首版当时明确未实现：跨页 coach、教学状态机、学习进度/徽章、行为触发提示、安全上下文、App 内开放式聊天、桌面 440px 完整新面板。安全上下文已在 2026-07-26 的后续修正中按上述最小字段恢复，其余仍未实现。
 
 ## 已确认的目标
 
@@ -140,7 +142,7 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 - 自动判断用户是否学会，以及跨设备学习档案。
 - “忽略两次后永久抑制”等行为触发与提示频控引擎。
 - What’s New 摘要、红点、未读状态和新功能生命周期。
-- 当前页面、平台、Agent、可见控件的上下文共享预览。
+- ~~当前页面、平台、Agent、可见控件的上下文共享预览。~~ 2026-07-26 后续修正已按上文最小安全字段恢复；仍不共享对话、项目路径、文件或日志。
 - 新建一套公开 Web 帮助站或重复的内容后台。
 - 桌面 440px 完整帮助面板与所有深浅色/异常变体同时上线。
 - 首次成功 checklist，除非先定义成功口径并证明现有 onboarding 的缺口。
@@ -164,17 +166,18 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 
 ## 当前交付边界
 
-- 已修改移动端与桌面端帮助入口、公开帮助官网、公开手册、测试与本实现交接。
-- 未修改 daemon、relay、protocol wire 或智能客服生产链路，因此不需要重启本机 daemon 或重新部署 relay。
-- 已部署官网与 GitHub Pages 镜像，并同步桌面 App 与 Pandaa；本次没有创建 PR。
+- 已修改移动端与桌面端帮助入口、公开帮助官网、公开手册、公开支持 API 边界、测试与本实现交接。
+- 公开支持 API 只增加安全上下文的服务端白名单、元数据提示封装和内部旁白过滤；未修改知识治理、daemon、relay 或 protocol wire，因此不需要重启本机 daemon 或重新部署 relay。
+- 官网静态页与支持 API 已部署，桌面 App 与 Pandaa 已同步；GitHub Pages 镜像随 `main` 更新。
 
 ## 实现验证
 
-- `:mobile:composeApp:compileKotlinDesktop` 通过。
+- `:mobile:composeApp:compileKotlinDesktop`、`:mobile:composeApp:compileKotlinIosArm64` 与 `:mobile:composeApp:compileDebugKotlinAndroid` 通过。
 - 新增原生帮助页与入口 UI 测试通过；上下文直达和非会话场景禁用行为均有覆盖。
-- 官网支持体验契约与智能客服后端测试共 21 项通过；支持页 JavaScript 语法检查通过。
+- 本次官网支持体验契约与智能客服后端测试共 17 项通过；支持页 JavaScript 语法检查通过。
 - `:protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:desktopTest` 通过。
 - `scripts/check-site-seo.py` 通过：38 个 HTML 页面、38 条 sitemap URL，站内链接无断链。
 - App 390×844 深色与浅色离屏截图已人工复核。
-- 真实浏览器已复核：桌面深色帮助首页与对话工作区、390×844 浅色帮助首页、App 直达移动页、双语切换、失败保留问题、相关指南和浏览器返回；均无横向溢出。
-- `scripts/check-all.sh` 唯一未跑项为 `protocol:iosSimulatorArm64Test`：本机 Xcode 缺少 `ios_simulator_arm64` SDK；失败发生在测试设备解析前，不是代码断言失败。
+- 线上 390×844 真实浏览器已复核：安全会话环境可见、fragment 已从地址栏移除、输入框为 16px，聚焦前后输入框/编辑区/欢迎区几何尺寸完全一致且无横向溢出。
+- 线上真实客服请求携带安全环境后成功返回；服务端端到端测试确认未知字段和项目路径不会进入 Agent 消息。
+- `scripts/check-all.sh` 唯一失败项为 `protocol:iosSimulatorArm64Test`：本机 Xcode 缺少 `ios_simulator_arm64` SDK；失败发生在测试设备解析前，不是代码断言失败。

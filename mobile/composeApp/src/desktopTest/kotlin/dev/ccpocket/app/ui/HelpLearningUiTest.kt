@@ -16,10 +16,13 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.SUPPORT_CHAT_URL
+import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.present
+import dev.ccpocket.app.supportChatUrl
+import dev.ccpocket.app.util.B64Url
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.files_title
 import dev.ccpocket.app.resources.help_action_open_changes
@@ -30,6 +33,7 @@ import dev.ccpocket.app.resources.support_title
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.PocketJson
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionLive
 import kotlin.test.Test
@@ -161,5 +165,27 @@ class HelpLearningUiTest {
         }
         assertEquals("2026-07-25", HELP_CONTENT_VERIFIED_AT)
         assertEquals("https://pocket.ark-nexus.cc/support/?mode=chat&source=app", SUPPORT_CHAT_URL)
+    }
+
+    @Test
+    fun sessionSupportContextStaysInTheUrlFragmentAndRoundTrips() {
+        val context = SupportContext(
+            screen = "chat",
+            platform = "iOS 18.5 · iPhone",
+            appVersion = "1.5.1",
+            agent = "claude",
+            model = "claude-sonnet-4-5",
+            state = "idle",
+            controls = listOf("composer", "changed_files"),
+        )
+        val url = supportChatUrl(context)
+
+        assertEquals(SUPPORT_CHAT_URL, url.substringBefore("#"))
+        assertTrue(url.contains("#ctx="))
+        val decoded = PocketJson.decodeFromString(
+            SupportContext.serializer(),
+            B64Url.decode(url.substringAfter("#ctx=")).decodeToString(),
+        )
+        assertEquals(context, decoded)
     }
 }

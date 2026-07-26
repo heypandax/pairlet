@@ -13,10 +13,12 @@
   const log = document.getElementById('chat-log');
   const welcome = document.getElementById('chat-welcome');
   const directNote = document.getElementById('direct-entry-note');
+  const directNoteText = document.getElementById('direct-entry-note-text');
+  const contextRemove = document.getElementById('context-remove');
   const related = document.getElementById('related-guides');
   const back = document.getElementById('back-to-help');
   const chatStatus = document.getElementById('chat-status');
-  if (!home || !chatView || !homeForm || !homeInput || !form || !input || !send || !log || !related || !back) return;
+  if (!home || !chatView || !homeForm || !homeInput || !form || !input || !send || !log || !directNote || !directNoteText || !contextRemove || !related || !back) return;
 
   const localPreview = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
   const apiBase = window.location.hostname === 'pocket.ark-nexus.cc' || localPreview
@@ -24,6 +26,49 @@
     : 'https://pocket.ark-nexus.cc/support-api/chat';
   const params = new URLSearchParams(window.location.search);
   const directEntry = params.get('mode') === 'chat' && params.get('source') === 'app';
+  const allowedControls = ['composer', 'quick_actions', 'changed_files', 'terminal', 'model_picker'];
+
+  function safeContextToken(value, pattern, max) {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim().slice(0, max);
+    return pattern.test(trimmed) ? trimmed : null;
+  }
+
+  function sanitizeAppContext(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.schemaVersion !== 1) return null;
+    if (!['chat', 'projects', 'sessions', 'settings'].includes(value.screen)) return null;
+    const context = {
+      schemaVersion: 1,
+      screen: value.screen,
+      platform: safeContextToken(value.platform, /^[A-Za-z0-9 ._()·/-]+$/, 64),
+      appVersion: safeContextToken(value.appVersion, /^[A-Za-z0-9._+-]+$/, 32),
+      agent: ['claude', 'codex', 'opencode'].includes(value.agent) ? value.agent : null,
+      model: safeContextToken(value.model, /^[A-Za-z0-9._:+/@-]+$/, 96),
+      state: ['idle', 'generating', 'observing', 'disconnected'].includes(value.state) ? value.state : null,
+      controls: Array.isArray(value.controls)
+        ? value.controls.filter(function (item, index, items) {
+          return allowedControls.includes(item) && items.indexOf(item) === index;
+        }).slice(0, allowedControls.length)
+        : [],
+    };
+    return context;
+  }
+
+  function readAppContext() {
+    const match = window.location.hash.match(/^#ctx=([A-Za-z0-9_-]{1,4096})$/);
+    if (!match) return null;
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+    try {
+      const padded = match[1].replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - match[1].length % 4) % 4);
+      const bytes = Uint8Array.from(window.atob(padded), function (character) { return character.charCodeAt(0); });
+      return sanitizeAppContext(JSON.parse(new TextDecoder().decode(bytes)));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  const appContext = readAppContext();
+  let attachAppContext = Boolean(appContext);
 
   const copy = {
     en: {
@@ -45,6 +90,10 @@
       matched: 'Closest verified guides',
       retry: 'Retry the same question',
       report: 'Report a reproducible issue',
+      appContextReady: 'Session environment ready: %s. It will be sent with your question; no conversation, path, or logs.',
+      appDirect: 'Opened from the App. You can ask right away.',
+      appContextRemoved: 'Opened from the App. Session environment will not be attached.',
+      removeContext: 'Don’t attach',
     },
     zh: {
       homePlaceholder: '例如：我想看看这次会话改了哪些文件',
@@ -65,6 +114,10 @@
       matched: '最贴近的已核验指南',
       retry: '重试同一个问题',
       report: '报告可复现问题',
+      appContextReady: '已准备会话环境：%s。提问时一并发送；不含对话内容、路径或日志。',
+      appDirect: '从 App 打开，可以直接提问。',
+      appContextRemoved: '从 App 打开；本次不会附带会话环境。',
+      removeContext: '不附带',
     },
   };
 
@@ -157,6 +210,30 @@
     homeInput.placeholder = text.homePlaceholder;
     input.placeholder = text.chatPlaceholder;
     renderRelated(currentQuestion);
+    renderDirectEntryNote(document.body.classList.contains('support-direct'));
+  }
+
+  function contextSummary(context) {
+    const agentNames = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
+    const values = [context.platform, context.agent ? agentNames[context.agent] : null, context.model].filter(Boolean);
+    return values.join(' · ') || (lang() === 'zh' ? '当前会话页' : 'current session screen');
+  }
+
+  function renderDirectEntryNote(show) {
+    directNote.hidden = !show;
+    if (!show) return;
+    const text = copy[lang()];
+    if (appContext && attachAppContext) {
+      directNoteText.textContent = text.appContextReady.replace('%s', contextSummary(appContext));
+      contextRemove.textContent = text.removeContext;
+      contextRemove.hidden = false;
+    } else if (appContext) {
+      directNoteText.textContent = text.appContextRemoved;
+      contextRemove.hidden = true;
+    } else {
+      directNoteText.textContent = text.appDirect;
+      contextRemove.hidden = true;
+    }
   }
 
   function makeSessionId() {
@@ -187,7 +264,7 @@
     chatView.hidden = false;
     document.body.classList.add('support-chat-active');
     document.body.classList.toggle('support-direct', Boolean(settings.direct));
-    directNote.hidden = !settings.direct;
+    renderDirectEntryNote(Boolean(settings.direct));
     if (settings.pushHistory) {
       const next = window.location.pathname + window.location.search + '#chat';
       window.history.pushState({ ccpSupportView: 'chat' }, '', next);
@@ -336,10 +413,12 @@
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timeout = controller ? window.setTimeout(function () { controller.abort(); }, 135000) : 0;
     try {
+      const requestBody = { message: question, sessionId: sessionId };
+      if (appContext && attachAppContext) requestBody.context = appContext;
       const response = await fetch(apiBase, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: question, sessionId: sessionId }),
+        body: JSON.stringify(requestBody),
         signal: controller ? controller.signal : undefined,
       });
       const data = await response.json().catch(function () { return {}; });
@@ -432,6 +511,10 @@
   });
   document.querySelectorAll('[data-setlang]').forEach(function (button) {
     button.addEventListener('click', updateLanguage);
+  });
+  contextRemove.addEventListener('click', function () {
+    attachAppContext = false;
+    renderDirectEntryNote(true);
   });
 
   renderRelated('');

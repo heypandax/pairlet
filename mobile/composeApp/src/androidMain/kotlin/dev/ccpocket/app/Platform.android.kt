@@ -5,6 +5,8 @@ actual fun defaultDaemonUrl(): String = "ws://10.0.2.2:8765/v1/ws"
 
 actual fun epochMillis(): Long = System.currentTimeMillis()
 
+actual fun supportPlatformLabel(): String = "Android ${android.os.Build.VERSION.RELEASE}"
+
 actual fun localClock(epochMs: Long): LocalClock {
     val c = java.util.Calendar.getInstance().apply { timeInMillis = epochMs }
     return LocalClock(

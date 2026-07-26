@@ -34,25 +34,37 @@ class SupportExperienceContractTest(unittest.TestCase):
         ):
             self.assertNotIn(removed, self.html)
 
-    def test_app_direct_url_has_only_the_non_sensitive_entry_contract(self):
+    def test_app_direct_url_keeps_context_out_of_the_request_query(self):
         self.assertIn(
             'const val SUPPORT_CHAT_URL = "${SUPPORT_URL}?mode=chat&source=app"',
             self.open_url,
         )
+        self.assertIn('"$SUPPORT_CHAT_URL#ctx=', self.open_url)
+        self.assertIn("SupportContext", self.open_url)
         self.assertIn("params.get('mode') === 'chat'", self.js)
         self.assertIn("params.get('source') === 'app'", self.js)
-        self.assertNotRegex(
-            self.open_url,
-            r"SUPPORT_CHAT_URL[^\n]*(session|path|repo|log|model|machine|token|pairing)",
-        )
+        self.assertIn("window.location.hash.match(/^#ctx=", self.js)
+        self.assertIn("requestBody.context = appContext", self.js)
+        self.assertNotIn("未附带任何会话、路径、模型或日志", self.html)
 
     def test_native_support_entry_is_one_clickable_row(self):
         body = self.help_screen.split("private fun SmartSupportCard", 1)[1].split(
             "private fun HelpTaskCard", 1
         )[0]
-        self.assertIn("openWebUrl(SUPPORT_CHAT_URL)", body)
+        self.assertIn("openWebUrl(supportChatUrl(supportContext))", body)
         self.assertEqual(1, body.count(".clickable"))
         self.assertNotIn("HelpAction(", body)
+
+    def test_mobile_textareas_do_not_trigger_ios_focus_zoom(self):
+        self.assertRegex(
+            self.css,
+            r"\.question-composer textarea\{[^}]*font-size:16px",
+        )
+        self.assertRegex(
+            self.css,
+            r"\.chat-composer textarea\{[^}]*font-size:16px",
+        )
+        self.assertIn("interactive-widget=resizes-content", self.html)
 
     def test_chat_waiting_and_failure_preserve_the_question(self):
         self.assertIn(

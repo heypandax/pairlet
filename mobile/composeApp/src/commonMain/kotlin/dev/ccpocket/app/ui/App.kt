@@ -124,7 +124,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.ccpocket.app.APP_VERSION
+import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.defaultDaemonUrl
+import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
@@ -1333,6 +1336,20 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 repo.fetchChangedFiles()
                 showChangedFiles = true
             },
+            supportContext = SupportContext(
+                screen = "chat",
+                platform = supportPlatformLabel(),
+                appVersion = APP_VERSION,
+                agent = (repo.sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase(),
+                model = repo.model.value?.take(96),
+                state = when {
+                    !repo.connected.value -> "disconnected"
+                    repo.streaming.value -> "generating"
+                    repo.observing.value -> "observing"
+                    else -> "idle"
+                },
+                controls = listOf("composer", "quick_actions", "changed_files", "terminal", "model_picker"),
+            ),
         )
         return
     }

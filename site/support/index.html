@@ -2,7 +2,7 @@
 <html lang="en" data-theme="dark" data-lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
 <title>CC Pocket Help &amp; Smart Support</title>
 <meta name="description" content="Solve common CC Pocket tasks, search verified guides, or ask public smart support without an account." />
 <link rel="canonical" href="https://heypandax.github.io/cc-pocket/support/" />
@@ -29,7 +29,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="../styles.css" />
-<link rel="stylesheet" href="support.css?v=20260726-2" />
+<link rel="stylesheet" href="support.css?v=20260726-3" />
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -138,13 +138,17 @@
       <div class="support-identity"><span class="support-mark" aria-hidden="true">&gt;_</span><span><strong><span class="i18n-en">Smart support</span><span class="i18n-zh">智能客服</span></strong><small><span class="i18n-en">Verified manual answers</span><span class="i18n-zh">基于已核验手册回答</span></small></span></div>
       <span class="public-pill"><span class="i18n-en">Public · no sign-in · no saved history</span><span class="i18n-zh">公开 · 无需登录 · 不保存历史</span></span>
     </header>
-    <div class="direct-entry-note" id="direct-entry-note" hidden><span aria-hidden="true">✓</span><span class="i18n-en">Opened from the App. Only the entry source was passed — no session, path, model, or log was attached.</span><span class="i18n-zh">从 App 打开，只传递了入口来源；未附带任何会话、路径、模型或日志。</span></div>
+    <div class="direct-entry-note" id="direct-entry-note" hidden>
+      <span aria-hidden="true">✓</span>
+      <span class="direct-entry-note-text" id="direct-entry-note-text"></span>
+      <button type="button" class="context-remove" id="context-remove" hidden></button>
+    </div>
     <div class="chat-layout">
       <div class="chat-column">
         <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-label="Support conversation">
           <div class="chat-welcome" id="chat-welcome">
             <h2><span class="i18n-en">What do you want to solve?</span><span class="i18n-zh">你想解决什么？</span></h2>
-            <p><span class="i18n-en">Tell me what you want to do, or where you’re stuck. I only use the verified CC Pocket manual. I cannot connect to your computer or read App sessions.</span><span class="i18n-zh">告诉我你想完成什么，或哪里卡住了。我只使用已核验的 CC Pocket 用户手册，也无法连接你的电脑或读取 App 会话。</span></p>
+            <p><span class="i18n-en">Tell me what you want to do, or where you’re stuck. I only use the verified CC Pocket manual. I cannot connect to your computer or read the conversation; from the App, I only receive the safe environment shown above.</span><span class="i18n-zh">告诉我你想完成什么，或哪里卡住了。我只使用已核验的 CC Pocket 用户手册，无法连接你的电脑或读取会话内容；从 App 进入时，只会使用上方展示的安全环境信息。</span></p>
             <span class="chat-suggestions-label"><span class="i18n-en">Choose one to start</span><span class="i18n-zh">可以直接点一个开始</span></span>
             <div class="suggestion-row chat-suggestions">
               <button type="button" data-question-en="How do I see what files the agent changed?" data-question-zh="怎么看 Agent 改了哪些文件？"><span class="i18n-en">See changed files</span><span class="i18n-zh">怎么看改过的文件？</span></button>
@@ -175,6 +179,6 @@
 
 <script>(function(){try{if(!localStorage.getItem('ccp-lang'))localStorage.setItem('ccp-lang',(navigator.language||'').toLowerCase().startsWith('zh')?'zh':'en');}catch(e){}}());</script>
 <script src="../app.js"></script>
-<script src="support.js?v=20260726-4"></script>
+<script src="support.js?v=20260726-5"></script>
 </body>
 </html>

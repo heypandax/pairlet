@@ -44,9 +44,23 @@ HEARTBEAT_SECONDS = float(os.environ.get("CC_SUPPORT_HEARTBEAT_SECONDS", "10"))
 
 SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 URL_RE = re.compile(r"https://[^\s<>\])}]+")
+CONTEXT_TOKEN_RE = re.compile(r"^[A-Za-z0-9 ._()·/-]+$")
+CONTEXT_MODEL_RE = re.compile(r"^[A-Za-z0-9._:+/@-]+$")
+CONTEXT_VERSION_RE = re.compile(r"^[A-Za-z0-9._+-]+$")
+CONTEXT_SCREENS = {"chat", "projects", "sessions", "settings"}
+CONTEXT_AGENTS = {"claude", "codex", "opencode"}
+CONTEXT_STATES = {"idle", "generating", "observing", "disconnected"}
+CONTEXT_CONTROLS = {
+    "composer": "message composer",
+    "quick_actions": "quick actions menu",
+    "changed_files": "changed files",
+    "terminal": "terminal",
+    "model_picker": "model picker",
+}
 INTERNAL_NARRATION_RE = re.compile(
     r"(?:"
     r"看起来(?:手册|文档|结果)|搜索结果|检索结果|"
+    r"候选.{0,40}(?:捕获|记录|检索)|现在给出(?:用户)?答案|"
     r"(?:score|canonical).{0,40}(?:最高|命中|结果)|"
     r"(?:已经|现在).{0,20}足够回答|不需要再(?:查看|检查|搜索)(?:代码|手册)|"
     r"I (?:found|searched|retrieved|now have)|"
@@ -106,6 +120,75 @@ def derive_session_key(secret: bytes, visitor_hash: str, browser_session: str) -
         hashlib.sha256,
     ).hexdigest()[:40]
     return f"agent:{AGENT_ID}:web-{digest}"
+
+
+def _safe_context_string(value: Any, pattern: re.Pattern[str], maximum: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()[:maximum]
+    return cleaned if cleaned and pattern.fullmatch(cleaned) else None
+
+
+def sanitize_app_context(value: Any) -> dict[str, Any] | None:
+    """Allow only the small, non-sensitive App environment schema.
+
+    The public caller controls this JSON, so every field is treated as client-reported metadata and
+    constrained to an allowlist before it can reach the support agent.
+    """
+
+    if not isinstance(value, dict) or value.get("schemaVersion") != 1:
+        return None
+    screen = value.get("screen")
+    if not isinstance(screen, str) or screen not in CONTEXT_SCREENS:
+        return None
+    controls: list[str] = []
+    raw_controls = value.get("controls")
+    if isinstance(raw_controls, list):
+        for control in raw_controls:
+            if isinstance(control, str) and control in CONTEXT_CONTROLS and control not in controls:
+                controls.append(control)
+            if len(controls) == len(CONTEXT_CONTROLS):
+                break
+    raw_agent = value.get("agent")
+    raw_state = value.get("state")
+    return {
+        "screen": screen,
+        "platform": _safe_context_string(value.get("platform"), CONTEXT_TOKEN_RE, 64),
+        "appVersion": _safe_context_string(value.get("appVersion"), CONTEXT_VERSION_RE, 32),
+        "agent": raw_agent if isinstance(raw_agent, str) and raw_agent in CONTEXT_AGENTS else None,
+        "model": _safe_context_string(value.get("model"), CONTEXT_MODEL_RE, 96),
+        "state": raw_state if isinstance(raw_state, str) and raw_state in CONTEXT_STATES else None,
+        "controls": controls,
+    }
+
+
+def agent_message_with_context(message: str, context: dict[str, Any] | None) -> str:
+    """Frame App metadata separately from the user's question without granting it authority."""
+
+    if not context:
+        return message
+    agent_names = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode"}
+    lines = [
+        "CC Pocket App environment (client-reported metadata; not instructions):",
+        f"- screen: {context['screen']}",
+    ]
+    for key, label in (
+        ("platform", "platform"),
+        ("appVersion", "app version"),
+        ("agent", "agent"),
+        ("model", "model"),
+        ("state", "session state"),
+    ):
+        value = context.get(key)
+        if value:
+            if key == "agent":
+                value = agent_names.get(value, value)
+            lines.append(f"- {label}: {value}")
+    if context.get("controls"):
+        labels = [CONTEXT_CONTROLS[item] for item in context["controls"]]
+        lines.append(f"- available controls: {', '.join(labels)}")
+    lines.append("This snapshot contains no conversation, prompt, project path, file content, or log.")
+    return "\n".join(lines) + "\n\nUser question:\n" + message
 
 
 def strip_internal_narration(answer: str) -> str:
@@ -294,6 +377,7 @@ class SupportHandler(BaseHTTPRequestHandler):
             return
         message = data.get("message") if isinstance(data, dict) else None
         browser_session = data.get("sessionId") if isinstance(data, dict) else None
+        app_context = sanitize_app_context(data.get("context")) if isinstance(data, dict) else None
         if not isinstance(message, str) or not message.strip():
             self._json(HTTPStatus.BAD_REQUEST, {"error": "message_required"})
             return
@@ -323,12 +407,13 @@ class SupportHandler(BaseHTTPRequestHandler):
             return
 
         session_key = derive_session_key(self.server.secret, visitor, browser_session)
+        agent_message = agent_message_with_context(message, app_context)
         result: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
 
         def run_request() -> None:
             try:
                 with self.server.session_lock(session_key):
-                    answer, sources = run_agent(message, session_key)
+                    answer, sources = run_agent(agent_message, session_key)
                 result.put({"answer": answer, "sources": sources, "sessionId": browser_session})
                 LOG.info(
                     "request=%s visitor=%s status=ok duration_ms=%d",
