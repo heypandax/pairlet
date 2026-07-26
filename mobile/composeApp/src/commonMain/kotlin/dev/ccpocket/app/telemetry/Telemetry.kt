@@ -29,6 +29,13 @@ enum class TelEvent(val id: String) {
     PromptResent("prompt_resent"),
     ApprovalShown("approval_shown"),
     ApprovalDecided("approval_decided"),
+    // learning/help discovery: enum-only entry/task ids answer whether the native task guides are useful.
+    // No search text, question, screen contents, or learning profile is collected.
+    HelpOpened("help_opened"),
+    HelpSupportOpened("help_support_opened"),
+    HelpTaskOpened("help_task_opened"),
+    HelpGuideOpened("help_guide_opened"),
+    HelpDirectAction("help_direct_action"),
 }
 
 /** Parameter keys — also enum-only; values are short categorical strings or counts, never content. */
@@ -42,6 +49,8 @@ enum class TelKey(val id: String) {
     Reason("reason"),       // conn_failed cause: wedged | auth | closed | <exception name>
     Attempt("attempt"),     // reconnect attempt counter at the time of failure
     Version("version"),
+    EntryPoint("entry_point"), // projects | sessions | chat | settings
+    HelpTask("help_task"),     // one of the fixed HelpTaskId values
 }
 
 /** The single seam over Firebase Analytics + Crashlytics. Default-on, opt-out via [setEnabled]. */

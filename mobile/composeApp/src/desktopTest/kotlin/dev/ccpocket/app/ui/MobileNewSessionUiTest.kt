@@ -9,6 +9,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import androidx.compose.ui.text.TextLayoutResult
@@ -19,6 +20,8 @@ import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.new_session_cta
 import dev.ccpocket.app.resources.new_session_subtitle
+import dev.ccpocket.app.resources.help_ask_support
+import dev.ccpocket.app.resources.support_title
 import dev.ccpocket.app.theme.PocketTheme
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -124,5 +127,16 @@ class MobileNewSessionUiTest {
         waitForIdle()
         assertTrue(present(pickerSubtitle), "the defaults chip must open the full picker")
         assertNull(repo.convoId.value, "opening the picker must not start a session yet")
+    }
+
+    @Test
+    fun helpIconOpensTheNativeTaskCatalog() = runComposeUiTest {
+        composeSessionsScreen()
+        onNodeWithContentDescription(runBlocking { getString(Res.string.support_title) }).performClick()
+        waitForIdle()
+        assertTrue(
+            present(runBlocking { getString(Res.string.help_ask_support) }),
+            "the one-tap help entry must open native task learning before handing off to the web",
+        )
     }
 }

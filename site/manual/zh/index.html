@@ -93,7 +93,7 @@
 </section><section class="category-card">
   <h2>项目与会话</h2>
   <p>恢复工作，并安全接管终端中的现有会话。</p>
-  <div class="category-links"><a href="take-over-a-terminal-session/"><span>无分叉接管终端会话</span><span aria-hidden="true">→</span></a><a href="choose-agent-and-model/"><span>选择 Agent 与模型</span><span aria-hidden="true">→</span></a></div>
+  <div class="category-links"><a href="review-changed-files/"><span>查看本次会话改过的文件</span><span aria-hidden="true">→</span></a><a href="take-over-a-terminal-session/"><span>无分叉接管终端会话</span><span aria-hidden="true">→</span></a><a href="choose-agent-and-model/"><span>选择 Agent 与模型</span><span aria-hidden="true">→</span></a></div>
 </section><section class="category-card">
   <h2>对话与控制</h2>
   <p>立即发送、运行中排队，或预约稍后执行提示词。</p>
@@ -127,6 +127,9 @@
     <div class="updated-list"><a class="updated-row" href="install-and-pair/">
   <span><strong>安装并配对电脑</strong><small>开始使用</small></span>
   <span class="verified">已核验 2026-07-25</span>
+</a><a class="updated-row" href="review-changed-files/">
+  <span><strong>查看本次会话改过的文件</strong><small>项目与会话</small></span>
+  <span class="verified">已核验 2026-07-25</span>
 </a><a class="updated-row" href="schedule-a-prompt/">
   <span><strong>预约稍后发送提示词</strong><small>对话与控制</small></span>
   <span class="verified">已核验 2026-07-25</span>
@@ -136,14 +139,11 @@
 </a><a class="updated-row" href="take-over-a-terminal-session/">
   <span><strong>无分叉接管终端会话</strong><small>项目与会话</small></span>
   <span class="verified">已核验 2026-07-25</span>
-</a><a class="updated-row" href="approve-from-another-computer/">
-  <span><strong>从另一台设备审批操作</strong><small>审批与安全</small></span>
-  <span class="verified">已核验 2026-07-25</span>
 </a></div>
   </section>
 </main>
 <footer class="manual-footer"><div class="manual-wrap"><span>© 2026 CC Pocket · MIT</span><span><a href="../../features.html">功能</a><a href="https://github.com/heypandax/cc-pocket">GitHub</a></span></div></footer>
-<script id="manual-search-index" type="application/json">[{"title": "安装并配对电脑", "summary": "安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。", "category": "开始使用", "aliases": ["安装", "配对", "二维码", "连接电脑", "开始"], "url": "install-and-pair/"}, {"title": "预约稍后发送提示词", "summary": "长按发送，选择延迟或自定义时间，让已配对电脑稍后执行提示词。", "category": "对话与控制", "aliases": ["定时", "预约", "稍后发送", "每天重复", "长按发送"], "url": "schedule-a-prompt/"}, {"title": "Whisper 语音转写如何处理录音", "summary": "App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。", "category": "对话与控制", "aliases": ["Whisper", "语音输入", "语音转写", "录音隐私", "转写日志", "临时文件"], "url": "whisper-dictation-privacy/"}, {"title": "无分叉接管终端会话", "summary": "先只读旁观终端会话；终端不再写入后，再原地接管继续。", "category": "项目与会话", "aliases": ["终端会话", "接管", "继续", "分叉", "恢复"], "url": "take-over-a-terminal-session/"}, {"title": "从另一台设备审批操作", "summary": "在手机或桌面端查看工具请求、核对命令或文件操作，再允许或拒绝。", "category": "审批与安全", "aliases": ["审批", "权限", "允许", "拒绝", "命令", "多电脑"], "url": "approve-from-another-computer/"}, {"title": "选择 Agent 与模型", "summary": "创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。", "category": "Agent 与模型", "aliases": ["Agent", "模型", "Claude", "Codex", "OpenCode", "网关"], "url": "choose-agent-and-model/"}, {"title": "独立 Claude 登录会共享什么", "summary": "凭据隔离成功启动后，daemon 会单独保存 Claude 凭据，同时继续共享会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置；准备失败时会告警并降级为未隔离模式。", "category": "Agent 与模型", "aliases": ["独立 Claude 登录", "隔离 Claude 凭据", "账号隔离", "CLAUDE.md", "skills", "MCP", "会话历史"], "url": "separate-claude-login/"}, {"title": "向协作者共享一个文件夹", "summary": "为一个文件夹生成一次性邀请，选择权限和有效期，并可随时撤销。", "category": "共享", "aliases": ["共享", "文件夹", "访客", "邀请", "协作者", "撤销"], "url": "share-a-folder/"}, {"title": "修复离线电脑", "summary": "检查 daemon 状态并恢复中继连接；只有设备凭据被移除时才重新配对。", "category": "故障排查", "aliases": ["离线", "无法连接", "断开", "状态", "中继", "电脑"], "url": "fix-offline-computer/"}, {"title": "更新 daemon", "summary": "使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。", "category": "故障排查", "aliases": ["更新", "升级", "daemon 过旧", "版本过旧", "Homebrew", "Scoop"], "url": "update-daemon/"}]</script>
+<script id="manual-search-index" type="application/json">[{"title": "安装并配对电脑", "summary": "安装 CC Pocket daemon，生成一次性二维码，无需注册账号即可完成 App 配对。", "category": "开始使用", "aliases": ["安装", "配对", "二维码", "连接电脑", "开始"], "url": "install-and-pair/"}, {"title": "查看本次会话改过的文件", "summary": "打开会话的改动文件列表，逐行核对 diff，并与文件结果对照；查看本身不会修改或批准任何操作。", "category": "项目与会话", "aliases": ["改动文件", "diff", "查看改动", "改了什么", "文件变更"], "url": "review-changed-files/"}, {"title": "预约稍后发送提示词", "summary": "长按发送，选择延迟或自定义时间，让已配对电脑稍后执行提示词。", "category": "对话与控制", "aliases": ["定时", "预约", "稍后发送", "每天重复", "长按发送"], "url": "schedule-a-prompt/"}, {"title": "Whisper 语音转写如何处理录音", "summary": "App 把音频分片发给已配对电脑，由 daemon 调用本地 whisper.cpp 转写，并限制运行日志、尽力清理临时文件。", "category": "对话与控制", "aliases": ["Whisper", "语音输入", "语音转写", "录音隐私", "转写日志", "临时文件"], "url": "whisper-dictation-privacy/"}, {"title": "无分叉接管终端会话", "summary": "先只读旁观终端会话；终端不再写入后，再原地接管继续。", "category": "项目与会话", "aliases": ["终端会话", "接管", "继续", "分叉", "恢复"], "url": "take-over-a-terminal-session/"}, {"title": "从另一台设备审批操作", "summary": "在手机或桌面端查看工具请求、核对命令或文件操作，再允许或拒绝。", "category": "审批与安全", "aliases": ["审批", "权限", "允许", "拒绝", "命令", "多电脑"], "url": "approve-from-another-computer/"}, {"title": "选择 Agent 与模型", "summary": "创建会话时选择 Claude Code、Codex 或 OpenCode，再选择支持的模型或网关模型 ID。", "category": "Agent 与模型", "aliases": ["Agent", "模型", "Claude", "Codex", "OpenCode", "网关"], "url": "choose-agent-and-model/"}, {"title": "独立 Claude 登录会共享什么", "summary": "凭据隔离成功启动后，daemon 会单独保存 Claude 凭据，同时继续共享会话历史、CLAUDE.md、skills、plugins、settings 与 MCP 配置；准备失败时会告警并降级为未隔离模式。", "category": "Agent 与模型", "aliases": ["独立 Claude 登录", "隔离 Claude 凭据", "账号隔离", "CLAUDE.md", "skills", "MCP", "会话历史"], "url": "separate-claude-login/"}, {"title": "向协作者共享一个文件夹", "summary": "为一个文件夹生成一次性邀请，选择权限和有效期，并可随时撤销。", "category": "共享", "aliases": ["共享", "文件夹", "访客", "邀请", "协作者", "撤销"], "url": "share-a-folder/"}, {"title": "修复离线电脑", "summary": "检查 daemon 状态并恢复中继连接；只有设备凭据被移除时才重新配对。", "category": "故障排查", "aliases": ["离线", "无法连接", "断开", "状态", "中继", "电脑"], "url": "fix-offline-computer/"}, {"title": "更新 daemon", "summary": "使用内置更新器或最初安装 CC Pocket 的包管理器，再确认新版 daemon 在线。", "category": "故障排查", "aliases": ["更新", "升级", "daemon 过旧", "版本过旧", "Homebrew", "Scoop"], "url": "update-daemon/"}]</script>
 <script src="../manual.js"></script>
 </body>
 </html>

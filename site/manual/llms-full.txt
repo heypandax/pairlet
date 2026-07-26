@@ -21,6 +21,22 @@ URL: https://heypandax.github.io/cc-pocket/manual/zh/install-and-pair/
 
 install 安装 daemon 在已经安装 Claude Code、Codex 或 OpenCode 的电脑上，执行对应系统的命令。 macOS 或 Linux 安装器会校验发行包、安装 daemon，并注册登录后自动启动的服务。 curl -fsSL https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.sh | bash Windows 用普通用户打开 PowerShell。安装器会注册登录时运行的计划任务。 irm https://raw.githubusercontent.com/heypandax/cc-pocket/main/scripts/install.ps1 | iex pair 配对 App 生成一次性配对码 在电脑上执行。命令会同时打印二维码和 6 位备用配对码。 cc-pocket-daemon pair 扫码或输入配对码 打开 CC Pocket，选择“添加电脑”并扫描二维码；相机不可用时可输入 6 位数字。 打开项目 电脑显示在线后，选择项目文件夹，开始新会话或恢复现有会话。 配对发生在设备之间。CC Pocket 不创建用户账号；daemon 主动向外连接，无需开放公网入站端口。
 
+## Review files changed in a session (en)
+
+URL: https://heypandax.github.io/cc-pocket/manual/en/review-changed-files/
+
+Open the live session, tap ⋯ → Changed files , choose a file, then switch between its Diff and File views.
+
+open Open the changed-file list Open the live session Choose the session whose work you want to review. The list is scoped to that session. Open Quick actions Tap ⋯ in the top-right, then choose Changed files . Choose a file Each row identifies the changed path and, when available, its added and removed line counts. inspect Inspect the result Diff shows added and removed lines grouped by hunk. File shows the resulting file content; binary files may only offer the file view. Opening this screen is read-only. It does not approve a pending tool request or edit the file. If no files are listed, the agent may not have changed a file in this session yet, or the connected daemon may be too old to provide line-level diffs.
+
+## 查看本次会话改过的文件 (zh)
+
+URL: https://heypandax.github.io/cc-pocket/manual/zh/review-changed-files/
+
+打开进行中的会话，点击 ⋯ → 改动文件 ，选择文件，再在 Diff 与文件原文之间切换。
+
+open 打开改动文件列表 打开进行中的会话 选择需要核对工作的会话；改动文件列表只对应这个会话。 打开快捷操作 点击右上角的 ⋯ ，再选择 改动文件 。 选择文件 每行会显示变更路径；数据可用时，也会显示新增与删除行数。 inspect 核对结果 Diff 按区块展示新增行与删除行。 文件 展示变更后的内容；二进制文件可能只提供文件视图。 打开此页面是只读操作，不会批准待处理的工具请求，也不会编辑文件。 如果列表为空，可能是 Agent 尚未在本次会话修改文件，或当前 daemon 版本过旧，无法提供逐行 diff。
+
 ## Schedule a prompt for later (en)
 
 URL: https://heypandax.github.io/cc-pocket/manual/en/schedule-a-prompt/

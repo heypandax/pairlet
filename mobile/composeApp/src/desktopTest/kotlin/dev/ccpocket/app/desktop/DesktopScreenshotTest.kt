@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.HelpCenterScreen
+import dev.ccpocket.app.ui.HelpEntryPoint
 import org.jetbrains.skia.EncodedImageFormat
 import java.io.File
 import kotlin.test.Test
@@ -102,10 +104,18 @@ class DesktopScreenshotTest {
         shot("06-focused-permission.png", W, H) { WindowFrame(seed { selectSession(sessions[2]); showPermissionModal = true }) }
         shot("07-command-palette.png", W, H) { WindowFrame(seed { palette = PaletteScope.ALL }) }
         shot("08-settings.png", W, H) { WindowFrame(seed { showSettings = true }) }
+        shot("09-help-learning-mobile.png", 390, 844) {
+            HelpCenterScreen(HelpEntryPoint.CHAT, onBack = {}, onOpenChanges = {})
+        }
+        shot("10-help-learning-mobile-light.png", 390, 844) {
+            PocketTheme(dark = false) {
+                HelpCenterScreen(HelpEntryPoint.CHAT, onBack = {}, onOpenChanges = {})
+            }
+        }
 
         val shots = outDir.listFiles { f -> f.name.endsWith(".png") }?.sortedBy { it.name }.orEmpty()
         println("[screenshots] wrote ${shots.size} files to ${outDir.absolutePath}")
         shots.forEach { println("[screenshots]   ${it.name}  ${it.length() / 1024}KB") }
-        assertTrue(shots.size >= 8, "expected at least 8 screenshots")
+        assertTrue(shots.size >= 10, "expected at least 10 screenshots")
     }
 }

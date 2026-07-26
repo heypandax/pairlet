@@ -29,7 +29,6 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Keyboard
@@ -42,7 +41,7 @@ import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import dev.ccpocket.app.epochMillis
-import dev.ccpocket.app.SUPPORT_URL
+import dev.ccpocket.app.SUPPORT_CHAT_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.pairing.encode
@@ -157,15 +156,6 @@ fun SettingsModal(model: DesktopModel, onDismiss: () -> Unit) {
 
 @Composable
 private fun HelpPane() {
-    val clipboard = LocalClipboardManager.current
-    val aiPrompt = stringResource(Res.string.settings_help_ai_prompt)
-    var copied by remember { mutableStateOf(false) }
-    LaunchedEffect(copied) {
-        if (copied) {
-            delay(2400)
-            copied = false
-        }
-    }
     Column {
         Text(
             stringResource(Res.string.settings_help_title),
@@ -179,7 +169,7 @@ private fun HelpPane() {
         HelpActionRow(
             icon = Icons.Rounded.SmartToy,
             title = stringResource(Res.string.support_open),
-        ) { openWebUrl(SUPPORT_URL) }
+        ) { openWebUrl(SUPPORT_CHAT_URL) }
         Spacer(Modifier.height(7.dp))
         HelpActionRow(
             icon = Icons.Rounded.Search,
@@ -201,21 +191,11 @@ private fun HelpPane() {
             title = stringResource(Res.string.settings_help_approvals),
         ) { openWebUrl("${USER_MANUAL_URL}?q=approve") }
         Spacer(Modifier.height(18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            HelpButton(
-                label = stringResource(Res.string.settings_help_open),
-                icon = Icons.AutoMirrored.Rounded.OpenInNew,
-                primary = true,
-            ) { openWebUrl(USER_MANUAL_URL) }
-            HelpButton(
-                label = if (copied) stringResource(Res.string.settings_help_copied) else stringResource(Res.string.settings_help_copy_ai),
-                icon = Icons.Rounded.ContentCopy,
-                primary = false,
-            ) {
-                clipboard.setText(AnnotatedString("$USER_MANUAL_URL\n$aiPrompt"))
-                copied = true
-            }
-        }
+        HelpButton(
+            label = stringResource(Res.string.settings_help_open),
+            icon = Icons.AutoMirrored.Rounded.OpenInNew,
+            primary = true,
+        ) { openWebUrl(USER_MANUAL_URL) }
     }
 }
 

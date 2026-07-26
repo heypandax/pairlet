@@ -125,8 +125,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.ccpocket.app.defaultDaemonUrl
-import dev.ccpocket.app.SUPPORT_URL
-import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
 import dev.ccpocket.app.data.PocketRepository
@@ -494,6 +492,11 @@ private fun ConnectScreen(repo: PocketRepository) {
 @Composable
 private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}) {
     var query by remember { mutableStateOf("") }
+    var showHelp by remember { mutableStateOf(false) }
+    if (showHelp) {
+        HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false })
+        return
+    }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
     // long-press a project → "Share this folder…" opens the owner invite flow full-screen (issue #115)
@@ -580,7 +583,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             }
             ViewToggle(tree) { repo.setTreeView(!tree) }
             Spacer(Modifier.width(4.dp))
-            IconButton({ openWebUrl(SUPPORT_URL) }, modifier = Modifier.size(36.dp)) {
+            IconButton({ showHelp = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
             }
             IconButton({ showSettings = true }, modifier = Modifier.size(36.dp)) {
@@ -1141,6 +1144,11 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
     // Repo-owned so every entry point is guarded: entries disable — a double-tap can't open two fresh
     // sessions — and the repo clears it on SessionLive/PocketError (8s safety net).
     val starting = repo.opening.value
+    var showHelp by remember { mutableStateOf(false) }
+    if (showHelp) {
+        HelpCenterScreen(HelpEntryPoint.SESSIONS, onBack = { showHelp = false })
+        return
+    }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
@@ -1164,7 +1172,7 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                         TailPathText(dir)
                     }
                 }
-                IconButton({ openWebUrl(SUPPORT_URL) }, modifier = Modifier.size(40.dp)) {
+                IconButton({ showHelp = true }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
                 IconButton({ showSettings = true }, modifier = Modifier.size(40.dp)) {
@@ -1315,6 +1323,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
     var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
+    var showHelp by remember { mutableStateOf(false) }
+    if (showHelp) {
+        HelpCenterScreen(
+            entryPoint = HelpEntryPoint.CHAT,
+            onBack = { showHelp = false },
+            onOpenChanges = {
+                showHelp = false
+                repo.fetchChangedFiles()
+                showChangedFiles = true
+            },
+        )
+        return
+    }
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
     if (repo.viewedFilePath.value != null) { // changed-file viewer (issue #36); back → the still-open files list, ✕ → chat (issue #53)
         FileViewerScreen(repo, onExit = if (showChangedFiles) ({ repo.closeFileViewer(); showChangedFiles = false }) else null) { repo.closeFileViewer() }
@@ -1856,6 +1877,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onTerminal = { showTerminal = true },
                 onMode = { showModeSheet = true },
                 onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
+                onHelp = { showHelp = true },
             ) { showQuickActions = false }
         }
         // the composer chip's direct model sheet (issue #157) — same picker, no quick-actions detour

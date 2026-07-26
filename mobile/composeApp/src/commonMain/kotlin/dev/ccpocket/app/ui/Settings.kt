@@ -52,7 +52,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.APP_VERSION
-import dev.ccpocket.app.SUPPORT_URL
 import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
 import dev.ccpocket.app.data.PocketRepository
@@ -94,6 +93,11 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // Capability rows come from the installed CLI/model cache. A recomposition after the reply replaces
     // the loading/empty state; no global max/ultra list is guessed in the client.
     LaunchedEffect(repo.defaultAgent.value) { repo.fetchModels(repo.defaultAgent.value) }
+    var showHelp by remember { mutableStateOf(false) }
+    if (showHelp) {
+        HelpCenterScreen(HelpEntryPoint.SETTINGS, onBack = { showHelp = false })
+        return
+    }
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) { UsageScreen(repo, onBack = { showUsage = false }); return } // full-screen usage dashboard (#26)
     // scheduled tasks (issue #137): list + cancel, full-screen like usage
@@ -151,7 +155,7 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 ManualLinkRow(
                     title = stringResource(Res.string.support_open),
                     sub = stringResource(Res.string.support_sub),
-                ) { openWebUrl(SUPPORT_URL) }
+                ) { showHelp = true }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 ManualLinkRow(
                     title = stringResource(Res.string.settings_manual_title),

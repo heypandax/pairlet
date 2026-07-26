@@ -1,0 +1,64 @@
+/* Help Support Direct Entry v2 — additions layered on help/help.css. No token changes. */
+.v2c{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--hair);border-radius:14px;padding:13px;box-shadow:var(--shadow)}
+.v2c.focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%,transparent)}
+.v2c .phtxt{font-size:14.5px;line-height:1.5;color:var(--muted)}
+.v2c .phtxt.typed{color:var(--text)}
+.v2c .bar{display:flex;align-items:center;gap:10px}
+.v2c .warn{flex:1;min-width:0;display:flex;align-items:center;gap:6px;font:400 11px/1.4 'JetBrains Mono',monospace;color:var(--muted)}
+.v2c .go{width:36px;height:36px;flex:none;border-radius:10px;display:grid;place-items:center;background:var(--accent);color:#0E0F11;cursor:pointer}
+[data-theme="light"] .v2c .go{color:#fff}
+.v2c .go.off{background:var(--raised);color:var(--muted)}
+
+/* fully tappable support row */
+.suprow{display:flex;align-items:center;gap:12px;min-height:64px;padding:13px 14px;border-radius:14px;background:var(--surface);border:1px solid color-mix(in oklab,var(--accent) 42%,var(--hair));box-shadow:var(--shadow);cursor:pointer;transition:background .14s ease,border-color .14s ease}
+.suprow:hover,.suprow:focus-visible{background:var(--raised);border-color:var(--accent);outline:none}
+.suprow .lead{width:38px;height:38px;flex:none;border-radius:11px;display:grid;place-items:center;background:var(--accent-bg);color:var(--accent)}
+
+/* task rows / cards */
+.trow{display:flex;align-items:center;gap:11px;min-height:52px;padding:11px 12px;border-radius:12px;background:var(--surface);border:1px solid var(--hair);cursor:pointer;transition:background .14s ease,border-color .14s ease}
+.trow:hover,.trow:focus-visible{background:var(--raised);border-color:color-mix(in oklab,var(--accent) 40%,var(--hair));outline:none}
+.trow .li{width:30px;height:30px;flex:none;border-radius:9px;display:grid;place-items:center;background:var(--raised);color:var(--accent)}
+.trow.open{border-color:color-mix(in oklab,var(--accent) 45%,var(--hair));align-items:flex-start;flex-direction:column;gap:9px}
+
+/* conversation */
+.qbub{margin-left:auto;max-width:82%;border-radius:12px 12px 4px 12px;padding:10px 12px;font-size:14px;line-height:1.5;background:var(--accent-bg);color:var(--text)}
+.abub{border-radius:12px 12px 12px 4px;padding:12px 13px;background:var(--surface);border:1px solid var(--hair);display:flex;flex-direction:column;gap:11px}
+.abub .lead{font-size:14px;line-height:1.6;color:var(--text);margin:0}
+.srclink{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:10px;background:var(--raised);border:1px solid color-mix(in oklab,var(--accent) 26%,var(--hair));color:var(--accent);font:500 12px/1.35 'JetBrains Mono',monospace;text-decoration:none;cursor:pointer}
+.srclink:hover,.srclink:focus-visible{border-color:var(--accent);background:var(--accent-bg);outline:none}
+.srclink b{color:var(--text);font-weight:500}
+.srclink .u{text-decoration:underline;text-underline-offset:2px}
+.rel{display:flex;align-items:center;gap:8px;min-height:40px;padding:8px 10px;border-radius:10px;border:1px solid var(--hair);font-size:13px;color:var(--sec);cursor:pointer}
+.rel:hover{background:var(--raised);color:var(--text)}
+
+/* waiting */
+.wait{display:flex;align-items:center;gap:10px;padding:12px 13px;border-radius:12px;background:var(--surface);border:1px solid var(--hair);font-size:13px;color:var(--sec)}
+.spin{width:15px;height:15px;flex:none;border-radius:50%;border:1.6px solid var(--hair);border-top-color:var(--accent);animation:v2spin .9s linear infinite}
+@keyframes v2spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none;border-top-color:var(--accent)}}
+
+/* pinned composer dock */
+.dock{flex:none;border-top:1px solid var(--hair);background:var(--base);padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
+
+/* browser chrome for the app-opened web page */
+.bchrome{flex:none;display:flex;align-items:center;gap:9px;height:44px;padding:0 12px;border-bottom:1px solid var(--hair);background:var(--surface)}
+.bchrome .url{flex:1;min-width:0;height:30px;border-radius:8px;background:var(--raised);border:1px solid var(--hair);display:flex;align-items:center;gap:6px;padding:0 9px;font:400 11px/1 'JetBrains Mono',monospace;color:var(--sec);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+/* frame-local overlay (external transition sheet) */
+.ovl{position:absolute;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;z-index:5}
+.ovl .sheet{width:100%;background:var(--raised);border-top:1px solid var(--hair);border-radius:18px 18px 0 0;padding:16px 16px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px}
+
+/* misc */
+.lane{border:1px solid var(--hair);border-radius:12px;background:#16181B;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.lane.acc{border-color:rgba(217,119,87,.45);background:#1B1614}
+.lane h6{margin:0;font:600 13px/1.3 Inter,system-ui;color:#ECEDEE;letter-spacing:-.01em}
+.lane p{margin:0;font:400 11.5px/1.6 'JetBrains Mono',monospace;color:#8A9096}
+.node{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:10px;border:1px solid #2A2E33;background:#101113;font-size:12.5px;color:#ECEDEE}
+.node .m{font:400 10.5px/1.4 'JetBrains Mono',monospace;color:#7A8086}
+.arrow{display:grid;place-items:center;color:#5E646A;font:400 13px/1 'JetBrains Mono',monospace;padding:1px 0}
+.ban{border-radius:12px;padding:11px 12px;display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.55}
+.ban.no{border:1px solid color-mix(in oklab,var(--danger) 40%,var(--hair));background:color-mix(in oklab,var(--danger) 7%,var(--surface));color:var(--sec)}
+.ban.ok2{border:1px solid color-mix(in oklab,var(--success) 40%,var(--hair));background:color-mix(in oklab,var(--success) 7%,var(--surface));color:var(--sec)}
+.tap{cursor:pointer}
+.tap:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
+.mini{font:400 11px/1.5 'JetBrains Mono',monospace;color:var(--muted)}
