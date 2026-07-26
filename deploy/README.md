@@ -5,16 +5,13 @@ opaque, end-to-end-encrypted binary data plane and stores only fingerprints / pu
 (zero-knowledge). It binds **loopback only**; **Caddy** terminates TLS in front of it.
 
 > Status: **LIVE**. The end-to-end-encryption layer is deployed and verified through the full
-> production path (daemon → Cloudflare → Caddy → relay → device), see `scripts/relay-smoke-prod.sh`.
+> production path (daemon → Caddy → relay → device), see `scripts/relay-smoke-prod.sh`.
 > The relay forwards only ciphertext and stores only fingerprints/pubkeys/hashes. Threat model: `docs/SECURITY.md`.
 
 ## Topology
 
 ```
-client ──HTTPS──> Cloudflare (proxy, edge cert for ark-nexus.cc)
-                      │  (orange-cloud; A record proxied, origin = $RELAY_HOST)
-                      ▼
-        Caddy :80/:443 (origin Let's Encrypt cert for pocket.ark-nexus.cc)
+client ──HTTPS──> Caddy :80/:443 (Let's Encrypt cert for pocket.ark-nexus.cc)
                       │  reverse_proxy (also upgrades WebSocket)
                       ▼
         cc-pocket-relay 127.0.0.1:9000  (SQLite at /var/lib/cc-pocket-relay/relay.db)
@@ -25,7 +22,7 @@ WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `
 
 ## Server facts
 
-> Commands below use `$RELAY_HOST` — export it first (`export RELAY_HOST=<your origin IP>`). The origin is kept out of git because it sits behind Cloudflare.
+> Commands below use `$RELAY_HOST` — export it first (`export RELAY_HOST=<your origin IP>`). The origin address is kept out of git.
 
 | Item | Value |
 | --- | --- |
@@ -141,19 +138,20 @@ systemctl reload caddy        # zero-downtime config reload
 # health — on server
 curl -s http://127.0.0.1:9000/healthz                     # -> ok
 
-# health — public (through Cloudflare)
+# health — public
 curl -sS https://pocket.ark-nexus.cc/healthz              # -> ok
 
-# health — origin directly (bypass Cloudflare; validates Caddy's own LE cert)
+# health — pin DNS to the origin explicitly (validates Caddy's LE cert)
 curl -sS --resolve pocket.ark-nexus.cc:443:$RELAY_HOST https://pocket.ark-nexus.cc/healthz
 ```
 
 ## TLS / networking notes
 
-- The domain `pocket.ark-nexus.cc` is **proxied through Cloudflare** (DNS resolves to a
-  Cloudflare IP, not the origin). Two cert layers exist: Cloudflare's edge cert (client side)
-  and Caddy's **origin** Let's Encrypt cert for `pocket.ark-nexus.cc`. Both are valid; the
-  ACME `http-01` challenge completed via Cloudflare passing it through to the origin on :80.
+- As verified on 2026-07-26, public DNS resolves `pocket.ark-nexus.cc` directly to the origin;
+  Caddy is the first HTTP hop and terminates the public Let's Encrypt certificate. Do not rely
+  on Cloudflare WAF, CDN, or edge rate limiting for this hostname. The optional smart-support
+  Turnstile widget works independently of Cloudflare proxying and does not change that network
+  boundary.
 - Renewal is automatic (Caddy). Cert + key persist under
   `/var/lib/caddy/.local/share/caddy/certificates/...`.
 - A benign log line `no OCSP stapling ... no OCSP server specified` is expected for current

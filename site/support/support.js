@@ -18,12 +18,16 @@
   const related = document.getElementById('related-guides');
   const back = document.getElementById('back-to-help');
   const chatStatus = document.getElementById('chat-status');
-  if (!home || !chatView || !homeForm || !homeInput || !form || !input || !send || !log || !directNote || !directNoteText || !contextRemove || !related || !back) return;
+  const securityCheck = document.getElementById('support-security');
+  const turnstileWidget = document.getElementById('turnstile-widget');
+  if (!home || !chatView || !homeForm || !homeInput || !form || !input || !send || !log || !directNote || !directNoteText || !contextRemove || !related || !back || !securityCheck || !turnstileWidget) return;
 
   const localPreview = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-  const apiBase = window.location.hostname === 'pocket.ark-nexus.cc' || localPreview
-    ? '/support-api/chat'
-    : 'https://pocket.ark-nexus.cc/support-api/chat';
+  const apiRoot = window.location.hostname === 'pocket.ark-nexus.cc' || localPreview
+    ? '/support-api'
+    : 'https://pocket.ark-nexus.cc/support-api';
+  const chatApi = apiRoot + '/chat';
+  const configApi = apiRoot + '/config';
   const params = new URLSearchParams(window.location.search);
   const directEntry = params.get('mode') === 'chat' && params.get('source') === 'app';
   const allowedControls = ['composer', 'quick_actions', 'changed_files', 'terminal', 'model_picker'];
@@ -80,12 +84,17 @@
       waiting: 'Searching the verified manual · complex questions may take about 1 minute',
       rate_limitedTitle: 'Public support is rate-limited',
       rate_limited: 'Several questions were sent recently. Your question is preserved; retry in a moment or use the closest verified guide.',
+      budgetTitle: 'Today’s public support budget is used up',
+      budget: 'No more AI calls will start today. Your question is preserved; use the closest verified guide or try again tomorrow.',
       busyTitle: 'Smart support is busy',
       busy: 'The service is available but currently at capacity. This is not a problem with your network.',
       timeoutTitle: 'The answer timed out',
       timeout: 'The service did not answer in the expected time. Retry the same question, or make it a little smaller.',
       unavailableTitle: 'Smart support is temporarily unavailable',
       unavailable: 'Your question is preserved. Retry it or continue with the closest verified manual guide.',
+      verificationLoading: 'Preparing a quick security check…',
+      verificationFailed: 'That check expired or could not be verified. Please try it once more.',
+      verificationUnavailable: 'The security check is temporarily unavailable. Your question is preserved.',
       question: 'Your question',
       matched: 'Closest verified guides',
       retry: 'Retry the same question',
@@ -104,12 +113,17 @@
       waiting: '正在检索已核验手册 · 复杂问题可能需要约 1 分钟',
       rate_limitedTitle: '公开客服请求已限流',
       rate_limited: '最近发送的问题较多。你的问题已保留，可以稍后重试，或先看最贴近的已核验指南。',
+      budgetTitle: '今天的公开客服额度已用完',
+      budget: '今天不会再启动新的 AI 请求。你的问题已保留，可以先看最贴近的指南，或明天再试。',
       busyTitle: '智能客服当前较忙',
       busy: '服务仍可用，但当前已满载。这不是你的网络问题。',
       timeoutTitle: '这次回答超时了',
       timeout: '服务没能在预期时间内返回。可以重试同一个问题，或把问题拆小一点。',
       unavailableTitle: '智能客服暂时不可用',
       unavailable: '你的问题已保留。可以直接重试，或继续查看最贴近的已核验手册指南。',
+      verificationLoading: '正在准备一次安全验证…',
+      verificationFailed: '验证已过期或未通过，请再完成一次。',
+      verificationUnavailable: '安全验证暂时不可用，你的问题已保留。',
       question: '你的问题',
       matched: '最贴近的已核验指南',
       retry: '重试同一个问题',
@@ -251,8 +265,121 @@
     }
   }
   const sessionId = makeSessionId();
+  let supportPass = '';
+  let turnstileToken = '';
+  let securityConfig = null;
+  let securityConfigPromise = null;
+  let turnstileScriptPromise = null;
+  let turnstileWidgetId = null;
+  let pendingVerification = null;
+
+  function loadSecurityConfig(force) {
+    if (force) securityConfigPromise = null;
+    if (securityConfigPromise) return securityConfigPromise;
+    securityConfigPromise = fetch(configApi, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      cache: 'no-store',
+    }).then(function (response) {
+      if (!response.ok) throw new Error('support config unavailable');
+      return response.json();
+    }).then(function (data) {
+      const candidate = data && data.turnstile;
+      if (candidate && candidate.enabled === true && typeof candidate.siteKey === 'string' && typeof candidate.action === 'string') {
+        securityConfig = { enabled: true, siteKey: candidate.siteKey, action: candidate.action };
+      } else {
+        securityConfig = { enabled: false };
+      }
+      return securityConfig;
+    }).catch(function (error) {
+      securityConfigPromise = null;
+      throw error;
+    });
+    return securityConfigPromise;
+  }
+
+  function loadTurnstileScript() {
+    if (window.turnstile) return Promise.resolve(window.turnstile);
+    if (turnstileScriptPromise) return turnstileScriptPromise;
+    turnstileScriptPromise = new Promise(function (resolve, reject) {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.addEventListener('load', function () {
+        if (window.turnstile) resolve(window.turnstile); else reject(new Error('Turnstile missing'));
+      }, { once: true });
+      script.addEventListener('error', function () { reject(new Error('Turnstile blocked')); }, { once: true });
+      document.head.appendChild(script);
+    }).catch(function (error) {
+      turnstileScriptPromise = null;
+      throw error;
+    });
+    return turnstileScriptPromise;
+  }
+
+  async function beginVerification(question, addUser) {
+    if (addUser) addMessage('user', question);
+    pendingVerification = { question: question };
+    input.value = question;
+    setBusy(true);
+    chatStatus.textContent = copy[lang()].verificationLoading;
+    try {
+      const config = await loadSecurityConfig(true);
+      if (!config.enabled) throw new Error('Turnstile is not configured');
+      const turnstile = await loadTurnstileScript();
+      securityCheck.hidden = false;
+      if (turnstileWidgetId == null) {
+        turnstileWidgetId = turnstile.render(turnstileWidget, {
+          sitekey: config.siteKey,
+          action: config.action,
+          size: 'flexible',
+          appearance: 'interaction-only',
+          callback: function (token) {
+            const pending = pendingVerification;
+            if (!pending || typeof token !== 'string') return;
+            pendingVerification = null;
+            turnstileToken = token;
+            securityCheck.hidden = true;
+            chatStatus.textContent = '';
+            requestAnswer(pending.question, false);
+          },
+          'expired-callback': function () {
+            turnstileToken = '';
+            chatStatus.textContent = copy[lang()].verificationFailed;
+            turnstile.reset(turnstileWidgetId);
+          },
+          'error-callback': function () {
+            turnstileToken = '';
+            chatStatus.textContent = copy[lang()].verificationFailed;
+            return true;
+          },
+        });
+      } else {
+        turnstile.reset(turnstileWidgetId);
+      }
+      chatStatus.textContent = '';
+    } catch (error) {
+      pendingVerification = null;
+      securityCheck.hidden = true;
+      setBusy(false);
+      chatStatus.textContent = copy[lang()].verificationUnavailable;
+      addFailure('verification_unavailable', question);
+    }
+  }
+
+  function cancelPendingVerification() {
+    pendingVerification = null;
+    turnstileToken = '';
+    securityCheck.hidden = true;
+    if (window.turnstile && turnstileWidgetId != null) {
+      window.turnstile.reset(turnstileWidgetId);
+    }
+  }
 
   function showHome() {
+    cancelPendingVerification();
+    setBusy(false);
     home.hidden = false;
     chatView.hidden = true;
     document.body.classList.remove('support-chat-active', 'support-direct');
@@ -288,15 +415,31 @@
     let match;
     while ((match = urlPattern.exec(value)) !== null) {
       element.appendChild(document.createTextNode(value.slice(cursor, match.index)));
-      const link = document.createElement('a');
-      link.href = match[0];
-      link.textContent = match[0];
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      element.appendChild(link);
+      if (isTrustedSupportUrl(match[0])) {
+        const link = document.createElement('a');
+        link.href = match[0];
+        link.textContent = match[0];
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        element.appendChild(link);
+      } else {
+        element.appendChild(document.createTextNode(match[0]));
+      }
       cursor = match.index + match[0].length;
     }
     element.appendChild(document.createTextNode(value.slice(cursor)));
+  }
+
+  function isTrustedSupportUrl(value) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || (parsed.port && parsed.port !== '443')) return false;
+      if (parsed.hostname === 'heypandax.github.io') return parsed.pathname.startsWith('/cc-pocket/');
+      if (parsed.hostname === 'github.com') return parsed.pathname === '/heypandax/cc-pocket' || parsed.pathname.startsWith('/heypandax/cc-pocket/');
+      return false;
+    } catch (error) {
+      return false;
+    }
   }
 
   function addMessage(role, value) {
@@ -333,6 +476,8 @@
   function failureCopy(code) {
     const text = copy[lang()];
     if (code === 'rate_limited') return { title: text.rate_limitedTitle, body: text.rate_limited };
+    if (code === 'daily_budget_exhausted') return { title: text.budgetTitle, body: text.budget };
+    if (code === 'verification_unavailable') return { title: text.unavailableTitle, body: text.verificationUnavailable };
     if (code === 'busy') return { title: text.busyTitle, body: text.busy };
     if (code === 'timeout') return { title: text.timeoutTitle, body: text.timeout };
     return { title: text.unavailableTitle, body: text.unavailable };
@@ -394,6 +539,9 @@
 
   function normalizedError(response, data) {
     if (data && data.error === 'rate_limited') return 'rate_limited';
+    if (data && data.error === 'verification_rate_limited') return 'rate_limited';
+    if (data && data.error === 'daily_budget_exhausted') return 'daily_budget_exhausted';
+    if (data && data.error === 'verification_unavailable') return 'verification_unavailable';
     if (data && data.error === 'busy') return 'busy';
     if (data && data.error === 'timeout') return 'timeout';
     if (response && response.status === 429) return 'rate_limited';
@@ -412,17 +560,28 @@
     chatStatus.textContent = copy[lang()].waiting;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timeout = controller ? window.setTimeout(function () { controller.abort(); }, 135000) : 0;
+    let verificationStarted = false;
     try {
       const requestBody = { message: question, sessionId: sessionId };
       if (appContext && attachAppContext) requestBody.context = appContext;
-      const response = await fetch(apiBase, {
+      if (supportPass) requestBody.supportPass = supportPass;
+      if (!supportPass && turnstileToken) requestBody.turnstileToken = turnstileToken;
+      const response = await fetch(chatApi, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
         signal: controller ? controller.signal : undefined,
       });
       const data = await response.json().catch(function () { return {}; });
+      turnstileToken = '';
+      if (data && typeof data.supportPass === 'string') supportPass = data.supportPass;
       pending.remove();
+      if (data && (data.error === 'human_verification_required' || data.error === 'human_verification_failed')) {
+        supportPass = '';
+        verificationStarted = true;
+        await beginVerification(question, false);
+        return;
+      }
       if (!response.ok || typeof data.answer !== 'string') {
         addFailure(normalizedError(response, data), question);
         input.value = question;
@@ -431,17 +590,20 @@
         input.value = '';
       }
     } catch (error) {
+      turnstileToken = '';
       pending.remove();
       addFailure(error && error.name === 'AbortError' ? 'timeout' : 'unavailable', question);
       input.value = question;
     } finally {
       if (timeout) window.clearTimeout(timeout);
-      setBusy(false);
-      chatStatus.textContent = '';
+      if (!verificationStarted && !pendingVerification) {
+        setBusy(false);
+        chatStatus.textContent = '';
+      }
     }
   }
 
-  function submitChat(question) {
+  async function submitChat(question) {
     const value = (question == null ? input.value : question).trim();
     if (send.disabled) return;
     if (!value) {
@@ -451,6 +613,22 @@
       return;
     }
     input.removeAttribute('aria-invalid');
+    if (!supportPass) {
+      setBusy(true);
+      chatStatus.textContent = copy[lang()].verificationLoading;
+      try {
+        const config = await loadSecurityConfig(false);
+        if (config.enabled) {
+          await beginVerification(value, true);
+          return;
+        }
+      } catch (error) {
+        // The chat boundary remains fail-closed. It will return a verification
+        // requirement if the local config fetch was transiently unavailable.
+      }
+      setBusy(false);
+      chatStatus.textContent = '';
+    }
     requestAnswer(value, true);
   }
 

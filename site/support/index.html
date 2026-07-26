@@ -29,7 +29,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="../styles.css" />
-<link rel="stylesheet" href="support.css?v=20260726-4" />
+<link rel="stylesheet" href="support.css?v=20260726-6" />
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -136,7 +136,7 @@
     <header class="chat-workspace-head">
       <button type="button" class="back-to-help" id="back-to-help"><span aria-hidden="true">←</span><span class="i18n-en">Back to help home</span><span class="i18n-zh">返回帮助首页</span></button>
       <div class="support-identity"><span class="support-mark" aria-hidden="true">&gt;_</span><span><strong><span class="i18n-en">Smart support</span><span class="i18n-zh">智能客服</span></strong><small><span class="i18n-en">Verified manual answers</span><span class="i18n-zh">基于已核验手册回答</span></small></span></div>
-      <span class="public-pill"><span class="i18n-en">Public · no sign-in · no saved history</span><span class="i18n-zh">公开 · 无需登录 · 不保存历史</span></span>
+      <span class="public-pill"><span class="i18n-en">Public · no sign-in · no account history</span><span class="i18n-zh">公开 · 无需登录 · 无账号历史</span></span>
     </header>
     <div class="direct-entry-note" id="direct-entry-note" hidden>
       <span aria-hidden="true">✓</span>
@@ -158,6 +158,10 @@
             </div>
           </div>
         </div>
+        <div class="security-check" id="support-security" hidden role="status" aria-live="polite">
+          <div><span aria-hidden="true">◇</span><span><strong><span class="i18n-en">One quick security check</span><span class="i18n-zh">完成一次安全验证</span></strong><small><span class="i18n-en">It protects the public support budget. No account is required.</span><span class="i18n-zh">用于保护公开客服额度，无需登录账号。</span></small></span></div>
+          <div id="turnstile-widget"></div>
+        </div>
         <form class="question-composer chat-composer" id="support-chat-form" novalidate>
           <label class="sr-only" for="support-message"><span class="i18n-en">Your question</span><span class="i18n-zh">你的问题</span></label>
           <textarea id="support-message" name="message" rows="2" maxlength="2000" required aria-describedby="chat-status chat-hint" placeholder="Tell me what you want to do, or where you’re stuck…"></textarea>
@@ -171,7 +175,7 @@
       <aside class="related-rail" aria-labelledby="related-title">
         <h2 id="related-title"><span class="i18n-en">Related guides</span><span class="i18n-zh">相关手册指南</span></h2>
         <div id="related-guides"></div>
-        <p><span class="i18n-en">Matched to the current question, not a conversation history. Closing this tab ends the conversation.</span><span class="i18n-zh">这里只按当前问题匹配手册，不是对话历史。关闭标签页后本次对话即结束。</span></p>
+        <p><span class="i18n-en">No account history is shown. Operational support sessions are retained for up to 30 days; anonymous chats never write to the shared knowledge queue. <a href="../privacy.html">Privacy details</a>.</span><span class="i18n-zh">这里不展示账号历史。客服运行记录最多保留 30 天；匿名对话不会写入共享知识队列。<a href="../privacy.html">查看隐私说明</a>。</span></p>
       </aside>
     </div>
   </section>
@@ -179,6 +183,6 @@
 
 <script>(function(){try{if(!localStorage.getItem('ccp-lang'))localStorage.setItem('ccp-lang',(navigator.language||'').toLowerCase().startsWith('zh')?'zh':'en');}catch(e){}}());</script>
 <script src="../app.js"></script>
-<script src="support.js?v=20260726-5"></script>
+<script src="support.js?v=20260726-7"></script>
 </body>
 </html>

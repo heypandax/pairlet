@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 # the decommissioned US-East machine, so this script deliberately reads only the *_HK variables.
 [ -f .env ] && { set -a; . ./.env; set +a; }
 
-: "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP, behind Cloudflare)}"
+: "${RELAY_HOST_HK:?set RELAY_HOST_HK in .env (HK origin IP)}"
 : "${SSHPASS_HK:?set SSHPASS_HK in .env (HK server root password)}"
 RELAY_HOST="$RELAY_HOST_HK"
 export SSHPASS="$SSHPASS_HK"   # sshpass -e reads SSHPASS
@@ -46,6 +46,6 @@ echo "── 4/5 start relay + health + reload caddy (h3 off) ──"
   caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy && echo " caddy reloaded (HTTP/3 disabled)"
 '
 
-echo "── 5/5 public health (through Cloudflare) ──"
+echo "── 5/5 public health ──"
 curl -fsS --max-time 15 https://pocket.ark-nexus.cc/healthz && echo " public OK"
 echo "✅ relay redeploy done"

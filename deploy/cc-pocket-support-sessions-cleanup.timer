@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily CC Pocket public support session cleanup
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=cc-pocket-support-sessions-cleanup.service
+
+[Install]
+WantedBy=timers.target

@@ -3,19 +3,20 @@
 This package creates two dedicated agents rather than reusing the personal
 default agent:
 
-- `cc-pocket-support`: routine public answers, manual retrieval, read-only code
-  inspection, and candidate capture.
+- `cc-pocket-support`: routine public answers, manual retrieval, and read-only
+  code inspection. Anonymous traffic cannot capture knowledge candidates.
 - `cc-pocket-support-review`: unbound scheduled routine reviewer. It can reject
   or provisionally verify a candidate, but cannot authorize manual promotion.
 
-Both agents run every tool turn inside Docker with no network. Provisioning
+Both agents run every tool turn inside per-session Docker sandboxes with no
+network, a read-only root, dropped capabilities, and CPU, memory, PID, file
+descriptor, and process limits. Provisioning
 first creates a `git archive` snapshot containing tracked files only, so ignored
 files such as `.env` can never enter the sandbox. That snapshot is mounted
-read-only at `/repo`. The public agent can write only candidate files under
-`/queue` and reads `/governance`; the reviewer sees `/queue` read-only and can
-write only `/governance`. Review verdicts are bound to the complete candidate
-SHA-256, so the public agent cannot self-verify or change a reviewed answer
-without invalidating that verdict. File mutation outside those mounts,
+read-only at `/repo`. The public agent has no writable host bind and cannot see
+the candidate or governance stores; the reviewer sees `/queue` read-only and
+can write only `/governance`. Review verdicts are bound to the complete
+candidate SHA-256. File mutation outside those mounts,
 browser, messaging, gateway, cron, elevated, node, and agent-spawn tools are
 denied.
 
@@ -29,17 +30,31 @@ channel can deliver them.
 
 The public entry is `https://pocket.ark-nexus.cc/support/`. It does not use a
 messaging app and does not require an account or organization membership.
-`support/web/server.py` is the narrow HTTP boundary: it accepts a question,
-applies per-visitor and concurrency limits, derives an opaque session key, and
-runs only the `cc-pocket-support` agent. It returns only the final visible
-answer and public source URLs; the OpenClaw Gateway, gateway token, tool output,
-and agent metadata are never exposed.
+`support/web/server.py` is the narrow HTTP boundary. A Cloudflare Turnstile
+check issues a registered, IP/session-bound, short-lived anonymous pass; no
+account is required. Before an Agent starts, one SQLite transaction reserves
+pass, visitor, global-minute, global-day, and daily token-budget quota. Limits
+survive restarts and database errors fail closed. The boundary also caps open
+connections, concurrent Turnstile checks, concurrent Agent runs, request size,
+socket time, and model output. It returns only the final visible answer and
+public source URLs plus the browser's short-lived anonymous pass; the OpenClaw
+Gateway, gateway token, tool output, quota state, and agent metadata are never
+exposed.
 
 The API listens on loopback on the OpenClaw host. The relay host reaches that
 single port through the restricted SSH forward in
 `deploy/cc-pocket-support-tunnel.service`, and Caddy publishes only
 `/support-api/*`. Keep the administrative Gateway on its existing private
 boundary.
+
+The API service requires `CC_SUPPORT_WEB_SECRET`,
+`CC_SUPPORT_TURNSTILE_SITE_KEY`, and `CC_SUPPORT_TURNSTILE_SECRET_KEY` in the
+root-owned environment file. The site key is public; the other two values must
+not enter the static site, logs, or OpenClaw subprocess environment. The unit
+stores abuse state under `/var/lib/cc-pocket-support-api/` with mode `0700`.
+`cc-pocket-support-sessions-cleanup.timer` runs the official agent-scoped
+cleanup daily. Its 28-day pruning threshold leaves enough timer jitter for the
+publicly disclosed 30-day maximum.
 
 ## Provision
 

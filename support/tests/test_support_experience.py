@@ -9,6 +9,8 @@ SUPPORT_JS = ROOT / "site" / "support" / "support.js"
 SUPPORT_CSS = ROOT / "site" / "support" / "support.css"
 OPEN_URL = ROOT / "mobile" / "composeApp" / "src" / "commonMain" / "kotlin" / "dev" / "ccpocket" / "app" / "OpenUrl.kt"
 HELP_SCREEN = ROOT / "mobile" / "composeApp" / "src" / "commonMain" / "kotlin" / "dev" / "ccpocket" / "app" / "ui" / "HelpLearning.kt"
+PROVISION = ROOT / "scripts" / "provision-openclaw-support.sh"
+SUPPORT_AGENT = ROOT / "support" / "openclaw" / "support-workspace" / "AGENTS.md"
 
 
 class SupportExperienceContractTest(unittest.TestCase):
@@ -19,6 +21,8 @@ class SupportExperienceContractTest(unittest.TestCase):
         cls.css = SUPPORT_CSS.read_text(encoding="utf-8")
         cls.open_url = OPEN_URL.read_text(encoding="utf-8")
         cls.help_screen = HELP_SCREEN.read_text(encoding="utf-8")
+        cls.provision = PROVISION.read_text(encoding="utf-8")
+        cls.support_agent = SUPPORT_AGENT.read_text(encoding="utf-8")
 
     def test_public_home_is_task_first_without_legacy_channel_picker(self):
         self.assertIn('id="home-question-form"', self.html)
@@ -67,7 +71,8 @@ class SupportExperienceContractTest(unittest.TestCase):
         self.assertIn("interactive-widget=resizes-content", self.html)
 
     def test_mobile_public_status_pill_does_not_truncate_privacy_copy(self):
-        self.assertIn("公开 · 无需登录 · 不保存历史", self.html)
+        self.assertIn("公开 · 无需登录 · 无账号历史", self.html)
+        self.assertNotIn("不保存历史", self.html)
         self.assertRegex(
             self.css,
             r"\.public-pill\{[^}]*overflow:visible[^}]*white-space:normal",
@@ -92,6 +97,40 @@ class SupportExperienceContractTest(unittest.TestCase):
         self.assertIn("window.history.pushState({ ccpSupportView: 'chat' }", self.js)
         self.assertIn("window.addEventListener('popstate'", self.js)
         self.assertIn("window.location.hash === '#chat'", self.js)
+
+    def test_anonymous_abuse_protection_keeps_pass_out_of_persistent_storage(self):
+        self.assertIn('id="support-security"', self.html)
+        self.assertIn("turnstileToken", self.js)
+        self.assertIn("supportPass", self.js)
+        self.assertIn("human_verification_required", self.js)
+        self.assertIn("daily_budget_exhausted", self.js)
+        self.assertNotRegex(self.js, r"(?:localStorage|sessionStorage)\.(?:setItem|getItem)\([^\n]*supportPass")
+        self.assertNotRegex(self.js, r"URLSearchParams\([^\n]*supportPass")
+        self.assertIn("客服运行记录最多保留 30 天", self.html)
+        self.assertIn("匿名对话不会写入共享知识队列", self.html)
+        self.assertIn("isTrustedSupportUrl", self.js)
+        self.assertIn("parsed.hostname === 'heypandax.github.io'", self.js)
+        self.assertIn("parsed.hostname === 'github.com'", self.js)
+
+    def test_public_agent_has_no_shared_writable_mount_and_bounded_sandbox(self):
+        support_branch = self.provision.split('if role == "support":', 1)[1].split(
+            'elif role == "reviewer":', 1
+        )[0]
+        self.assertIn('binds = [f"{repo}:/repo:ro"]', support_branch)
+        self.assertNotIn('/queue:rw', support_branch)
+        for contract in (
+            '"scope": "session"',
+            '"readOnlyRoot": True',
+            '"pidsLimit": 64',
+            '"memory": "256m"',
+            '"cpus": 0.5',
+            '"maxTokens": 2048',
+            'contextTokens", "value": 24000',
+            '"loopDetection": {"enabled": true}',
+        ):
+            self.assertIn(contract, self.provision)
+        self.assertIn("Anonymous support traffic must never", self.support_agent)
+        self.assertNotIn("support-kb.py capture", self.support_agent)
 
 
 if __name__ == "__main__":

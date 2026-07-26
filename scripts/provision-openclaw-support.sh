@@ -181,7 +181,8 @@ configure_agent() {
 import json, sys
 repo, candidates, governance, role = sys.argv[1:5]
 if role == "support":
-    binds = [f"{repo}:/repo:ro", f"{candidates}:/queue:rw", f"{governance}:/governance:ro"]
+    # Anonymous traffic never receives a writable or shared knowledge mount.
+    binds = [f"{repo}:/repo:ro"]
 elif role == "reviewer":
     binds = [f"{repo}:/repo:ro", f"{candidates}:/queue:ro", f"{governance}:/governance:rw"]
 else:
@@ -189,13 +190,25 @@ else:
 print(json.dumps({
     "mode": "all",
     "backend": "docker",
-    "scope": "agent",
+    "scope": "session",
     "workspaceAccess": "none",
     "docker": {
         "network": "none",
         "binds": binds,
+        "readOnlyRoot": True,
+        "tmpfs": ["/tmp", "/var/tmp", "/run"],
+        "capDrop": ["ALL"],
+        "pidsLimit": 64,
+        "memory": "256m",
+        "memorySwap": "256m",
+        "cpus": 0.5,
+        "ulimits": {
+            "nofile": {"soft": 256, "hard": 512},
+            "nproc": 64,
+        },
         "dangerouslyAllowExternalBindSources": True,
     },
+    "prune": {"idleHours": 1, "maxAgeDays": 1},
 }))
 ' "$SOURCE_SNAPSHOT" "$CANDIDATE_QUEUE_PATH" "$GOVERNANCE_PATH" "$role"
   )"
@@ -218,6 +231,7 @@ print(json.dumps({
       }
     },
     "exec": {"host": "sandbox", "security": "full", "ask": "off"},
+    "loopDetection": {"enabled": true},
     "elevated": {"enabled": false}
   }'
   local batch
@@ -227,12 +241,15 @@ import json, sys
 base, model, skill, tools, sandbox = sys.argv[1:6]
 print(json.dumps([
     {"path": f"{base}.model", "value": model},
+    {"path": f"{base}.params", "value": {"maxTokens": 2048}},
+    {"path": f"{base}.contextTokens", "value": 24000},
     {"path": f"{base}.skills", "value": [skill]},
     {"path": f"{base}.tools", "value": json.loads(tools)},
     {"path": f"{base}.sandbox", "value": json.loads(sandbox)},
 ]))
 ' "$base" "$model" "$skill" "$tools" "$sandbox"
   )"
+  openclaw config set --batch-json "$batch" --dry-run >/dev/null
   openclaw config set --batch-json "$batch"
 }
 
@@ -251,6 +268,9 @@ openclaw plugins install --force "$SUPPORT_GUARD_PLUGIN"
 retry_openclaw openclaw config set \
   plugins.entries.cc-pocket-support-guard.hooks.allowConversationAccess \
   true --strict-json
+retry_openclaw openclaw config set session.maintenance.mode '"enforce"' --strict-json
+retry_openclaw openclaw config set session.maintenance.pruneAfter '"28d"' --strict-json
+retry_openclaw openclaw config set session.maintenance.maxEntries '500' --strict-json
 
 create_tracked_snapshot
 install -d -m 700 \

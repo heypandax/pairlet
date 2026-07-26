@@ -95,6 +95,12 @@ body.support-direct .support-identity{margin-left:0}
 .chat-suggestions{margin-top:0}
 .chat-composer{flex:none;margin:0 max(24px,calc((100% - 720px)/2)) 16px;padding:11px}
 .chat-composer textarea{min-height:42px}
+.security-check{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 max(24px,calc((100% - 720px)/2)) 10px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent) 38%,var(--hair));border-radius:12px;background:var(--surface);box-shadow:var(--shadow)}
+.security-check>div:first-child{display:flex;align-items:flex-start;gap:8px;min-width:0;color:var(--accent)}
+.security-check>div:first-child>span:last-child{display:flex;flex-direction:column;gap:2px;color:var(--text)}
+.security-check strong{font-size:12px;line-height:1.35;font-weight:600}
+.security-check small{color:var(--muted);font-size:10px;line-height:1.4}
+#turnstile-widget{width:min(100%,300px);min-height:0;flex:none}
 
 .chat-message{display:flex;flex-direction:column;gap:5px;max-width:86%;font-size:13.5px;line-height:1.65}
 .chat-message.user{align-self:flex-end;max-width:82%;padding:9px 12px;border-radius:13px 13px 4px 13px;background:var(--accent-bg);color:var(--text)}
@@ -127,6 +133,7 @@ body.support-direct .support-identity{margin-left:0}
 .related-guide:hover{background:var(--raised);border-color:color-mix(in srgb,var(--accent) 36%,var(--hair));color:var(--text)}
 .related-guide span:last-child{color:var(--muted)}
 .related-rail>p{margin:auto 0 0;color:var(--muted);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;line-height:1.55}
+.related-rail>p a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 
 @media (prefers-reduced-motion:reduce){
   .waiting-spinner{animation:none}
@@ -186,6 +193,8 @@ body.support-direct .support-identity{margin-left:0}
   .chat-composer{margin:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-width:1px 0 0;border-radius:0;background:var(--base);box-shadow:none}
   .chat-composer:focus-within{box-shadow:none;border-color:var(--hair)}
   .chat-composer textarea{min-height:40px;padding:8px 10px;border:1px solid var(--hair);border-radius:10px;background:var(--surface);font-size:16px}
+  .security-check{align-items:stretch;flex-direction:column;gap:8px;margin:0 12px 8px;padding:9px 10px}
+  #turnstile-widget{width:100%;max-width:none}
   .chat-message{max-width:94%;font-size:12.5px}
   .chat-message.user{max-width:88%}
   .chat-message.assistant{padding:11px}

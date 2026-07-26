@@ -25,7 +25,7 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 - 等待态如实显示「检索已核验手册，复杂问题可能约 1 分钟」；限流、繁忙、超时和不可用状态均保留原问题，提供 Retry、最贴近的已核验指南与 Issue 升级路径。
 - 桌面 App 的智能客服入口同样使用直达 URL，并移除重复的「复制手册链接给 AI」动作；桌面侧栏的普通 Help 入口仍打开任务首页。
 - 支持页保持中英文、深浅色、390px/桌面响应式、44pt 级触控目标、safe area 与 reduced-motion；移动输入框固定使用 16px，并用动态视口避免 iOS 聚焦自动缩放或输入态挤走页面。
-- 公开支持 API 只新增安全上下文的白名单解析与提示封装；知识治理、daemon、relay 与 protocol wire 均未改动。
+- 当时公开支持 API 只新增安全上下文的白名单解析与提示封装；同日后续的匿名安全补强见下一节。
 
 实现文件：
 
@@ -33,6 +33,23 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 - [`OpenUrl.kt`](../../../../mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/OpenUrl.kt)、[`HelpLearning.kt`](../../../../mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/ui/HelpLearning.kt)
 - [`SettingsModal.kt`](../../../../mobile/composeApp/src/desktopMain/kotlin/dev/ccpocket/app/desktop/SettingsModal.kt)
 - [`test_support_experience.py`](../../../../support/tests/test_support_experience.py)、[`HelpLearningUiTest.kt`](../../../../mobile/composeApp/src/desktopTest/kotlin/dev/ccpocket/app/ui/HelpLearningUiTest.kt)
+
+## 2026-07-26 匿名客服安全补强
+
+公开客服继续「无需登录」，但不再等同于无限匿名调用：
+
+- 首次提问先完成 Cloudflare Turnstile；校验只在服务端调用 Siteverify，并同时核对精确 hostname、action 与 challenge 时间。校验服务不可用时不签发新通行证。
+- 成功后签发 30 分钟匿名通行证。通行证仅保存在当前页面内存，使用随机 `jti`、完整 HMAC-SHA256 与数据库登记；同时绑定规范化来源 IP 和浏览器会话。复制、篡改、换会话、过期或数据库中不存在的通行证不能启动 Agent。
+- Agent 启动前在同一笔 SQLite `BEGIN IMMEDIATE` 事务中原子检查并预占：访客 6 次/分钟、30 次/日，通行证 4 次/分钟、生命周期 10 次，全站 12 次/分钟、100 次/日，以及每日 100 万 Token 安全预算。每个执行中请求预占 12.8 万 Token，结束后用 OpenClaw usage 结算；数据库锁、损坏、只读或写满均 fail closed。
+- API 额外限制 32 个连接、4 个并行 Turnstile 校验、3 个并行 Agent、8 KiB body、2,000 字问题、socket/Agent 超时；Caddy 覆盖客户端伪造的转发 IP 头并设置 CSP、frame、referrer 与权限策略。
+- OpenClaw 子进程只继承固定非密钥环境白名单。公开 Agent 改为 per-session 容器、只读根文件系统、无网络、无共享可写挂载，并限制 CPU、内存、PID、文件描述符、上下文与输出 Token；匿名流量不再写入或读取候选知识队列。
+- 页面不再声称「不保存历史」，改为「无账号历史」。运行会话以 28 天为清理阈值，由官方 `openclaw sessions cleanup --agent cc-pocket-support --enforce` 的 systemd timer 每日清理并为随机调度留出余量，对外承诺最多 30 天；隐私页同步披露普通 HTTPS/非 App E2E 边界、模型处理、Turnstile、运行记录与 HMAC 化配额数据。
+
+实现文件还包括：
+
+- [`abuse.py`](../../../../support/web/abuse.py)、[`server.py`](../../../../support/web/server.py)
+- [`cc-pocket-support-api.service`](../../../../deploy/cc-pocket-support-api.service)、[`cc-pocket-support-sessions-cleanup.service`](../../../../deploy/cc-pocket-support-sessions-cleanup.service)、[`cc-pocket-support-sessions-cleanup.timer`](../../../../deploy/cc-pocket-support-sessions-cleanup.timer)
+- [`provision-openclaw-support.sh`](../../../../scripts/provision-openclaw-support.sh)、[`Caddyfile`](../../../../deploy/Caddyfile)、[`privacy.html`](../../../../site/privacy.html)
 
 ## 2026-07-25 移动端首版结果（历史）
 
@@ -167,14 +184,14 @@ Claude Design 是交互与信息结构参考，不是已经确认的完整业务
 ## 当前交付边界
 
 - 已修改移动端与桌面端帮助入口、公开帮助官网、公开手册、公开支持 API 边界、测试与本实现交接。
-- 公开支持 API 只增加安全上下文的服务端白名单、元数据提示封装和内部旁白过滤；未修改知识治理、daemon、relay 或 protocol wire，因此不需要重启本机 daemon 或重新部署 relay。
+- 公开支持 API 已增加 Turnstile 匿名通行证、持久化原子配额与 Token 预算；公开 Agent 已移除共享候选写入并收紧容器资源。未修改 daemon、relay Kotlin 或 protocol wire，因此不需要重启本机 daemon；只需更新支持主机、官网静态文件与 Caddy 配置。
 - 官网静态页与支持 API 已部署，桌面 App 与 Pandaa 已同步；GitHub Pages 镜像随 `main` 更新。
 
 ## 实现验证
 
 - `:mobile:composeApp:compileKotlinDesktop`、`:mobile:composeApp:compileKotlinIosArm64` 与 `:mobile:composeApp:compileDebugKotlinAndroid` 通过。
 - 新增原生帮助页与入口 UI 测试通过；上下文直达和非会话场景禁用行为均有覆盖。
-- 本次官网支持体验契约与智能客服后端测试共 18 项通过；支持页 JavaScript 语法检查通过。
+- 本次官网支持、知识治理与智能客服后端测试共 34 项通过；支持页 JavaScript 与部署 shell 语法检查通过。
 - `:protocol:jvmTest :daemon:test :relay:test :mobile:composeApp:desktopTest` 通过。
 - `scripts/check-site-seo.py` 通过：38 个 HTML 页面、38 条 sitemap URL，站内链接无断链。
 - App 390×844 深色与浅色离屏截图已人工复核。
