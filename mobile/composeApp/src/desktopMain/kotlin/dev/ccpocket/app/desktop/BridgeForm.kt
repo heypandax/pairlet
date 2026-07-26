@@ -70,6 +70,8 @@ import dev.ccpocket.app.resources.bridge_ph_admin_edit
 import dev.ccpocket.app.resources.bridge_ph_appid
 import dev.ccpocket.app.resources.bridge_projects
 import dev.ccpocket.app.resources.bridge_projects_hint
+import dev.ccpocket.app.resources.bridge_request_approval
+import dev.ccpocket.app.resources.bridge_request_approval_hint
 import dev.ccpocket.app.resources.bridge_tier_ask_sub
 import dev.ccpocket.app.resources.bridge_tier_ask_title
 import dev.ccpocket.app.resources.bridge_tier_edit_sub
@@ -155,8 +157,8 @@ internal fun OneShotCredentialCard(name: String, ttlSec: Int, json: String, onDo
 }
 
 /**
- * Mint a bridge. The form's shape encodes the two decisions that actually matter and hides everything
- * else: WHICH projects it may touch, and WHETHER it may act without asking.
+ * Mint a bridge. Built-in Feishu approves an outsider's exact request, then executes that one request
+ * without piecemeal tool prompts. The legacy autonomy/command controls remain only for external adapters.
  *
  * The adapter fields are optional in one specific sense: leaving them empty means "I'll run the adapter
  * myself" (the daemon hands back a credential instead of managing a process). Filling them means the
@@ -177,6 +179,7 @@ internal fun NewBridgeForm(
     var appSecret by remember { mutableStateOf("") }
     var adminId by remember { mutableStateOf("") }
     var ownerBypass by remember { mutableStateOf(false) }
+    val requestScopedApproval = manage && scriptPath.isBlank()
 
     // scriptPath is NOT required: blank = the built-in Feishu adapter (the normal case)
     val canCreate = name.isNotBlank() && picked.isNotEmpty() &&
@@ -193,15 +196,21 @@ internal fun NewBridgeForm(
         PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
 
         Spacer(Modifier.height(14.dp))
-        FieldLabel(stringResource(Res.string.bridge_autonomy).uppercase(), stringResource(Res.string.bridge_autonomy_hint))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TierChoice(stringResource(Res.string.bridge_tier_ask_title), stringResource(Res.string.bridge_tier_ask_sub), tier == AccessTier.REVIEW) { tier = AccessTier.REVIEW }
-            TierChoice(stringResource(Res.string.bridge_tier_edit_title), stringResource(Res.string.bridge_tier_edit_sub), tier == AccessTier.COLLABORATE) { tier = AccessTier.COLLABORATE }
+        if (requestScopedApproval) {
+            FieldLabel(
+                stringResource(Res.string.bridge_request_approval).uppercase(),
+                stringResource(Res.string.bridge_request_approval_hint),
+            )
+        } else {
+            FieldLabel(stringResource(Res.string.bridge_autonomy).uppercase(), stringResource(Res.string.bridge_autonomy_hint))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TierChoice(stringResource(Res.string.bridge_tier_ask_title), stringResource(Res.string.bridge_tier_ask_sub), tier == AccessTier.REVIEW) { tier = AccessTier.REVIEW }
+                TierChoice(stringResource(Res.string.bridge_tier_edit_title), stringResource(Res.string.bridge_tier_edit_sub), tier == AccessTier.COLLABORATE) { tier = AccessTier.COLLABORATE }
+            }
+            Spacer(Modifier.height(14.dp))
+            FieldLabel(stringResource(Res.string.bridge_allow_cmds).uppercase(), stringResource(Res.string.bridge_allow_cmds_hint_create))
+            MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
         }
-
-        Spacer(Modifier.height(14.dp))
-        FieldLabel(stringResource(Res.string.bridge_allow_cmds).uppercase(), stringResource(Res.string.bridge_allow_cmds_hint_create))
-        MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
 
         Spacer(Modifier.height(16.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
@@ -300,6 +309,7 @@ internal fun EditRunnerForm(
     workdirs: List<String>,
     allowedCommands: List<String>,
     ownerBypass: Boolean,
+    requestScopedApproval: Boolean,
     onCancel: () -> Unit,
     onSave: (appId: String, appSecret: String, adminId: String, workdirs: List<String>, allowedCommands: List<String>, ownerBypass: Boolean) -> Unit,
 ) {
@@ -308,9 +318,9 @@ internal fun EditRunnerForm(
     var adminId by remember { mutableStateOf("") }
     var ownerBypassOn by remember { mutableStateOf(ownerBypass) }
     val picked = remember { mutableStateListOf<String>().apply { addAll(workdirs) } }
-    var allowCmds by remember { mutableStateOf(allowedCommands.joinToString("\n")) }
     val projectsChanged = picked.toList() != workdirs
-    val commandsChanged = parseCommandLines(allowCmds) != allowedCommands
+    var allowCmds by remember { mutableStateOf(allowedCommands.joinToString("\n")) }
+    val commandsChanged = !requestScopedApproval && parseCommandLines(allowCmds) != allowedCommands
     // save is live once SOMETHING changed AND at least one project remains (a bridge with no allow-listed
     // directory can open nothing — the daemon rejects it too, this just greys the button first)
     val dirty = (appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank() || projectsChanged || commandsChanged || ownerBypassOn != ownerBypass) && picked.isNotEmpty()
@@ -322,8 +332,15 @@ internal fun EditRunnerForm(
         FieldLabel(stringResource(Res.string.bridge_projects).uppercase(), stringResource(Res.string.bridge_edit_projects_hint))
         PickedDirs(picked, onAdd = { pickProjectDir()?.let { if (it !in picked) picked.add(it) } }, onRemove = { picked.remove(it) })
         Spacer(Modifier.height(14.dp))
-        FieldLabel(stringResource(Res.string.bridge_allow_cmds).uppercase(), stringResource(Res.string.bridge_allow_cmds_hint))
-        MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
+        if (requestScopedApproval) {
+            FieldLabel(
+                stringResource(Res.string.bridge_request_approval).uppercase(),
+                stringResource(Res.string.bridge_request_approval_hint),
+            )
+        } else {
+            FieldLabel(stringResource(Res.string.bridge_allow_cmds).uppercase(), stringResource(Res.string.bridge_allow_cmds_hint))
+            MultilineInput(allowCmds, { allowCmds = it }, "npm test\n./gradlew build\npytest")
+        }
         Spacer(Modifier.height(14.dp))
         FieldLabel(
             stringResource(Res.string.bridge_adapter_config).uppercase(),

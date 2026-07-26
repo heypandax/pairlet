@@ -793,7 +793,7 @@ class DesktopUiTest {
             }
         }
         waitForIdle()
-        assertPresent(str(Res.string.bridge_autonomy).uppercase())
+        assertPresent(str(Res.string.bridge_request_approval).uppercase())
         assertPresent(str(Res.string.bridge_manage_toggle))
     }
 }

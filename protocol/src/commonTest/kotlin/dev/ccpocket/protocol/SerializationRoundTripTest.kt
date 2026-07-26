@@ -283,6 +283,33 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun pendingApprovals_request_and_snapshot_roundtrip_with_optional_context() {
+        val request = Envelope(id = "pa1", ts = 0, body = ListPendingApprovals)
+        val requestJson = PocketJson.encodeToString(request)
+        assertTrue("\"t\":\"pocket/approvals.list\"" in requestJson, requestJson)
+        assertEquals(ListPendingApprovals, PocketJson.decodeFromString<Envelope>(requestJson).body)
+
+        val ask = PermissionAsk("c1", "a1", "FeishuRequest", "run tests", neverRemember = true, timeoutSec = 600)
+        val snapshot = Envelope(
+            id = "pa2", ts = 0,
+            body = PendingApprovals(
+                listOf(PendingApproval(ask, expiresAt = 123_456, workdir = "/repo", sessionId = "s1", origin = "feishu-bot")),
+            ),
+        )
+        val snapshotJson = PocketJson.encodeToString(snapshot)
+        assertTrue("\"t\":\"pocket/approvals\"" in snapshotJson, snapshotJson)
+        assertEquals(snapshot, PocketJson.decodeFromString<Envelope>(snapshotJson))
+
+        // Sources that cannot provide provenance stay useful; a newer daemon's future row keys are skipped.
+        val minimal = """{"id":"pa3","ts":0,"to":"PEER","body":{"t":"pocket/approvals","items":[{"ask":{"convoId":"c2","askId":"a2","tool":"Bash","inputPreview":"ls","title":"","danger":false,"neverRemember":false},"future":{"x":1}}]}}"""
+        val row = (PocketJson.decodeFromString<Envelope>(minimal).body as PendingApprovals).items.single()
+        assertEquals("a2", row.ask.askId)
+        assertEquals(null, row.expiresAt)
+        assertEquals(null, row.workdir)
+        assertEquals(null, row.sessionId)
+    }
+
+    @Test
     fun permissionVerdict_answers_roundtrip_and_old_frames_still_decode() {
         val v = PermissionVerdict(
             "c1", "a1", Decision.ALLOW,

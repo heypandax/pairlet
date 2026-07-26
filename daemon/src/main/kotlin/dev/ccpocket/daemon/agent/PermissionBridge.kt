@@ -9,6 +9,7 @@ import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
+import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PocketError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -56,6 +57,10 @@ class PermissionBridge(
     // PER-SESSION property (race-free — no attributing individual tool calls to a sender), set at OPEN by
     // TRUSTED in-process code only, never the wire. Bridge-only. neverRemember gates still reach a human.
     private val ownerBypassSession: Boolean = false,
+    // issue #190: true only while ONE owner-approved bridge request is executing. Unlike a remembered
+    // allow-rule, this grant is revoked at TurnResult/process end and the next request must be approved
+    // separately. Supplied dynamically because the PermissionBridge lives for the whole agent process.
+    private val bridgeRequestAuthorized: () -> Boolean = { false },
     // issue #91 "一次授权跑完全程": the owner-configured Bash allow-list for this bridge. A command that
     // matches (and is neither DANGEROUS nor carrying shell metacharacters) is auto-run with NO phone prompt,
     // so a whitelisted multi-step task isn't chopped up by per-command approvals in an async IM channel.
@@ -73,21 +78,33 @@ class PermissionBridge(
     // [ask] is the exact PermissionAsk frame we emitted for this request — kept so a phone that reattaches
     // after missing the live frame (backgrounded during plan mode's long post-`result` phase, issue #55)
     // can be re-shown the card verbatim via [resurfacePending].
-    private class Pending(val ask: PermissionAsk, val input: JsonObject?, val rule: String, val neverRemember: Boolean, val isQuestion: Boolean, val timeoutJob: Job)
+    private class Pending(
+        val ask: PermissionAsk,
+        val input: JsonObject?,
+        val rule: String,
+        val neverRemember: Boolean,
+        val isQuestion: Boolean,
+        val expiresAt: Long,
+        val timeoutJob: Job,
+    )
 
     private val pending = ConcurrentHashMap<String, Pending>()
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
         val meta = ToolMetadata.of(ev.toolName, ev.input)
-        // OWNER BYPASS (issue #91): this whole conversation is the bridge OWNER's OWN dedicated session (the
-        // built-in engine opens a separate session for the owner and never lets anyone else drive it), so its
-        // tool calls run with NO approval and NO bridge Bash gate — the owner asked in the chat, that IS the
-        // approval, on their own machine. The flag is set at OPEN by TRUSTED in-process code only, never the
-        // wire, so an external adapter cannot forge it. Being per-SESSION it is race-free (no need to attribute
-        // a tool call to a sender). Still exempts the neverRemember gates — a plan approval, and AskUserQuestion
-        // whose answer rides the verdict — exactly like the user-chosen bypass below.
+        // OWNER BYPASS (issue #91): preserve its established semantics — ordinary execution tools auto-run,
+        // while neverRemember human-decision gates still ask.
         if (bridgeSession && ownerBypassSession && !meta.neverRemember) {
+            respond(ev.requestId, true, false, ev.input, null, null)
+            return
+        }
+        // FULL REQUEST AUTHORIZATION (issue #190): the owner approved this exact externally submitted
+        // request before it reached the agent. Execution tools — including ExitPlanMode — run without a
+        // second layer of piecemeal approval or the bridge Bash/path gates. AskUserQuestion remains
+        // interactive because the answer, rather than permission, rides the verdict. The supplier is
+        // trusted in-process state; it cannot be claimed over the wire and is revoked when that turn ends.
+        if (bridgeSession && bridgeRequestAuthorized() && ev.toolName != AskQuestions.TOOL) {
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -155,7 +172,11 @@ class PermissionBridge(
             neverRemember = neverRemember,
             timeoutSec = (timeoutMs / 1000).toInt(), // phone counts its local no-response fallback against the REAL window
         )
-        pending[askId] = Pending(ask, ev.input, meta.rule, neverRemember, isQuestion, timeout)
+        pending[askId] = Pending(
+            ask, ev.input, meta.rule, neverRemember, isQuestion,
+            expiresAt = System.currentTimeMillis() + timeoutMs,
+            timeoutJob = timeout,
+        )
         emit(ask)
     }
 
@@ -166,6 +187,10 @@ class PermissionBridge(
      *  AskUserQuestion minutes later — well past the 90s idle window — so without this the pending question is
      *  reaped while the phone is backgrounded. Self-bounds: [questionTimeoutMs] eventually clears the entry. */
     fun hasPending(): Boolean = pending.isNotEmpty()
+
+    /** Approval rows only. AskUserQuestion needs its answer UI and remains scoped to the conversation. */
+    fun pendingApprovals(): List<PendingApproval> =
+        pending.values.filterNot { it.isQuestion }.map { PendingApproval(it.ask, expiresAt = it.expiresAt) }
 
     /** Re-emit every still-open ask to [to]. A reattaching phone (foregrounded after an iOS background suspend,
      *  or any reconnect / session re-entry) never received the live PermissionAsk that fired while it was away —

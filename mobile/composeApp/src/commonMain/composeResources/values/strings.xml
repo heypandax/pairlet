@@ -1037,7 +1037,7 @@
 
     <!-- bridges: desktop manager -->
     <string name="bridge_new">New bridge</string>
-    <string name="bridge_intro">IM bots that can drive this machine. They only ever open sessions in the projects you pick, and they can never approve their own permission prompts — those come to your phone.</string>
+    <string name="bridge_intro">IM bots that can drive this machine. They only open sessions in projects you pick. Built-in Feishu asks you to approve each outsider request before execution; one approval never carries into the next request.</string>
     <string name="bridge_live_count">%1$d/%2$d live</string>
     <string name="bridge_adapter">Adapter</string>
     <string name="bridge_configured">Configured</string>
@@ -1075,6 +1075,12 @@
     <string name="bridge_allow_cmds">Run these without asking</string>
     <string name="bridge_allow_cmds_hint_create">one command per line (e.g.  npm test  /  ./gradlew build  /  pytest). Matching commands run with no phone prompt so a task finishes in one go. Dangerous commands and anything with a pipe / redirect / $var still ask you.</string>
     <string name="bridge_allow_cmds_hint">one command per line — matching commands run with no phone prompt. Dangerous commands and anything with a pipe / redirect / $var still ask you.</string>
+    <string name="bridge_request_approval">One request, one approval</string>
+    <string name="bridge_request_approval_hint">Each outsider request is shown on your phone before the agent sees it. Approve once and that request runs to completion; the next request starts locked again. Sensitive data is still withheld from the reply.</string>
+    <string name="bridge_request_approval_tag">approves each request</string>
+    <string name="approval_fab_label">Pending</string>
+    <string name="approval_fab_a11y">%1$d pending approvals</string>
+    <string name="approval_fab_refreshing">Last known · refreshing</string>
 
     <!-- window chrome & misc -->
     <string name="exit_fullscreen">Exit Full Screen</string>

@@ -1,0 +1,91 @@
+package dev.ccpocket.daemon.agent
+
+import dev.ccpocket.protocol.AskWithdrawn
+import dev.ccpocket.protocol.Decision
+import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.PermissionAsk
+import dev.ccpocket.protocol.PermissionVerdict
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
+
+class BridgeRequestApprovalGateTest {
+    @Test
+    fun approval_is_one_off_and_remember_is_ignored() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>()
+        val gate = BridgeRequestApprovalGate("c1", scope, { emitted += it }, timeoutMs = 10_000)
+
+        val first = async { gate.awaitApproval("sender: ou_a\n\nrun tests") }
+        yield()
+        val firstAsk = assertIs<PermissionAsk>(emitted.single())
+        assertTrue(firstAsk.neverRemember)
+        assertTrue(firstAsk.danger)
+        assertEquals("full access for this request", firstAsk.dangerNote)
+        assertEquals("FeishuRequest", firstAsk.tool)
+        assertTrue(gate.onVerdict(PermissionVerdict("c1", firstAsk.askId, Decision.ALLOW, remember = true)))
+        assertTrue(first.await())
+
+        emitted.clear()
+        val second = async { gate.awaitApproval("sender: ou_a\n\nrun tests again") }
+        yield()
+        val secondAsk = assertIs<PermissionAsk>(emitted.single())
+        assertNotEquals(firstAsk.askId, secondAsk.askId)
+        assertFalse(second.isCompleted, "the first approval must not authorize a later request")
+        assertTrue(gate.onVerdict(PermissionVerdict("c1", secondAsk.askId, Decision.DENY)))
+        assertFalse(second.await())
+        scope.cancel()
+    }
+
+    @Test
+    fun pending_request_resurfaces_and_timeout_withdraws_it() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>()
+        val gate = BridgeRequestApprovalGate("c1", scope, { emitted += it }, timeoutMs = 20)
+
+        val result = async { gate.awaitApproval("exact request") }
+        yield()
+        val ask = assertIs<PermissionAsk>(emitted.single())
+        val snapshot = gate.pendingApprovals().single()
+        assertEquals(ask, snapshot.ask)
+        assertTrue(requireNotNull(snapshot.expiresAt) > System.currentTimeMillis())
+        val resurfaced = mutableListOf<Frame>()
+        gate.resurfacePending { resurfaced += it }
+        assertEquals(ask, resurfaced.single())
+
+        delay(40)
+        assertFalse(result.await())
+        assertIs<AskWithdrawn>(emitted.last())
+        assertFalse(gate.hasPending())
+        assertTrue(gate.pendingApprovals().isEmpty())
+        scope.cancel()
+    }
+
+    @Test
+    fun cancelling_the_waiter_withdraws_the_orphaned_card() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = mutableListOf<Frame>()
+        val gate = BridgeRequestApprovalGate("c1", scope, { emitted += it }, timeoutMs = 10_000)
+
+        val waiter = async { gate.awaitApproval("exact request") }
+        yield()
+        assertIs<PermissionAsk>(emitted.single())
+        waiter.cancelAndJoin()
+        yield()
+
+        assertIs<AskWithdrawn>(emitted.last())
+        assertFalse(gate.hasPending())
+        scope.cancel()
+    }
+}

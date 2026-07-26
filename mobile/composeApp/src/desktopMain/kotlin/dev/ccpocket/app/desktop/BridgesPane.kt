@@ -54,6 +54,7 @@ import dev.ccpocket.app.resources.bridge_live_count
 import dev.ccpocket.app.resources.bridge_merge_lost
 import dev.ccpocket.app.resources.bridge_new
 import dev.ccpocket.app.resources.bridge_projects
+import dev.ccpocket.app.resources.bridge_request_approval_tag
 import dev.ccpocket.app.resources.bridge_runner_restart
 import dev.ccpocket.app.resources.bridge_runner_start
 import dev.ccpocket.app.resources.bridge_runner_stop
@@ -178,7 +179,11 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
             )
             Spacer(Modifier.width(8.dp))
-            TierPill(b.tier)
+            if (b.runner?.scriptPath == "built-in") {
+                Tag(stringResource(Res.string.bridge_request_approval_tag), Tok.ok)
+            } else {
+                TierPill(b.tier)
+            }
         }
         Spacer(Modifier.height(8.dp))
         Row(
@@ -219,6 +224,7 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                 workdirs = b.workdirs,
                 allowedCommands = b.allowedCommands,
                 ownerBypass = b.runner?.ownerBypass ?: false,
+                requestScopedApproval = b.runner?.scriptPath == "built-in",
                 onCancel = { editing = false },
                 onSave = { appId, appSecret, adminId, workdirs, allowedCommands, ownerBypass ->
                     // merge semantics: only what was typed lands; blank fields keep the stored values —

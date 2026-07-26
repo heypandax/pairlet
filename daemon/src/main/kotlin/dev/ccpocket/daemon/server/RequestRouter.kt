@@ -56,10 +56,12 @@ import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupRename
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListPendingApprovals
 import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
 import dev.ccpocket.protocol.PathEntries
+import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
 import dev.ccpocket.protocol.RenameSession
@@ -175,6 +177,13 @@ class RequestRouter(
             is ListDirectories ->
                 if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
                 else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true), caps)))
+
+            // Owner control-plane pull: push is alert-only, so every foreground client can reconstruct the
+            // complete queue even if APNs/FCM was delayed or lost. Restricted credentials must never learn
+            // another user's approvals; GuestCaps/BridgeGuard deny this frame and this check is defence in depth.
+            is ListPendingApprovals -> if (origin == null && guestScope == null) {
+                sink.emit(PendingApprovals(registry.pendingApprovals(shell.pendingApprovals() + exports.pendingApprovals())))
+            }
 
             is ListSessions -> emitSessions(frame.workdir, sink, guestScope, caps)
 

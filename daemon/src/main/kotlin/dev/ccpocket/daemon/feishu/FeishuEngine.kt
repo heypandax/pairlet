@@ -6,6 +6,7 @@ import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1
 import com.lark.oapi.service.im.v1.model.ReplyMessageReq
 import com.lark.oapi.service.im.v1.model.ReplyMessageReqBody
 import dev.ccpocket.daemon.DaemonCore
+import dev.ccpocket.daemon.bridge.BridgeDenyCode
 import dev.ccpocket.daemon.bridge.BridgeGuard
 import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.bridge.BridgeVerdict
@@ -22,8 +23,10 @@ import dev.ccpocket.protocol.TurnDone
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -86,11 +89,22 @@ class FeishuEngine(
     private val sessionOf = HashMap<String, String>()
     private val turnWaiters = HashMap<String, CompletableDeferred<TurnDone>>()
     private val openWaiters = HashMap<String, CompletableDeferred<String>>() // openId -> convoId
+    // A completed Feishu turn keeps its transcript/session id but must not keep a live CLI forever: bridge
+    // maxSessions is a concurrent-REQUEST limit, not a "number of chats ever used" limit. A release job waits
+    // through background work / continuation grace, then closes the warm process. A new message in the same
+    // chat cancels the job and reuses the process if it wins the race; otherwise openOrReuse resumes by sid.
+    private val releaseJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
     // a turn's reply target + a one-shot guard: the final text posts to the group EXACTLY ONCE, whether
     // ask() delivers it inline (finished within the wait) or a late TurnDone does (the owner approved a
     // permission ask on their phone minutes later — the bridge's whole reason to exist). Keyed by convoId.
     private data class ReplySlot(val replyTo: String, var done: Boolean = false)
     private val replySlots = HashMap<String, ReplySlot>()
+
+    private sealed interface OpenResult {
+        data class Opened(val convoId: String) : OpenResult
+        data class Denied(val code: BridgeDenyCode) : OpenResult
+        data object TimedOut : OpenResult
+    }
     // convoId -> the label of a permission ask currently waiting on the owner's phone, so the "still
     // working" nudge can name it ("Run command 在等你批准") instead of a bare, scary timeout.
     private val pendingAsk = HashMap<String, String>()
@@ -157,6 +171,9 @@ class FeishuEngine(
             ws!!.start()
             running = true
             lastError = null
+            // A managed-runner restart deliberately preserves live conversations for continuity. Re-arm their
+            // idle release jobs so stop/start cannot turn a previously settled chat into a permanent slot leak.
+            ownedConvoIds().forEach(::scheduleRelease)
             fetchBotIdentity()
             logLine("[engine] built-in feishu bridge \"$name\" connected (projects: ${spec.workdirs.joinToString { FeishuRoutes.projectName(it) }})")
             log.info("feishu engine \"$name\" started")
@@ -170,6 +187,8 @@ class FeishuEngine(
 
     override fun stop() {
         running = false
+        releaseJobs.values.forEach { it.cancel() }
+        releaseJobs.clear()
         // The SDK's ws.Client exposes no public stop — only protected disconnect() and an autoReconnect
         // flag. Reflection is regrettable but contained: the version is PINNED in the catalog, and the
         // failure mode of a drifted SDK is an orphaned (but harmless) reconnect loop we log about.
@@ -366,7 +385,7 @@ class FeishuEngine(
                 // survives an out-of-band owner tap; we only surface a hard failure to open/drive the turn.
                 val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
                 lock.withLock {
-                    runCatching { ask(convoKey, action.workdir, prompt, replyTo, ownerTurn) }
+                    runCatching { ask(convoKey, action.workdir, prompt, replyTo, sender, ownerTurn) }
                         .onFailure { e ->
                             log.warn("feishu turn failed: ${e.message}")
                             reply(replyTo, "⚠️ 出错了：${e.message}")
@@ -405,16 +424,76 @@ class FeishuEngine(
      *  - never approved within the wait → the reply slot stays armed and [onFrame] posts the eventual
      *    TurnDone whenever the owner finally taps approve — no more "timed out, ask again".
      */
-    private suspend fun ask(key: String, workdir: String, prompt: String, replyTo: String, ownerBypass: Boolean = false) {
-        val convoId = openOrReuse(key, workdir, ownerBypass)
-            ?: run { reply(replyTo, "⚠️ 无法打开会话（超出并发/频率限制或目录不可用）"); return }
-        val done = CompletableDeferred<TurnDone>()
-        mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo) }
-        var leaveArmed = false
+    private suspend fun ask(
+        key: String,
+        workdir: String,
+        prompt: String,
+        replyTo: String,
+        senderOpenId: String,
+        ownerBypass: Boolean = false,
+    ) {
+        val convoId = when (val opened = openOrReuse(key, workdir, ownerBypass)) {
+            is OpenResult.Opened -> opened.convoId
+            is OpenResult.Denied -> {
+                reply(replyTo, openDeniedMessage(opened.code))
+                return
+            }
+            OpenResult.TimedOut -> {
+                reply(replyTo, "⚠️ 会话后端未能在 ${OPEN_TIMEOUT_MS / 1_000} 秒内启动，请稍后重试。")
+                return
+            }
+        }
+
+        // Once a prompt reaches the agent, its eventual TurnDone/PocketError schedules release. Every earlier
+        // return (prompt rejected, owner denied/timed out, freshly-approved send failed) releases here instead.
+        var awaitingTerminalFrame = false
+        var waiterInstalled = false
+        var preserveLateReply = false
         try {
-            val vetted = vet(SendPrompt(convoId, prompt))
-                ?: run { reply(replyTo, "⚠️ 消息被限流或过长，请稍后再试"); return }
-            core.router.handle(vetted, sink, spec.name)
+            // Reject an over-limit/oversized prompt before asking the owner to approve something that cannot run.
+            val promptVerdict = vet(SendPrompt(convoId, prompt))
+            val vetted = (promptVerdict as? BridgeVerdict.Allow)?.frame as? SendPrompt
+            if (vetted == null) {
+                val code = (promptVerdict as? BridgeVerdict.Deny)?.code ?: BridgeDenyCode.FORBIDDEN
+                reply(replyTo, promptDeniedMessage(code))
+                return
+            }
+
+            // issue #190: approval belongs to THIS request, before requester-controlled text reaches the agent.
+            // The configured owner's bypass session keeps its existing direct path; every other request waits on
+            // a one-off card and gains full execution authority only for the resulting turn.
+            if (!ownerBypass) {
+                val preview = buildString {
+                    appendLine("发起人：${senderOpenId.ifBlank { "未知飞书用户" }}")
+                    appendLine("项目：${FeishuRoutes.projectName(workdir)}")
+                    appendLine()
+                    append(prompt)
+                }
+                reply(replyTo, "⏳ 这次请求已发送给电脑所有者审批；通过后会自动执行并把结果发在这里。")
+                val approved = core.registry.approveBridgeRequest(convoId, preview)
+                mutex.withLock { pendingAsk.remove(convoId) }
+                if (!approved) {
+                    reply(replyTo, "⛔ 这次请求未获批准，未执行任何操作。")
+                    return
+                }
+            }
+
+            val done = CompletableDeferred<TurnDone>()
+            mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo) }
+            waiterInstalled = true
+            val sent =
+                if (ownerBypass) {
+                    core.router.handle(vetted, sink, spec.name)
+                    true
+                } else {
+                    core.registry.sendApprovedBridgePrompt(vetted)
+                }
+            if (!sent) {
+                reply(replyTo, "⚠️ 已批准的请求未能启动，请重新发送。")
+                return
+            }
+            awaitingTerminalFrame = true
+            preserveLateReply = true
             // fast path first: most turns finish in seconds and never nudge
             var turn = withTimeoutOrNull(NUDGE_MS) { done.await() }
             if (turn == null && !done.isCompleted) {
@@ -428,18 +507,17 @@ class FeishuEngine(
             }
             if (turn != null) {
                 postTurn(convoId, turnText(turn))
-            } else {
-                // gave up waiting, but the owner may still approve minutes later — leave the slot armed so
-                // onFrame delivers the eventual TurnDone to the group instead of dropping it.
-                leaveArmed = true
             }
         } finally {
-            mutex.withLock {
-                turnWaiters.remove(convoId)
-                // release the slot unless we're deliberately holding it for a late TurnDone (and a racing
-                // onFrame post hasn't already consumed it)
-                if (!leaveArmed || replySlots[convoId]?.done == true) replySlots.remove(convoId)
+            if (waiterInstalled) {
+                mutex.withLock {
+                    turnWaiters.remove(convoId)
+                    // Once sent, preserve the slot for a late terminal frame unless it already posted. Before
+                    // send, no late reply can arrive and the slot is discarded with the idle conversation.
+                    if (!preserveLateReply || replySlots[convoId]?.done == true) replySlots.remove(convoId)
+                }
             }
+            if (!awaitingTerminalFrame) scheduleRelease(convoId)
         }
     }
 
@@ -453,7 +531,7 @@ class FeishuEngine(
     private fun turnText(t: TurnDone): String =
         t.error?.let { "⚠️ $it" } ?: t.finalText?.takeIf { it.isNotBlank() } ?: "(无回复)"
 
-    private suspend fun openOrReuse(key: String, workdir: String, ownerBypass: Boolean = false): String? {
+    private suspend fun openOrReuse(key: String, workdir: String, ownerBypass: Boolean = false): OpenResult {
         // Only a convo opened against THIS SAME workdir may be reused or resumed. After a /bind moves the
         // chat to another project, the key still points at the old project's convo; reusing (or resuming
         // its session) would land prompts in the old workdir — the rebind-doesn't-take-effect bug. A
@@ -462,20 +540,26 @@ class FeishuEngine(
         if (sameWorkdir) {
             mutex.withLock { convoByKey[key] }?.let { existing ->
                 // still live? reuse. Reaped? fall through to a resume-open with its sessionId.
-                if (core.registry.liveCountOf(listOf(existing)) > 0) return existing
+                if (core.registry.liveCountOf(listOf(existing)) > 0) {
+                    cancelRelease(existing)
+                    return OpenResult.Opened(existing)
+                }
             }
         }
         val resume = if (sameWorkdir) mutex.withLock { convoByKey[key]?.let { sessionOf[it] } } else null
         // open at the bridge's GRANTED ceiling, not the wire default DEFAULT — else a COLLABORATE/AUTONOMOUS
         // bridge still prompts the owner for every file edit (the mode never got raised; the guard's clamp
         // only ever LOWERS). vet()/BridgeGuard re-clamps to the tier ceiling, so this can't exceed the grant.
-        val open = vet(OpenSession(workdir = workdir, resumeId = resume, mode = AccessTier.ceiling(spec.tier))) as? OpenSession ?: return null
+        val openVerdict = vet(OpenSession(workdir = workdir, resumeId = resume, mode = AccessTier.ceiling(spec.tier)))
+        val open = (openVerdict as? BridgeVerdict.Allow)?.frame as? OpenSession
+            ?: return OpenResult.Denied((openVerdict as BridgeVerdict.Deny).code)
         val opened = CompletableDeferred<String>()
         val openKey = "open-${System.nanoTime()}"
         mutex.withLock { openWaiters[openKey] = opened }
         try {
-            // spec.allowedCommands rides down beside origin so the session's PermissionBridge can auto-run the
-            // owner-whitelisted Bash commands without a phone prompt (issue #91 "一次授权跑完全程").
+            // Keep the legacy command allow-list on the conversation for wire/backward compatibility with
+            // existing bridge records. Built-in Feishu requests no longer depend on it: issue #190 approves
+            // the exact request before execution, then grants that turn full authority.
             // ownerBypass (issue #91): the owner's DEDICATED session opens with the trusted in-process
             // full-trust flag → its PermissionBridge auto-allows. Never set for the shared / group session,
             // and impossible for an external adapter to set (it never reaches this in-process handle call).
@@ -483,24 +567,68 @@ class FeishuEngine(
                 guard.noteOpened(convoId)
                 openWaiters[openKey]?.complete(convoId)
             }
-            val convoId = withTimeoutOrNull(OPEN_TIMEOUT_MS) { opened.await() } ?: return null
+            val convoId = withTimeoutOrNull(OPEN_TIMEOUT_MS) { opened.await() } ?: return OpenResult.TimedOut
             mutex.withLock { convoByKey[key] = convoId; keyWorkdir[key] = workdir }
-            return convoId
+            return OpenResult.Opened(convoId)
         } finally {
             mutex.withLock { openWaiters.remove(openKey) }
         }
     }
 
-    /** The same vet an external bridge's frames pass in DeviceSessions — deny → null (with a log line). */
-    private suspend fun vet(frame: Frame): Frame? {
+    /** The same verdict an external bridge's frames receive; retain its code for an honest chat reply. */
+    private suspend fun vet(frame: Frame): BridgeVerdict {
         val liveOwned = if (frame is OpenSession) core.registry.liveCountOf(guard.ownedConvoIds()) else 0
         return when (val v = guard.vet(frame, System.currentTimeMillis(), liveOwned)) {
-            is BridgeVerdict.Allow -> v.frame
+            is BridgeVerdict.Allow -> v
             is BridgeVerdict.Deny -> {
                 logLine("[guard] ${frame::class.simpleName} denied: ${v.code.wire}")
-                null
+                v
             }
         }
+    }
+
+    private fun openDeniedMessage(code: BridgeDenyCode): String = when (code) {
+        BridgeDenyCode.BAD_WORKDIR -> "⚠️ 当前绑定目录不可用，或已不在这个 Bridge 的项目范围内。请重新 /bind。"
+        BridgeDenyCode.TOO_MANY_SESSIONS ->
+            "⚠️ 正在处理的请求已达并发上限（${spec.maxSessions}/${spec.maxSessions}），请等其中一个完成后重试。"
+        BridgeDenyCode.OPEN_RATE -> "⚠️ 一分钟内新建会话过多，请稍后再试。"
+        BridgeDenyCode.NOT_OWN_SESSION -> "⚠️ 原会话已无法安全续接，请发送 /new 后重试。"
+        else -> "⚠️ 这个 Bridge 不允许打开该会话（${code.wire}）。"
+    }
+
+    private fun promptDeniedMessage(code: BridgeDenyCode): String = when (code) {
+        BridgeDenyCode.PROMPT_RATE -> "⚠️ 一分钟内发送消息过多，请稍后再试。"
+        BridgeDenyCode.PROMPT_TOO_LARGE -> "⚠️ 消息过长，请缩短后重试。"
+        BridgeDenyCode.IMAGES_DENIED -> "⚠️ 这个 Bridge 暂不支持图片附件。"
+        BridgeDenyCode.NOT_OWN_SESSION -> "⚠️ 该会话已经失效，请发送 /new 后重试。"
+        else -> "⚠️ 消息未获 Bridge 接受（${code.wire}）。"
+    }
+
+    /**
+     * Reclaim a settled chat's live process without losing context. Busy state is authoritative: background
+     * jobs, pending cards, and continuation grace keep retrying here and continue to count against maxSessions.
+     */
+    private fun scheduleRelease(convoId: String) {
+        val job = scope.launch {
+            while (running) {
+                if (core.registry.closeIfIdle(convoId)) {
+                    guard.noteClosed(convoId)
+                    logLine("[session] released idle conversation ${convoId.take(8)}…; context remains resumable")
+                    return@launch
+                }
+                if (core.registry.liveCountOf(listOf(convoId)) == 0) {
+                    guard.noteClosed(convoId)
+                    return@launch
+                }
+                delay(RELEASE_RETRY_MS)
+            }
+        }
+        releaseJobs.put(convoId, job)?.cancel()
+        job.invokeOnCompletion { releaseJobs.remove(convoId, job) }
+    }
+
+    private fun cancelRelease(convoId: String) {
+        releaseJobs.remove(convoId)?.cancel()
     }
 
     private suspend fun onFrame(frame: Frame) {
@@ -518,6 +646,7 @@ class FeishuEngine(
                 mutex.withLock { turnWaiters.remove(frame.convoId) }?.complete(frame)
                 mutex.withLock { pendingAsk.remove(frame.convoId) }
                 postTurn(frame.convoId, turnText(frame)) // idempotent; delivers a late reply after approval
+                scheduleRelease(frame.convoId)
             }
             is PocketError -> {
                 logLine("[engine] ${frame.code}: ${frame.message}")
@@ -525,6 +654,7 @@ class FeishuEngine(
                     mutex.withLock { turnWaiters.remove(id) }?.complete(TurnDone(id, error = frame.message))
                     mutex.withLock { pendingAsk.remove(id) }
                     postTurn(id, "⚠️ ${frame.message}")
+                    scheduleRelease(id)
                 }
             }
             // deny-by-default egress (see [sink]): any frame NOT named above is dropped here, and nothing
@@ -538,6 +668,7 @@ class FeishuEngine(
         const val NUDGE_MS = 25_000L        // no reply yet after this + an approval pending → nudge the group
         const val TURN_TIMEOUT_MS = 300_000L
         const val OPEN_TIMEOUT_MS = 30_000L
+        const val RELEASE_RETRY_MS = 1_000L
         const val MAX_REPLY_CHARS = 20_000 // feishu text-message ceiling with headroom
     }
 }

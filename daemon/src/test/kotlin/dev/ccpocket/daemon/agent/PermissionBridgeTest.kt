@@ -110,6 +110,30 @@ class PermissionBridgeTest {
     }
 
     @Test
+    fun approved_bridge_request_is_full_access_only_while_its_turn_grant_is_active() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        var requestAuthorized = true
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true,
+            bridgeRequestAuthorized = { requestAuthorized })
+
+        // Full authorization skips both the destructive Bash wall and the plan's second approval gate.
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "ExitPlanMode", null))
+        assertEquals(listOf(true, true), responses.map { it.allow })
+        assertTrue(emitted.isEmpty())
+
+        // Revoking the one-turn supplier locks the same conversation again; no standing grant was recorded.
+        requestAuthorized = false
+        b.onControlRequest(AgentEvent.ControlRequest("r3", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        assertFalse(responses.last().allow)
+        scope.cancel()
+    }
+
+    @Test
     fun owner_bypass_still_routes_AskUserQuestion_to_a_human() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val responses = mutableListOf<Resp>()

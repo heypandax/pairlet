@@ -12,6 +12,16 @@ import kotlinx.serialization.Serializable
 @SerialName("pocket/dirs.list")
 data class ListDirectories(val root: String? = null) : ToDaemon
 
+/** Pull the daemon-authoritative, account-wide pending approval queue.
+ *
+ * This is intentionally a separate additive frame instead of a field on [Directories]: approvals can
+ * change while the user stays on the project/session list, and an older daemon can safely drop the
+ * unknown request. Push remains a wake-up hint; this snapshot is the source of truth. Owner clients only
+ * (restricted bridge/guest ingress deny it before [dev.ccpocket.daemon.server.RequestRouter]). */
+@Serializable
+@SerialName("pocket/approvals.list")
+data object ListPendingApprovals : ToDaemon
+
 /** List resumable sessions for a working directory (reads .jsonl headers; no claude launch). */
 @Serializable
 @SerialName("pocket/sessions.list")
@@ -803,6 +813,25 @@ data class PermissionAsk(
     // phones ignore the field.
     val timeoutSec: Int? = null,
 ) : ToPhone
+
+/** One row in [PendingApprovals]. [expiresAt] is epoch millis from the daemon's real deadline, so a
+ * snapshot fetched halfway through an approval does not restart the phone's countdown. Context fields are
+ * optional: older/new sources that only know the ask still render safely, while account-wide inboxes can
+ * explain which project/session originated it. */
+@Serializable
+data class PendingApproval(
+    val ask: PermissionAsk,
+    val expiresAt: Long? = null,
+    val workdir: String? = null,
+    val sessionId: String? = null,
+    val origin: String? = null,
+)
+
+/** Daemon-authoritative account-wide approval snapshot. A fresh empty list is the only signal that the
+ * floating approval entry should disappear; clients keep their last-known rows while reconnecting. */
+@Serializable
+@SerialName("pocket/approvals")
+data class PendingApprovals(val items: List<PendingApproval> = emptyList()) : ToPhone
 
 /** Whether this ask is a one-off decision the UI must not offer to remember. The daemon's flag is the
  *  source of truth; the tool-name check covers daemons that predate [PermissionAsk.neverRemember] —

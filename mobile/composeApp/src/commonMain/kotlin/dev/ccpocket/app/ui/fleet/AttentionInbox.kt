@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.ui.tilde
 import kotlinx.coroutines.delay
 
 /**
@@ -54,6 +55,9 @@ import kotlinx.coroutines.delay
 fun AttentionInboxScreen(repo: PocketRepository, onBack: () -> Unit) {
     val entries = repo.fleetAttention().sortedBy { it.seconds }
     val finished = repo.fleetFinished()
+    LaunchedEffect(Unit) {
+        (dev.ccpocket.app.data.FleetRuntime.forPrimary(repo)?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
+    }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         Row(
             Modifier.fillMaxWidth().background(Tok.surface).padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
@@ -106,6 +110,22 @@ private fun ApprovalCard(e: AttentionEntry, onDeny: () -> Unit, onAllow: () -> U
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Outlined.Shield, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
             Text("${e.title} · ${e.tool}", color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        val context = listOfNotNull(
+            e.workdir?.let(::tilde),
+            e.sessionId?.take(8)?.let { "$it…" },
+            e.origin?.let { "via $it" },
+        ).joinToString(" · ")
+        if (context.isNotEmpty()) {
+            Text(
+                context,
+                color = Tok.muted,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 5.dp),
+            )
         }
         Text(
             e.preview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,

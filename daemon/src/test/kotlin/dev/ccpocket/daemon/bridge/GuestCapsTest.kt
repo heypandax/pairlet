@@ -3,6 +3,8 @@ package dev.ccpocket.daemon.bridge
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CreateShare
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.ListPendingApprovals
+import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -63,6 +65,7 @@ class GuestCapsTest {
         assertFalse(GuestCaps.ingressAllowed(dev.ccpocket.protocol.FetchAuthStatus))
         assertFalse(GuestCaps.ingressAllowed(dev.ccpocket.protocol.SetPushPrefs(true)))      // no owner push toggle
         assertFalse(GuestCaps.ingressAllowed(dev.ccpocket.protocol.SwitchDirectory("c", "/etc"))) // can't leave the scope
+        assertFalse(GuestCaps.ingressAllowed(ListPendingApprovals))                    // owner approval queue
     }
 
     @Test
@@ -105,6 +108,7 @@ class GuestCapsTest {
         assertFalse(GuestCaps.egressAllowed(dev.ccpocket.protocol.DaemonInfo("ws://192.168.1.5:8765"))) // no LAN address
         assertFalse(GuestCaps.egressAllowed(dev.ccpocket.protocol.ShareListing()))
         assertFalse(GuestCaps.egressAllowed(dev.ccpocket.protocol.ShareCreated(ok = true)))
+        assertFalse(GuestCaps.egressAllowed(PendingApprovals())) // never enumerate the owner's approval queue
         // …but its OWN ending notice IS deliverable (#115 follow-up) — and stays bridge-denied, so the
         // guest-vs-bridge egress split holds for the new frame too
         assertTrue(GuestCaps.egressAllowed(dev.ccpocket.protocol.ShareEnded()))

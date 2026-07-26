@@ -83,6 +83,7 @@ import dev.ccpocket.protocol.FileUploaded
 import dev.ccpocket.protocol.MAX_UPLOAD_BYTES
 import dev.ccpocket.protocol.isImageFile
 import dev.ccpocket.protocol.ListDirectories
+import dev.ccpocket.protocol.ListPendingApprovals
 import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
@@ -96,8 +97,11 @@ import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.PermissionAsk
+import dev.ccpocket.protocol.PendingApproval
+import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
+import dev.ccpocket.protocol.isQuestion
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.PromptAck
 import dev.ccpocket.protocol.RegisterPush
@@ -730,6 +734,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val chatTitle = mutableStateOf<String?>(null)            // session title for the chat header (client-side)
     private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
+    /** Daemon-authoritative account-wide approval queue for this machine. Kept across transient reconnects;
+     * only a fresh [PendingApprovals] replaces it, so a network blip never masquerades as "all clear". */
+    val pendingApprovals = mutableStateMapOf<String, PendingApproval>()
     // issue #100: the askId the daemon reported as TIMED_OUT — the permission sheet for THIS exact ask renders
     // its terminal "timed out / auto-denied" state instead of vanishing. Matched by id, so a stale value can
     // never bleed onto the next card (askIds are unique per request).
@@ -1532,7 +1539,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // On a reconnect, also re-sync whatever page the user is parked on (re-open a live chat, re-list sessions).
         // ClientCaps FIRST: it declares this build understands agent="opencode", so the daemon stops
         // filtering those rows out of the lists that follow (old builds never send it — see Messages.kt).
-        scope.launch { send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE))); send(ListDirectories()); if (reconnect) restoreAfterReconnect() }
+        scope.launch {
+            send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE)))
+            send(ListDirectories())
+            send(ListPendingApprovals)
+            if (reconnect) restoreAfterReconnect()
+        }
         startGrace(reconnect)
         startConnectWatchdog()
     }
@@ -1687,6 +1699,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
         pendingAsk.value = null
+        pendingApprovals.clear()
         // #165: the busy→idle detector is per-MACHINE state. Carrying this machine's working ids into the
         // next one's first project list would mark every one of them "finished while you were away".
         lastWorkingSessions = emptySet(); unseenSessions.value = emptySet()
@@ -2251,19 +2264,39 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // full transcript via ConvoHistory, so nothing is actually lost. (Matches the BackgroundJobs guard.)
             is AssistantChunk -> if (f.convoId == convoId.value) { promptEvidence(); appendChunk(f) }
             is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); finishThinking(); onToolEvent(f) }
-            is PermissionAsk -> if (f.convoId == convoId.value) { pendingAsk.value = f; Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool)) }
+            is PendingApprovals -> {
+                pendingApprovals.clear()
+                f.items.filterNot { it.ask.isQuestion }.forEach { pendingApprovals[it.ask.askId] = it }
+            }
+            is PermissionAsk -> {
+                // Every approval contributes to the machine-wide inbox, even when its conversation is not
+                // the screen currently open. AskUserQuestion remains in its conversation-specific answer UI.
+                if (!f.isQuestion) {
+                    pendingApprovals[f.askId] = PendingApproval(
+                        ask = f,
+                        expiresAt = f.timeoutSec?.let { epochMillis() + it * 1000L },
+                    )
+                }
+                if (f.convoId == convoId.value) {
+                    pendingAsk.value = f
+                    Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool))
+                }
+            }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
-            is AskWithdrawn -> if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
-                val ask = pendingAsk.value
-                if (f.reason == AskWithdrawnReason.TIMED_OUT && ask?.questions == null) {
-                    // issue #100: keep the permission card up but flip it to its terminal "timed out" state,
-                    // so a returning user sees what happened instead of a card that silently vanished (which
-                    // read as success). A tap on it now only dismisses — no more silent no-op.
-                    timedOutAskId.value = f.askId
-                } else {
-                    // agent moved on / session closed / a question timed out → dismiss (a question leaves a note)
-                    if (ask?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
-                    pendingAsk.value = null
+            is AskWithdrawn -> {
+                pendingApprovals.remove(f.askId)
+                if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
+                    val ask = pendingAsk.value
+                    if (f.reason == AskWithdrawnReason.TIMED_OUT && ask?.questions == null) {
+                        // issue #100: keep the permission card up but flip it to its terminal "timed out" state,
+                        // so a returning user sees what happened instead of a card that silently vanished (which
+                        // read as success). A tap on it now only dismisses — no more silent no-op.
+                        timedOutAskId.value = f.askId
+                    } else {
+                        // agent moved on / session closed / a question timed out → dismiss (a question leaves a note)
+                        if (ask?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
+                        pendingAsk.value = null
+                    }
                 }
             }
             is TurnDone -> if (f.convoId == convoId.value) {
@@ -3849,12 +3882,30 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
         pendingAsk.value = null
+        pendingApprovals.remove(a.askId)
         if (decision == Decision.ALLOW && remember) a.rule?.let { r ->
             if (r !in allowRules) allowRules.add(r)
             messages.add(ChatItem.RuleChip(r)) // drop the "always allowing X" chip into the stream
         }
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to (if (remember) "always" else decision.name.lowercase())))
         scope.launch { send(PermissionVerdict(c, a.askId, decision, message = message, remember = remember)) }
+    }
+
+    /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
+    fun resolvePendingApproval(askId: String, allow: Boolean) {
+        val row = pendingApprovals.remove(askId) ?: return
+        if (pendingAsk.value?.askId == askId) pendingAsk.value = null
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to if (allow) "allow" else "deny"))
+        scope.launch {
+            send(PermissionVerdict(row.ask.convoId, askId, if (allow) Decision.ALLOW else Decision.DENY))
+        }
+    }
+
+    /** Pull the source-of-truth queue. Safe against an old daemon: it drops the additive unknown frame. */
+    fun refreshPendingApprovals() {
+        if (!demoMode.value && sessionActive.value && phase.value == ConnPhase.Ready) {
+            scope.launch { send(ListPendingApprovals) }
+        }
     }
 
     /** Answer an AskUserQuestion prompt: the picks (question text → label/comma-joined labels/"Other…" text)

@@ -10,6 +10,7 @@ import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
+import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.ShellResult
 import kotlinx.coroutines.CompletableDeferred
@@ -42,7 +43,13 @@ class ShellService(
     private val log = logger("Shell")
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
 
-    private class Pending(val gate: CompletableDeferred<Boolean>, val convoId: String, val rule: String)
+    private class Pending(
+        val gate: CompletableDeferred<Boolean>,
+        val convoId: String,
+        val rule: String,
+        val ask: PermissionAsk,
+        val expiresAt: Long,
+    )
 
     private val pending = ConcurrentHashMap<String, Pending>()
     private val allowRules = ConcurrentHashMap<String, MutableSet<String>>() // convoId -> remembered command scopes
@@ -80,8 +87,9 @@ class ShellService(
     ): Boolean {
         val askId = "sh-" + UUID.randomUUID()
         val gate = CompletableDeferred<Boolean>()
-        pending[askId] = Pending(gate, cmd.convoId, rule)
-        emit(PermissionAsk(cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null, timeoutSec = (verdictTimeoutMs / 1000).toInt()))
+        val ask = PermissionAsk(cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null, timeoutSec = (verdictTimeoutMs / 1000).toInt())
+        pending[askId] = Pending(gate, cmd.convoId, rule, ask, System.currentTimeMillis() + verdictTimeoutMs)
+        emit(ask)
         val timeout = scope.launch {
             delay(verdictTimeoutMs)
             if (pending.remove(askId) != null) {
@@ -106,6 +114,10 @@ class ShellService(
         p.gate.complete(allow)
         return true
     }
+
+    /** Owner-facing snapshot rows for quick-terminal approvals. */
+    fun pendingApprovals(): List<PendingApproval> =
+        pending.values.map { PendingApproval(it.ask, expiresAt = it.expiresAt) }
 
     /** Drop remembered command scopes for a closed conversation. */
     fun forget(convoId: String) { allowRules.remove(convoId) }

@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.FileContent
@@ -157,6 +158,7 @@ class FileExportServiceTest {
         val out = Emitted()
         service(timeoutMs = 150).run(req("report.txt"), PermissionMode.DEFAULT, out.emit)
         assertTrue(out.next() is PermissionAsk)
+        assertTrue(out.next() is AskWithdrawn, "timeout retires the approval card before the denied result")
         val reply = out.next() as FileContent
         assertFalse(reply.ok)
         assertTrue("not approved" in reply.error!!)

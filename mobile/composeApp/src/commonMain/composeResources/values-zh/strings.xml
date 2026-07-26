@@ -1037,7 +1037,7 @@
 
     <!-- 机器人桥接：桌面管理端 -->
     <string name="bridge_new">新建桥接</string>
-    <string name="bridge_intro">可驱动这台电脑的 IM 机器人。它们只能在你选定的项目里开会话，且永远无法自行批准权限请求——那些会发到你的手机。</string>
+    <string name="bridge_intro">可驱动这台电脑的 IM 机器人，只能在你选定的项目里开会话。内置飞书会在执行前把他人的每次请求发到手机审批；一次同意不会延续到下一次请求。</string>
     <string name="bridge_live_count">%1$d/%2$d 进行中</string>
     <string name="bridge_adapter">适配器</string>
     <string name="bridge_configured">已配置</string>
@@ -1075,6 +1075,12 @@
     <string name="bridge_allow_cmds">这些命令免审批</string>
     <string name="bridge_allow_cmds_hint_create">每行一条命令（如  npm test  /  ./gradlew build  /  pytest）。命中的命令不再推手机审批，任务一口气跑完。危险命令以及带管道 / 重定向 / $变量 的仍会先问你。</string>
     <string name="bridge_allow_cmds_hint">每行一条命令——命中的命令不再推手机审批。危险命令以及带管道 / 重定向 / $变量 的仍会先问你。</string>
+    <string name="bridge_request_approval">一次请求，一次审批</string>
+    <string name="bridge_request_approval_hint">他人的每次请求都会先完整展示到你的手机，批准后该请求可一次跑完；下一次请求会重新锁住。回复仍会拦截敏感信息。</string>
+    <string name="bridge_request_approval_tag">逐请求审批</string>
+    <string name="approval_fab_label">待审批</string>
+    <string name="approval_fab_a11y">%1$d 项待审批</string>
+    <string name="approval_fab_refreshing">上次状态 · 正在刷新</string>
 
     <!-- 窗口边框及杂项 -->
     <string name="exit_fullscreen">退出全屏</string>

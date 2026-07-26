@@ -41,6 +41,10 @@ data class AttentionEntry(
     val preview: String,
     val seconds: Int,          // countdown budget when it entered the queue (PermissionSheet's 30s convention)
     val current: Boolean,      // resolvable through the live connection (repo.resolve)
+    val convoId: String? = null,
+    val workdir: String? = null,
+    val sessionId: String? = null,
+    val origin: String? = null,
 )
 
 data class FinishedEntry(
@@ -69,12 +73,13 @@ private fun liveMachine(repo: PocketRepository, binding: dev.ccpocket.app.pairin
         ConnPhase.Reconnecting, ConnPhase.Connecting -> MachineStatus.RECONNECTING
         else -> MachineStatus.OFFLINE
     }
-    val ask = repo.pendingAsk.value
+    val waiting = repo.pendingApprovals.values.toList()
+    val ask = waiting.firstOrNull()?.ask
     val open = repo.directories.count { it.open || it.busy }
     val activity = when {
         status == MachineStatus.RECONNECTING -> "reconnecting…"
         status == MachineStatus.OFFLINE -> "offline"
-        ask != null -> "⏸ 1 waiting approval · ${ask.tool}: ${ask.inputPreview.take(28)}"
+        ask != null -> "⏸ ${waiting.size} waiting approval · ${ask.tool}: ${ask.inputPreview.take(28)}"
         current && repo.convoId.value != null -> "▶ ${repo.chatTitle.value ?: "session"} · ${repo.workdir.value?.let(::tilde) ?: ""}"
         open > 0 -> "▶ $open active · ${repo.directories.firstOrNull { it.open || it.busy }?.path?.let(::tilde) ?: ""}"
         else -> "idle"
@@ -82,7 +87,7 @@ private fun liveMachine(repo: PocketRepository, binding: dev.ccpocket.app.pairin
     return FleetMachine(
         accountId = binding.accountId, name = name, os = osFromName(name), status = status,
         activity = activity, lastSeen = if (status == MachineStatus.ONLINE) "active now" else "",
-        pending = if (ask != null) 1 else 0, current = current,
+        pending = waiting.size, current = current,
     )
 }
 
@@ -107,22 +112,30 @@ fun PocketRepository.fleetMachines(): List<FleetMachine> {
 }
 
 /**
- * Approvals waiting across every live link. Today only the focused machine's link ever carries an ask —
- * the daemon binds a conversation's asks to the device connection that opened it — so satellite entries
- * light up once the daemon learns to broadcast asks account-wide (follow-up on the daemon side).
+ * Approvals waiting across every live link. Each daemon snapshot is account-wide, so this stays complete
+ * even when a bridge-created conversation has no ordinary session row and its push never reached the phone.
  */
 fun PocketRepository.fleetAttention(): List<AttentionEntry> {
     if (demoMode.value) return DemoFleet.attention()
     val links = FleetRuntime.forPrimary(this)?.repos() ?: listOf(this)
-    return links.mapNotNull { repo ->
-        val ask = repo.pendingAsk.value ?: return@mapNotNull null
-        val d = repo.paired.value ?: return@mapNotNull null
+    val now = dev.ccpocket.app.epochMillis()
+    return links.flatMap { repo ->
+        val d = repo.paired.value ?: return@flatMap emptyList()
         val name = d.displayName()
-        AttentionEntry(
-            askId = ask.askId, accountId = d.accountId, machineName = name, os = osFromName(name),
-            tool = ask.tool, title = ask.title.ifBlank { "Needs permission" }, preview = ask.diff ?: ask.inputPreview,
-            seconds = 30, current = repo === this,
-        )
+        repo.pendingApprovals.values.map { row ->
+            val ask = row.ask
+            AttentionEntry(
+                askId = ask.askId, accountId = d.accountId, machineName = name, os = osFromName(name),
+                tool = ask.tool, title = ask.title.ifBlank { "Needs permission" }, preview = ask.diff ?: ask.inputPreview,
+                seconds = row.expiresAt?.let { ((it - now + 999) / 1000).toInt().coerceAtLeast(0) }
+                    ?: ask.timeoutSec ?: 30,
+                current = repo === this,
+                convoId = ask.convoId,
+                workdir = row.workdir ?: repo.workdir.value,
+                sessionId = row.sessionId,
+                origin = row.origin,
+            )
+        }
     }
 }
 
@@ -184,13 +197,11 @@ object DemoFleet {
 fun PocketRepository.resolveAttention(entry: AttentionEntry, allow: Boolean) {
     if (demoMode.value) { DemoFleet.resolve(entry.askId); return }
     val repo = FleetRuntime.forPrimary(this)?.repoFor(entry.accountId) ?: this.takeIf { entry.current }
-    if (repo?.pendingAsk?.value?.askId == entry.askId) {
-        repo.resolve(if (allow) dev.ccpocket.protocol.Decision.ALLOW else dev.ccpocket.protocol.Decision.DENY)
-    }
+    repo?.resolvePendingApproval(entry.askId, allow)
 }
 
 /** The full ask behind an attention row, from whichever link holds it. */
 fun PocketRepository.attentionAsk(entry: AttentionEntry): PermissionAsk? {
     val repo = FleetRuntime.forPrimary(this)?.repoFor(entry.accountId) ?: this.takeIf { entry.current }
-    return repo?.pendingAsk?.value?.takeIf { it.askId == entry.askId }
+    return repo?.pendingApprovals?.get(entry.askId)?.ask
 }

@@ -135,7 +135,10 @@ import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
+import dev.ccpocket.app.ui.fleet.ApprovalQueueFab
 import dev.ccpocket.app.ui.fleet.fleetAttention
+import dev.ccpocket.app.ui.fleet.fleetMachines
+import dev.ccpocket.app.ui.fleet.MachineStatus
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.ui.share.GuestEnding
 import dev.ccpocket.app.ui.share.ShareFolderScreen
@@ -172,6 +175,7 @@ fun App(scope: CoroutineScope) {
     // name → Fleet home; attention banner / cross-machine banner → inbox. UI-local like the sheets.
     var fleetOpen by remember { mutableStateOf(false) }
     var inboxOpen by remember { mutableStateOf(false) }
+    var appForeground by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // already paired -> straight to the list
@@ -183,14 +187,25 @@ fun App(scope: CoroutineScope) {
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
     val appLock = repo.appLock
     dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
+        appForeground = true
         repo.onAppForeground()
         dev.ccpocket.app.data.FleetRuntime.coordinator?.onAppForeground()
+        (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
         appLock.onForeground() // App Lock (issue #109): re-lock per policy / drop the cover on return
     }
     // App Lock: arm auto-lock when fully backgrounded; draw the opaque privacy cover the instant the app is
     // obscured (before the OS app-switcher snapshot) so a session is never visible in the task switcher.
-    dev.ccpocket.app.OnAppBackground { appLock.onBackground() }
+    dev.ccpocket.app.OnAppBackground { appForeground = false; appLock.onBackground() }
     dev.ccpocket.app.OnAppObscured { appLock.onWillObscure() }
+    // Push is alert-only: while the app is visible, pull each live daemon's authoritative queue. The first
+    // pull is immediate; a missed APNs notification therefore becomes visible within one foreground sync.
+    LaunchedEffect(appForeground, repo.sessionActive.value) {
+        if (!appForeground || !repo.sessionActive.value) return@LaunchedEffect
+        while (true) {
+            (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
+            delay(3_000)
+        }
+    }
     // Android system back walks the in-app stack (chat → sessions → directories) instead of leaving
     // the app; at the root it stays disabled so the system default (exit) applies. An open sheet
     // registers its own handler later in composition, which wins while it is showing (LIFO).
@@ -233,8 +248,8 @@ fun App(scope: CoroutineScope) {
                                     // this the switcher bounced you out to a session list for a beat (#165)
                                     repo.convoId.value != null || repo.switchingSession.value ->
                                         ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
-                                    repo.sessionsDir.value != null -> SessionsScreen(repo)
-                                    else -> DirectoryScreen(repo, onOpenFleet = { fleetOpen = true })
+                                    repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = { inboxOpen = true })
+                                    else -> DirectoryScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
                                 }
                             }
                             // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
@@ -493,7 +508,7 @@ private fun ConnectScreen(repo: PocketRepository) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}) {
+private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
     var query by remember { mutableStateOf("") }
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
@@ -559,6 +574,9 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
     val focus = LocalFocusManager.current
     val listState = rememberLazyListState()
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() }
+    val approvalCount = repo.fleetAttention().size
+    val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
+    val approvalClearance = if (approvalCount > 0) 72.dp else 0.dp
 
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
@@ -631,7 +649,12 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
                     }
-                treeMode -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                treeMode -> LazyColumn(
+                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    state = listState,
+                    contentPadding = PaddingValues(bottom = approvalClearance),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     if (base == root) { // PINNED + ACTIVE pinned on top at root
                         if (pinned.isNotEmpty()) {
                             item { Label(pinnedLabel) }
@@ -671,7 +694,12 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                         }
                     }
                 }
-                else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), state = listState, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                else -> LazyColumn(
+                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                    state = listState,
+                    contentPadding = PaddingValues(bottom = approvalClearance),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     items(flatRows) { row ->
                         when (row) {
                             is DirRow.Header -> Label(row.label)
@@ -682,6 +710,12 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             }
         }
     }
+        ApprovalQueueFab(
+            count = approvalCount,
+            refreshing = approvalsRefreshing,
+            onClick = onOpenInbox,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+        )
         actionTarget?.let { t -> ProjectActionsSheet(repo, t, onShare = { shareTarget = t }) { actionTarget = null } }
         if (showNewPath) NewPathSheet(
             // drilled into a folder → seed it as the parent so the user types only the new project's name (issue #7)
@@ -1140,7 +1174,7 @@ private fun AgentFilterChip(filter: String, onClear: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class) // PullToRefreshBox
 @Composable
-internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to-end by MobileNewSessionUiTest (demo mode)
+internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}) { // internal: driven end-to-end by MobileNewSessionUiTest (demo mode)
     val dir = repo.sessionsDir.value ?: return
     var pickMode by remember { mutableStateOf(false) }
     // an open is in flight (the screen only switches once the daemon answers with the live convo).
@@ -1163,6 +1197,8 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
     var manageTarget by remember { mutableStateOf<SessionGroup?>(null) }
     var moveTarget by remember { mutableStateOf<SessionSummary?>(null) }
     val collapsed = remember(dir) { mutableStateMapOf<String, Boolean>() }
+    val approvalCount = repo.fleetAttention().size
+    val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1192,7 +1228,11 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
                 }
             }
             PullToRefreshBox(isRefreshing = repo.sessionsRefreshing.value, onRefresh = { repo.refreshSessions() }, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = 16.dp, bottom = if (approvalCount > 0) 88.dp else 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (af != "both") item { AgentFilterChip(af) { repo.setAgentFilter("both") } }
                 item {
                     // one tap starts right away with the persisted defaults (openSession's own fallbacks);
@@ -1251,6 +1291,12 @@ internal fun SessionsScreen(repo: PocketRepository) { // internal: driven end-to
             }
             }
         }
+        ApprovalQueueFab(
+            count = approvalCount,
+            refreshing = approvalsRefreshing,
+            onClick = onOpenInbox,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+        )
         if (pickMode) {
             LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(

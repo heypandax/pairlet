@@ -111,6 +111,17 @@ class SessionRegistryReapTest {
     }
 
     @Test
+    fun bridge_release_refuses_to_close_a_request_still_executing() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-release-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse).joinToString("\n") + "\n") }
+        harness(ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is ToolEvent } }) { registry, convoId ->
+            assertFalse(registry.closeIfIdle(convoId), "an active bridge request must continue to consume its slot")
+            assertEquals(1, registry.liveCountOf(listOf(convoId)))
+        }
+    }
+
+    @Test
     fun idle_after_turn_end_is_still_reaped() {
         if (isWindows()) return
         val script = Files.createTempDirectory("ccp-reap-fx").resolve("stream.jsonl")
@@ -119,6 +130,18 @@ class SessionRegistryReapTest {
             delay(600)
             assertEquals(1, registry.reapIdle(idleMs = 200), "a genuinely idle conversation must still be reclaimed")
             assertFalse(registry.sendPrompt(SendPrompt(convoId = convoId, text = "gone?")), "reaped conversation must be gone")
+        }
+    }
+
+    @Test
+    fun bridge_release_closes_a_settled_turn_immediately() {
+        if (isWindows()) return
+        val script = Files.createTempDirectory("ccp-release-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, result).joinToString("\n") + "\n") }
+        harness(ScriptedBackend(script, thenExit = false), until = { fs -> fs.any { it is TurnDone } }) { registry, convoId ->
+            assertTrue(registry.closeIfIdle(convoId), "a settled bridge request must release its concurrent slot")
+            assertEquals(0, registry.liveCountOf(listOf(convoId)))
+            assertFalse(registry.sendPrompt(SendPrompt(convoId = convoId, text = "resume through a new open")))
         }
     }
 

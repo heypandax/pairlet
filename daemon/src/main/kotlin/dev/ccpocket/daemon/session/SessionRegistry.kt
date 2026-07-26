@@ -17,6 +17,7 @@ import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.GetWorkflowAgentDetail
 import dev.ccpocket.protocol.ClearAllowRule
 import dev.ccpocket.protocol.OpenSession
+import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
@@ -152,7 +153,9 @@ class SessionRegistry(
             // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too,
             // else a reconnect re-open spawns a second Conversation onto the same transcript.
             val live = mutex.withLock {
-                convos.values.firstOrNull { it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume) }
+                convos.values.firstOrNull {
+                    it.convoId == resume || it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume)
+                }
             }
             if (live != null) {
                 // The reattach match is by resumeId ALONE — `open.agent` is deliberately not consulted, so
@@ -398,6 +401,43 @@ class SessionRegistry(
     suspend fun liveCountOf(ids: Collection<String>): Int =
         mutex.withLock { ids.count { it in convos } }
 
+    /** Daemon-authoritative owner approval queue. Conversation-owned asks already carry provenance;
+     * service-owned asks (quick shell/export) are enriched here by their convo id. Soonest deadline first. */
+    suspend fun pendingApprovals(extra: List<PendingApproval> = emptyList()): List<PendingApproval> =
+        mutex.withLock {
+            val byId = convos
+            (convos.values.flatMap { it.pendingApprovals() } + extra).map { row ->
+                val convo = byId[row.ask.convoId]
+                if (convo == null) row else row.copy(
+                    workdir = row.workdir ?: convo.workdir.toString(),
+                    sessionId = row.sessionId ?: convo.sessionId ?: convo.resumeAnchor,
+                    origin = row.origin ?: convo.origin,
+                )
+            }.distinctBy { it.ask.askId }.sortedBy { it.expiresAt ?: Long.MAX_VALUE }
+        }
+
+    /**
+     * Release a warm conversation only when it has no turn, background job, pending approval/question, or
+     * continuation grace left. Built-in chat bridges call this after a request settles: their session id stays
+     * resumable on disk, but an idle chat no longer occupies one of the bridge's concurrent-request slots.
+     *
+     * The busy check and registry removal are one mutex operation so a reaper/release cannot observe an idle
+     * conversation and then remove a newly-busy registry entry. False means either "still busy" or "already
+     * gone"; callers that retry can distinguish those with [liveCountOf].
+     */
+    suspend fun closeIfIdle(convoId: String): Boolean {
+        val removed = mutex.withLock {
+            val convo = convos[convoId] ?: return@withLock null
+            if (convo.isBusy()) return@withLock null
+            pendingClose.remove(convoId) to (convos.remove(convoId) ?: return@withLock null)
+        } ?: return false
+        removed.first?.cancel()
+        removed.second.close()
+        noteSelfClosed(removed.second)
+        log.info("closeIfIdle: released ${convoId.take(8)}… (sid=${removed.second.sessionId?.take(8) ?: "-"})")
+        return true
+    }
+
     /** Routes a prompt into its conversation. False = the convo is gone (idle-reaped / daemon restarted):
      *  the router answers [dev.ccpocket.protocol.SessionGone] so the phone can re-open + resend instead of
      *  the prompt vanishing into silence (the root of "sent a message, nothing happened"). */
@@ -406,6 +446,17 @@ class SessionRegistry(
         convo.sendPrompt(p.text, p.images, p.promptId)
         return true
     }
+
+    /** One-off bridge request approval, before the requester-controlled text reaches the agent. */
+    suspend fun approveBridgeRequest(convoId: String, preview: String): Boolean =
+        get(convoId)?.awaitBridgeRequestApproval(preview) ?: false
+
+    /** Execute the one request that just passed [approveBridgeRequest] under its ephemeral full grant. */
+    suspend fun sendApprovedBridgePrompt(p: SendPrompt): Boolean {
+        val convo = get(p.convoId) ?: return false
+        return convo.sendApprovedBridgePrompt(p.text, p.promptId)
+    }
+
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode, s.permissionMode) ?: Unit

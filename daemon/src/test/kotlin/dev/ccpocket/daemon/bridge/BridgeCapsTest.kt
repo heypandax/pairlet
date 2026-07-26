@@ -6,7 +6,9 @@ import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.ListPendingApprovals
 import dev.ccpocket.protocol.OpenSession
+import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.PermissionVerdict
@@ -56,6 +58,7 @@ class BridgeCapsTest {
         assertFalse(BridgeCaps.ingressAllowed(PermissionVerdict("c", "a", Decision.ALLOW)))
         assertFalse(BridgeCaps.ingressAllowed(SwitchMode("c", PermissionMode.BYPASS_PERMISSIONS)))
         assertFalse(BridgeCaps.ingressAllowed(RunShellCommand("c", "rm -rf /", "/w")))
+        assertFalse(BridgeCaps.ingressAllowed(ListPendingApprovals))
     }
 
     @Test
@@ -63,6 +66,7 @@ class BridgeCapsTest {
         // the guarantee "an approval prompt is structurally invisible to the trigger source"
         assertFalse(BridgeCaps.egressAllowed(PermissionAsk("c", "a", "Bash", "rm -rf /")))
         assertFalse(BridgeCaps.egressAllowed(AskWithdrawn("c", "a")))
+        assertFalse(BridgeCaps.egressAllowed(PendingApprovals()))
     }
 
     @Test
