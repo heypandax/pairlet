@@ -26,6 +26,9 @@ captures/
 /*.jpeg
 /*.png
 
+# local social-post publishing package (not used by product or site builds)
+/docs/design/claude-design-handoff/xhs-off-lan/
+
 # release secrets — never commit
 .env
 .env.*
