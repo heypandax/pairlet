@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -207,12 +206,17 @@ private fun SwitcherHeader(model: DesktopModel) {
             }
             Key("⌘0")
             val waiting = model.attention.size
-            Box(
+            // Badge rides INLINE, not as a corner overlay: the hover pill's own clip() truncated an
+            // offset badge, and a TopEnd anchor sits above the row's centre line so it never lined
+            // up with the ⌘0 keycap beside it. Same shape the pinned/session rows already use.
+            Row(
                 Modifier.clip(RoundedCornerShape(7.dp)).hoverFill(RoundedCornerShape(7.dp))
                     .clickable { model.showAttention = !model.showAttention }.padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Icon(Icons.Outlined.Notifications, null, tint = if (waiting > 0) Tok.tx else Tok.tx2, modifier = Modifier.size(16.dp))
-                if (waiting > 0) AttentionBadge(waiting, Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp))
+                if (waiting > 0) AttentionBadge(waiting)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
