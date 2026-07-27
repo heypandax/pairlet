@@ -247,7 +247,9 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
 
             SectionLabel(stringResource(Res.string.default_model_section))
             val modelDefaultLabel = stringResource(Res.string.value_default)
-            SegmentedRow(MODEL_DEFAULT_OPTS, repo.defaultModel.value, label = { it ?: modelDefaultLabel }) { repo.setDefaultModel(it) }
+            // selected via defaultModelFor so a legacy stored "opus" still highlights the (migrated) Opus
+            // segment; labels collapse the full Opus 5 id to its short alias so the segments stay compact
+            SegmentedRow(MODEL_DEFAULT_OPTS, repo.defaultModelFor(AgentKind.CLAUDE), label = { it?.let(::modelAlias) ?: modelDefaultLabel }) { repo.setDefaultModel(it) }
             Text(stringResource(Res.string.default_model_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 
             SectionLabel(stringResource(Res.string.default_effort_section))

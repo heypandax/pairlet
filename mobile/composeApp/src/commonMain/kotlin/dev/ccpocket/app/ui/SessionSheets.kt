@@ -66,6 +66,7 @@ import dev.ccpocket.protocol.JobKind
 import dev.ccpocket.protocol.JobStatus
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
+import dev.ccpocket.protocol.CLAUDE_OPUS_5
 import dev.ccpocket.protocol.CODEX_MODEL_IDS
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import androidx.compose.runtime.LaunchedEffect
@@ -79,7 +80,16 @@ internal val CODEX_MODEL_OPTIONS = CODEX_MODEL_IDS // Codex sessions get Codex m
 // user configured (free catalogs also rotate weekly) — a hardcoded list is someone else's setup
 // and every wrong row is a launch failure. The picker shows the daemon's `opencode models` answer
 // (FetchModels) or an explicit empty/error state, never a guess.
-internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to "opus", "Sonnet" to "sonnet", "Haiku" to "haiku") // display name → alias; shared by both shells' pickers
+// Display name → what `--model` gets. Aliases everywhere EXCEPT Opus: the CLI's bare `opus` still
+// resolves to 4.8, so reaching Opus 5 needs the full id (which `--model` passes through verbatim).
+// Deliberately only ONE Opus row — 4.8 is not offered; anyone still wanting it types it in Custom.
+internal val CLAUDE_MODEL_OPTIONS = listOf("Fable" to "fable", "Opus" to CLAUDE_OPUS_5, "Sonnet" to "sonnet", "Haiku" to "haiku") // shared by both shells' pickers
+
+/** The pick a Claude preset row actually sends. On a gateway the Opus row degrades back to the bare
+ *  alias: compatible endpoints map opus/sonnet/haiku onto their own tiers (issue #167), and a native
+ *  id sent there rots or 404s (#168) — the full Opus 5 id is only right on the official endpoint. */
+internal fun claudeRowPick(pick: String, gatewayUrl: String?): String =
+    if (gatewayUrl != null && pick == CLAUDE_OPUS_5) "opus" else pick
 
 /** Short header alias for a model id: "claude-opus-4-8[1m]" -> "opus". */
 fun modelAlias(model: String?): String {
@@ -480,6 +490,8 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // Fetch dynamic model list from the daemon when any agent picker opens.
     LaunchedEffect(agent) { repo.fetchModels(agent) }
     val agentModels = repo.agentModels[agent]
+    // gateway state up front: the Claude rows' effective picks depend on it (claudeRowPick)
+    val gatewayUrl = if (codex || opencode) null else repo.gatewayBaseUrl.value
     val choices = if (codex) {
         // daemon list first (real cache: configured default leads, includes ids the static trio lacks);
         // static trio only until it answers. A list may ride WITH an error (last-good + failed refresh).
@@ -491,8 +503,9 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     else CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
-        val big = contextWindowFor(alias) == LARGE_CONTEXT_WINDOW
-        ModelChoice(name, alias, alias, if (big) "1M" else "200K", big)
+        val pick = claudeRowPick(alias, gatewayUrl)
+        val big = contextWindowFor(pick) == LARGE_CONTEXT_WINDOW
+        ModelChoice(name, pick, pick, if (big) "1M" else "200K", big)
     }
     val selected = if (codex || opencode) repo.model.value else modelAlias(repo.model.value)
     var switchingTo by remember { mutableStateOf<String?>(null) }
@@ -517,7 +530,6 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // toggle below, so the sheet keeps today's size for everyone else. Claude sessions only: Codex
     // model routing doesn't go through ANTHROPIC_BASE_URL, and OpenCode has its own model format
     // (provider/name) — gateway presets would send bare ids like "deepseek-chat" that cause hangs.
-    val gatewayUrl = if (codex || opencode) null else repo.gatewayBaseUrl.value
     val pickPreset: (String) -> Unit = { switchingTo = it; repo.switchModel(it) }
     // opencode has NO static fallback rows: surface the fetch error / loading state explicitly
     // instead of a silent blank (or worse, a catalog of models this user's providers can't run)
@@ -548,7 +560,9 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     }
     Column(Modifier.padding(top = if (gatewayUrl != null) 8.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         choices.forEach { c ->
-            val isSel = c.pick.equals(selected, ignoreCase = true)
+            // raw compare too (desktop's isActive does the same): full-id rows like Opus 5 never
+            // alias-match `selected`, but the daemon echoes the id verbatim
+            val isSel = c.pick.equals(selected, ignoreCase = true) || c.pick.equals(repo.model.value, ignoreCase = true)
             val isSwitching = switchingTo?.equals(c.pick, ignoreCase = true) == true
             val raised = isSwitching || (isSel && switchingTo == null)
             val dimmed = (switchingTo != null && !isSwitching) || c.unavailable
@@ -595,7 +609,7 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     // Custom model id (issue #54): third-party gateways (cc-switch presets etc.) route ids a fixed list
     // can't know, and `--model` passes any string through — so hand that power to the user. Prefilled when
     // the session already runs an id outside the presets, with the same ✓/spinner the preset rows use.
-    val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) }
+    val presetActive = choices.any { it.pick.equals(selected, ignoreCase = true) || it.pick.equals(repo.model.value, ignoreCase = true) }
     val customActive = !presetActive && !repo.model.value.isNullOrBlank()
     // NOT keyed on the live model: an external switch (another device's /model, SessionLive echo)
     // must never wipe an id the user is mid-typing here

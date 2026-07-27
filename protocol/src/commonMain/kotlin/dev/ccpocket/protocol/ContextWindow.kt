@@ -19,7 +19,7 @@ const val LARGE_CONTEXT_WINDOW = 1_000_000L
  * (occupancy beyond 200k proves the 1M window; see Conversation.live / ObserveSession).
  */
 private val KNOWN_1M_MODELS = listOf(
-    "opus-4-8", "opus-4-7", "opus-4-6",
+    "opus-5", "opus-4-8", "opus-4-7", "opus-4-6",
     "sonnet-5", "sonnet-4-6",
     "fable-5", "mythos-5",
 )

@@ -124,6 +124,7 @@ import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
 import dev.ccpocket.protocol.AuthState
 import dev.ccpocket.protocol.compatibleModelForAgent
+import dev.ccpocket.protocol.migrateLegacyClaudeModel
 import dev.ccpocket.protocol.isModelCompatibleWithAgent
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
@@ -442,7 +443,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private val defaultOpenCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_OPENCODE_MODEL)?.takeIf { it.isNotEmpty() })
 
     fun defaultModelFor(agent: AgentKind): String? = when (agent) {
-        AgentKind.CLAUDE -> defaultModel.value
+        // legacy persisted bare "opus" follows the Opus row to Opus 5. Official endpoint only: on a
+        // gateway the alias IS the contract (#167 — vendors map it onto their own tiers).
+        AgentKind.CLAUDE -> defaultModel.value.let { if (gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it }
         AgentKind.CODEX -> defaultCodexModel.value
         AgentKind.OPENCODE -> defaultOpenCodeModel.value
     }
@@ -3165,7 +3168,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             startPermissionMode?.takeIf { openAgent == AgentKind.CLAUDE && it == CLAUDE_PERMISSION_MODE_AUTO }
         // Each backend seeds from its own persisted default. The compatibility guard is the final defence against
         // an old/corrupt preference crossing agent families; null means that CLI chooses its configured default.
-        val openModel = compatibleModelForAgent(openAgent, saved?.model)
+        // a session saved under an older build may carry bare "opus" — that now means Opus 5 on the
+        // official endpoint (defaultModelFor applies the same migration to the persisted default)
+        val savedModel = saved?.model?.let {
+            if (openAgent == AgentKind.CLAUDE && gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it
+        }
+        val openModel = compatibleModelForAgent(openAgent, savedModel)
             ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
         val knownCapabilities = modelCapabilities(openAgent, openModel)
         val openEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->

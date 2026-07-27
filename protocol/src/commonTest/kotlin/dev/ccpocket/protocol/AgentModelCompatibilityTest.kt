@@ -43,4 +43,15 @@ class AgentModelCompatibilityTest {
         assertEquals(null, compatibleModelForAgent(AgentKind.OPENCODE, "deepseek-chat"))
         assertEquals(null, compatibleModelForAgent(AgentKind.CODEX, "  "))
     }
+
+    @Test
+    fun legacy_bare_opus_migrates_to_opus_5() {
+        // older builds persisted the bare alias; on the official endpoint it follows the Opus row to Opus 5
+        assertEquals(CLAUDE_OPUS_5, migrateLegacyClaudeModel("opus"))
+        assertEquals(CLAUDE_OPUS_5, migrateLegacyClaudeModel("OPUS"))
+        // full ids and the other aliases are NOT rewritten — only the ambiguous legacy value moves
+        assertEquals("claude-opus-4-8", migrateLegacyClaudeModel("claude-opus-4-8"))
+        assertEquals("fable", migrateLegacyClaudeModel("fable"))
+        assertEquals(null, migrateLegacyClaudeModel(null))
+    }
 }

@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import dev.ccpocket.protocol.CLAUDE_OPUS_5
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -33,6 +34,8 @@ class ModelChipLabelTest {
         assertEquals("fable", modelChipLabel("fable"))                    // bare alias — the default state
         assertEquals("opus", modelChipLabel("claude-opus-4-8"))           // full id collapses like the header
         assertEquals("opus", modelChipLabel("claude-opus-4-8[1m]"))       // 1M variant keeps the alias
+        // the picker's Opus row now carries the full id — it must still collapse to the short alias
+        assertEquals("opus", modelChipLabel("claude-opus-5"))
     }
 
     @Test
@@ -48,5 +51,20 @@ class ModelChipLabelTest {
     fun `blank in, blank out — callers fall back to the account-default placeholder`() {
         assertEquals("", modelChipLabel(null))
         assertEquals("", modelChipLabel("   "))
+    }
+
+    @Test
+    fun `bare legacy opus fell out of the preset table but still renders short`() {
+        // "opus" left CLAUDE_MODEL_OPTIONS (the row now carries the full Opus 5 id) — a session
+        // still RUNNING the bare alias falls to the generic branch, which must not mangle a short id
+        assertEquals("opus", modelChipLabel("opus"))
+    }
+
+    @Test
+    fun `opus row pick degrades to the alias on a gateway`() {
+        // #167/#168: vendors map the alias onto their own tiers; the native Opus 5 id is official-endpoint-only
+        assertEquals("opus", claudeRowPick(CLAUDE_OPUS_5, "https://open.bigmodel.cn/api/anthropic"))
+        assertEquals(CLAUDE_OPUS_5, claudeRowPick(CLAUDE_OPUS_5, null))
+        assertEquals("sonnet", claudeRowPick("sonnet", "https://open.bigmodel.cn/api/anthropic"))
     }
 }

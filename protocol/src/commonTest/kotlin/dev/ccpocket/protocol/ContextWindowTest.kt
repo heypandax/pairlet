@@ -14,6 +14,7 @@ class ContextWindowTest {
     @Test
     fun natively_1m_ids_map_to_the_large_window() {
         listOf(
+            "claude-opus-5", // observed 412k occupancy in real transcripts — window is provably >200k
             "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
             "claude-sonnet-5", "claude-sonnet-4-6",
             "claude-fable-5", "claude-mythos-5",

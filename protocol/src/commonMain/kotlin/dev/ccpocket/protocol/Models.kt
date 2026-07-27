@@ -56,6 +56,16 @@ val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex
 /** Claude alias set — the ONE id family that is meaningless to the other backends. */
 val CLAUDE_MODEL_ALIAS_IDS = setOf("fable", "opus", "sonnet", "haiku")
 
+/** The full id the Opus picker row sends on the official endpoint: the CLI's bare `opus` alias still
+ *  resolves to Opus 4.8, so reaching Opus 5 needs the id `--model` passes through verbatim. */
+const val CLAUDE_OPUS_5 = "claude-opus-5"
+
+/** Legacy bare "opus" written by older builds (picker rows, persisted defaults, per-session params)
+ *  follows the Opus row forward to Opus 5. Callers keep gateways exempt: there the alias is the
+ *  contract — vendors map it onto their own tiers, while a native id rots (#167/#168). */
+fun migrateLegacyClaudeModel(model: String?): String? =
+    if (model.equals("opus", ignoreCase = true)) CLAUDE_OPUS_5 else model
+
 /** OpenCode model ids must include their provider prefix, e.g. "opencode/deepseek-v4-flash-free". */
 fun isOpenCodeModelId(model: String?): Boolean = model?.trim()?.let { '/' in it && it.substringBefore('/').isNotBlank() && it.substringAfter('/').isNotBlank() } == true
 
