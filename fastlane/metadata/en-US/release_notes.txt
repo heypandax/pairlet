@@ -1,15 +1,9 @@
-What's new in 1.5.2
+What's new in 1.5.3
 
 New
-• Approval inbox: pending actions now appear from the daemon even when a push notification is delayed or missed
-• Project and session lists show a compact pending-approval button only when something needs your attention
-• Feishu Bridge now asks once per outsider request; an approval completes that request without becoming a standing permission
-• Built-in Help Center and public smart support make setup, pairing, agents, permissions and troubleshooting easier to discover
-• Agent-specific project skills and dynamic capability controls now reflect what each connected backend actually supports
+• Opus 5 is now the Opus entry in the model picker, so sessions start on the latest Opus without typing a model id
+• A default model saved as plain "opus" moves forward with it, while third-party gateways keep using the alias their own tiers are mapped to
 
 Fixed
-• Missed approval pushes no longer leave requests invisible; reopening the app reconstructs the daemon's current queue
-• Idle Feishu conversations release their concurrency slot, and open failures now report the precise cause
-• Sensitive data remains blocked from bridge replies even after a request receives full execution approval
-• Windows closes to the tray reliably, while project lists filter agent-only folders more accurately
-• Help and support links preserve context and remain stable during slower answers
+• Opus 5 sessions measure context usage against their real window, instead of reporting a percentage several times too high
+• On desktop, the pending-approval count in the sidebar header sits level with the controls beside it and is no longer clipped
