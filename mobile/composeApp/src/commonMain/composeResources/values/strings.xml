@@ -282,7 +282,7 @@
     <string name="default_model_hint">Which model new Claude sessions start on — Codex sessions keep their own. A live session switches from ⋯ → Model.</string>
     <string name="default_effort_section">DEFAULT REASONING EFFORT</string>
     <string name="context_window_section">CONTEXT WINDOW · CATCH-ALL</string>
-    <string name="context_window_hint">Applies to any model without its own window. Auto reads the size from the model id.</string>
+    <string name="context_window_hint">Applies to any model without its own window and none we can read off its id. Auto reads the size from the model id.</string>
     <string name="context_window_custom">Custom</string>
     <string name="context_window_tokens">tokens</string>
     <string name="ctx_conflict_one">Saved. This won\'t affect %1$s — it uses its own window. Manage it below.</string>

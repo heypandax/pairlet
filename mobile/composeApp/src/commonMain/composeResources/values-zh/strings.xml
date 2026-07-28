@@ -282,7 +282,7 @@
     <string name="default_model_hint">新建 Claude 会话默认使用的模型（Codex 会话不受影响）。会话中可在 ⋯ → 模型 里临时切换。</string>
     <string name="default_effort_section">默认推理强度</string>
     <string name="context_window_section">上下文窗口 · 兜底</string>
-    <string name="context_window_hint">适用于所有没单独设过窗口的模型。自动档从模型 id 推断大小。</string>
+    <string name="context_window_hint">适用于既没单独设过窗口、也无法从 id 认出窗口的模型。自动档从模型 id 推断大小。</string>
     <string name="context_window_custom">自定义</string>
     <string name="context_window_tokens">token 数</string>
     <string name="ctx_conflict_one">已保存。这不会影响 %1$s，它用的是自己的窗口。可在下方管理。</string>

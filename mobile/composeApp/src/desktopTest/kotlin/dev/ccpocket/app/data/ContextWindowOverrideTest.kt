@@ -133,6 +133,45 @@ class ContextWindowOverrideTest {
         )
     }
 
+    /**
+     * The catch-all is the answer for models nobody can derive a window for — it must NOT answer for one whose id
+     * names its window. A stale `context_window_override=200000` (a pre-9cff9c0 test run left one in the dev
+     * store) pinned a 852k / 1M Opus 5 session at "ctx 426%", and since an override is exempt from the
+     * proven-usage upgrade, the occupancy that disproved the 200k could not rescue it either.
+     */
+    @Test
+    fun theCatchAllDoesNotOverrideAWindowWeCanReadOffTheModelId() {
+        val r = repo()
+        r.setContextWindowOverride(DEFAULT_CONTEXT_WINDOW)
+        r.contextUsed.value = 852_000L
+        r.live(model = "claude-opus-5", declared = LARGE_CONTEXT_WINDOW)
+        assertEquals(
+            LARGE_CONTEXT_WINDOW, r.contextWindow.value,
+            "a global 200k outranked Opus 5's native 1M — the statusline reads 426% and no occupancy can correct it",
+        )
+    }
+
+    /** Same for a bare alias: the window table resolves `opus` positively, so the catch-all stays out of it. */
+    @Test
+    fun theCatchAllAlsoYieldsToAKnownAlias() {
+        val r = repo()
+        r.setContextWindowOverride(DEFAULT_CONTEXT_WINDOW)
+        r.live(model = "opus", declared = LARGE_CONTEXT_WINDOW)
+        assertEquals(LARGE_CONTEXT_WINDOW, r.contextWindow.value, "the alias tier lost to the catch-all")
+    }
+
+    /** ...but a per-model row is a statement ABOUT that model, so it still outranks the derived 1M. */
+    @Test
+    fun aPerModelEntryStillOutranksAKnownOneMillionWindow() {
+        val r = repo()
+        r.setContextWindowOverrideFor("claude-opus-5", 500_000L)
+        r.live(model = "claude-opus-5", declared = LARGE_CONTEXT_WINDOW)
+        assertEquals(
+            500_000L, r.contextWindow.value,
+            "the known-window rule swallowed a hand-typed per-model value — #159's exemption is gone",
+        )
+    }
+
     @Test
     fun clearingAPerModelEntryFallsBackToTheCatchAll() {
         val r = repo()

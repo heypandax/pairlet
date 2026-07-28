@@ -61,6 +61,7 @@ import dev.ccpocket.protocol.ShareRevoked
 import dev.ccpocket.app.pairing.toPairingInfo
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
+import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.contextWindowFor
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.ConvoHistoryPage
@@ -484,9 +485,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun contextWindowKeyOf(model: String?): String? = modelKey(model)
 
     /** The denominator the user pinned for [model], most-specific first: a per-model entry beats the legacy
-     *  catch-all. Null = no override, follow the daemon/model-derived window. */
-    fun contextWindowOverrideFor(model: String?): Long? =
-        modelKey(model)?.let { contextWindowOverrides[it] } ?: contextWindowOverride.value
+     *  catch-all. Null = no override, follow the daemon/model-derived window.
+     *
+     *  The catch-all YIELDS for a model whose window we positively know — [contextWindowFor] returning the large
+     *  window is evidence (a `[1m]` marker, the known-1M table, an alias), never a fallback guess. That tier was
+     *  typed for the gateway model whose window nobody can derive; letting it also answer for a native-1M Claude
+     *  made an 852k / 1M Opus 5 session read "ctx 426%" — and because an override is exempt from the
+     *  proven-usage upgrade, the occupancy that disproved the 200k could not correct it either. A per-model row
+     *  still wins over everything: that one IS a statement about this model. */
+    fun contextWindowOverrideFor(model: String?): Long? {
+        modelKey(model)?.let { contextWindowOverrides[it] }?.let { return it }
+        return contextWindowOverride.value?.takeIf { contextWindowFor(model) != LARGE_CONTEXT_WINDOW }
+    }
 
     /** Persisted default agent backend for NEW sessions (Claude unless the user switched to Codex). Resumed
      *  sessions keep their own backend (the picker only seeds new ones). */
