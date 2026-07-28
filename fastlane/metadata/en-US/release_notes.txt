@@ -1,9 +1,5 @@
-What's new in 1.5.3
-
-New
-• Opus 5 is now the Opus entry in the model picker, so sessions start on the latest Opus without typing a model id
-• A default model saved as plain "opus" moves forward with it, while third-party gateways keep using the alias their own tiers are mapped to
+What's new in 1.5.4
 
 Fixed
-• Opus 5 sessions measure context usage against their real window, instead of reporting a percentage several times too high
-• On desktop, the pending-approval count in the sidebar header sits level with the controls beside it and is no longer clipped
+• The general context-window setting no longer overrides models whose window is already known (Opus 5, Sonnet 5, Fable), so usage percentages can no longer read several times too high
+• A window set for one specific model is untouched and still takes precedence
