@@ -184,6 +184,149 @@ class FeishuRoutesTest {
         assertIs<ChatAction.Reply>(c.handle("/clear", "oc_unbound", "ou_x"))
     }
 
+    // ── NO-APPROVAL trust (issue #198): only the machine owner, only with the master switch on ──
+
+    private fun trustCommands(
+        admin: String? = "ou_admin",
+        masterOn: Boolean = true,
+        trusted: MutableSet<String> = mutableSetOf(),
+        r: FeishuRoutes = FeishuRoutes(routesFile),
+    ) = Triple(
+        r,
+        FeishuCommands(
+            r, workdirs, admin, noApprovalEnabled = masterOn,
+            trustedOf = { it in trusted }, trustedProjectOf = { if (it in trusted) "/p/alpha" else null },
+        ),
+        trusted,
+    )
+
+    @Test
+    fun trust_is_the_machine_owners_alone_never_the_group_owners() {
+        val r = FeishuRoutes(routesFile)
+        r.bind("oc_1", "/p/alpha")
+        // a group owner may /bind, but waiving the machine owner's review is not theirs to grant — so the
+        // chatOwnerOf fallback that /bind honors must NOT apply here
+        val c = FeishuCommands(
+            r, workdirs, adminOpenId = "ou_admin", chatOwnerOf = { "ou_groupowner" },
+            noApprovalEnabled = true, trustedOf = { false },
+        )
+        assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_groupowner")).text)
+        assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_stranger")).text)
+        assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin"))
+    }
+
+    @Test
+    fun trust_refuses_until_the_owner_enabled_it_on_the_machine() {
+        val (r, c, _) = trustCommands(masterOn = false)
+        r.bind("oc_1", "/p/alpha")
+        val out = assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text
+        assertTrue("桌面端" in out, out) // points at the master switch instead of silently doing nothing
+    }
+
+    @Test
+    fun trust_needs_an_admin_and_echoes_the_callers_open_id_to_bootstrap_one() {
+        val (r, c, _) = trustCommands(admin = null)
+        r.bind("oc_1", "/p/alpha")
+        val out = assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_me")).text
+        assertTrue("ou_me" in out, out)
+    }
+
+    @Test
+    fun trust_requires_a_bound_project_and_reports_a_no_op_instead_of_re_trusting() {
+        val (r, c, trusted) = trustCommands()
+        assertTrue("绑定" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
+        r.bind("oc_1", "/p/alpha")
+        assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin")).let { assertTrue(it.enable) }
+        trusted += "oc_1"
+        assertTrue("已经是免审核" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
+    }
+
+    @Test
+    fun untrust_works_even_with_the_master_switch_off() {
+        // turning trust DOWN must never depend on config state, or flipping the master switch back on would
+        // resurrect an entry the owner meant to drop
+        val (r, c, _) = trustCommands(masterOn = false, trusted = mutableSetOf("oc_1"))
+        r.bind("oc_1", "/p/alpha")
+        assertIs<ChatAction.SetTrust>(c.handle("/untrust", "oc_1", "ou_admin")).let { assertFalse(it.enable) }
+        // ...and an untrusted chat says so rather than writing anything
+        val (r2, c2, _) = trustCommands(masterOn = false)
+        r2.bind("oc_1", "/p/alpha")
+        assertTrue("逐请求审批" in assertIs<ChatAction.Reply>(c2.handle("/untrust", "oc_1", "ou_admin")).text)
+    }
+
+    @Test
+    fun the_trust_store_persists_at_0600_and_fails_safe_on_a_corrupt_file() {
+        val f = File(tmp, "trust.json")
+        val t = FeishuTrust(f)
+        assertTrue(t.trust("oc_1", "/p/alpha"))
+        assertFalse(t.trust("oc_1", "/p/alpha")) // idempotent: a second /trust changes nothing
+        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(f.toPath())))
+        assertTrue(FeishuTrust(f).isTrusted("oc_1", "/p/alpha"))
+        assertTrue(FeishuTrust(f).untrust("oc_1"))
+        assertFalse(FeishuTrust(f).isTrusted("oc_1", "/p/alpha"))
+
+        // unreadable state must mean "nothing is trusted", and must not take the bridge down with it
+        f.writeText("[ broken")
+        val fallback = FeishuTrust(f)
+        assertFalse(fallback.isTrusted("oc_1", "/p/alpha"))
+        assertEquals(0, fallback.size())
+    }
+
+    @Test
+    fun trust_is_granted_per_project_so_a_rebind_voids_it_instead_of_inheriting() {
+        // the /bind authority may be the Feishu GROUP OWNER, not the machine owner — so a chat re-pointed at
+        // another allow-listed project must NOT carry card-free execution onto a project nobody trusted it with
+        val f = File(tmp, "trust.json")
+        val t = FeishuTrust(f)
+        t.trust("oc_1", "/p/alpha")
+        assertTrue(t.isTrusted("oc_1", "/p/alpha"))
+        assertFalse(t.isTrusted("oc_1", "/p/Beta"), "a rebound chat is not trusted for its NEW project")
+        // ...and the stale mark is still visible, so /untrust can clear it
+        assertEquals("/p/alpha", t.trustedProject("oc_1"))
+        // re-granting for the new project is an explicit act that replaces the old pair
+        assertTrue(t.trust("oc_1", "/p/Beta"))
+        assertTrue(t.isTrusted("oc_1", "/p/Beta"))
+        assertFalse(t.isTrusted("oc_1", "/p/alpha"))
+        assertEquals(1, t.size())
+    }
+
+    @Test
+    fun a_revoke_that_cannot_be_persisted_fails_loudly_instead_of_coming_back_later() {
+        // untrust writes BEFORE mutating memory: a revocation that only landed in RAM would look revoked until
+        // the next daemon start and then silently return. An unwritable path must report failure.
+        val dir = File(tmp, "ro").apply { mkdirs() }
+        val f = File(dir, "trust.json")
+        val t = FeishuTrust(f)
+        t.trust("oc_1", "/p/alpha")
+        Files.setPosixFilePermissions(dir.toPath(), PosixFilePermissions.fromString("r-xr-xr-x"))
+        try {
+            assertFalse(t.untrust("oc_1"), "an unpersistable revoke must return false, not pretend it worked")
+            assertTrue(t.isTrusted("oc_1", "/p/alpha"), "…and the in-memory state must still match the disk")
+        } finally {
+            Files.setPosixFilePermissions(dir.toPath(), PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
+    }
+
+    @Test
+    fun the_trust_log_is_durable_and_rotates_instead_of_growing_without_bound() {
+        // with no-approval on there is no PermissionAsk and therefore no push: this file is the whole trail,
+        // so unlike the runner's 200-line in-memory ring it must survive a restart
+        val f = File(tmp, "trust.log")
+        val log = FeishuTrustLog(f)
+        log.record("ran chat=oc_1 免审核执行")
+        log.record("multi\nline collapses to one")
+        val lines = f.readLines()
+        assertEquals(2, lines.size)
+        assertTrue("oc_1" in lines[0])
+        assertFalse("\n" in lines[1])
+        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(f.toPath())))
+        // one generation is kept when it grows past the cap
+        f.writeText("x".repeat((FeishuTrustLog.MAX_BYTES + 1).toInt()))
+        log.record("after rotation")
+        assertEquals("after rotation", f.readText().trim())
+        assertTrue(File(tmp, "trust.log.1").exists())
+    }
+
     @Test
     fun new_resets_the_chat_conversation() {
         val (r, c) = commands()

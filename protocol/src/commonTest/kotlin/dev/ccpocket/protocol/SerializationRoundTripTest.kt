@@ -1878,6 +1878,39 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun bridge_runner_authority_flags_are_additive_and_default_to_the_feature_being_off() {
+        // The two posture flags on BridgeRunnerState (ownerBypass #91, noApproval #198) are DISPLAY flags the
+        // edit form pre-fills its toggles from. What must hold on the wire: they round-trip, and a frame from a
+        // daemon too old to know them decodes as FALSE. That direction is the whole safety property — an absent
+        // key reading as "on" would make an old daemon look like it had waived approvals it still enforces.
+        val state = BridgeRunnerState(
+            kind = RUNNER_KIND_FEISHU, scriptPath = "built-in", running = true,
+            ownerBypass = true, noApproval = true,
+        )
+        for (carrier in listOf<Frame>(
+            BridgeRunnerStatus("feishu-bot", ok = true, state = state),
+            BridgeListing(listOf(BridgeInfo(name = "feishu-bot", runner = state))),
+            BridgeCreated(ok = true, runner = state),
+        )) {
+            val json = PocketJson.encodeToString(Envelope(id = "n1", ts = 0, body = carrier))
+            assertTrue("\"noApproval\":true" in json, json)
+            assertEquals(carrier, PocketJson.decodeFromString<Envelope>(json).body)
+        }
+        // "new app reads an OLD daemon's row": no ownerBypass / noApproval keys at all → both false (feature off)
+        val legacy = """{"id":"n2","ts":0,"to":"PEER","body":{"t":"pocket/bridge.listing","items":[
+            {"name":"feishu-bot","runner":{"kind":"feishu","scriptPath":"built-in"}}]}}"""
+        val row = (PocketJson.decodeFromString<Envelope>(legacy).body as BridgeListing).items.single().runner!!
+        assertFalse(row.ownerBypass, "an old daemon's runner must never read as owner-bypassing")
+        assertFalse(row.noApproval, "…nor as allowing no-approval chats")
+        // and a FUTURE structured field on this class is skipped, not a decode failure (ignoreUnknownKeys)
+        val future = """{"id":"n3","ts":0,"to":"PEER","body":{"t":"pocket/bridge.listing","items":[
+            {"name":"feishu-bot","runner":{"kind":"feishu","scriptPath":"built-in","noApproval":true,
+             "trustedChats":[{"chatId":"oc_1","workdir":"/p/a"}]}}]}}"""
+        val ahead = (PocketJson.decodeFromString<Envelope>(future).body as BridgeListing).items.single().runner!!
+        assertTrue(ahead.noApproval)
+    }
+
+    @Test
     fun a_managed_bridge_returns_a_runner_and_no_credential_to_copy() {
         // the managed path's whole point: the ticket never leaves the machine
         val managed = BridgeCreated(ok = true, runner = BridgeRunnerState(kind = RUNNER_KIND_FEISHU, scriptPath = "/x.py", running = true, pid = 7))

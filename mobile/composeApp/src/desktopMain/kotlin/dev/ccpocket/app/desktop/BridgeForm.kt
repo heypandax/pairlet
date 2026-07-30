@@ -62,6 +62,8 @@ import dev.ccpocket.app.resources.bridge_manage_on
 import dev.ccpocket.app.resources.bridge_manage_toggle
 import dev.ccpocket.app.resources.bridge_name_hint
 import dev.ccpocket.app.resources.bridge_none_yet
+import dev.ccpocket.app.resources.bridge_no_approval
+import dev.ccpocket.app.resources.bridge_no_approval_hint
 import dev.ccpocket.app.resources.bridge_owner_bypass
 import dev.ccpocket.app.resources.bridge_owner_bypass_hint_create
 import dev.ccpocket.app.resources.bridge_owner_bypass_hint_edit
@@ -179,6 +181,7 @@ internal fun NewBridgeForm(
     var appSecret by remember { mutableStateOf("") }
     var adminId by remember { mutableStateOf("") }
     var ownerBypass by remember { mutableStateOf(false) }
+    var noApproval by remember { mutableStateOf(false) }
     val requestScopedApproval = manage && scriptPath.isBlank()
 
     // scriptPath is NOT required: blank = the built-in Feishu adapter (the normal case)
@@ -248,6 +251,21 @@ internal fun NewBridgeForm(
                     )
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            // issue #198: the MASTER enable only. Which groups actually go card-free is decided in the group
+            // itself with /trust, so the hint has to say that — a checkbox that reads like "all my groups are
+            // now free" would be the one misunderstanding that matters here.
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { noApproval = !noApproval }) {
+                Check(noApproval)
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(stringResource(Res.string.bridge_no_approval), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                    Text(
+                        stringResource(Res.string.bridge_no_approval_hint),
+                        color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             // custom adapter script = the advanced escape hatch. Blank (the default) runs the adapter the
             // daemon has BUILT IN — no python, no checkout, nothing else to install.
@@ -277,6 +295,7 @@ internal fun NewBridgeForm(
                                 put("FEISHU_APP_SECRET", appSecret.trim())
                                 if (adminId.isNotBlank()) put("FEISHU_ADMIN_OPEN_ID", adminId.trim())
                                 if (ownerBypass) put("FEISHU_OWNER_BYPASS", "1")
+                                if (noApproval) put("FEISHU_NO_APPROVAL", "1")
                             },
                         )
                         onCreate(name.trim(), picked.toList(), tier, parseCommandLines(allowCmds), runner)
@@ -309,21 +328,26 @@ internal fun EditRunnerForm(
     workdirs: List<String>,
     allowedCommands: List<String>,
     ownerBypass: Boolean,
+    noApproval: Boolean,
     requestScopedApproval: Boolean,
     onCancel: () -> Unit,
-    onSave: (appId: String, appSecret: String, adminId: String, workdirs: List<String>, allowedCommands: List<String>, ownerBypass: Boolean) -> Unit,
+    onSave: (appId: String, appSecret: String, adminId: String, workdirs: List<String>, allowedCommands: List<String>, ownerBypass: Boolean, noApproval: Boolean) -> Unit,
 ) {
     var appId by remember { mutableStateOf("") }
     var appSecret by remember { mutableStateOf("") }
     var adminId by remember { mutableStateOf("") }
     var ownerBypassOn by remember { mutableStateOf(ownerBypass) }
+    var noApprovalOn by remember { mutableStateOf(noApproval) }
     val picked = remember { mutableStateListOf<String>().apply { addAll(workdirs) } }
     val projectsChanged = picked.toList() != workdirs
     var allowCmds by remember { mutableStateOf(allowedCommands.joinToString("\n")) }
     val commandsChanged = !requestScopedApproval && parseCommandLines(allowCmds) != allowedCommands
     // save is live once SOMETHING changed AND at least one project remains (a bridge with no allow-listed
     // directory can open nothing — the daemon rejects it too, this just greys the button first)
-    val dirty = (appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank() || projectsChanged || commandsChanged || ownerBypassOn != ownerBypass) && picked.isNotEmpty()
+    val dirty = (
+        appId.isNotBlank() || appSecret.isNotBlank() || adminId.isNotBlank() || projectsChanged ||
+            commandsChanged || ownerBypassOn != ownerBypass || noApprovalOn != noApproval
+        ) && picked.isNotEmpty()
 
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
@@ -364,13 +388,27 @@ internal fun EditRunnerForm(
             }
         }
         Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { noApprovalOn = !noApprovalOn }) {
+            Check(noApprovalOn)
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(stringResource(Res.string.bridge_no_approval), color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.sp)
+                Text(
+                    stringResource(Res.string.bridge_no_approval_hint),
+                    color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 stringResource(Res.string.bridge_edit_save), color = if (dirty) Tok.accent else Tok.muted.copy(alpha = 0.5f),
                 fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.clip(RoundedCornerShape(6.dp))
                     .background((if (dirty) Tok.accent else Tok.muted).copy(alpha = 0.12f))
-                    .clickable(enabled = dirty) { onSave(appId, appSecret, adminId, picked.toList(), parseCommandLines(allowCmds), ownerBypassOn) }
+                    .clickable(enabled = dirty) {
+                        onSave(appId, appSecret, adminId, picked.toList(), parseCommandLines(allowCmds), ownerBypassOn, noApprovalOn)
+                    }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
             Text(

@@ -457,6 +457,19 @@ class SessionRegistry(
         return convo.sendApprovedBridgePrompt(p.text, p.promptId)
     }
 
+    /**
+     * Execute one request from a chat the owner PRE-TRUSTED (issue #198) — no approval card was shown, so the
+     * turn runs under the narrower AUTO_TRUSTED grant (danger/workdir walls still enforced).
+     *
+     * In-process callers only, exactly like [approveBridgeRequest]: the trust decision is keyed on the
+     * attested chat id, which only the built-in engine sees. No frame reaches this — the router has no branch
+     * that calls it, so a bridge cannot claim its own request is trusted over the wire.
+     */
+    suspend fun sendTrustedBridgePrompt(p: SendPrompt): Boolean {
+        val convo = get(p.convoId) ?: return false
+        return convo.sendTrustedBridgePrompt(p.text, p.promptId)
+    }
+
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode, s.permissionMode) ?: Unit

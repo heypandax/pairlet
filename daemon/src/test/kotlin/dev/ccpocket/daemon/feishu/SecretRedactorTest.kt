@@ -38,6 +38,31 @@ class SecretRedactorTest {
     }
 
     @Test
+    fun a_prefixed_env_var_name_is_caught_too() {
+        // The shapes a project's own .env is ACTUALLY made of. These all slipped through while the key pattern
+        // was anchored with a leading \b: that boundary does not exist between `_` and a letter, so
+        // `AWS_SECRET_ACCESS_KEY=…` never matched — and .env is the very file this scrub exists for.
+        for ((line, secret) in listOf(
+            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI0K7MDENGbPxRfiCYEXAMPLEKEY" to "wJalrXUtnFEMI0K7MDENGbPxRfiCYEXAMPLEKEY",
+            "GITHUB_TOKEN=0123456789abcdefghij" to "0123456789abcdefghij",
+            "FEISHU_APP_SECRET=abcdefghijklmnop" to "abcdefghijklmnop",
+            "STRIPE_SECRET_KEY=rk_live_0123456789" to "rk_live_0123456789",
+            "SSHPASS=hunter2hunter2" to "hunter2hunter2",
+            """  "accessToken": "0123456789abcdef"""" to "0123456789abcdef",
+        )) {
+            assertTrue(didRedact(line), "should redact: $line")
+            assertFalse(secret in redactedText(line), "the value must be gone: ${redactedText(line)}")
+        }
+        // a credential embedded in a URL has no secret-ish key name at all to key off
+        val dsn = "DATABASE_URL=postgres://appuser:s3cr3tpass@db.internal:5432/app"
+        assertTrue(didRedact(dsn))
+        assertFalse("s3cr3tpass" in redactedText(dsn), redactedText(dsn))
+        val bare = "连的是 postgres://appuser:s3cr3tpass@db.internal:5432/app"
+        assertFalse("s3cr3tpass" in redactedText(bare), redactedText(bare))
+        assertTrue("db.internal" in redactedText(bare), "the host is not the secret: ${redactedText(bare)}")
+    }
+
+    @Test
     fun ordinary_prose_is_left_alone() {
         // no false positives on normal replies — the field WORD without a value isn't a secret
         for (s in listOf(

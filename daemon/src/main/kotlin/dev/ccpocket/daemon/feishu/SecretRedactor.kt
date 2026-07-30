@@ -20,12 +20,23 @@ object SecretRedactor {
     // a PEM private-key block, whole
     private val PEM = Regex("-----BEGIN [^-\n]*PRIVATE KEY-----[\\s\\S]*?-----END [^-\n]*PRIVATE KEY-----")
 
-    // KEY = VALUE / KEY: VALUE where the key name signals a secret — redact only the value
+    // KEY = VALUE / KEY: VALUE where the key name signals a secret — redact only the value.
+    //
+    // The key may carry a PREFIX (`AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN`, `FEISHU_APP_SECRET`,
+    // `STRIPE_SECRET_KEY`, `"accessToken"`): a leading `\b` does NOT match between `_` and a letter (both are
+    // word characters), so the original anchor missed the single most common shape there is — the env-var
+    // names in a project's own .env, which is exactly the file this scrub exists for. Allow any leading
+    // name-ish run instead, and require the match to start at a boundary the naming can't fake.
     private val ASSIGN = Regex(
-        "(?i)(\\b(?:password|passwd|pwd|secret|secret[_-]?key|token|access[_-]?token|api[_-]?key|apikey|" +
-            "access[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token)\\b\\s*[=:]\\s*)" +
+        "(?i)((?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]*" +
+            "(?:password|passwd|pwd|passphrase|sshpass|secret|secret[_-]?key|token|access[_-]?token|" +
+            "api[_-]?key|apikey|access[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token)" +
+            "[A-Za-z0-9_.-]*\"?\\s*[=:]\\s*)" +
             "[\"']?([^\\s\"'\\n]{3,})[\"']?",
     )
+
+    // credentials embedded in a URL (`postgres://user:pass@host`) — no secret-ish key name to key off at all
+    private val URL_CREDS = Regex("([A-Za-z][A-Za-z0-9+.-]*://[^\\s/:@]+:)[^\\s/@]+(@)")
 
     // self-identifying token formats (GitHub, Slack, AWS, OpenAI-style, JWT) — redact wherever they appear
     private val TOKENS = Regex(
@@ -38,6 +49,7 @@ object SecretRedactor {
         var hit = false
         var out = PEM.replace(text) { hit = true; "$MASK（私钥已移除）" }
         out = ASSIGN.replace(out) { m -> hit = true; m.groupValues[1] + MASK }
+        out = URL_CREDS.replace(out) { m -> hit = true; m.groupValues[1] + MASK + m.groupValues[2] }
         out = TOKENS.replace(out) { hit = true; MASK }
         return out to hit
     }

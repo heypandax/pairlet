@@ -129,4 +129,47 @@ class SessionRegistryBridgeApprovalRouteTest {
             scope.cancel()
         }
     }
+
+    /** issue #198: a pre-trusted chat's request needs NO permit (nothing was tapped) but is still refused on a
+     *  guest credential and still emits no approval card. The narrower in-turn grant is PermissionBridge's
+     *  half of the contract (see PermissionBridgeTest). */
+    @Test
+    fun a_trusted_chats_request_runs_without_a_permit_but_never_on_a_guest_share() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = LazyBackend()
+        val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }))
+        val workdir = Files.createTempDirectory("ccp-bridge-trusted").toString()
+        val frames = mutableListOf<Frame>()
+        try {
+            val convoId = registry.open(
+                OpenSession(workdir),
+                { frame -> synchronized(frames) { frames += frame } },
+                origin = "feishu-bot",
+            )
+            assertTrue(
+                registry.sendTrustedBridgePrompt(SendPrompt(convoId, "run tests")),
+                "the owner's standing per-chat grant IS the authorization — no permit to mint",
+            )
+            withTimeout(5_000) {
+                while (backend.launchedSpec == null) delay(10)
+            }
+            assertTrue(
+                synchronized(frames) { frames.filterIsInstance<PermissionAsk>() }.isEmpty(),
+                "a trusted request must not push a per-request card",
+            )
+
+            // a GUEST folder share is a different credential kind: it approves its own asks and must never
+            // reach the bridge grant path at all
+            val guestConvo = registry.open(
+                OpenSession(workdir),
+                { },
+                origin = "guest-share",
+                pathScope = listOf(workdir),
+            )
+            assertFalse(registry.sendTrustedBridgePrompt(SendPrompt(guestConvo, "run tests")))
+        } finally {
+            registry.closeAll()
+            scope.cancel()
+        }
+    }
 }

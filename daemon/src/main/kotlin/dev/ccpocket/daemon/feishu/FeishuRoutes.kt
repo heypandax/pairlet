@@ -35,13 +35,7 @@ class FeishuRoutes(private val path: File) {
     @Synchronized fun chatsFor(workdir: String): Int = map.values.count { it == workdir }
     @Synchronized fun size(): Int = map.size
 
-    private fun flush() {
-        path.parentFile?.mkdirs()
-        val tmp = File(path.parentFile, ".${path.name}.tmp")
-        tmp.writeText(PocketJson.encodeToString(map.toMap()))
-        runCatching { Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("rw-------")) }
-        Files.move(tmp.toPath(), path.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-    }
+    private fun flush() = writeOwnerOnly(path, PocketJson.encodeToString(map.toMap()))
 
     companion object {
         /** The chat-facing name of a workdir: its basename. /bind uses this, never the full path. */
@@ -59,6 +53,18 @@ class FeishuRoutes(private val path: File) {
     }
 }
 
+/** Write [text] to [path] atomically, owner-only where the filesystem supports it — the shape every
+ *  engine-side state file in this package needs (a torn write reads as "all my chats got unbound", and the
+ *  contents name the chats a machine answers to). Best-effort on the permission bit, like the credential
+ *  stores: Windows ACLs inherit the profile dir instead. */
+internal fun writeOwnerOnly(path: File, text: String) {
+    path.parentFile?.mkdirs()
+    val tmp = File(path.parentFile, ".${path.name}.tmp")
+    tmp.writeText(text)
+    runCatching { Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("rw-------")) }
+    Files.move(tmp.toPath(), path.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+}
+
 /** What the engine should do with one inbound chat line. */
 sealed interface ChatAction {
     /** Reply [text] to the message (a /command's answer, or a refusal). */
@@ -71,6 +77,10 @@ sealed interface ChatAction {
     data class Ask(val workdir: String, val prompt: String, val note: String? = null) : ChatAction
     /** Drop this chat's conversation so the next message opens a FRESH session ("/new"). [note] confirms it. */
     data class Reset(val note: String) : ChatAction
+    /** Turn this chat's NO-APPROVAL trust on/off ("/trust", "/untrust", issue #198) — authority already
+     *  verified (machine owner only). The engine persists it and replies, since only it knows whether the
+     *  state actually changed. */
+    data class SetTrust(val enable: Boolean) : ChatAction
     /** Not addressed to us / nothing to do. */
     data object Ignore : ChatAction
 }
@@ -89,6 +99,14 @@ class FeishuCommands(
      *  authority when [adminOpenId] is unset. Injected by the engine; the pure default keeps this class
      *  IO-free and unit-testable. An explicit admin always WINS; the owner only fills the no-admin gap. */
     private val chatOwnerOf: (chatId: String) -> String? = { null },
+    /** MASTER enable for per-chat no-approval (issue #198), read off the owner-only bridge spec. False (the
+     *  default) makes /trust refuse: the chat side can never turn the feature on by itself. */
+    private val noApprovalEnabled: Boolean = false,
+    /** Is this chat no-approval FOR THE PROJECT IT IS BOUND TO NOW? Injected so this class stays IO-free. */
+    private val trustedOf: (chatId: String) -> Boolean = { false },
+    /** Any trust entry for this chat, whatever project it names — so a mark left over from an earlier binding
+     *  is still revocable by /untrust even though [trustedOf] (correctly) reports it as not in effect. */
+    private val trustedProjectOf: (chatId: String) -> String? = { null },
 ) {
     fun handle(text: String, chatId: String, senderOpenId: String): ChatAction {
         if (!text.startsWith("/")) {
@@ -150,6 +168,36 @@ class FeishuCommands(
                     }
                 },
             )
+            // NO-APPROVAL trust (issue #198). Authority is the MACHINE OWNER alone — deliberately NOT the /bind
+            // authority: a Feishu group owner may point their chat at an allow-listed project, but waiving the
+            // machine owner's review of what runs on their machine is not theirs to grant. So no group-owner
+            // fallback here; with no admin configured the answer is "can't", plus the caller's own open_id so
+            // the owner can paste it into the desktop field (the same bootstrap /bind uses).
+            "trust", "untrust" -> {
+                val on = cmd == "trust"
+                val admin = adminOpenId?.takeIf { it.isNotBlank() }
+                val trusted = trustedOf(chatId)
+                when {
+                    admin == null -> ChatAction.Reply(
+                        "还没设置机主 open_id，无法开关免审核。\n你的 open_id 是：$senderOpenId\n" +
+                            "在桌面端「桥」的配置里填进 admin 字段后再试。",
+                    )
+                    senderOpenId != admin -> ChatAction.Reply("只有机主可以开关本群免审核。")
+                    // OFF always works, even with the master switch off: turning trust DOWN must never be
+                    // blocked by config state, or a bridge whose master switch later flips back on would
+                    // silently resurrect an entry the owner meant to drop.
+                    // trustedOf() answers for the CURRENT binding, so a chat rebound since the grant reads
+                    // untrusted here — but its stale entry must still be revocable, hence trustedProjectOf
+                    !on -> if (trustedProjectOf(chatId) != null) ChatAction.SetTrust(false)
+                    else ChatAction.Reply("本群本来就是逐请求审批。")
+                    !noApprovalEnabled -> ChatAction.Reply(
+                        "电脑上还没允许免审核：先在桌面端「桥」的配置里勾上「群成员免审核」，再在群里发 /trust。",
+                    )
+                    routes.workdirFor(chatId) == null -> ChatAction.Reply("本群还没有绑定项目，先 /bind 再开免审核。")
+                    trusted -> ChatAction.Reply("本群已经是免审核了。")
+                    else -> ChatAction.SetTrust(true)
+                }
+            }
             // a non-bridge slash → run it in the bound session (or teach if this chat has none yet)
             else -> routes.workdirFor(chatId)?.let { ChatAction.Ask(it, text) }
                 ?: ChatAction.Reply("本群还没有绑定项目，无法执行 /$cmd。\n\n$HELP")
@@ -174,6 +222,8 @@ class FeishuCommands(
               @机器人 /projects       列出可绑定的项目
               @机器人 /bind <项目>    把本群绑到某个项目（仅管理员）
               @机器人 /unbind         解绑本群（仅管理员）
+              @机器人 /trust          本群免审核直接执行（仅机主，需电脑上先允许）
+              @机器人 /untrust        恢复逐请求审批（仅机主）
         """.trimIndent()
     }
 }

@@ -291,7 +291,14 @@ class CodexBackend(
                 val path = itemId?.let { fileChangePaths[it] }
                 val diff = itemId?.let { fileChangeDiffs[it] }
                 val input = buildJsonObject {
-                    (path ?: params?.str("reason"))?.let { put("file_path", it) }
+                    // file_path carries a PATH and nothing else: the daemon's scope guards (guest share roots,
+                    // a bridge's workdir) resolve this key against the allowed roots, and codex's prose `reason`
+                    // resolved as a relative path canonicalizes INSIDE the workdir — i.e. a cache miss would
+                    // manufacture an in-scope target and wave a real out-of-scope edit through. When the path is
+                    // unknown the guards must see "no target" and the ask must reach a human; the reason still
+                    // rides along for the card, under a key no guard reads as a path.
+                    path?.let { put("file_path", it) }
+                    if (path == null) params?.str("reason")?.let { put("description", it) }
                 }
                 listOf(AgentEvent.ControlRequest(askId, "Edit", input, diff = diff)) // diff is typed, not smuggled in input
 

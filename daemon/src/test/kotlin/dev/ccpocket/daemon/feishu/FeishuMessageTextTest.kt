@@ -39,6 +39,30 @@ class FeishuMessageTextTest {
         assertEquals("[audit_log]", FeishuMessageText.plainText("audit_log", "{}"))
     }
 
+    /** inboundText is the INSTRUCTION reader — the regression that made a bullet-list @mention vanish. */
+    @Test
+    fun inbound_reads_text_and_post_alike() {
+        assertEquals("修一下登录崩溃", FeishuMessageText.inboundText("text", """{"text":"修一下登录崩溃"}"""))
+        val post = """{"title":"","content":[
+              [{"tag":"at","user_id":"@_user_1","user_name":"bot"},{"tag":"text","text":" 我已经："}],
+              [{"tag":"text","text":"取消排队的旧 job"}]
+            ]}"""
+        val out = FeishuMessageText.inboundText("post", post)
+        assertTrue(out != null && "我已经" in out && "取消排队的旧 job" in out, "got: $out")
+    }
+
+    /** …and unlike plainText it must NOT invent a placeholder: a turn driven by the literal "[图片]" is
+     *  worse than no turn, so a kind with no instruction in it reads as null and the message is ignored. */
+    @Test
+    fun inbound_has_no_instruction_in_non_text_kinds_or_a_bad_body() {
+        assertEquals(null, FeishuMessageText.inboundText("image", """{"image_key":"img_x"}"""))
+        assertEquals(null, FeishuMessageText.inboundText("interactive", "{}"))
+        assertEquals(null, FeishuMessageText.inboundText("text", "not json{"))
+        assertEquals(null, FeishuMessageText.inboundText("text", """{"text":"   "}"""))
+        assertEquals(null, FeishuMessageText.inboundText("post", """{"content":[[{"tag":"at","user_id":"@_user_1"}]]}"""))
+        assertEquals(null, FeishuMessageText.inboundText(null, null))
+    }
+
     @Test
     fun malformed_or_empty_body_degrades_never_throws() {
         assertEquals("[非文本消息]", FeishuMessageText.plainText("text", "not json{"))

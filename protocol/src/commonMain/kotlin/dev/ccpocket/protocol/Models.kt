@@ -727,4 +727,9 @@ data class BridgeRunnerState(
     // OWNER BYPASS (issue #91): the CONFIGURED owner's OWN messages run without approval. A display flag so
     // the edit form can pre-fill its toggle — NOT a secret. Absent on an older daemon → false (feature off).
     val ownerBypass: Boolean = false,
+    // NON-OWNER NO-APPROVAL (issue #198): the owner's MASTER enable for skipping the per-request approval card
+    // on requests from OTHER chat members. On its own it changes nothing — the owner still has to mark each
+    // chat with /trust — so this flag means "allowed to be trusted", not "trusted". Same display-flag role as
+    // [ownerBypass]: absent on an older daemon → false (feature off).
+    val noApproval: Boolean = false,
 )

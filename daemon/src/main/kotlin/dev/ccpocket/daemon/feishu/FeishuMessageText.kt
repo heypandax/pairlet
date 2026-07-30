@@ -21,6 +21,23 @@ import kotlinx.serialization.json.jsonPrimitive
 internal object FeishuMessageText {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    /**
+     * The INSTRUCTION text of an inbound message, or null when the kind carries none.
+     *
+     * Deliberately NOT [plainText]: a quote degrades to `[图片]` because a placeholder is better context than
+     * nothing, but driving a whole Claude turn on the literal string "[图片]" is worse than ignoring the
+     * message. So text and rich-text `post` yield their words and every other kind yields null.
+     *
+     * `post` matters more than it looks: Feishu sends `post`, not `text`, the moment someone uses a bullet
+     * list, a heading or a link — so reading only `content.text` (what onMessage did before) silently
+     * swallowed a large share of real requests, with no reply and no log.
+     */
+    fun inboundText(msgType: String?, content: String?): String? = when (msgType) {
+        "text" -> textField(content)
+        "post" -> richPostText(content).takeIf { it.isNotEmpty() }
+        else -> null
+    }
+
     /** [msgType] is the message's `msg_type`; [content] is the raw `body.content` JSON string. */
     fun plainText(msgType: String?, content: String?): String = when (msgType) {
         "text" -> textField(content) ?: PLACEHOLDER_OTHER

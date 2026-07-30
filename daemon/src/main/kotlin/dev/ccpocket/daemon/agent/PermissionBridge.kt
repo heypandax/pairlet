@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.bridge.BridgeGrant
 import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AskWithdrawn
@@ -57,10 +58,12 @@ class PermissionBridge(
     // PER-SESSION property (race-free — no attributing individual tool calls to a sender), set at OPEN by
     // TRUSTED in-process code only, never the wire. Bridge-only. neverRemember gates still reach a human.
     private val ownerBypassSession: Boolean = false,
-    // issue #190: true only while ONE owner-approved bridge request is executing. Unlike a remembered
-    // allow-rule, this grant is revoked at TurnResult/process end and the next request must be approved
-    // separately. Supplied dynamically because the PermissionBridge lives for the whole agent process.
-    private val bridgeRequestAuthorized: () -> Boolean = { false },
+    // issue #190 / #198: the authority ONE externally submitted bridge request carries into its turn —
+    // [BridgeGrant.OWNER_APPROVED] when the owner read and approved it, [BridgeGrant.AUTO_TRUSTED] when the
+    // owner pre-trusted the chat it came from. Unlike a remembered allow-rule the grant is revoked at
+    // TurnResult/process end, so the next request starts locked. Supplied dynamically because the
+    // PermissionBridge lives for the whole agent process while the grant is per-turn.
+    private val bridgeGrant: () -> BridgeGrant = { BridgeGrant.NONE },
     // issue #91 "一次授权跑完全程": the owner-configured Bash allow-list for this bridge. A command that
     // matches (and is neither DANGEROUS nor carrying shell metacharacters) is auto-run with NO phone prompt,
     // so a whitelisted multi-step task isn't chopped up by per-command approvals in an async IM channel.
@@ -99,12 +102,13 @@ class PermissionBridge(
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
+        val grant = if (bridgeSession) bridgeGrant() else BridgeGrant.NONE
         // FULL REQUEST AUTHORIZATION (issue #190): the owner approved this exact externally submitted
         // request before it reached the agent. Execution tools — including ExitPlanMode — run without a
         // second layer of piecemeal approval or the bridge Bash/path gates. AskUserQuestion remains
         // interactive because the answer, rather than permission, rides the verdict. The supplier is
         // trusted in-process state; it cannot be claimed over the wire and is revoked when that turn ends.
-        if (bridgeSession && bridgeRequestAuthorized() && ev.toolName != AskQuestions.TOOL) {
+        if (grant == BridgeGrant.OWNER_APPROVED && ev.toolName != AskQuestions.TOOL) {
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -133,6 +137,17 @@ class PermissionBridge(
                 }
                 BridgeCommandPolicy.Verdict.ASK -> {} // fall through to the phone approval below
             }
+        }
+        // PRE-TRUSTED CHAT (issue #198): the owner granted this chat standing permission to run without a
+        // per-request card. Placed HERE, below the workdir wall (:above) and BELOW the Bash gate, and gated on
+        // a CLOSED tool allow-list ([BridgeGrant.autoRunnable]) rather than "everything but AskUserQuestion":
+        // nobody read this prompt, so only tools the daemon can confine on its own may skip the owner. Bash
+        // therefore keeps its normal verdict — its ambiguous middle falls past this branch to the ask below,
+        // which is the backstop that makes the DANGEROUS blacklist tolerable in the first place. Unknown tools
+        // (MCP, WebFetch, a renamed file tool) likewise ask, instead of passing the path wall vacuously.
+        if (grant == BridgeGrant.AUTO_TRUSTED && autoTrustedMayRun(ev.toolName, ev.input)) {
+            respond(ev.requestId, true, false, ev.input, null, null)
+            return
         }
         // bypassPermissions auto-allows ordinary tools — but NOT the neverRemember class (issue #156): those
         // are human-decision gates that must survive every skip-the-ask path (the ToolMeta contract).
@@ -261,9 +276,37 @@ class PermissionBridge(
         // workdir (trailing slash / symlinked prefix / ..) would otherwise mis-compare (review N7).
         val roots = pathScope ?: (workdir?.takeIf { bridgeSession }?.let { listOf(PathScope.canonical(it) ?: it) } ?: return null)
         return ToolMetadata.pathTargets(tool, input).firstOrNull { target ->
+            // A `~` form is refused OUTRIGHT, before containment — the same rule GuestGuard applies one layer up
+            // (issue #152) and for the same reason: PathScope does NOT expand a tilde, so `~/.ssh/id_rsa`
+            // resolves to <workdir>/~/.ssh/id_rsa and lands INSIDE the scope, while the execution side expands
+            // it to the real home dir. Containment would pass and the read would escape. No legitimate
+            // in-scope tool call needs one.
+            if (target.startsWith("~")) return@firstOrNull true
             val abs = if (File(target).isAbsolute || workdir == null) target else File(workdir, target).path
             !PathScope.contains(roots, abs)
         }
+    }
+
+    /**
+     * May a [BridgeGrant.AUTO_TRUSTED] request run [tool] with no owner card (issue #198)? On top of the closed
+     * tool allow-list, two target-shaped conditions the tool NAME cannot express:
+     *
+     *  1. A specific-file tool must have at least one target the daemon actually RESOLVED. With no target the
+     *     workdir wall passes vacuously, so "confined by machinery" would be a claim about an unknown location —
+     *     e.g. a Codex fileChange whose path the daemon could not recover. Not applied to Glob/Grep, whose
+     *     absent `path` legitimately means "the session cwd".
+     *  2. No target may be a file that EXECUTES on the owner's next interaction. The wall bounds where bytes
+     *     land, not what they mean: `.git/config` (`core.pager`, `diff.external`), a `.git/hooks` entry and
+     *     `.claude/settings.json` (hooks) all run as the OWNER — and the owner's own sessions in that project
+     *     are not clean-room, unlike the bridge's. So an unattended in-project write is a persistence
+     *     primitive. These fall through to the owner's card (one tap), NOT a hard deny: editing them is
+     *     legitimate work, it just isn't something a group member should do while nobody is looking.
+     */
+    private fun autoTrustedMayRun(tool: String, input: JsonObject?): Boolean {
+        if (!BridgeGrant.autoRunnable(tool)) return false
+        val targets = ToolMetadata.pathTargets(tool, input)
+        if (tool in BridgeGrant.SPECIFIC_FILE_TOOLS && targets.isEmpty()) return false
+        return targets.none { BridgeGrant.executesForTheOwner(it) }
     }
 
     private companion object {

@@ -69,8 +69,24 @@ class FeishuEngine(
     // turn runs with NO approval (full trust). Default off; meaningless without an adminOpenId set. Only the
     // BUILT-IN engine may claim this — it reads feishu's attested sender directly (an external adapter can't).
     private val ownerBypassEnabled = env["FEISHU_OWNER_BYPASS"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on")
+    // NO-APPROVAL (issue #198): the owner's MASTER enable for letting OTHER members' requests run without the
+    // per-request card. Off by default, and on its own it trusts nothing — each chat still has to be marked
+    // with /trust by the machine owner. Two conditions, because a single one would make "I turned it on to try
+    // it" silently apply to every group the bot happens to sit in.
+    private val noApprovalEnabled = env["FEISHU_NO_APPROVAL"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on")
     private val routes = FeishuRoutes(File(stateDir, "feishu-routes.json"))
-    private val commands = FeishuCommands(routes, spec.workdirs, adminOpenId, chatOwnerOf = { chatOwners[it] })
+    private val trust = FeishuTrust(File(stateDir, "feishu-trust.json"))
+    // the durable half of the no-approval trail — see FeishuTrustLog on why the runner's log ring isn't enough
+    private val trustLog = FeishuTrustLog(File(stateDir, "feishu-trust.log"))
+    private val commands = FeishuCommands(
+        routes, spec.workdirs, adminOpenId,
+        chatOwnerOf = { chatOwners[it] },
+        noApprovalEnabled = noApprovalEnabled,
+        // "already trusted?" means trusted FOR THE PROJECT THIS CHAT IS BOUND TO NOW — a chat rebound to
+        // another project reads as untrusted, so /trust re-grants explicitly instead of inheriting silently
+        trustedOf = { chatId -> routes.workdirFor(chatId)?.let { trust.isTrusted(chatId, it) } == true },
+        trustedProjectOf = { trust.trustedProject(it) },
+    )
     private val guard = BridgeGuard(spec)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -333,21 +349,33 @@ class FeishuEngine(
         // us — "@colleague look at this" in our chat must stay none of our business
         val self = botOpenId
         if (self != null && mentions.none { it.id?.openId == self }) return
-        var text = runCatching {
-            Json.parseToJsonElement(msg.content ?: return).jsonObject["text"]?.jsonPrimitive?.content
-        }.getOrNull()?.trim() ?: return
-        for (m in mentions) m.key?.let { text = text.replace(it, "").trim() }
-        if (text.isEmpty()) return
         val chatId = msg.chatId ?: return
+        // requirement 2: when this message REPLIES to an earlier one, parentId is the quoted message and
+        // rootId the thread root — read here rather than below because a mention-only message has to know
+        // it HAS a quote before it can tell "nothing was said" from "what was said is the quote".
+        val parentId = msg.parentId
+        val rootId = msg.rootId
+        // text AND rich-text `post` carry instructions; every other kind (image / file / card) carries none.
+        // This used to read `content.text` directly, which is present only on `text` — so any message written
+        // with a bullet list or a heading arrived as `post` and vanished here, with no reply and no log.
+        var text = FeishuMessageText.inboundText(msg.messageType, msg.content) ?: run {
+            logLine("[drop] $chatId: 不处理的消息类型 ${msg.messageType}（只认文本和富文本）")
+            return
+        }
+        for (m in mentions) m.key?.let { text = text.replace(it, "").trim() }
+        // "@bot" + a quoted message and nothing else is how people actually say "deal with THIS one" — the
+        // instruction lives in the quote, so hand the turn a note saying exactly that and let the quoted
+        // context (fetched on the Ask path) carry the content. A bare mention with no quote stays a no-op.
+        val quoteOnly = text.isEmpty() && !parentId.isNullOrBlank()
+        if (quoteOnly) text = QUOTE_ONLY_PROMPT
+        if (text.isEmpty()) {
+            logLine("[drop] $chatId: 只 @ 了机器人，既没写内容也没引用消息")
+            return
+        }
         // warm the group-owner cache for the /bind fallback — only when no admin is set (else it's unused)
         if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
         val sender = data.sender?.senderId?.openId.orEmpty()
         val replyTo = msg.messageId ?: return
-        // requirement 2: when this message REPLIES to an earlier one, parentId is the quoted message and
-        // rootId the thread root — pulled below so Claude sees the original the user is pointing at, not
-        // just their new one-liner. Absent on a plain new message. Only used for natural-language turns.
-        val parentId = msg.parentId
-        val rootId = msg.rootId
         // Feishu delivers events at-least-once — the SAME message can arrive again on a retry / reconnect,
         // and without dedup that re-runs the prompt (issue #91). Drop a message id we've already handled.
         if (!firstSeen(replyTo)) return
@@ -356,7 +384,7 @@ class FeishuEngine(
         // (keyed apart from the group's) that auto-allows — race-free, because a session never mixes senders.
         // Everyone else drives the shared, approval-gated session. Gated on the toggle + a set admin id.
         val ownerTurn = ownerBypassEnabled && !adminOpenId.isNullOrBlank() && sender == adminOpenId
-        val convoKey = if (ownerTurn) "$chatId owner" else chatId
+        val convoKey = if (ownerTurn) "$chatId\u0000owner" else chatId
 
         when (val action = commands.handle(text, chatId, sender)) {
             is ChatAction.Ignore -> {}
@@ -371,6 +399,46 @@ class FeishuEngine(
                 } }
                 reply(replyTo, action.note)
             }
+            // issue #198: authority was checked in FeishuCommands (machine owner only); persist + confirm here.
+            // Logged to the adapter log as well, so the owner's own record of "this group stopped asking me"
+            // does not live only in a chat message they may never scroll back to.
+            is ChatAction.SetTrust -> scope.launch {
+                // trust is granted for the (chat, project) pair the chat is bound to RIGHT NOW: a later rebind
+                // voids it rather than carrying card-free execution onto a project nobody trusted it with
+                val wd = routes.workdirFor(chatId)
+                if (action.enable && wd == null) return@launch reply(replyTo, "本群还没有绑定项目，先 /bind 再开免审核。")
+                // Deliberately NOT under the per-chat turn lock: taking it would park this write (and the
+                // owner's confirmation) behind an in-flight turn for however long it runs, and buy nothing —
+                // ask() reads the trust state and hands the prompt off inside ONE uninterrupted block, so no
+                // lock can squeeze a revoke into that window, and a turn already ARMED with a grant can't be
+                // disarmed by any of this anyway (it ends with the turn). Writing immediately is what actually
+                // matters: every message that hasn't been read yet sees the revocation.
+                val changed = if (action.enable) trust.trust(chatId, wd!!) else trust.untrust(chatId)
+                if (!changed) {
+                    // Either it was already in that state, or the write FAILED (both return false). Say so in
+                    // both directions: a silent failure to grant is confusing, and a silent failure to revoke
+                    // would come back on the next daemon start (see FeishuTrust.untrust).
+                    reply(
+                        replyTo,
+                        if (action.enable) "⚠️ 没能开启免审核（可能已开启，或写盘失败）。桌面端「桥」的日志里有原因。"
+                        else "⚠️ 收回免审核没能写盘，本群可能仍是免审核，请重试或在桌面端关掉总开关。",
+                    )
+                    return@launch
+                }
+                val what =
+                    if (action.enable) "机主开启了免审核：$chatId → ${FeishuRoutes.projectName(wd!!)}（本群成员的请求将直接执行）"
+                    else "机主关闭了免审核：$chatId（恢复逐请求审批）"
+                logLine("[trust] $what")
+                trustLog.record("${java.time.Instant.now()} trust-change $what")
+                reply(
+                    replyTo,
+                    if (action.enable)
+                        "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」免审核：群成员的请求会直接执行，不再逐条等机主批准。\n" +
+                            "仍然拦着的：shell 命令照旧（危险命令直接拒绝，拿不准的仍会弹机主手机），项目目录外的文件读写直接拒绝。\n" +
+                            "换绑到别的项目会自动失效；随时 /untrust 收回。"
+                    else "✅ 已恢复逐请求审批：本群每次请求都会先发到机主手机。",
+                )
+            }
             is ChatAction.Ask -> scope.launch {
                 // an auto-bind's feedback posts NOW — the turn behind it can take minutes
                 action.note?.let { reply(replyTo, it) }
@@ -379,13 +447,18 @@ class FeishuEngine(
                 // prompt. Skipped for slash pass-throughs ("/clear" etc.) — those act on the user's own line,
                 // not the quoted one. Network fetch here, safely inside the coroutine (never the lark thread).
                 val prompt = if (!text.startsWith("/")) withQuotedContext(action.prompt, parentId, rootId) else action.prompt
+                // a quote-only request whose quote couldn't be read has NO instruction left in it — running
+                // the turn would burn a session on the placeholder note alone. Say so instead of pretending.
+                if (quoteOnly && prompt == action.prompt) {
+                    return@launch reply(replyTo, "⚠️ 读不到你引用的那条消息，请把要处理的内容直接 @我 发出来。")
+                }
                 // ONE conversation per chat (context carries across messages), one turn at a time per
                 // chat (see chatLocks) — a second message queues instead of clobbering the first's waiter.
                 // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
                 // survives an out-of-band owner tap; we only surface a hard failure to open/drive the turn.
                 val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
                 lock.withLock {
-                    runCatching { ask(convoKey, action.workdir, prompt, replyTo, sender, ownerTurn) }
+                    runCatching { ask(convoKey, chatId, action.workdir, prompt, replyTo, sender, ownerTurn) }
                         .onFailure { e ->
                             log.warn("feishu turn failed: ${e.message}")
                             reply(replyTo, "⚠️ 出错了：${e.message}")
@@ -426,6 +499,7 @@ class FeishuEngine(
      */
     private suspend fun ask(
         key: String,
+        chatId: String,
         workdir: String,
         prompt: String,
         replyTo: String,
@@ -459,10 +533,24 @@ class FeishuEngine(
                 return
             }
 
+            // issue #198: a chat the machine owner PRE-TRUSTED skips the card entirely. Both conditions are
+            // owner-held state (the master switch lives in the bridge spec, the per-chat mark in the engine's
+            // own state dir) and the chat id is Feishu-attested, so nothing a member can type reaches this.
+            // Recorded in the adapter log before the turn starts — with免审核 on, that log IS the owner's trail.
+            // isTrusted takes the workdir this turn actually runs in, so a chat rebound since the grant is NOT
+            // trusted for its new project (FeishuTrust keys on the pair, no bind/unbind hook to keep in sync)
+            val trusted = !ownerBypass && noApprovalEnabled && trust.isTrusted(chatId, workdir)
+            if (trusted) {
+                val what = "免审核执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)} " +
+                    "← ${prompt.replace('\n', ' ').take(120)}"
+                logLine("[trust] $what")
+                trustLog.record("${java.time.Instant.now()} ran chat=$chatId $what")
+            }
+
             // issue #190: approval belongs to THIS request, before requester-controlled text reaches the agent.
             // The configured owner's bypass session keeps its existing direct path; every other request waits on
             // a one-off card and gains full execution authority only for the resulting turn.
-            if (!ownerBypass) {
+            if (!ownerBypass && !trusted) {
                 val preview = buildString {
                     appendLine("发起人：${senderOpenId.ifBlank { "未知飞书用户" }}")
                     appendLine("项目：${FeishuRoutes.projectName(workdir)}")
@@ -481,15 +569,20 @@ class FeishuEngine(
             val done = CompletableDeferred<TurnDone>()
             mutex.withLock { turnWaiters[convoId] = done; replySlots[convoId] = ReplySlot(replyTo) }
             waiterInstalled = true
-            val sent =
-                if (ownerBypass) {
+            val sent = when {
+                ownerBypass -> {
                     core.router.handle(vetted, sink, spec.name)
                     true
-                } else {
-                    core.registry.sendApprovedBridgePrompt(vetted)
                 }
+                // pre-trusted chat: the narrower AUTO_TRUSTED grant (issue #198) — no card was shown, so the
+                // danger/workdir walls stay armed for this turn, unlike an owner-read request
+                trusted -> core.registry.sendTrustedBridgePrompt(vetted)
+                else -> core.registry.sendApprovedBridgePrompt(vetted)
+            }
             if (!sent) {
-                reply(replyTo, "⚠️ 已批准的请求未能启动，请重新发送。")
+                // the grant was minted but the hand-off lost a race (the conversation went busy) — the request
+                // is NOT running, and its permit/grant was consumed, so the requester must send it again
+                reply(replyTo, if (trusted) "⚠️ 这次请求未能启动，请重新发送。" else "⚠️ 已批准的请求未能启动，请重新发送。")
                 return
             }
             awaitingTerminalFrame = true
@@ -670,5 +763,9 @@ class FeishuEngine(
         const val OPEN_TIMEOUT_MS = 30_000L
         const val RELEASE_RETRY_MS = 1_000L
         const val MAX_REPLY_CHARS = 20_000 // feishu text-message ceiling with headroom
+        // stands in as the "[用户本次的指令]" line when the user only @'d the bot on a quoted message. Worded as
+        // a note ABOUT the request rather than as words the user didn't type, so the model isn't misled about
+        // who said what — the actual content arrives above it as the quoted context.
+        const val QUOTE_ONLY_PROMPT = "（用户只 @ 了机器人并引用了上面这条消息，没有另外写文字——请针对被引用的内容处理。）"
     }
 }

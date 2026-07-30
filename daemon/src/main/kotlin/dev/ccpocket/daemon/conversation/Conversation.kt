@@ -11,6 +11,7 @@ import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.agent.BridgeRequestApprovalGate
 import dev.ccpocket.daemon.agent.PermissionBridge
 import dev.ccpocket.daemon.agent.ToolMetadata
+import dev.ccpocket.daemon.bridge.BridgeGrant
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SlashCommandScanner
@@ -54,6 +55,7 @@ import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /** The file-writing tools whose transcript preview should read as their clean target PATH (via
  *  [ToolMetadata.of]) rather than raw input JSON — the phone turns this path into an openable "open file"
@@ -153,10 +155,15 @@ class Conversation(
         },
     )
 
-    // True only from one approved bridge prompt's hand-off through its TurnResult/process end. PermissionBridge
-    // reads it dynamically so every tool in that request is authorized without creating a standing allow-rule.
-    @Volatile
-    private var bridgeRequestAuthorized: Boolean = false
+    // The authority of the ONE bridge request currently executing — armed at hand-off, revoked at
+    // TurnResult / process end. PermissionBridge reads it dynamically so the request's tools are authorized
+    // without creating a standing allow-rule. OWNER_APPROVED = the owner read it (#190); AUTO_TRUSTED = it
+    // came from a chat the owner pre-trusted (#198), which authorizes only workdir-confined tools.
+    //
+    // An AtomicReference, not a @Volatile var: arming it is a check-THEN-set, and "one grant at a time" is a
+    // security property, so it must not rest on a caller-side mutex living in another file (today only the
+    // engine's per-chat lock serializes hand-offs; a second caller would silently break the invariant).
+    private val bridgeGrant = AtomicReference(BridgeGrant.NONE)
 
     // An approval and its execution hand-off are mechanically coupled: awaitBridgeRequestApproval mints one
     // permit, sendApprovedBridgePrompt atomically consumes it. Trusted in-process callers still cannot invoke
@@ -918,9 +925,9 @@ class Conversation(
             // OWNER BYPASS (issue #91): this whole conversation is the owner's dedicated session → auto-allow.
             // Per-session (set at open) ⇒ race-free: no attributing individual tool calls to a sender.
             ownerBypassSession = ownerBypass,
-            // issue #190: one exact Feishu request was approved before execution. Dynamic, one-turn state;
-            // unlike bridgeAllowedCommands it cannot authorize any later request.
-            bridgeRequestAuthorized = { bridgeRequestAuthorized },
+            // issue #190 / #198: the authority of the one exact Feishu request now executing. Dynamic,
+            // one-turn state; unlike bridgeAllowedCommands it cannot authorize any later request.
+            bridgeGrant = { bridgeGrant.get() },
             // the owner's Bash allow-list for this bridge — matching commands auto-run with no phone prompt
             // (issue #91 "一次授权跑完全程"). Empty for owner/guest; only consulted on a bridgeSession.
             bridgeAllowedCommands = bridgeAllowedCommands,
@@ -1169,9 +1176,9 @@ class Conversation(
                     }
                     is AgentEvent.TurnResult -> {
                         turnCompleted = true
-                        // issue #190: this TurnResult is the end of the exact request the owner approved.
+                        // issue #190: this TurnResult is the end of the exact request that was authorized.
                         // Revoke before processing any later stdout event; the next request starts locked.
-                        bridgeRequestAuthorized = false
+                        bridgeGrant.set(BridgeGrant.NONE)
                         if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
                         executing = false
                         // relaunch continuation grace anchor (issue #122 ⑤): this result may be a phantom
@@ -1209,14 +1216,19 @@ class Conversation(
                         // occupancy, not the stale open-time snapshot (same value the phone shows live).
                         usage?.contextTokens?.takeIf { it > 0 }?.let { resumeContextUsed = it }
                         // The turn's real outcome (issue #65). A synthetic placeholder means every API call
-                        // failed — say so instead of letting "No response requested." pass for an answer. A
-                        // user-cancelled turn (■) may report is_error too: that one is not a failure to paint red.
+                        // failed — say so instead of letting "No response requested." pass for an answer.
+                        // A user-cancelled turn (■ / desktop Esc) is not a failure at all, and the CLI answers
+                        // an interrupt with a synthetic placeholder of its very own ("No response requested."),
+                        // so `interrupted` has to gate the SYNTHETIC branch too — not just is_error. Gating only
+                        // is_error painted the user's own stop as a red "API request failed" (and, via the streak
+                        // below, degraded the session behind it).
                         val error = when {
+                            interrupted -> null // ended because the user asked, not because anything failed
                             synthetic ->
                                 "API request failed — the agent wrote a placeholder, not a real reply. " +
                                     "If this keeps happening the session has likely outgrown its context window: " +
                                     "start a new session or send /clear."
-                            ev.isError && !interrupted -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
+                            ev.isError -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
                             else -> null
                         }
                         // usage-limit reset moment (issue #137): parsed daemon-side so the phone can
@@ -1228,9 +1240,14 @@ class Conversation(
                             ),
                         )
                         // degraded tracking: consecutive placeholder-only turns mark the session as likely
-                        // context-dead; announce transitions so clients warn + gate the next send (issue #65)
+                        // context-dead; announce transitions so clients warn + gate the next send (issue #65).
+                        // An INTERRUPTED turn is evidence of neither health nor rot — its placeholder is the
+                        // CLI's reply to the interrupt, and the turn never got to succeed or fail on its own —
+                        // so it must neither count nor clear. Counting it meant two stops in a row flipped a
+                        // healthy session degraded, and the client's degraded gate then swallowed the next
+                        // send whole (the "I have to send it three times" report).
                         val wasDegraded = degraded()
-                        failedTurnStreak = if (synthetic) failedTurnStreak + 1 else 0
+                        if (!interrupted) failedTurnStreak = if (synthetic) failedTurnStreak + 1 else 0
                         if (degraded() != wasDegraded) sink.emit(live(sessionId))
                         // wake an offline phone (relay mode only; hook is null on LAN). Launched off the pump
                         // so a control-plane send never stalls stdout parsing. A failed turn carries [error]
@@ -1257,7 +1274,7 @@ class Conversation(
             // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
             // real process exit before touching the file (intentional stops settle in stopProcess)
             executing = false // a dead process never delivers TurnResult
-            bridgeRequestAuthorized = false // nor may its one-off grant survive into the respawned process
+            bridgeGrant.set(BridgeGrant.NONE) // nor may its one-off grant survive into the respawned process
             p.awaitExit()
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
                 log.info("$convoId one-shot process completed normally (sid=${sessionId?.take(8) ?: "-"})")
@@ -1415,7 +1432,7 @@ class Conversation(
     suspend fun awaitBridgeRequestApproval(preview: String): Boolean {
         if (
             origin == null || pathScope != null || ownerBypass || executing ||
-            bridgeRequestAuthorized || bridgeRequestPermit.get()
+            bridgeGrant.get().authorizes || bridgeRequestPermit.get()
         ) return false
         lastActivityMs = System.currentTimeMillis()
         val approved = bridgeRequestGate.awaitApproval(preview)
@@ -1432,14 +1449,35 @@ class Conversation(
         // Consume first even when a concurrent turn made the conversation busy: a failed hand-off must make
         // the requester ask again, never leave a live permit that an unrelated later prompt could spend.
         if (!bridgeRequestPermit.compareAndSet(true, false)) return false
-        if (executing || bridgeRequestAuthorized) return false
-        bridgeRequestAuthorized = true
+        return handOff(text, promptId, BridgeGrant.OWNER_APPROVED)
+    }
+
+    /**
+     * Hand one request from an owner-PRE-TRUSTED chat to the agent (issue #198) — no per-request card was
+     * shown, so it runs under [BridgeGrant.AUTO_TRUSTED], which keeps the Bash-danger and workdir walls up.
+     *
+     * Deliberately permit-FREE: the authorization here is the owner's standing per-chat grant, checked by the
+     * caller (the built-in engine, which reads Feishu's attested chat id), not a human tap to serialize
+     * against. Everything else matches the approved path: bridge-origin only, never a guest, never the
+     * owner's own bypass session, one grant at a time, revoked when the turn ends.
+     */
+    suspend fun sendTrustedBridgePrompt(text: String, promptId: String? = null): Boolean {
+        if (origin == null || pathScope != null || ownerBypass) return false
+        return handOff(text, promptId, BridgeGrant.AUTO_TRUSTED)
+    }
+
+    /** Arm [grant] for exactly this prompt's turn and hand it over. Armed by CAS, so two concurrent hand-offs
+     *  can never both believe they hold the grant. A hand-off that starts no turn (a daemon-intercepted slash
+     *  command) or throws revokes it immediately. */
+    private suspend fun handOff(text: String, promptId: String?, grant: BridgeGrant): Boolean {
+        if (executing) return false
+        if (!bridgeGrant.compareAndSet(BridgeGrant.NONE, grant)) return false
         return runCatching {
             sendPrompt(text, promptId = promptId)
-            if (!executing) bridgeRequestAuthorized = false
+            if (!executing) bridgeGrant.set(BridgeGrant.NONE)
             true
         }.getOrElse {
-            bridgeRequestAuthorized = false
+            bridgeGrant.set(BridgeGrant.NONE)
             throw it
         }
     }
@@ -1728,7 +1766,7 @@ class Conversation(
     private suspend fun stopProcess() {
         intentionalStop = true
         executing = false // any in-flight turn dies with the process
-        bridgeRequestAuthorized = false
+        bridgeGrant.set(BridgeGrant.NONE)
         bridgeRequestPermit.set(false)
         bridge?.cancelAll()
         proc?.shutdown() // waits for real exit (force-kill fallback) — file is quiet after this

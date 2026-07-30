@@ -287,6 +287,7 @@ class BridgeRunners(
             envKeys = e.spec.env.keys.sorted(),
             logTail = logs[name]?.let { ring -> synchronized(ring) { ring.toList() } }?.takeLast(logLines).orEmpty(),
             ownerBypass = e.spec.env["FEISHU_OWNER_BYPASS"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on"),
+            noApproval = e.spec.env["FEISHU_NO_APPROVAL"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on"),
         )
     }
 

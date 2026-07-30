@@ -54,6 +54,7 @@ import dev.ccpocket.app.resources.bridge_live_count
 import dev.ccpocket.app.resources.bridge_merge_lost
 import dev.ccpocket.app.resources.bridge_new
 import dev.ccpocket.app.resources.bridge_projects
+import dev.ccpocket.app.resources.bridge_no_approval_tag
 import dev.ccpocket.app.resources.bridge_request_approval_tag
 import dev.ccpocket.app.resources.bridge_runner_restart
 import dev.ccpocket.app.resources.bridge_runner_start
@@ -180,7 +181,10 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
             )
             Spacer(Modifier.width(8.dp))
             if (b.runner?.scriptPath == "built-in") {
-                Tag(stringResource(Res.string.bridge_request_approval_tag), Tok.ok)
+                // the card must not keep claiming "approves each request" once the owner allowed no-approval
+                // groups — the posture is what this tag is for (issue #198)
+                if (b.runner?.noApproval == true) Tag(stringResource(Res.string.bridge_no_approval_tag), Tok.warn)
+                else Tag(stringResource(Res.string.bridge_request_approval_tag), Tok.ok)
             } else {
                 TierPill(b.tier)
             }
@@ -224,9 +228,10 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                 workdirs = b.workdirs,
                 allowedCommands = b.allowedCommands,
                 ownerBypass = b.runner?.ownerBypass ?: false,
+                noApproval = b.runner?.noApproval ?: false,
                 requestScopedApproval = b.runner?.scriptPath == "built-in",
                 onCancel = { editing = false },
-                onSave = { appId, appSecret, adminId, workdirs, allowedCommands, ownerBypass ->
+                onSave = { appId, appSecret, adminId, workdirs, allowedCommands, ownerBypass, noApproval ->
                     // merge semantics: only what was typed lands; blank fields keep the stored values —
                     // the app secret is never echoed back out, so "retype everything" isn't even possible
                     model.configureBridgeRunner(
@@ -237,8 +242,14 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
                                 if (appId.isNotBlank()) put("FEISHU_APP_ID", appId.trim())
                                 if (appSecret.isNotBlank()) put("FEISHU_APP_SECRET", appSecret.trim())
                                 if (adminId.isNotBlank()) put("FEISHU_ADMIN_OPEN_ID", adminId.trim())
-                                // overlay the bypass flag only when it changed (merge keeps the rest untouched)
-                                if (ownerBypass != (b.runner?.ownerBypass ?: false)) put("FEISHU_OWNER_BYPASS", if (ownerBypass) "1" else "0")
+                                // The two authority switches are written UNCONDITIONALLY, unlike the credential
+                                // fields above: sending them only "when changed" makes them unclearable against
+                                // a daemon too old to report the flag back (its baseline reads false forever, so
+                                // ON persists an env value the form can never see or send "0" for — stale
+                                // security config that silently activates on the next daemon upgrade). mergeEnv
+                                // overlays non-blank values, so writing both every time keeps the rest untouched.
+                                put("FEISHU_OWNER_BYPASS", if (ownerBypass) "1" else "0")
+                                put("FEISHU_NO_APPROVAL", if (noApproval) "1" else "0")
                             },
                             kind = b.runner?.kind ?: dev.ccpocket.protocol.RUNNER_KIND_FEISHU,
                             autostart = b.runner?.autostart ?: true,

@@ -165,6 +165,11 @@ private fun BridgeCard(b: BridgeInfo, repo: PocketRepository, onRevoke: () -> Un
             }
             Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
             Text(label, color = color, fontSize = 12.5.sp, fontWeight = if (b.online) FontWeight.SemiBold else FontWeight.Normal)
+            // issue #198: THIS is the device whose approval cards stop arriving once the owner allows
+            // no-approval chats, so it has to say so out loud — silence would read as "nothing is happening"
+            if (runner?.noApproval == true) {
+                Text(stringResource(Res.string.bridge_no_approval_tag), color = Tok.warn, fontSize = 11.sp)
+            }
             Spacer(Modifier.weight(1f))
             // controls exist only for a daemon-MANAGED adapter; a self-run one has nothing to start/stop
             if (runner != null) {
