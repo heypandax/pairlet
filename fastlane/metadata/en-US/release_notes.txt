@@ -1,5 +1,9 @@
-What's new in 1.5.4
+What's new in 1.5.5
+
+Added
+• Feishu groups can now run without a per-request approval card. It stays off until you turn it on for a bridge AND send /trust in a specific group — a trusted group's reads, edits and searches then run with no card on your phone, confined to that project. Shell commands are unchanged (dangerous ones refused, anything unproven still asks you), and every card-free run is logged.
 
 Fixed
-• The general context-window setting no longer overrides models whose window is already known (Opus 5, Sonnet 5, Fable), so usage percentages can no longer read several times too high
-• A window set for one specific model is untouched and still takes precedence
+• Feishu messages written with bullet lists, headings or links (rich text) were silently dropped instead of reaching Claude — they now go through
+• "@bot" on a quoted message with no other text now treats the quoted message as the request instead of doing nothing
+• Interrupting a turn no longer counts as a failure, so stopping twice in a row can no longer push a healthy session into a state where the next message needs sending several times
