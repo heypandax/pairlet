@@ -916,7 +916,7 @@ private fun ProjectCell(
     val pinned = repo.isPinned(e.path)
     when {
         // a guest's shared folder (issue #115) — neutral "Shared" pill + origin + "6d left"
-        e.sharedBy != null -> SharedProjectCell(repo, e, onLongPress)
+        e.sharedBy != null -> SharedProjectCell(repo, e, onLongPress, onNewSession)
         direct && e.open && sid != null ->
             // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
             LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }, onNewSession = onNewSession) { repo.openProject(e) }
@@ -937,10 +937,11 @@ private fun NewSessionGlyph(onClick: () -> Unit) {
 /** A guest's shared-folder row (issue #115): folder (mono) + the neutral hairline "Shared" pill,
  *  the "shared by <owner>" origin, and the remaining validity ("6d left"). Tap opens its sessions. */
 @Composable
-private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongPress: (() -> Unit)?) {
+private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongPress: (() -> Unit)?, onNewSession: (() -> Unit)? = null) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .combinedClickable(onClick = { repo.openProject(e) }, onLongClick = onLongPress).padding(12.dp),
+            .combinedClickable(onClick = { repo.openProject(e) }, onLongClick = onLongPress)
+            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = if (onNewSession != null) 6.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -956,6 +957,8 @@ private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongP
             Spacer(Modifier.width(8.dp))
             Text(expiryLeftText(expiryLeft(exp, dev.ccpocket.app.epochMillis())), color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, maxLines = 1)
         }
+        // a guest can start work in the folder they were given — same ＋ as any other project row
+        onNewSession?.let { Spacer(Modifier.width(2.dp)); NewSessionGlyph(it) }
     }
 }
 
