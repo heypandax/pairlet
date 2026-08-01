@@ -21,6 +21,16 @@ expect fun localClock(epochMs: Long): LocalClock
 expect fun supportPlatformLabel(): String
 
 /**
+ * How THIS build of the app gets a newer version (issue #200) — what the update nudge is allowed to
+ * offer. Deliberately NOT a self-updater on mobile: [IOS_STORE] is a store constraint (the app can only
+ * point at its listing), and [ANDROID_DOWNLOAD] reuses the existing release page rather than opening a
+ * second distribution channel. The desktop app has its own in-app updater (Settings ▸ About).
+ */
+enum class AppUpdateRoute { ANDROID_DOWNLOAD, IOS_STORE, DESKTOP_IN_APP }
+
+expect fun appUpdateRoute(): AppUpdateRoute
+
+/**
  * Preview/recording mode for producing App Store preview videos (see marketing/preview). When on, the
  * no-pairing demo gains a connecting → end-to-end-encrypted opener, hides the "demo mode" banner, and
  * uses a destructive sample command so the permission card shows the danger styling. Dormant otherwise.

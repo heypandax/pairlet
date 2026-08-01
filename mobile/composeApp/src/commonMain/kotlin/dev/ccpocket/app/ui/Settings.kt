@@ -51,10 +51,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.ccpocket.app.APP_VERSION
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import dev.ccpocket.app.APP_STORE_URL
+import dev.ccpocket.app.AppUpdateRoute
+import dev.ccpocket.app.RELEASES_URL
 import dev.ccpocket.app.USER_MANUAL_TROUBLESHOOTING_URL
 import dev.ccpocket.app.USER_MANUAL_URL
+import dev.ccpocket.app.appUpdateRoute
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.AutoLockDelay
 import dev.ccpocket.app.openWebUrl
@@ -403,10 +409,10 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 }
             }
 
+            VersionsGroup(repo.versionStatus.value)
+
             SectionLabel(stringResource(Res.string.about_section))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                AboutRow(stringResource(Res.string.about_version), APP_VERSION)
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 AboutRow(stringResource(Res.string.about_license), "MIT")
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
                 AboutRow(
@@ -425,6 +431,98 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 Text(stringResource(Res.string.exit), color = Tok.danger, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
             }
         }
+    }
+}
+
+/**
+ * VERSIONS (issue #200): what this app and the connected computer's daemon are running, and — when either
+ * is behind — how to fix that side specifically. The phone does no version check of its own; everything
+ * here rides in on `DaemonInfo`, so the section degrades to "unknown" against a daemon that predates it
+ * rather than guessing. Update guidance is per side: the daemon gets the exact command for ITS install
+ * layout (the daemon computed it — only it can see whether it's brew, scoop or installer-managed), the
+ * app gets whatever its own store/download route allows.
+ */
+@Composable
+private fun VersionsGroup(status: VersionStatus) {
+    val clipboard = LocalClipboardManager.current
+    SectionLabel(stringResource(Res.string.updates_section))
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+        VersionRow(
+            stringResource(Res.string.updates_app), status.appVersion,
+            if (status.appBehind) stringResource(Res.string.updates_outdated, status.newestKnown) else null,
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        VersionRow(
+            stringResource(Res.string.updates_daemon),
+            status.daemonVersion ?: stringResource(Res.string.updates_unknown),
+            if (status.daemonBehind) stringResource(Res.string.updates_outdated, status.newestKnown) else null,
+        )
+
+        if (status.daemonBehind && status.updateCommand != null) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Text(
+                    stringResource(Res.string.updates_daemon_howto),
+                    color = Tok.tx2, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(bottom = 8.dp),
+                )
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.base)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
+                        .padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        status.updateCommand, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        stringResource(Res.string.path_copy), color = Tok.accent, fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable { clipboard.setText(AnnotatedString(status.updateCommand)) }
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
+
+        if (status.appBehind) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+            AppUpdateGuidance()
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+/** The app-side half of [VersionsGroup] — one action per distribution route (never a self-updater). */
+@Composable
+private fun AppUpdateGuidance() {
+    when (appUpdateRoute()) {
+        AppUpdateRoute.ANDROID_DOWNLOAD ->
+            ManualLinkRow(stringResource(Res.string.updates_app_android), RELEASES_URL) { openWebUrl(RELEASES_URL) }
+        AppUpdateRoute.IOS_STORE ->
+            ManualLinkRow(stringResource(Res.string.updates_app_ios), stringResource(Res.string.updates_app_ios_note)) { openWebUrl(APP_STORE_URL) }
+        AppUpdateRoute.DESKTOP_IN_APP -> Text(
+            stringResource(Res.string.updates_app_desktop),
+            color = Tok.tx2, fontSize = 12.5.sp, lineHeight = 18.sp,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+        )
+    }
+}
+
+/** Label + mono version, with an accent "vX available" tail when that side is behind. */
+@Composable
+private fun VersionRow(label: String, version: String, behindNote: String?) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Tok.tx2, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+        if (behindNote != null) {
+            Box(Modifier.size(7.dp).clip(RoundedCornerShape(4.dp)).background(Tok.accent))
+            Spacer(Modifier.width(6.dp))
+            Text(behindNote, color = Tok.accent, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
+        }
+        Text(version, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, maxLines = 1)
     }
 }
 

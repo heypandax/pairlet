@@ -210,6 +210,19 @@
 
     <!-- ── settings (about + paired devices) ─────────────────────── -->
     <string name="settings_title">Settings</string>
+    <!-- versions &amp; updates (issue #200) -->
+    <string name="updates_section">VERSIONS</string>
+    <string name="updates_app">This app</string>
+    <string name="updates_daemon">Computer daemon</string>
+    <string name="updates_unknown">unknown</string>
+    <string name="updates_current">up to date</string>
+    <string name="updates_outdated">v%1$s available</string>
+    <string name="updates_daemon_unknown_hint">This computer runs a daemon too old to report its version — update it to see it here.</string>
+    <string name="updates_daemon_howto">Run this on the computer to update its daemon:</string>
+    <string name="updates_app_android">Download the newest APK</string>
+    <string name="updates_app_ios">Open the App Store listing</string>
+    <string name="updates_app_ios_note">New versions land on TestFlight first.</string>
+    <string name="updates_app_desktop">Update from Settings ▸ About on the desktop app.</string>
     <string name="about_section">ABOUT</string>
     <string name="about_version">Version</string>
     <string name="about_license">License</string>

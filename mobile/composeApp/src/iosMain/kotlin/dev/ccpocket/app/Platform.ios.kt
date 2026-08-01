@@ -36,3 +36,6 @@ actual fun localClock(epochMs: Long): LocalClock {
 
 // Launch arg `-ccpPreview YES` lands in standardUserDefaults — see marketing/preview.
 actual fun isPreviewMode(): Boolean = NSUserDefaults.standardUserDefaults.boolForKey("ccpPreview")
+
+// No in-app update path on iOS by store rule — the nudge points at the listing and stops there.
+actual fun appUpdateRoute(): AppUpdateRoute = AppUpdateRoute.IOS_STORE

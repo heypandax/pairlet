@@ -4,8 +4,10 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
+import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.ensureLocalNetworkAccess
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.update.VersionStatus
 import dev.ccpocket.app.net.DirectE2EConnection
 import dev.ccpocket.app.net.DirectUnreachableException
 import dev.ccpocket.app.net.RelayAuthException
@@ -1705,6 +1707,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         presetsState.value = null; presetsStateRev.value = 0
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
+        versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
         skillCatalog.value = null; skillCatalogLoading.value = false; skillCatalogUnavailable.value = false
@@ -2193,6 +2196,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // endpoint (or an old daemon omitting the field) must clear a previous gateway's value
                 gatewayBaseUrl.value = f.gatewayBaseUrl
                 bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
+                // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
+                // the fields — "unknown" must not be shown as the previous machine's numbers
+                versionStatus.value = VersionStatus(
+                    appVersion = APP_VERSION,
+                    daemonVersion = f.daemonVersion,
+                    latestVersion = f.latestVersion,
+                    updateCommand = f.updateCommand,
+                )
             }
             is SessionLive -> {
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
@@ -2706,6 +2717,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  null until the first one lands, false from a daemon too old to carry the field. The Bridges screen
      *  shows "update the daemon" up front on false, instead of waiting for a bridge fetch to time out. */
     val bridgeControl = mutableStateOf<Boolean?>(null)
+
+    /** App / daemon / newest-release versions (issue #200), refreshed from every [DaemonInfo]. Starts as
+     *  "only our own version known"; a daemon too old to report leaves the other fields null, which reads
+     *  as "unknown" everywhere rather than as "up to date". */
+    val versionStatus = mutableStateOf(VersionStatus(APP_VERSION))
 
     fun fetchPresets() = scope.launch { runCatching { send(FetchPresets) } }
 

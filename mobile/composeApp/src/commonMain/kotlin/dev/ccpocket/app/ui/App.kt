@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -607,9 +608,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             IconButton({ showHelp = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
             }
-            IconButton({ showSettings = true }, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
-            }
+            SettingsIconButton(repo, size = 36.dp) { showSettings = true }
         }
         OutlinedTextField(
             query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
@@ -1011,6 +1010,27 @@ internal fun HistoryBadge(onClick: (() -> Unit)? = null) {
     )
 }
 
+/**
+ * The gear, with an accent dot when this app or the connected daemon is behind (issue #200). Settings is
+ * where the versions and the update instructions live, so the nudge rides the entry to them rather than
+ * interrupting with a banner — the whole point of the issue is that people don't KNOW they're stale, not
+ * that they need blocking. Nothing to show until a version-reporting daemon has said so.
+ */
+@Composable
+private fun SettingsIconButton(repo: PocketRepository, size: Dp, onClick: () -> Unit) {
+    IconButton(onClick, modifier = Modifier.size(size)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
+            if (repo.versionStatus.value.anyBehind) {
+                Box(
+                    Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-2).dp)
+                        .size(7.dp).clip(CircleShape).background(Tok.accent),
+                )
+            }
+        }
+    }
+}
+
 /** Flat ⇄ tree view-mode toggle (top-bar right). Tapping flips the persisted mode. */
 @Composable
 private fun ViewToggle(tree: Boolean, onToggle: () -> Unit) {
@@ -1265,9 +1285,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 IconButton({ showHelp = true }, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
-                IconButton({ showSettings = true }, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Outlined.Settings, stringResource(Res.string.settings_open), tint = Tok.tx2, modifier = Modifier.size(20.dp))
-                }
+                SettingsIconButton(repo, size = 40.dp) { showSettings = true }
             }
             val af = repo.agentFilter.value
             val filtered = repo.sessions.filter {

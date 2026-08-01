@@ -932,6 +932,16 @@ data class LanHello(val deviceId: String) : ToDaemon
  * model picker. Trailing optional both ways: an old daemon omits it (no gateway hint, presets stay
  * collapsed), an old app ignores it. Re-evaluated per handshake, so activating a preset shows up on
  * the next connect.
+ *
+ * Version visibility (issue #200): [daemonVersion] is what this daemon actually runs, [latestVersion]
+ * the newest published release its daily check has seen (null until the first successful check, and on
+ * dev builds that never check), and [updateCommand] the ONE line that updates THIS install — which
+ * differs by how it was installed (`cc-pocket-daemon update` for an installer-managed tree, the brew /
+ * scoop upgrade command for a package-manager copy, the installer one-liner otherwise). Sending the
+ * command rather than a kind keeps the decision on the side that can actually see the install layout.
+ * Releases ship in lockstep, so the app also compares [latestVersion] against ITS own version — that
+ * is how a phone with no GitHub access of its own learns it is behind. All three are trailing optional:
+ * an older daemon omits them (the app shows "unknown" and skips the nudge), an older app ignores them.
  */
 @Serializable
 @SerialName("pocket/daemon.info")
@@ -943,6 +953,9 @@ data class DaemonInfo(
     // older daemon's DaemonInfo → decodes to false → the management page can say "update your daemon" up front
     // instead of sending a bridge frame that just times out on a build that never learned it.
     val bridgeControl: Boolean = false,
+    val daemonVersion: String? = null,
+    val latestVersion: String? = null,
+    val updateCommand: String? = null,
 ) : ToPhone
 
 @Serializable

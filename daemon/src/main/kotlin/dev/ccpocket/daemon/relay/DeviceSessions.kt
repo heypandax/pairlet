@@ -289,7 +289,26 @@ class DeviceSessions(
         // A bridge (issue #91) never gets this: it can't use the direct-LAN path (its key isn't in
         // devices.json, so the LAN gate refuses it) and shouldn't learn the host's LAN address. The
         // sealAndSend egress filter would drop it anyway; skipping avoids a pointless sealed frame.
-        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
+        if (!bridges.isBridgeCandidate(deviceId)) sealAndSend(deviceId, daemonInfo())
+    }
+
+    /** What every device learns about this daemon after a handshake — version-stamped (issue #200) in one
+     *  place so the handshake, the #161 twin re-send and the update re-announce can't drift apart. */
+    private fun daemonInfo(): DaemonInfo =
+        dev.ccpocket.daemon.update.UpdateState.stamp(DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
+
+    /**
+     * Re-announce [DaemonInfo] to every device with a live session — called when the daily check learns
+     * a newer release exists (issue #200), so a phone that has been attached for days sees the nudge
+     * without waiting for a reconnect. Bridges/guests are excluded exactly as at handshake time.
+     */
+    suspend fun reannounceDaemonInfo() {
+        val info = daemonInfo()
+        val targets = mutex.withLock { sessions.keys.toList() }
+        for (deviceId in targets) {
+            if (bridges.isBridgeCandidate(deviceId)) continue
+            runCatching { sealAndSend(deviceId, info) }
+        }
     }
 
     private suspend fun transport(deviceId: String, body: ByteArray) {
@@ -332,7 +351,7 @@ class DeviceSessions(
                 log.info("first-contact PSK abandoned for ${deviceId.take(8)}… — device handshook without its ticket (#161)")
                 // the post-handshake DaemonInfo sealed under the ticket-bound session this device can't
                 // read; re-send it under the just-proven twin so this connect still learns the LAN address
-                sealAndSend(deviceId, DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
+                sealAndSend(deviceId, daemonInfo())
             } else {
                 bridges.finalize(deviceId, confirmedPsk)?.let { log.info("${it.kind.name.lowercase()} \"${it.name}\" confirmed on ${deviceId.take(8)}…") }
             }

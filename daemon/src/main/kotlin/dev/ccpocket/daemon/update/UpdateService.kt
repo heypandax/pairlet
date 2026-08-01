@@ -95,18 +95,50 @@ object UpdateService {
     fun selfExe(): Path? = ProcessHandle.current().info().command().orElse(null)?.let { runCatching { Path.of(it) }.getOrNull() }
 
     /** Which package manager (if any) owns this binary — for the "not ours to update" hint. */
-    fun ownerHint(exe: Path?): String {
-        val s = exe?.toString()?.lowercase() ?: return genericHint()
-        return when {
-            "caskroom" in s || "/homebrew/" in s -> "this install is managed by Homebrew — upgrade with:  brew upgrade --cask heypandax/tap/cc-pocket"
-            "scoop" in s -> "this install is managed by Scoop — upgrade with:  scoop update cc-pocket-daemon"
-            else -> genericHint()
-        }
+    fun ownerHint(exe: Path?): String = when (packageManagerOf(exe)) {
+        InstallKind.HOMEBREW -> "this install is managed by Homebrew — upgrade with:  ${updateCommand(InstallKind.HOMEBREW)}"
+        InstallKind.SCOOP -> "this install is managed by Scoop — upgrade with:  ${updateCommand(InstallKind.SCOOP)}"
+        else -> genericHint()
     }
 
     private fun genericHint() =
         "this daemon wasn't installed by the cc-pocket installer — re-install with the one-liner " +
             "(https://github.com/$REPO#quick-start) to enable self-update"
+
+    // ── how this install updates itself (issue #200) ─────────────────────────────────────────────
+
+    /** Who owns this binary, hence who is allowed to update it. Only [MANAGED] ever self-overwrites. */
+    enum class InstallKind { MANAGED, HOMEBREW, SCOOP, UNKNOWN }
+
+    /** Package-manager ownership from the path shape alone (no filesystem walk). */
+    private fun packageManagerOf(exe: Path?): InstallKind {
+        val s = exe?.toString()?.lowercase() ?: return InstallKind.UNKNOWN
+        return when {
+            "caskroom" in s || "/homebrew/" in s -> InstallKind.HOMEBREW
+            "scoop" in s -> InstallKind.SCOOP
+            else -> InstallKind.UNKNOWN
+        }
+    }
+
+    /** Classify the install [exe] runs from. The installer tree wins: a managed layout is authoritative
+     *  regardless of where it happens to sit, and only it may be hot-swapped by [apply]. */
+    fun installKind(exe: Path?, home: Path = Path.of(System.getProperty("user.home"))): InstallKind =
+        if (managedInstallOf(exe, home) != null) InstallKind.MANAGED else packageManagerOf(exe)
+
+    /**
+     * The ONE line that updates a [kind] install. Shown by `version`/`status` and — the point of issue
+     * #200 — sent to the phone in `DaemonInfo`, so "your daemon is behind" always arrives with the exact
+     * command for THIS machine instead of a generic "go update it". An unrecognized install has no
+     * updater to invoke, so it gets the installer one-liner (re-running it converts the tree to managed).
+     */
+    fun updateCommand(kind: InstallKind, os: String = System.getProperty("os.name")): String = when (kind) {
+        InstallKind.MANAGED -> "cc-pocket-daemon update"
+        InstallKind.HOMEBREW -> "brew upgrade --cask heypandax/tap/cc-pocket"
+        InstallKind.SCOOP -> "scoop update cc-pocket-daemon"
+        InstallKind.UNKNOWN ->
+            if (os.lowercase().contains("win")) "irm https://raw.githubusercontent.com/$REPO/main/scripts/install.ps1 | iex"
+            else "curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install.sh | bash"
+    }
 
     fun latestRelease(): Release? = ReleaseClient.latest(REPO)
 

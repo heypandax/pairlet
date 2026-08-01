@@ -258,6 +258,10 @@ class RelayClient(
         controlOutbox.send(NotifyPush(title = title, body = body, workdir = "", sessionId = null))
     }
 
+    /** Re-send `DaemonInfo` to attached devices — how a newly-learned release version (issue #200)
+     *  reaches a phone that has been connected since before the daily check ran. */
+    suspend fun reannounceDaemonInfo() = sessions.reannounceDaemonInfo()
+
     /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK.
      *  [headless] mints a BRIDGE ticket (issue #91): it skips the interactive-mint exclusion stamp so
      *  only real phone pairings block a headless mint — the caller records the intent right after. */

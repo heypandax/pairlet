@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import dev.ccpocket.daemon.agent.AgentBackendFactory
@@ -97,7 +98,53 @@ internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java
     }
 
 private class Root : CliktCommand(name = "cc-pocket-daemon") {
+    // `--version` is where everyone reaches first when asked "which build are you on?" (issue #200);
+    // `version` below answers the same question with the install layout and the upgrade command.
+    init {
+        versionOption(dev.ccpocket.daemon.update.UpdateState.current, names = setOf("--version", "-V"))
+    }
+
     override fun run() = Unit
+}
+
+/**
+ * `cc-pocket-daemon version` — what's running, how it was installed, and the one command that updates
+ * it (issue #200). Deliberately offline and daemon-independent: `status` needs the loopback port (and
+ * exits 1 when the daemon is down), `update` needs GitHub — but "which version am I on?" must answer
+ * on a plane, with the service stopped. `--check` opts into the network round-trip.
+ */
+private class VersionCmd : CliktCommand(name = "version") {
+    private val check by option("--check", help = "also ask GitHub whether a newer release exists").flag()
+
+    override fun run() {
+        val exe = dev.ccpocket.daemon.update.UpdateService.selfExe()
+        val kind = dev.ccpocket.daemon.update.UpdateService.installKind(exe)
+        echo("cc-pocket-daemon ${dev.ccpocket.daemon.update.UpdateState.current}")
+        echo("  install:  ${installLabel(kind)}")
+        exe?.let { echo("  path:     $it") }
+        echo("  update:   ${dev.ccpocket.daemon.update.UpdateService.updateCommand(kind)}")
+        if (!check) return
+        val latest = dev.ccpocket.daemon.update.UpdateService.latestRelease()
+        if (latest == null) {
+            echo("  latest:   (could not reach GitHub releases — check network/proxy)")
+            return
+        }
+        val current = dev.ccpocket.daemon.update.UpdateState.current
+        echo(
+            if (dev.ccpocket.daemon.update.UpdateService.isNewer(latest.version, current)) {
+                "  latest:   ${latest.version} — update available"
+            } else {
+                "  latest:   ${latest.version} — up to date"
+            },
+        )
+    }
+}
+
+private fun installLabel(kind: dev.ccpocket.daemon.update.UpdateService.InstallKind): String = when (kind) {
+    dev.ccpocket.daemon.update.UpdateService.InstallKind.MANAGED -> "cc-pocket installer (self-update enabled)"
+    dev.ccpocket.daemon.update.UpdateService.InstallKind.HOMEBREW -> "Homebrew cask"
+    dev.ccpocket.daemon.update.UpdateService.InstallKind.SCOOP -> "Scoop"
+    dev.ccpocket.daemon.update.UpdateService.InstallKind.UNKNOWN -> "unrecognized (dev build or manual copy)"
 }
 
 private class RunCmd : CliktCommand(name = "run") {
@@ -630,7 +677,9 @@ private class StatusCmd : CliktCommand(name = "status") {
     override fun run() = runBlocking {
         val client = HttpClient(CIO)
         var healthy = true
-        echo("  version:  ${dev.ccpocket.daemon.update.UpdateService.currentVersion()}")
+        val installKind = dev.ccpocket.daemon.update.UpdateService.installKind(dev.ccpocket.daemon.update.UpdateService.selfExe())
+        echo("  version:  ${dev.ccpocket.daemon.update.UpdateState.current} (${installLabel(installKind)})")
+        echo("  update:   ${dev.ccpocket.daemon.update.UpdateService.updateCommand(installKind)}")
         try {
             // 1. daemon process + relay link (via the loopback /status the running daemon serves)
             val body = runCatching { client.get("http://127.0.0.1:$pairPort/status").bodyAsText() }.getOrNull()
@@ -738,5 +787,5 @@ fun main(args: Array<String>) {
     // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
 }

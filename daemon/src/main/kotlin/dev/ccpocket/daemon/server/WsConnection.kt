@@ -137,7 +137,11 @@ class WsConnection(
                     gatedDeviceId = id
                     // freshly gated: hand the device our current direct address (IP may have changed since it
                     // stored it). outbox is buffered, so this queues until pump()'s writer starts draining.
-                    sink.emit(DaemonInfo(gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true))
+                    sink.emit(
+                        dev.ccpocket.daemon.update.UpdateState.stamp( // version visibility (issue #200)
+                            DaemonInfo(gate.lanUrl(), gate.hostname(), gate.gatewayBaseUrl(), bridgeControl = true),
+                        ),
+                    )
                     log.info("direct E2E session established with ${id.take(8)}…")
                     return crypto
                 }

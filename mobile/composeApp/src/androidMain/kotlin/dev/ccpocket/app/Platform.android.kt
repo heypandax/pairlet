@@ -21,3 +21,5 @@ actual fun localClock(epochMs: Long): LocalClock {
 }
 
 actual fun isPreviewMode(): Boolean = false
+
+actual fun appUpdateRoute(): AppUpdateRoute = AppUpdateRoute.ANDROID_DOWNLOAD

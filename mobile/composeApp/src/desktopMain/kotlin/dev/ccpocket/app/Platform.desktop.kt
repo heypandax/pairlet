@@ -21,3 +21,6 @@ actual fun localClock(epochMs: Long): LocalClock {
 }
 
 actual fun isPreviewMode(): Boolean = System.getProperty("ccpPreview") == "true"
+
+// The desktop app updates itself from Settings ▸ About (issue #87) — no web hand-off needed.
+actual fun appUpdateRoute(): AppUpdateRoute = AppUpdateRoute.DESKTOP_IN_APP

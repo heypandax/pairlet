@@ -38,6 +38,13 @@ object UpdateChecker {
         val current = UpdateService.currentVersion()
         if (current == "0.0.0-dev") return // dev builds don't self-update
         val latest = UpdateService.latestRelease() ?: return
+        // Publish what we saw even when we're already current (issue #200): DaemonInfo carries this to the
+        // phone, and the APP compares it against its OWN version — that's how a device with no GitHub access
+        // of its own learns it's behind. Re-announce only on a change, so this is at most one frame a day.
+        if (UpdateState.recordLatest(latest.version)) {
+            runCatching { kotlinx.coroutines.runBlocking { relay.reannounceDaemonInfo() } }
+                .onFailure { log.warn("could not re-announce daemon info: ${it.message}") }
+        }
         if (!UpdateService.isNewer(latest.version, current)) return
 
         log.info("update available: $current → ${latest.version} (cc-pocket-daemon update)")
@@ -55,8 +62,8 @@ object UpdateChecker {
         // notify the phone once per version (the relay only pushes when the app isn't attached;
         // an attached user sees the daemon log / release notes anyway)
         if (lastNotified() != latest.version) {
-            val hint = if (install != null) "cc-pocket-daemon update" else UpdateService.ownerHint(UpdateService.selfExe())
-            runCatching { kotlinx.coroutines.runBlocking { relay.notifyPhone("cc-pocket ${latest.version} available", hint) } }
+            // the SAME line DaemonInfo carries and `version` prints — one answer to "how do I update this?"
+            runCatching { kotlinx.coroutines.runBlocking { relay.notifyPhone("cc-pocket ${latest.version} available", UpdateState.updateCommand) } }
             saveNotified(latest.version)
         }
     }

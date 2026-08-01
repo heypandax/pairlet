@@ -210,6 +210,19 @@
 
     <!-- ── 设置（关于 + 已配对设备）──────────────────────────────── -->
     <string name="settings_title">设置</string>
+    <!-- versions &amp; updates (issue #200) -->
+    <string name="updates_section">版本</string>
+    <string name="updates_app">当前 App</string>
+    <string name="updates_daemon">电脑守护进程</string>
+    <string name="updates_unknown">未知</string>
+    <string name="updates_current">已是最新</string>
+    <string name="updates_outdated">可更新到 v%1$s</string>
+    <string name="updates_daemon_unknown_hint">这台电脑上的守护进程版本太旧、报不了自己的版本号——更新后即可在这里看到。</string>
+    <string name="updates_daemon_howto">在电脑上运行这行命令来更新守护进程：</string>
+    <string name="updates_app_android">下载最新安装包</string>
+    <string name="updates_app_ios">打开 App Store 页面</string>
+    <string name="updates_app_ios_note">新版本会先上 TestFlight。</string>
+    <string name="updates_app_desktop">在桌面端「设置 ▸ 关于」里更新。</string>
     <string name="about_section">关于</string>
     <string name="about_version">版本</string>
     <string name="about_license">许可证</string>

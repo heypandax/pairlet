@@ -15,6 +15,12 @@ const val SUPPORT_URL = "https://pocket.ark-nexus.cc/support/"
 // static-site request, proxy logs, or Referer headers.
 const val SUPPORT_CHAT_URL = "${SUPPORT_URL}?mode=chat&source=app"
 
+// Where a phone goes for a newer app build (issue #200). Both are the EXISTING distribution surfaces —
+// the release page that already carries the APK, and the store listing — so the nudge never becomes a
+// second update channel of its own.
+const val RELEASES_URL = "https://github.com/heypandax/cc-pocket/releases/latest"
+const val APP_STORE_URL = "https://apps.apple.com/app/id6778773969"
+
 /**
  * Small, user-visible environment snapshot that lets public support tailor button/location guidance.
  * It deliberately excludes session/conversation ids, titles, project names, paths, prompts, file
