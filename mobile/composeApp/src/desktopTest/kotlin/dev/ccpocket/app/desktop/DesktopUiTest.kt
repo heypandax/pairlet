@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -26,6 +27,7 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.ThemeMode
+import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import kotlin.test.Test
@@ -267,6 +269,54 @@ class DesktopUiTest {
         m.unpin(m.pins[0])
         assertEquals(3, m.pins.size)
         assertTrue(!m.isPinned("s2"))
+    }
+
+    /**
+     * Issue #199 ②, the main line: every RECENT project header carries a ＋ that opens the new-session
+     * popover already pointed at THAT project — the whole point is not having to walk into the project
+     * first. The ＋ is deliberately not hover-gated, so this asserts it without synthesising a hover.
+     */
+    @Test
+    fun recentGroupHeaderStartsASessionInThatProject() = runComposeUiTest {
+        // ONE recent group, so the single ＋ in the tree is unambiguously that group's — and its path
+        // differs from newSessionDir (where plain ⌘N would land), which is exactly the claim: the ＋
+        // follows the row it sits on, not the current project. (With the full seed the RECENT list is
+        // taller than the test viewport and the #83 reveal scroll decides which headers are composed.)
+        val other = DkSessionGroup(
+            "~/work/acme-api", "acme-api", current = false,
+            sessions = listOf(DkSession("s6", "~/work/acme-api", "Add rate-limit middleware")),
+        )
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val sessionGroups = listOf(other)
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertEquals("~/code/cc-pocket", model.newSessionDir) // ⌘N would land here…
+        onAllNodesWithContentDescription(str(Res.string.new_session_here)).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showNewSession, "the ＋ opens the new-session popover")
+        assertEquals(tilde(other.path), model.newSessionSeed, "…the ＋ seeds ITS project instead")
+    }
+
+    /** Issue #199 ①: a pinned PROJECT renders in the same PINNED zone as the session pins, and ⌘1–9 keeps
+     *  running past the session pins into it — so neither kind of pin displaces or renumbers the other. */
+    @Test
+    fun pinnedProjectRendersBesideSessionPinsAndKeepsTheKeycapLadder() = runComposeUiTest {
+        var opened: DkProjectPin? = null
+        val model = object : SeedDesktopModel() {
+            override fun openProjectPin(p: DkProjectPin) { opened = p }
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        model.pinProject("~/scratch/notes", "notes")
+        waitForIdle()
+        assertPresent("Port parser to Rust") // the session pins are still there…
+        assertPresent("notes")               // …with the project pin under them
+        model.jumpPin(model.pins.size)       // the keycap right after the last session pin
+        assertEquals("~/scratch/notes", opened?.path)
+        model.unpinProject("~/scratch/notes")
+        waitForIdle()
+        assertTrue(!present("notes"))
+        assertPresent("Port parser to Rust")
     }
 
     @Test

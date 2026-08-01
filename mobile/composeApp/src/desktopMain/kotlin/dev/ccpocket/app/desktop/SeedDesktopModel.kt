@@ -16,7 +16,9 @@ import dev.ccpocket.protocol.PermissionMode
  * Static [DesktopModel] used by the screenshot generator and UI tests — no daemon, deterministic. Renders the
  * exact same surfaces as the live app via [RepoDesktopModel], just fed canned data.
  */
-class SeedDesktopModel : DesktopModel {
+// open so a test can override one verb (e.g. record where a ⌘n jump landed) without re-implementing
+// the whole DesktopModel surface — this is the shell's only ready-made fake.
+open class SeedDesktopModel : DesktopModel {
     override val connected = true
     override val computers = listOf(
         DkComputer("acct-mbp", "Lidapeng-MacBook", DkOs.MAC, online = true, meta = "online · active now"),
@@ -117,8 +119,10 @@ class SeedDesktopModel : DesktopModel {
         else computers.firstOrNull { it.accountId == p.accountId }?.let(::selectComputer)
     }
 
-    // one pinned project (issue #199) so the PINNED zone shows both kinds side by side in previews/tests
-    private val projectPinList = mutableStateListOf(DkProjectPin("~/src/relay", "relay"))
+    // project pins (issue #199) start EMPTY on purpose: the seed's PINNED zone already fills three rows,
+    // and a fourth pushes the RECENT list past the UI tests' viewport (they assert on rows near its foot).
+    // Tests that want one call [pinProject] first — which is also the gesture being tested.
+    private val projectPinList = mutableStateListOf<DkProjectPin>()
     override val projectPins: List<DkProjectPin> get() = projectPinList
     override fun isProjectPinned(path: String) = projectPinList.any { it.path == path }
     override fun pinProject(path: String, name: String) { if (!isProjectPinned(path)) projectPinList += DkProjectPin(path, name) }

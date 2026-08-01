@@ -100,6 +100,40 @@ class RepoDesktopModelRecentTest {
         assertTrue(m3.sessionGroups.isEmpty())
     }
 
+    /**
+     * Issue #199: project pins ride the repo's EXISTING project-pin list (the one the phone shell's PINNED
+     * section already uses) instead of a second desktop-only store — one answer to "is this pinned", and a
+     * project pinned in either shell of a device is pinned in both. Session pins keep their own list, so
+     * pinning a project can neither renumber nor evict a pinned session.
+     */
+    @Test
+    fun projectPinsRideTheRepoListAndLeaveSessionPinsAlone() {
+        val (repo, m) = demoModel()
+        val (a, b) = DemoData.dirs()
+        m.openProject(DkProject(a.path, a.name))
+        val pinnedBefore = repo.pinnedPaths.toList() // the dev machine's real store — restore below
+        try {
+            repo.pinnedPaths.forEach { repo.togglePin(it) }
+            m.pin(m.sessions.first())
+
+            m.pinProject(b.path, b.name)
+            assertTrue(m.isProjectPinned(b.path))
+            assertEquals(listOf(b.path), repo.pinnedPaths.toList(), "the pin lands in the repo's list, not a second store")
+            assertEquals(listOf(b.path), m.projectPins.map { it.path })
+            m.pinProject(b.path, b.name) // idempotent — a second pin must not double the row
+            assertEquals(1, m.projectPins.size)
+            assertEquals(1, m.pins.size, "session pins untouched")
+
+            m.unpinProject(b.path)
+            assertTrue(!m.isProjectPinned(b.path))
+            assertTrue(m.projectPins.isEmpty())
+            assertEquals(1, m.pins.size)
+        } finally {
+            repo.pinnedPaths.toList().forEach { repo.togglePin(it) }
+            pinnedBefore.reversed().forEach { repo.togglePin(it) }
+        }
+    }
+
     // issue #115: a guest's shared folder — the daemon stamps sharedBy/shareExpiresAt on its
     // DirectoryEntry — must keep that provenance on its RECENT group (visits carry only account+path,
     // so the group re-derives it from the directory list). Ordinary local dirs stay unstamped.
