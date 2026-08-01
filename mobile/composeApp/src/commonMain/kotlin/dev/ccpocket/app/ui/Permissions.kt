@@ -48,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -205,7 +206,16 @@ private fun BypassConfirm(workdir: String?, onCancel: () -> Unit, onConfirm: () 
     }
 }
 
-/** New-session picker: choose the agent backend + execution mode up front. Defaults stay safe; Full auto still confirms. */
+/**
+ * New-session picker: choose the agent backend + model + execution mode up front. Defaults stay safe;
+ * Full auto still confirms.
+ *
+ * Model (issue #199) is a collapsed row between agent and mode — the mode rows COMMIT (tapping one starts
+ * the session), so anything the user may want to change first has to sit above them. It reads the same
+ * [modelChoicesFor] table the live-session picker does, and the pick rides [onPick] for this one session
+ * only: no per-project memory, no new default. [modelsFor] is a lambda because the list depends on the
+ * agent the user picks INSIDE the sheet, and [onAgentPicked] lets the host refresh the daemon's list for it.
+ */
 @Composable
 fun StartSessionModeSheet(
     workdir: String? = null,
@@ -213,14 +223,21 @@ fun StartSessionModeSheet(
     selectedNativeMode: String? = null,
     agent: AgentKind = AgentKind.CLAUDE,
     autoAvailable: Boolean = false,
-    onPick: (PermissionMode, AgentKind, String?) -> Unit,
+    modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
+    defaultModelFor: (AgentKind) -> String? = { null },
+    onAgentPicked: (AgentKind) -> Unit = {},
+    onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var confirmBypass by remember { mutableStateOf(false) }
     var chosenAgent by remember { mutableStateOf(agent) }
+    // null = "follow the default" (Settings / the CLI's own). Reset per agent: a Claude alias is not a
+    // model Codex can run, and compatibleModelForAgent would drop it silently anyway.
+    var chosenModel by remember(chosenAgent) { mutableStateOf<String?>(null) }
+    LaunchedEffect(chosenAgent) { onAgentPicked(chosenAgent) }
     PocketSheet(onDismiss) {
         if (confirmBypass) {
-            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS, chosenAgent, null) })
+            BypassConfirm(workdir, onCancel = { confirmBypass = false }, onConfirm = { onPick(PermissionMode.BYPASS_PERMISSIONS, chosenAgent, null, chosenModel) })
         } else {
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp, top = 4.dp)) {
                 Text(stringResource(Res.string.new_session_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -231,13 +248,18 @@ fun StartSessionModeSheet(
                     AgentOption(AgentKind.CODEX, chosenAgent == AgentKind.CODEX, Modifier.weight(1f)) { chosenAgent = AgentKind.CODEX }
                     AgentOption(AgentKind.OPENCODE, chosenAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { chosenAgent = AgentKind.OPENCODE }
                 }
+                NewSessionModelSection(
+                    choices = modelsFor(chosenAgent),
+                    chosen = chosenModel,
+                    fallback = defaultModelFor(chosenAgent),
+                ) { chosenModel = it }
                 SectionLabel(stringResource(Res.string.label_mode))
                 if (chosenAgent == AgentKind.CLAUDE) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         (MODES + if (autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
                             ModeRow(m, selected = m.key == selected && m.nativeMode == selectedNativeMode, enabled = true) {
                                 if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
-                                else onPick(m.key, AgentKind.CLAUDE, m.nativeMode)
+                                else onPick(m.key, AgentKind.CLAUDE, m.nativeMode, chosenModel)
                             }
                         }
                     }
@@ -249,12 +271,12 @@ fun StartSessionModeSheet(
                     SheetButton(
                         stringResource(Res.string.opencode_mode_start), Modifier.fillMaxWidth().padding(top = 10.dp),
                         bg = Tok.warn, fg = Tok.base,
-                    ) { onPick(PermissionMode.BYPASS_PERMISSIONS, AgentKind.OPENCODE, null) }
+                    ) { onPick(PermissionMode.BYPASS_PERMISSIONS, AgentKind.OPENCODE, null, chosenModel) }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         CODEX_PRESETS.forEach { p ->
                             PresetRow(p, selected = p.mode == selected) {
-                                if (p.danger) confirmBypass = true else onPick(p.mode, AgentKind.CODEX, null)
+                                if (p.danger) confirmBypass = true else onPick(p.mode, AgentKind.CODEX, null, chosenModel)
                             }
                         }
                     }
@@ -265,6 +287,71 @@ fun StartSessionModeSheet(
                 }
             }
         }
+    }
+}
+
+/**
+ * The new-session MODEL row (issue #199): collapsed to one line showing what will actually run, tapping
+ * reveals "Default" + the same rows the live-session picker offers. [chosen] null = follow [fallback]
+ * (the persisted per-agent default, or the CLI's own when that is null too) — so the row is honest about
+ * the model even when the user never touches it. Scrolls past ~240dp: a gateway's list can be long and a
+ * sheet that grows past the screen would push the mode ladder out of reach.
+ */
+@Composable
+private fun NewSessionModelSection(
+    choices: List<ModelChoice>,
+    chosen: String?,
+    fallback: String?,
+    onChoose: (String?) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val defaultLabel = stringResource(Res.string.value_model_default)
+    val summary = when {
+        chosen != null -> choices.firstOrNull { it.pick.equals(chosen, ignoreCase = true) }?.name ?: modelChipLabel(chosen)
+        !fallback.isNullOrBlank() -> modelChipLabel(fallback)
+        else -> defaultLabel
+    }
+    SectionLabel(stringResource(Res.string.label_model))
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+            .clickable { open = !open }.padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(summary, color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
+        if (chosen == null) Text(defaultLabel, color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(end = 6.dp))
+        Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Tok.muted, modifier = Modifier.size(18.dp).rotate(if (open) 180f else 0f))
+    }
+    if (open) {
+        Column(
+            Modifier.padding(top = 6.dp).heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ModelOptionRow(defaultLabel, fallback?.takeIf { it.isNotBlank() }, "", false, chosen == null) { onChoose(null); open = false }
+            choices.forEach { c ->
+                ModelOptionRow(c.name, c.id, c.ctx, c.big, chosen.equals(c.pick, ignoreCase = true)) { onChoose(c.pick); open = false }
+            }
+        }
+    }
+}
+
+/** One row of [NewSessionModelSection]: display name, the mono `--model` value, the 1M/200K pill, a check. */
+@Composable
+private fun ModelOptionRow(name: String, id: String?, ctx: String, big: Boolean, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Tok.raised else Color.Transparent)
+            .then(if (selected) Modifier.border(1.dp, Tok.hair, RoundedCornerShape(12.dp)) else Modifier)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(name, color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            if (!id.isNullOrBlank()) Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(id, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
+                if (ctx.isNotEmpty()) { Spacer(Modifier.width(8.dp)); CtxPill(ctx, big) }
+            }
+        }
+        if (selected) Text("✓", color = Tok.accent, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 

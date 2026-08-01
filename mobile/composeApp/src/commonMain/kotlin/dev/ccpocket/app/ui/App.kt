@@ -658,12 +658,12 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                     if (base == root) { // PINNED + ACTIVE pinned on top at root
                         if (pinned.isNotEmpty()) {
                             item { Label(pinnedLabel) }
-                            items(pinned, key = { "p:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }) }
+                            items(pinned, key = { "p:" + it.path }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
                         }
                         if (live.isNotEmpty()) {
                             item { Label(activeLabel) }
                             // key carries the session too — expansion can put the same project here several times
-                            items(live, key = { "a:" + it.path + ":" + (it.activeSessionId ?: "") }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }) }
+                            items(live, key = { "a:" + it.path + ":" + (it.activeSessionId ?: "") }) { e -> ProjectCell(repo, e, showPath = true, direct = true, onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) }
                         }
                         if (pinned.isNotEmpty() || live.isNotEmpty()) item { Label(projectsLabel) }
                     }
@@ -672,7 +672,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                         item { Label(currentProjectLabel) }
                         item(key = "cur:" + currentLeaf.entry.path) {
                             val e = currentLeaf.entry
-                            LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }) { repo.openProject(e) }
+                            LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
                         }
                         item { Label(projectsLabel) }
                     }
@@ -689,7 +689,7 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                             }
                             is TreeRow.Leaf -> {
                                 val e = r.entry
-                                LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }) { repo.openProject(e) }
+                                LeafRow(e, pinned = repo.isPinned(e.path), onLongPress = { actionTarget = e }, onNewSession = { newPathTarget = e.path }) { repo.openProject(e) }
                             }
                         }
                     }
@@ -703,7 +703,11 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                     items(flatRows) { row ->
                         when (row) {
                             is DirRow.Header -> Label(row.label)
-                            is DirRow.Dir -> ProjectCell(repo, row.entry, showPath = row.showPath, direct = row.direct, onLongPress = { actionTarget = row.entry })
+                            is DirRow.Dir -> ProjectCell(
+                                repo, row.entry, showPath = row.showPath, direct = row.direct,
+                                onLongPress = { actionTarget = row.entry },
+                                onNewSession = { newPathTarget = row.entry.path },
+                            )
                         }
                     }
                 }
@@ -744,10 +748,13 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
                 selectedNativeMode = repo.defaultPermissionMode.value,
                 agent = repo.defaultAgent.value,
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
-                onPick = { m, a, native ->
+                modelsFor = { a -> repo.newSessionModelChoices(a) },
+                defaultModelFor = { a -> repo.defaultModelFor(a) },
+                onAgentPicked = { a -> repo.fetchModels(a) },
+                onPick = { m, a, native, model ->
                     newPathTarget = null
                     repo.setDefaultAgent(a)
-                    repo.openSession(path, startMode = m, agent = a, startPermissionMode = native)
+                    repo.openSession(path, startMode = m, agent = a, startPermissionMode = native, startModel = model)
                 },
                 onDismiss = { newPathTarget = null },
             )
@@ -893,9 +900,18 @@ private fun PocketRepository.openProject(e: DirectoryEntry) {
     if (e.open && sid != null) openSession(e.path, sid, title = e.activeSessionTitle, agent = liveAgent(e)) else listSessions(e.path)
 }
 
-/** A project row: jumps into the live session (when [direct] and running) or opens its session list. */
+/** A project row: jumps into the live session (when [direct] and running) or opens its session list.
+ *  [onNewSession] is the trailing ＋ (issue #199) — start a session in THIS project without first
+ *  walking into its session list. Null hides it (a guest's shared row keeps its own layout). */
 @Composable
-private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boolean, direct: Boolean, onLongPress: (() -> Unit)? = null) {
+private fun ProjectCell(
+    repo: PocketRepository,
+    e: DirectoryEntry,
+    showPath: Boolean,
+    direct: Boolean,
+    onLongPress: (() -> Unit)? = null,
+    onNewSession: (() -> Unit)? = null,
+) {
     val sid = e.activeSessionId
     val pinned = repo.isPinned(e.path)
     when {
@@ -903,9 +919,19 @@ private fun ProjectCell(repo: PocketRepository, e: DirectoryEntry, showPath: Boo
         e.sharedBy != null -> SharedProjectCell(repo, e, onLongPress)
         direct && e.open && sid != null ->
             // the 历史 badge lists this project's sessions (issue #49) — the row itself keeps auto-resuming
-            LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }) { repo.openProject(e) }
-        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress) { repo.listSessions(e.path) }
+            LiveProjectCell(e, pinned, onLongPress, onBrowse = { repo.listSessions(e.path) }, onNewSession = onNewSession) { repo.openProject(e) }
+        else -> DirCell(e.name.ifBlank { e.path }, if (showPath) tilde(e.path) else null, indent = false, pinned = pinned, onLongPress = onLongPress, onNewSession = onNewSession) { repo.listSessions(e.path) }
     }
+}
+
+/** The ＋ that starts a session right where the project name is (issue #199): same terracotta as every
+ *  other "new session" call to action, sized as a real 32dp touch target inside a dense list row. */
+@Composable
+private fun NewSessionGlyph(onClick: () -> Unit) {
+    Icon(
+        Icons.Rounded.Add, stringResource(Res.string.new_session_here), tint = Tok.accent,
+        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(7.dp),
+    )
 }
 
 /** A guest's shared-folder row (issue #115): folder (mono) + the neutral hairline "Shared" pill,
@@ -1064,9 +1090,10 @@ private fun FolderRow(
 
 /** A project-leaf row in the tree — opens its session list (or jumps into the live session). */
 @Composable
-private fun LeafRow(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onClick: () -> Unit) {
+private fun LeafRow(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onNewSession: (() -> Unit)? = null, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(horizontal = 4.dp, vertical = 13.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(start = 4.dp, end = if (onNewSession != null) 0.dp else 4.dp, top = 13.dp, bottom = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("⑂", color = Tok.accent, fontSize = 14.sp, modifier = Modifier.padding(end = 9.dp)) // project marker
@@ -1083,14 +1110,24 @@ private fun LeafRow(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit
             Spacer(Modifier.width(8.dp))
         }
         if (e.hasSessions) HistoryBadge()
+        onNewSession?.let { NewSessionGlyph(it) }
     }
 }
 
 @Composable
-private fun DirCell(name: String, path: String?, indent: Boolean, pinned: Boolean = false, onLongPress: (() -> Unit)? = null, onClick: () -> Unit) {
+private fun DirCell(
+    name: String,
+    path: String?,
+    indent: Boolean,
+    pinned: Boolean = false,
+    onLongPress: (() -> Unit)? = null,
+    onNewSession: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().padding(start = if (indent) 16.dp else 0.dp)
-            .clip(RoundedCornerShape(10.dp)).background(Tok.surface).combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(12.dp),
+            .clip(RoundedCornerShape(10.dp)).background(Tok.surface).combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = if (onNewSession != null) 6.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -1098,6 +1135,7 @@ private fun DirCell(name: String, path: String?, indent: Boolean, pinned: Boolea
             if (path != null) Text(path, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
         }
         if (pinned) PinGlyph()
+        onNewSession?.let { Spacer(Modifier.width(4.dp)); NewSessionGlyph(it) }
     }
 }
 
@@ -1105,10 +1143,18 @@ private fun DirCell(name: String, path: String?, indent: Boolean, pinned: Boolea
  *  [onBrowse] is the secondary affordance (issue #49): open the project's session LIST instead of the
  *  live session, so a running project's history stays reachable — the row tap only ever auto-resumes. */
 @Composable
-private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (() -> Unit)?, onBrowse: (() -> Unit)? = null, onClick: () -> Unit) {
+private fun LiveProjectCell(
+    e: DirectoryEntry,
+    pinned: Boolean,
+    onLongPress: (() -> Unit)?,
+    onBrowse: (() -> Unit)? = null,
+    onNewSession: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-            .combinedClickable(onClick = onClick, onLongClick = onLongPress).padding(12.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
+            .padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = if (onNewSession != null) 6.dp else 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -1127,6 +1173,8 @@ private fun LiveProjectCell(e: DirectoryEntry, pinned: Boolean, onLongPress: (()
                 stringResource(if (active) Res.string.running else Res.string.idle),
                 color = if (active) Tok.accent else Tok.muted, fontSize = 11.sp,
             )
+            // a running project still gets the ＋: "another session in here", not "resume that one"
+            onNewSession?.let { Spacer(Modifier.width(2.dp)); NewSessionGlyph(it) }
         }
         Text(
             buildString {
@@ -1305,10 +1353,13 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 selectedNativeMode = repo.defaultPermissionMode.value,
                 agent = repo.defaultAgent.value,
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
-                onPick = { m, a, native ->
+                modelsFor = { a -> repo.newSessionModelChoices(a) },
+                defaultModelFor = { a -> repo.defaultModelFor(a) },
+                onAgentPicked = { a -> repo.fetchModels(a) },
+                onPick = { m, a, native, model ->
                     pickMode = false
                     repo.setDefaultAgent(a)
-                    repo.openSession(dir, startMode = m, agent = a, startPermissionMode = native)
+                    repo.openSession(dir, startMode = m, agent = a, startPermissionMode = native, startModel = model)
                 },
                 onDismiss = { pickMode = false },
             )

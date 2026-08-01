@@ -3139,6 +3139,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         title: String? = null,
         agent: AgentKind = defaultAgent.value,
         startPermissionMode: String? = defaultPermissionMode.value,
+        // issue #199: a model picked in the new-session step, for THIS session only. Null = the usual
+        // ladder (the session's remembered model, else the per-agent Settings default). Deliberately not
+        // persisted anywhere: the pick is part of creating one session, not a new default.
+        startModel: String? = null,
     ) = scope.launch {
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
@@ -3183,7 +3187,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val savedModel = saved?.model?.let {
             if (openAgent == AgentKind.CLAUDE && gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it
         }
-        val openModel = compatibleModelForAgent(openAgent, savedModel)
+        // an explicit new-session pick (issue #199) leads: it was made for THIS open, so it outranks both
+        // the session's remembered model and the Settings default. Same compatibility guard as the rest.
+        val openModel = compatibleModelForAgent(openAgent, startModel)
+            ?: compatibleModelForAgent(openAgent, savedModel)
             ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
         val knownCapabilities = modelCapabilities(openAgent, openModel)
         val openEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->

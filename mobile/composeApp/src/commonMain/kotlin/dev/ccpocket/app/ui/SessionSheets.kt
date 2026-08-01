@@ -461,11 +461,39 @@ private fun OptionPicker(title: String, options: List<String>, selected: String?
 
 /** One row in the [ModelPicker]: a display [name], the `--model` value [pick] shown in mono as [id], and a
  *  context-window pill ([ctx], filled terracotta when [big]). Uses the app's real model aliases, not invented ids. */
-private data class ModelChoice(val name: String, val id: String, val pick: String, val ctx: String, val big: Boolean, val unavailable: Boolean = false)
+data class ModelChoice(val name: String, val id: String, val pick: String, val ctx: String, val big: Boolean, val unavailable: Boolean = false)
 
-/** Context-window pill — filled terracotta for a 1M window, muted outline otherwise. */
+/**
+ * THE model-row list for an agent — one definition, shared by the live-session [ModelPicker] and the
+ * new-session picker (issue #199), so "which models can I pick" never forks between the two moments.
+ * [daemonModels] is the daemon's own list (`ModelsList.models`, null/empty = not answered yet) and
+ * [gatewayUrl] the third-party ANTHROPIC_BASE_URL, which degrades the Opus row to the bare alias (#167/#168).
+ *
+ * Claude keeps its static alias table (the daemon's list for Claude is config-default + the same aliases);
+ * Codex falls back to the static trio until the daemon answers; OpenCode has NO static fallback on purpose
+ * — an invented catalog would offer models the user's providers can't run, so an empty list is the truth.
+ */
+internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gatewayUrl: String?): List<ModelChoice> = when (agent) {
+    AgentKind.CODEX -> (daemonModels?.takeIf { it.isNotEmpty() } ?: CODEX_MODEL_OPTIONS).map { ModelChoice(it, it, it, "", false) }
+    AgentKind.OPENCODE -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
+    // window pill derives from the protocol table, so registering a new alias THERE is the only edit
+    AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
+        val pick = claudeRowPick(alias, gatewayUrl)
+        val big = contextWindowFor(pick) == LARGE_CONTEXT_WINDOW
+        ModelChoice(name, pick, pick, if (big) "1M" else "200K", big)
+    }
+}
+
+/** The repo-fed form of [modelChoicesFor] for the NEW-session step (issue #199) — reads the daemon's
+ *  cached list for [agent] plus the gateway url, exactly like the live-session picker does. Called from
+ *  composition, so both snapshot reads recompose the sheet when the daemon's ModelsList lands. */
+internal fun PocketRepository.newSessionModelChoices(agent: AgentKind): List<ModelChoice> =
+    modelChoicesFor(agent, agentModels[agent]?.models, if (agent == AgentKind.CLAUDE) gatewayBaseUrl.value else null)
+
+/** Context-window pill — filled terracotta for a 1M window, muted outline otherwise. (internal: the
+ *  new-session model rows in Permissions.kt wear the same pill, issue #199.) */
 @Composable
-private fun CtxPill(ctx: String, big: Boolean) {
+internal fun CtxPill(ctx: String, big: Boolean) {
     Text(
         ctx, color = if (big) Tok.base else Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
         modifier = Modifier.clip(RoundedCornerShape(999.dp))
@@ -492,21 +520,9 @@ internal fun ModelPicker(repo: PocketRepository, onBack: (() -> Unit)?, onDone: 
     val agentModels = repo.agentModels[agent]
     // gateway state up front: the Claude rows' effective picks depend on it (claudeRowPick)
     val gatewayUrl = if (codex || opencode) null else repo.gatewayBaseUrl.value
-    val choices = if (codex) {
-        // daemon list first (real cache: configured default leads, includes ids the static trio lacks);
-        // static trio only until it answers. A list may ride WITH an error (last-good + failed refresh).
-        val visibleModels = agentModels?.models?.takeIf { it.isNotEmpty() } ?: CODEX_MODEL_OPTIONS
-        visibleModels.map { ModelChoice(it, it, it, "", false) }
-    } else if (opencode) {
-        // daemon truth or nothing (see the OPTIONS note above) — the empty state renders below
-        (agentModels?.models ?: emptyList()).map { m -> ModelChoice(m, m, m, "", false) }
-    }
-    // window pill derives from the protocol table, so registering a new alias THERE is the only edit
-    else CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
-        val pick = claudeRowPick(alias, gatewayUrl)
-        val big = contextWindowFor(pick) == LARGE_CONTEXT_WINDOW
-        ModelChoice(name, pick, pick, if (big) "1M" else "200K", big)
-    }
+    // daemon list first for codex (real cache: configured default leads, includes ids the static trio
+    // lacks); a list may ride WITH an error (last-good + failed refresh). See [modelChoicesFor].
+    val choices = modelChoicesFor(agent, agentModels?.models, gatewayUrl)
     val selected = if (codex || opencode) repo.model.value else modelAlias(repo.model.value)
     var switchingTo by remember { mutableStateOf<String?>(null) }
     // close once the daemon confirms the switch (model re-announced through SessionLive)…
