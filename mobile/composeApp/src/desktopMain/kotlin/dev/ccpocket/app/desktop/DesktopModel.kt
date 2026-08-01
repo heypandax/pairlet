@@ -111,6 +111,15 @@ data class DkPin(
     val agent: AgentKind = AgentKind.CLAUDE,
 )
 
+/**
+ * A pinned PROJECT (issue #199) — the session pin's sibling, living in the same PINNED zone under the same
+ * gesture. Deliberately a separate list rather than a nullable-session [DkPin]: the two open different
+ * things (a session resumes, a project lists) and neither replaces the other. Client-local like every pin,
+ * and it rides the SAME store mobile's project pins already use, so a project pinned in either shell of a
+ * device stays pinned in both.
+ */
+data class DkProjectPin(val path: String, val name: String)
+
 // ── fleet ("Fleet Desktop" board): machine-grouped sidebar · cross-machine attention · watch pane ──
 
 /**
@@ -203,9 +212,23 @@ interface DesktopModel {
     fun movePin(from: Int, to: Int)
     /** Jump to a pin: same machine opens the session in place; another machine switches over first. */
     fun openPin(p: DkPin)
-    fun jumpPin(i: Int) { pins.getOrNull(i)?.let { openPin(it) } }
+    /** ⌘1–9 runs over the session pins first, then continues into the project pins — one keycap ladder
+     *  for one PINNED zone, and adding a project pin never renumbers the session pins above it. */
+    fun jumpPin(i: Int) {
+        val s = pins.getOrNull(i)
+        if (s != null) openPin(s) else projectPins.getOrNull(i - pins.size)?.let { openProjectPin(it) }
+    }
     fun isPinned(sessionId: String): Boolean = pins.any { it.sessionId == sessionId }
     val pinsFull: Boolean get() = pins.size >= MAX_PINS
+
+    // pinned projects (issue #199) — same zone, same gesture, separate list; see [DkProjectPin].
+    // Defaults are inert so seed/preview/test fakes need no changes.
+    val projectPins: List<DkProjectPin> get() = emptyList()
+    fun pinProject(path: String, name: String) {}
+    fun unpinProject(path: String) {}
+    fun isProjectPinned(path: String): Boolean = projectPins.any { it.path == path }
+    /** Open a pinned project: its session LIST — the pinned entity is the project, not one session in it. */
+    fun openProjectPin(p: DkProjectPin) { openProject(DkProject(p.path, p.name)) }
 
     // ── workflow orchestration (issue #106): the docked right panel + chat-card binding ──
     // Defaults keep the seed/demo model untouched; the live model delegates to the repository.
@@ -335,8 +358,9 @@ interface DesktopModel {
         newSessionSeed = seed ?: newSessionDir?.let { tilde(it) } ?: "~/"
         showNewSession = true
     }
-    /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home). */
-    fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String? = null)
+    /** Start a session at [dir] (display form; "~" is expanded against the daemon host's home).
+     *  [model] is the popover's per-creation pick (issue #199); null = the usual default ladder. */
+    fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String? = null, model: String? = null)
     /**
      * True when the ACTIVE computer is the one this desktop app runs on (issue #163). Gates the native
      * directory chooser: a local Finder panel can only browse local disk, so a remote machine has to fall

@@ -102,7 +102,13 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                     model.defaultMode,
                     model.defaultPermissionMode,
                     model.permissionModeAvailable(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
-                ) { dir, agent, mode, native -> model.newSession(dir, agent, mode, native) }
+                    // same table the live-session picker reads (issue #199) — one definition of "which models"
+                    modelsFor = { a ->
+                        dev.ccpocket.app.ui.modelChoicesFor(a, model.modelsForAgent(a), if (a == AgentKind.CLAUDE) model.gatewayBaseUrl else null)
+                    },
+                    defaultModelFor = { a -> model.defaultModelFor(a) },
+                    onAgentPicked = { a -> model.fetchModels(a) },
+                ) { dir, agent, mode, native, pickedModel -> model.newSession(dir, agent, mode, native, pickedModel) }
             }
         }
         if (model.showQuickActions) {

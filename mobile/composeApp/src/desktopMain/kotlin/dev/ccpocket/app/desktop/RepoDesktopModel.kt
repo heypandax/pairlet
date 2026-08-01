@@ -653,6 +653,20 @@ class RepoDesktopModel(
         savePins()
     }
 
+    // ── pinned projects (issue #199) ────────────────────────────────────────────────────────────
+    // No store of its own: the repo ALREADY keeps a project-pin list (the phone shell's PINNED section),
+    // persisted client-side under the same SecureStore this model's own keys live in. Riding it means a
+    // project pinned in either shell of this device is pinned in both — and there is exactly one answer
+    // to "is this project pinned", instead of two lists drifting apart.
+    override val projectPins: List<DkProjectPin> get() = repo.pinnedPaths.map { DkProjectPin(it, folderName(it)) }
+    override fun isProjectPinned(path: String): Boolean = repo.isPinned(path)
+    override fun pinProject(path: String, name: String) { if (!repo.isPinned(path)) repo.togglePin(path) }
+    override fun unpinProject(path: String) { if (repo.isPinned(path)) repo.togglePin(path) }
+    override fun openProjectPin(p: DkProjectPin) {
+        navGen++ // user navigation — same guard openPin takes against an in-flight RECENT refill (#102)
+        openProject(DkProject(path = p.path, name = p.name))
+    }
+
     // ── hidden sessions: the RECENT row's ✕ (issue #62) — a persisted, account-scoped remove-from-list ──
     private val hiddenState = mutableStateListOf<HiddenRec>().apply {
         runCatching {
@@ -723,7 +737,7 @@ class RepoDesktopModel(
     override val activeIsThisMachine: Boolean
         get() = machines.firstOrNull { it.active }?.thisMachine == true
 
-    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?) {
+    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) {
         // "~" ships raw, exactly like mobile's NewPathSheet: the daemon owns the expansion
         // (DirectoryService.expandTilde) — only it knows the remote machine's home
         val typed = trimTrailingSep(dir.trim())
@@ -738,7 +752,7 @@ class RepoDesktopModel(
         // the project enters RECENT (visit + live listing) exactly as if it had been clicked — without
         // this the group never appeared for a dir typed straight into the popover (#42)
         openProject(DkProject(path = target, name = folderName(target)))
-        repo.openSession(wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode)
+        repo.openSession(wd = target, startMode = mode, agent = agent, startPermissionMode = permissionMode, startModel = model)
     }
 
     override val hasChat: Boolean get() = repo.convoId.value != null

@@ -117,6 +117,13 @@ class SeedDesktopModel : DesktopModel {
         else computers.firstOrNull { it.accountId == p.accountId }?.let(::selectComputer)
     }
 
+    // one pinned project (issue #199) so the PINNED zone shows both kinds side by side in previews/tests
+    private val projectPinList = mutableStateListOf(DkProjectPin("~/src/relay", "relay"))
+    override val projectPins: List<DkProjectPin> get() = projectPinList
+    override fun isProjectPinned(path: String) = projectPinList.any { it.path == path }
+    override fun pinProject(path: String, name: String) { if (!isProjectPinned(path)) projectPinList += DkProjectPin(path, name) }
+    override fun unpinProject(path: String) { projectPinList.removeAll { it.path == path } }
+
     // the fleet boards' other machines — the design's four-machine command-center scenario
     private val resolvedAttention = mutableStateListOf<String>()
     private val allAttention = listOf(
@@ -310,7 +317,7 @@ class SeedDesktopModel : DesktopModel {
     override fun selectSession(s: DkSession) { sessions.indexOfFirst { it.sessionId == s.sessionId }.takeIf { it >= 0 }?.let { selectedIndex = it; askResolved = false } }
     override val newSessionDir = "~/code/cc-pocket"
     override var newSessionSeed: String? by mutableStateOf(null)
-    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?) { showNewSession = false }
+    override fun newSession(dir: String, agent: AgentKind, mode: PermissionMode, permissionMode: String?, model: String?) { showNewSession = false }
     override fun send(text: String) { composer = "" }
 
     override val pendingImages: List<dev.ccpocket.app.data.PendingImage> = emptyList()

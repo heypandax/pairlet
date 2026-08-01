@@ -61,6 +61,7 @@ import dev.ccpocket.app.resources.label_agent
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
 import dev.ccpocket.app.resources.label_model
+import dev.ccpocket.app.resources.value_model_default
 import dev.ccpocket.app.resources.mode_accept_short
 import dev.ccpocket.app.resources.mode_auto_short
 import dev.ccpocket.app.resources.mode_bypass_short
@@ -102,6 +103,7 @@ import dev.ccpocket.app.ui.GatewayVendorMonogram
 import dev.ccpocket.app.ui.gatewayRowsFrom
 import dev.ccpocket.app.ui.gatewayHostLabel
 import dev.ccpocket.app.ui.matchesGatewayHost
+import dev.ccpocket.app.ui.ModelChoice
 import dev.ccpocket.app.ui.modelChipLabel
 import dev.ccpocket.app.ui.recommendedGatewayPresets
 import dev.ccpocket.app.ui.agentColor
@@ -131,9 +133,14 @@ internal val CLAUDE_AUTO_MODE =
     DkMode(Res.string.mode_auto_short, CLAUDE_PERMISSION_MODE_AUTO, PermissionMode.DEFAULT, Tok.accent, nativeMode = CLAUDE_PERMISSION_MODE_AUTO)
 
 /**
- * Agent + mode picker with an EDITABLE path field seeded by whoever opened it (the current project from
- * ⌘N / the Sessions-pane row, "~/" from the Projects-group row). A path whose leaf folder doesn't exist
- * yet is created by the daemon (one level, under an existing parent) — same contract as mobile's NewPathSheet.
+ * Agent + model + mode picker with an EDITABLE path field seeded by whoever opened it (the current project
+ * from ⌘N / the Sessions-pane row, "~/" from the Projects-group row, a RECENT header's ＋). A path whose
+ * leaf folder doesn't exist yet is created by the daemon (one level, under an existing parent) — same
+ * contract as mobile's NewPathSheet.
+ *
+ * Model (issue #199) reads the same [modelChoicesFor] table the live-session [ModelPopover] does and rides
+ * [onStart] for this creation only — no per-project memory, no new default. [modelsFor] is a lambda because
+ * the list follows the agent picked INSIDE the popover; [onAgentPicked] lets the host refresh it.
  */
 @Composable
 fun NewSessionPopover(
@@ -142,7 +149,10 @@ fun NewSessionPopover(
     defaultMode: PermissionMode = PermissionMode.DEFAULT,
     defaultPermissionMode: String? = null,
     autoAvailable: Boolean = false,
-    onStart: (String, AgentKind, PermissionMode, String?) -> Unit,
+    modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
+    defaultModelFor: (AgentKind) -> String? = { null },
+    onAgentPicked: (AgentKind) -> Unit = {},
+    onStart: (String, AgentKind, PermissionMode, String?, String?) -> Unit,
 ) {
     var agent by remember { mutableStateOf(defaultAgent) }
     val availableModes = CLAUDE_MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
@@ -151,6 +161,9 @@ fun NewSessionPopover(
             availableModes.indexOfFirst { it.mode == defaultMode && it.nativeMode == defaultPermissionMode }.coerceAtLeast(0),
         )
     }
+    // null = follow the per-agent default. Reset per agent: a Claude alias isn't a model Codex can run.
+    var chosenModel by remember(agent) { mutableStateOf<String?>(null) }
+    LaunchedEffect(agent) { onAgentPicked(agent) }
     var path by remember(initialPath) { mutableStateOf(TextFieldValue(initialPath, selection = TextRange(initialPath.length))) }
     val trimmed = path.text.trim()
     // light client check; the daemon is the authority (rejects a non-readable dir with a clear error)
@@ -168,6 +181,7 @@ fun NewSessionPopover(
                         agent,
                         if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else selected.mode,
                         selected.nativeMode.takeIf { agent == AgentKind.CLAUDE },
+                        chosenModel,
                     )
                     true
                 } else false
@@ -195,6 +209,7 @@ fun NewSessionPopover(
                 AgentCard(AgentKind.CODEX, agent == AgentKind.CODEX, Modifier.weight(1f)) { agent = AgentKind.CODEX }
                 AgentCard(AgentKind.OPENCODE, agent == AgentKind.OPENCODE, Modifier.weight(1f)) { agent = AgentKind.OPENCODE }
             }
+            NewSessionModelRow(modelsFor(agent), chosenModel, defaultModelFor(agent)) { chosenModel = it }
             PopoverLabel(stringResource(Res.string.label_mode))
             if (agent == AgentKind.OPENCODE) {
                 // no selectable ladder: opencode has no approval protocol (daemon runs it --auto),
@@ -241,9 +256,45 @@ fun NewSessionPopover(
                             agent,
                             if (agent == AgentKind.OPENCODE) PermissionMode.BYPASS_PERMISSIONS else selected.mode,
                             selected.nativeMode.takeIf { agent == AgentKind.CLAUDE },
+                            chosenModel,
                         )
                     }.padding(vertical = 10.dp),
             )
+        }
+    }
+}
+
+/**
+ * The new-session MODEL row (issue #199): one line saying what will actually run, click to reveal
+ * "Default" + the agent's rows. [chosen] null = follow [fallback] (the per-agent Settings default, or the
+ * CLI's own when that is null too), so the row stays honest even when the user never opens it.
+ */
+@Composable
+private fun NewSessionModelRow(choices: List<ModelChoice>, chosen: String?, fallback: String?, onChoose: (String?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val defaultLabel = stringResource(Res.string.value_model_default)
+    val summary = when {
+        chosen != null -> choices.firstOrNull { it.pick.equals(chosen, ignoreCase = true) }?.name ?: modelChipLabel(chosen)
+        !fallback.isNullOrBlank() -> modelChipLabel(fallback)
+        else -> defaultLabel
+    }
+    PopoverLabel(stringResource(Res.string.label_model))
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = if (open) 6.dp else 14.dp).clip(RoundedCornerShape(8.dp))
+            .border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
+            .clickable { open = !open }.padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(summary, color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp, maxLines = 1, modifier = Modifier.weight(1f))
+        if (chosen == null) Text(defaultLabel, color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+        Text(if (open) "⌃" else "›", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp)
+    }
+    if (open) {
+        Column(Modifier.padding(bottom = 8.dp)) {
+            QaOption(defaultLabel, chosen == null, token = fallback?.takeIf { it.isNotBlank() }?.let { modelChipLabel(it) }) { onChoose(null); open = false }
+            choices.forEach { c ->
+                QaOption(c.name, chosen.equals(c.pick, ignoreCase = true), token = c.ctx.takeIf { it.isNotEmpty() }) { onChoose(c.pick); open = false }
+            }
         }
     }
 }

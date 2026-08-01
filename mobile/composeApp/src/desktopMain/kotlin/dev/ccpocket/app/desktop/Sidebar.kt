@@ -119,12 +119,16 @@ import dev.ccpocket.app.resources.sidebar_recent_empty
 import dev.ccpocket.app.resources.status_reconnecting
 import dev.ccpocket.app.resources.switcher_all_projects
 import dev.ccpocket.app.resources.switcher_recent
+import dev.ccpocket.app.resources.new_session_here
+import dev.ccpocket.app.resources.pin_project
 import dev.ccpocket.app.resources.this_machine
+import dev.ccpocket.app.resources.unpin_project
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.AgentBadge
 import dev.ccpocket.app.ui.AgentTag
 import dev.ccpocket.app.ui.fleet.AttentionBadge
 import dev.ccpocket.app.ui.modelAlias
+import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.app.ui.share.SharedPill
 import dev.ccpocket.app.ui.share.expiryLeft
 import dev.ccpocket.app.ui.share.expiryLeftText
@@ -228,7 +232,8 @@ private fun SwitcherHeader(model: DesktopModel) {
 @Composable
 private fun PinnedZone(model: DesktopModel) {
     val pins = model.pins
-    if (pins.isEmpty()) return // pinning is discoverable from the hover pin on any session row
+    val projectPins = model.projectPins
+    if (pins.isEmpty() && projectPins.isEmpty()) return // pinning is discoverable from the hover pin on any session/project row
     Column(Modifier.fillMaxWidth()) {
         SectionLabel(stringResource(Res.string.dir_pinned), trailing = { Key("⌘1–9") })
         var dragFrom by remember(pins.size) { mutableStateOf(-1) }
@@ -254,6 +259,9 @@ private fun PinnedZone(model: DesktopModel) {
             )
             if (i == t && t > dragFrom) SlotIndicator()
         }
+        // pinned PROJECTS (issue #199) sit BELOW the session pins: they are entries, not live work, and
+        // appending them keeps every session pin's ⌘n keycap exactly where it was.
+        projectPins.forEachIndexed { i, p -> ProjectPinRow(model, p, index = pins.size + i) }
         if (model.pinsFull) {
             Text(
                 stringResource(Res.string.sidebar_pins_full, DesktopModel.MAX_PINS),
@@ -349,6 +357,48 @@ private fun PinRow(
             Key("⌘${index + 1}") // keycap on hover only — at rest the row is just title + state
         }
     }
+}
+
+/**
+ * One pinned PROJECT row (issue #199): folder glyph · project name (mono, the same type the RECENT and
+ * RUNNING rows give a project) · hover ＋ (new session here) · hover unpin · ⌘n keycap while the numbering
+ * still reaches. Click opens the project's session list — the pinned thing is the project, not a session.
+ * No drag grip: reordering belongs to the session pins' ⌘1–9 ladder, and these always follow them.
+ */
+@Composable
+private fun ProjectPinRow(model: DesktopModel, p: DkProjectPin, index: Int) {
+    val src = remember { MutableInteractionSource() }
+    val hovered by src.collectIsHoveredAsState()
+    Row(
+        Modifier.fillMaxWidth().height(32.dp).hoverable(src).hoverFill()
+            .clickable { model.openProjectPin(p) }.padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(Icons.Outlined.Folder, null, tint = Tok.muted, modifier = Modifier.size(12.dp))
+        Text(
+            p.name, color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp, lineHeight = 12.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        if (hovered) {
+            NewSessionHere { model.openNewSession(tilde(p.path)) }
+            Icon(
+                PinSlashIcon, stringResource(Res.string.unpin_project), tint = Tok.tx2,
+                modifier = Modifier.size(13.dp).clickable { model.unpinProject(p.path) },
+            )
+            if (index < DesktopModel.MAX_PINS) Key("⌘${index + 1}")
+        }
+    }
+}
+
+/** The ＋ that starts a session in the project the row names (issue #199) — accent, so it reads as the
+ *  same call to action the sidebar's own "New session" row is, just scoped to one project. */
+@Composable
+private fun NewSessionHere(onClick: () -> Unit) {
+    Icon(
+        Icons.Rounded.Add, stringResource(Res.string.new_session_here), tint = Tok.accent,
+        modifier = Modifier.size(15.dp).clip(RoundedCornerShape(4.dp)).clickable(onClick = onClick),
+    )
 }
 
 // ── zone 3: running (flat, cross-machine) ───────────────────────────────────────────────────────
@@ -487,7 +537,10 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     GroupHeader(
                         g, closed,
                         refreshing = g.path == spinningPath,
+                        pinned = model.isProjectPinned(g.path),
                         onRefresh = { refreshTarget = g.path; model.refresh(g) },
+                        onTogglePin = { if (model.isProjectPinned(g.path)) model.unpinProject(g.path) else model.pinProject(g.path, g.name) },
+                        onNewSession = { model.openNewSession(tilde(g.path)) },
                         onToggle = { if (closed) collapsed.remove(g.path) else collapsed.add(g.path) },
                     )
                 }
@@ -562,9 +615,26 @@ private fun recentRowIndex(
     return -1
 }
 
-/** A RECENT group header: folder + project name (mono, muted) · hover refresh · running pulse · collapse chevron. */
+/**
+ * A RECENT group header: folder + project name (mono, muted) · ＋ new session here · hover pin/refresh ·
+ * running pulse · collapse chevron.
+ *
+ * The ＋ (issue #199) is the one affordance here that does NOT hide at rest: it is the reason to look at
+ * this list ("that project — start something there"), and a hover-only entry would leave the path from
+ * RECENT to a new session as invisible as it was before. Pin joins the hover cluster instead, next to
+ * refresh — it's a preference, not a call to action, and it wears the same glyphs the session rows use.
+ */
 @Composable
-private fun GroupHeader(g: DkSessionGroup, closed: Boolean, refreshing: Boolean, onRefresh: () -> Unit, onToggle: () -> Unit) {
+private fun GroupHeader(
+    g: DkSessionGroup,
+    closed: Boolean,
+    refreshing: Boolean,
+    pinned: Boolean,
+    onRefresh: () -> Unit,
+    onTogglePin: () -> Unit,
+    onNewSession: () -> Unit,
+    onToggle: () -> Unit,
+) {
     val src = remember { MutableInteractionSource() }
     val hovered by src.collectIsHoveredAsState()
     Row(
@@ -577,6 +647,13 @@ private fun GroupHeader(g: DkSessionGroup, closed: Boolean, refreshing: Boolean,
             g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
         )
+        NewSessionHere(onNewSession)
+        if (hovered) Icon(
+            if (pinned) PinSlashIcon else PinIcon,
+            stringResource(if (pinned) Res.string.unpin_project else Res.string.pin_project),
+            tint = if (pinned) Tok.tx2 else Tok.accent,
+            modifier = Modifier.size(13.dp).clickable(onClick = onTogglePin),
+        ) else if (pinned) Icon(PinIcon, null, tint = Tok.muted, modifier = Modifier.size(11.dp))
         if (g.sharedBy != null) {
             // a guest's shared folder (issue #115): the same neutral hairline pill as mobile — provenance,
             // not attention — plus "who · how long" at rest. Hover hands that space to the refresh icon
