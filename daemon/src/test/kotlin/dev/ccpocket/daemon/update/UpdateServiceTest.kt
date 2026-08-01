@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.update
 
+import dev.ccpocket.daemon.update.UpdateService.InstallKind
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -48,6 +49,28 @@ class UpdateServiceTest {
         assertTrue("brew upgrade" in UpdateService.ownerHint(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon")))
         assertTrue("scoop update" in UpdateService.ownerHint(Path.of("C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\1.2.0\\cc-pocket-daemon.exe")))
         assertTrue("one-liner" in UpdateService.ownerHint(Path.of("/somewhere/else/cc-pocket-daemon")))
+    }
+
+    @Test
+    fun install_kind_prefers_the_managed_layout_then_the_package_manager(): Unit = with(UpdateService) {
+        val home = Path.of("/Users/x")
+        assertEquals(InstallKind.MANAGED, installKind(Path.of("/Users/x/.local/share/cc-pocket/versions/1.2.0/bin/cc-pocket-daemon"), home))
+        assertEquals(InstallKind.HOMEBREW, installKind(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon"), home))
+        assertEquals(InstallKind.SCOOP, installKind(Path.of("C:\\Users\\x\\scoop\\apps\\cc-pocket-daemon\\1.2.0\\cc-pocket-daemon.exe"), home))
+        assertEquals(InstallKind.UNKNOWN, installKind(Path.of("/Users/x/Desktop/proj/daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon"), home))
+        assertEquals(InstallKind.UNKNOWN, installKind(null, home))
+    }
+
+    @Test
+    fun update_command_is_one_runnable_line_per_install_kind(): Unit = with(UpdateService) {
+        assertEquals("cc-pocket-daemon update", updateCommand(InstallKind.MANAGED))
+        assertEquals("brew upgrade --cask heypandax/tap/cc-pocket", updateCommand(InstallKind.HOMEBREW))
+        assertEquals("scoop update cc-pocket-daemon", updateCommand(InstallKind.SCOOP))
+        // an unrecognized install has no updater to call — re-running the installer converts it to managed
+        assertTrue(updateCommand(InstallKind.UNKNOWN, "Mac OS X").startsWith("curl -fsSL"))
+        assertTrue(updateCommand(InstallKind.UNKNOWN, "Windows 11").startsWith("irm "))
+        // the hint the CLI throws and the command the phone gets must never disagree about the owner
+        assertTrue(updateCommand(InstallKind.HOMEBREW) in ownerHint(Path.of("/opt/homebrew/Caskroom/cc-pocket/1.2.0/bin/cc-pocket-daemon")))
     }
 
     @Test
