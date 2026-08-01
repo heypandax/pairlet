@@ -873,6 +873,9 @@ class RepoDesktopModel(
     private var pendingRelease: ReleaseClient.Release? = null
 
     override val updateState: DkUpdateState get() = updateStateInternal
+    override val daemonVersion: String? get() = repo.versionStatus.value.daemonVersion
+    override val daemonUpdateCommand: String?
+        get() = repo.versionStatus.value.let { if (it.daemonBehind) it.updateCommand else null }
     override val updateCommand: String?
         get() = (updateStateInternal as? DkUpdateState.Available)?.let { DesktopUpdater.upgradeCommandFor(it.source) }
 

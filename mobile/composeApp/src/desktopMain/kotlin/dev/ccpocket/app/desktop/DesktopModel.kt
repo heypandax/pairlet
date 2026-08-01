@@ -567,6 +567,14 @@ interface DesktopModel {
     // self-updates (download → verify → replace → relaunch), a brew/scoop copy exposes its upgrade command
     // instead of self-overwriting, and an unrecognized/dev build opens the releases page.
     val updateState: DkUpdateState get() = DkUpdateState.Idle
+
+    /** The connected daemon's version and how to update IT (issue #200), from `DaemonInfo`. Null before
+     *  the first one lands or from a daemon too old to report — shown as "unknown", never as "current".
+     *  Worth its own row here because the desktop app usually shares a machine with the daemon, so a
+     *  stale daemon behind a fresh app is the common case. */
+    val daemonVersion: String? get() = null
+    /** Non-null only when that daemon is actually behind: the exact command for ITS install layout. */
+    val daemonUpdateCommand: String? get() = null
     /** Check GitHub releases for a newer app version, then classify how this install can take it. */
     fun checkForUpdates() {}
     /** STANDALONE installs only: download the new dmg/msi, verify its SHA256, replace this app and relaunch. */

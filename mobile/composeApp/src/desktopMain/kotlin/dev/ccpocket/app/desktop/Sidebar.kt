@@ -167,6 +167,7 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         RecentZone(model, Modifier.weight(1f))
         AllProjectsRow { model.browseProjects() }
         FooterActions(
+            updateAvailable = model.updateState is DkUpdateState.Available,
             onHelp = { openWebUrl(SUPPORT_URL) },
             onSettings = { model.showSettings = true },
         )
@@ -998,8 +999,11 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
     }
 }
 
+/** [updateAvailable] tints the footer version accent (issue #200) — the startup check runs silently, so
+ *  this dim mono line is the only place a waiting update would otherwise be invisible. Settings ▸ About
+ *  is one click away behind the same row. */
 @Composable
-private fun FooterActions(onHelp: () -> Unit, onSettings: () -> Unit) {
+private fun FooterActions(updateAvailable: Boolean, onHelp: () -> Unit, onSettings: () -> Unit) {
     Column {
         Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         Row(
@@ -1028,7 +1032,11 @@ private fun FooterActions(onHelp: () -> Unit, onSettings: () -> Unit) {
                     Icons.Outlined.Settings, stringResource(Res.string.settings_title),
                     tint = Tok.tx2, modifier = Modifier.size(15.dp),
                 )
-                Text("v$APP_VERSION", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
+                if (updateAvailable) Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(Tok.accent))
+                Text(
+                    "v$APP_VERSION", color = if (updateAvailable) Tok.accent else Tok.muted,
+                    fontFamily = Dk.mono, fontSize = 10.sp,
+                )
             }
         }
     }

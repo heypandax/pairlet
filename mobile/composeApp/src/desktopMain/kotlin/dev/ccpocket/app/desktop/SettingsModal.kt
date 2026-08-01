@@ -1569,6 +1569,9 @@ private fun AboutPane(model: DesktopModel) {
         )
         val info = listOf(
             stringResource(Res.string.about_version) to model.appVersion,
+            // the daemon's own version (issue #200) — usually this same machine, so a stale daemon
+            // behind a fresh app is exactly the case this row exists to make visible
+            stringResource(Res.string.updates_daemon) to (model.daemonVersion ?: stringResource(Res.string.updates_unknown)),
             stringResource(Res.string.about_relay) to model.relayUrl.ifBlank { "—" },
             stringResource(Res.string.about_license) to "MIT",
         )
@@ -1576,7 +1579,28 @@ private fun AboutPane(model: DesktopModel) {
             InfoRow(row.first, row.second)
             if (i < info.lastIndex) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
         }
+        DaemonUpdateHint(model)
         UpdatesSection(model)
+    }
+}
+
+// The daemon half of the version picture (issue #200). The app can't update the daemon for it — different
+// binary, possibly a different owner (brew/scoop/installer) — so this shows the exact command the DAEMON
+// reported for its own install layout, ready to copy. Silent unless that daemon is actually behind.
+@Composable
+private fun DaemonUpdateHint(model: DesktopModel) {
+    val cmd = model.daemonUpdateCommand ?: return
+    val clipboard = LocalClipboardManager.current
+    Column(Modifier.padding(top = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Dot(Tok.accent, 8.dp)
+            Text(
+                stringResource(Res.string.updates_daemon_howto), color = Tok.tx2,
+                fontFamily = Dk.ui, fontSize = 12.5.sp, lineHeight = 18.sp,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        CommandBox(cmd, clipboard)
     }
 }
 

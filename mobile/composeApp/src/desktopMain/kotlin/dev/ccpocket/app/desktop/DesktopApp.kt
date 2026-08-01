@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -57,6 +58,15 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
     }
     val density = LocalDensity.current
     val setCollapsed = { v: Boolean -> collapsed = v; SecureStore.putString(K_SIDEBAR_COLLAPSED, if (v) "1" else "0") }
+    // One silent update check per launch (issue #200), extending the existing #87 checker rather than
+    // adding a channel: it only ever moves updateState, never downloads — applying stays a click in
+    // Settings ▸ About. Delayed so it can't compete with connect/first paint, and guarded on Idle so a
+    // check the user already started isn't stomped. Seed/preview models no-op checkForUpdates(), so
+    // screenshots and UI tests stay offline.
+    LaunchedEffect(Unit) {
+        delay(STARTUP_UPDATE_CHECK_DELAY_MS)
+        if (model.updateState is DkUpdateState.Idle) model.checkForUpdates()
+    }
     Box(Modifier.fillMaxSize().background(Tok.base)) {
         Row(Modifier.fillMaxSize()) {
             if (collapsed) {
@@ -173,6 +183,8 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
 
 // sidebar sizing bounds (issue #62). COLLAPSE_AT < MIN so dragging the divider left of the minimum snaps
 // the sidebar hidden rather than stopping at the floor.
+/** Long enough that the launch-time check never competes with connect + first paint (issue #200). */
+private const val STARTUP_UPDATE_CHECK_DELAY_MS = 8_000L
 private const val SIDEBAR_MIN = 220f
 private const val SIDEBAR_MAX = 460f
 private const val SIDEBAR_COLLAPSE_AT = 170f
