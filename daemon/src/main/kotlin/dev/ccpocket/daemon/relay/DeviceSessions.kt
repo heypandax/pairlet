@@ -298,9 +298,14 @@ class DeviceSessions(
         dev.ccpocket.daemon.update.UpdateState.stamp(DaemonInfo(lanUrl(), hostname(), gatewayBaseUrl(), bridgeControl = true))
 
     /**
-     * Re-announce [DaemonInfo] to every device with a live session — called when the daily check learns
-     * a newer release exists (issue #200), so a phone that has been attached for days sees the nudge
-     * without waiting for a reconnect. Bridges/guests are excluded exactly as at handshake time.
+     * Re-announce [DaemonInfo] to every device with a live RELAY session — called when the daily check
+     * learns a newer release exists (issue #200), so a phone that has been attached for days sees the
+     * nudge without waiting for a reconnect. Bridges/guests are excluded exactly as at handshake time.
+     *
+     * Direct-LAN sessions are NOT covered (they're owned by [dev.ccpocket.daemon.server.WsConnection],
+     * which emits its own DaemonInfo at gate time): a LAN device attached across the daily check keeps a
+     * stale latestVersion until it reconnects. Degradation only — the version fields are advisory, and
+     * "slightly stale" beats reaching across transports for a once-a-day nicety.
      */
     suspend fun reannounceDaemonInfo() {
         val info = daemonInfo()

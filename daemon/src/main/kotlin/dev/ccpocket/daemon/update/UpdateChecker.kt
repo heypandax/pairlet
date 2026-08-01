@@ -42,8 +42,13 @@ object UpdateChecker {
         // phone, and the APP compares it against its OWN version — that's how a device with no GitHub access
         // of its own learns it's behind. Re-announce only on a change, so this is at most one frame a day.
         if (UpdateState.recordLatest(latest.version)) {
-            runCatching { kotlinx.coroutines.runBlocking { relay.reannounceDaemonInfo() } }
-                .onFailure { log.warn("could not re-announce daemon info: ${it.message}") }
+            // bounded: the send path suspends on a full outbox, and a once-a-day nicety must never park
+            // this thread behind a backed-up relay link
+            runCatching {
+                kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeout(REANNOUNCE_TIMEOUT_MS) { relay.reannounceDaemonInfo() }
+                }
+            }.onFailure { log.warn("could not re-announce daemon info: ${it.message}") }
         }
         if (!UpdateService.isNewer(latest.version, current)) return
 
@@ -75,6 +80,7 @@ object UpdateChecker {
         noticeFile.writeText(v)
     }
 
+    private const val REANNOUNCE_TIMEOUT_MS = 5_000L
     private const val FIRST_CHECK_DELAY_MS = 5 * 60 * 1000L
     private const val CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000L
 }
