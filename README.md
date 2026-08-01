@@ -92,6 +92,8 @@ One command: installs, registers a logon Scheduled Task, and drops straight into
 
 Open the app and **scan the QR** (or type the 6-digit code) that `cc-pocket-daemon pair` printed — you're connected end-to-end. Full walkthrough: [`docs/USAGE.md`](docs/USAGE.md).
 
+`cc-pocket-daemon version` tells you what's running, how it was installed, and the one command that updates *this* install — it works offline and whether or not the daemon is up. The app shows the same thing under Settings ▸ Versions, and nudges you when either side falls behind.
+
 Upgrade anytime with `cc-pocket-daemon update` — the daemon also checks daily and notifies your phone (add `--auto-update` to `run` to apply silently). Homebrew: `brew upgrade --cask heypandax/tap/cc-pocket` · Scoop: `scoop update cc-pocket-daemon`. Other architectures: [build from source](#building-from-source).
 
 ## Security
