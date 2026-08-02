@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.defaultDaemonUrl
+import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
@@ -92,6 +93,25 @@ fun PairingScreen(repo: PocketRepository) {
             stringResource(Res.string.pairing_subtitle),
             color = Tok.tx2, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 300.dp),
         )
+        // A pure RECIPIENT (SESSION-HANDOFF.md §10: "接收方要求 cc-pocket App；不要求 daemon") has
+        // collaborator links but no owner binding, so this pairing screen is their whole app — it would
+        // otherwise read as "you haven't started yet" while their contact link is live and offers are
+        // already routed here. One line, stated once; the offer overlay above still does the real work.
+        val collabLinks = remember { dev.ccpocket.app.pairing.Pairing.collaboratorLinks() }
+        if (!adding && collabLinks.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                Text(stringResource(Res.string.co_pairing_linked), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    stringResource(Res.string.co_pairing_linked_sub, collabLinks.joinToString("、") { it.displayName() }),
+                    color = Tok.tx2, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+
         Spacer(Modifier.height(22.dp))
 
         Viewfinder { repo.handlePairUrl(it) }
