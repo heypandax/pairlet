@@ -77,10 +77,11 @@ sealed interface ChatAction {
     data class Ask(val workdir: String, val prompt: String, val note: String? = null) : ChatAction
     /** Drop this chat's conversation so the next message opens a FRESH session ("/new"). [note] confirms it. */
     data class Reset(val note: String) : ChatAction
-    /** Turn this chat's NO-APPROVAL trust on/off ("/trust", "/untrust", issue #198) — authority already
-     *  verified (machine owner only). The engine persists it and replies, since only it knows whether the
-     *  state actually changed. */
-    data class SetTrust(val enable: Boolean) : ChatAction
+    /** Move this chat to [mode] ("/trust", "/review [purpose]", "/untrust") — authority already verified
+     *  (machine owner only). [purpose] is the owner-typed Trust Contract for REVIEWED (null = the default
+     *  contract). The engine persists it and replies, since only it knows whether the state actually
+     *  changed — and whether the write LANDED (a failed revoke must never read as a success). */
+    data class SetTrust(val mode: FeishuTrustMode, val purpose: String? = null) : ChatAction
     /** Not addressed to us / nothing to do. */
     data object Ignore : ChatAction
 }
@@ -99,14 +100,13 @@ class FeishuCommands(
      *  authority when [adminOpenId] is unset. Injected by the engine; the pure default keeps this class
      *  IO-free and unit-testable. An explicit admin always WINS; the owner only fills the no-admin gap. */
     private val chatOwnerOf: (chatId: String) -> String? = { null },
-    /** MASTER enable for per-chat no-approval (issue #198), read off the owner-only bridge spec. False (the
-     *  default) makes /trust refuse: the chat side can never turn the feature on by itself. */
+    /** MASTER enable for the per-chat trust modes (issue #198), read off the owner-only bridge spec. False
+     *  (the default) makes /trust and /review refuse: the chat side can never turn the feature on itself. */
     private val noApprovalEnabled: Boolean = false,
-    /** Is this chat no-approval FOR THE PROJECT IT IS BOUND TO NOW? Injected so this class stays IO-free. */
-    private val trustedOf: (chatId: String) -> Boolean = { false },
-    /** Any trust entry for this chat, whatever project it names — so a mark left over from an earlier binding
-     *  is still revocable by /untrust even though [trustedOf] (correctly) reports it as not in effect. */
-    private val trustedProjectOf: (chatId: String) -> String? = { null },
+    /** This chat's stored trust record, whatever project it names — injected so this class stays IO-free.
+     *  A record naming a project OTHER than the current binding is not in effect, but must still be
+     *  revocable by /untrust and visible to /trust-status. */
+    private val trustRecordOf: (chatId: String) -> FeishuTrustRecord? = { null },
 ) {
     fun handle(text: String, chatId: String, senderOpenId: String): ChatAction {
         if (!text.startsWith("/")) {
@@ -168,40 +168,80 @@ class FeishuCommands(
                     }
                 },
             )
-            // NO-APPROVAL trust (issue #198). Authority is the MACHINE OWNER alone — deliberately NOT the /bind
-            // authority: a Feishu group owner may point their chat at an allow-listed project, but waiving the
-            // machine owner's review of what runs on their machine is not theirs to grant. So no group-owner
-            // fallback here; with no admin configured the answer is "can't", plus the caller's own open_id so
-            // the owner can paste it into the desktop field (the same bootstrap /bind uses).
-            "trust", "untrust" -> {
-                val on = cmd == "trust"
+            // TRUST MODES (issue #198 + reviewed trust). Authority is the MACHINE OWNER alone — deliberately
+            // NOT the /bind authority: a Feishu group owner may point their chat at an allow-listed project,
+            // but waiving or conditioning the machine owner's review of what runs on their machine is not
+            // theirs to grant. So no group-owner fallback here; with no admin configured the answer is
+            // "can't", plus the caller's own open_id so the owner can paste it into the desktop field (the
+            // same bootstrap /bind uses).
+            "trust", "untrust", "review" -> {
                 val admin = adminOpenId?.takeIf { it.isNotBlank() }
-                val trusted = trustedOf(chatId)
+                val record = trustRecordOf(chatId)
+                val bound = routes.workdirFor(chatId)
                 when {
                     admin == null -> ChatAction.Reply(
-                        "还没设置机主 open_id，无法开关免审核。\n你的 open_id 是：$senderOpenId\n" +
+                        "还没设置机主 open_id，无法调整本群的信任模式。\n你的 open_id 是：$senderOpenId\n" +
                             "在桌面端「桥」的配置里填进 admin 字段后再试。",
                     )
-                    senderOpenId != admin -> ChatAction.Reply("只有机主可以开关本群免审核。")
-                    // OFF always works, even with the master switch off: turning trust DOWN must never be
-                    // blocked by config state, or a bridge whose master switch later flips back on would
-                    // silently resurrect an entry the owner meant to drop.
-                    // trustedOf() answers for the CURRENT binding, so a chat rebound since the grant reads
-                    // untrusted here — but its stale entry must still be revocable, hence trustedProjectOf
-                    !on -> if (trustedProjectOf(chatId) != null) ChatAction.SetTrust(false)
-                    else ChatAction.Reply("本群本来就是逐请求审批。")
+                    senderOpenId != admin -> ChatAction.Reply("只有机主可以调整本群的信任模式。")
+                    // /untrust always works, even with the master switch off or the chat unbound: turning
+                    // trust DOWN must never be blocked by config state, or a bridge whose master switch later
+                    // flips back on would silently resurrect an entry the owner meant to drop. The record may
+                    // name a project the chat has since been rebound away from — still revocable.
+                    cmd == "untrust" ->
+                        if (record != null) ChatAction.SetTrust(FeishuTrustMode.UNTRUSTED)
+                        else ChatAction.Reply("本群本来就是逐请求审批。")
                     !noApprovalEnabled -> ChatAction.Reply(
-                        "电脑上还没允许免审核：先在桌面端「桥」的配置里勾上「群成员免审核」，再在群里发 /trust。",
+                        "电脑上还没允许群信任模式：先在桌面端「桥」的配置里勾上「允许群信任模式」，再在群里发 /$cmd。",
                     )
-                    routes.workdirFor(chatId) == null -> ChatAction.Reply("本群还没有绑定项目，先 /bind 再开免审核。")
-                    trusted -> ChatAction.Reply("本群已经是免审核了。")
-                    else -> ChatAction.SetTrust(true)
+                    bound == null -> ChatAction.Reply("本群还没有绑定项目，先 /bind 再设置信任模式。")
+                    cmd == "trust" ->
+                        if (record?.workdir == bound && record.mode == FeishuTrustMode.TRUSTED) {
+                            ChatAction.Reply("本群已经是免审核了。")
+                        } else {
+                            ChatAction.SetTrust(FeishuTrustMode.TRUSTED)
+                        }
+                    else -> { // /review [purpose]
+                        val purpose = arg.takeIf { it.isNotBlank() }?.take(FeishuTrust.MAX_PURPOSE_CHARS)
+                        if (record?.workdir == bound && record.mode == FeishuTrustMode.REVIEWED && record.purpose == purpose) {
+                            ChatAction.Reply("本群已经是智能审核了。用 /trust-status 查看契约。")
+                        } else {
+                            ChatAction.SetTrust(FeishuTrustMode.REVIEWED, purpose)
+                        }
+                    }
                 }
             }
+            // read-only status — open to any member on purpose: it shows nothing but the mode, the bound
+            // project's display name and the owner's declared contract, all of which the group already lives
+            "trust-status" -> ChatAction.Reply(trustStatusText(chatId))
             // a non-bridge slash → run it in the bound session (or teach if this chat has none yet)
             else -> routes.workdirFor(chatId)?.let { ChatAction.Ask(it, text) }
                 ?: ChatAction.Reply("本群还没有绑定项目，无法执行 /$cmd。\n\n$HELP")
         }
+    }
+
+    /** The /trust-status answer: mode + bound project + contract summary — never internal paths. */
+    private fun trustStatusText(chatId: String): String {
+        val bound = routes.workdirFor(chatId)
+        val record = trustRecordOf(chatId)
+        if (bound == null) {
+            return "本群还没有绑定项目，当前所有请求都不会执行。先 /bind 绑定项目。"
+        }
+        val effective = record?.takeIf { it.workdir == bound }
+        return buildString {
+            appendLine("绑定项目：${FeishuRoutes.projectName(bound)}")
+            when (effective?.mode) {
+                FeishuTrustMode.TRUSTED -> appendLine("模式：免审核 —— 群成员的请求直接执行（仅限项目内的受限工具）。")
+                FeishuTrustMode.REVIEWED -> {
+                    appendLine("模式：智能审核 —— 每条请求先经 AI 审核，明确低风险且符合群用途的才直接执行，其余转机主审批。")
+                    appendLine("契约（版本 ${effective.contractVersion}）：${effective.purpose ?: FeishuTrust.DEFAULT_CONTRACT}")
+                }
+                else -> appendLine("模式：每次审批 —— 每条请求都先发到机主手机。")
+            }
+            if (record != null && effective == null) {
+                append("（另有一条旧信任记录指向别的项目，已不生效；机主可 /untrust 清除。）")
+            }
+        }.trimEnd()
     }
 
     private fun projectsText(): String = buildString {
@@ -223,7 +263,9 @@ class FeishuCommands(
               @机器人 /bind <项目>    把本群绑到某个项目（仅管理员）
               @机器人 /unbind         解绑本群（仅管理员）
               @机器人 /trust          本群免审核直接执行（仅机主，需电脑上先允许）
+              @机器人 /review [用途]  本群智能审核：AI 判定低风险才直接执行（仅机主）
               @机器人 /untrust        恢复逐请求审批（仅机主）
+              @机器人 /trust-status   查看本群的信任模式与契约
         """.trimIndent()
     }
 }

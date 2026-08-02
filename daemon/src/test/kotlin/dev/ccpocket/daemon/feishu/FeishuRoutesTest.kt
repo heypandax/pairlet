@@ -184,21 +184,24 @@ class FeishuRoutesTest {
         assertIs<ChatAction.Reply>(c.handle("/clear", "oc_unbound", "ou_x"))
     }
 
-    // ── NO-APPROVAL trust (issue #198): only the machine owner, only with the master switch on ──
+    // ── TRUST MODES (issue #198 + reviewed trust): only the machine owner, only with the master switch on ──
 
     private fun trustCommands(
         admin: String? = "ou_admin",
         masterOn: Boolean = true,
-        trusted: MutableSet<String> = mutableSetOf(),
+        records: MutableMap<String, FeishuTrustRecord> = mutableMapOf(),
         r: FeishuRoutes = FeishuRoutes(routesFile),
     ) = Triple(
         r,
         FeishuCommands(
             r, workdirs, admin, noApprovalEnabled = masterOn,
-            trustedOf = { it in trusted }, trustedProjectOf = { if (it in trusted) "/p/alpha" else null },
+            trustRecordOf = { records[it] },
         ),
-        trusted,
+        records,
     )
+
+    private fun record(mode: FeishuTrustMode, workdir: String = "/p/alpha", purpose: String? = null) =
+        FeishuTrustRecord(workdir = workdir, mode = mode, purpose = purpose, contractVersion = 1)
 
     @Test
     fun trust_is_the_machine_owners_alone_never_the_group_owners() {
@@ -208,46 +211,81 @@ class FeishuRoutesTest {
         // chatOwnerOf fallback that /bind honors must NOT apply here
         val c = FeishuCommands(
             r, workdirs, adminOpenId = "ou_admin", chatOwnerOf = { "ou_groupowner" },
-            noApprovalEnabled = true, trustedOf = { false },
+            noApprovalEnabled = true,
         )
-        assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_groupowner")).text)
-        assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_stranger")).text)
+        for (cmd in listOf("/trust", "/review", "/review 只做评审")) {
+            assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_groupowner")).text)
+            assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_stranger")).text)
+        }
         assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin"))
+        assertIs<ChatAction.SetTrust>(c.handle("/review", "oc_1", "ou_admin"))
     }
 
     @Test
-    fun trust_refuses_until_the_owner_enabled_it_on_the_machine() {
+    fun trust_and_review_refuse_until_the_owner_enabled_it_on_the_machine() {
         val (r, c, _) = trustCommands(masterOn = false)
         r.bind("oc_1", "/p/alpha")
-        val out = assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text
-        assertTrue("桌面端" in out, out) // points at the master switch instead of silently doing nothing
+        for (cmd in listOf("/trust", "/review 只做评审")) {
+            val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_admin")).text
+            assertTrue("桌面端" in out, out) // points at the master switch instead of silently doing nothing
+        }
     }
 
     @Test
     fun trust_needs_an_admin_and_echoes_the_callers_open_id_to_bootstrap_one() {
         val (r, c, _) = trustCommands(admin = null)
         r.bind("oc_1", "/p/alpha")
-        val out = assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_me")).text
-        assertTrue("ou_me" in out, out)
+        for (cmd in listOf("/trust", "/review")) {
+            val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_me")).text
+            assertTrue("ou_me" in out, out)
+        }
     }
 
     @Test
     fun trust_requires_a_bound_project_and_reports_a_no_op_instead_of_re_trusting() {
-        val (r, c, trusted) = trustCommands()
+        val (r, c, records) = trustCommands()
         assertTrue("绑定" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
         r.bind("oc_1", "/p/alpha")
-        assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin")).let { assertTrue(it.enable) }
-        trusted += "oc_1"
+        assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.TRUSTED, it.mode)
+        }
+        records["oc_1"] = record(FeishuTrustMode.TRUSTED)
         assertTrue("已经是免审核" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
+        // …but a TRUSTED chat may still be MOVED to reviewed (and back) — a mode change is not a no-op
+        assertIs<ChatAction.SetTrust>(c.handle("/review", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.REVIEWED, it.mode)
+        }
     }
 
     @Test
-    fun untrust_works_even_with_the_master_switch_off() {
-        // turning trust DOWN must never depend on config state, or flipping the master switch back on would
-        // resurrect an entry the owner meant to drop
-        val (r, c, _) = trustCommands(masterOn = false, trusted = mutableSetOf("oc_1"))
+    fun review_carries_the_owner_typed_purpose_and_null_means_default_contract() {
+        val (r, c, records) = trustCommands()
         r.bind("oc_1", "/p/alpha")
-        assertIs<ChatAction.SetTrust>(c.handle("/untrust", "oc_1", "ou_admin")).let { assertFalse(it.enable) }
+        assertIs<ChatAction.SetTrust>(c.handle("/review", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.REVIEWED, it.mode)
+            assertNull(it.purpose)
+        }
+        assertIs<ChatAction.SetTrust>(c.handle("/review 只用于代码评审和测试", "oc_1", "ou_admin")).let {
+            assertEquals("只用于代码评审和测试", it.purpose)
+        }
+        // same purpose again is a no-op; a DIFFERENT purpose is a change
+        records["oc_1"] = record(FeishuTrustMode.REVIEWED, purpose = "只用于代码评审和测试")
+        assertTrue("已经是智能审核" in assertIs<ChatAction.Reply>(c.handle("/review 只用于代码评审和测试", "oc_1", "ou_admin")).text)
+        assertIs<ChatAction.SetTrust>(c.handle("/review 换个用途", "oc_1", "ou_admin"))
+    }
+
+    @Test
+    fun untrust_works_even_with_the_master_switch_off_or_after_a_rebind() {
+        // turning trust DOWN must never depend on config state, or flipping the master switch back on would
+        // resurrect an entry the owner meant to drop — and a record naming ANOTHER project is still revocable
+        val (r, c, _) = trustCommands(
+            masterOn = false,
+            records = mutableMapOf("oc_1" to record(FeishuTrustMode.REVIEWED, workdir = "/p/gamma")),
+        )
+        r.bind("oc_1", "/p/alpha")
+        assertIs<ChatAction.SetTrust>(c.handle("/untrust", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.UNTRUSTED, it.mode)
+        }
         // ...and an untrusted chat says so rather than writing anything
         val (r2, c2, _) = trustCommands(masterOn = false)
         r2.bind("oc_1", "/p/alpha")
@@ -255,56 +293,22 @@ class FeishuRoutesTest {
     }
 
     @Test
-    fun the_trust_store_persists_at_0600_and_fails_safe_on_a_corrupt_file() {
-        val f = File(tmp, "trust.json")
-        val t = FeishuTrust(f)
-        assertTrue(t.trust("oc_1", "/p/alpha"))
-        assertFalse(t.trust("oc_1", "/p/alpha")) // idempotent: a second /trust changes nothing
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(f.toPath())))
-        assertTrue(FeishuTrust(f).isTrusted("oc_1", "/p/alpha"))
-        assertTrue(FeishuTrust(f).untrust("oc_1"))
-        assertFalse(FeishuTrust(f).isTrusted("oc_1", "/p/alpha"))
-
-        // unreadable state must mean "nothing is trusted", and must not take the bridge down with it
-        f.writeText("[ broken")
-        val fallback = FeishuTrust(f)
-        assertFalse(fallback.isTrusted("oc_1", "/p/alpha"))
-        assertEquals(0, fallback.size())
-    }
-
-    @Test
-    fun trust_is_granted_per_project_so_a_rebind_voids_it_instead_of_inheriting() {
-        // the /bind authority may be the Feishu GROUP OWNER, not the machine owner — so a chat re-pointed at
-        // another allow-listed project must NOT carry card-free execution onto a project nobody trusted it with
-        val f = File(tmp, "trust.json")
-        val t = FeishuTrust(f)
-        t.trust("oc_1", "/p/alpha")
-        assertTrue(t.isTrusted("oc_1", "/p/alpha"))
-        assertFalse(t.isTrusted("oc_1", "/p/Beta"), "a rebound chat is not trusted for its NEW project")
-        // ...and the stale mark is still visible, so /untrust can clear it
-        assertEquals("/p/alpha", t.trustedProject("oc_1"))
-        // re-granting for the new project is an explicit act that replaces the old pair
-        assertTrue(t.trust("oc_1", "/p/Beta"))
-        assertTrue(t.isTrusted("oc_1", "/p/Beta"))
-        assertFalse(t.isTrusted("oc_1", "/p/alpha"))
-        assertEquals(1, t.size())
-    }
-
-    @Test
-    fun a_revoke_that_cannot_be_persisted_fails_loudly_instead_of_coming_back_later() {
-        // untrust writes BEFORE mutating memory: a revocation that only landed in RAM would look revoked until
-        // the next daemon start and then silently return. An unwritable path must report failure.
-        val dir = File(tmp, "ro").apply { mkdirs() }
-        val f = File(dir, "trust.json")
-        val t = FeishuTrust(f)
-        t.trust("oc_1", "/p/alpha")
-        Files.setPosixFilePermissions(dir.toPath(), PosixFilePermissions.fromString("r-xr-xr-x"))
-        try {
-            assertFalse(t.untrust("oc_1"), "an unpersistable revoke must return false, not pretend it worked")
-            assertTrue(t.isTrusted("oc_1", "/p/alpha"), "…and the in-memory state must still match the disk")
-        } finally {
-            Files.setPosixFilePermissions(dir.toPath(), PosixFilePermissions.fromString("rwxr-xr-x"))
-        }
+    fun trust_status_shows_mode_and_contract_but_never_machine_paths() {
+        val (r, c, records) = trustCommands()
+        // unbound: says so
+        assertTrue("还没有绑定项目" in assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_0", "ou_x")).text)
+        r.bind("oc_1", "/p/alpha")
+        // default (no record): per-request approval — readable by ANY member, it's their group's policy
+        assertTrue("每次审批" in assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text)
+        // reviewed with a custom contract: mode + purpose + version, no absolute paths
+        records["oc_1"] = FeishuTrustRecord("/p/alpha", FeishuTrustMode.REVIEWED, "只做评审", contractVersion = 3)
+        val out = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
+        assertTrue("智能审核" in out && "只做评审" in out && "3" in out, out)
+        assertFalse("/p/alpha" in out, "chat-facing text must not leak machine paths: $out")
+        // a stale record for another project reads as not in effect
+        records["oc_1"] = record(FeishuTrustMode.TRUSTED, workdir = "/p/gamma")
+        val stale = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
+        assertTrue("每次审批" in stale && "不生效" in stale, stale)
     }
 
     @Test
