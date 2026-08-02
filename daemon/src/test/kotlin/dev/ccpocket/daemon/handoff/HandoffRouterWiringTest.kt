@@ -277,4 +277,38 @@ class HandoffRouterWiringTest {
         fx.registry.reapIdle(idleMs = -1)
         assertNull(fx.registry.modeOf(convoId), "a terminal handoff frees the session for the reaper")
     }
+
+    /**
+     * §3.4 at the wire: creating an offer BOUND to a contact queues the content-free nudge for that device,
+     * and only for it. The router used to leave a TODO here, so an offline recipient learned of an offer
+     * only if it happened to reconnect — the "B is offline" leg of the acceptance criteria never passed.
+     */
+    @Test
+    fun creating_a_bound_offer_announces_it_and_an_unbound_one_does_not() = runBlocking {
+        val bound = Fixture(CoroutineScope(Dispatchers.Default))
+        val announced = CopyOnWriteArrayList<Pair<String, String>>()
+        bound.handoffs.offerPush = OfferPush { id, dev -> announced += id to dev }
+        val a = frames()
+        bound.openSession("dev-a", a)
+        bound.route(
+            CreateHandoff(
+                bound.workdir, Fixture.SESSION_ID, HandoffBrief(request = "review the relay ACK path"),
+                recipientDeviceId = "dev-bob",
+            ),
+            "dev-a", a,
+        )
+        val created = a.filterIsInstance<HandoffCreated>().first()
+        assertTrue(created.ok, "create must succeed: ${created.error}")
+        assertEquals(listOf(assertNotNull(created.handoff).id to "dev-bob"), announced.toList())
+
+        // an UNBOUND offer (the older open-invite shape) has nobody to address — and must not fall back to
+        // the account fan-out, which is the owner's own phones
+        val open = Fixture(CoroutineScope(Dispatchers.Default))
+        val openAnnounced = CopyOnWriteArrayList<Pair<String, String>>()
+        open.handoffs.offerPush = OfferPush { id, dev -> openAnnounced += id to dev }
+        val b = frames()
+        open.openSession("dev-a", b)
+        open.create("dev-a", b)
+        assertTrue(openAnnounced.isEmpty(), "an unbound offer must never push: ${openAnnounced.toList()}")
+    }
 }

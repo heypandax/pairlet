@@ -88,6 +88,10 @@ class RelayClient(
     private val ctrlId = AtomicLong(0)
 
     @Volatile private var dataOut: Channel<ByteArray>? = null
+    // The RELAY's own capability level, learned from Attached (§3.4). 0 until the first attach, and reset on
+    // every reconnect: a relay rollback must immediately re-close the features gated on it, and the daemon
+    // reconnects to whatever is answering NOW — the previous link's answer proves nothing about this one.
+    @Volatile private var relayProtoV = 0
     @Volatile private var peerOnline = false
     @Volatile private var lastPongAt = 0L  // last app-level Pong from the relay (heartbeat liveness; baselined at attach)
     @Volatile private var sawPong = false  // logging only: notes when this relay first proves it speaks Pong
@@ -205,7 +209,7 @@ class RelayClient(
             relayWsBase = relayWsBase,
             ownerLabel = hostname,
             registry = sessions.bridges,
-            mintTicket = { headless -> mintTicket(headless) },
+            mintTicket = { mintTicket(headless = true, collaborator = true) },
             interactivePairingPending = { sessions.interactivePairingPending() },
             revokeCredential = { deviceId -> revokeBridge(deviceId) },
             revokeGrants = { deviceId -> core.handoffs.revokeRecipient(deviceId) },
@@ -213,6 +217,25 @@ class RelayClient(
         )
         sessions.collaboratorControl = collaboratorService
         core.handoffs.collaborators = collaboratorService
+        // §3.4: the content-free, device-TARGETED offer nudge for an offline contact. The whole payload is
+        // built by PushPolicy from two opaque ids — nothing about the work rides the alert.
+        //
+        // CAPABILITY GATE: an older relay ignores NotifyPush.deviceId and degrades to the ACCOUNT fan-out,
+        // which would ring the OWNER's phone about someone else's offer. Below PROTO_V_TARGETED_PUSH we send
+        // nothing at all and fall back to the existing, honest behaviour — the recipient sees the offer on
+        // its next connect / foreground pull.
+        //
+        // NOT gated on core.prefs.pushEnabled: that preference is the OWNER's own "buzz my phone" switch (it
+        // de-registers the OWNER's token), and it has no standing over whether a colleague gets told someone
+        // is waiting on them. The recipient's own notification toggle clears the recipient's token at the
+        // relay, which is the control that actually belongs to the person being alerted.
+        core.handoffs.offerPush = dev.ccpocket.daemon.handoff.OfferPush { handoffId, recipientDeviceId ->
+            if (PushPolicy.offerPushAllowed(relayProtoV)) {
+                controlOutbox.send(PushPolicy.offerPush(handoffId, recipientDeviceId))
+            } else {
+                log.info("offer ${handoffId.take(8)}…: relay has no targeted push (protoV=$relayProtoV) — skipping the nudge")
+            }
+        }
         // register the BUILT-IN engines by wire kind (issue #91 follow-up): in-process, driven through the
         // same guard + router an external bridge passes — see FeishuEngine. A new IM adds one line here.
         bridgeRunners.registerEngine(dev.ccpocket.protocol.RUNNER_KIND_FEISHU) { name, spec, env, dir, logLine ->
@@ -281,11 +304,14 @@ class RelayClient(
 
     /** Ask the relay to mint a pairing ticket, and remember it as the next device's handshake PSK.
      *  [headless] mints a BRIDGE ticket (issue #91): it skips the interactive-mint exclusion stamp so
-     *  only real phone pairings block a headless mint — the caller records the intent right after. */
-    suspend fun mintTicket(headless: Boolean = false): PairTicket? {
-        // relay needs our E2E pub to serve the code path; headless is the authoritative bridge marker the
-        // relay stamps onto the ticket (issue #91) so a lying redeem can't dodge presence/push/replay
-        controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless))
+     *  only real phone pairings block a headless mint — the caller records the intent right after.
+     *  [collaborator] additionally marks it a Collaborator Link INBOX (§3.4) — still headless (presence-
+     *  invisible, outside the owner's push fan-out) but allowed to hold its own push token and be woken by
+     *  a targeted NotifyPush. Only [dev.ccpocket.daemon.handoff.CollaboratorService] passes it. */
+    suspend fun mintTicket(headless: Boolean = false, collaborator: Boolean = false): PairTicket? {
+        // relay needs our E2E pub to serve the code path; headless/collaborator are the authoritative markers
+        // the relay stamps onto the ticket (issue #91, §3.4) so a lying redeem can't dodge presence/push/replay
+        controlOutbox.send(PairBegin(identity.e2ePubB64, headless = headless, collaborator = collaborator))
         return withTimeoutOrNull(10_000) { inboundControl.filterIsInstance<PairTicket>().first() }
             ?.also { sessions.onMintedTicket(it.ticket, headless) }
     }
@@ -298,50 +324,71 @@ class RelayClient(
                 // block on incoming.receive() forever — before the heartbeat below is even armed — wedging the
                 // daemon until a manual restart. A timeout throws instead, so run()'s loop backs off and retries.
                 if (withTimeoutOrNull(HANDSHAKE_TIMEOUT_MS) { authenticate() } == null) error("relay handshake timed out")
-                log.info("attached to relay as daemon (account=${identity.accountId})")
-                // the relay re-announces every non-revoked device right after attach; once that replay
-                // settles, prune local keys it didn't include (devices revoked while we were away) so the
-                // direct-LAN gate stops honoring them. Cancelled harmlessly if the link drops first.
-                sessions.beginAttachReplay()
-                val reconcile = launch { delay(ATTACH_REPLAY_SETTLE_MS); sessions.reconcileReplay() }
+                // §3.4: the learned capability dies with the link, and the reset must cover EVERYTHING after
+                // authenticate() — not just the message loop. A throw from the setup below (attach replay,
+                // channel/coroutine wiring) would otherwise leave a dead link's protoV standing for the whole
+                // reconnect backoff, and offers created in that window would queue a targeted push.
+                try {
+                    log.info("attached to relay as daemon (account=${identity.accountId})")
+                    // the relay re-announces every non-revoked device right after attach; once that replay
+                    // settles, prune local keys it didn't include (devices revoked while we were away) so the
+                    // direct-LAN gate stops honoring them. Cancelled harmlessly if the link drops first.
+                    sessions.beginAttachReplay()
+                    val reconcile = launch { delay(ATTACH_REPLAY_SETTLE_MS); sessions.reconcileReplay() }
 
-                val outbox = Channel<ByteArray>(Channel.BUFFERED)
-                dataOut = outbox
-                // Every steady-state write is bounded (sendOrDie): on a wedged socket a write never errors —
-                // the TCP send buffer just fills silently (network switch, NAT rebind) — and it would otherwise
-                // hang this writer, back up the outbox, and wedge the pumps feeding it. Same pattern as the
-                // phone's LinkHealth. The throw hard-cancels the whole session; run()'s loop reconnects.
-                val dataWriter = launch { for (bytes in outbox) sendOrDie { outgoing.send(WsFrame.Binary(true, bytes)) } }
-                val ctrlWriter = launch { for (c in controlOutbox) sendOrDie { outgoing.send(WsFrame.Text(controlText(c))) } }
-                // App-level heartbeat: a half-open/zombie link keeps the TCP socket ESTABLISHED and Ktor's
-                // transport ping satisfied, yet no Pong returns through the dead relay app. The deadline runs
-                // from ATTACH, not from the first Pong — a link that wedges before ever ponging must die too
-                // (the old sawPong gate left that window undetectable). And it THROWS instead of close():
-                // a graceful close writes a close frame down the same wedged path and can itself hang for
-                // minutes (probed on ktor 3.1.3); a thrown exception tears the session down without writing.
-                sawPong = false; lastPongAt = System.currentTimeMillis()
-                val heartbeat = launch {
-                    while (true) {
-                        delay(HEARTBEAT_INTERVAL_MS)
-                        controlOutbox.send(Ping(System.currentTimeMillis()))
-                        if (System.currentTimeMillis() - lastPongAt > HEARTBEAT_DEAD_MS) {
-                            log.warn("relay heartbeat timeout (no pong in ${HEARTBEAT_DEAD_MS}ms${if (!sawPong) ", none since attach — relay predates Pong?" else ""}); forcing reconnect")
-                            throw DeadLinkException("no relay pong in ${HEARTBEAT_DEAD_MS}ms")
+                    val outbox = Channel<ByteArray>(Channel.BUFFERED)
+                    dataOut = outbox
+                    // Every steady-state write is bounded (sendOrDie): on a wedged socket a write never errors —
+                    // the TCP send buffer just fills silently (network switch, NAT rebind) — and it would otherwise
+                    // hang this writer, back up the outbox, and wedge the pumps feeding it. Same pattern as the
+                    // phone's LinkHealth. The throw hard-cancels the whole session; run()'s loop reconnects.
+                    val dataWriter = launch { for (bytes in outbox) sendOrDie { outgoing.send(WsFrame.Binary(true, bytes)) } }
+                    // The control outbox deliberately BUFFERS ACROSS RECONNECTS, so this writer may be flushing
+                    // frames another link queued — against a relay that is not necessarily the same build (an
+                    // in-place redeploy or rollback lands mid-reconnect). PushPolicy.mayWrite re-checks the
+                    // §3.4 capability against THIS link and drops a targeted push that would otherwise degrade
+                    // to the account fan-out and ring the OWNER's phones about a contact's offer.
+                    val ctrlWriter = launch {
+                        for (c in controlOutbox) {
+                            if (!PushPolicy.mayWrite(c, relayProtoV)) {
+                                log.info("dropping a targeted push: this relay has no targeted delivery (protoV=$relayProtoV)")
+                                continue
+                            }
+                            sendOrDie { outgoing.send(WsFrame.Text(controlText(c))) }
                         }
                     }
-                }
-                try {
-                    for (frame in incoming) when (frame) {
-                        is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
-                            sessions.onFrame(deviceId, payload) // sequential: preserves per-device frame order
+                    // App-level heartbeat: a half-open/zombie link keeps the TCP socket ESTABLISHED and Ktor's
+                    // transport ping satisfied, yet no Pong returns through the dead relay app. The deadline runs
+                    // from ATTACH, not from the first Pong — a link that wedges before ever ponging must die too
+                    // (the old sawPong gate left that window undetectable). And it THROWS instead of close():
+                    // a graceful close writes a close frame down the same wedged path and can itself hang for
+                    // minutes (probed on ktor 3.1.3); a thrown exception tears the session down without writing.
+                    sawPong = false; lastPongAt = System.currentTimeMillis()
+                    val heartbeat = launch {
+                        while (true) {
+                            delay(HEARTBEAT_INTERVAL_MS)
+                            controlOutbox.send(Ping(System.currentTimeMillis()))
+                            if (System.currentTimeMillis() - lastPongAt > HEARTBEAT_DEAD_MS) {
+                                log.warn("relay heartbeat timeout (no pong in ${HEARTBEAT_DEAD_MS}ms${if (!sawPong) ", none since attach — relay predates Pong?" else ""}); forcing reconnect")
+                                throw DeadLinkException("no relay pong in ${HEARTBEAT_DEAD_MS}ms")
+                            }
                         }
-                        is WsFrame.Text -> onControl(runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull())
-                        else -> {}
+                    }
+                    try {
+                        for (frame in incoming) when (frame) {
+                            is WsFrame.Binary -> Wire.unwrapDevice(frame.data)?.let { (deviceId, payload) ->
+                                sessions.onFrame(deviceId, payload) // sequential: preserves per-device frame order
+                            }
+                            is WsFrame.Text -> onControl(runCatching { PocketJson.decodeFromString<Envelope>(frame.readText()).body }.getOrNull())
+                            else -> {}
+                        }
+                    } finally {
+                        dataOut = null
+                        outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel(); reconcile.cancel()
+                        withContext(NonCancellable) { sessions.onDisconnect() }
                     }
                 } finally {
-                    dataOut = null
-                    outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel(); reconcile.cancel()
-                    withContext(NonCancellable) { sessions.onDisconnect() }
+                    relayProtoV = 0 // no link, no capability — and the next link re-answers for itself
                 }
             }
         }
@@ -363,8 +410,11 @@ class RelayClient(
         outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64, protoV = PROTO_V_HEADLESS))))
         val challenge = nextControl() as? Challenge ?: error("expected challenge")
         outgoing.send(WsFrame.Text(controlText(DaemonAuth(identity.signChallenge(challenge.nonce)))))
+        relayProtoV = 0 // fail closed until THIS link says otherwise
         when (val r = nextControl()) {
-            is Attached -> {}
+            // §3.4: the relay announces its own capability level here (0 from a relay that predates the
+            // field). Everything gated on it is decided per-connection, never remembered across a reconnect.
+            is Attached -> relayProtoV = r.relayProtoV
             is AuthError -> error("relay rejected auth: ${r.code}")
             else -> error("expected attached, got ${r?.let { it::class.simpleName }}")
         }

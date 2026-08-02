@@ -1,6 +1,8 @@
 package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.protocol.NotifyPush
+import dev.ccpocket.protocol.PROTO_V_TARGETED_PUSH
+import dev.ccpocket.protocol.ToRelay
 import java.nio.file.Path
 
 /**
@@ -133,6 +135,66 @@ object PushPolicy {
             else -> null
         }
     }
+
+    /**
+     * The offer push for an OFFLINE Collaborator Link recipient
+     * (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.4) — deliberately the only push in this file with NO
+     * variable content at all.
+     *
+     * Everything the other pushes carry is cleartext to the relay and to a lock screen someone else may be
+     * looking over: project name, workdir, the assistant's first line, the tool being asked about. An offer
+     * lives on the far side of a trust boundary the owner just opened for ONE person, so nothing about it —
+     * brief, project, path, session title, initiator label — may ride the alert. The push is a doorbell; the
+     * app pulls the real, end-to-end-encrypted offer with `ListHandoffs()` once it is awake, over the
+     * collaborator's own credential, which is what proves it may see it at all.
+     *
+     * [handoffId] is opaque and routable: it deep-links into the offer inbox and is useless to anyone who
+     * cannot authenticate as this recipient. It rides [NotifyPush.handoffId] (relay → APNs/FCM `hid`), never
+     * workdir/sessionId. [recipientDeviceId] makes the delivery TARGETED so the owner's own phones — the
+     * account fan-out — are not woken by someone else's offer.
+     */
+    fun offerPush(handoffId: String, recipientDeviceId: String): NotifyPush = NotifyPush(
+        title = OFFER_TITLE,
+        body = OFFER_BODY,
+        workdir = null,
+        sessionId = null,
+        urgent = false, // the relay gates on the RECIPIENT's own socket; urgency never enters into it
+        deviceId = recipientDeviceId,
+        handoffId = handoffId,
+    )
+
+    /** Fixed offer-alert copy. Constants (not inline literals) so the "no identifying content" test can
+     *  assert against the same strings the wire carries. */
+    const val OFFER_TITLE = "cc-pocket"
+    const val OFFER_BODY = "You have a new handoff offer. Open the app to see the details."
+
+    /**
+     * May an [offerPush] actually be put on the wire, given the relay's announced capability
+     * ([dev.ccpocket.protocol.Attached.relayProtoV], 0 from a relay that predates the field)?
+     *
+     * This gate FAILS CLOSED for a reason that is worse than "the feature is missing": an older relay does
+     * not reject the unknown `deviceId` — it ignores it and falls back to the ACCOUNT fan-out, i.e. it rings
+     * the OWNER's own phone about a colleague's offer. Not sending is the honest degradation; the recipient
+     * still finds the offer on its next connect / foreground pull.
+     */
+    fun offerPushAllowed(relayProtoV: Int): Boolean = relayProtoV >= PROTO_V_TARGETED_PUSH
+
+    /**
+     * The same gate applied at the moment a control frame is actually WRITTEN to a relay socket — the only
+     * place it is sound.
+     *
+     * The daemon's control outbox outlives any single connection (it deliberately buffers across
+     * reconnects), so a frame that passed [offerPushAllowed] against one link can be flushed by the NEXT
+     * link's writer. That successor is not guaranteed to be the same relay build: an in-place redeploy or a
+     * rollback lands mid-reconnect, and the frames most likely to still be sitting in the buffer are exactly
+     * the ones queued in the seconds before the disconnect (a stalled write is what declares the link dead).
+     * A targeted push flushed to an older relay is not merely dropped — it degrades to the ACCOUNT fan-out
+     * and rings the OWNER's phones about a contact's offer.
+     *
+     * Returns false only for the frames that are unsafe on this link; everything else passes through.
+     */
+    fun mayWrite(frame: ToRelay, relayProtoV: Int): Boolean =
+        !(frame is NotifyPush && frame.deviceId != null && !offerPushAllowed(relayProtoV))
 
     private fun firstLine(text: String): String =
         text.lineSequence().firstOrNull { it.isNotBlank() }?.trim() ?: text.trim()

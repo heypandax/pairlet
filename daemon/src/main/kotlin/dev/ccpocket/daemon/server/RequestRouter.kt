@@ -491,9 +491,11 @@ class RequestRouter(
                                 sink.emit(HandoffCreated(ok = true, handoff = out.handoff))
                                 svc.broadcast(listOf(out.handoff)) // includes the bound recipient's sink, if attached
                                 recipient?.let { contacts?.noteHandoff(it, out.handoff.createdAt) } // stats + CollaboratorUpdated
-                                // TODO(§4.2 step 9 push): an OFFLINE recipient learns of the offer only when
-                                // it next connects and pulls ListHandoffs — the no-content push nudge is a
-                                // later milestone.
+                                // §4.2 step 9 / §3.4: nudge an OFFLINE bound recipient with a CONTENT-FREE,
+                                // device-TARGETED push. Self-gating (WAITING + bound + the relay can even
+                                // deliver one) lives in the service; when any of that is missing the offer
+                                // still arrives on the recipient's next connect/foreground pull.
+                                svc.announceOffer(out.handoff)
                                 svc.reconcile() // announce anything the create's internal sweep settled
                             }
                             // the refusal's machine-readable code rides along (§6: an unimplemented

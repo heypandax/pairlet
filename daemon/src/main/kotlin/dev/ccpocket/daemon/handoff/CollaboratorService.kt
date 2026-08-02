@@ -57,7 +57,10 @@ class CollaboratorService(
     private val ownerLabel: () -> String?,
     private val registry: BridgeRegistry,
     private val store: CollaboratorStore = CollaboratorStore.load(),
-    private val mintTicket: suspend (headless: Boolean) -> PairTicket?,
+    /** Mint a COLLABORATOR ticket. No parameters on purpose (§3.4): a contact link is always headless AND
+     *  collaborator-marked, and both markers are stamped relay-side from this one mint — there is no
+     *  variation for a caller to get wrong. */
+    private val mintTicket: suspend () -> PairTicket?,
     private val interactivePairingPending: () -> Boolean,
     /** Local prune (key dies) + relay RevokeDevice + force-close the collaborator's convos. */
     private val revokeCredential: suspend (deviceId: String) -> Unit,
@@ -81,7 +84,7 @@ class CollaboratorService(
             return CollaboratorTicketCreated(ok = false, error = "another pairing is in progress — try again shortly")
         }
         val spec = BridgeSpec.collaborator(req.label?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_LABEL)
-        val ticket = mintTicket(true) ?: return CollaboratorTicketCreated(ok = false, error = "can't reach the relay — check the connection")
+        val ticket = mintTicket() ?: return CollaboratorTicketCreated(ok = false, error = "can't reach the relay — check the connection")
         // bindable window = the redeem ticket's TTL + grace (mirrors ShareService), so a slow-to-redeem
         // contact is still classified as a collaborator, never mis-promoted to a full device
         if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + BridgeRegistry.INTENT_GRACE_MS)) {

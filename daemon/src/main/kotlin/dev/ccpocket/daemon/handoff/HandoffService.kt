@@ -48,6 +48,13 @@ class HandoffService(
     @Volatile
     var collaborators: CollaboratorDirectory? = null
 
+    /** The content-free offer push (§3.4), installed by [dev.ccpocket.daemon.relay.RelayClient] — the only
+     *  component that knows whether the relay can even deliver a targeted push. Null on a LAN-only `serve`
+     *  and in unit tests: a missing hook simply means no nudge, and the recipient still discovers the offer
+     *  on its next connect/foreground pull (the daemon's ledger is the source of truth, the push is not). */
+    @Volatile
+    var offerPush: OfferPush? = null
+
     /** One fan-out target: the sink + the COLLABORATOR deviceId it is restricted to (null = a
      *  full-power owner device that sees every update). */
     private class Target(val sink: OutboundSink, val recipientDeviceId: String?)
@@ -116,6 +123,27 @@ class HandoffService(
      *  IN_PROGRESS→RECALLED) and fan the transitions out — [CollaboratorService.remove]'s first step. */
     suspend fun revokeRecipient(deviceId: String) {
         broadcast(registry.revokeRecipient(deviceId))
+    }
+
+    /**
+     * §3.4: nudge an OFFLINE bound recipient that an offer is waiting. Called once, right after the offer is
+     * created — recall/return/expiry deliberately do NOT push: those land on the recipient's live data plane
+     * when it is there, and when it is not, the state it would have been told about is already gone by the
+     * time it opens the app.
+     *
+     * Two preconditions, both checked here so every caller (and every transport) gets the same answer:
+     * the offer must actually be WAITING (a create whose internal sweep already settled it must not ring
+     * someone's phone about work that is over), and it must be BOUND to a device — an unbound handoff has
+     * nobody to address, and the account fan-out is exactly what §3.4 must not use.
+     *
+     * Failures are swallowed: a push that could not be queued must never fail the create that earned it.
+     */
+    suspend fun announceOffer(h: SessionHandoff) {
+        if (h.status != HandoffStatus.WAITING) return
+        val recipient = h.recipientDeviceId ?: return
+        val hook = offerPush ?: return
+        runCatching { hook.send(h.id, recipient) }
+            .onFailure { log.warn("handoff ${h.id.take(8)}…: offer push not queued: ${it.message}") }
     }
 
     // ---- §5.3 item 7: the Grant's sinks die with the Grant --------------------
@@ -292,6 +320,15 @@ class HandoffService(
         const val RECALL_TIMEOUT_MS = 15_000L
         const val RECALL_POLL_MS = 100L
     }
+}
+
+/**
+ * The "an offer is waiting for you" nudge (§3.4). Takes ONLY the two opaque ids — the id to route back to
+ * the inbox and the device to address — so the transport that implements it structurally cannot widen the
+ * payload into carrying brief/project/path even by accident.
+ */
+fun interface OfferPush {
+    suspend fun send(handoffId: String, recipientDeviceId: String)
 }
 
 /**
