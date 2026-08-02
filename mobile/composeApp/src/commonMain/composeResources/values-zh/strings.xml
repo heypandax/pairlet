@@ -726,6 +726,24 @@
     <string name="join_invalid">邀请无效或已过期。请索取新的邀请。</string>
     <string name="join_review_title">确认邀请</string>
     <string name="settings_sharing_section">共享</string>
+    <!-- 会话归档（issue #202）—— 桌面端与手机端共用 -->
+    <string name="archive_session">归档会话</string>
+    <string name="archive_session_sub">在所有设备上隐藏，不会删除任何内容。</string>
+    <string name="archive_unarchive">取消归档</string>
+    <string name="archive_title">已归档</string>
+    <string name="archive_empty">还没有归档的会话</string>
+    <string name="archive_empty_sub">长按任意会话选「归档会话」，它就会收到这里。正在跑的会话会继续跑；在你把它取回来之前，它在所有设备上都是隐藏的。</string>
+    <string name="archive_no_groups_hint">这个项目还没有分组——可以在会话列表里新建一个。</string>
+    <string name="archive_toast_archived">已归档</string>
+    <string name="archive_toast_restored">已放回 %1$s</string>
+    <string name="archive_toast_still_running">仍在运行</string>
+    <string name="session_section">会话</string>
+    <string name="group_move_to_section">移动到分组</string>
+    <string name="sidebar_archived">已归档会话</string>
+    <string name="archive_remove_from_recents">从最近中移除</string>
+    <string name="palette_archived_placeholder">搜索已归档会话……</string>
+    <string name="palette_archived_legend">⏎ 打开 · ⌘⏎ 取消归档 · esc 退出归档</string>
+
     <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
     <string name="group_new">新建分组</string>
     <string name="group_ungrouped">未分组</string>

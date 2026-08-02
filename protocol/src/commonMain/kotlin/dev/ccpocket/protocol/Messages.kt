@@ -55,6 +55,32 @@ data class GroupDelete(val workdir: String, val groupId: String) : ToDaemon
 @SerialName("pocket/group.assign")
 data class GroupAssign(val workdir: String, val sessionId: String, val groupId: String? = null) : ToDaemon
 
+// ── session archive (issue #202): file a session away from the regular lists without deleting it. Daemon-
+//    side truth like the groups above, so archiving on one client hides the row on every other. The daemon
+//    FILTERS archived rows out of [Sessions] itself, which is why an old app gets the "tidied list" half of
+//    the feature for free — it just has no entry point to browse or restore them. ──
+
+/** phone -> daemon: archive (or, with [archived] false, restore) [sessionId] under [workdir]. Never touches
+ *  the transcript — the session is only hidden from the regular listings. Reply: the re-pushed [Sessions] for
+ *  [workdir] (the #119 refresh contract) — EXCEPT when [fromArchiveView], where the reply is the re-pushed
+ *  [ArchivedSessions] instead: acting from the cross-project archive must not silently repoint the client's
+ *  currently-listed directory to whatever project that row happened to belong to. Owner only; a guest's
+ *  mutation is a silent no-op that still answers with its (re-filtered) list. */
+@Serializable
+@SerialName("pocket/session.archive")
+data class SetSessionArchived(
+    val workdir: String,
+    val sessionId: String,
+    val archived: Boolean,
+    val fromArchiveView: Boolean = false,
+) : ToDaemon
+
+/** phone -> daemon: list EVERY archived session across all projects — the one cross-project entry point
+ *  (issue #202). Bounded by construction: the daemon re-lists only the projects that actually hold an
+ *  archived session, not every project on the machine. Owner only. Reply: one [ArchivedSessions]. */
+@Serializable
+@SerialName("pocket/sessions.archived.list")
+data object ListArchivedSessions : ToDaemon
 
 /**
  * phone -> daemon: rename session [sessionId] under [workdir] to [title] (issue #158). The daemon lands it
@@ -708,8 +734,19 @@ data class Sessions(
     // issue #158). A trailing optional: an old daemon omits it → false → clients hide their rename entry
     // instead of sending a frame that would be silently dropped; an old app ignores it.
     val renameSupported: Boolean = false,
+    // This daemon handles [SetSessionArchived]/[ListArchivedSessions] and this connection may send them
+    // (owner only — false for a guest, issue #202). A trailing optional: an old daemon omits it → false →
+    // clients hide every archive affordance rather than firing frames that would be dropped; an old app
+    // ignores it (and still benefits, since the archived rows are already filtered out of [items]).
+    val archiveSupported: Boolean = false,
 ) : ToPhone
 
+/** daemon -> phone: every archived session across all projects, newest-archived first (issue #202). Each row's
+ *  [SessionSummary.cwd] names its project, so the client groups by that instead of needing a second index.
+ *  Re-pushed after a [SetSessionArchived] that carried `fromArchiveView`. */
+@Serializable
+@SerialName("pocket/sessions.archived")
+data class ArchivedSessions(val items: List<SessionSummary> = emptyList()) : ToPhone
 
 /**
  * Aggregated token usage (issue #26). [tokensToday]/[requestsToday]/[cacheHitPct]/[costUsdToday] are for the

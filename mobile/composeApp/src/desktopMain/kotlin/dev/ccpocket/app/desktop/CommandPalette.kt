@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.Search
@@ -51,6 +52,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -60,6 +62,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.archive_unarchive
+import dev.ccpocket.app.resources.palette_archived_placeholder
 import dev.ccpocket.app.resources.dir_no_matches
 import dev.ccpocket.app.resources.key_navigate
 import dev.ccpocket.app.resources.key_open
@@ -108,6 +112,7 @@ private data class PaletteL10n(
     val skills: String,
     val onMachine: String,  // "%1$s" template
     val approveOn: String,  // "%1$s" template
+    val unarchive: String,  // issue #202
 )
 
 /** Minimal "%1$s" fill-in for templates resolved outside a composable (mirrors compose-resources' own token). */
@@ -123,6 +128,10 @@ private class PItem(
     val badge: Int = 0,         // AttentionBadge count (approvals waiting on that machine)
     val accent: Boolean = false, // terracotta label — the "needs you" verbs
     val id: String? = null,     // stable unique key when label+detail can collide (sessions share titles — fork twins)
+    // A row's SECOND verb (issue #202's Unarchive), reachable with ⌘⏎ or by clicking the trailing glyph.
+    // The palette is otherwise a single-activation model; this stays opt-in per row so nothing else changes.
+    val secondary: (() -> Unit)? = null,
+    val secondaryLabel: String? = null,
     val activate: () -> Unit,
 )
 
@@ -136,6 +145,21 @@ private fun buildItems(model: DesktopModel, scope: CoroutineScope, l10n: Palette
         // issue #163: the same destination reached by browsing instead of typing
         add(PItem(PKind.ACTION, l10n.openFolder, l10n.browse, Icons.Outlined.FolderOpen, hint = "⌘O") { openFolderAction(scope, model) })
         model.projects.forEach { add(projectItem(it)) }
+        return@buildList
+    }
+    // scoped mode ("Archived sessions", issue #202): the cross-project archive. Deliberately a SCOPE of
+    // this palette rather than its own window — a second panel would duplicate search/empty-state/nav and
+    // split "find a session" across two places, which is what archiving is meant to stop.
+    if (model.palette == PaletteScope.ARCHIVED) {
+        model.archivedSessions.forEach { sess ->
+            add(
+                PItem(
+                    PKind.SESSION, sess.title, tilde(sess.cwd), Icons.Outlined.Inventory2,
+                    agent = sess.agent, id = sess.sessionId,
+                    secondary = { model.unarchiveSession(sess) }, secondaryLabel = l10n.unarchive,
+                ) { model.selectSession(sess) },
+            )
+        }
         return@buildList
     }
     // MACHINES — reachable via the switcher (⌘0, then the digit); badges surface approvals waiting over there
@@ -210,8 +234,9 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
         skills = stringResource(Res.string.palette_skills),
         onMachine = stringResource(Res.string.palette_on_machine),
         approveOn = stringResource(Res.string.palette_approve_on),
+        unarchive = stringResource(Res.string.archive_unarchive),
     )
-    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.palette, l10n) { buildItems(model, paletteScope, l10n) }
+    val all = remember(model.machines, model.attention, model.projects, model.sessions, model.archivedSessions, model.palette, l10n) { buildItems(model, paletteScope, l10n) }
     val items = remember(all, query) {
         if (query.isBlank()) all.take(60) // blank query keeps source order — skip the score/sort/strip pass
         else all.mapNotNull { it.score(query).takeIf { s -> s > 0 }?.let { s -> it to s } }
@@ -239,7 +264,13 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
             Box(Modifier.weight(1f)) {
                 if (query.isEmpty()) {
                     Text(
-                        stringResource(if (model.palette == PaletteScope.PROJECTS) Res.string.palette_open_project else Res.string.palette_placeholder),
+                        stringResource(
+                            when (model.palette) {
+                                PaletteScope.PROJECTS -> Res.string.palette_open_project
+                                PaletteScope.ARCHIVED -> Res.string.palette_archived_placeholder
+                                else -> Res.string.palette_placeholder
+                            },
+                        ),
                         color = Tok.muted, fontFamily = Dk.ui, fontSize = 14.5.sp,
                     )
                 }
@@ -254,8 +285,18 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
                         when (e.key) {
                             Key.DirectionDown -> { if (items.isNotEmpty()) active = (active + 1).coerceAtMost(items.lastIndex); true }
                             Key.DirectionUp -> { active = (active - 1).coerceAtLeast(0); true }
-                            Key.Enter -> { open(active); true }
-                            Key.Escape -> { onDismiss(); true }
+                            // ⌘⏎ fires the row's second verb (issue #202: Unarchive) — the palette's
+                            // one-activation model otherwise has nowhere to put it
+                            Key.Enter -> {
+                                val sec = items.getOrNull(active)?.secondary
+                                if (e.isMetaPressed && sec != null) sec() else open(active)
+                                true
+                            }
+                            // two-stage: inside a scope, Escape leaves the SCOPE first, then closes
+                            Key.Escape -> {
+                                if (model.palette == PaletteScope.ARCHIVED) model.palette = PaletteScope.ALL else onDismiss()
+                                true
+                            }
                             else -> false
                         }
                     },
@@ -282,6 +323,12 @@ fun CommandPalette(model: DesktopModel, onDismiss: () -> Unit) {
             Key("↑"); Key("↓"); Text(stringResource(Res.string.key_navigate), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
             Spacer(Modifier.width(6.dp))
             Key("⏎"); Text(stringResource(Res.string.key_open), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            // #202: a PERSISTENT legend, not a hover hint — this is what actually makes the second verb
+            // discoverable (an icon that only appears on hover does not).
+            if (model.palette == PaletteScope.ARCHIVED) {
+                Spacer(Modifier.width(6.dp))
+                Key("⌘⏎"); Text(stringResource(Res.string.archive_unarchive), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp)
+            }
             Spacer(Modifier.weight(1f))
             Text(stringResource(if (items.size == 1) Res.string.palette_results_one else Res.string.palette_results_many, items.size), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
         }
@@ -316,6 +363,16 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
             if (item.badge > 0) AttentionBadge(item.badge)
+            // #202: the selected row spells the verb out; keyboard users never hover, so hover-only
+            // would hide it from exactly the people driving this panel
+            if (item.secondary != null && selected) {
+                Text(
+                    item.secondaryLabel.orEmpty(), color = Tok.accent, fontFamily = Dk.ui, fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                        .clickable { item.secondary.invoke() }.padding(horizontal = 6.dp, vertical = 3.dp),
+                )
+            }
             when {
                 item.hint != null -> Key(item.hint)
                 else -> Text(stringResource(item.kind.tag), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)

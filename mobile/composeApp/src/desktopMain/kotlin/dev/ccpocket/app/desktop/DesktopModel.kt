@@ -150,8 +150,11 @@ data class DkAttention(
     val question: Boolean = false,
 )
 
-/** What the ⌘K palette shows: everything, or just project rows ("All projects…"). */
-enum class PaletteScope { ALL, PROJECTS }
+/** What the ⌘K palette shows: everything, just project rows ("All projects…"), or the cross-project
+ *  archive ("Archived sessions", issue #202). A scope is a MODE of the one palette, deliberately not a
+ *  second panel — a separate window would fork "find a session" into two places, which is the very
+ *  fragmentation archiving exists to remove. */
+enum class PaletteScope { ALL, PROJECTS, ARCHIVED }
 
 /** A second session watched read-only beside the open chat (split pane). */
 data class DkWatch(
@@ -343,6 +346,19 @@ interface DesktopModel {
     /** Per project + per group collapse memory (issue #119; persisted like #102's RECENT keys). */
     fun groupCollapsed(projectPath: String, groupId: String): Boolean = false
     fun setGroupCollapsed(projectPath: String, groupId: String, collapsed: Boolean) {}
+
+    // ── session archive (issue #202) ──────────────────────────────────────────────────────────────
+    // Daemon-side truth (unlike pins/hidden, which are client-local): archiving on the phone hides the row
+    // here too. Defaults keep the seed/preview models entirely inert.
+    /** Every archived session across ALL projects, newest-archived first. Populated by [refreshArchived]. */
+    val archivedSessions: List<DkSession> get() = emptyList()
+    /** Owner + archive-capable connection (Sessions.archiveSupported): false hides every archive entry. */
+    val canArchiveSessions: Boolean get() = false
+    fun archiveSession(s: DkSession) {}
+    fun unarchiveSession(s: DkSession) {}
+    fun refreshArchived() {}
+    /** Open the ⌘K palette in its ARCHIVED scope (the sidebar's "Archived sessions" row). */
+    fun browseArchived() {}
 
     // ── session rename (issue #158) ───────────────────────────────────────────────────────────────
     /** Owner on a rename-aware daemon (the daemon stamps Sessions.renameSupported): false hides the

@@ -119,6 +119,9 @@ import dev.ccpocket.protocol.ListPendingApprovals
 import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.ListArchivedSessions
+import dev.ccpocket.protocol.SetSessionArchived
+import dev.ccpocket.protocol.ArchivedSessions
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PathEntry
 import dev.ccpocket.protocol.ReadFile
@@ -817,6 +820,33 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  [Sessions.renameSupported] (owner on a rename-aware daemon). False — an older daemon or a guest —
      *  hides the rename entry instead of sending a frame the daemon would silently drop. */
     val renameSupported = mutableStateOf(false)
+    /** True when THIS connection may archive sessions (issue #202): the daemon stamped
+     *  [Sessions.archiveSupported] (owner on an archive-aware daemon). False — an older daemon or a guest —
+     *  hides every archive affordance instead of firing frames the daemon would silently drop. */
+    val archiveSupported = mutableStateOf(false)
+
+    /** Every archived session across ALL projects (issue #202) — the cross-project archive view. Populated
+     *  only by an explicit [listArchivedSessions]; each row's [SessionSummary.cwd] names its own project. */
+    val archivedSessions = mutableStateListOf<SessionSummary>()
+    val archivedRefreshing = mutableStateOf(false)
+
+    /** The last archive/restore, for the confirmation toast (issue #202). The design deliberately offers the
+     *  REVERSE VERB rather than an "Undo": the two directions are exact inverses, so the toast's action is
+     *  the same call with the flag flipped — no undo stack, and the wording stays honest about what happens.
+     *  [running] drives the "still running" note: a disappearing green dot is the one moment a user fears
+     *  they killed the session, and archiving never stops anything. */
+    data class ArchiveToast(
+        val workdir: String,
+        val sessionId: String,
+        val title: String,
+        val archived: Boolean,
+        val running: Boolean,
+        val at: Long,
+    )
+
+    val archiveToast = mutableStateOf<ArchiveToast?>(null)
+
+    fun dismissArchiveToast() { archiveToast.value = null }
     /** The daemon's refusal of the LAST [renameSession] attempt (issue #158), keyed to the session it
      *  targeted. Renames are asked from the SESSIONS list, so the feedback belongs there — the most
      *  common refusal (renaming a terminal-held session from the sidebar) happens with no chat open at
@@ -2283,7 +2313,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 replace(sessionGroups, f.groups ?: emptyList()) // #119: null (older daemon) → no groups, flat list
                 groupsSupported.value = f.groups != null // groups=[] (owner, none yet) still enables management
                 renameSupported.value = f.renameSupported // #158: false from an older daemon / a guest
+                archiveSupported.value = f.archiveSupported // #202: same contract as renameSupported
                 sessionsRefreshing.value = false
+            }
+            is ArchivedSessions -> { // #202: the cross-project archive view's rows
+                replace(archivedSessions, f.items)
+                archivedRefreshing.value = false
             }
             is Usage -> { usage.value = f; usageLoading.value = false }
             is SkillCatalog -> {
@@ -3707,6 +3742,31 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
+
+    /** Fetch the cross-project archive (issue #202) — a multi-project scan on the daemon, so only ever on
+     *  an explicit open/refresh, never on a timer. */
+    fun listArchivedSessions() = scope.launch {
+        archivedRefreshing.value = true
+        runCatching { send(ListArchivedSessions) }.onFailure { archivedRefreshing.value = false }
+    }
+
+    /**
+     * Archive or restore [sessionId] (issue #202). [fromArchiveView] MUST be set when the action originates
+     * in the archive screen: without it the daemon answers with `Sessions(workdir)`, which would repoint the
+     * client's listed directory to whatever project that row happened to belong to.
+     */
+    fun setSessionArchived(
+        wd: String,
+        sessionId: String,
+        archived: Boolean,
+        fromArchiveView: Boolean = false,
+        title: String = "",
+        running: Boolean = false,
+    ) {
+        scope.launch { runCatching { send(SetSessionArchived(wd, sessionId, archived, fromArchiveView)) } }
+        if (fromArchiveView) listArchivedSessions() // frames are ordered: the mutation lands before the list
+        archiveToast.value = ArchiveToast(wd, sessionId, title, archived, running, epochMillis())
+    }
 
     /** Pull-to-refresh spinner for the sessions list (mirrors [refreshing] for the project list). */
     val sessionsRefreshing = mutableStateOf(false)

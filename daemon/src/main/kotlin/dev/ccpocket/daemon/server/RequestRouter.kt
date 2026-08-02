@@ -11,6 +11,7 @@ import dev.ccpocket.daemon.codex.CodexModelService
 import dev.ccpocket.daemon.disk.DirectoryService
 import dev.ccpocket.daemon.disk.FileExportService
 import dev.ccpocket.daemon.disk.FileInboxService
+import dev.ccpocket.daemon.disk.SessionArchive
 import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SkillCatalogService
@@ -81,6 +82,7 @@ import dev.ccpocket.protocol.ListPendingApprovals
 import dev.ccpocket.protocol.ListPathEntries
 import dev.ccpocket.protocol.ListSessionFiles
 import dev.ccpocket.protocol.ListSessions
+import dev.ccpocket.protocol.ListArchivedSessions
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.ReadFile
@@ -91,6 +93,7 @@ import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.ApprovalPrefs
+import dev.ccpocket.protocol.ArchivedSessions
 import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.ScheduleCancel
@@ -101,6 +104,7 @@ import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
 import dev.ccpocket.protocol.SetApprovalPrefs
 import dev.ccpocket.protocol.SetPushPrefs
+import dev.ccpocket.protocol.SetSessionArchived
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.StopBackgroundJob
 import dev.ccpocket.protocol.SwitchDirectory
@@ -133,6 +137,9 @@ class RequestRouter(
     private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
     private val approvalHistory: dev.ccpocket.daemon.approval.ApprovalHistoryStore? = null,
+    // the session-archive store's backing file (issue #202). Injectable like prefs/presets/schedules so a
+    // test never reads or rewrites the developer's real ~/.cc-pocket/session-archive.json.
+    private val archiveFile: java.io.File = SessionArchive.defaultFile(),
 ) {
     /** One connection's declared wire vocabulary (see [ClientCaps] in Messages.kt). Mutable: the
      *  declaration frame lands after connect and upgrades the SAME holder the ingress created for
@@ -154,6 +161,9 @@ class RequestRouter(
          *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
         const val LOCAL_DEVICE_ID = "local"
 
+        /** Soft cap on the cross-project archive view (issue #202) — the archive is "put it away", not an
+         *  unbounded ledger, and one frame must stay bounded however long a machine has accumulated. */
+        const val MAX_ARCHIVE_ROWS = 500
 
         /** §18.2 P2-3: frames only an approvalV2-declaring client should receive — ingress sinks drop
          *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
@@ -270,6 +280,20 @@ class RequestRouter(
                 emitSessions(frame.workdir, sink, guestScope, caps)
             }
 
+            // session archive (issue #202): same daemon-side-truth + re-push contract as the groups above.
+            // Acting from the cross-project archive view answers with the ARCHIVE list instead, so restoring
+            // a row there never repoints the client's currently-listed directory to that row's project.
+            is SetSessionArchived -> {
+                if (guestScope == null) {
+                    SessionArchive.setArchived(groupWorkdir(frame.workdir), frame.sessionId, frame.archived, archiveFile)
+                }
+                if (frame.fromArchiveView) scope.launch { emitArchivedSessions(sink, caps) }
+                else emitSessions(frame.workdir, sink, guestScope, caps)
+            }
+            // a multi-project scan → off the inbound pump like FetchUsage. Owner only: this is a
+            // cross-project discovery surface, strictly more than the per-dir listing a guest may have.
+            is ListArchivedSessions ->
+                if (origin == null && guestScope == null) scope.launch { emitArchivedSessions(sink, caps) }
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -732,14 +756,42 @@ class RequestRouter(
         val wd = groupWorkdir(workdir)
         var items = registry.listSessions(wd).map { if (it.sessionId in busy) it.copy(busy = true) else it }
         if (guestScope != null) items = items.filter { it.sessionId in guestScope.ownedSessions }
+        // archived rows are filtered HERE, not client-side (issue #202): the desktop's RECENT snapshot holds
+        // rows for projects it isn't currently listing and could never re-filter them, and doing it daemon-side
+        // means even an old app gets the tidied list. One store load per listing, then O(1) per row.
+        val archived = SessionArchive.archivedIds(wd, archiveFile)
+        if (archived.isNotEmpty()) items = items.filter { it.sessionId !in archived }
         // wire-compat (ClientCaps): an undeclared client would drop this WHOLE frame on one opencode row
         if (caps?.supportsOpencode != true) items = items.filter { it.agent != AgentKind.OPENCODE }
         val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
-        // renameSupported (issue #158): owner-only — a guest's RenameSession is capability-denied anyway,
-        // so its client must not show the entry
-        sink.emit(Sessions(workdir, items, groups = groups, renameSupported = guestScope == null))
+        // renameSupported (issue #158) / archiveSupported (issue #202): owner-only — a guest's frame is
+        // capability-denied anyway, so its client must not show the entry
+        sink.emit(
+            Sessions(
+                workdir, items, groups = groups,
+                renameSupported = guestScope == null, archiveSupported = guestScope == null,
+            ),
+        )
     }
 
+    /**
+     * Emit EVERY archived session across all projects (issue #202) — the cross-project archive view.
+     * Bounded by the store itself: [SessionArchive.all] is exactly the projects that hold an archived
+     * session, so this re-lists those and no others (never a walk of every project on the machine).
+     * Still a multi-directory scan, so callers run it OFF the inbound pump, like FetchUsage.
+     */
+    private suspend fun emitArchivedSessions(sink: OutboundSink, caps: ClientCapsHolder? = null) {
+        val busy = registry.busySessionIds()
+        var rows = SessionArchive.all(archiveFile).flatMap { entry ->
+            registry.listSessions(entry.workdir)
+                .filter { it.sessionId in entry.sessions }
+                .map { (if (it.sessionId in busy) it.copy(busy = true) else it) to (entry.sessions[it.sessionId] ?: 0L) }
+        }.sortedByDescending { it.second }.map { it.first }
+        if (caps?.supportsOpencode != true) rows = rows.filter { it.agent != AgentKind.OPENCODE }
+        // soft cap: the archive is "put it away", not an unbounded ledger — keep the frame bounded however
+        // long the machine has been accumulating. Newest-archived survive the cut.
+        sink.emit(ArchivedSessions(rows.take(MAX_ARCHIVE_ROWS)))
+    }
 
     // ── ClientCaps filters: strip agent=OPENCODE rows for peers that never declared support, so an
     // already-shipped build (unknown-enum decode = whole-frame drop) keeps its claude/codex lists ──

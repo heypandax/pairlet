@@ -726,6 +726,24 @@
     <string name="join_invalid">This invite is invalid or has expired. Ask for a new one.</string>
     <string name="join_review_title">Review invite</string>
     <string name="settings_sharing_section">Sharing</string>
+    <!-- session archive (issue #202) — shared by desktop and mobile -->
+    <string name="archive_session">Archive session</string>
+    <string name="archive_session_sub">Hides it on all devices. Nothing is deleted.</string>
+    <string name="archive_unarchive">Unarchive</string>
+    <string name="archive_title">Archived</string>
+    <string name="archive_empty">Nothing archived</string>
+    <string name="archive_empty_sub">Long-press any session and choose Archive to file it away here. It keeps running if it was running, and it stays hidden on every device until you bring it back.</string>
+    <string name="archive_no_groups_hint">No groups in this project yet — create one from the sessions list.</string>
+    <string name="archive_toast_archived">Archived</string>
+    <string name="archive_toast_restored">Back in %1$s</string>
+    <string name="archive_toast_still_running">still running</string>
+    <string name="session_section">SESSION</string>
+    <string name="group_move_to_section">MOVE TO GROUP</string>
+    <string name="sidebar_archived">Archived sessions</string>
+    <string name="archive_remove_from_recents">Remove from recents</string>
+    <string name="palette_archived_placeholder">Search archived sessions…</string>
+    <string name="palette_archived_legend">⏎ Open · ⌘⏎ Unarchive · esc Leave archive</string>
+
     <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
     <string name="group_new">New group</string>
     <string name="group_ungrouped">Ungrouped</string>

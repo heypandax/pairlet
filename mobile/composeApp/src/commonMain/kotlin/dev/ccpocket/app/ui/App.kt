@@ -55,6 +55,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
@@ -1406,6 +1407,11 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     }
     var showSettings by remember { mutableStateOf(false) }
     if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return } // full-screen, replaces this screen
+    // the cross-project archive (issue #202) — a full-screen route like Help/Settings. It hangs off THIS
+    // screen because archiveSupported arrives on the Sessions frame, so the capability is already known
+    // here; there is no gating-order problem to solve.
+    var showArchived by remember { mutableStateOf(false) }
+    if (showArchived) { ArchivedSessionsScreen(repo, onBack = { showArchived = false }); return }
     // Session groups (issue #119). Membership + the group list are daemon-owned; these hold only the
     // transient UI: which manage-sheet/dialog is open, and (client-only) which sections are collapsed —
     // kept per group id and reset per project (keyed on [dir]), so folding a group doesn't leak across projects.
@@ -1427,6 +1433,11 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
                         Spacer(Modifier.width(5.dp))
                         TailPathText(dir)
+                    }
+                }
+                if (repo.archiveSupported.value) {
+                    IconButton({ showArchived = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.Inventory2, stringResource(Res.string.archive_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                     }
                 }
                 IconButton({ showHelp = true }, modifier = Modifier.size(40.dp)) {
@@ -1500,7 +1511,10 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                     }
                     if (!isCollapsed) {
                         items(section.sessions, key = { it.sessionId }) { s ->
-                            SessionRow(repo, dir, s, onLongPress = if (grouped) ({ moveTarget = s }) else null)
+                            // #202: the row menu is no longer gated on the project having groups — archive
+                            // is available regardless, so a project with no groups still long-presses.
+                            val hasRowMenu = grouped || repo.archiveSupported.value
+                            SessionRow(repo, dir, s, onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null)
                         }
                     }
                 }
@@ -1532,6 +1546,12 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 onDismiss = { pickMode = false },
             )
         }
+        // #202: the archive receipt. The row it refers to has already vanished from this list, so the toast
+        // is the only thing that says where it went — and its action is the reverse verb, not an Undo.
+        ArchiveToastBar(
+            repo,
+            Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp),
+        )
         // issue #119 group management — the daemon re-pushes the Sessions frame after every mutation, so the
         // list/headers refresh themselves (no optimistic edit here).
         if (showNewGroup) NewGroupDialog(onConfirm = { repo.createGroup(it) }, onDismiss = { showNewGroup = false })
@@ -1554,6 +1574,12 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 session = s,
                 groups = repo.sessionGroups,
                 onAssign = { repo.assignGroup(s.sessionId, it) },
+                onArchive = if (repo.archiveSupported.value) ({
+                    repo.setSessionArchived(
+                        dir, s.sessionId, archived = true,
+                        title = s.title, running = s.live || s.busy,
+                    )
+                }) else null,
                 onDismiss = { moveTarget = null },
             )
         }

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="design_doc_mode" content="canvas" />
+<title>cc-pocket — Session Archive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="session-handoff/handoff.css" />
+<link rel="stylesheet" href="session-archive/archive.css" />
+</head>
+<body>
+
+<template id="__bundler_thumbnail" data-bg-color="#191A1C">
+<svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg"><rect width="1200" height="800" fill="#191A1C"/><g fill="none" stroke="#D97757" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"><rect x="380" y="250" width="440" height="106" rx="34"/><path d="M424 356v230a40 40 0 0 0 40 40h272a40 40 0 0 0 40-40V356"/><path d="M600 560V420"/><path d="M540 480l60-60 60 60"/></g></svg>
+</template>
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-arch" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4.4" rx="1.4"/><path d="M4.8 8.4v10a1.6 1.6 0 0 0 1.6 1.6h11.2a1.6 1.6 0 0 0 1.6-1.6v-10"/><path d="M9.8 12.4h4.4"/></symbol>
+<symbol id="i-unarch" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4.4" rx="1.4"/><path d="M4.8 8.4v10a1.6 1.6 0 0 0 1.6 1.6h11.2a1.6 1.6 0 0 0 1.6-1.6v-10"/><path d="M12 17.2v-5.6"/><path d="M9.6 14l2.4-2.4 2.4 2.4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.6h8.8A1.5 1.5 0 0 1 21 9.1v9.4A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="7" cy="5.5" r="2.4"/><circle cx="7" cy="18.5" r="2.4"/><circle cx="17" cy="9" r="2.4"/><path d="M7 7.9v8.2"/><path d="M17 11.4c0 3.2-3.4 3.6-6.4 4.4"/></symbol>
+<symbol id="i-msg" viewBox="0 0 24 24"><path d="M20.5 12.2c0 4.1-3.8 7.4-8.5 7.4a10 10 0 0 1-2.6-.34L4.5 21l1.2-3.5a7 7 0 0 1-2.2-5.1c0-4.1 3.8-7.4 8.5-7.4s8.5 3.3 8.5 7.4z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4L21 21"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.6 2.6 0 0 0-3.7-3.7L4.3 16.3z"/><path d="M13.5 7.5l3 3"/></symbol>
+<symbol id="i-move" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.6h8.8A1.5 1.5 0 0 1 21 9.1v9.4A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z"/><path d="M9.5 13.5h6"/><path d="M13.2 11.2l2.3 2.3-2.3 2.3"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 5.5h-9a2 2 0 0 0-2 2v9"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></symbol>
+<symbol id="i-bat" viewBox="0 0 19 12"><rect y="7.5" width="3.2" height="4.5" rx=".7" fill="currentColor" stroke="none"/><rect x="4.8" y="5" width="3.2" height="7" rx=".7" fill="currentColor" stroke="none"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx=".7" fill="currentColor" stroke="none"/><rect x="14.4" width="3.2" height="12" rx=".7" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-batt" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity=".35" fill="none"/><rect x="2" y="2" width="20" height="9" rx="2" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<div class="secttl" style="left:80px;top:44px;width:1300px">Session Archive — put a session away, get it back in one step
+<i>Archive is <b>daemon truth</b>: archive on the phone, the row is gone on the desktop too. It is not delete, not expiry, not “done”. The row <b>leaves the regular list immediately</b>; opening an archived session does <b>not</b> bring it back.<br>Two rules carry the whole design: <b>put-away is a menu verb, take-back is a visible control.</b> Archiving is deliberate, so it lives behind long-press / right-click. Unarchiving happens in a room you had to walk into on purpose, so it is a persistent trailing control on every row — never a hidden gesture.<br>Colour law unchanged: terracotta only on the take-back action and the active scope · green 70% = still running · muted mono for paths, counts, branches.</i></div>
+
+<!-- ══════ FRAME 1 — sessions list, long-press sheet (full) ══════ -->
+<div class="flabel" style="left:80px;top:250px;width:400px">Frame 1 · Long-press sheet — full<i>390×844 · entry point ⌸ in the top bar · project has groups</i></div>
+<div class="frame t" style="left:80px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="arnav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">Sessions</span><span class="tapicon"><svg class="ic ic-20"><use href="#i-search"/></svg></span><span class="tapicon"><svg class="ic ic-20"><use href="#i-arch"/></svg></span></div>
+    <div class="arscroll">
+      <div class="pgrp">
+        <div class="grpl" style="padding:0 4px 2px">Active</div>
+        <div class="grpbox">
+          <div class="arow"><div class="tx"><div class="n">Fix relay reconnect</div><div class="fl1">The socket drops after the phone sleeps — retrying with backoff.</div><div class="mt"><span class="runmark"><span class="livedot"></span>running</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-msg"/></svg>34</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>fix/relay</span><span class="d">·</span><span>now</span></div></div></div>
+          <div class="arow"><div class="tx"><div class="n">Coverage report in CI</div><div class="fl1">Wiring codecov into the PR check so the delta shows up.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>12</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>ci/coverage</span><span class="d">·</span><span>2h</span></div></div></div>
+        </div>
+      </div>
+      <div class="pgrp">
+        <div class="grpl" style="padding:0 4px 2px">Auth refactor</div>
+        <div class="grpbox"><div class="arow" style="background:var(--raised)"><div class="tx"><div class="n">Token rotation spike</div><div class="fl1">Rotating refresh tokens without logging anyone out.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>58</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>spike/rotate</span><span class="d">·</span><span>5d</span></div></div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="scrim"></div>
+  <div class="shabs" style="position:absolute;left:0;right:0;bottom:0;z-index:45"><div class="sheet" style="flex:none">
+    <div class="grab"></div>
+    <div class="shtitle"><div class="n">Token rotation spike</div><div class="s">~/code/cc-pocket · 58 msgs · 5d</div></div>
+    <div class="shbody" style="gap:16px;padding-bottom:4px">
+      <div class="sheetsec"><div class="lb">Move to group</div>
+        <div class="sheetrow"><svg class="ic ic-18"><use href="#i-folder"/></svg>Active</div>
+        <div class="sheetrow"><svg class="ic ic-18"><use href="#i-folder"/></svg>Auth refactor<span class="sub">current</span></div>
+        <div class="sheetrow"><svg class="ic ic-18"><use href="#i-plus"/></svg>New group…</div>
+      </div>
+      <div class="sheetsec"><div class="lb">Session</div>
+        <div class="sheetrow"><svg class="ic ic-18"><use href="#i-edit"/></svg>Rename</div>
+        <div class="sheetrow"><svg class="ic ic-18"><use href="#i-arch"/></svg>Archive<span class="sub">hides on all devices</span></div>
+      </div>
+    </div>
+    <div class="shfoot" style="padding-top:10px"><span class="btn full sec">Cancel</span></div>
+  </div></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:80px;top:1176px;width:390px">Sheet order is <b>frequency, then weight</b>: grouping is the everyday verb and sits on top; <b>Archive</b> is last, under a hairline-separated SESSION label, with a one-line consequence caption — <b>hides on all devices</b>. It is not destructive-red: archiving is reversible, and red is reserved for deny / delete.</div>
+
+<!-- ══════ FRAME 2 — degraded sheet ══════ -->
+<div class="flabel" style="left:520px;top:250px;width:400px">Frame 2 · Long-press sheet — degraded<i>390×844 · project has no groups yet · one row only</i></div>
+<div class="frame t" style="left:520px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="arnav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">Sessions</span><span class="tapicon"><svg class="ic ic-20"><use href="#i-search"/></svg></span><span class="tapicon"><svg class="ic ic-20"><use href="#i-arch"/></svg></span></div>
+    <div class="arscroll">
+      <div class="pgrp"><div class="pghd"><svg class="ic"><use href="#i-folder"/></svg><b>~/code/parser</b></div>
+        <div class="grpbox">
+          <div class="arow" style="background:var(--raised)"><div class="tx"><div class="n">Port tokenizer to Rust</div><div class="fl1">Same output as the Go version on the fixture corpus.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>21</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>rust/tok</span><span class="d">·</span><span>1d</span></div></div></div>
+          <div class="arow"><div class="tx"><div class="n">Bench harness</div><div class="fl1">Criterion setup so the port has numbers to beat.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>7</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>main</span><span class="d">·</span><span>3d</span></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="scrim"></div>
+  <div class="shabs" style="position:absolute;left:0;right:0;bottom:0;z-index:45"><div class="sheet" style="flex:none">
+    <div class="grab"></div>
+    <div class="shtitle"><div class="n">Port tokenizer to Rust</div><div class="s">~/code/parser · 21 msgs · 1d</div></div>
+    <div class="shbody" style="gap:12px;padding-bottom:4px">
+      <div class="sheetrow"><svg class="ic ic-18"><use href="#i-edit"/></svg>Rename</div>
+      <div class="sheetrow"><svg class="ic ic-18"><use href="#i-arch"/></svg>Archive<span class="sub">hides on all devices</span></div>
+      <div class="emptygrp"><svg class="ic ic-14"><use href="#i-folder"/></svg>No groups in this project — <span style="color:var(--accent)">create one</span></div>
+    </div>
+    <div class="shfoot" style="padding-top:10px"><span class="btn full sec">Cancel</span></div>
+  </div></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:520px;top:1176px;width:390px">Degradation rule: when a project has no groups, the <b>MOVE TO GROUP</b> section and its label disappear — a section header over an empty list is worse than no header. The <b>SESSION</b> label goes too (a label needs a sibling to distinguish from), so the sheet is a flat two-row list. The session title is doing the heading work in both states, so nothing moves when groups appear later — <b>the sheet only grows upward</b>. The empty-group prompt is a dashed hint at the bottom, not a row: it is a way in, not a verb on this session.</div>
+
+<!-- ══════ FRAME 3 — archive screen ══════ -->
+<div class="flabel" style="left:960px;top:250px;width:400px">Frame 3 · Archive — mobile<i>390×844 · cross-project, grouped by path · trailing unarchive</i></div>
+<div class="frame t" style="left:960px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="arnav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">Archived</span><span class="cnt">14</span><span class="tapicon"><svg class="ic ic-20"><use href="#i-search"/></svg></span></div>
+    <div class="arscroll">
+      <div class="pgrp"><div class="pghd"><svg class="ic"><use href="#i-folder"/></svg><b>~/code/cc-pocket</b><span class="n">6</span></div>
+        <div class="grpbox">
+          <div class="arow"><div class="tx"><div class="n">Push notification spike</div><div class="fl1">APNs relay worked end-to-end; parked until the daemon lands.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>41</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>spike/apns</span><span class="d">·</span><span>12d</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+          <div class="arow"><div class="tx"><div class="n">Migrate settings store</div><div class="fl1">Moved prefs off UserDefaults; merged in #418.</div><div class="mt"><span class="runmark"><span class="livedot"></span>running</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-msg"/></svg>96</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>chore/prefs</span><span class="d">·</span><span>3w</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+          <div class="arow"><div class="tx"><div class="n">Onboarding copy pass</div><div class="fl1">Rewrote the pairing screens; shipped in 1.4.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>18</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>copy/onboard</span><span class="d">·</span><span>3w</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+        </div>
+      </div>
+      <div class="pgrp"><div class="pghd"><svg class="ic"><use href="#i-folder"/></svg><b>~/code/relay</b><span class="n">5</span></div>
+        <div class="grpbox">
+          <div class="arow"><div class="tx"><div class="n">TLS handshake debugging</div><div class="fl1">Root cause was a stale cert in the test fixture.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>73</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>fix/tls</span><span class="d">·</span><span>1mo</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+          <div class="arow"><div class="tx"><div class="n">Load test scratchpad</div><div class="fl1">10k concurrent sockets on the box — notes only.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>9</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>main</span><span class="d">·</span><span>1mo</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+        </div>
+      </div>
+      <div class="pgrp"><div class="pghd"><svg class="ic"><use href="#i-folder"/></svg><b>~/code/parser</b><span class="n">3</span></div>
+        <div class="grpbox"><div class="arow"><div class="tx"><div class="n">Grammar experiments</div><div class="fl1">Tried a PEG rewrite; slower, kept for reference.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>27</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>exp/peg</span><span class="d">·</span><span>2mo</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:960px;top:1176px;width:390px">Verdict on the take-back gesture: <b>a persistent trailing icon</b>, 44dp, one tap, no confirm. Swipe was rejected — this screen is entered rarely, so a gesture nobody rehearses is a gesture nobody finds; long-press was rejected because it hides the <b>only</b> verb this screen exists for behind the same gesture that got you here. A row that stays running keeps its green dot: <b>archived ≠ stopped</b>. Tap anywhere else opens the session and it stays archived.</div>
+
+<!-- ══════ FRAME 4 — unarchive feedback ══════ -->
+<div class="flabel" style="left:1400px;top:250px;width:400px">Frame 4 · Feedback<i>390×844 · row leaves · toast with the inverse verb</i></div>
+<div class="frame t" style="left:1400px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="arnav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">Archived</span><span class="cnt">13</span><span class="tapicon"><svg class="ic ic-20"><use href="#i-search"/></svg></span></div>
+    <div class="arscroll">
+      <div class="pgrp"><div class="pghd"><svg class="ic"><use href="#i-folder"/></svg><b>~/code/cc-pocket</b><span class="n">5</span></div>
+        <div class="grpbox">
+          <div class="arow leaving"><div class="tx"><div class="n">Push notification spike</div><div class="fl1">APNs relay worked end-to-end; parked until the daemon lands.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>41</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>spike/apns</span><span class="d">·</span><span>12d</span></div></div><span class="unarch press"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+          <div class="arow"><div class="tx"><div class="n">Migrate settings store</div><div class="fl1">Moved prefs off UserDefaults; merged in #418.</div><div class="mt"><span class="runmark"><span class="livedot"></span>running</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-msg"/></svg>96</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>chore/prefs</span><span class="d">·</span><span>3w</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+          <div class="arow"><div class="tx"><div class="n">Onboarding copy pass</div><div class="fl1">Rewrote the pairing screens; shipped in 1.4.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>18</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>copy/onboard</span><span class="d">·</span><span>3w</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div>
+        </div>
+      </div>
+      <div class="pgrp"><div class="pghd"><svg class="ic"><use href="#i-folder"/></svg><b>~/code/relay</b><span class="n">5</span></div>
+        <div class="grpbox"><div class="arow"><div class="tx"><div class="n">TLS handshake debugging</div><div class="fl1">Root cause was a stale cert in the test fixture.</div><div class="mt"><span class="g"><svg class="ic"><use href="#i-msg"/></svg>73</span><span class="d">·</span><span class="g"><svg class="ic"><use href="#i-branch"/></svg>fix/tls</span><span class="d">·</span><span>1mo</span></div></div><span class="unarch"><svg class="ic ic-20"><use href="#i-unarch"/></svg></span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="toast"><div class="tt">Back in ~/code/cc-pocket<em>Push notification spike · still running</em></div><span class="act">Archive</span></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1400px;top:1176px;width:390px">Verdict on feedback: <b>a toast, but never an “Undo”.</b> There is no undo stack, and there does not need to be — archive and unarchive are exact inverses, so the toast simply offers the <b>opposite verb</b> (here <b>Archive</b>; after archiving from the chat it reads <b>Unarchive</b>). It is honest about what happened, it names <b>where the session went</b>, and it costs engineering nothing. Same toast fires on the archive side, where it matters more: a row vanishing from a list you were reading needs a receipt. Toast is 4s, tap-to-dismiss, never blocks the composer.</div>
+
+<!-- ══════ FRAME 5 — empty ══════ -->
+<div class="flabel" style="left:1840px;top:250px;width:400px">Frame 5 · Empty<i>390×844 · nothing archived yet</i></div>
+<div class="frame t" style="left:1840px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="arnav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">Archived</span></div>
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:0 40px 80px">
+      <div class="empty"><svg class="ic" style="width:26px;height:26px;color:var(--muted)"><use href="#i-arch"/></svg>
+        <p style="font-size:14px;color:var(--sec);font-weight:500;max-width:270px">Nothing archived</p>
+        <p>Long-press any session and choose <span style="color:var(--sec)">Archive</span> to hide it here. It keeps running, and it stays hidden on every device until you bring it back.</p>
+      </div>
+    </div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1840px;top:1176px;width:390px">The empty state teaches the gesture that fills it, and pre-empts the two questions the model raises: <b>does it stop?</b> (no) and <b>is it just this phone?</b> (no). No illustration, no button — there is nothing to act on here.</div>
+
+<!-- ══════ DESKTOP ══════ -->
+<div class="secttl" style="left:80px;top:1400px;width:1200px">Desktop — one lightweight door, two different erasers
+<i>The sidebar already has a hover <b>✕</b>. It is local, temporary, and forgetful. Archive is shared, persistent and deliberate. They must never look like siblings.</i></div>
+
+<div class="flabel" style="left:80px;top:1520px;width:520px">Frame 6 · Sidebar + right-click menu<i>1180×680 · 260dp sidebar · ✕ and Archive side by side</i></div>
+<div class="frame" style="left:80px;top:1584px;width:1180px;height:680px">
+  <div class="dwin t">
+    <div class="dside sm">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span style="font-size:12.5px;font-weight:600;color:var(--sec)">cc-pocket</span></div>
+      <div class="dslist" style="padding:4px 8px">
+        <div class="dslabel">Active</div>
+        <div class="dsrow on"><span class="sdot" style="background:var(--success);box-shadow:0 0 7px rgba(79,180,119,.6)"></span><span class="tx"><span class="n">Fix relay reconnect</span><span class="s">~/code/cc-pocket · now</span></span></div>
+        <div class="dsrow hov"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Coverage report in CI</span><span class="s">~/code/cc-pocket · 2h</span></span><span class="rmx"><svg class="ic ic-14"><use href="#i-x"/></svg></span></div>
+        <div class="dsrow"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Token rotation spike</span><span class="s">~/code/cc-pocket · 5d</span></span></div>
+        <div class="dslabel">Parser</div>
+        <div class="dsrow"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Port tokenizer to Rust</span><span class="s">~/code/parser · 1d</span></span></div>
+        <div class="dsrow"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Bench harness</span><span class="s">~/code/parser · 3d</span></span></div>
+      </div>
+      <div class="dsfoot">
+        <div class="dfrow"><svg class="ic"><use href="#i-grid"/></svg>All projects…<span class="kbd">⌘P</span></div>
+        <div class="dfrow hov"><svg class="ic"><use href="#i-arch"/></svg>Archived sessions<span class="kbd">14</span></div>
+      </div>
+    </div>
+    <div class="dpane">
+      <div class="dph"><span class="n">Fix relay reconnect</span><span class="s">~/code/cc-pocket · fix/relay</span></div>
+      <div class="dstream">
+        <div class="msg"><div class="who">CLAUDE</div><div class="bd">Backoff is in — the socket now reconnects within 400ms of the phone waking. Running the integration suite next.</div></div>
+        <div class="toolrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-edit"/></svg><span class="cmd">edit · relay/src/socket.rs</span><span class="ok">done</span></div>
+      </div>
+      <div class="dcomposer"><span class="ci">Reply to Claude…</span></div>
+    </div>
+    <div class="ctx" style="left:212px;top:214px">
+      <div class="ctxrow"><svg class="ic"><use href="#i-edit"/></svg>Rename…</div>
+      <div class="ctxrow"><svg class="ic"><use href="#i-move"/></svg>Move to group<span class="ch"><svg class="ic ic-14"><use href="#i-chev-r"/></svg></span></div>
+      <div class="ctxrow"><svg class="ic"><use href="#i-copy"/></svg>Copy path</div>
+      <div class="ctxsep"></div>
+      <div class="ctxrow hi"><svg class="ic"><use href="#i-arch"/></svg>Archive session<span class="kbd">⌘⌫</span></div>
+      <div class="ctxrow"><svg class="ic"><use href="#i-x"/></svg>Remove from recents</div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:2288px;width:560px">Menu order = <b>edit the session → file the session → hide the session</b>, with a hairline before the last pair, and the two hiding verbs <b>deliberately adjacent so the difference is read, not guessed</b>. <b>Archive session</b> carries a box glyph and the shortcut; <b>Remove from recents</b> carries the same ✕ as the hover control, so the row control and the menu item are visibly one feature. Neither is red: nothing here loses work.</div>
+<div class="note" style="left:660px;top:2288px;width:580px">The row hover <b>✕</b> keeps its meaning by <b>keeping its size</b> — a 22px glyph that lives on the row, appears on hover, and undoes itself the moment you open the session again. Archive is never on the row: <b>persistent, cross-device state is not a hover-weight action</b>. And the footer entry carries a <b>count, not a keycap</b> — it reads as a place with contents, and it is the only sidebar row that grows when you archive something, which is the desktop's ambient receipt.</div>
+
+<!-- ══════ FRAME 7 — ⌘K ARCHIVED ══════ -->
+<div class="flabel" style="left:1320px;top:1520px;width:560px">Frame 7 · ⌘K — ARCHIVED scope<i>1180×680 · 560dp panel · rows 42dp · ⏎ open · ⌘⏎ unarchive</i></div>
+<div class="frame" style="left:1320px;top:1584px;width:1180px;height:680px">
+  <div class="dwin t">
+    <div class="dside sm" style="opacity:.5">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span style="font-size:12.5px;font-weight:600;color:var(--sec)">cc-pocket</span></div>
+      <div class="dslist" style="padding:4px 8px">
+        <div class="dslabel">Active</div>
+        <div class="dsrow"><span class="sdot" style="background:var(--success)"></span><span class="tx"><span class="n">Fix relay reconnect</span><span class="s">~/code/cc-pocket · now</span></span></div>
+        <div class="dsrow"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Coverage report in CI</span><span class="s">~/code/cc-pocket · 2h</span></span></div>
+      </div>
+      <div class="dsfoot"><div class="dfrow"><svg class="ic"><use href="#i-grid"/></svg>All projects…<span class="kbd">⌘P</span></div><div class="dfrow"><svg class="ic"><use href="#i-arch"/></svg>Archived sessions<span class="kbd">14</span></div></div>
+    </div>
+    <div class="dpane" style="opacity:.5">
+      <div class="dph"><span class="n">Fix relay reconnect</span><span class="s">~/code/cc-pocket · fix/relay</span></div>
+      <div class="dstream"><div class="msg"><div class="who">CLAUDE</div><div class="bd">Backoff is in — the socket now reconnects within 400ms of the phone waking.</div></div></div>
+      <div class="dcomposer"><span class="ci">Reply to Claude…</span></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="pal">
+      <div class="palq"><svg class="ic ic-18"><use href="#i-search"/></svg><span class="scopetag"><svg class="ic ic-12"><use href="#i-arch"/></svg>ARCHIVED</span><span class="q">tls<i>|</i></span><span class="kbd">14</span></div>
+      <div class="palsec">~/code/relay</div>
+      <div class="pallist">
+        <div class="palrow on"><svg class="ic"><use href="#i-arch"/></svg><span class="n">TLS handshake debugging</span><span class="p">~/code/relay</span><span class="ua"><svg class="ic"><use href="#i-unarch"/></svg>Unarchive<span class="kbd">⌘⏎</span></span></div>
+        <div class="palrow hov"><svg class="ic"><use href="#i-arch"/></svg><span class="n">Cert pinning notes</span><span class="p">~/code/relay</span><span class="ua"><svg class="ic"><use href="#i-unarch"/></svg></span></div>
+      </div>
+      <div class="palsec">~/code/cc-pocket</div>
+      <div class="pallist">
+        <div class="palrow"><svg class="ic"><use href="#i-arch"/></svg><span class="n">TLS fixture refresh</span><span class="p">~/code/cc-pocket</span></div>
+        <div class="palrow"><svg class="ic"><use href="#i-arch"/></svg><span class="n">Push notification spike</span><span class="p">~/code/cc-pocket</span></div>
+      </div>
+      <div class="palfoot"><span class="h"><span class="kbd">⏎</span>Open</span><span class="h"><span class="kbd">⌘⏎</span>Unarchive</span><span class="sp"></span><span class="h"><span class="kbd">⎋</span>Leave archive</span></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:1320px;top:2288px;width:560px">Ruling on the conflict: <b>keep the ⌘K scope, do not build a second panel.</b> A separate browser is a whole surface, a search field and an empty state for a list you visit monthly — and it would fork “find a session” into two places, which is exactly what archive is meant to un-fork. The palette already <b>is</b> the desktop's find-anything room; ARCHIVED is a scope inside it, entered by the sidebar row or by ⌘K → <span style="color:#D97757">arch</span>.</div>
+<div class="note" style="left:1900px;top:2288px;width:600px">What actually fixes discoverability is <b>not</b> the hover icon — it is the <b>footer legend</b>, which is always visible and names both verbs the moment the scope opens. So: the icon shows on hover <b>and permanently on the selected row</b> (keyboard users never touch a mouse and must still see it), the label <b>Unarchive</b> is spelled out on the selected row only — icon alone on hover — and the footer carries ⏎ / ⌘⏎ / ⎋ at all times. Scope is a terracotta tag in the query field, so you always know which list you are typing into; <b>⎋ leaves the scope before it closes the panel.</b></div>
+
+<!-- ══════ DECISION PANEL ══════ -->
+<div class="dec" style="left:2280px;top:314px;width:520px">
+  <h4>Rulings on the three open questions</h4>
+  <div class="item"><div class="q">1 · mobile take-back: trailing icon / long-press / swipe?</div><div class="a"><em>Trailing icon.</em> Persistent, 44dp, one tap, no confirm. The archive screen exists for exactly one verb — hiding it behind a gesture makes the room pointless. Swipe stays unimplemented rather than half-implemented.</div></div>
+  <div class="item"><div class="q">2 · desktop second action: hover icon vs separate panel?</div><div class="a"><em>Keep the ⌘K scope.</em> A separate panel duplicates search, empty state and navigation for a monthly-visit list. Discoverability is fixed by the <b>always-on footer legend</b> (⏎ / ⌘⏎) plus the icon pinned to the <b>selected</b> row, not by hover alone.</div></div>
+  <div class="item"><div class="q">3 · ✕ vs Archive — how does each mean itself?</div><div class="a"><em>Different weight, different place, different words.</em> ✕ is 22px, hover-only, on the row, worded <b>Remove from recents</b> — local, forgetful, self-healing. Archive is a menu verb with a box glyph and a shortcut, worded <b>Archive session</b>, captioned <b>hides on all devices</b>. They sit adjacent in the context menu so the pair is read once and never confused again.</div></div>
+  <div class="item"><div class="q">4 · feedback for a vanishing (possibly running) row?</div><div class="a"><em>Toast, no undo stack.</em> The toast offers the <b>inverse verb</b>, not an undo — same call, no engineering. It names the destination, and a running session's toast says <b>still running</b>, because a green dot disappearing is the one moment a user fears they killed something. Desktop shows no toast: the sidebar count bumping is receipt enough on a screen where the whole list is visible.</div></div>
+  <div class="item"><div class="q">out of scope, on purpose</div><div class="a">No delete, no expiry, no bulk select, no auto-archive suggestion, no change to the existing list or group layout. Archived sessions are <b>excluded from the default ⌘K scope</b> and from the sidebar — they only appear when you ask for them by name.</div></div>
+</div>
+
+</body>
+</html>

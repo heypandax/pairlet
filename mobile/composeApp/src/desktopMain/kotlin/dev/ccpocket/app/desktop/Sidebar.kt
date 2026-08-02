@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
@@ -94,6 +95,9 @@ import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.openWebUrl
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.add_device
+import dev.ccpocket.app.resources.archive_remove_from_recents
+import dev.ccpocket.app.resources.archive_session
+import dev.ccpocket.app.resources.sidebar_archived
 import dev.ccpocket.app.resources.dir_pinned
 import dev.ccpocket.app.resources.group_delete
 import dev.ccpocket.app.resources.group_delete_confirm
@@ -166,6 +170,7 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         RunningZone(model)
         RecentZone(model, Modifier.weight(1f))
         AllProjectsRow { model.browseProjects() }
+        if (model.canArchiveSessions) ArchivedRow(model.archivedSessions.size) { model.browseArchived() }
         FooterActions(
             updateAvailable = model.updateState is DkUpdateState.Available,
             onHelp = { openWebUrl(SUPPORT_URL) },
@@ -557,6 +562,10 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                     // rename-capable daemon — same scoping as the group menu (a RECENT snapshot's dir isn't
                     // the one the daemon would resolve the rename against).
                     val renameable = g.current && model.canRenameSessions
+                    // #202: only the CURRENT project's rows. A non-current RECENT snapshot row would answer
+                    // with Sessions(thatProject), repointing the client's listed directory; those rows keep
+                    // the local hover-✕ instead.
+                    val canArchive = g.current && model.canArchiveSessions
                     // "+ New group" sits at the TOP of the project's sessions (matches mobile) — a bottom
                     // entry forces scrolling past a long session list to create a group. Current + group-aware
                     // + owner only (canEditGroups folds in groupsSupported), so it also creates the FIRST group
@@ -573,14 +582,14 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                             }
                         }
                         items(g.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                            SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups, renameable = renameable) { model.selectSession(s) }
+                            SessionRow(model, s, selected = s.sessionId == selectedId, menuGroups = menuGroups, renameable = renameable, canArchive = canArchive) { model.selectSession(s) }
                         }
                     } else {
                         sessionSections(g.sessions, custom).forEach { sec ->
                             item(key = "gh:${g.path}:${sec.id}") { CustomGroupHeader(model, g.path, sec) }
                             if (!model.groupCollapsed(g.path, sec.id)) {
                                 items(sec.sessions, key = { "s:${g.path}:${it.sessionId}" }) { s ->
-                                    SessionRow(model, s, selected = s.sessionId == selectedId, indented = true, menuGroups = menuGroups, renameable = renameable) { model.selectSession(s) }
+                                    SessionRow(model, s, selected = s.sessionId == selectedId, indented = true, menuGroups = menuGroups, renameable = renameable, canArchive = canArchive) { model.selectSession(s) }
                                 }
                             }
                         }
@@ -846,6 +855,22 @@ private fun AllProjectsRow(onClick: () -> Unit) {
     }
 }
 
+/** The cross-project archive entry (issue #202). Its right edge carries a COUNT rather than a keycap:
+ *  on desktop the count ticking is the receipt for an archive action, which is why this shell shows no
+ *  toast for one (the phone, having no such always-visible counter, does). */
+@Composable
+private fun ArchivedRow(count: Int, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(34.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Outlined.Inventory2, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
+        Text(stringResource(Res.string.sidebar_archived), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        if (count > 0) Text("$count", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+    }
+}
+
 @Composable
 private fun NewSessionRow(onClick: () -> Unit) {
     Row(
@@ -885,6 +910,7 @@ private fun SessionRow(
     indented: Boolean = false,
     menuGroups: List<DkGroup> = emptyList(),
     renameable: Boolean = false,
+    canArchive: Boolean = false,
     onClick: () -> Unit,
 ) {
     // rename entry (issue #158): Claude rows only — a Codex rename write path is out of scope
@@ -916,18 +942,29 @@ private fun SessionRow(
         }
         return
     }
-    if (menuGroups.isEmpty() && !canRename) { SessionRowBody(model, s, selected, indented, onClick); return }
+    // #202 widened this short-circuit: archiving is available on rows that can neither be renamed nor
+    // grouped, so "no groups and no rename" no longer means "no menu".
+    if (menuGroups.isEmpty() && !canRename && !canArchive) { SessionRowBody(model, s, selected, indented, onClick); return }
     val rename = stringResource(Res.string.session_rename)
     val moveTo = stringResource(Res.string.group_move_to)
     val moveOut = stringResource(Res.string.group_move_out)
+    val archive = stringResource(Res.string.archive_session)
+    val removeRecents = stringResource(Res.string.archive_remove_from_recents)
     ContextMenuArea(
         items = {
+            // order: edit → file → hide (the design's "编辑 → 归位 → 隐藏"). Archive sits directly ABOVE
+            // "Remove from recents" on purpose: the two are the pair users most need to tell apart, and
+            // reading them adjacently is what teaches the difference (persistent+shared vs local+temporary).
             buildList {
                 if (canRename) add(ContextMenuItem(rename) { renaming = true })
                 menuGroups.filter { it.id != s.group }.forEach { grp ->
                     add(ContextMenuItem("$moveTo · ${grp.name}") { model.assignGroup(s.sessionId, grp.id) })
                 }
                 if (s.group != null) add(ContextMenuItem(moveOut) { model.assignGroup(s.sessionId, null) })
+                if (canArchive) {
+                    add(ContextMenuItem(archive) { model.archiveSession(s) })
+                    add(ContextMenuItem(removeRecents) { model.hideSession(s) })
+                }
             }
         },
         content = { SessionRowBody(model, s, selected, indented, onClick) },

@@ -215,18 +215,35 @@ internal fun GroupActionsSheet(group: SessionGroup, onRename: () -> Unit, onDele
     }
 }
 
-/** Session-row long-press menu: file this session under a group, or lift it back to ungrouped. */
+/**
+ * Session-row long-press menu: file this session under a group, or archive it (issue #202).
+ *
+ * Two sections, ordered by the design's "组织 → 隐藏" rule: MOVE TO GROUP first (the frequent, reversible,
+ * in-project action), then SESSION. DEGRADED FORM — when the project has no groups, the whole group section
+ * AND BOTH section labels disappear and the sheet collapses to the bare action rows: a lone "SESSION" label
+ * with one row under it labels nothing (a section header needs siblings to mean anything). The session title
+ * carries the heading job in both states, which is also why the group rows only ever grow downward — an
+ * existing row never shifts under the user's thumb.
+ */
 @Composable
 internal fun MoveSessionSheet(
     session: SessionSummary,
     groups: List<SessionGroup>,
     onAssign: (String?) -> Unit,
+    onArchive: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
+    val sectioned = groups.isNotEmpty() && onArchive != null
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
-            Text(stringResource(Res.string.group_move_to), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(session.title, color = Tok.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            // With groups the sheet is still "move to…"; without them the title is just the session's own.
+            if (groups.isNotEmpty()) {
+                Text(stringResource(Res.string.group_move_to), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(session.title, color = Tok.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            } else {
+                Text(session.title, color = Tok.tx, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            if (sectioned) SheetSectionLabel(stringResource(Res.string.group_move_to_section), top = 12.dp)
             groups.sortedBy { it.order }.forEach { g ->
                 val current = session.group == g.id
                 Row(
@@ -243,18 +260,44 @@ internal fun MoveSessionSheet(
             if (session.group != null) {
                 SheetActionRow(stringResource(Res.string.group_move_out), Tok.tx2) { onAssign(null); onDismiss() }
             }
+            onArchive?.let { archive ->
+                if (sectioned) SheetSectionLabel(stringResource(Res.string.session_section), top = 16.dp)
+                SheetActionRow(
+                    stringResource(Res.string.archive_session), Tok.tx,
+                    // the sub-line is what separates this from the desktop's local hover-✕: archiving is
+                    // shared and persistent, and the row has to say so before it's tapped
+                    sub = stringResource(Res.string.archive_session_sub),
+                ) { archive(); onDismiss() }
+                // no groups yet: point at the other half of this sheet instead of leaving a bare action
+                if (groups.isEmpty()) {
+                    Text(
+                        stringResource(Res.string.archive_no_groups_hint), color = Tok.muted, fontSize = 11.5.sp,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+            }
         }
     }
 }
 
-/** A tappable, full-width label row for the group action sheets (matches the ProjectActionsSheet look). */
+/** A small caps section label inside an action sheet. */
 @Composable
-private fun SheetActionRow(label: String, color: Color, onClick: () -> Unit) {
-    Row(
+private fun SheetSectionLabel(label: String, top: androidx.compose.ui.unit.Dp) {
+    Text(
+        label, color = Tok.muted, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.8.sp, modifier = Modifier.padding(top = top, bottom = 2.dp),
+    )
+}
+
+/** A tappable, full-width label row for the group action sheets (matches the ProjectActionsSheet look).
+ *  [sub] adds a muted second line — used where a row's consequence isn't obvious from its verb. */
+@Composable
+private fun SheetActionRow(label: String, color: Color, sub: String? = null, onClick: () -> Unit) {
+    Column(
         Modifier.padding(top = 9.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = color, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+        sub?.let { Text(it, color = Tok.muted, fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp)) }
     }
 }

@@ -1004,6 +1004,39 @@ class RepoDesktopModel(
     override fun setApprovalNoAutoDeny(enabled: Boolean) { repo.setAskNoAutoDeny(enabled) }
     override fun refreshApprovalPrefs() { repo.fetchApprovalPrefs() }
 
+    // ── session archive (issue #202): daemon truth, so nothing is cached in a second client store ──
+    override val archivedSessions: List<DkSession>
+        get() = repo.archivedSessions.map {
+            DkSession(
+                it.sessionId, it.cwd, it.title, it.agent ?: dev.ccpocket.protocol.AgentKind.CLAUDE,
+                running = it.live || it.busy, model = it.model,
+            )
+        }
+
+    /** Mirrors [canRenameSessions]: the daemon's capability stamp AND not a guest's shared directory. */
+    override val canArchiveSessions: Boolean
+        get() {
+            if (!repo.archiveSupported.value) return false
+            val dir = repo.sessionsDir.value ?: return false
+            return repo.directories.none { sameDir(it.path, dir) && it.sharedBy != null }
+        }
+
+    override fun archiveSession(s: DkSession) {
+        repo.setSessionArchived(s.cwd, s.sessionId, archived = true, title = s.title, running = s.running)
+    }
+
+    override fun unarchiveSession(s: DkSession) {
+        // fromArchiveView: answering with Sessions(cwd) here would repoint the listed directory to
+        // whatever project the restored row belonged to
+        repo.setSessionArchived(
+            s.cwd, s.sessionId, archived = false, fromArchiveView = true,
+            title = s.title, running = s.running,
+        )
+    }
+
+    override fun refreshArchived() { repo.listArchivedSessions() }
+
+    override fun browseArchived() { refreshArchived(); palette = PaletteScope.ARCHIVED }
 
     override val observing: Boolean get() = repo.observing.value
     override fun takeOver() { repo.takeOver() }
