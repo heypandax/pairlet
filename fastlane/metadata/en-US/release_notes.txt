@@ -1,9 +1,10 @@
-What's new in 1.5.5
+What's new in 1.6.0
 
 Added
-• Feishu groups can now run without a per-request approval card. It stays off until you turn it on for a bridge AND send /trust in a specific group — a trusted group's reads, edits and searches then run with no card on your phone, confined to that project. Shell commands are unchanged (dangerous ones refused, anything unproven still asks you), and every card-free run is logged.
-
-Fixed
-• Feishu messages written with bullet lists, headings or links (rich text) were silently dropped instead of reaching Claude — they now go through
-• "@bot" on a quoted message with no other text now treats the quoted message as the request instead of doing nothing
-• Interrupting a turn no longer counts as a failure, so stopping twice in a row can no longer push a healthy session into a state where the next message needs sending several times
+• Session handoff: a session running on one device can be handed to another and continued there, with context and approval state carried over
+• Collaborator links: invite someone into a specific session with a one-time credential — read-only or allowed to drive — and the offer lands directly on their device
+• Approvals, upgraded: permission prompts can wait for you indefinitely ("keep waiting for me") instead of auto-denying after 10 minutes, and every approval lands in one reviewable history
+• Archivable sessions: tuck away sessions you rarely open; browse and unarchive them all from one place
+• Project entry points: pin projects, start a new session right from the recents list, and pick the model when creating one
+• Version visibility: check the daemon's version, get update reminders on the phone, one-tap update on desktop/Android
+• Feishu groups gain Smart Review (/review), between per-request approval and full trust: an AI screens each request against the group's declared purpose first — clearly low-risk ones run directly (still confined to in-project tools), everything else still asks you. Off by default; enable it on the bridge first, /trust-status to inspect
