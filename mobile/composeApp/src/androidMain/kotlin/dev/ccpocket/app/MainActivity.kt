@@ -59,8 +59,10 @@ class MainActivity : FragmentActivity() {
     }
 
     /**
-     * Two ways an intent routes us somewhere:
+     * Three ways an intent routes us somewhere:
      *  - a tapped task-complete notification carries `wd`/`sid` extras (FCM `data`) → open that session;
+     *  - a tapped Handoff OFFER notification carries only `hid` (§3.4) → select that offer in the incoming
+     *    doorway (which still runs the confirm → accept flow; a push never accepts anything);
      *  - a `ccpocket://` VIEW intent → the unified deep-link parser (§7). The manifest has declared this
      *    scheme all along, but nothing ever read `intent.data`, so every Android deep link (pairing,
      *    collaborator and share invites alike) silently did nothing.
@@ -70,6 +72,7 @@ class MainActivity : FragmentActivity() {
             DeepLink.handle(it.toString())
             return
         }
+        intent?.getStringExtra("hid")?.let { PushRoute.openHandoff(it); return }
         val wd = intent?.getStringExtra("wd") ?: return
         val sid = intent.getStringExtra("sid") ?: return
         PushRoute.open(wd, sid)

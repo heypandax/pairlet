@@ -31,4 +31,17 @@ object PushRoute {
     fun open(workdir: String, sessionId: String) {
         if (workdir.isNotEmpty() && sessionId.isNotEmpty()) pending.value = SessionRoute(workdir, sessionId)
     }
+
+    /**
+     * A tapped Handoff OFFER push (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.4). The alert is content-free by
+     * design, so the ONLY thing it can route by is the opaque handoff id (APNs/FCM key `hid`) — there is no
+     * workdir or session to open, and there must not be: the offer's contents are pulled end-to-end
+     * encrypted over the Collaborator Link once the app is awake. The Compose root hands this to the
+     * repository's `pendingOfferId`, which SELECTS the offer in the incoming-handoff doorway — it never
+     * accepts it. The confirm-then-accept screen is always in the path.
+     */
+    val pendingHandoff = MutableStateFlow<String?>(null)
+    fun openHandoff(handoffId: String) {
+        if (handoffId.isNotEmpty()) pendingHandoff.value = handoffId
+    }
 }

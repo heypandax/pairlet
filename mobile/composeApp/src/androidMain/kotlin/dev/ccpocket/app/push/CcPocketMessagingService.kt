@@ -22,15 +22,18 @@ class CcPocketMessagingService : FirebaseMessagingService() {
         val n = message.notification ?: return // data-only messages aren't used by the relay
         val nm = getSystemService(NotificationManager::class.java) ?: return
         ensureChannel(nm)
-        // carry the session-routing data so a tap opens the right session (mirrors how the system tray
-        // delivers `data` as intent extras for backgrounded notifications)
+        // carry the routing data so a tap opens the right thing (mirrors how the system tray delivers
+        // `data` as intent extras for backgrounded notifications): a session, or — for a Collaborator Link
+        // offer alert (§3.4) — the opaque handoff id, which is all such an alert is allowed to carry.
         val wd = message.data["wd"]
         val sid = message.data["sid"]
+        val hid = message.data["hid"]
         val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
             if (wd != null && sid != null) { putExtra("wd", wd); putExtra("sid", sid) }
+            if (hid != null) putExtra("hid", hid)
         }
-        // a distinct request code per session keeps each notification's extras from clobbering another's
-        val reqCode = (wd to sid).hashCode()
+        // a distinct request code per target keeps each notification's extras from clobbering another's
+        val reqCode = listOf(wd, sid, hid).hashCode()
         val tap = launch?.let {
             PendingIntent.getActivity(this, reqCode, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }

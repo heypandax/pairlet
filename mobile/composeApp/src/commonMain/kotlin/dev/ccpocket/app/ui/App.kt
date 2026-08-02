@@ -221,6 +221,13 @@ fun App(scope: CoroutineScope) {
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
+    // a tapped OFFER push (§3.4) names only the handoff — it selects that offer in the doorway below, which
+    // still runs the ordinary confirm → accept flow
+    val offerOpen by dev.ccpocket.app.PushRoute.pendingHandoff.collectAsState()
+    LaunchedEffect(offerOpen) { offerOpen?.let { repo.pendingOfferId.value = it; dev.ccpocket.app.PushRoute.pendingHandoff.value = null } }
+    // the notifications toggle lives on the primary link but governs the whole device: fan it out so a
+    // Collaborator Link inbox de-registers (and re-registers) its own token with it (§3.4)
+    remember { repo.onNotificationsChanged = { on -> collabInbox.onNotificationsChanged(on) } }
     val appLock = repo.appLock
     dev.ccpocket.app.OnAppForeground { // iOS kills sockets in background — reconnect the whole fleet on return
         appForeground = true
@@ -369,9 +376,11 @@ private fun IncomingHandoffRoot(repo: PocketRepository, inbox: dev.ccpocket.app.
         repo.incomingOffers().map { repo to it } + inbox.offers().map { it.repo to it.handoff }
     var dismissedFor by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedId by remember { mutableStateOf<String?>(null) }
-    // a deep link / push tap names an offer directly (§3.4): honour it even if the sheet was dismissed
+    // a deep link / push tap names an offer directly (§3.4): honour it even if the sheet was dismissed.
+    // Keyed on the offer IDS too, not just the routed id: a push routinely wakes the app BEFORE the inbox
+    // link has reconnected and pulled the listing, so the named offer usually shows up a moment later.
     val routed = repo.pendingOfferId.value
-    LaunchedEffect(routed) {
+    LaunchedEffect(routed, all.map { it.second.id }) {
         if (routed != null && all.any { it.second.id == routed }) {
             dismissedFor = dismissedFor - routed
             selectedId = routed

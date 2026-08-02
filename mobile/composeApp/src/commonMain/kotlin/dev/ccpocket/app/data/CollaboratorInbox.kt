@@ -61,9 +61,12 @@ class CollaboratorInbox(private val scope: CoroutineScope) {
         links[binding.accountId] = connect(binding, ticket)
     }
 
-    /** Drop a contact's link (and its stored credential). */
+    /** Drop a contact's link (and its stored credential). The push token registered under THAT colleague's
+     *  account (§3.4) is cleared first: it was only ever there to receive their offers, and once the
+     *  credential is gone we could never de-register it — their daemon would go on pushing at a link this
+     *  device no longer holds, stoppable only by the owner revoking from their side. */
     fun remove(accountId: String) {
-        links.remove(accountId)?.disconnect()
+        links.remove(accountId)?.let { it.deregisterPush(); it.disconnect() }
         Pairing.removeCollaborator(accountId)
     }
 
@@ -91,6 +94,11 @@ class CollaboratorInbox(private val scope: CoroutineScope) {
 
     /** iOS suspends every socket in the background — fan the foreground reconnect out to the inbox too. */
     fun onAppForeground() = links.values.forEach { it.onAppForeground() }
+
+    /** The device-wide notifications toggle changed (it is bound to the primary link's Settings). Each inbox
+     *  link registers a push token under ITS OWN deviceId (§3.4), so each has to (de)register for itself —
+     *  otherwise "notifications off" would silence your own computers and leave every contact able to buzz. */
+    fun onNotificationsChanged(on: Boolean) = links.values.forEach { it.setNotificationsEnabled(on) }
 }
 
 /**

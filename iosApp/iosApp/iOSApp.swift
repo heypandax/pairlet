@@ -85,12 +85,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         completionHandler([.banner, .sound])
     }
 
-    // a tapped task-complete notification carries `wd`/`sid` custom keys → deep-link into that session
+    // a tapped task-complete notification carries `wd`/`sid` custom keys → deep-link into that session;
+    // a Handoff OFFER notification carries only `hid` (§3.4) → open that offer in the incoming doorway
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        if let wd = info["wd"] as? String, let sid = info["sid"] as? String {
+        if let hid = info["hid"] as? String {
+            MainViewControllerKt.handlePushOpenHandoff(handoffId: hid)
+        } else if let wd = info["wd"] as? String, let sid = info["sid"] as? String {
             MainViewControllerKt.handlePushOpen(workdir: wd, sessionId: sid)
         }
         completionHandler()

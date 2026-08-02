@@ -28,6 +28,12 @@ fun handleDeepLink(url: String) = DeepLink.handle(url)
 @Suppress("unused")
 fun handlePushOpen(workdir: String, sessionId: String) = PushRoute.open(workdir, sessionId)
 
+/** Called from iOSApp.swift when a Handoff OFFER notification is tapped (§3.4). Such an alert carries NO
+ *  session routing at all — only the opaque `hid` custom key — so this selects the offer in the incoming
+ *  doorway, which still runs the ordinary confirm → accept flow. */
+@Suppress("unused")
+fun handlePushOpenHandoff(handoffId: String) = PushRoute.openHandoff(handoffId)
+
 /** Called from iOSApp.swift's didRegisterForRemoteNotificationsWithDeviceToken with the hex APNs token
  *  ("apns" on release builds, "apns_sandbox" on debug — picks the relay's APNs host). */
 @Suppress("unused")

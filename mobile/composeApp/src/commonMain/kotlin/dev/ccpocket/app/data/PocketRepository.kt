@@ -20,7 +20,7 @@ import dev.ccpocket.app.pairing.IncomingLink
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
 import dev.ccpocket.app.pairing.parseIncomingLink
-import dev.ccpocket.app.push.PushController
+import dev.ccpocket.app.push.PushTokens
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
 import dev.ccpocket.app.theme.ThemeMode
@@ -445,6 +445,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private var pushStarted = false
     private var pushRegistered: Pair<String, String>? = null // last (platform, token) sent; skip redundant re-sends
     private var pushDialJob: Job? = null // in-flight one-shot relay dial (direct-LAN registration compensation)
+    private var pushTokenJob: Job? = null // observes the shared platform token (see PushTokens)
     // direct-LAN registration seams (internal for tests, mirroring promptReceiptTimeoutMs). directLinkUp
     // includes the in-flight direct attempt: a RegisterPush buffered into the relay control outbox during
     // that ≤3s window would otherwise sit undrained for as long as the phone stays on the LAN, then flush
@@ -1298,12 +1299,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // ── push registration ───────────────────────────────────────────────────────────────────────────
 
     /** Start platform push registration once, after the first relay attach (so the iOS permission prompt
-     *  follows pairing). The token callback may land later — [registerPush] also runs on every Attached. */
+     *  follows pairing). The token callback may land later — [registerPush] also runs on every Attached.
+     *
+     *  Fleet satellites stay out: they are other machines of the SAME user, and the primary link's token
+     *  already wakes this phone for them. A COLLABORATOR inbox is not a satellite (§3.4) — it is a different
+     *  person's daemon, which can only reach this phone through the token registered under the INBOX's own
+     *  deviceId (the owner's account fan-out deliberately excludes it). So an inbox registers for itself,
+     *  sharing the one platform token through [PushTokens] rather than fighting the primary over the
+     *  single-callback [PushController]. */
     private fun ensurePushStarted() {
-        if (pinnedTo != null) return // satellites leave the platform push singleton to the primary link
+        if (pinnedTo != null && !isCollaboratorInbox) return
         if (pushStarted || !notificationsOn.value) return
         pushStarted = true
-        PushController.start { onPushToken(it) }
+        PushTokens.ensureStarted()
+        pushTokenJob = scope.launch { PushTokens.token.collect { t -> t?.let(::onPushToken) } }
     }
 
     /** Platform token callback (and the test seam for it): remember the token, then (re)register. */
@@ -1320,9 +1329,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  the direct link stays up) so the token still converges. */
     private fun registerPush() {
         if (!useRelay) return // unpaired dev-direct transport: no relay account to deposit to
-        val tok = pushToken ?: return
-        val sent = tok.platform to (if (notificationsOn.value) tok.token else "")
+        val tok = pushToken
+        // OFF must converge even with no platform token in hand. A cold start with notifications already
+        // off never starts the platform stack (starting it is what prompts on iOS), so [pushToken] stays
+        // null — and if the clearing frame was lost the first time (killed app, drained outbox) the relay
+        // would keep a live token forever while the UI reads "off". The relay ignores the platform of a
+        // blank-token register (it nulls both columns), so the last known one — or a placeholder — clears
+        // the row just as well. §3.4 makes this consequential: a contact's daemon is now a pusher too.
+        val sent = when {
+            !notificationsOn.value -> (tok?.platform ?: lastPushPlatform() ?: "unknown") to ""
+            tok != null -> tok.platform to tok.token
+            else -> return // ON but no token yet — the platform callback will re-enter here
+        }
         if (sent == pushRegistered) return
+        if (sent.second.isNotEmpty()) SecureStore.putString(K_PUSH_PLATFORM, sent.first)
         pushRegistered = sent
         if (directLinkUp()) {
             val p = paired.value ?: return
@@ -1340,6 +1360,29 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         }
     }
 
+    /** The platform tag of the last token we registered, so a later "off" can still clear the relay row
+     *  even when this launch never obtained a token. Not a secret and not the token itself. */
+    private fun lastPushPlatform(): String? = SecureStore.getString(K_PUSH_PLATFORM)?.takeIf { it.isNotBlank() }
+
+    /**
+     * Clear THIS link's push token at the relay without touching the device-wide preference — used when a
+     * Collaborator Link is severed. The credential is about to be discarded, so the token registered under
+     * that colleague's account has to go with it; otherwise their daemon keeps pushing at a link we no
+     * longer hold, and only the OWNER revoking the contact would ever stop it.
+     */
+    fun deregisterPush() {
+        if (!useRelay) return
+        val platform = pushToken?.platform ?: lastPushPlatform() ?: "unknown"
+        pushRegistered = platform to ""
+        val p = paired.value
+        scope.launch {
+            runCatching {
+                if (directLinkUp() && p != null) pushDial(p, RegisterPush(platform, ""))
+                else relay.sendControl(RegisterPush(platform, ""))
+            }
+        }
+    }
+
     /** Settings toggle: persist the choice, then register (on) or clear (off) the token on the relay. */
     fun setNotificationsEnabled(on: Boolean) {
         if (on == notificationsOn.value) return
@@ -1347,6 +1390,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         SecureStore.putString(K_NOTIFY, if (on) "1" else "0")
         ensurePushStarted() // self-guards when off
         registerPush()
+        onNotificationsChanged?.invoke(on) // §3.4: contacts' inbox links hold their own tokens
     }
 
     /** Settings: persist the default execution mode for new sessions. Takes effect on the next new session. */
@@ -1770,6 +1814,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
+        // the shared-token observer dies with the link too (an inbox link that was removed must not be kept
+        // alive by a collector); pushStarted re-arms it on the next Attached. PushTokens.ensureStarted() is
+        // globally once-only, so this never re-triggers the iOS permission prompt.
+        pushTokenJob?.cancel(); pushTokenJob = null; pushStarted = false
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         // per-daemon truth must not survive a machine switch: a stale non-null presetsState would keep
         // the token-bearing create/edit form UNLOCKED after switching to a daemon that predates presets
@@ -3493,6 +3541,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  so the inbox connection for it comes up now rather than at the next app launch. */
     var onCollaboratorLinkAdded: ((PairedDaemon, String) -> Unit)? = null
 
+    /** Set by the app root: the notifications toggle changed. Settings binds to the PRIMARY link, but the
+     *  preference is the device's, and a Collaborator Link inbox now holds a push token of its own (§3.4) —
+     *  without this fan-out, turning notifications off would leave every contact still able to buzz you. */
+    var onNotificationsChanged: ((Boolean) -> Unit)? = null
+
     /** The one-time ticket doubles as the PSK on a binding's FIRST relay connect — a freshly redeemed inbox
      *  link is constructed after the redeem, so it needs it handed over explicitly. */
     internal fun armFirstTicket(ticket: String?) { firstTicket = ticket }
@@ -4663,6 +4716,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         fun fileChunkParts(total: Int): Int = ((total + FILE_CHUNK_RAW - 1) / FILE_CHUNK_RAW).coerceAtLeast(1)
 
         const val K_NOTIFY = "notify_on_complete"    // SecureStore flag: "0" = task-complete push off (default on)
+        // the platform tag ("apns"/"apns_sandbox"/"fcm") of the last token registered — kept so a later
+        // "notifications off" can still send the clearing register on a launch that never got a token
+        const val K_PUSH_PLATFORM = "push_platform_last"
         const val K_DEFAULT_MODE = "default_session_mode" // SecureStore: PermissionMode.name seeding new sessions (default DEFAULT)
         const val K_DEFAULT_PERMISSION_MODE = "default_session_permission_mode" // backend-native mode (`auto`), "" = legacy mode
         const val K_DEFAULT_EFFORT = "default_session_effort" // SecureStore: effort level for new sessions ("" = model default)
