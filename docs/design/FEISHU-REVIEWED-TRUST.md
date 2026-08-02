@@ -1,8 +1,9 @@
 # 飞书群智能审核信任模式（Reviewed Trust）
 
-> 状态：**已按本方案实现**（2026-08-03，分支 `feat/feishu-reviewed-trust`；直接实现阶段 B，
-> `FEISHU_REVIEW_SHADOW` 影子配置点保留、默认关）。Reviewer CLI 契约回归见
-> `scripts/probe-feishu-reviewer.py`（升级 claude CLI 后必跑）。
+> 状态：**已实现，§21 复审整改已完成（处置见 §22），待真实飞书群验收**（2026-08-03，已合并到
+> `feat/session-handoff-collaborator`；直接实现阶段 B，`FEISHU_REVIEW_SHADOW` 影子配置点保留、默认关）。
+> 在 §17 + §21.8 的真机验收完成前不应发版。Reviewer CLI 契约回归见
+> `scripts/probe-feishu-reviewer.py`（升级 claude CLI 后必跑；已含 12s 生产超时门）。
 >
 > 面向实现者：本文已收敛 MVP 产品语义、权限边界、数据迁移、代码改动、测试与验收标准，可直接据此实现。
 >
@@ -839,3 +840,272 @@ PermissionBridge 的 hard wall 用 fake event/unit test 覆盖。
 - 日志足以追踪审核结果，但不保存提示词正文和身份明文；
 - daemon、protocol、desktop 编译与相关测试全部通过；
 - 在真实测试飞书群完成三态、风险升级、工具越界和撤销竞态验收。
+
+## 21. 2026-08-02 实现复审与整改清单
+
+### 21.1 复审结论
+
+本次复审范围为合并提交 `ce9ebd21` 相对第一父提交的 Reviewed Trust 实现，覆盖三态存储、群命令、
+Reviewer 子进程、请求分流、一次性 Grant、`PermissionBridge`、审计和测试。
+
+已经确认正确的部分：
+
+- `REVIEWER_APPROVED` 与 `OWNER_APPROVED` 保持分离；
+- Reviewed 请求复用 `AUTO_TRUSTED` 的封闭工具白名单，没有直接开放 MCP、WebFetch 或未知工具；
+- Bash、workdir、destructive hard wall 位于 reviewed grant 自动放行之前；
+- 旧 `chatId -> workdir` 记录迁移为 `TRUSTED`，没有无声改变旧 `/trust` 语义；
+- Reviewer 超时、不可用和解析失败默认转人工审批；
+- MVP 没有新增外部授权 frame，relay/mobile 不能在 wire 上自报 reviewed grant。
+
+但复审发现 4 个 P1 和 2 个 P2。P1 是发布阻断项，必须全部修复；P2 应在同一轮完成，避免把已知安全债带入上线。
+
+### 21.2 P1-1：Reviewer 必须沿用 daemon 的 Claude 认证和 API 路由
+
+当前接线：
+
+- `FeishuEngine.kt` 直接以 `ClaudeFeishuPromptReviewer(File(stateDir, "reviewer"))` 构造 Reviewer；
+- Reviewer 自行调用无显式参数的 `ClaudeLauncher.resolveExecutable()`；
+- Reviewer 使用原始 `ProcessBuilder`，只移除 `CLAUDECODE`。
+
+因此 Reviewer 没有沿用正常 `ClaudeBackend` 的：
+
+- daemon 启动参数 `--claude-bin`；
+- 隔离认证目录 `CLAUDE_CONFIG_DIR`；
+- 当前激活的 API preset / 企业 Gateway 环境；
+- 与主 Agent 一致的凭证和模型路由选择。
+
+影响：
+
+- 只通过 `--claude-bin` 安装 Claude 的机器上，主 Agent 可用但 Reviewer 会持续报告 unavailable；
+- 开启 isolated Claude auth 后，Reviewer 可能误用终端 Claude 的个人凭证；
+- 使用企业 Gateway 或 API preset 时，群提示词可能绕过预期路由，发送到默认 Claude 账号；
+- 即使安全降级到人工审批，功能也会表现为“智能审核永远不通过”。
+
+整改要求：
+
+1. 为 Reviewer 定义明确的运行配置，例如 `ReviewerRuntimeConfig`，至少携带 executable、
+   `claudeConfigDir` 和 `presetEnv` supplier；
+2. 配置来源必须与 `Main.kt` 创建 `ClaudeBackend` 时使用的实例一致，不能在 FeishuEngine 内重新加载另一份 preset store；
+3. 构造 Reviewer 的 ProcessBuilder 时应用正常 Claude launcher 的认证与 preset 环境逻辑，同时保留
+   `--tools ""`、空 MCP、safe mode、一次性 Session 等隔离参数；
+4. Reviewer 不得因为 safe mode 而丢失认证，但也不得重新加载项目 CLAUDE.md、skills、hooks 或 MCP；
+5. probe 增加“显式 binary + 隔离 config dir + preset env”测试入口，不能只验证 PATH 中的终端 Claude。
+
+必须新增测试：
+
+- 显式 claude binary 被传入 ProcessBuilder；
+- `CLAUDE_CONFIG_DIR` 正确继承 daemon 隔离目录；
+- preset 激活后 Reviewer 获得同一组 endpoint/token/model routing env；
+- preset 切换后下一次 Review 使用新配置；
+- Reviewer 参数仍然禁用 tools、MCP、Session persistence 和项目设置。
+
+### 21.3 P1-2：未知 reason code 必须 fail closed
+
+当前 `PromptReviewPolicy.mayAutoRun` 只检查：
+
+```kotlin
+r.reasonCodes.none { it in FORCE_OWNER_REASON_CODES }
+```
+
+这意味着 `ALLOW_GUARDED + LOW + matchesContract + 高置信度` 即使携带拼错或模型新造的 reason code，仍会
+自动执行。当前测试还明确断言 `SOME_NOVEL_NOTE` 可以通过，这与“未知不等于安全”冲突。
+
+整改要求：
+
+1. Reviewer JSON Schema 的 `reasonCodes.items` 改成固定 enum，只接受本文已声明的模型风险 code；
+2. parser 遇到任何未知 code 时返回 invalid output，最终转 `ASK_OWNER`；
+3. `PromptReviewPolicy.mayAutoRun` 进一步要求 `reasonCodes.isEmpty()`；LOW 自动通过不应同时携带任何风险理由；
+4. durable audit 继续只保存已知常量 code，但不能把“过滤后为空”误当成安全；过滤只用于隐私，不参与授权；
+5. 删除当前“未知 code 仍 auto-run”的测试，改成未知 code 必须拒绝自动通过。
+
+必须新增测试：
+
+- `CREDENTIAL_REQUEST` 等拼错 code 转人工；
+- 任意新造 code 转人工；
+- `ALLOW_GUARDED + LOW` 但 reasonCodes 非空时转人工；
+- schema/parser/policy 三层都不能接受未知 code；
+- 未知 code 的原始内容不能进入 durable audit 或 adapter log。
+
+### 21.4 P1-3：最终策略校验必须覆盖 rebind，并与授权签发原子耦合
+
+当前 Reviewed 重校验为：
+
+```kotlin
+trust.stillMatches(chatId, workdir, snapshot)
+```
+
+存在三个问题：
+
+1. `/bind` 只修改 `FeishuRoutes`，不会修改 trust store。审核期间重新绑定后，原 workdir 的 trust snapshot
+   仍完全相同，因此 `stillMatches` 会错误返回 true；
+2. 重校验发生在 `ReviewedPreflight.evaluate` 内，返回后还会写审计、写 ring log、安装 waiter，最后才调用
+   `sendReviewedBridgePrompt`。`/untrust` 不走 turn lock，可以在这段窗口内完成；
+3. `/untrust` 删除记录，随后相同 `/review` 会从 `contractVersion=1` 重新开始。旧 snapshot 和新记录可能完全相同，
+   构成 ABA，旧审核结果会被误认成仍有效。
+
+只在 handoff 前“再检查一次”不能彻底解决问题，因为检查和授权仍是两个可竞争动作。
+
+整改要求：
+
+1. 最终校验必须同时验证 `routes.workdirFor(chatId) == originalWorkdir`；
+2. 为 `(chatId, workdir)` 使用单调、不可复用的 policy revision；删除记录后 revision 也不能回退或重置；
+3. daemon 原子签发一个与 `chatId + workdir + policyRevision + reviewId + convoId + promptId` 绑定的一次性 permit；
+4. `sendReviewedBridgePrompt` 必须消费该 permit，不能只接受任意 `reviewId`；
+5. permit 的原子签发时刻定义为“本请求已经被授权”。此后 `/untrust` 可以不撤销已经签发并马上 handoff 的该请求，
+   但不能让 permit 被另一条 prompt、另一个 conversation 或后续 turn 使用；
+6. handoff 失败、重复 prompt、conversation busy、取消和 daemon stop 都必须消费或清除 permit；
+7. 不要用长时间持有 per-chat turn lock 的方式覆盖 Reviewer 延迟；Reviewer 仍应在锁外运行，只把最终校验与 permit
+   签发做成很短的原子操作。
+
+必须新增测试：
+
+- Reviewer 阻塞期间 `/bind` 到另一个项目，旧结果不能签发 permit；
+- 最终重校验之后、handoff 之前 `/untrust`，不能出现未定义授权窗口；
+- `/untrust -> 相同 /review` 不会复用旧 revision；
+- permit 与 promptId/convoId 不匹配时拒绝；
+- 一个 permit 不能执行两次；
+- handoff 失败后 permit 不可被下一条 prompt 使用。
+
+### 21.5 P1-4：补齐 Agent 指令与配置文件的持久化墙
+
+当前 `BridgeGrant.executesForTheOwner` 已拦截 `.git`、`.claude`、`.envrc`、`.mcp.json` 和 `.claude.json`，
+但 `AGENTS.md`、`CLAUDE.md` 仍按普通项目文件处理。它们会在机主后续 Codex/Claude Session 中自动成为指令，
+属于和 hooks 同类的持久化 Prompt Injection 入口。
+
+典型链路：
+
+```text
+群成员提出“更新项目开发规范”
+  → Guardian 可能判断为正常项目修改
+  → REVIEWER_APPROVED 自动 Write/Edit AGENTS.md 或 CLAUDE.md
+  → 机主后续 Agent Session 自动加载其中指令
+```
+
+整改要求：
+
+1. `executesForTheOwner` 至少加入任意层级的 `AGENTS.md` 和 `CLAUDE.md`；
+2. 盘点并保护当前支持 Agent 的项目级配置目录/文件，包括 `.codex/`、`.opencode/` 等实际会影响工具、模型、
+   MCP、plugin、hook 或指令加载的入口；
+3. 这些文件不必永久 DENY，但在 `AUTO_TRUSTED` 和 `REVIEWER_APPROVED` 下必须 fall through 到机主审批；
+4. 不要只依赖 Prompt Reviewer 识别“持久化意图”，运行期路径墙才是安全事实源；
+5. 用共享集合维护，不为 trusted/reviewed 复制两份规则。
+
+必须新增测试：
+
+- `Write/Edit/MultiEdit` 对根目录和子目录中的 `AGENTS.md`、`CLAUDE.md` 都不能自动运行；
+- `.codex/`、`.opencode/` 中确认会影响运行的配置文件不能自动运行；
+- `docs/agents-notes.md`、`src/claude.md.backup` 等仅相似名称不应误伤；
+- `AUTO_TRUSTED` 与 `REVIEWER_APPROVED` 使用同一参数化矩阵。
+
+### 21.6 P2-1：Reviewer 的 capability ceiling 必须与真实运行能力一致
+
+当前 `PromptReviewInput.CAPABILITY_CEILING` 告诉 Reviewer：
+
+> No shell beyond a tiny proven-safe set, no network access.
+
+但 `PermissionBridge` 会在 machine-confined grant 判断之前，自动执行 owner 配置的 `allowedCommands`。例如 owner
+允许的 `python deploy.py`、`npm test` 或其他脚本，可能访问网络、运行项目代码或读取更广资源。因此 Reviewer 正在
+基于错误的能力上限判断“低风险”。
+
+整改方案二选一，优先推荐 A：
+
+- **A（更安全）**：`REVIEWER_APPROVED` 只继承 `BridgeCommandPolicy` 内置的可证明只读 Bash；owner command
+  allowlist 仍需要一次具体工具审批。为此 `BridgeCommandPolicy` 应返回 ALLOW 的来源，区分 builtin-safe 与 owner-list；
+- **B（更便捷）**：把真实 owner allowlist 及其风险说明加入 ReviewInput，由 Guardian 按真实能力评估，并在 Trust
+  Contract/UI 中明确这些命令会零点击执行。仅传命令名仍不能证明脚本副作用，所以 B 的保证弱于 A。
+
+无论选择哪种，都不能继续向 Reviewer 声称“无网络”，同时又保留能联网的零点击脚本路径。
+
+必须新增测试：
+
+- reviewed grant 下 owner-allowlisted command 的行为与选定方案一致；
+- Reviewer 接收到的 capability 描述与最终 `PermissionBridge` 路径一致；
+- 能联网或运行项目脚本的命令不能在错误的“无网络”假设下自动执行。
+
+### 21.7 P2-2：未知 trust schema version 必须 fail closed
+
+当前 `FeishuTrust.parse` 只判断根对象是否含 `version`，任何版本都会按 `FeishuTrustFile` v2 解码。未来 daemon 降级
+读取 v3 文件时，可能忽略新增安全字段却继续应用旧字段中的 `TRUSTED/REVIEWED` 记录。
+
+整改要求：
+
+```kotlin
+when (version) {
+    2 -> decodeV2()
+    else -> failClosedUnsupportedVersion()
+}
+```
+
+- legacy `chatId -> workdir` 仍按现有规则迁移；
+- `version == 2` 才能读取三态记录；
+- version 缺失但形状不是合法 legacy map 时 fail closed；
+- version 大于、小于或类型错误都 fail closed，且不能自动覆盖原文件；
+- 日志应明确区分 corrupt 与 unsupported version，但不得记录文件内容。
+
+必须新增测试：
+
+- version 1/3/999 均读取为空信任；
+- version 为字符串、null 或负数时读取为空信任；
+- unsupported 文件不会因读取而被覆盖；
+- 用户随后显式设置新策略时，按既定恢复规则写出 v2。
+
+### 21.8 整改后的回归与交付门槛
+
+完成以上整改后必须执行：
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :daemon:test
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :protocol:allTests
+JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :mobile:composeApp:compileKotlinDesktop
+bash scripts/check-all.sh
+python3 scripts/probe-feishu-reviewer.py
+```
+
+其中 probe 会真实调用 Claude，应在确认使用 daemon 预期的认证和 API 路由后运行，并记录耗时。probe 的成功标准除了
+schema，还应要求耗时低于生产 hard timeout；当前 probe 允许 60 秒，而生产 Reviewer 12 秒就会终止，不能出现
+“probe PASS、线上永远 timeout”的假阳性。
+
+修复后需要重新完成 §17 的真实飞书验收，并增加：
+
+1. 开启 isolated Claude auth 后 Reviewed 正常工作，不触碰终端个人凭证；
+2. 激活 API preset/Gateway 后审核请求走同一路由；
+3. 审核期间 rebind/untrust 的确定性竞态测试；
+4. `AGENTS.md`、`CLAUDE.md` 修改必定弹机主审批；
+5. owner allowlisted 脚本按 §21.6 的最终选择执行；
+6. Reviewer 返回未知 reason code 时必定转人工。
+
+复审验证记录：
+
+- 在干净的 `ce9ebd21` 快照中，Feishu 定向测试与 `PermissionBridgeTest` 通过；
+- 当前开发工作区的全量 daemon test 曾被另一组未提交的 SessionArchive 改动阻塞，错误为
+  `RequestRouterArchiveTest.kt` 找不到 `SessionArchiveProbe`，与 Reviewed Trust 实现无关；
+- 本次复审未运行会真实调用外部模型的 Reviewer probe；完成 P1-1 后再用正确 daemon 认证/路由运行。
+
+### 21.9 整改完成定义
+
+只有同时满足以下条件，本文顶部状态才可以恢复为“已实现并通过复审”：
+
+- §21.2～§21.5 的全部 P1 完成并有针对性回归测试；
+- §21.6～§21.7 的 P2 完成，或在本文写明经机主接受的延期理由与临时限制；
+- Reviewer 使用与 daemon 主 Agent 一致的 binary、认证和 API 路由；
+- 未知/矛盾 Reviewer 输出全部 fail closed；
+- policy revision、rebind 和一次性 permit 不存在可复用或 TOCTOU 窗口；
+- Agent 指令与运行配置文件不能零点击写入；
+- capability ceiling 与真实运行权限一致；
+- clean HEAD 全量测试、Reviewer probe 和真实飞书验收全部通过。
+
+## 22. 2026-08-03 整改处置记录
+
+§21 各项经逐条对码核实后的处置（详细论证见当日会话分析）：
+
+| 项 | 处置 | 说明 |
+|---|---|---|
+| P1-1 认证/路由 | ✅ 已修 | `DaemonCore.claudeRuntime`（`--claude-bin` override + `CLAUDE_CONFIG_DIR` + preset env supplier）注入 Reviewer 进程，与主 `ClaudeBackend` 同源同步 |
+| P1-2 未知 reason code | ✅ 已修 | schema enum 收紧 + parser 拒未知 code + `mayAutoRun` 要求 `reasonCodes.isEmpty()`；注意这是对 §7.2 原规范的收紧（原文允许非强制 code 通过） |
+| P1-3 rebind/ABA | ✅ 部分采纳 | 终校验补 `routes.workdirFor(chatId) == workdir`；`TrustSnapshot` 带 `updatedAtEpochMs` 灭 ABA。**六字段一次性 permit 机制被拒绝**：审核结果是 `ask()` 内局部变量、同步传入 `sendReviewedBridgePrompt`，从不落成可被其他 prompt/conversation 窃取的存储 token，`handOff` CAS 已保证单次武装；revalidate→handoff 为微秒级同步窗口，§8.1 已明确接受「已 ARM 不可 disarm」，permit 机制解决的是不存在的通路 |
+| P1-4 持久化墙 | ✅ 已修 | `executesForTheOwner` 增补 `AGENTS.md`/`CLAUDE.md`/`CLAUDE.local.md`（大小写不敏感精确名）与 `.codex`/`.opencode` 目录段；仍是转卡非 DENY |
+| P2-1 capability ceiling | ✅ 轻量修 | 采用比 §21.6-B 更直接的方案：`allowedCommands` 进 `PromptReviewInput` + ceiling 文案如实声明白名单命令零点击执行；未采纳 A（会打破与 TRUSTED 的对等并削弱 #91 的价值） |
+| P2-2 schema version | ✅ 已修 | 仅整数 `version == 2` 解码，其余 fail closed 且不覆盖原文件 |
+| probe 假阳性 | ✅ 已修 | probe 加 12 秒（生产 hard timeout）耗时断言 |
+
+仍未完成（不阻塞合并、发版前必做）：§17 真实飞书群验收 + §21.8 追加的六项实测。

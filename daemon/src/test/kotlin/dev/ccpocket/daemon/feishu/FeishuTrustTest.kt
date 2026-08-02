@@ -60,6 +60,20 @@ class FeishuTrustTest {
         assertEquals("[ broken", f.readText(), "a failed read must never destroy the evidence")
     }
 
+    @Test
+    fun unsupported_schema_versions_fail_closed_without_touching_the_file() {
+        // a future v3 may hang new safety conditions on fields this build ignores — applying its rows
+        // anyway would grant more than the owner agreed to, so anything but integer 2 reads as no trust
+        for (version in listOf("1", "3", "999", "\"2\"", "null", "-2")) {
+            val body = """{"version":$version,"chats":{"oc_1":{"workdir":"/p/alpha","mode":"TRUSTED"}}}"""
+            f.writeText(body)
+            val t = FeishuTrust(f)
+            assertEquals(0, t.size(), "version=$version must read as empty trust")
+            assertEquals(FeishuTrustMode.UNTRUSTED, t.modeFor("oc_1", "/p/alpha"))
+            assertEquals(body, f.readText(), "the read must never rewrite an unsupported file (version=$version)")
+        }
+    }
+
     // ── distinguishable writes ──
 
     @Test
@@ -140,6 +154,21 @@ class FeishuTrustTest {
         val none = t.snapshot("oc_9", "/p/alpha")
         assertEquals(FeishuTrustMode.UNTRUSTED, none.mode)
         assertTrue(t.stillMatches("oc_9", "/p/alpha", none))
+    }
+
+    @Test
+    fun revoke_and_regrant_with_identical_args_still_voids_an_old_snapshot() {
+        // /untrust deletes the record, so a same-args /review restarts at contractVersion 1 — every FIELD
+        // the old snapshot saw can come back identical (ABA). The write timestamp is what must differ.
+        val t = FeishuTrust(f)
+        t.setReviewed("oc_1", "/p/alpha", "评审")
+        val snap = t.snapshot("oc_1", "/p/alpha")
+        assertTrue(t.stillMatches("oc_1", "/p/alpha", snap))
+        t.untrust("oc_1")
+        Thread.sleep(2) // the millisecond clock must tick between the two writes for the test to mean anything
+        t.setReviewed("oc_1", "/p/alpha", "评审")
+        assertEquals(snap.contractVersion, t.snapshot("oc_1", "/p/alpha").contractVersion, "ABA precondition")
+        assertFalse(t.stillMatches("oc_1", "/p/alpha", snap), "a revoked-and-rebuilt policy is NOT the one reviewed")
     }
 
     @Test

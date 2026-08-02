@@ -13,6 +13,19 @@ import json
 import shutil
 import subprocess
 import sys
+import time
+
+# the daemon rejects a review past this wall-clock budget (ClaudeFeishuPromptReviewer.HARD_TIMEOUT_MS) —
+# a probe that "passes" slower than this would still fail closed on every production review
+HARD_TIMEOUT_S = 12.0
+
+# closed enum, mirroring ClaudeFeishuPromptReviewer.SCHEMA (design §21.3): only these 8 model-emittable
+# codes are valid; the daemon-side degradation codes are never the model's to claim
+REASON_CODES = [
+    "CREDENTIAL_OR_SECRET_REQUEST", "EXTERNAL_PATH_REQUEST", "DATA_EXFILTRATION_REQUEST",
+    "PRIVILEGE_ESCALATION_REQUEST", "PERSISTENCE_REQUEST", "APPROVAL_BYPASS_REQUEST",
+    "DESTRUCTIVE_OR_IRREVERSIBLE_REQUEST", "OBFUSCATED_INTENT",
+]
 
 SCHEMA = json.dumps({
     "type": "object", "additionalProperties": False,
@@ -22,7 +35,7 @@ SCHEMA = json.dumps({
         "matchesContract": {"type": "boolean"},
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "intent": {"type": "string", "maxLength": 300},
-        "reasonCodes": {"type": "array", "items": {"type": "string", "maxLength": 80}, "maxItems": 16},
+        "reasonCodes": {"type": "array", "items": {"type": "string", "enum": REASON_CODES}, "maxItems": 16},
         "explanation": {"type": "string", "maxLength": 300},
     },
     "required": ["decision", "risk", "matchesContract", "confidence", "intent", "reasonCodes", "explanation"],
@@ -38,7 +51,8 @@ PAYLOAD = json.dumps({
     "project_name": "probe-project",
     "purpose": "仅允许日常开发、阅读、代码评审和测试",
     "sender_role": "MEMBER",
-    "capability_ceiling": "read/search/edit inside the project only",
+    "capability_ceiling": "read/search/edit inside the project only, plus owner-whitelisted shell commands (see allowed_commands)",
+    "allowed_commands": ["npm test"],
     "UNTRUSTED_DATA": {"prompt": "请概括 README 的主要内容"},
 })
 
@@ -63,11 +77,13 @@ def main() -> int:
         "--no-session-persistence",
         "--system-prompt", SYSTEM_PROMPT,
     ]
+    started = time.monotonic()
     try:
         proc = subprocess.run(argv, input=PAYLOAD, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
         print("FAIL: reviewer probe timed out (60s)")
         return 1
+    elapsed = time.monotonic() - started
     if proc.returncode != 0:
         print(f"FAIL: exit={proc.returncode} — likely a flag the installed CLI doesn't know")
         print(proc.stderr.strip()[:500])
@@ -92,8 +108,15 @@ def main() -> int:
     c = structured.get("confidence")
     if not isinstance(c, (int, float)) or not (0.0 <= float(c) <= 1.0):
         problems.append(f"confidence={c!r}")
-    if not isinstance(structured.get("reasonCodes"), list):
+    codes = structured.get("reasonCodes")
+    if not isinstance(codes, list):
         problems.append("reasonCodes not a list")
+    else:
+        # the daemon's parser rejects any code outside the closed set (design §21.3) — a CLI that stops
+        # honoring the schema enum would silently turn every review into REVIEWER_INVALID_OUTPUT
+        unknown = [c for c in codes if c not in REASON_CODES]
+        if unknown:
+            problems.append(f"reasonCodes outside the closed enum: {unknown!r}")
     for field in ("intent", "explanation"):
         if not isinstance(structured.get(field), str):
             problems.append(f"{field} not a string")
@@ -101,8 +124,14 @@ def main() -> int:
         print("FAIL: structured_output violates the contract: " + "; ".join(problems))
         print(json.dumps(structured, ensure_ascii=False)[:500])
         return 1
+    if elapsed > HARD_TIMEOUT_S:
+        # correct shape, unusable latency: the daemon kills the process at HARD_TIMEOUT_MS, so every
+        # production review would fail closed to owner approval despite this probe's contract holding
+        print(f"FAIL: contract holds but the review took {elapsed:.1f}s > {HARD_TIMEOUT_S:.0f}s "
+              "(production hard timeout) — probe would PASS on shape alone, but every live review will time out")
+        return 1
     print("PASS: reviewer CLI contract holds")
-    print(f"  decision={structured['decision']} risk={structured['risk']} confidence={structured['confidence']}")
+    print(f"  decision={structured['decision']} risk={structured['risk']} confidence={structured['confidence']} elapsed={elapsed:.1f}s")
     return 0
 
 

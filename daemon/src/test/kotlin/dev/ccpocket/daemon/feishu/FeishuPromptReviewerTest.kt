@@ -40,12 +40,13 @@ class FeishuPromptReviewerTest {
     }
 
     @Test
-    fun any_force_owner_reason_code_vetoes_an_otherwise_clean_pass() {
+    fun any_reason_code_at_all_vetoes_an_otherwise_clean_pass() {
         for (code in PromptReviewPolicy.FORCE_OWNER_REASON_CODES) {
             assertFalse(PromptReviewPolicy.mayAutoRun(result(reasonCodes = listOf(code))), code)
         }
-        // an unknown, non-forcing code the model invented does not veto by itself
-        assertTrue(PromptReviewPolicy.mayAutoRun(result(reasonCodes = listOf("SOME_NOVEL_NOTE"))))
+        // fail closed on codes the daemon doesn't know (design §21.3): a LOW auto-pass may carry NO risk
+        // annotation, so an invented "code" — a signal the policy can't price — escalates just the same
+        assertFalse(PromptReviewPolicy.mayAutoRun(result(reasonCodes = listOf("SOME_NOVEL_NOTE"))))
     }
 
     @Test
@@ -100,6 +101,21 @@ class FeishuPromptReviewerTest {
     }
 
     @Test
+    fun unknown_or_misspelled_reason_codes_invalidate_the_whole_output() {
+        // a typo'd or invented code is either schema drift or a smuggling channel (design §21.3) — the
+        // parser rejects the output wholesale, which normalizes to REVIEWER_INVALID_OUTPUT → ASK_OWNER
+        val typo = outer(
+            """{"decision":"ASK_OWNER","risk":"MEDIUM","matchesContract":true,"confidence":0.95,"intent":"x","reasonCodes":["CREDENTIAL_REQUEST"],"explanation":"y"}""",
+        )
+        assertNull(ClaudeFeishuPromptReviewer.parseReviewOutput(typo))
+        // the exact constant still parses — and vetoes auto-run downstream
+        val known = ClaudeFeishuPromptReviewer.parseReviewOutput(
+            outer("""{"decision":"ALLOW_GUARDED","risk":"LOW","matchesContract":true,"confidence":0.95,"intent":"x","reasonCodes":["${PromptReviewPolicy.CREDENTIAL_OR_SECRET_REQUEST}"],"explanation":"y"}"""),
+        )!!
+        assertFalse(PromptReviewPolicy.mayAutoRun(known), "ALLOW_GUARDED+LOW with a known code must still ask the owner")
+    }
+
+    @Test
     fun overlong_string_fields_are_clamped_not_stored_raw() {
         val long = "z".repeat(5_000)
         val r = ClaudeFeishuPromptReviewer.parseReviewOutput(
@@ -113,5 +129,34 @@ class FeishuPromptReviewerTest {
     fun oversized_stdout_is_rejected_wholesale() {
         val padded = outer(valid) + " ".repeat(ClaudeFeishuPromptReviewer.MAX_STDOUT_BYTES)
         assertNull(ClaudeFeishuPromptReviewer.parseReviewOutput(padded))
+    }
+
+    // ── capability ceiling honesty (design §21.6): the reviewer sees the REAL zero-click surface ──
+
+    @Test
+    fun payload_carries_the_owner_allowlist_for_the_reviewer_to_price_risk_against() {
+        val p = ClaudeFeishuPromptReviewer.payload(
+            PromptReviewInput(
+                reviewId = "r1",
+                projectName = "alpha",
+                purpose = "review only",
+                prompt = "run the tests",
+                allowedCommands = listOf("npm test", "./gradlew build"),
+            ),
+        )
+        assertTrue(""""allowed_commands":["npm test","./gradlew build"]""" in p, p)
+        // an empty allowlist is still an explicit (empty) field, never an absent one
+        val empty = ClaudeFeishuPromptReviewer.payload(PromptReviewInput("r2", "alpha", "review only", "hi"))
+        assertTrue(""""allowed_commands":[]""" in empty, empty)
+    }
+
+    @Test
+    fun capability_ceiling_admits_the_allowlist_instead_of_claiming_absolute_no_network() {
+        val c = PromptReviewInput.CAPABILITY_CEILING
+        assertTrue("allowed_commands" in c, "ceiling must point at the real allowlist field")
+        // the old wording promised "no network access" flatly — a whitelisted command can reach the
+        // network, and a reviewer judging against the fiction would under-price that risk
+        assertFalse("no network access" in c, c)
+        assertFalse("no shell beyond" in c.lowercase(), c)
     }
 }

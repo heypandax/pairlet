@@ -27,12 +27,21 @@ data class PromptReviewInput(
     /** The fixed description of what an auto-passed request may at most do — so "low-risk" is judged
      *  against the real ceiling, not the model's imagination of it. */
     val capabilityCeiling: String = CAPABILITY_CEILING,
+    /** The owner's configured Bash allowlist (command patterns, not secrets) — the one hole in the "no
+     *  shell" ceiling, surfaced to the reviewer so it judges risk against what CAN actually run
+     *  zero-click instead of a rosier fiction (design §21.6). */
+    val allowedCommands: List<String> = emptyList(),
 ) {
     companion object {
+        // honest about the allowlist hole: an owner-whitelisted command runs zero-click and MAY reach the
+        // network or run project scripts, so the ceiling must not claim "no network" absolutes the
+        // reviewer would then price risk against (design §21.6)
         const val CAPABILITY_CEILING =
-            "Auto-approved requests may only: read/search/edit files INSIDE the bound project directory. " +
-                "No shell beyond a tiny proven-safe set, no MCP tools, no network access, no writes to " +
-                ".git/.claude/.envrc, nothing outside the project — all of those still require the machine owner's approval."
+            "Auto-approved requests may only: read/search/edit files INSIDE the bound project directory, " +
+                "plus run shell commands the machine owner explicitly whitelisted (see the allowed_commands " +
+                "field) — those run with zero clicks and may access the network or run project scripts. " +
+                "Everything else — any other shell command, MCP tools, network access, writes to " +
+                ".git/.claude/.envrc, anything outside the project — still requires the machine owner's approval."
     }
 }
 
@@ -64,6 +73,11 @@ object PromptReviewPolicy {
             r.risk == PromptReviewRisk.LOW &&
             r.matchesContract &&
             r.confidence.isFinite() && r.confidence >= CONFIDENCE_FLOOR && r.confidence <= 1.0 &&
+            // a LOW-risk auto-pass may not carry ANY risk annotation (design §21.3): a code the daemon
+            // doesn't recognize is a signal it can't price, so it fails closed the same as a known veto.
+            // The explicit force-owner check below is redundant under the empty-set rule — kept anyway as
+            // defense in depth against a future edit relaxing the isEmpty bar.
+            r.reasonCodes.isEmpty() &&
             r.reasonCodes.none { it in FORCE_OWNER_REASON_CODES }
 
     /** A degraded outcome (prescreen hit, timeout, invalid output, unavailable adapter) as a well-formed
@@ -137,6 +151,9 @@ class ReviewedPreflight(
     private val auditLog: FeishuReviewLog,
     /** shadow rollout switch (design §13): review + audit as usual, but NEVER auto-run. */
     private val shadowOnly: Boolean = false,
+    /** The owner's Bash allowlist, forwarded into every review so the model prices risk against the real
+     *  capability ceiling (design §21.6). Defaults empty — wiring from the engine config is separate. */
+    private val allowedCommands: List<String> = emptyList(),
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     data class Outcome(val autoRun: Boolean, val reviewId: String, val result: PromptReviewResult)
@@ -165,6 +182,7 @@ class ReviewedPreflight(
                             projectName = projectName,
                             purpose = purpose,
                             prompt = prompt,
+                            allowedCommands = allowedCommands,
                         ),
                     )
                 }.getOrElse {

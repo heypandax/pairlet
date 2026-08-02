@@ -4,7 +4,9 @@ import dev.ccpocket.protocol.PocketJson
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 import java.io.File
 
 /**
@@ -59,6 +61,11 @@ data class TrustSnapshot(
     val mode: FeishuTrustMode,
     val purpose: String?,
     val contractVersion: Long,
+    /** Guards the ABA hole contractVersion alone leaves open: /untrust deletes the record, so a same-args
+     *  /review restarts at version 1 and can rebuild a record FIELD-IDENTICAL to the one the in-flight
+     *  review snapshotted. The write timestamp differs across that revoke/re-grant, so the data-class
+     *  equality in [FeishuTrust.stillMatches] voids the stale result without any extra comparison logic. */
+    val updatedAtEpochMs: Long = 0,
 )
 
 /**
@@ -120,6 +127,7 @@ class FeishuTrust(private val path: File) {
             mode = r?.mode ?: FeishuTrustMode.UNTRUSTED,
             purpose = r?.purpose,
             contractVersion = r?.contractVersion ?: 0,
+            updatedAtEpochMs = r?.updatedAtEpochMs ?: 0,
         )
     }
 
@@ -181,16 +189,25 @@ class FeishuTrust(private val path: File) {
          * `chatId -> workdir` map as [FeishuTrustFile] would "succeed" as an empty table and silently drop
          * every grant. A legacy map migrates in-memory to TRUSTED records — those rows were the owner's
          * explicit /trust, so the upgrade must not quietly change their meaning.
+         *
+         * Only the integer version 2 is decoded (reviewed-trust design §21.7). Any OTHER version — newer,
+         * older, or the wrong type — reads as empty trust rather than best-effort: a future v3 may hang new
+         * safety conditions on fields this build does not know, so applying its TRUSTED/REVIEWED rows while
+         * ignoring those conditions would grant more than the owner agreed to. Fail closed is the same
+         * posture as a corrupt file, and like it the unsupported file is never overwritten by the read —
+         * only a later explicit trust write regenerates it as v2.
          */
         internal fun parse(text: String): Map<String, FeishuTrustRecord> {
             val root = PocketJson.parseToJsonElement(text)
-            return if (root is JsonObject && "version" in root) {
-                PocketJson.decodeFromJsonElement<FeishuTrustFile>(root).chats
-            } else {
-                PocketJson.decodeFromJsonElement<Map<String, String>>(root).mapValues { (_, wd) ->
+            if (root !is JsonObject || "version" !in root) {
+                return PocketJson.decodeFromJsonElement<Map<String, String>>(root).mapValues { (_, wd) ->
                     FeishuTrustRecord(workdir = wd, mode = FeishuTrustMode.TRUSTED, purpose = null, contractVersion = 1)
                 }
             }
+            // an unquoted integer 2, exactly — "2" (string), null, 3, -2 etc. all fall through to fail closed
+            val v = root["version"] as? JsonPrimitive
+            if (v == null || v.isString || v.intOrNull != 2) return emptyMap()
+            return PocketJson.decodeFromJsonElement<FeishuTrustFile>(root).chats
         }
     }
 }

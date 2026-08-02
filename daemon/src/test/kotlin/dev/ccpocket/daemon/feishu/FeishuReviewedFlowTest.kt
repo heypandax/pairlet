@@ -93,8 +93,10 @@ class FeishuReviewedFlowTest {
 
     @Test
     fun model_invented_reason_codes_never_reach_the_durable_audit_trail() {
-        // reasonCodes from the model are free text — a smuggling channel for prompt content (review Low-2):
-        // only the known constant codes persist, while the in-memory result keeps the full list for policy
+        // the CLI parser already rejects unknown codes wholesale (design §21.3), so a real adapter can't
+        // deliver this shape — the fake injects it directly to prove the preflight's audit filter holds as
+        // an independent second layer: only the known constant codes persist, while the in-memory result
+        // keeps the full list for the ring log / policy, which never touch disk
         val smuggle = "SMUGGLED prompt fragment here"
         val outcome = evaluate(FakeReviewer {
             allow().copy(risk = PromptReviewRisk.MEDIUM, reasonCodes = listOf(smuggle, PromptReviewPolicy.CREDENTIAL_OR_SECRET_REQUEST))
@@ -104,6 +106,32 @@ class FeishuReviewedFlowTest {
         val line = auditFile.readLines().single()
         assertFalse("SMUGGLED" in line, "free-text codes must not persist: $line")
         assertTrue(PromptReviewPolicy.CREDENTIAL_OR_SECRET_REQUEST in line, "known codes still persist")
+    }
+
+    @Test
+    fun an_unknown_reason_code_on_an_otherwise_clean_pass_escalates() {
+        // defense in depth behind the parser (design §21.3): even if an unknown code slipped past it, the
+        // empty-set rule in the policy bar means a LOW auto-pass carrying ANY annotation asks the owner
+        val outcome = evaluate(FakeReviewer { allow().copy(reasonCodes = listOf("SOME_NOVEL_NOTE")) })
+        assertFalse(outcome.autoRun)
+        assertTrue("escalated_owner" in auditFile.readLines().single())
+    }
+
+    @Test
+    fun preflight_forwards_the_owner_allowlist_into_the_review_input() {
+        // the reviewer must judge risk against the REAL zero-click surface (design §21.6)
+        var seen: PromptReviewInput? = null
+        val reviewer = object : FeishuPromptReviewer {
+            override suspend fun review(input: PromptReviewInput): PromptReviewResult {
+                seen = input
+                return allow()
+            }
+        }
+        runBlocking {
+            ReviewedPreflight(reviewer, audit, allowedCommands = listOf("npm test", "./gradlew build"))
+                .evaluate(snapshot, "帮我跑测试", "alpha", "ou_member", "om_msg1") { true }
+        }
+        assertEquals(listOf("npm test", "./gradlew build"), seen?.allowedCommands)
     }
 
     @Test

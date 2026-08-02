@@ -260,15 +260,61 @@ class PermissionBridgeTest {
             workdir = System.getProperty("java.io.tmpdir"))
         // in-workdir, so the wall passes — but each of these RUNS on the owner's next git/claude/cd, whose
         // sessions are not clean-room. That is a persistence primitive, not a code change, so it gets a card.
-        for ((i, p) in listOf(".git/config", ".git/hooks/pre-commit", ".claude/settings.json", "sub/.envrc", ".mcp.json", ".claude.json").withIndex()) {
+        val executing = listOf(
+            ".git/config", ".git/hooks/pre-commit", ".claude/settings.json", "sub/.envrc", ".mcp.json", ".claude.json",
+            // agent instruction files + agent config dirs (§21.5 P1-4): loaded by the owner's next session
+            "AGENTS.md", "CLAUDE.md", "CLAUDE.local.md", "sub/AGENTS.md", "agents.md", ".codex/config.toml", ".opencode/settings.json",
+        )
+        for ((i, p) in executing.withIndex()) {
             b.onControlRequest(AgentEvent.ControlRequest("x$i", "Write", buildJsonObject { put("file_path", p) }))
         }
         assertTrue(responses.isEmpty(), "an unattended write to an auto-executing file must ask: $responses")
-        assertEquals(6, emitted.size)
+        assertEquals(executing.size, emitted.size)
         // ...and a file that merely LOOKS like one is unaffected (segment match, not substring)
         b.onControlRequest(AgentEvent.ControlRequest("ok", "Write", buildJsonObject { put("file_path", "docs/dotgit-notes.md") }))
         assertTrue(responses.single().allow)
         scope.cancel()
+    }
+
+    @Test
+    fun agent_instruction_files_and_config_dirs_ask_under_both_machine_confined_grants() = runBlocking {
+        // §21.5 P1-4: AGENTS.md / CLAUDE.md / CLAUDE.local.md are loaded as standing instructions by the
+        // owner's next agent session, and .codex / .opencode carry config that shapes it — same persistence
+        // class as a git hook. One parameterized sweep over BOTH machine-confined grants (a shared set in
+        // BridgeGrant, not two copies), over every write-shaped file tool, at root and in subdirectories,
+        // including case variants (the macOS filesystem is case-insensitive, so `agents.MD` IS `AGENTS.md`).
+        for (grant in listOf(BridgeGrant.AUTO_TRUSTED, BridgeGrant.REVIEWER_APPROVED)) {
+            val scope = CoroutineScope(Dispatchers.Unconfined)
+            val coord = ApprovalCoordinator(scope)
+            val responses = mutableListOf<Resp>()
+            val emitted = mutableListOf<Frame>()
+            val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+                respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+                bridgeSession = true, bridgeGrant = { grant },
+                workdir = System.getProperty("java.io.tmpdir"))
+
+            val guarded = listOf(
+                "AGENTS.md", "sub/AGENTS.md", "CLAUDE.md", "deep/nested/CLAUDE.md", "CLAUDE.local.md",
+                "agents.md", "agents.MD", "Claude.Md", // case variants land on the same on-disk file
+                ".codex/config.toml", ".codex/mcp.json", ".opencode/settings.json", ".opencode/plugin/x.js",
+            )
+            var n = 0
+            for (tool in listOf("Write", "Edit", "MultiEdit")) {
+                for (p in guarded) {
+                    b.onControlRequest(AgentEvent.ControlRequest("g${n++}", tool, buildJsonObject { put("file_path", p) }))
+                }
+            }
+            assertTrue(responses.isEmpty(), "$grant: instruction/config writes must reach the owner: $responses")
+            assertEquals(3 * guarded.size, emitted.size, "$grant: each guarded write raises its own card")
+
+            // Similar-LOOKING names stay ordinary project files: whole-name match, not substring — otherwise
+            // the wall degrades into a nuisance filter and trusted chats lose their whole point.
+            for ((i, p) in listOf("docs/agents-notes.md", "src/claude.md.backup", "AGENTS.md.bak").withIndex()) {
+                b.onControlRequest(AgentEvent.ControlRequest("ok$i", "Write", buildJsonObject { put("file_path", p) }))
+            }
+            assertEquals(listOf(true, true, true), responses.map { it.allow }, "$grant: similar names must not be caught")
+            scope.cancel()
+        }
     }
 
     @Test
@@ -597,11 +643,16 @@ class PermissionBridgeTest {
             assertFalse(responses.single().allow, "$grant: out-of-workdir read must be denied")
             responses.clear()
 
-            // 4. a write that EXECUTES for the owner later still asks (persistence primitive)
+            // 4. a write that EXECUTES for the owner later still asks (persistence primitive) — including the
+            // agent instruction files and agent config dirs of §21.5 P1-4
             b.onControlRequest(AgentEvent.ControlRequest("d1", "Write", buildJsonObject { put("file_path", ".git/hooks/pre-commit") }))
             b.onControlRequest(AgentEvent.ControlRequest("d2", "Write", buildJsonObject { put("file_path", ".claude/settings.json") }))
             b.onControlRequest(AgentEvent.ControlRequest("d3", "Write", buildJsonObject { put("file_path", "sub/.envrc") }))
             b.onControlRequest(AgentEvent.ControlRequest("d4", "Write", buildJsonObject { put("file_path", ".mcp.json") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d5", "Write", buildJsonObject { put("file_path", "AGENTS.md") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d6", "Edit", buildJsonObject { put("file_path", "sub/CLAUDE.md") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d7", "MultiEdit", buildJsonObject { put("file_path", ".codex/config.toml") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d8", "Write", buildJsonObject { put("file_path", ".opencode/plugin.js") }))
             assertTrue(responses.isEmpty(), "$grant: auto-executing files must reach the owner")
 
             // 5. MCP / egress / unknown / plan-gate tools all still ask

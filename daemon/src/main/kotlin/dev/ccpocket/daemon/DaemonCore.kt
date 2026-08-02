@@ -38,6 +38,8 @@ class DaemonCore(
     backends: Map<AgentKind, AgentBackendFactory>,
     val prefs: DaemonPrefs = DaemonPrefs.load(),
     claudeConfigDir: java.nio.file.Path? = null,
+    /** The owner's --claude-bin override — must reach every auxiliary claude process (see [claudeRuntime]). */
+    claudeBin: String? = null,
     presetStore: PresetStore = PresetStore.load(),
     scheduleStore: ScheduleStore = ScheduleStore.load(),
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
@@ -49,6 +51,13 @@ class DaemonCore(
     val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** The shared claude launch context (binary override + credential store + preset env) for auxiliary
+     *  claude processes — e.g. the Feishu Guardian Reviewer (reviewed-trust §21.2): a helper that resolved
+     *  its own binary or inherited raw env would diverge from the main backend on all three. */
+    val claudeRuntime = dev.ccpocket.daemon.claude.ClaudeRuntime(claudeBin, claudeConfigDir) {
+        runCatching { presetStore.activeEnv() }.getOrNull()
+    }
 
     /** ONE pending-approval ledger for the whole daemon (approval design M1): agent tool asks, bridge
      *  request approvals, quick-shell commands and file exports all register here, so a verdict routes by

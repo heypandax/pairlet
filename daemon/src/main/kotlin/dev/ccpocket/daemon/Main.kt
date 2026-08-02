@@ -193,6 +193,7 @@ private class RunCmd : CliktCommand(name = "run") {
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,
+            claudeBin = claudeBin,
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
         )

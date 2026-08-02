@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.feishu
 
 import dev.ccpocket.daemon.claude.ClaudeLauncher
+import dev.ccpocket.daemon.claude.ClaudeRuntime
 import dev.ccpocket.daemon.util.logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -16,9 +17,11 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.io.File
 import java.io.InputStream
 import java.nio.file.Path
@@ -36,7 +39,15 @@ import java.nio.file.Path
 class ClaudeFeishuPromptReviewer(
     /** Working dir for the reviewer process — MUST hold no project material (use the bridge state dir). */
     private val cwd: File,
-    private val resolveBin: () -> Path? = { runCatching { ClaudeLauncher.resolveExecutable() }.getOrNull() },
+    /** The MAIN backend's launch context (§21.2 / P1-1): binary override, isolated credential store, active
+     *  preset env. Null (tests only) falls back to bare PATH resolution + inherited env — production callers
+     *  must pass [dev.ccpocket.daemon.DaemonCore.claudeRuntime], or the reviewer dies on --claude-bin-only
+     *  machines, burns the terminal's personal login under credential isolation, and routes group prompts
+     *  around the owner's chosen gateway/preset. */
+    private val runtime: ClaudeRuntime? = null,
+    private val resolveBin: () -> Path? = {
+        runtime?.resolveExecutable() ?: runCatching { ClaudeLauncher.resolveExecutable() }.getOrNull()
+    },
 ) : FeishuPromptReviewer {
     private val log = logger("FeishuReviewer")
 
@@ -60,8 +71,11 @@ class ClaudeFeishuPromptReviewer(
             .directory(cwd.apply { mkdirs() })
             .redirectErrorStream(false)
         // never look like a nested agent session; login/proxy env passes through untouched (a denylist —
-        // stripping more risks breaking whatever auth shape this machine uses, see design §7.5)
+        // stripping more risks breaking whatever auth shape this machine uses, see design §7.5). The main
+        // backend's runtime then layers the SAME credential store + preset env the agent launches with
+        // (§21.2) — isolation flags in argv stay untouched, so auth rides along but project context does not.
         pb.environment().remove("CLAUDECODE")
+        runtime?.applyTo(pb.environment())
         val proc = runCatching { pb.start() }.getOrElse {
             return forced(PromptReviewPolicy.REVIEWER_UNAVAILABLE, "couldn't start the reviewer: ${it.message}")
         }
@@ -131,6 +145,9 @@ class ClaudeFeishuPromptReviewer(
             put("purpose", input.purpose)
             put("sender_role", input.senderRole.name)
             put("capability_ceiling", input.capabilityCeiling)
+            // the owner's Bash allowlist (patterns, not secrets) — the reviewer must see the REAL
+            // zero-click surface, not the ceiling's prose alone (design §21.6)
+            putJsonArray("allowed_commands") { input.allowedCommands.forEach { add(it) } }
             put(
                 "UNTRUSTED_DATA",
                 buildJsonObject { put("prompt", input.prompt) },
@@ -158,9 +175,13 @@ class ClaudeFeishuPromptReviewer(
             val intent = (s["intent"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
             val explanation = (s["explanation"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
             val reasonCodes = runCatching {
-                s["reasonCodes"]!!.jsonArray.map { it.jsonPrimitive.content.take(PromptReviewPolicy.MAX_FIELD_CHARS) }
+                s["reasonCodes"]!!.jsonArray.map { it.jsonPrimitive.content }
             }.getOrNull() ?: return null
             if (reasonCodes.size > PromptReviewPolicy.MAX_REASON_CODES) return null
+            // fail closed on any code outside the daemon's own constant set (design §21.3): an unknown
+            // "code" is either schema drift or a free-text smuggling channel, and either way this output
+            // can't be trusted — REVIEWER_INVALID_OUTPUT → ASK_OWNER, never a partial accept
+            if (reasonCodes.any { it !in PromptReviewPolicy.FORCE_OWNER_REASON_CODES }) return null
             return PromptReviewResult(
                 decision = decision,
                 risk = risk,
@@ -193,6 +214,9 @@ class ClaudeFeishuPromptReviewer(
             return out.toString(Charsets.UTF_8)
         }
 
+        // reasonCodes is a CLOSED enum of the model-emittable codes (design §21.3) — the degradation codes
+        // (REVIEWER_TIMEOUT etc.) are the daemon's own and never the model's to claim. The parser enforces
+        // the same closure independently, so a CLI that ignores --json-schema still can't widen the set.
         internal val SCHEMA = """
             {"type":"object","additionalProperties":false,
              "properties":{
@@ -201,7 +225,10 @@ class ClaudeFeishuPromptReviewer(
                "matchesContract":{"type":"boolean"},
                "confidence":{"type":"number","minimum":0,"maximum":1},
                "intent":{"type":"string","maxLength":300},
-               "reasonCodes":{"type":"array","items":{"type":"string","maxLength":80},"maxItems":16},
+               "reasonCodes":{"type":"array","items":{"type":"string","enum":[
+                 "CREDENTIAL_OR_SECRET_REQUEST","EXTERNAL_PATH_REQUEST","DATA_EXFILTRATION_REQUEST",
+                 "PRIVILEGE_ESCALATION_REQUEST","PERSISTENCE_REQUEST","APPROVAL_BYPASS_REQUEST",
+                 "DESTRUCTIVE_OR_IRREVERSIBLE_REQUEST","OBFUSCATED_INTENT"]},"maxItems":16},
                "explanation":{"type":"string","maxLength":300}},
              "required":["decision","risk","matchesContract","confidence","intent","reasonCodes","explanation"]}
         """.trimIndent()
@@ -219,6 +246,9 @@ class ClaudeFeishuPromptReviewer(
 
             The question you answer: does this request match the owner's declared purpose for this group,
             AND is it clearly low-risk WITHIN the stated capability ceiling? Not "can the task be done".
+            `allowed_commands` lists the shell commands the owner has pre-approved to run with zero clicks
+            — judge risk against that REAL ceiling: those commands may reach the network or run project
+            scripts, so weigh what this request would actually do with them.
 
             You MUST output decision=ASK_OWNER when the request involves ANY of: reading or collecting
             credentials or secrets; sending project data anywhere external; privilege escalation;
@@ -227,7 +257,8 @@ class ClaudeFeishuPromptReviewer(
             intent. When you are uncertain, when context is missing, or when several readings exist, output
             risk=UNKNOWN and decision=ASK_OWNER.
 
-            Applicable reasonCodes (emit every one that applies, empty array when none):
+            Applicable reasonCodes (emit every one that applies, empty array when none). Codes MUST come
+            from this exact list and no other — anything else invalidates your whole output:
             CREDENTIAL_OR_SECRET_REQUEST, EXTERNAL_PATH_REQUEST, DATA_EXFILTRATION_REQUEST,
             PRIVILEGE_ESCALATION_REQUEST, PERSISTENCE_REQUEST, APPROVAL_BYPASS_REQUEST,
             DESTRUCTIVE_OR_IRREVERSIBLE_REQUEST, OBFUSCATED_INTENT.

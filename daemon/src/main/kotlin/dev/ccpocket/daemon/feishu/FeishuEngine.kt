@@ -87,9 +87,14 @@ class FeishuEngine(
     // reach. Lazy: an engine on a machine that never uses /review must not pay the resolver.
     private val reviewPreflight by lazy {
         ReviewedPreflight(
-            ClaudeFeishuPromptReviewer(File(stateDir, "reviewer")),
+            // core.claudeRuntime = the MAIN backend's binary/credentials/preset routing (§21.2 P1-1) — a
+            // reviewer resolving its own claude would diverge on all three
+            ClaudeFeishuPromptReviewer(File(stateDir, "reviewer"), core.claudeRuntime),
             reviewLog,
             shadowOnly = reviewShadowOnly,
+            // the owner's zero-click Bash allowlist rides into the review input (§21.6 P2-1), so the
+            // Guardian judges "low risk" against the ceiling this bridge ACTUALLY runs with
+            allowedCommands = spec.allowedCommands,
         )
     }
     private val commands = FeishuCommands(
@@ -597,7 +602,12 @@ class FeishuEngine(
             val review = if (!ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED) {
                 reviewPreflight.evaluate(
                     snapshot, vetted.text, FeishuRoutes.projectName(workdir), senderOpenId, replyTo,
-                ) { trust.stillMatches(chatId, workdir, snapshot) }.also {
+                ) {
+                    // §21.4: the trust record alone can't see a mid-review /bind — the routes table is the
+                    // half a rebind actually mutates, so the final check reads BOTH: the policy must be
+                    // unchanged AND the chat must still be bound to the very project this review ran against.
+                    trust.stillMatches(chatId, workdir, snapshot) && routes.workdirFor(chatId) == workdir
+                }.also {
                     logLine(
                         "[review] ${if (it.autoRun) "自动通过" else "转机主审批"}" +
                             "（risk=${it.result.risk} codes=${it.result.reasonCodes.joinToString(",").ifEmpty { "-" }} id=${it.reviewId.take(8)}…）",
