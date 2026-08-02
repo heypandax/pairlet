@@ -1138,9 +1138,9 @@
     <string name="bridge_request_approval">One request, one approval</string>
     <string name="bridge_request_approval_hint">Each outsider request is shown on your phone before the agent sees it. Approve once and that request runs to completion; the next request starts locked again. Sensitive data is still withheld from the reply.</string>
     <string name="bridge_request_approval_tag">approves each request</string>
-    <string name="bridge_no_approval">Let group members run without my approval</string>
-    <string name="bridge_no_approval_hint">Off by default, and this alone trusts nobody: you still send /trust in each group you want to free. A trusted group\'s reads, edits and searches then run with no card on your phone, confined to that project. Shell commands are unchanged — dangerous ones refused, anything unproven still asks you — and every card-free run is logged.</string>
-    <string name="bridge_no_approval_tag">no-approval allowed</string>
+    <string name="bridge_no_approval">Allow group trust modes</string>
+    <string name="bridge_no_approval_hint">Off by default, and this alone trusts nobody: per group you then send /review for Smart Review (an AI screens each request — only clearly low-risk, on-purpose ones run without a card; the rest still ask you) or /trust for no-approval; every other group keeps per-request approval. Card-free runs stay confined to that project\'s reads, edits and searches. Shell commands are unchanged — dangerous ones refused, anything unproven still asks you — and every card-free run is logged.</string>
+    <string name="bridge_no_approval_tag">trust modes allowed</string>
     <string name="approval_fab_label">Pending</string>
     <string name="approval_fab_a11y">%1$d pending approvals</string>
     <string name="approval_fab_refreshing">Last known · refreshing</string>

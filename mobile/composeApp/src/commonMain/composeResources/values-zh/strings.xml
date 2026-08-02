@@ -1138,9 +1138,9 @@
     <string name="bridge_request_approval">一次请求，一次审批</string>
     <string name="bridge_request_approval_hint">他人的每次请求都会先完整展示到你的手机，批准后该请求可一次跑完；下一次请求会重新锁住。回复仍会拦截敏感信息。</string>
     <string name="bridge_request_approval_tag">逐请求审批</string>
-    <string name="bridge_no_approval">允许群成员免审批直接执行</string>
-    <string name="bridge_no_approval_hint">默认关，且单开这里不信任任何群：还要在想放开的群里发 /trust。放开后该群的读文件、改代码、搜索不再弹你手机，且只限那个项目；shell 命令照旧——危险命令直接拒绝，拿不准的仍然弹你审批。每次免审批执行都会留档。</string>
-    <string name="bridge_no_approval_tag">可免审批</string>
+    <string name="bridge_no_approval">允许群信任模式</string>
+    <string name="bridge_no_approval_hint">默认关，且单开这里不信任任何群：开启后机主可在群里发 /review 选「智能审核」（AI 逐条判断，明确低风险且符合群用途的才直接执行，其余仍弹你审批）或 /trust 选「免审核」；其他群保持逐次审批。直接执行只限那个项目内的读写和搜索；shell 命令照旧——危险命令直接拒绝，拿不准的仍然弹你审批。每次直接执行都会留档。</string>
+    <string name="bridge_no_approval_tag">可设信任模式</string>
     <string name="approval_fab_label">待审批</string>
     <string name="approval_fab_a11y">%1$d 项待审批</string>
     <string name="approval_fab_refreshing">上次状态 · 正在刷新</string>

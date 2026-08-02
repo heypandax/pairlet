@@ -74,18 +74,32 @@ class FeishuEngine(
     // with /trust by the machine owner. Two conditions, because a single one would make "I turned it on to try
     // it" silently apply to every group the bot happens to sit in.
     private val noApprovalEnabled = env["FEISHU_NO_APPROVAL"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on")
+    // SHADOW rollout for the reviewed mode (design §13): reviews run and are audited, but nothing
+    // auto-passes — every request still reaches the owner. Off by default; an internal calibration knob.
+    private val reviewShadowOnly = env["FEISHU_REVIEW_SHADOW"]?.trim()?.lowercase() in setOf("1", "true", "yes", "on")
     private val routes = FeishuRoutes(File(stateDir, "feishu-routes.json"))
     private val trust = FeishuTrust(File(stateDir, "feishu-trust.json"))
     // the durable half of the no-approval trail — see FeishuTrustLog on why the runner's log ring isn't enough
     private val trustLog = FeishuTrustLog(File(stateDir, "feishu-trust.log"))
+    // structured audit for the REVIEWED flow (design §10) — hashes + outcomes, never prompt text
+    private val reviewLog = FeishuReviewLog(File(stateDir, "feishu-review.log"))
+    // one-shot claude -p per review, cwd'd into the bridge's own state dir so no project material is in
+    // reach. Lazy: an engine on a machine that never uses /review must not pay the resolver.
+    private val reviewPreflight by lazy {
+        ReviewedPreflight(
+            ClaudeFeishuPromptReviewer(File(stateDir, "reviewer")),
+            reviewLog,
+            shadowOnly = reviewShadowOnly,
+        )
+    }
     private val commands = FeishuCommands(
         routes, spec.workdirs, adminOpenId,
         chatOwnerOf = { chatOwners[it] },
         noApprovalEnabled = noApprovalEnabled,
-        // "already trusted?" means trusted FOR THE PROJECT THIS CHAT IS BOUND TO NOW — a chat rebound to
-        // another project reads as untrusted, so /trust re-grants explicitly instead of inheriting silently
-        trustedOf = { chatId -> routes.workdirFor(chatId)?.let { trust.isTrusted(chatId, it) } == true },
-        trustedProjectOf = { trust.trustedProject(it) },
+        // the stored record, whatever project it names — FeishuCommands compares it against the CURRENT
+        // binding itself, so a chat rebound to another project reads as untrusted (no silent inheriting)
+        // while its stale record stays revocable and visible to /trust-status
+        trustRecordOf = { trust.recordFor(it) },
     )
     private val guard = BridgeGuard(spec)
 
@@ -399,45 +413,72 @@ class FeishuEngine(
                 } }
                 reply(replyTo, action.note)
             }
-            // issue #198: authority was checked in FeishuCommands (machine owner only); persist + confirm here.
-            // Logged to the adapter log as well, so the owner's own record of "this group stopped asking me"
-            // does not live only in a chat message they may never scroll back to.
+            // issue #198 + reviewed trust: authority was checked in FeishuCommands (machine owner only);
+            // persist + confirm here. Logged to the adapter log as well, so the owner's own record of "this
+            // group stopped asking me" does not live only in a chat message they may never scroll back to.
             is ChatAction.SetTrust -> scope.launch {
                 // trust is granted for the (chat, project) pair the chat is bound to RIGHT NOW: a later rebind
-                // voids it rather than carrying card-free execution onto a project nobody trusted it with
+                // voids it rather than carrying reduced-approval execution onto a project nobody trusted it with
                 val wd = routes.workdirFor(chatId)
-                if (action.enable && wd == null) return@launch reply(replyTo, "本群还没有绑定项目，先 /bind 再开免审核。")
+                if (action.mode != FeishuTrustMode.UNTRUSTED && wd == null) {
+                    return@launch reply(replyTo, "本群还没有绑定项目，先 /bind 再设置信任模式。")
+                }
                 // Deliberately NOT under the per-chat turn lock: taking it would park this write (and the
                 // owner's confirmation) behind an in-flight turn for however long it runs, and buy nothing —
-                // ask() reads the trust state and hands the prompt off inside ONE uninterrupted block, so no
-                // lock can squeeze a revoke into that window, and a turn already ARMED with a grant can't be
-                // disarmed by any of this anyway (it ends with the turn). Writing immediately is what actually
+                // ask() reads the trust state and hands the prompt off inside ONE uninterrupted block (the
+                // REVIEWED path additionally re-validates its snapshot AFTER the async review), so no lock can
+                // squeeze a revoke into that window, and a turn already ARMED with a grant can't be disarmed
+                // by any of this anyway (it ends with the turn). Writing immediately is what actually
                 // matters: every message that hasn't been read yet sees the revocation.
-                val changed = if (action.enable) trust.trust(chatId, wd!!) else trust.untrust(chatId)
-                if (!changed) {
-                    // Either it was already in that state, or the write FAILED (both return false). Say so in
-                    // both directions: a silent failure to grant is confusing, and a silent failure to revoke
-                    // would come back on the next daemon start (see FeishuTrust.untrust).
-                    reply(
-                        replyTo,
-                        if (action.enable) "⚠️ 没能开启免审核（可能已开启，或写盘失败）。桌面端「桥」的日志里有原因。"
-                        else "⚠️ 收回免审核没能写盘，本群可能仍是免审核，请重试或在桌面端关掉总开关。",
-                    )
-                    return@launch
+                val result = when (action.mode) {
+                    FeishuTrustMode.TRUSTED -> trust.trust(chatId, wd!!)
+                    FeishuTrustMode.REVIEWED -> trust.setReviewed(chatId, wd!!, action.purpose)
+                    FeishuTrustMode.UNTRUSTED -> trust.untrust(chatId)
                 }
-                val what =
-                    if (action.enable) "机主开启了免审核：$chatId → ${FeishuRoutes.projectName(wd!!)}（本群成员的请求将直接执行）"
-                    else "机主关闭了免审核：$chatId（恢复逐请求审批）"
-                logLine("[trust] $what")
-                trustLog.record("${java.time.Instant.now()} trust-change $what")
-                reply(
-                    replyTo,
-                    if (action.enable)
-                        "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」免审核：群成员的请求会直接执行，不再逐条等机主批准。\n" +
-                            "仍然拦着的：shell 命令照旧（危险命令直接拒绝，拿不准的仍会弹机主手机），项目目录外的文件读写直接拒绝。\n" +
-                            "换绑到别的项目会自动失效；随时 /untrust 收回。"
-                    else "✅ 已恢复逐请求审批：本群每次请求都会先发到机主手机。",
-                )
+                when (result) {
+                    // distinguishable from a failed write on purpose — "already so" must not read as an error
+                    TrustWrite.UNCHANGED -> reply(
+                        replyTo,
+                        when (action.mode) {
+                            FeishuTrustMode.TRUSTED -> "本群已经是免审核了。"
+                            FeishuTrustMode.REVIEWED -> "本群已经是智能审核了。用 /trust-status 查看契约。"
+                            FeishuTrustMode.UNTRUSTED -> "本群本来就是逐请求审批。"
+                        },
+                    )
+                    // a silent failure to grant is confusing, and a silent failure to revoke would come back
+                    // on the next daemon start (see FeishuTrust.untrust) — both must fail LOUDLY
+                    TrustWrite.WRITE_FAILED -> reply(
+                        replyTo,
+                        if (action.mode == FeishuTrustMode.UNTRUSTED)
+                            "⚠️ 收回信任没能写盘，本群可能仍处于原来的模式，请重试或在桌面端关掉总开关。"
+                        else "⚠️ 设置没能写盘，本群模式未变。桌面端「桥」的日志里有原因。",
+                    )
+                    TrustWrite.CHANGED -> {
+                        val what = when (action.mode) {
+                            FeishuTrustMode.TRUSTED -> "机主开启了免审核：$chatId → ${FeishuRoutes.projectName(wd!!)}（本群成员的请求将直接执行）"
+                            FeishuTrustMode.REVIEWED -> "机主开启了智能审核：$chatId → ${FeishuRoutes.projectName(wd!!)}" +
+                                (if (action.purpose != null) "（自定义契约）" else "（默认契约）")
+                            FeishuTrustMode.UNTRUSTED -> "机主关闭了信任模式：$chatId（恢复逐请求审批）"
+                        }
+                        logLine("[trust] $what")
+                        trustLog.record("${java.time.Instant.now()} trust-change $what")
+                        reply(
+                            replyTo,
+                            when (action.mode) {
+                                FeishuTrustMode.TRUSTED ->
+                                    "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」免审核：群成员的请求会直接执行，不再逐条等机主批准。\n" +
+                                        "仍然拦着的：shell 命令照旧（危险命令直接拒绝，拿不准的仍会弹机主手机），项目目录外的文件读写直接拒绝。\n" +
+                                        "换绑到别的项目会自动失效；随时 /untrust 收回。"
+                                FeishuTrustMode.REVIEWED ->
+                                    "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」开启智能审核：每条请求先由 AI 判断是否符合群用途且低风险，" +
+                                        "通过的直接执行（仅限项目内的受限工具），其余仍会发机主审批。\n" +
+                                        "契约：${action.purpose ?: FeishuTrust.DEFAULT_CONTRACT}\n" +
+                                        "换绑到别的项目会自动失效；/trust-status 查看，/untrust 收回。"
+                                FeishuTrustMode.UNTRUSTED -> "✅ 已恢复逐请求审批：本群每次请求都会先发到机主手机。"
+                            },
+                        )
+                    }
+                }
             }
             is ChatAction.Ask -> scope.launch {
                 // an auto-bind's feedback posts NOW — the turn behind it can take minutes
@@ -533,24 +574,44 @@ class FeishuEngine(
                 return
             }
 
-            // issue #198: a chat the machine owner PRE-TRUSTED skips the card entirely. Both conditions are
-            // owner-held state (the master switch lives in the bridge spec, the per-chat mark in the engine's
-            // own state dir) and the chat id is Feishu-attested, so nothing a member can type reaches this.
-            // Recorded in the adapter log before the turn starts — with免审核 on, that log IS the owner's trail.
-            // isTrusted takes the workdir this turn actually runs in, so a chat rebound since the grant is NOT
-            // trusted for its new project (FeishuTrust keys on the pair, no bind/unbind hook to keep in sync)
-            val trusted = !ownerBypass && noApprovalEnabled && trust.isTrusted(chatId, workdir)
+            // TRUST-MODE ROUTING (issue #198 + reviewed trust). One immutable snapshot drives the whole
+            // decision: both conditions are owner-held state (the master switch lives in the bridge spec, the
+            // per-chat record in the engine's own state dir) and the chat id is Feishu-attested, so nothing a
+            // member can type reaches this. The snapshot keys on the workdir this turn actually runs in, so a
+            // chat rebound since the grant is NOT trusted for its new project (FeishuTrust keys on the pair,
+            // no bind/unbind hook to keep in sync).
+            val snapshot = trust.snapshot(chatId, workdir)
+            val trusted = !ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.TRUSTED
             if (trusted) {
-                val what = "免审核执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)} " +
-                    "← ${prompt.replace('\n', ' ').take(120)}"
-                logLine("[trust] $what")
-                trustLog.record("${java.time.Instant.now()} ran chat=$chatId $what")
+                // ring gets a short excerpt for live debugging; the DURABLE line carries no prompt text
+                // (design §10 — message content stays out of persistent storage)
+                logLine("[trust] 免审核执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)} ← ${prompt.replace('\n', ' ').take(80)}")
+                trustLog.record("${java.time.Instant.now()} ran chat=$chatId 免审核执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)}")
             }
+
+            // REVIEWED (design §8): the Guardian classifies the vetted prompt BEFORE it reaches the agent.
+            // The preflight audits itself; a non-pass (risk, low confidence, prescreen hit, timeout, CLI
+            // missing, shadow mode, policy changed mid-review) simply falls through to the owner's card —
+            // degraded, not broken. The revalidation closure re-reads the store AFTER the async review, so a
+            // /untrust, rebind or contract edit that landed while the model was thinking voids the pass.
+            val review = if (!ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED) {
+                reviewPreflight.evaluate(
+                    snapshot, vetted.text, FeishuRoutes.projectName(workdir), senderOpenId, replyTo,
+                ) { trust.stillMatches(chatId, workdir, snapshot) }.also {
+                    logLine(
+                        "[review] ${if (it.autoRun) "自动通过" else "转机主审批"}" +
+                            "（risk=${it.result.risk} codes=${it.result.reasonCodes.joinToString(",").ifEmpty { "-" }} id=${it.reviewId.take(8)}…）",
+                    )
+                }
+            } else {
+                null
+            }
+            val reviewedAuto = review?.autoRun == true
 
             // issue #190: approval belongs to THIS request, before requester-controlled text reaches the agent.
             // The configured owner's bypass session keeps its existing direct path; every other request waits on
             // a one-off card and gains full execution authority only for the resulting turn.
-            if (!ownerBypass && !trusted) {
+            if (!ownerBypass && !trusted && !reviewedAuto) {
                 val preview = buildString {
                     appendLine("发起人：${senderOpenId.ifBlank { "未知飞书用户" }}")
                     appendLine("项目：${FeishuRoutes.projectName(workdir)}")
@@ -560,6 +621,10 @@ class FeishuEngine(
                 reply(replyTo, "⏳ 这次请求已发送给电脑所有者审批；通过后会自动执行并把结果发在这里。")
                 val approved = core.registry.approveBridgeRequest(convoId, preview)
                 mutex.withLock { pendingAsk.remove(convoId) }
+                // a REVIEWED chat's escalation closes its audit trail with the owner's verdict
+                review?.let {
+                    reviewLog.record(reviewTurnEvent(if (approved) "escalated_owner_allowed" else "escalated_owner_denied", it, snapshot, senderOpenId, replyTo, workdir))
+                }
                 if (!approved) {
                     reply(replyTo, "⛔ 这次请求未获批准，未执行任何操作。")
                     return
@@ -577,12 +642,19 @@ class FeishuEngine(
                 // pre-trusted chat: the narrower AUTO_TRUSTED grant (issue #198) — no card was shown, so the
                 // danger/workdir walls stay armed for this turn, unlike an owner-read request
                 trusted -> core.registry.sendTrustedBridgePrompt(vetted)
+                // Guardian-passed request: the REVIEWER_APPROVED grant — same closed ceiling as trusted,
+                // distinct in the audit trail. In-process hand-off only; reviewId correlates, grants nothing.
+                reviewedAuto -> core.registry.sendReviewedBridgePrompt(vetted, review!!.reviewId)
                 else -> core.registry.sendApprovedBridgePrompt(vetted)
+            }
+            if (reviewedAuto) {
+                reviewLog.record(reviewTurnEvent(if (sent) "turn_started" else "handoff_failed", review!!, snapshot, senderOpenId, replyTo, workdir))
             }
             if (!sent) {
                 // the grant was minted but the hand-off lost a race (the conversation went busy) — the request
-                // is NOT running, and its permit/grant was consumed, so the requester must send it again
-                reply(replyTo, if (trusted) "⚠️ 这次请求未能启动，请重新发送。" else "⚠️ 已批准的请求未能启动，请重新发送。")
+                // is NOT running, and its permit/grant was consumed, so the requester must send it again.
+                // A reviewed pass is single-shot by the same rule: it may not be retried onto a later prompt.
+                reply(replyTo, if (trusted || reviewedAuto) "⚠️ 这次请求未能启动，请重新发送。" else "⚠️ 已批准的请求未能启动，请重新发送。")
                 return
             }
             awaitingTerminalFrame = true
@@ -613,6 +685,27 @@ class FeishuEngine(
             if (!awaitingTerminalFrame) scheduleRelease(convoId)
         }
     }
+
+    /** A turn-level audit event for a REVIEWED request, correlated to its review by id (design §10). */
+    private fun reviewTurnEvent(
+        outcome: String,
+        review: ReviewedPreflight.Outcome,
+        snapshot: TrustSnapshot,
+        senderOpenId: String,
+        messageId: String,
+        workdir: String,
+    ) = FeishuReviewEvent(
+        timestampMs = System.currentTimeMillis(),
+        eventType = "turn",
+        reviewId = review.reviewId,
+        chatIdHash = FeishuReviewLog.hash(snapshot.chatId),
+        senderHash = FeishuReviewLog.hash(senderOpenId),
+        messageIdHash = FeishuReviewLog.hash(messageId),
+        projectName = FeishuRoutes.projectName(workdir),
+        mode = snapshot.mode.name,
+        contractVersion = snapshot.contractVersion,
+        finalOutcome = outcome,
+    )
 
     /** Post a turn's final text to its group thread AT MOST ONCE — the inline caller and a late [onFrame]
      *  both try, and the loser no-ops, so an out-of-band approval never double-posts nor drops the reply. */
