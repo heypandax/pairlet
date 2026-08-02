@@ -1466,6 +1466,22 @@ class Conversation(
         return handOff(text, promptId, BridgeGrant.AUTO_TRUSTED)
     }
 
+    /**
+     * Hand one Guardian-passed request from a REVIEWED chat to the agent (reviewed-trust design §9.1) — the
+     * reviewer classified it, no human read it, so it runs under [BridgeGrant.REVIEWER_APPROVED]: the same
+     * closed ceiling as AUTO_TRUSTED, distinct only for audit and future tightening.
+     *
+     * In-process callers only, permit-free like the trusted path (the authorization is the owner's standing
+     * REVIEWED policy plus the daemon-validated review result, both held in-process — no frame can claim
+     * either over the wire). [reviewId] is an audit correlation handle, NOT a credential: nothing validates
+     * it and it grants nothing, so a caller-supplied value can at worst mislabel a log line.
+     */
+    suspend fun sendReviewedBridgePrompt(text: String, promptId: String? = null, reviewId: String): Boolean {
+        if (origin == null || pathScope != null || ownerBypass) return false
+        log.info("$convoId reviewed hand-off (review=${reviewId.take(8)}…)")
+        return handOff(text, promptId, BridgeGrant.REVIEWER_APPROVED)
+    }
+
     /** Arm [grant] for exactly this prompt's turn and hand it over. Armed by CAS, so two concurrent hand-offs
      *  can never both believe they hold the grant. A hand-off that starts no turn (a daemon-intercepted slash
      *  command) or throws revokes it immediately. */

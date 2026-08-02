@@ -14,6 +14,12 @@ package dev.ccpocket.daemon.bridge
  *  - [OWNER_APPROVED] (issue #190) — the owner READ this exact request on their phone and approved it, so
  *    the resulting turn runs with no second layer of piecemeal approval. Because a human vetted the prompt
  *    itself, this level deliberately also clears the Bash and path walls: the owner is the wall.
+ *  - [REVIEWER_APPROVED] (reviewed trust) — the owner pre-set this chat to Guardian review, and the
+ *    independent reviewer classified THIS request as clearly low-risk and on-contract. NOT an owner
+ *    approval: no human read the prompt, so its ceiling is IDENTICAL to [AUTO_TRUSTED] (the same closed
+ *    [autoRunnable] list, same walls) — the distinct value exists so audit can tell "the owner trusts this
+ *    chat outright" from "a model judged this one request", and so the reviewed level can later be
+ *    tightened on its own without touching trusted chats. It must never widen anything.
  *  - [AUTO_TRUSTED] (issue #198) — the owner marked this CHAT trusted in advance, so a member's request runs
  *    with NO per-request card. Nobody read the prompt, so this level authorizes ONLY the tools whose reach is
  *    bounded by machinery rather than by a human reading the prompt: see [autoRunnable]. Everything else —
@@ -23,8 +29,13 @@ package dev.ccpocket.daemon.bridge
 enum class BridgeGrant {
     NONE,
     OWNER_APPROVED,
+    REVIEWER_APPROVED,
     AUTO_TRUSTED,
     ;
+
+    /** The two machine-confined levels share ONE closed-ceiling judgement — a single entry point on purpose
+     *  (design §9.2): a copied list would drift, and drift here is a security bug. */
+    val machineConfined: Boolean get() = this == AUTO_TRUSTED || this == REVIEWER_APPROVED
 
     /** True when the grant authorizes ordinary execution tools without a per-tool ask. */
     val authorizes: Boolean get() = this != NONE

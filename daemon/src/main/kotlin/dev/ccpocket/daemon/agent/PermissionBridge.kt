@@ -138,14 +138,18 @@ class PermissionBridge(
                 BridgeCommandPolicy.Verdict.ASK -> {} // fall through to the phone approval below
             }
         }
-        // PRE-TRUSTED CHAT (issue #198): the owner granted this chat standing permission to run without a
-        // per-request card. Placed HERE, below the workdir wall (:above) and BELOW the Bash gate, and gated on
-        // a CLOSED tool allow-list ([BridgeGrant.autoRunnable]) rather than "everything but AskUserQuestion":
-        // nobody read this prompt, so only tools the daemon can confine on its own may skip the owner. Bash
-        // therefore keeps its normal verdict — its ambiguous middle falls past this branch to the ask below,
-        // which is the backstop that makes the DANGEROUS blacklist tolerable in the first place. Unknown tools
-        // (MCP, WebFetch, a renamed file tool) likewise ask, instead of passing the path wall vacuously.
-        if (grant == BridgeGrant.AUTO_TRUSTED && autoTrustedMayRun(ev.toolName, ev.input)) {
+        // MACHINE-CONFINED GRANTS (issue #198 AUTO_TRUSTED + reviewed-trust REVIEWER_APPROVED): the owner
+        // pre-authorized this chat's requests to run without a per-request card — outright, or conditional on
+        // the Guardian's per-request pass. Placed HERE, below the workdir wall (:above) and BELOW the Bash
+        // gate, and gated on a CLOSED tool allow-list ([BridgeGrant.autoRunnable]) rather than "everything but
+        // AskUserQuestion": nobody (human) read this prompt, so only tools the daemon can confine on its own
+        // may skip the owner. Bash therefore keeps its normal verdict — its ambiguous middle falls past this
+        // branch to the ask below, which is the backstop that makes the DANGEROUS blacklist tolerable in the
+        // first place. Unknown tools (MCP, WebFetch, a renamed file tool) likewise ask, instead of passing the
+        // path wall vacuously. ONE shared judgement for both levels — a second copy of the ceiling would
+        // drift; the grant value is logged so audit can still tell the two apart.
+        if (grant.machineConfined && autoTrustedMayRun(ev.toolName, ev.input)) {
+            log.info("$convoId auto-run ${ev.toolName} under $grant")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }

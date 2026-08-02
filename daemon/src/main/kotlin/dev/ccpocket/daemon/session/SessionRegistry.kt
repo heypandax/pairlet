@@ -470,6 +470,19 @@ class SessionRegistry(
         return convo.sendTrustedBridgePrompt(p.text, p.promptId)
     }
 
+    /**
+     * Execute one Guardian-passed request from a REVIEWED chat (reviewed-trust design) under the one-turn
+     * REVIEWER_APPROVED grant — same closed ceiling as trusted, distinct for audit.
+     *
+     * In-process callers only, exactly like [sendTrustedBridgePrompt]: the review decision is made and
+     * re-validated inside the built-in engine, and no router branch calls this — a bridge cannot claim its
+     * own request passed review over the wire.
+     */
+    suspend fun sendReviewedBridgePrompt(p: SendPrompt, reviewId: String): Boolean {
+        val convo = get(p.convoId) ?: return false
+        return convo.sendReviewedBridgePrompt(p.text, p.promptId, reviewId = reviewId)
+    }
+
     suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode, s.permissionMode) ?: Unit
