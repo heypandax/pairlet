@@ -108,6 +108,10 @@ import dev.ccpocket.app.data.SentFile
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.action_launch
 import dev.ccpocket.app.resources.allow_chip_prefix
+import dev.ccpocket.app.resources.autorun_basis_session
+import dev.ccpocket.app.resources.autorun_basis_task
+import dev.ccpocket.app.resources.autorun_label
+import dev.ccpocket.app.resources.autorun_tighten
 import dev.ccpocket.app.resources.attach_menu
 import dev.ccpocket.app.resources.cancel
 import dev.ccpocket.app.resources.cancel_upload
@@ -331,6 +335,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
                                     onOpenWorkflow = model::openWorkflowPanel,
                                     onOpenVideo = { model.openWorkspaceFile(it.path) },
+                                    onTightenAutoRun = model::tightenAutoRun,
                                 )
                             }
                         }
@@ -368,6 +373,19 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                         modifier = Modifier.padding(bottom = 3.dp),
                                     )
                                 }
+                                // M2 AttentionLease: a 30s heartbeat while THIS card is on screen pauses the
+                                // daemon's no-response budget. Gated on grantOptions (a grant-aware daemon's
+                                // ask) — ALSO the reason no loop runs under the Compose TEST clock: an
+                                // unconditional infinite delay-loop keeps the virtual frame clock busy and
+                                // waitForIdle never returns (desktopTest hang, 08-02).
+                                if (ask.grantOptions != null) {
+                                    LaunchedEffect(ask.askId) {
+                                        while (true) {
+                                            model.askHeartbeat()
+                                            kotlinx.coroutines.delay(30_000)
+                                        }
+                                    }
+                                }
                                 // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal
                                 // "auto-denied" state (greyed + Dismiss) rather than staying actionable — the
                                 // repo keeps the pendingAsk and stamps timedOutAskId, so ask is still non-null here.
@@ -377,6 +395,9 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     onDeny = { model.resolve(allow = false, remember = false) },
                                     timedOut = model.askTimedOut,
                                     onDismiss = { model.dismissAsk() },
+                                    risk = model.askRisk,
+                                    onAllowTask = { model.resolveTaskGrant() },
+                                    onRetrySafer = { model.retrySafer(it) },
                                 )
                             } else if (model.turnStalled) {
                                 // delivered but the agent started no turn within the deadline (issue #104) —
@@ -554,6 +575,7 @@ private fun MessageRow(
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
     onOpenWorkflow: (String) -> Unit = {},
     onOpenVideo: (SentFile) -> Unit = {},
+    onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
 ) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
@@ -634,6 +656,31 @@ private fun MessageRow(
             stringResource(Res.string.allow_chip_prefix) + "  ${item.rule}", color = Tok.accent, fontFamily = Dk.mono, fontSize = 11.sp,
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
         )
+        // approval design M2 §9.6 (design frame 3 `.achip`): grant-covered auto-run audit chip + 收紧 link
+        is ChatItem.AutoRun -> {
+            var tightened by remember(item.eventId) { mutableStateOf(false) }
+            Row(
+                Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text("⚡ " + stringResource(Res.string.autorun_label), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.sp)
+                Text(item.summary, color = Tok.tx, fontFamily = Dk.mono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    stringResource(if (item.basis == "task-grant") Res.string.autorun_basis_task else Res.string.autorun_basis_session),
+                    color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 1.dp),
+                )
+                if (!tightened) {
+                    Text(
+                        stringResource(Res.string.autorun_tighten), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { tightened = true; onTightenAutoRun(item) }.padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
+                } else {
+                    Text("✓", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                }
+            }
+        }
         // question-exchange residue (AskUserQuestion); desktop still answers via the generic flow for now
         is ChatItem.QuestionsAnswered -> Text(
             "?  " + stringResource(Res.string.question_answered_label) + if (item.items.isEmpty()) "" else "  ·  ${item.items.joinToString(" · ") { it.second }}",

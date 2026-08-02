@@ -573,6 +573,11 @@ fun PermissionSheet(
     // approval design M1: 1-based position / burst total when several asks queued up behind each other —
     // null (the overwhelmingly common single-ask case) renders exactly the old sheet
     queuePosition: Pair<Int, Int>? = null,
+    // approval design M2/M3 (all optional so a pre-M2 daemon renders exactly the legacy sheet):
+    // advisory risk badge ("low"/"medium"/"high"/"unknown"), 允许本任务, 换种安全方式(约束列表)
+    risk: String? = null,
+    onAllowTask: (() -> Unit)? = null,
+    onRetrySafer: ((List<String>) -> Unit)? = null,
     onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit, onDismiss: () -> Unit,
 ) {
     var seconds by remember(ask.askId) { mutableStateOf(ask.total()) }
@@ -594,7 +599,7 @@ fun PermissionSheet(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.weight(1f).alpha(if (timedOut) 0.5f else 1f)) { PermBody(ask, workdir) }
+                Box(Modifier.weight(1f).alpha(if (timedOut) 0.5f else 1f)) { PermBody(ask, workdir, risk) }
                 if (!timedOut) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         CountdownRing(seconds, ask.total())
@@ -615,9 +620,146 @@ fun PermissionSheet(
                     Text(stringResource(Res.string.dismiss), color = Tok.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onDismiss() }.padding(6.dp))
                 }
             } else {
-                Decision(ask, onDeny, onOnce, onAlways)
+                // M2 (design §9.3): a grant-aware daemon's ordinary tool ask gets the four-action card —
+                // 拒绝 / 允许本次 / 允许本任务(推荐) / 换种安全方式, with the session grant folded into
+                // "更多". Everything else (old daemon, one-off decisions) keeps the legacy button row.
+                val v2 = ask.grantOptions?.contains("task") == true && onAllowTask != null && onRetrySafer != null
+                if (v2) {
+                    DecisionV2(
+                        ask, onDeny, onOnce, onAllowTask!!,
+                        onAlways = onAlways.takeIf { ask.grantOptions?.contains("session") == true },
+                        onRetrySafer = onRetrySafer!!,
+                    )
+                } else {
+                    Decision(ask, onDeny, onOnce, onAlways)
+                }
             }
         }
+    }
+}
+
+/** M2 four-action decision area. The recommended path is 允许本任务 (task grant) — except on a flagged
+ *  danger, where 允许本次 takes the accent and the task grant is demoted to an outline. */
+@Composable
+private fun DecisionV2(
+    ask: PermissionAsk,
+    onDeny: () -> Unit, onOnce: () -> Unit, onAllowTask: () -> Unit,
+    onAlways: (() -> Unit)?, onRetrySafer: (List<String>) -> Unit,
+) {
+    var safer by remember(ask.askId) { mutableStateOf(false) }
+    var more by remember(ask.askId) { mutableStateOf(false) }
+    Column(Modifier.padding(top = 16.dp)) {
+        if (safer) {
+            RetrySaferPanel(ask, onBack = { safer = false }, onSend = onRetrySafer)
+            return@Column
+        }
+        val danger = ask.danger
+        // 2×2 action grid (design frame 1 `.actgrid`): row 1 = Deny / Allow once; row 2 = Safer way /
+        // Allow for task (recommended `.btn.rec`). On a flagged danger the accent shifts to Allow once.
+        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DecisionButton(stringResource(Res.string.deny), Modifier.weight(1f).fillMaxHeight(), outline = Tok.danger, fg = Tok.danger, onClick = onDeny)
+            DecisionButton(
+                stringResource(Res.string.allow_once), Modifier.weight(1f).fillMaxHeight(),
+                bg = if (danger) Tok.accent else Tok.surface, outline = if (danger) null else Tok.hair,
+                fg = if (danger) Tok.base else Tok.tx, bold = danger, onClick = onOnce,
+            )
+        }
+        Row(Modifier.padding(top = 8.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DecisionButton(stringResource(Res.string.retry_safer), Modifier.weight(1f).fillMaxHeight(), outline = Tok.hair, fg = Tok.tx2, onClick = { safer = true })
+            DecisionButton(
+                stringResource(Res.string.allow_for_task), Modifier.weight(1f).fillMaxHeight(), sub = ask.rule ?: ask.tool,
+                bg = if (danger) Color.Transparent else Tok.accent, outline = if (danger) Tok.warn.copy(alpha = 0.6f) else null,
+                fg = if (danger) Tok.warn else Tok.base, warn = danger, bold = true, onClick = onAllowTask,
+            )
+        }
+        if (onAlways != null) {
+            Row(Modifier.padding(top = 8.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "⋯ " + stringResource(Res.string.more_options), color = Tok.muted, fontSize = 12.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { more = !more }.padding(horizontal = 8.dp, vertical = 5.dp),
+                )
+            }
+        }
+        if (more && onAlways != null) {
+            // the session grant deliberately lives BEHIND a tap (design §9.3: no "始终允许" on the main card)
+            Row(
+                Modifier.padding(top = 4.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+                    .clickable(onClick = onAlways).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Rounded.Check, null, tint = Tok.tx2, modifier = Modifier.size(13.dp))
+                Column {
+                    Text(stringResource(Res.string.allow_session_option), color = Tok.tx, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(Res.string.always_allow_scope, ask.rule ?: ask.tool), color = Tok.tx2, fontSize = 11.sp)
+                }
+            }
+        } else {
+            Text(
+                stringResource(Res.string.allow_for_task_note), color = Tok.muted, fontSize = 11.sp,
+                modifier = Modifier.padding(top = 2.dp, start = 2.dp),
+            )
+        }
+    }
+}
+
+/** "换种安全方式" (design §3.5): the user picks constraint chips (and/or a free-text one); the agent gets
+ *  a structured RETRY_SAFER deny it re-plans under, instead of a bare refusal. */
+@Composable
+private fun RetrySaferPanel(ask: PermissionAsk, onBack: () -> Unit, onSend: (List<String>) -> Unit) {
+    val presets = listOf(
+        stringResource(Res.string.rs_no_network),
+        stringResource(Res.string.rs_read_only),
+        stringResource(Res.string.rs_tests_only),
+        stringResource(Res.string.rs_stay_workspace),
+        stringResource(Res.string.rs_patch_only),
+    )
+    val picked = remember(ask.askId) { androidx.compose.runtime.mutableStateListOf<String>() }
+    var custom by remember(ask.askId) { mutableStateOf("") }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(Res.string.retry_safer_title), color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Icon(
+                Icons.Rounded.Close, null, tint = Tok.tx2,
+                modifier = Modifier.size(22.dp).clip(CircleShape).clickable(onClick = onBack).padding(3.dp),
+            )
+        }
+        presets.forEach { c ->
+            val on = c in picked
+            Row(
+                Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(if (on) Tok.accent.copy(alpha = 0.14f) else Tok.surface)
+                    .border(1.dp, if (on) Tok.accent else Tok.hair, RoundedCornerShape(10.dp))
+                    .clickable { if (on) picked.remove(c) else picked.add(c) }
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Rounded.Check, null, tint = if (on) Tok.accent else Tok.muted, modifier = Modifier.size(13.dp))
+                Text(c, color = if (on) Tok.tx else Tok.tx2, fontSize = 13.sp)
+            }
+        }
+        androidx.compose.foundation.text.BasicTextField(
+            value = custom, onValueChange = { custom = it }, singleLine = true,
+            textStyle = TextStyle(color = Tok.tx, fontSize = 13.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Tok.accent),
+            decorationBox = { inner ->
+                Box(
+                    Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    if (custom.isEmpty()) Text(stringResource(Res.string.rs_custom_hint), color = Tok.muted, fontSize = 13.sp)
+                    inner()
+                }
+            },
+        )
+        val enabled = picked.isNotEmpty() || custom.isNotBlank()
+        DecisionButton(
+            stringResource(Res.string.retry_safer_send), Modifier.padding(top = 10.dp).fillMaxWidth(),
+            bg = if (enabled) Tok.accent else Tok.surface, fg = if (enabled) Tok.base else Tok.muted, bold = enabled,
+            onClick = { if (enabled) onSend(picked + listOfNotNull(custom.trim().takeIf { it.isNotBlank() })) },
+        )
     }
 }
 
@@ -625,12 +767,33 @@ fun PermissionSheet(
 // timeoutSec → keep the legacy 30s so this phone still matches that daemon's 30s auto-deny.
 private fun PermissionAsk.total() = timeoutSec ?: 30
 
+/** M3 advisory risk badge (design frame 4 `.rbg`): the four states stay distinguishable by SHAPE, not
+ *  only color — HIGH is a solid danger fill ("Risk found"), UNKNOWN a dashed-feel outline with "?"
+ *  ("Not assessed"): finding risk and failing to assess are different facts (SMART-APPROVAL §八). */
 @Composable
-private fun PermBody(ask: PermissionAsk, workdir: String?) {
+fun RiskBadge(risk: String) {
+    class Style(val label: String, val fg: Color, val bg: Color, val outline: Color?)
+    val s = when (risk.lowercase()) {
+        "high" -> Style(stringResource(Res.string.risk_high), Tok.base, Tok.danger, null)
+        "medium" -> Style(stringResource(Res.string.risk_medium), Tok.warn, Tok.warn.copy(alpha = 0.12f), Tok.warn.copy(alpha = 0.5f))
+        "low" -> Style(stringResource(Res.string.risk_low), Tok.muted, Color.Transparent, Tok.hair)
+        else -> Style("? " + stringResource(Res.string.risk_unknown), Tok.tx2, Color.Transparent, Tok.muted)
+    }
+    Text(
+        s.label, color = s.fg, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(s.bg)
+            .then(s.outline?.let { Modifier.border(1.dp, it, RoundedCornerShape(6.dp)) } ?: Modifier)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+@Composable
+private fun PermBody(ask: PermissionAsk, workdir: String?, risk: String? = null) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(Icons.Outlined.Shield, null, tint = if (ask.danger) Tok.danger else Tok.warn, modifier = Modifier.size(16.dp))
             Text(stringResource(Res.string.needs_permission), color = Tok.tx2, fontSize = 13.sp)
+            risk?.let { RiskBadge(it) } // M3 advisory: HIGH="发现风险" vs UNKNOWN="无法可靠评估" stay distinct
         }
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.Bottom) {
             Text(ask.title.ifBlank { stringResource(Res.string.permission_fallback) }, color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -778,6 +941,38 @@ fun AllowChip(rule: String) {
             Text(stringResource(Res.string.allow_chip_prefix) + " ", color = Tok.tx2, fontSize = 12.5.sp)
             Text(rule, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp)
             if (suffix.isNotBlank()) Text(" $suffix", color = Tok.tx2, fontSize = 12.5.sp)
+        }
+    }
+}
+
+/** Approval design M2 §9.6 (design `.achip`): the light in-stream audit row for a grant-covered auto-run —
+ *  glyph + redacted mono summary + basis pill + a trailing 收紧 link that revokes the grant (or clears the
+ *  session rule) so the NEXT matching action asks again. Deliberately quieter than a tool card. */
+@Composable
+fun AutoRunChip(item: dev.ccpocket.app.data.ChatItem.AutoRun, onTighten: () -> Unit) {
+    var tightened by remember(item.eventId) { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(999.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
+            .padding(start = 11.dp, end = 9.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text("⚡", fontSize = 11.sp)
+        Text(stringResource(Res.string.autorun_label), color = Tok.tx2, fontSize = 11.5.sp)
+        Text(item.summary, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+        Text(
+            stringResource(if (item.basis == "task-grant") Res.string.autorun_basis_task else Res.string.autorun_basis_session),
+            color = Tok.accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 2.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        if (!tightened) {
+            Text(
+                stringResource(Res.string.autorun_tighten), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { tightened = true; onTighten() }.padding(horizontal = 6.dp, vertical = 3.dp),
+            )
+        } else {
+            Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(12.dp))
         }
     }
 }

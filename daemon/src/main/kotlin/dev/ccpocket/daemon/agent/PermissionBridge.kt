@@ -78,11 +78,21 @@ class PermissionBridge(
     private val grants: ApprovalGrantStore = ApprovalGrantStore(),
     /** The conversation's CURRENT task id (rotates per top-level prompt); stamped on asks + grant matches. */
     private val taskId: () -> String? = { null },
+    /** M3 advisory risk radar — null keeps the pre-M3 behavior (no badges). Its verdict NEVER changes an
+     *  approval outcome; it only rides a [dev.ccpocket.protocol.PermissionRiskUpdated] badge. */
+    private val risk: dev.ccpocket.daemon.approval.ApprovalRiskEngine? = null,
 ) {
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
         val meta = ToolMetadata.of(ev.toolName, ev.input)
+        // M3: feed the sequence ledger on every ATTEMPT (denied ones included — intent matters for the
+        // radar) and keep the assessment for the ask below. Deterministic + advisory: no outcome changes.
+        val assessed = risk?.observe(
+            convoId, ev.toolName,
+            command = (ev.input?.get("command") as? JsonPrimitive)?.content,
+            targets = ToolMetadata.pathTargets(ev.toolName, ev.input),
+        )
         // OWNER BYPASS (issue #91): preserve its established semantics — ordinary execution tools auto-run,
         // while neverRemember human-decision gates still ask.
         if (bridgeSession && ownerBypassSession && !meta.neverRemember) {
@@ -232,6 +242,11 @@ class PermissionBridge(
                 // agent cancelled its own request / session closing — nothing to answer, the CLI moved on
                 ApprovalOutcome.Withdrawn -> {}
             }
+        }
+        // M3 advisory: the badge rides a separate additive frame AFTER the ask, so the card updates in
+        // place without resetting the client countdown (SMART-APPROVAL §八). Old clients drop it.
+        assessed?.let {
+            emit(dev.ccpocket.protocol.PermissionRiskUpdated(convoId, askId, it.level, it.reason, it.reasonCodes, System.currentTimeMillis()))
         }
     }
 

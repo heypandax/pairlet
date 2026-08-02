@@ -270,13 +270,36 @@ fun App(scope: CoroutineScope) {
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
             repo.pendingAsk.value?.takeIf { !it.isQuestion }?.let { ask ->
+                // M2 AttentionLease: while THIS card is on screen AND the app is foregrounded, a 30s
+                // heartbeat pauses the daemon's no-response budget (grant-aware asks only). Backgrounding
+                // releases the lease explicitly, so an Android process idling behind the launcher can't
+                // pause the budget forever (design §10.4). The grantOptions gate sits OUTSIDE the effect:
+                // under the Compose test clock an unconditional infinite delay-loop would keep the virtual
+                // frame clock busy forever (desktopTest hang, 08-02).
+                if (ask.grantOptions != null) {
+                    LaunchedEffect(ask.askId, appForeground) {
+                        if (!appForeground) {
+                            repo.sendAskHeartbeat(visible = false)
+                            return@LaunchedEffect
+                        }
+                        while (true) {
+                            repo.sendAskHeartbeat(visible = true)
+                            kotlinx.coroutines.delay(30_000)
+                        }
+                    }
+                }
                 PermissionSheet(
                     ask, repo.workdir.value,
                     timedOutSignal = repo.timedOutAskId.value == ask.askId, // issue #100: daemon said this ask timed out
                     queuePosition = repo.askQueueProgress.value, // "n / m" while a burst is queued (design M1)
+                    risk = repo.askRisk[ask.askId]?.risk, // M3 advisory badge, updated in place
+                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
+                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
                     onDeny = { repo.resolve(Decision.DENY) },
                     onOnce = { repo.resolve(Decision.ALLOW) },
-                    onAlways = { repo.resolve(Decision.ALLOW, remember = true) },
+                    // "Always allow" (legacy card) / "本会话内总是允许" (V2 ⋯More): remember for old
+                    // daemons + the M2 session scope for new ones — same effect either way
+                    onAlways = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
                     onDismiss = { repo.dismissAsk() },
                 )
             }
@@ -1689,6 +1712,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 onOpenWorkflow = repo::openWorkflow,
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
+                                onTightenAutoRun = repo::tightenAutoRun,
                             )
                             when {
                                 undelivered -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -2125,6 +2149,7 @@ private fun MessageItem(
     onOpenWorkflow: (String) -> Unit = {},
     onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
     onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
+    onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
 ) {
     when (m) {
         // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
@@ -2196,6 +2221,8 @@ private fun MessageItem(
         }
         is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)
         is ChatItem.RuleChip -> AllowChip(m.rule)
+        // approval design M2 §9.6: grant-covered auto-run — light audit chip with the 收紧 affordance
+        is ChatItem.AutoRun -> AutoRunChip(m) { onTightenAutoRun(m) }
         // the quiet residue of a question exchange: an expandable answered row / a muted withdrawn note
         is ChatItem.QuestionsAnswered -> QuestionsAnsweredRow(m.items)
         is ChatItem.QuestionsWithdrawn -> QuestionsWithdrawnRow()

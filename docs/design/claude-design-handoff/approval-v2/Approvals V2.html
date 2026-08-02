@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="design_doc_mode" content="canvas" />
+<title>cc-pocket — Approvals V2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="session-handoff/handoff.css" />
+<link rel="stylesheet" href="session-approvals/approvals.css" />
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5L20 7"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3 8.1-7.5 9.5-4.5-1.4-7.5-4.9-7.5-9.5V6z"/></symbol>
+<symbol id="i-shield-ck" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3 8.1-7.5 9.5-4.5-1.4-7.5-4.9-7.5-9.5V6z"/><path d="M9 11.8l2.2 2.2 4-4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.4V12l3.2 2"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.4"/><path d="M12 17.4h.01"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M7 10l2.5 2.5L7 15"/><path d="M12.5 15.3h4.5"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.4"/><path d="M12 7.6h.01"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.6 2.6 0 0 0-3.7-3.7L4.3 16.3z"/><path d="M13.5 7.5l3 3"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M13.5 3v5.5H19"/></symbol>
+<symbol id="i-net" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.2 9.5h17.6M3.2 14.5h17.6"/><path d="M12 3c-2.6 2.6-3.8 5.7-3.8 9s1.2 6.4 3.8 9c2.6-2.6 3.8-5.7 3.8-9S14.6 5.6 12 3z"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9"/><path d="M17.5 12v3.4M20.2 12v2.4"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.2l1.9 5.4 5.4 1.9-5.4 1.9L12 17.8l-1.9-5.4-5.4-1.9 5.4-1.9z"/><path d="M18.6 16.4l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V6"/><path d="M6.5 11.5L12 6l5.5 5.5"/></symbol>
+<symbol id="i-flask" viewBox="0 0 24 24"><path d="M10 3.5v6L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.5v-6"/><path d="M8.6 3.5h6.8"/><path d="M7.4 14.5h9.2"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.6h8.8A1.5 1.5 0 0 1 21 9.1v9.4A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z"/></symbol>
+<symbol id="i-bat" viewBox="0 0 19 12"><rect y="7.5" width="3.2" height="4.5" rx=".7" fill="currentColor" stroke="none"/><rect x="4.8" y="5" width="3.2" height="7" rx=".7" fill="currentColor" stroke="none"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx=".7" fill="currentColor" stroke="none"/><rect x="14.4" width="3.2" height="12" rx=".7" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-batt" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity=".35" fill="none"/><rect x="2" y="2" width="20" height="9" rx="2" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<div class="secttl" style="left:80px;top:44px;width:1240px">Approvals V2 — structured grants, counter-proposals, risk &amp; audit
+<i>A permission ask is no longer Allow/Deny. It is a <b>grant</b>: scope (paths + hosts) × duration (once · this task · this session) × a risk verdict.<br>Hierarchy law, top to bottom: <b>what it does → why → scope → risk → delta against grants you already gave</b>. The raw command is <b>Details</b>, collapsed — evidence, not the headline.<br>“Allow for this task” is the recommended default and the only filled button. “Always allow this session” is deliberately demoted into ⋯ More. Timeout always fails closed = denied.<br>Colour law unchanged: terracotta = the recommended action · amber = medium risk / grant delta · red = high risk, deny, timeout · green at 70% = something that already ran.</i></div>
+
+<!-- ══════ FRAME 1 — mobile sheet, MEDIUM, collapsed ══════ -->
+<div class="flabel" style="left:80px;top:250px;width:400px">Frame 1 · Mobile sheet — normal<i>390×844 · dark · MEDIUM risk · queued 1/3 · details collapsed</i></div>
+<div class="frame t" style="left:80px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">cc-pocket · auth-refactor</span><span class="modepill"><svg class="ic ic-12"><use href="#i-shield"/></svg>ask</span></div>
+    <div class="subhdr"><span class="livedot"></span><span>daemon · macbook-pro</span><span class="p">·</span><span class="p">claude-sonnet-4.6</span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Refactor is in. I'll run the suite and push a coverage report so the PR shows the delta.</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-file"/></svg><span class="cmd">edit · src/auth/session.kt</span><span class="ok">done</span></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-term"/></svg><span class="cmd">bash · ./gradlew assemble</span><span class="ok">done</span></div>
+    </div></div>
+  </div>
+  <div class="scrim"></div>
+  <div class="shabs"><div class="sheet auto">
+    <div class="grab"></div>
+    <div class="apbody" style="padding:12px 16px 4px;gap:13px">
+      <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Run command <span>· Bash</span></span><span class="sp"></span><span class="rbg med"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 4l8.5 16h-17z"/></svg>Medium</span><span class="qbadge">1/3</span><span class="ring warn"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="30 44"/></svg>18s</span></div>
+      <div class="apsum">
+        <div class="ap-what">Runs the full test suite and uploads a coverage report to Codecov.</div>
+        <div class="ap-why">So the pull request for the auth refactor shows the coverage delta.</div>
+        <div class="ap-scope"><span class="k">Scope</span><span class="schip">src/**</span><span class="schip">coverage/**</span><span class="schip">api.codecov.io</span></div>
+        <div class="ap-risk md"><svg class="ic ic-14"><use href="#i-alert"/></svg><span>Sends coverage data to an external host. Reads a token from your environment. No source files are written.</span></div>
+        <div class="ap-delta"><svg class="ic"><use href="#i-key"/></svg><span>outside current task grant: <b>network access</b></span></div>
+      </div>
+      <div class="apdet"><div class="dh"><svg class="ic ic-14"><use href="#i-term"/></svg>Details<span class="rt">2 lines</span><svg class="ic ic-16 cv"><use href="#i-chev-d"/></svg></div></div>
+    </div>
+    <div class="shfoot" style="gap:10px">
+      <div class="actrow" style="min-height:26px"><span class="reclab">Recommended · Allow for this task</span><span class="apmore"><svg class="ic ic-16"><use href="#i-dots"/></svg>More</span></div>
+      <div class="actgrid">
+        <span class="btn md dgr">Deny</span>
+        <span class="btn md sec">Allow once</span>
+        <span class="btn md pri rec">Allow for this task</span>
+        <span class="btn md sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span>
+      </div>
+    </div>
+  </div></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:80px;top:1176px;width:390px">Four asks are never four buttons of equal weight. One filled button = one recommended path; <b>Deny</b> is outlined danger, not filled — denying is cheap and reversible, so it should not shout.</div>
+
+<!-- ══════ FRAME 1b — details expanded ══════ -->
+<div class="flabel" style="left:520px;top:250px;width:400px">Frame 1b · Details expanded<i>390×844 · the raw command as evidence, h-scrollable</i></div>
+<div class="frame t" style="left:520px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">cc-pocket · auth-refactor</span><span class="modepill"><svg class="ic ic-12"><use href="#i-shield"/></svg>ask</span></div>
+    <div class="subhdr"><span class="livedot"></span><span>daemon · macbook-pro</span><span class="p">·</span><span class="p">claude-sonnet-4.6</span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Refactor is in. I'll run the suite and push a coverage report so the PR shows the delta.</div></div>
+    </div></div>
+  </div>
+  <div class="scrim"></div>
+  <div class="shabs"><div class="sheet auto">
+    <div class="grab"></div>
+    <div class="apbody" style="padding:12px 16px 4px;gap:13px">
+      <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Run command <span>· Bash</span></span><span class="sp"></span><span class="rbg med"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 4l8.5 16h-17z"/></svg>Medium</span><span class="qbadge">1/3</span><span class="ring warn"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="22 44"/></svg>13s</span></div>
+      <div class="apsum">
+        <div class="ap-what">Runs the full test suite and uploads a coverage report to Codecov.</div>
+        <div class="ap-why">So the pull request for the auth refactor shows the coverage delta.</div>
+        <div class="ap-scope"><span class="k">Scope</span><span class="schip">src/**</span><span class="schip">coverage/**</span><span class="schip">api.codecov.io</span></div>
+        <div class="ap-risk md"><svg class="ic ic-14"><use href="#i-alert"/></svg><span>Sends coverage data to an external host. Reads a token from your environment. No source files are written.</span></div>
+        <div class="ap-delta"><svg class="ic"><use href="#i-key"/></svg><span>outside current task grant: <b>network access</b></span></div>
+      </div>
+      <div class="apdet open"><div class="dh"><svg class="ic ic-14"><use href="#i-term"/></svg>Details<span class="rt">2 lines</span><svg class="ic ic-16 cv"><use href="#i-chev-d"/></svg></div>
+        <div class="codebox">npm test -- --coverage --runInBand --reporters=default
+npx codecov -t $CODECOV_TOKEN --slug cc-pocket/app --flags unit</div>
+        <div class="hscroll"><i></i></div>
+      </div>
+    </div>
+    <div class="shfoot" style="gap:10px">
+      <div class="actrow" style="min-height:26px"><span class="reclab">Recommended · Allow for this task</span><span class="apmore"><svg class="ic ic-16"><use href="#i-dots"/></svg>More</span></div>
+      <div class="actgrid">
+        <span class="btn md dgr">Deny</span>
+        <span class="btn md sec">Allow once</span>
+        <span class="btn md pri rec">Allow for this task</span>
+        <span class="btn md sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span>
+      </div>
+    </div>
+  </div></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:520px;top:1176px;width:390px">The code box never wraps — wrapped shell is misread. It scrolls horizontally with a fade edge and a thumb, so a long one-liner can't hide a second command past the fold.</div>
+
+<!-- ══════ FRAME 1c — timed out ══════ -->
+<div class="flabel" style="left:960px;top:250px;width:400px">Frame 1c · Timed out<i>390×844 · terminal · fails closed → denied</i></div>
+<div class="frame t" style="left:960px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:44</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">cc-pocket · auth-refactor</span><span class="modepill"><svg class="ic ic-12"><use href="#i-shield"/></svg>ask</span></div>
+    <div class="subhdr"><span class="livedot"></span><span>daemon · macbook-pro</span><span class="p">·</span><span class="p">claude-sonnet-4.6</span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Refactor is in. I'll run the suite and push a coverage report so the PR shows the delta.</div></div>
+    </div></div>
+  </div>
+  <div class="scrim"></div>
+  <div class="shabs"><div class="sheet auto">
+    <div class="grab"></div>
+    <div class="apbody dim" style="padding:12px 16px 4px;gap:13px">
+      <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Run command <span>· Bash</span></span><span class="sp"></span><span class="rbg med"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 4l8.5 16h-17z"/></svg>Medium</span><span class="qbadge">1/3</span><span class="ring"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/></svg>0s</span></div>
+      <div class="apsum">
+        <div class="ap-what">Runs the full test suite and uploads a coverage report to Codecov.</div>
+        <div class="ap-why">So the pull request for the auth refactor shows the coverage delta.</div>
+        <div class="ap-scope"><span class="k">Scope</span><span class="schip">src/**</span><span class="schip">coverage/**</span><span class="schip">api.codecov.io</span></div>
+        <div class="ap-risk md"><svg class="ic ic-14"><use href="#i-alert"/></svg><span>Sends coverage data to an external host. Reads a token from your environment. No source files are written.</span></div>
+        <div class="ap-delta"><svg class="ic"><use href="#i-key"/></svg><span>outside current task grant: <b>network access</b></span></div>
+      </div>
+      <div class="apdet"><div class="dh"><svg class="ic ic-14"><use href="#i-term"/></svg>Details<span class="rt">2 lines</span><svg class="ic ic-16 cv"><use href="#i-chev-d"/></svg></div></div>
+    </div>
+    <div class="tobanner" style="margin-top:12px"><svg class="ic ic-16"><use href="#i-clock"/></svg>Timed out — automatically denied<span class="dis">Dismiss</span></div>
+    <div class="shfoot" style="gap:10px;border-top:0">
+      <div class="actgrid dim">
+        <span class="btn md dgr">Deny</span>
+        <span class="btn md sec">Allow once</span>
+        <span class="btn md pri">Allow for this task</span>
+        <span class="btn md sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span>
+      </div>
+    </div>
+  </div></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:960px;top:1176px;width:390px">Timeout is a <b>denial</b>, not a lapse: the banner keeps full contrast while the card behind it drops to 50%, so a glance at a stale phone reads the outcome, not the request. Re-asking is the agent's job.</div>
+
+<!-- ══════ FRAME 2 — safer way ══════ -->
+<div class="flabel" style="left:1400px;top:250px;width:400px">Frame 2 · “Safer way…” sub-panel<i>390×844 · sheet content transitions in place · 2 constraints selected</i></div>
+<div class="frame t" style="left:1400px;top:314px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:19px;height:12px"><use href="#i-bat"/></svg><svg class="ic" style="width:27px;height:13px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><span class="ttl">cc-pocket · auth-refactor</span><span class="modepill"><svg class="ic ic-12"><use href="#i-shield"/></svg>ask</span></div>
+    <div class="subhdr"><span class="livedot"></span><span>daemon · macbook-pro</span><span class="p">·</span><span class="p">claude-sonnet-4.6</span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Refactor is in. I'll run the suite and push a coverage report so the PR shows the delta.</div></div>
+    </div></div>
+  </div>
+  <div class="scrim"></div>
+  <div class="shabs"><div class="sheet auto">
+    <div class="grab"></div>
+    <div class="shhd" style="padding-bottom:6px"><span class="tapicon" style="margin-left:-12px"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><h3 style="font-size:17px">Safer way</h3><span class="sp"></span><span class="rbg med"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 4l8.5 16h-17z"/></svg>Medium</span></div>
+    <div class="apbody" style="padding:4px 16px 4px;gap:14px">
+      <div class="swcap">Ask the agent to retry with constraints:</div>
+      <div class="cchips">
+        <span class="cchip on"><svg class="ic"><use href="#i-check"/></svg>No network</span>
+        <span class="cchip on"><svg class="ic"><use href="#i-check"/></svg>Read-only</span>
+        <span class="cchip"><svg class="ic"><use href="#i-flask"/></svg>Tests only</span>
+        <span class="cchip"><svg class="ic"><use href="#i-folder"/></svg>Stay in workspace</span>
+        <span class="cchip"><svg class="ic"><use href="#i-edit"/></svg>Patch only (no writes)</span>
+      </div>
+      <div class="otherfld"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-edit"/></svg><span style="color:var(--text)">write coverage to /tmp</span><span class="caret"></span></div>
+      <div class="swprev"><span style="color:var(--muted)">counter-proposal →</span><br>retry <b>Bash</b> with: no_network, read_only,<br>“write coverage to /tmp”</div>
+    </div>
+    <div class="shfoot" style="gap:8px">
+      <span class="btn full pri"><svg class="ic ic-16"><use href="#i-send"/></svg>Send to agent</span>
+      <span class="btn full ghost" style="min-height:44px">Cancel</span>
+    </div>
+  </div></div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1400px;top:1176px;width:390px">Counter-proposing beats denying: denial ends the turn, a constraint keeps the work moving. Chips compile to structured flags the daemon enforces — free text rides along as an instruction, never as enforcement.</div>
+
+<!-- ══════ FRAME 3 — desktop ══════ -->
+<div class="flabel" style="left:80px;top:1268px;width:700px">Frame 3 · Desktop chat stream<i>1200×820 · inline card, HIGH risk, horizontal action row · audit chips grouped and expanded below</i></div>
+<div class="frame t" style="left:80px;top:1332px;width:1200px;height:820px">
+  <div class="dwin">
+    <div class="dside">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span class="mono" style="font-size:11.5px;color:var(--muted)">cc-pocket</span></div>
+      <div class="dslist">
+        <div class="dsrow on"><span class="sdot" style="background:var(--accent)"></span><span class="tx"><span class="n">auth-refactor</span><span class="s">1 permission waiting</span></span></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">docs-pass</span><span class="s">idle · 2h</span></span></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--success)"></span><span class="tx"><span class="n">release-0.9</span><span class="s">handed off to Mei</span></span></div>
+      </div>
+    </div>
+    <div class="dpane">
+      <div class="dph"><svg class="ic ic-18" style="color:var(--muted)"><use href="#i-term"/></svg><span class="n">auth-refactor</span><span class="s">macbook-pro · ask mode</span><span class="sp"></span><span class="chip"><svg class="ic"><use href="#i-key"/></svg>task grant · 12m left</span></div>
+      <div class="dstream" style="gap:14px">
+        <div class="msg"><div class="who">CLAUDE</div><div class="bd">Migrations are written. Next I need to apply them against the staging database and drop the deprecated <span class="m">sessions_v1</span> table.</div></div>
+
+        <div class="apcard risky">
+          <div class="apbody">
+            <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Run command <span>· Bash</span></span><span class="rbg high"><svg class="g" viewBox="0 0 24 24"><path d="M12 4l8.5 16h-17z" fill="currentColor" stroke="none"/></svg>Risk found</span><span class="qbadge">2/3</span><span class="sp"></span><span class="ring warn"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="16 44"/></svg>9s</span></div>
+            <div class="apsum">
+              <div class="ap-what">Applies 3 migrations to the staging database and permanently drops the <span class="mono" style="font-size:13px">sessions_v1</span> table.</div>
+              <div class="ap-why">To finish the auth refactor by removing the old session store.</div>
+              <div class="ap-scope"><span class="k">Scope</span><span class="schip">db/migrations/**</span><span class="schip">staging-db.internal:5432</span><span class="schip">DROP TABLE ×1</span></div>
+              <div class="ap-risk hi"><svg class="ic ic-14"><use href="#i-alert"/></svg><span>Destructive and irreversible: 41k rows are deleted with no snapshot in this run. Staging only — production credentials are not in scope.</span></div>
+              <div class="ap-delta"><svg class="ic"><use href="#i-key"/></svg><span>outside current task grant: <b>database writes, external host</b></span></div>
+            </div>
+            <div class="apdet"><div class="dh"><svg class="ic ic-14"><use href="#i-term"/></svg>Details<span class="rt">4 lines</span><svg class="ic ic-16 cv"><use href="#i-chev-d"/></svg></div></div>
+            <div class="actrow">
+              <span class="btn xs dgr">Deny</span>
+              <span class="btn xs sec">Allow once</span>
+              <span class="btn xs pri rec">Allow for this task</span>
+              <span class="btn xs sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span>
+              <span class="apmore"><svg class="ic ic-16"><use href="#i-dots"/></svg>More</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:1px;max-width:640px">
+          <div class="agrp"><span class="tri">▸</span><b>6 actions</b> under task grant<span class="abasis">task grant</span><span class="sp"></span><span class="ts">9:38–9:40</span></div>
+          <div class="agrp" style="color:var(--sec)"><span class="tri">▾</span><b>3 actions</b> under task grant<span class="abasis">task grant</span><span class="sp"></span><span class="ts">9:41</span></div>
+          <div class="achild" style="display:flex;flex-direction:column;gap:1px">
+            <div class="achip"><svg class="ic sh"><use href="#i-shield-ck"/></svg><span class="sum">bash · npm test</span><span class="abasis">task grant</span><span class="sp"></span><span class="tail"><a>View</a><span class="d">/</span><a>Tighten</a></span><span class="ts">9:41:02</span></div>
+            <div class="achip"><svg class="ic sh"><use href="#i-shield-ck"/></svg><span class="sum">edit · src/auth/SessionStore.kt</span><span class="abasis">task grant</span><span class="sp"></span><span class="tail"><a>View</a><span class="d">/</span><a>Tighten</a></span><span class="ts">9:41:20</span></div>
+            <div class="achip"><svg class="ic sh"><use href="#i-shield-ck"/></svg><span class="sum">bash · ./gradlew :app:lint</span><span class="abasis">task grant</span><span class="sp"></span><span class="tail"><a style="color:var(--accent)">Hide</a><span class="d">/</span><a>Tighten</a></span><span class="ts">9:41:47</span></div>
+            <div class="araw">./gradlew :app:lint --offline  <span style="color:var(--muted)"># exit 0 · 3.4s</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="dcomposer"><div class="ci">Reply to Claude…</div><span class="btn xs sec" style="min-height:34px">⌘↵</span></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:2170px;width:560px">Audit chips are <b>log furniture</b>, not messages: no card, no background, mono 12 at secondary weight, green shield at 70%. A run under one grant collapses to a single line so a 40-action task doesn't bury the conversation. <b>Tighten</b> reuses the Safer-way panel to narrow the live grant mid-flight.</div>
+
+<!-- ══════ FRAME 3b — light theme card ══════ -->
+<div class="flabel" style="left:1340px;top:1268px;width:460px">Frame 3b · Light theme<i>same card, LOW risk · token swap only</i></div>
+<div class="frame t lt" style="left:1340px;top:1332px;width:700px;height:392px">
+  <div style="padding:26px;display:flex;flex-direction:column;gap:14px;height:100%">
+    <div class="apcard" style="max-width:640px">
+      <div class="apbody">
+        <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Edit files <span>· Write</span></span><span class="rbg low"><svg class="g" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg>Low</span><span class="sp"></span><span class="ring"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="38 44"/></svg>24s</span></div>
+        <div class="apsum">
+          <div class="ap-what">Rewrites 2 test files to use the new session helper.</div>
+          <div class="ap-why">The refactor renamed <span class="mono" style="font-size:12.5px">SessionStore.open()</span>, so the old tests no longer compile.</div>
+          <div class="ap-scope"><span class="k">Scope</span><span class="schip">src/test/auth/**</span></div>
+          <div class="ap-risk"><svg class="ic ic-14"><use href="#i-info"/></svg><span>Inside the workspace, no network, fully reversible from git.</span></div>
+          <div class="ap-delta"><svg class="ic"><use href="#i-check"/></svg><span>covered by current task grant</span></div>
+        </div>
+        <div class="apdet"><div class="dh"><svg class="ic ic-14"><use href="#i-file"/></svg>Details<span class="rt">diff · +18 −11</span><svg class="ic ic-16 cv"><use href="#i-chev-d"/></svg></div></div>
+        <div class="actrow"><span class="btn xs dgr">Deny</span><span class="btn xs sec">Allow once</span><span class="btn xs pri rec">Allow for this task</span><span class="btn xs sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span><span class="apmore"><svg class="ic ic-16"><use href="#i-dots"/></svg>More</span></div>
+      </div>
+    </div>
+    <div class="achip" style="max-width:640px"><svg class="ic sh"><use href="#i-shield-ck"/></svg><span class="sum">edit · src/App.kt</span><span class="abasis">task grant</span><span class="sp"></span><span class="tail"><a>View</a><span class="d">/</span><a>Tighten</a></span><span class="ts">9:42:11</span></div>
+  </div>
+</div>
+<div class="note" style="left:1340px;top:1742px;width:700px">Light theme is a token swap, no layout delta. Only two badges need a light-specific value: LOW loses its dark green-grey and HIGH takes white text on the danger fill to hold contrast.</div>
+
+<!-- ══════ FRAME 4 — component sheet ══════ -->
+<div class="flabel" style="left:80px;top:2320px;width:700px">Frame 4 · Components<i>risk badges · action sets · audit chip anatomy · overflow menu</i></div>
+<div class="frame t" style="left:80px;top:2384px;width:1240px;height:1150px">
+  <div class="csheet">
+    <div class="cgrp">
+      <div class="clab">Risk badge · four states</div>
+      <div class="crow" style="gap:26px">
+        <div class="cell"><span class="rbg low"><svg class="g" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg>Low</span><span class="cn"><b>Low</b> — muted grey-green, dot. Reads as “fine”, not as “good”.</span></div>
+        <div class="cell"><span class="rbg med"><svg class="g" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><path d="M12 4l8.5 16h-17z"/></svg>Medium</span><span class="cn"><b>Medium</b> — amber #E0A93B, hollow triangle. Same amber as the grant-delta line.</span></div>
+        <div class="cell"><span class="rbg high"><svg class="g" viewBox="0 0 24 24"><path d="M12 4l8.5 16h-17z" fill="currentColor" stroke="none"/></svg>Risk found</span><span class="cn"><b>High</b> — solid #E5604D fill, filled triangle. The only filled badge; also tints the RISK line.</span></div>
+        <div class="cell"><span class="rbg unk"><span class="q">?</span>Not assessed</span><span class="cn"><b>Unknown</b> — hollow + dashed, never red. Absence of a verdict, not a bad verdict.</span></div>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="cgrp">
+      <div class="clab">In context · header row per state</div>
+      <div class="crow" style="gap:20px">
+        <div class="apcard" style="width:378px"><div class="apbody" style="gap:9px">
+          <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Read files <span>· Glob</span></span><span class="rbg low"><svg class="g" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg>Low</span><span class="sp"></span><span class="ring"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="40 44"/></svg>26s</span></div>
+          <div class="ap-what" style="font-size:13.5px">Lists every Kotlin file under src/.</div>
+          <div class="ap-risk"><svg class="ic ic-14"><use href="#i-info"/></svg><span>Read-only, inside the workspace.</span></div>
+        </div></div>
+        <div class="apcard risky" style="width:378px"><div class="apbody" style="gap:9px">
+          <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Run command <span>· Bash</span></span><span class="rbg high"><svg class="g" viewBox="0 0 24 24"><path d="M12 4l8.5 16h-17z" fill="currentColor" stroke="none"/></svg>Risk found</span><span class="sp"></span><span class="ring warn"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="12 44"/></svg>7s</span></div>
+          <div class="ap-what" style="font-size:13.5px">Force-pushes the rewritten branch to origin.</div>
+          <div class="ap-risk hi"><svg class="ic ic-14"><use href="#i-alert"/></svg><span>Overwrites remote history. Two commits by Mei are not in your local branch.</span></div>
+        </div></div>
+        <div class="apcard" style="width:378px"><div class="apbody" style="gap:9px">
+          <div class="aphd"><svg class="ic ic-18 gl"><use href="#i-shield"/></svg><span class="aptool">Run command <span>· MCP</span></span><span class="rbg unk"><span class="q">?</span>Not assessed</span><span class="sp"></span><span class="ring"><svg viewBox="0 0 18 18"><circle class="trk" cx="9" cy="9" r="7"/><circle class="prg" cx="9" cy="9" r="7" stroke-dasharray="34 44"/></svg>21s</span></div>
+          <div class="ap-what" style="font-size:13.5px">Calls <span class="mono" style="font-size:12.5px">deploy.trigger</span> on an unrecognised MCP server.</div>
+          <div class="ap-risk unk"><svg class="ic ic-14"><use href="#i-info"/></svg><span>No verdict — this tool isn't in the risk catalogue.<em>couldn't assess this action reliably</em></span></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="cgrp">
+      <div class="clab">Action set · both layouts</div>
+      <div class="crow" style="gap:30px;align-items:flex-start">
+        <div class="cell"><span class="cn" style="max-width:none">desktop · one row, 30px</span>
+          <div class="actrow" style="width:598px"><span class="btn xs dgr">Deny</span><span class="btn xs sec">Allow once</span><span class="btn xs pri rec">Allow for this task</span><span class="btn xs sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span><span class="apmore"><svg class="ic ic-16"><use href="#i-dots"/></svg>More</span></div>
+        </div>
+        <div class="cell"><span class="cn" style="max-width:none">mobile · 2×2, 44pt</span>
+          <div class="actgrid" style="width:322px"><span class="btn md dgr">Deny</span><span class="btn md sec">Allow once</span><span class="btn md pri rec">Allow for this task</span><span class="btn md sec"><svg class="ic"><use href="#i-spark"/></svg>Safer way…</span></div>
+        </div>
+        <div class="cell"><span class="cn" style="max-width:none">⋯ More · overflow</span>
+          <div class="menu" style="position:static;width:274px">
+            <div class="mrow"><svg class="ic ic-16"><use href="#i-clock"/></svg>Allow for 15 minutes</div>
+            <div class="mrow" style="align-items:flex-start;padding:11px 14px;min-height:0"><svg class="ic ic-16" style="color:var(--warning);margin-top:1px"><use href="#i-alert"/></svg><span>Always allow this session<span style="display:block;font:400 10.5px/1.45 'JetBrains Mono',monospace;color:var(--muted);margin-top:3px">no further asks until the session ends</span></span></div>
+            <div class="mrow"><svg class="ic ic-16"><use href="#i-eye"/></svg>Show raw request</div>
+            <div class="mrow"><svg class="ic ic-16"><use href="#i-lock"/></svg>Manage grants…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div class="cgrp">
+      <div class="clab">Audit chip · anatomy</div>
+      <div class="crow" style="gap:34px;align-items:flex-start">
+        <div class="cell" style="gap:14px">
+          <div class="anat" style="width:600px"><div class="achip"><svg class="ic sh"><use href="#i-shield-ck"/></svg><span class="sum">bash · npm test</span><span class="abasis">task grant</span><span class="sp"></span><span class="tail"><a>View</a><span class="d">/</span><a>Tighten</a></span><span class="ts">9:41:02</span></div></div>
+          <div class="cn" style="max-width:600px">shield-check <b>success @ 70%</b> · sanitized summary <b>mono 12 / secondary</b> · grant-basis pill <b>muted</b> · tail links <b>Inter 11 muted</b> · timestamp <b>mono 10.5, right</b>. Row height 30px — below the 40px tool-event row, so the stream stays legible top-down.</div>
+          <div class="agrp" style="width:600px"><span class="tri">▸</span><b>6 actions</b> under task grant<span class="abasis">task grant</span><span class="sp"></span><span class="ts">9:38–9:40</span></div>
+          <div class="cn" style="max-width:600px">Consecutive chips under one grant collapse into a group row; the basis pill hoists to the group so the grant is still named while collapsed.</div>
+        </div>
+        <div class="cell" style="gap:10px">
+          <span class="cn" style="max-width:300px">weight ladder, quietest → loudest</span>
+          <div style="display:flex;flex-direction:column;gap:8px;width:300px">
+            <div class="achip" style="padding-left:0"><svg class="ic sh"><use href="#i-shield-ck"/></svg><span class="sum">audit chip</span></div>
+            <div class="toolrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-term"/></svg><span class="cmd">tool event row</span><span class="ok">done</span></div>
+            <div class="msg"><div class="bd" style="font-size:14px">Assistant message</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -63,6 +63,9 @@ class SessionRegistry(
     // the daemon-wide task-grant engine (approval design M2), shared with the quick terminal
     private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
+    // M3 deterministic risk radar (advisory) — daemon-wide so the sequence ledger survives relaunches
+    private val riskEngine: dev.ccpocket.daemon.approval.ApprovalRiskEngine? =
+        dev.ccpocket.daemon.approval.ApprovalRiskEngine(),
 ) {
     private val mutex = Mutex()
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
@@ -230,7 +233,7 @@ class SessionRegistry(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
-            approvals = approvals, grants = grants,
+            approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`

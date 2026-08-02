@@ -187,6 +187,28 @@
     <string name="always_allow_scope">“Always allow” remembers only %1$s for this session.</string>
     <string name="allow_chip_prefix">Always allowing</string>
     <string name="allow_chip_suffix">this session</string>
+    <!-- approval design M2: task-scope actions, retry-safer, autorun chip, risk badge -->
+    <string name="allow_for_task">Allow for task</string>
+    <string name="allow_for_task_note">Covers matching actions until this task ends (2 h max).</string>
+    <string name="retry_safer">Safer way</string>
+    <string name="retry_safer_title">Ask for a safer approach</string>
+    <string name="retry_safer_send">Send constraints</string>
+    <string name="rs_no_network">Don\'t access the network</string>
+    <string name="rs_read_only">Read-only, don\'t change files</string>
+    <string name="rs_tests_only">Only run tests</string>
+    <string name="rs_stay_workspace">Stay inside the project folder</string>
+    <string name="rs_patch_only">Produce a patch to review, don\'t apply it</string>
+    <string name="rs_custom_hint">Other constraint…</string>
+    <string name="more_options">More</string>
+    <string name="allow_session_option">Always allow this session</string>
+    <string name="autorun_label">Auto-ran</string>
+    <string name="autorun_basis_task">task grant</string>
+    <string name="autorun_basis_session">session rule</string>
+    <string name="autorun_tighten">Tighten</string>
+    <string name="risk_low">Low risk</string>
+    <string name="risk_medium">Medium risk</string>
+    <string name="risk_high">Risk found</string>
+    <string name="risk_unknown">Couldn\'t assess</string>
 
     <!-- ── voice input ───────────────────────────────────────────── -->
     <string name="cancel_recording">Cancel recording</string>
