@@ -1648,6 +1648,15 @@ data class DaemonHello(val accountId: String, val ed25519Pub: String, val protoV
  *  and a bridge credential would silently escalate to a complete device on downgrade. */
 const val PROTO_V_HEADLESS: Int = 2
 
+/** The [Attached.relayProtoV] from which a RELAY understands [NotifyPush.deviceId] — a push aimed at ONE
+ *  device instead of the account's interactive fan-out (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.4).
+ *
+ *  The daemon MUST gate the offer push on this: an older relay silently ignores the unknown `deviceId`
+ *  key and falls back to the ACCOUNT-level fan-out, which would deliver the collaborator's offer alert to
+ *  the OWNER's own phone. Not sending at all is the honest degradation — the recipient still discovers the
+ *  offer on its next connect/foreground pull. */
+const val PROTO_V_TARGETED_PUSH: Int = 3
+
 /** relay -> daemon: a single-use nonce to sign (bound to this socket, short TTL). */
 @Serializable
 @SerialName("pocket/challenge")
@@ -1667,10 +1676,14 @@ data class DeviceHello(val deviceId: String, val secret: String, val protoV: Int
 
 // ---- handshake result ----
 
-/** relay -> peer: authenticated and bound to accountId; binary data plane is now live. */
+/** relay -> peer: authenticated and bound to accountId; binary data plane is now live.
+ *
+ *  [relayProtoV] is the RELAY's own capability level — the mirror of [DaemonHello.protoV], which only ever
+ *  travelled daemon→relay. 0 = "this relay predates capability announcement" (an old relay simply omits the
+ *  key), so every feature gated on it fails CLOSED. See [PROTO_V_TARGETED_PUSH]. */
 @Serializable
 @SerialName("pocket/attached")
-data class Attached(val role: Role, val accountId: String) : ToRelay
+data class Attached(val role: Role, val accountId: String, val relayProtoV: Int = 0) : ToRelay
 
 /** relay -> peer: auth/handshake failed; the relay closes the socket after this. */
 @Serializable
@@ -1685,10 +1698,23 @@ data class AuthError(val code: String, val message: String? = null) : ToRelay
  *  issuing a bridge ticket, so the relay stamps the flag onto the ticket and later onto the redeemed
  *  device — never trusting the redeeming client's self-declared [PairRedeem.headless]. Old daemons omit
  *  it (mint a phone ticket, as before); old relays ignore it (the device then rides PairRedeem.headless,
- *  which is why that field remains). */
+ *  which is why that field remains).
+ *
+ *  [collaborator] is the SAME authoritative-at-mint idea for a Collaborator Link inbox
+ *  (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.4). A collaborator credential is minted headless — it must
+ *  never count as "a person is watching this account" nor receive the owner's session pushes — but unlike a
+ *  bridge it IS a phone in someone's pocket, so the relay must let it register its own push token and be
+ *  addressed by [NotifyPush.deviceId]. Two orthogonal markers, not one three-valued one: `headless` keeps
+ *  meaning "invisible to presence / excluded from the account fan-out" for both, and `collaborator` only
+ *  re-opens the two doors an inbox needs. An old relay ignores the key → the link still works, just with no
+ *  offer push (the daemon's capability gate refuses to send one anyway). */
 @Serializable
 @SerialName("pocket/pair.begin")
-data class PairBegin(val e2ePub: String, val headless: Boolean = false) : ToRelay
+data class PairBegin(
+    val e2ePub: String,
+    val headless: Boolean = false,
+    val collaborator: Boolean = false,
+) : ToRelay
 
 /** relay -> daemon: the raw ticket (for the QR) plus a short 6-digit code to type on the phone. */
 @Serializable
@@ -1764,6 +1790,24 @@ data class NotifyPush(
     // approval until it times out to deny. Old relays ignore the field (they gate on deviceCount==0 as
     // before → an online-but-elsewhere phone misses it, degrading to the timeout).
     val urgent: Boolean = false,
+    /**
+     * TARGETED delivery (§3.4): non-null = send ONLY to this device (which the relay verifies belongs to
+     * this account), gated on THAT device's own liveness rather than the account's interactive socket
+     * count. This is how a Collaborator Link inbox — deliberately excluded from the account fan-out — is
+     * reachable at all.
+     *
+     * DANGEROUS ON AN OLD RELAY: it ignores the unknown key and fans out to the ACCOUNT, i.e. the owner's
+     * own phone. Senders MUST gate on [PROTO_V_TARGETED_PUSH] from [Attached.relayProtoV] and simply not
+     * send when it is absent.
+     */
+    val deviceId: String? = null,
+    /**
+     * Routing for a targeted OFFER push (§3.4): the opaque handoff id, and nothing else. It deep-links the
+     * woken app into its offer inbox (`ccpocket://handoff?id=…`) where the real, END-TO-END-ENCRYPTED offer
+     * is pulled with `ListHandoffs()`. Deliberately carried INSTEAD of [workdir]/[sessionId], which are
+     * cleartext to the relay and would leak the initiator's project path.
+     */
+    val handoffId: String? = null,
 ) : ToRelay
 
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----

@@ -10,6 +10,7 @@ import kotlinx.serialization.encodeToString
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** The pre-#119 `pocket/sessions` body shape (no `groups`) — used to prove an old app skips a populated
@@ -1483,6 +1484,93 @@ class SerializationRoundTripTest {
         // an OLD daemon's push (no urgent key) decodes to false — the ordinary deviceCount==0 gate applies
         val old = """{"id":"n2","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b"}}"""
         assertEquals(NotifyPush("t", "b"), PocketJson.decodeFromString<Envelope>(old).body as NotifyPush)
+    }
+
+    @Test
+    fun notifyPush_targeted_offer_roundtrips_and_old_frames_read_null() {
+        // §3.4: the offer nudge is addressed to ONE device and routes by handoff id alone — no workdir, no
+        // sessionId (both are cleartext to the relay and would leak the initiator's project path)
+        val offer = NotifyPush(
+            title = "cc-pocket",
+            body = "You have a new handoff offer. Open the app to see the details.",
+            deviceId = "dev-recipient",
+            handoffId = "h-42",
+        )
+        val json = PocketJson.encodeToString(Envelope(id = "n3", ts = 0, to = Route.RELAY, body = offer))
+        assertTrue("\"deviceId\":\"dev-recipient\"" in json, json)
+        assertTrue("\"handoffId\":\"h-42\"" in json, json)
+        assertEquals(offer, PocketJson.decodeFromString<Envelope>(json).body as NotifyPush)
+
+        // an ORDINARY turn-complete push must stay BYTE-IDENTICAL for an old relay: explicitNulls=false, so
+        // neither new key may appear at all when unset (a relay parses this frame — an extra key is not free)
+        val plain = PocketJson.encodeToString(
+            Envelope(id = "n3b", ts = 0, to = Route.RELAY, body = NotifyPush("t", "b", workdir = "/w", sessionId = "s")),
+        )
+        assertFalse("deviceId" in plain, plain)
+        assertFalse("handoffId" in plain, plain)
+
+        // an OLD daemon's push carries neither key: both read null, i.e. the ordinary ACCOUNT fan-out with
+        // session routing — exactly the pre-§3.4 behaviour
+        val old = """{"id":"n4","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b","workdir":"/w","sessionId":"s","urgent":false}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(old).body as NotifyPush
+        assertNull(decoded.deviceId)
+        assertNull(decoded.handoffId)
+
+        // …and an OLD RELAY's tolerance is the mirror image: unknown keys are skipped, so a targeted push
+        // degrades to an account fan-out rather than failing the decode (which is exactly why the daemon
+        // gates on Attached.relayProtoV instead of relying on this)
+        val fromFuture = """{"id":"n5","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b","deviceId":"d","handoffId":"h","somethingNewer":{"x":1}}}"""
+        val tolerant = PocketJson.decodeFromString<Envelope>(fromFuture).body as NotifyPush
+        assertEquals("d", tolerant.deviceId)
+        assertEquals("h", tolerant.handoffId)
+    }
+
+    @Test
+    fun attached_relayProtoV_roundtrips_and_old_relays_read_zero() {
+        // §3.4: the relay's own capability level — the mirror of DaemonHello.protoV
+        val attached = Attached(Role.DAEMON, "acct", relayProtoV = PROTO_V_TARGETED_PUSH)
+        val json = PocketJson.encodeToString(Envelope(id = "a1", ts = 0, to = Route.RELAY, body = attached))
+        assertTrue("\"relayProtoV\":3" in json, json)
+        assertEquals(attached, PocketJson.decodeFromString<Envelope>(json).body as Attached)
+
+        // an OLD relay's Attached has no such key → 0, so every capability gated on it FAILS CLOSED. This is
+        // the whole safety property: below PROTO_V_TARGETED_PUSH the daemon sends no targeted push at all,
+        // because an old relay would ignore NotifyPush.deviceId and ring the OWNER's phone instead.
+        val old = """{"id":"a2","ts":0,"to":"RELAY","body":{"t":"pocket/attached","role":"daemon","accountId":"acct"}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(old).body as Attached
+        assertEquals(0, decoded.relayProtoV)
+        assertTrue(decoded.relayProtoV < PROTO_V_TARGETED_PUSH)
+
+        // Attached is the ONE frame every peer decodes on every connect, so its unknown-key tolerance is the
+        // most load-bearing in the protocol: a newer relay's extra capability keys must be skipped, including
+        // structured ones, rather than failing the handshake decode
+        val fromFuture = """{"id":"a3","ts":0,"to":"RELAY","body":{"t":"pocket/attached","role":"device","accountId":"acct","relayProtoV":9,"limits":{"maxFrame":4194304}}}"""
+        val tolerant = PocketJson.decodeFromString<Envelope>(fromFuture).body as Attached
+        assertEquals(9, tolerant.relayProtoV)
+        assertEquals(Role.DEVICE, tolerant.role)
+    }
+
+    @Test
+    fun pairBegin_collaborator_roundtrips_and_old_frames_default_false() {
+        // §3.4: a Collaborator Link ticket is minted headless AND collaborator-marked — two orthogonal
+        // markers, so "presence-invisible" and "may hold its own push token" stay separable
+        val collab = PairBegin("pub", headless = true, collaborator = true)
+        val json = PocketJson.encodeToString(Envelope(id = "pb3", ts = 0, to = Route.RELAY, body = collab))
+        assertTrue("\"collaborator\":true" in json, json)
+        assertEquals(collab, PocketJson.decodeFromString<Envelope>(json).body as PairBegin)
+
+        // an OLD daemon's PairBegin (no collaborator key) → false: a bridge, as before
+        val old = """{"id":"pb4","ts":0,"to":"RELAY","body":{"t":"pocket/pair.begin","e2ePub":"pub","headless":true}}"""
+        val decoded = PocketJson.decodeFromString<Envelope>(old).body as PairBegin
+        assertTrue(decoded.headless)
+        assertFalse(decoded.collaborator)
+        // …and a bridge mint from a NEW daemon is still headless-only — the marker never rides along by itself
+        assertFalse(PairBegin("pub", headless = true).collaborator)
+
+        // a newer daemon's extra mint markers are skipped by this relay rather than failing the mint
+        val fromFuture = """{"id":"pb5","ts":0,"to":"RELAY","body":{"t":"pocket/pair.begin","e2ePub":"pub","headless":true,"collaborator":true,"scope":{"roots":["/a"]}}}"""
+        val tolerant = PocketJson.decodeFromString<Envelope>(fromFuture).body as PairBegin
+        assertTrue(tolerant.collaborator)
     }
 
     // ---- folder-share (issue #115) ----
