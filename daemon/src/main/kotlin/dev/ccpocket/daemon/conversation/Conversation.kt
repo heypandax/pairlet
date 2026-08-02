@@ -101,6 +101,12 @@ class Conversation(
      *  command auto-runs on this session with no phone prompt (via BridgeCommandPolicy); empty for owner/guest
      *  and for a bridge whose owner configured none. Only consulted when [bridgeSession] is true. */
     private val bridgeAllowedCommands: List<String> = emptyList(),
+    /** COLLABORATOR handoff (SESSION-HANDOFF.md §8.3): the Handoff Grant's operation ceiling this
+     *  conversation runs under. Non-null → the PermissionBridge HARD-REFUSES write tools
+     *  (Write/Edit/…) before any ask exists unless the access explicitly grants scoped writes —
+     *  the recipient is the lease controller and answers its own asks, so a mere ask is no wall.
+     *  Null = not a handoff-granted conversation. */
+    private val handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -462,8 +468,20 @@ class Conversation(
     /** The current permission mode — read by the shell approval gate so it can't be spoofed from the phone. */
     fun currentMode(): PermissionMode = mode
 
+    /** Does this live conversation already enforce EXACTLY the given collaborator grant walls
+     *  (pathScope + access ceiling)? SessionRegistry's hot→cold gate (SESSION-HANDOFF §8.3): a
+     *  collaborator open that hits a live convo may only reattach when the walls match — the owner's
+     *  wall-less convo (both null here) never matches a grant, so it is closed and rebuilt cold. */
+    internal fun matchesGrant(scope: List<String>?, access: dev.ccpocket.protocol.HandoffAccess?): Boolean =
+        pathScope == scope && handoffAccess == access
+
     /** True while this conversation still streams to [s] — the LAN grace-close ownership check. */
     fun isAttachedTo(s: OutboundSink): Boolean = sinks.containsKey(sinkKey(s))
+
+    /** Every client currently streaming from this conversation. Used by the handoff hot→cold rebuild
+     *  (SESSION-HANDOFF §3.3): the conversation being replaced hands its viewers over, so the initiator
+     *  keeps watching the SAME session live instead of having to re-open it by hand. */
+    internal fun attachedSinks(): List<OutboundSink> = sinks.values.toList()
 
     /** Remove [s]'s view of this conversation; true when no clients remain (caller may close for real). */
     fun detach(s: OutboundSink): Boolean {
@@ -934,6 +952,8 @@ class Conversation(
             // GUEST folder-share (issue #115): confine every file tool to the shared roots
             pathScope = pathScope,
             workdir = workdir.toString(),
+            // COLLABORATOR handoff (§8.3): REVIEW_READ_ONLY hard-refuses write tools before any ask
+            handoffAccess = handoffAccess,
         )
         proc = p
         bridge = b

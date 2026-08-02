@@ -35,6 +35,7 @@ import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
@@ -75,6 +76,9 @@ class DeviceSessions(
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl?
         get() = core.bridgeControl
         set(v) { core.bridgeControl = v }
+    var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl?
+        get() = core.collaboratorControl
+        set(v) { core.collaboratorControl = v }
     private val mutex = Mutex()
     private val devicePubs = HashMap<String, ByteArray>(loadPersisted())
     private val psks = ArrayDeque<ByteArray>()              // minted tickets, oldest first
@@ -358,7 +362,16 @@ class DeviceSessions(
                 // read; re-send it under the just-proven twin so this connect still learns the LAN address
                 sealAndSend(deviceId, daemonInfo())
             } else {
-                bridges.finalize(deviceId, confirmedPsk)?.let { log.info("${it.kind.name.lowercase()} \"${it.name}\" confirmed on ${deviceId.take(8)}…") }
+                bridges.finalize(deviceId, confirmedPsk)?.let { spec ->
+                    log.info("${spec.kind.name.lowercase()} \"${spec.name}\" confirmed on ${deviceId.take(8)}…")
+                    // Collaborator Link (SESSION-HANDOFF.md §4.1 step 5): the redeem just proved the connect
+                    // ticket — record the contact (label + word-group fingerprint of the peer's static key)
+                    // and tell attached OWNER clients (CollaboratorConnected flips the waiting-for-scan UI).
+                    if (spec.kind == CredentialKind.COLLABORATOR) {
+                        val pubB64 = bridges.pubOf(deviceId)?.let { B64enc.encodeToString(it) } ?: ""
+                        runCatching { collaboratorControl?.onRedeemed(deviceId, pubB64) }
+                    }
+                }
             }
         }
         // FAIL CLOSED: a device that is neither a confirmed RESTRICTED credential (bridge/guest) nor in the
@@ -387,6 +400,7 @@ class DeviceSessions(
         var toRoute: Frame = env.body
         var origin: String? = null
         var guestScope: GuestScope? = null
+        var collabScope: dev.ccpocket.daemon.handoff.CollaboratorScope? = null
         when {
             bridges.isBridge(deviceId) -> {
                 val guard = bridges.startGuard(deviceId)
@@ -437,19 +451,72 @@ class DeviceSessions(
                     }
                 }
             }
+            bridges.isCollaborator(deviceId) -> {
+                // COLLABORATOR link (SESSION-HANDOFF.md §4.1): ZERO-baseline credential. The type
+                // whitelist admits only the handoff plane + the granted-session frames; the guard then
+                // requires an IN_PROGRESS handoff bound to THIS device for every session-shaped frame.
+                val svc = core.registry.handoffs
+                val guard = svc?.collaboratorGuard(deviceId)
+                if (guard == null || !dev.ccpocket.daemon.handoff.CollaboratorCaps.ingressAllowed(env.body)) {
+                    log.warn("collaborator ${deviceId.take(8)}… sent forbidden ${env.body::class.simpleName} — refused")
+                    runCatching { sink.emit(PocketError("collaborator_forbidden", "not permitted for a collaborator link: ${env.body::class.simpleName}", convoIdOf(env.body))) }
+                    return
+                }
+                // fan-out target for ITS OWN offers only (§4.2 offer delivery): keyed per device like the
+                // owner attach; the recipient filter — not just the egress whitelist — keeps every other
+                // handoff's updates away from this sink.
+                svc.attach(sink, recipientDeviceId = deviceId)
+                when (val v = guard.vet(env.body)) {
+                    is dev.ccpocket.daemon.handoff.CollaboratorGuard.Verdict.Deny -> {
+                        log.warn("collaborator ${deviceId.take(8)}… ${env.body::class.simpleName} denied: ${v.code}")
+                        runCatching { sink.emit(PocketError(v.code, v.message, convoIdOf(env.body))) }
+                        return
+                    }
+                    is dev.ccpocket.daemon.handoff.CollaboratorGuard.Verdict.Allow -> {
+                        toRoute = v.frame // workdir forced to the grant's, mode clamped, takeOver stripped
+                        collabScope = dev.ccpocket.daemon.handoff.CollaboratorScope(
+                            deviceId, v.pathScope,
+                            // the grant's ceiling for the PermissionBridge write wall (§8.3);
+                            // absent (non-open frames) defaults fail-closed to read-only
+                            access = v.access ?: dev.ccpocket.protocol.HandoffAccess.REVIEW_READ_ONLY,
+                        )
+                    }
+                }
+            }
             else -> {
-                // FULL-POWER owner device: the share/bridge control planes (mint / list / revoke) need
-                // handles the router lacks, so they're intercepted here — via the SAME dispatcher the LAN
-                // transport uses. A guest/bridge never reaches this branch (its own whitelist denies these
-                // frames), so re-sharing the machine or minting another bridge is structurally impossible.
-                if (dispatchOwnerControl(env.body, shareControl, bridgeControl) { sink.emit(it) }) return
+                // FULL-POWER owner device: the share/bridge/collaborator control planes (mint / list /
+                // revoke) need handles the router lacks, so they're intercepted here — via the SAME
+                // dispatcher the LAN transport uses. A restricted credential never reaches this branch
+                // (its own whitelist denies these frames), so re-sharing the machine, minting another
+                // bridge, or inviting another collaborator is structurally impossible.
+                // Also register as a handoff fan-out target (SESSION-HANDOFF.md): keyed per device, so each
+                // frame just refreshes the same slot; owner devices only (a restricted credential's egress
+                // whitelist would drop HandoffUpdated anyway — this keeps it out of the target set entirely).
+                core.registry.handoffs?.attach(sink)
+                if (isOwnerControlFrame(env.body)) {
+                    // OFF the reader loop: a mint suspends ~10s waiting for the relay's PairTicket reply,
+                    // which arrives through the SAME single ws reader that called us — dispatching inline
+                    // deadlocks the mint into its own timeout (and starves every device for the duration).
+                    // The direct-ws leg masked this for shares/bridges; the relay leg hits it every time.
+                    val body = env.body
+                    core.scope.launch {
+                        val handled = dispatchOwnerControl(body, shareControl, bridgeControl, collaboratorControl) { sink.emit(it) }
+                        // null control plane (daemon still wiring up / LAN-only serve) — surface it rather
+                        // than vanish, mirroring what the router's fall-through used to produce
+                        if (!handled) runCatching { sink.emit(PocketError("unsupported", "the daemon isn't ready for ${body::class.simpleName}", null)) }
+                    }
+                    return
+                }
             }
         }
         try {
-            core.router.handle(toRoute, sink, origin, guestScope, caps = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }) { convoId ->
+            // deviceId is the Noise-authenticated transport identity — the handoff gate's ONLY input for
+            // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
+            core.router.handle(toRoute, sink, origin, guestScope, caps = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }, deviceId = deviceId, collabScope = collabScope) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
+                if (collabScope != null) core.registry.handoffs?.collaboratorGuard(deviceId)?.noteOpened(convoId) // collaborator grant
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -484,6 +551,7 @@ class DeviceSessions(
             // BRIDGE whitelist until the first transport frame confirms the kind (fail closed).
             val allowed = when (bridges.kindOf(deviceId)) {
                 CredentialKind.GUEST -> GuestCaps.egressAllowed(frame)
+                CredentialKind.COLLABORATOR -> dev.ccpocket.daemon.handoff.CollaboratorCaps.egressAllowed(frame)
                 else -> BridgeCaps.egressAllowed(frame)
             }
             if (!allowed) return
@@ -522,6 +590,7 @@ class DeviceSessions(
 
     private companion object {
         val B64dec: Base64.Decoder = Base64.getUrlDecoder()
+        val B64enc: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
 
         // ticket TTL (120s at the relay) + slack: how long after an interactive mint a headless mint
         // is refused (and PairLoopback refuses the reverse via BridgeRegistry.intentPending)

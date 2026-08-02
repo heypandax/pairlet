@@ -47,10 +47,23 @@ import java.io.File
  * Null controls (daemon still wiring up, or a LAN-only `serve` with no relay link to mint over) → false,
  * so the frame surfaces the router's "unsupported" rather than silently vanishing.
  */
+/** The exact frame set [dispatchOwnerControl] handles — kept adjacent so the two can't drift. The relay
+ *  transport needs this to decide BEFORE dispatching: mints suspend on a reply that arrives through the
+ *  same single reader loop, so they must run OFF that loop (head-of-line deadlock otherwise). */
+fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (frame) {
+    is dev.ccpocket.protocol.CreateShare, is dev.ccpocket.protocol.ListShares, is dev.ccpocket.protocol.RevokeShare,
+    is CreateBridge, is dev.ccpocket.protocol.ListBridges, is dev.ccpocket.protocol.RevokeBridge,
+    is ConfigureBridgeRunner, is ControlBridgeRunner, is dev.ccpocket.protocol.DetachBridgeRunner,
+    is dev.ccpocket.protocol.CreateCollaboratorTicket, is dev.ccpocket.protocol.ListCollaborators, is dev.ccpocket.protocol.RemoveCollaborator,
+    -> true
+    else -> false
+}
+
 suspend fun dispatchOwnerControl(
     frame: dev.ccpocket.protocol.Frame,
     share: ShareControl?,
     bridge: BridgeControl?,
+    collaborator: dev.ccpocket.daemon.handoff.CollaboratorControl? = null,
     emit: suspend (dev.ccpocket.protocol.ToPhone) -> Unit,
 ): Boolean {
     when (frame) {
@@ -63,6 +76,10 @@ suspend fun dispatchOwnerControl(
         is ConfigureBridgeRunner -> emit((bridge ?: return false).configureRunner(frame))
         is ControlBridgeRunner -> emit((bridge ?: return false).controlRunner(frame))
         is dev.ccpocket.protocol.DetachBridgeRunner -> emit((bridge ?: return false).detachRunner(frame.name))
+        // Collaborator Link contact management (SESSION-HANDOFF.md §4.1) — same owner-only footing
+        is dev.ccpocket.protocol.CreateCollaboratorTicket -> emit((collaborator ?: return false).createTicket(frame))
+        is dev.ccpocket.protocol.ListCollaborators -> emit((collaborator ?: return false).list())
+        is dev.ccpocket.protocol.RemoveCollaborator -> emit((collaborator ?: return false).remove(frame.deviceId))
         else -> return false
     }
     return true

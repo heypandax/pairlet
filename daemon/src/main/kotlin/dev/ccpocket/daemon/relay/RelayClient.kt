@@ -196,6 +196,23 @@ class RelayClient(
             runners = bridgeRunners,
             liveCount = { ids -> core.registry.liveCountOf(ids) },
         )
+        // Collaborator Link contact plane (SESSION-HANDOFF.md §4.1), on the same relay-only footing as the
+        // share plane: minting a connect ticket needs the relay. The service doubles as the router's
+        // contact DIRECTORY (recipient-binding validation + labels + stats), installed on HandoffService.
+        val collaboratorService = dev.ccpocket.daemon.handoff.CollaboratorService(
+            accountId = identity.accountId,
+            daemonPubB64 = identity.e2ePubB64,
+            relayWsBase = relayWsBase,
+            ownerLabel = hostname,
+            registry = sessions.bridges,
+            mintTicket = { headless -> mintTicket(headless) },
+            interactivePairingPending = { sessions.interactivePairingPending() },
+            revokeCredential = { deviceId -> revokeBridge(deviceId) },
+            revokeGrants = { deviceId -> core.handoffs.revokeRecipient(deviceId) },
+            fanoutToOwners = { frame -> core.handoffs.emitToOwners(frame) },
+        )
+        sessions.collaboratorControl = collaboratorService
+        core.handoffs.collaborators = collaboratorService
         // register the BUILT-IN engines by wire kind (issue #91 follow-up): in-process, driven through the
         // same guard + router an external bridge passes — see FeishuEngine. A new IM adds one line here.
         bridgeRunners.registerEngine(dev.ccpocket.protocol.RUNNER_KIND_FEISHU) { name, spec, env, dir, logLine ->

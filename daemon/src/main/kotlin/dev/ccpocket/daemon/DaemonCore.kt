@@ -42,14 +42,23 @@ class DaemonCore(
     scheduleStore: ScheduleStore = ScheduleStore.load(),
     openCodeModels: OpenCodeModelService = OpenCodeModelService(),
     codexModels: CodexModelService = CodexModelService(),
+    /** Session Handoff (SESSION-HANDOFF.md): registry + guard + fan-out, shared by both transports.
+     *  Installed onto [SessionRegistry.handoffs] below so the router's drive gate, the §4.1 create
+     *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
+     *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
+    val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val registry = SessionRegistry(scope, backends)
 
     init {
+        registry.handoffs = handoffs
         // unhide transcripts a crashed previous instance stranded hidden (issue #70) — off the
         // constructor path (file IO over up to 200 journal entries must not delay startup)
         scope.launch(Dispatchers.IO) { runCatching { SpawnedSessions.sweepAtBoot() } }
+        // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
+        // pump below, so BOTH transports (relay client + local server) get it for free
+        scope.launch { handoffs.sweepLoop() }
     }
 
     val dirs = DirectoryService()
@@ -89,8 +98,12 @@ class DaemonCore(
                 ),
                 sink,
             )
+            // the handoff drive gate covers scheduled fires too (SESSION-HANDOFF.md §5.3: a WAITING/
+            // handed-off session accepts input from its controller only — the scheduler is never that)
+            val handoffDeny = if (convoId.isEmpty()) null else registry.driveDenied(convoId, "scheduler")
             when {
                 convoId.isEmpty() -> "agent unavailable"
+                handoffDeny != null -> handoffDeny.message
                 !registry.sendPrompt(SendPrompt(convoId, entry.prompt, promptId = "sched-${entry.id}")) ->
                     "session unavailable (live in another client?)"
                 else -> null
@@ -127,6 +140,10 @@ class DaemonCore(
     var shareControl: dev.ccpocket.daemon.relay.ShareControl? = null
     @Volatile
     var bridgeControl: dev.ccpocket.daemon.relay.BridgeControl? = null
+    /** The Collaborator Link contact plane (SESSION-HANDOFF.md §4.1) — same install/lifetime terms as
+     *  the two above (minting a connect ticket needs the relay link). */
+    @Volatile
+    var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl? = null
 
     suspend fun shutdown() = registry.closeAll()
 }

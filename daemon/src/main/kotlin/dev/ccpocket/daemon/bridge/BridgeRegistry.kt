@@ -38,6 +38,8 @@ class BridgeRegistry(
     private val guestStore: File = store.parentFile?.let { File(it, "guests.json") } ?: GuestStore.file(),
     private val guestSessionStore: File = store.parentFile?.let { File(it, "guest-sessions.json") }
         ?: File(BridgeStore.file().parentFile, "guest-sessions.json"),
+    private val collaboratorKeyStore: File = store.parentFile?.let { File(it, "collaborator-keys.json") }
+        ?: CollaboratorKeyStore.file(),
 ) {
     private val log = logger("BridgeRegistry")
     private val b64enc: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
@@ -59,6 +61,7 @@ class BridgeRegistry(
     init {
         BridgeStore.load(store).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.BRIDGE) }
         GuestStore.load(guestStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.GUEST) }
+        CollaboratorKeyStore.load(collaboratorKeyStore).forEach { (id, entry) -> admitLoaded(id, entry, CredentialKind.COLLABORATOR) }
         runCatching {
             if (guestSessionStore.exists()) {
                 PocketJson.decodeFromString<Map<String, List<String>>>(guestSessionStore.readText())
@@ -67,22 +70,20 @@ class BridgeRegistry(
         }
         val bridges = specs.values.count { it.kind == CredentialKind.BRIDGE }
         val guests = specs.values.count { it.kind == CredentialKind.GUEST }
-        if (bridges + guests > 0) log.info("loaded $bridges bridge + $guests guest credential(s)")
+        val collabs = specs.values.count { it.kind == CredentialKind.COLLABORATOR }
+        if (bridges + guests + collabs > 0) log.info("loaded $bridges bridge + $guests guest + $collabs collaborator credential(s)")
     }
 
     /** File entries carry their own kind in the spec (default BRIDGE for pre-#115 rows); [expected] is the
-     *  file's kind, used to skip a mis-filed row (never trust a guests.json row that claims BRIDGE). */
+     *  file's kind, used to skip a mis-filed row (never trust a guests.json row that claims BRIDGE — a
+     *  mis-filed row would silently grant the wrong policy, so refuse it outright). */
     private fun admitLoaded(id: String, entry: BridgeEntry, expected: CredentialKind) {
-        val kind = entry.spec.kind
-        val spec = if (expected == CredentialKind.GUEST && kind != CredentialKind.GUEST) {
-            // a bridges-shaped row in guests.json (or vice-versa) is nonsense — refuse it rather than
-            // silently granting the wrong policy
-            log.warn("ignoring ${id.take(8)}… in ${if (expected == CredentialKind.GUEST) "guests" else "bridges"}.json — kind mismatch"); return
-        } else if (expected == CredentialKind.BRIDGE && kind == CredentialKind.GUEST) {
-            log.warn("ignoring guest row ${id.take(8)}… found in bridges.json"); return
-        } else entry.spec
+        if (entry.spec.kind != expected) {
+            log.warn("ignoring ${id.take(8)}… (${entry.spec.kind.name.lowercase()} row) found in the ${expected.name.lowercase()} store — kind mismatch")
+            return
+        }
         runCatching { b64dec.decode(entry.pubB64) }.getOrNull()?.let { pub ->
-            bridgePubs[id] = pub; specs[id] = spec; createdAts[id] = entry.createdAt
+            bridgePubs[id] = pub; specs[id] = entry.spec; createdAts[id] = entry.createdAt
         }
     }
 
@@ -151,6 +152,10 @@ class BridgeRegistry(
     /** issue #115: this deviceId is a confirmed GUEST folder-share credential. */
     @Synchronized
     fun isGuest(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.GUEST && deviceId in bridgePubs
+
+    /** SESSION-HANDOFF.md §4.1: this deviceId is a confirmed COLLABORATOR link credential. */
+    @Synchronized
+    fun isCollaborator(deviceId: String): Boolean = specs[deviceId]?.kind == CredentialKind.COLLABORATOR && deviceId in bridgePubs
 
     @Synchronized
     fun kindOf(deviceId: String): CredentialKind? = specs[deviceId]?.kind
@@ -254,8 +259,9 @@ class BridgeRegistry(
         specs.entries.filter { it.value.kind == CredentialKind.GUEST && it.value.expired(now) }.map { it.key }
 
     private fun persist() {
-        // split by kind: bridges.json holds ONLY bridges, guests.json ONLY guests — the downgrade-isolation
-        // invariant (a pre-#115 daemon reading bridges.json must never see a guest key)
+        // split by kind: bridges.json holds ONLY bridges, guests.json ONLY guests, collaborator-keys.json
+        // ONLY collaborators — the downgrade-isolation invariant (an older daemon reading its own files
+        // must never see a newer kind's key)
         val byKind = bridgePubs.entries.groupBy { specs[it.key]?.kind }
         fun rows(kind: CredentialKind) = (byKind[kind] ?: emptyList()).associate { (id, pub) ->
             // keep each credential's ORIGINAL bind time — an unrelated persist (another bind, a revoke)
@@ -264,6 +270,7 @@ class BridgeRegistry(
         }
         BridgeStore.save(rows(CredentialKind.BRIDGE), store)
         GuestStore.save(rows(CredentialKind.GUEST), guestStore)
+        CollaboratorKeyStore.save(rows(CredentialKind.COLLABORATOR), collaboratorKeyStore)
     }
 
     private fun persistGuestSessions() {

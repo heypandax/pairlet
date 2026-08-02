@@ -19,14 +19,19 @@ import java.nio.file.attribute.PosixFilePermissions
  *  - [GUEST] (issue #115): a scoped INTERACTIVE collaborator on one shared folder. It approves its OWN
  *    asks, lists + browses inside the shared root, but never reaches the daemon's management plane or any
  *    path outside the root. Expires; the owner can revoke.
+ *  - [COLLABORATOR] (SESSION-HANDOFF.md §4.1): a long-lived Collaborator Link contact. Its BASELINE is
+ *    ZERO session access ([workdirs] is empty — nothing is ever in scope) — it may only receive/act on
+ *    Handoff offers addressed to its own deviceId; per-handoff session access is a separate temporary
+ *    Grant decided by the handoff state machine, never by this credential. No expiry (the link lives
+ *    until either side severs it).
  *
  * Old bridges.json entries (pre-#115) carry no `kind` → default [BRIDGE], so #91 credentials keep their
- * exact behaviour. A GUEST is persisted to a SEPARATE file (guests.json) so a downgraded daemon that
- * predates guests never loads it and fails that key closed — the same downgrade-safety argument that
- * keeps bridge keys out of devices.json.
+ * exact behaviour. A GUEST is persisted to a SEPARATE file (guests.json), a COLLABORATOR to
+ * collaborator-keys.json, so a downgraded daemon that predates either never loads it and fails that key
+ * closed — the same downgrade-safety argument that keeps bridge keys out of devices.json.
  */
 @Serializable
-enum class CredentialKind { BRIDGE, GUEST }
+enum class CredentialKind { BRIDGE, GUEST, COLLABORATOR }
 
 /**
  * Constraints minted with a restricted credential — decided by the OWNER at mint time and enforced
@@ -123,6 +128,27 @@ data class BridgeSpec(
 
         const val MAX_ALLOWED_COMMANDS = 64
 
+        /**
+         * Build a COLLABORATOR spec (SESSION-HANDOFF.md §4.1). [workdirs] is deliberately EMPTY: the
+         * baseline capability of a Collaborator Link is zero session/path access ([PathScope.contains]
+         * over an empty root list is always false — fail closed), and every rate bound is the tightest.
+         * Session access is granted per-handoff by the handoff state machine (the temporary Grant), so
+         * nothing here may widen; [tier] REVIEW is only the fallback ceiling for that grant's mode clamp.
+         * No [expiresAt]: the LINK persists until severed (each redeem TICKET's TTL is the relay's).
+         */
+        fun collaborator(label: String) = BridgeSpec(
+            name = label,
+            workdirs = emptyList(),
+            maxSessions = 1, // at most the one handed-off Source Session
+            opensPerMin = COLLAB_OPENS_PER_MIN,
+            promptsPerMin = GUEST_PROMPTS_PER_MIN, // interactive human, same prompt cadence as a guest
+            kind = CredentialKind.COLLABORATOR,
+            expiresAt = null,
+            tier = AccessTier.REVIEW,
+        )
+
+        const val COLLAB_OPENS_PER_MIN = 6
+
         /** Build a GUEST spec (issue #115): a single canonical shared root, an access tier, and an expiry. */
         fun guest(name: String, root: String, tier: AccessTier, expiresAt: Long) = BridgeSpec(
             name = name,
@@ -184,6 +210,24 @@ object BridgeStore {
  */
 object GuestStore {
     fun file(): File = credentialFile("guests.json")
+
+    fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
+
+    fun save(map: Map<String, BridgeEntry>, store: File = file()) = saveCredentials(map, store)
+}
+
+/**
+ * The persisted registry of COLLABORATOR link credentials (SESSION-HANDOFF.md §4.1): deviceId ->
+ * [BridgeEntry] (kind = COLLABORATOR), in `~/.cc-pocket/collaborator-keys.json`. A THIRD separate file
+ * for the same downgrade-safety chain as guests.json: a daemon that predates Collaborator Links never
+ * loads it, so the key is an unknown device → handshake refused, fail closed — and a collaborator key
+ * can never be mis-read as a full device (devices.json), a bridge (bridges.json) or a folder-share
+ * guest (guests.json). Contact METADATA (label/fingerprint/stats — the wire [dev.ccpocket.protocol.Collaborator]
+ * rows, removed ones included) lives separately in `collaborators.json`
+ * ([dev.ccpocket.daemon.handoff.CollaboratorStore]); this file holds only the E2E key + spec.
+ */
+object CollaboratorKeyStore {
+    fun file(): File = credentialFile("collaborator-keys.json")
 
     fun load(store: File = file()): Map<String, BridgeEntry> = loadCredentials(store)
 

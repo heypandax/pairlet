@@ -76,6 +76,14 @@ class PermissionBridge(
     // agent runs with the session cwd, which is itself inside the scope).
     private val pathScope: List<String>? = null,
     private val workdir: String? = null,
+    // SESSION-HANDOFF §8.3: the Handoff Grant's operation ceiling for a COLLABORATOR-opened
+    // conversation; null for every other kind. Under REVIEW_READ_ONLY (and any access that isn't
+    // explicitly CONTINUE_SCOPED — UNKNOWN clamps to the safest) the write tools are HARD-DENIED
+    // before any ask exists: the recipient is the session's lease controller and answers its own
+    // asks, so "every write surfaces as a PermissionAsk" would let it approve its own writes.
+    // Bash still routes to the normal ask (command policy is a separate concern); Read/Glob/Grep
+    // are untouched (the pathScope wall above already confines their targets).
+    private val handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
 ) {
     private val log = logger("Perms")
     // [ask] is the exact PermissionAsk frame we emitted for this request — kept so a phone that reattaches
@@ -96,6 +104,15 @@ class PermissionBridge(
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
         val meta = ToolMetadata.of(ev.toolName, ev.input)
+        // HANDOFF READ-ONLY WALL (SESSION-HANDOFF §8.3, crypto review MUST-FIX): a write tool under a
+        // review/read-only Handoff Grant is refused HERE — first, before every auto-allow path and
+        // before any PermissionAsk is minted, exactly like the guest out-of-scope guard below. No ask
+        // ever exists, so no verdict (the recipient's own, or anyone's) can approve it: the deny
+        // precedes the verdict channel structurally, not by policy.
+        if (handoffWriteBanned(ev.toolName)) {
+            respond(ev.requestId, false, false, ev.input, null, "denied — this handoff grant is review/read-only; write tools are disabled")
+            return
+        }
         // OWNER BYPASS (issue #91): preserve its established semantics — ordinary execution tools auto-run,
         // while neverRemember human-decision gates still ask.
         if (bridgeSession && ownerBypassSession && !meta.neverRemember) {
@@ -309,7 +326,21 @@ class PermissionBridge(
         return targets.none { BridgeGrant.executesForTheOwner(it) }
     }
 
+    /** Is [tool] a write tool this conversation's Handoff Grant refuses outright (§8.3)? Fail-closed
+     *  on the access axis: only an explicit CONTINUE_SCOPED grants writes — REVIEW_READ_ONLY and a
+     *  newer peer's UNKNOWN both land here. Codex's apply_patch is synthesized into the Claude-shaped
+     *  "Edit" upstream, but the raw names stay on the list as defense in depth. */
+    private fun handoffWriteBanned(tool: String): Boolean =
+        handoffAccess != null &&
+            handoffAccess != dev.ccpocket.protocol.HandoffAccess.CONTINUE_SCOPED &&
+            tool in HANDOFF_WRITE_TOOLS
+
     private companion object {
+        /** The file-WRITE tool families a review/read-only Handoff Grant hard-refuses (§8.3): the
+         *  built-in Claude names plus the raw Codex patch-tool spellings (normally synthesized to
+         *  "Edit" before reaching here). Bash is deliberately absent — it keeps the normal ask. */
+        val HANDOFF_WRITE_TOOLS = setOf("Write", "Edit", "MultiEdit", "NotebookEdit", "apply_patch", "ApplyPatch")
+
         // issue #100: distinct from a real user "deny" so claude phrases its follow-up honestly — it reads
         // this string as the deny reason. NOT "denied": the user rejected nothing, they just didn't answer.
         const val TIMEOUT_DENY_MESSAGE =

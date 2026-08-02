@@ -66,11 +66,12 @@ class WsConnection(
     private val router: RequestRouter,
     private val registry: SessionRegistry,
     private val e2e: LanE2E? = null,
-    /** The owner control planes (share #115 / bridge #91) — served on the LAN transport too, because the
-     *  desktop app on the daemon's own machine arrives HERE, not over the relay, and every LAN peer is a
-     *  full-power owner by construction (restricted credentials can't pass the LAN gate). Null while the
-     *  relay link is still coming up, or forever on a LAN-only `serve` (minting needs the relay). */
-    private val ownerControls: (() -> Pair<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?>)? = null,
+    /** The owner control planes (share #115 / bridge #91 / collaborator SESSION-HANDOFF §4.1) — served on
+     *  the LAN transport too, because the desktop app on the daemon's own machine arrives HERE, not over
+     *  the relay, and every LAN peer is a full-power owner by construction (restricted credentials can't
+     *  pass the LAN gate). Null while the relay link is still coming up, or forever on a LAN-only `serve`
+     *  (minting needs the relay). */
+    private val ownerControls: (() -> Triple<dev.ccpocket.daemon.relay.ShareControl?, dev.ccpocket.daemon.relay.BridgeControl?, dev.ccpocket.daemon.handoff.CollaboratorControl?>)? = null,
 ) {
     private val outbox = Channel<Envelope>(Channel.BUFFERED)
     private val nextId = AtomicLong(0)
@@ -152,6 +153,10 @@ class WsConnection(
     }
 
     private suspend fun pump(crypto: E2ESession?) = coroutineScope {
+        // handoff fan-out target (SESSION-HANDOFF.md): every LAN peer is a full-power owner by
+        // construction (the gate refuses restricted credentials), so it may see HandoffUpdated pushes.
+        // Instance-keyed (one sink per connection) — MUST detach on disconnect, see the finally below.
+        registry.handoffs?.attach(sink)
         val writer = launch {
             for (env in outbox) {
                 val text = PocketJson.encodeToString(env)
@@ -195,9 +200,12 @@ class WsConnection(
                             // owner control planes first (share #115 / bridge #91) — the same dispatcher the
                             // relay transport uses, so the two paths can't drift. Falls through to the router
                             // for everything else (and when the controls aren't up yet).
-                            val (sc, bc) = ownerControls?.invoke() ?: (null to null)
-                            if (dispatchOwnerControl(env.body, sc, bc) { sink.emit(it) }) return@launch
-                            router.handle(env.body, sink, caps = caps) { owned.add(it) }
+                            val (sc, bc, cc) = ownerControls?.invoke() ?: Triple(null, null, null)
+                            if (dispatchOwnerControl(env.body, sc, bc, cc) { sink.emit(it) }) return@launch
+                            // gatedDeviceId = the LAN-gate-authenticated paired device (same identity space
+                            // as the relay's); null only on the plaintext --local dev socket, which the
+                            // router maps to its machine-local pseudo-device for the handoff gate
+                            router.handle(env.body, sink, caps = caps, deviceId = gatedDeviceId) { owned.add(it) }
                         } catch (e: Exception) {
                             if (e is kotlinx.coroutines.CancellationException) throw e
                             log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")
@@ -211,6 +219,7 @@ class WsConnection(
                 }
             }
         } finally {
+            registry.handoffs?.detach(sink) // this connection's fan-out slot dies with the socket
             outbox.close()
             writer.cancel()
             withContext(NonCancellable) {

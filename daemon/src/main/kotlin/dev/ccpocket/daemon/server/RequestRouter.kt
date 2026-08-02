@@ -14,6 +14,10 @@ import dev.ccpocket.daemon.disk.SessionFilesService
 import dev.ccpocket.daemon.disk.SessionGroups
 import dev.ccpocket.daemon.disk.SkillCatalogService
 import dev.ccpocket.daemon.disk.UsageService
+import dev.ccpocket.daemon.handoff.CollaboratorScope
+import dev.ccpocket.daemon.handoff.HandoffGuard
+import dev.ccpocket.daemon.handoff.HandoffRegistry
+import dev.ccpocket.daemon.handoff.HandoffService
 import dev.ccpocket.daemon.opencode.OpenCodeModelService
 import dev.ccpocket.daemon.presets.PresetService
 import dev.ccpocket.daemon.schedule.SchedulerService
@@ -32,8 +36,19 @@ import dev.ccpocket.protocol.AuthLogin
 import dev.ccpocket.protocol.AuthLoginCancel
 import dev.ccpocket.protocol.AuthLoginCode
 import dev.ccpocket.protocol.AuthLogout
+import dev.ccpocket.protocol.AcceptHandoff
+import dev.ccpocket.protocol.CancelHandoff
 import dev.ccpocket.protocol.CancelTurn
+import dev.ccpocket.protocol.CompleteHandoff
+import dev.ccpocket.protocol.CreateHandoff
+import dev.ccpocket.protocol.DeclineHandoff
 import dev.ccpocket.protocol.GetWorkflowAgentDetail
+import dev.ccpocket.protocol.HandoffCreated
+import dev.ccpocket.protocol.HandoffListing
+import dev.ccpocket.protocol.HandoffUpdated
+import dev.ccpocket.protocol.ListHandoffs
+import dev.ccpocket.protocol.RecallHandoff
+import dev.ccpocket.protocol.ReturnHandoff
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.FetchPresets
@@ -114,6 +129,11 @@ class RequestRouter(
     }
 
     companion object {
+        /** The device identity for callers with no transport-authenticated id: the plaintext `--local`
+         *  dev socket and trusted in-process callers. One machine-local pseudo-device, so the handoff
+         *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
+        const val LOCAL_DEVICE_ID = "local"
+
         /**
          * [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
          * enrichment carries [AgentKind] — strip the opencode entries, keep the row.
@@ -166,7 +186,16 @@ class RequestRouter(
     // the WHOLE session auto-allows (per-session ⇒ race-free). Passed ONLY by trusted in-process code (the
     // built-in engine); the relay/LAN ingress never sets it, so an external adapter can never claim it.
     // Ignored for non-OpenSession frames.
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), ownerBypass: Boolean = false, onOpened: suspend (String) -> Unit = {}) {
+    // [deviceId] (SESSION-HANDOFF.md §5.3): the TRANSPORT-authenticated identity of the sender — the relay
+    // ingress passes the Noise-proven deviceId, the gated LAN path its hello'd device — NEVER a frame field.
+    // It drives the handoff controller gate and stamps handoff mutations; null (plaintext --local dev mode /
+    // in-process callers) falls back to [LOCAL_DEVICE_ID].
+    // [collabScope] (SESSION-HANDOFF.md §4.1) is non-null ONLY for a COLLABORATOR link credential, whose
+    // frame was already vetted by CollaboratorGuard at the ingress: it restricts the handoff plane to the
+    // device's OWN offers (accept/decline/return + a filtered listing), denies every owner-side handoff
+    // op, and carries the vetted OpenSession's path scope into the conversation's PermissionBridge.
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, onOpened: suspend (String) -> Unit = {}) {
+        val dev = deviceId ?: LOCAL_DEVICE_ID
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
             // next list request answers unfiltered. Ingress handlers may process frames concurrently,
@@ -287,10 +316,17 @@ class RequestRouter(
                         sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
                     else -> {
                         dirs.noteRecent(wd.toString())
-                        // pathScope = the guest's roots → the conversation's PermissionBridge denies any
-                        // Read/Write/Edit whose target lands outside them (issue #115 §4). Null for an owner.
+                        // pathScope = the guest's roots (issue #115 §4) or a collaborator grant's
+                        // workdir+allowedRoots (SESSION-HANDOFF.md §8.3) → the conversation's
+                        // PermissionBridge denies any Read/Write/Edit outside them. Null for an owner.
                         val convoId = registry.open(
-                            frame.copy(workdir = wd.toString()), sink, origin, pathScope = guestScope?.roots,
+                            frame.copy(workdir = wd.toString()), sink, origin,
+                            pathScope = guestScope?.roots ?: collabScope?.pathScope?.takeIf { it.isNotEmpty() },
+                            // non-null exactly for a COLLABORATOR open: the grant's operation ceiling.
+                            // Keys BOTH crypto MUST-FIX halves in registry.open — the hot→cold rebuild
+                            // (a reattach must not drop the grant walls) and the PermissionBridge's
+                            // REVIEW write-tool refusal (SESSION-HANDOFF.md §8.3).
+                            handoffAccess = collabScope?.access,
                             // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
                             peerSupportsOpencode = caps?.supportsOpencode == true,
                             bridgeAllowedCommands = bridgeAllowedCommands,
@@ -301,10 +337,20 @@ class RequestRouter(
                 }
             }
 
-            is SendPrompt -> if (!registry.sendPrompt(frame)) sink.emit(SessionGone(frame.convoId))
+            // handoff drive gate (SESSION-HANDOFF.md §5.3 items 2/3): every input-shaped frame checks the
+            // controller lease FIRST — WAITING denies everyone, IN_PROGRESS only the lease-holding
+            // recipient drives. A Deny maps to a PocketError so the client can show why (never silence).
+            is SendPrompt -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
+                null -> if (!registry.sendPrompt(frame)) sink.emit(SessionGone(frame.convoId))
+                else -> sink.emit(handoffDenied(deny, frame.convoId))
+            }
             // a verdict may resolve a SHELL ask (issue #3), an EXPORT ask (issue #67 v2), or an agent tool
-            // ask — each service claims its own by askId (pending-map membership) before the registry
-            is PermissionVerdict -> if (!shell.onVerdict(frame) && !exports.onVerdict(frame)) registry.verdict(frame)
+            // ask — each service claims its own by askId (pending-map membership) before the registry.
+            // Question answers (AskUserQuestion) ride this same frame, so the drive gate covers them too.
+            is PermissionVerdict -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
+                null -> if (!shell.onVerdict(frame) && !exports.onVerdict(frame)) registry.verdict(frame)
+                else -> sink.emit(handoffDenied(deny, frame.convoId))
+            }
             is SwitchMode -> registry.switchMode(frame)
             is SwitchServiceTier -> registry.switchServiceTier(frame)
             is ClearAllowRule -> registry.clearRule(frame)
@@ -336,7 +382,10 @@ class RequestRouter(
             // fan-out: only a REAL close (last attached client) drops the quick-terminal state with it
             // (exports keep NO cross-request state to drop: every export ask is one-off, never remembered)
             is CloseSession -> { if (registry.close(frame.convoId, sink, frame.force)) shell.forget(frame.convoId) }
-            is CancelTurn -> registry.cancelTurn(frame)
+            is CancelTurn -> when (val deny = registry.driveDenied(frame.convoId, dev)) {
+                null -> registry.cancelTurn(frame)
+                else -> sink.emit(handoffDenied(deny, frame.convoId))
+            }
             // task panel "stop" (issue #80): interrupt the agent's work for this job + settle its row killed
             is StopBackgroundJob -> registry.stopBackgroundJob(frame)
             // workflow detail sheet (issue #106): read one agent's full prompt/return off disk —
@@ -394,9 +443,175 @@ class RequestRouter(
                 })
             }
 
+            // ---- Session Handoff control frames (SESSION-HANDOFF.md §9.1). Owner-plane except for the
+            // recipient-side trio (accept/decline/return) + a filtered listing, which a COLLABORATOR link
+            // credential may use for ITS OWN offers only (§4.1): bridges/guests never reach here (their
+            // ingress caps default-deny), the origin/guestScope re-check below is defence in depth, and a
+            // collaborator caller is marked by [collabScope] (its ingress already passed CollaboratorCaps
+            // + CollaboratorGuard). The executing device identity is ALWAYS the transport's [dev].
+            is CreateHandoff -> {
+                val svc = registry.handoffs
+                when {
+                    svc == null -> sink.emit(HandoffCreated(ok = false, error = "handoffs are not available on this daemon"))
+                    origin != null || guestScope != null || collabScope != null ->
+                        sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
+                    else -> {
+                        // §4.1 preconditions live on the registry (it owns the live conversation state)
+                        val blocker = registry.handoffBlocker(frame.sessionId)
+                        val contacts = svc.collaborators
+                        val recipient = frame.recipientDeviceId
+                        if (blocker != null) sink.emit(HandoffCreated(ok = false, error = blocker))
+                        // recipient binding (§4.2 step 7): when the contact ledger is available, the named
+                        // device must be a live (non-removed, credential-backed) collaborator — a dead link
+                        // must fail the send, not mint an offer nobody can ever accept. With no ledger
+                        // (dev/local mode) the binding passes through and is still enforced at accept.
+                        else if (recipient != null && contacts != null && !contacts.isActive(recipient)) {
+                            sink.emit(HandoffCreated(ok = false, error = "that collaborator link is gone — reconnect before handing off"))
+                        } else when (
+                            val out = svc.registry.create(
+                                sourceSessionId = frame.sessionId,
+                                // resolve like OpenSession/ListSessions so the durable binding uses the real cwd
+                                workdir = groupWorkdir(frame.workdir),
+                                agent = frame.agent,
+                                initiatorDeviceId = dev,
+                                kind = frame.kind,
+                                access = frame.access,
+                                brief = frame.brief,
+                                allowedRoots = frame.allowedRoots,
+                                expiresInSec = frame.expiresInSec,
+                                // TODO: initiatorLabel could carry the daemon hostname / device label once
+                                // the router learns it; sourceEventSeq (the transcript cursor) is not on the
+                                // wire CreateHandoff yet — left 0 (recipient replays the full window).
+                                recipientLabel = frame.recipientLabel ?: recipient?.let { contacts?.labelOf(it) },
+                                sourceConvoId = frame.sourceConvoId,
+                                recipientDeviceId = recipient,
+                            )
+                        ) {
+                            is HandoffRegistry.HandoffOutcome.Ok -> {
+                                sink.emit(HandoffCreated(ok = true, handoff = out.handoff))
+                                svc.broadcast(listOf(out.handoff)) // includes the bound recipient's sink, if attached
+                                recipient?.let { contacts?.noteHandoff(it, out.handoff.createdAt) } // stats + CollaboratorUpdated
+                                // TODO(§4.2 step 9 push): an OFFLINE recipient learns of the offer only when
+                                // it next connects and pulls ListHandoffs — the no-content push nudge is a
+                                // later milestone.
+                                svc.reconcile() // announce anything the create's internal sweep settled
+                            }
+                            // the refusal's machine-readable code rides along (§6: an unimplemented
+                            // kind/access combination answers `handoff_not_supported`, not just prose)
+                            is HandoffRegistry.HandoffOutcome.Refused ->
+                                sink.emit(HandoffCreated(ok = false, error = out.message, code = out.code))
+                        }
+                    }
+                }
+            }
+            is ListHandoffs -> {
+                val svc = registry.handoffs
+                when {
+                    svc == null -> sink.emit(HandoffListing())
+                    origin != null || guestScope != null -> sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
+                    else -> {
+                        var items = svc.registry.list(frame.workdir?.let { groupWorkdir(it) }, frame.sessionId)
+                        // a COLLABORATOR credential sees ONLY handoffs addressed to its own device (§4.1:
+                        // offers + their history — never the owner's other handoffs); owners see everything
+                        if (collabScope != null) items = items.filter { it.recipientDeviceId == collabScope.deviceId }
+                        sink.emit(HandoffListing(items))
+                    }
+                }
+            }
+            is AcceptHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) {
+                // a collaborator's accept stamps its contact label (owner devices resolve to null → the
+                // registry keeps the initiator's chosen recipientLabel)
+                it.accept(frame.handoffId, dev, deviceLabel = registry.handoffs?.collaborators?.labelOf(dev))
+            }
+            is DeclineHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) { it.decline(frame.handoffId, dev, frame.reason) }
+            is CancelHandoff -> handoffMutation(sink, origin, guestScope, collabScope) { it.cancel(frame.handoffId, dev) }
+            // GRACEFUL RECALL (SESSION-HANDOFF.md §5.4): an idle session settles RECALLED at once; with a
+            // turn EXECUTING the daemon arms the hand-back (nobody may drive from this instant), pushes
+            // the recallPending row to both sides, then interrupts + waits for the stable point OFF this
+            // pump — awaiting it inline would wedge the whole socket for the length of the turn.
+            is RecallHandoff -> {
+                val svc = registry.handoffs
+                when {
+                    svc == null -> sink.emit(PocketError("handoff_unavailable", "handoffs are not available on this daemon"))
+                    origin != null || guestScope != null -> sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
+                    collabScope != null -> sink.emit(PocketError("handoff_forbidden", "not permitted for a collaborator link"))
+                    else -> when (val out = svc.beginRecall(frame.handoffId, dev)) {
+                        is HandoffService.RecallOutcome.Refused -> {
+                            sink.emit(PocketError(handoffCode(out.code), out.message))
+                            svc.reconcile() // the refusal's internal sweep may have settled the row itself
+                        }
+                        is HandoffService.RecallOutcome.Settled -> {
+                            sink.emit(HandoffUpdated(out.handoff))
+                            svc.broadcast(listOf(out.handoff))
+                            svc.reconcile()
+                        }
+                        is HandoffService.RecallOutcome.Pending -> {
+                            // both sides learn the recall is in flight NOW (the initiator waits instead of
+                            // typing, the recipient sees control being taken back); the terminal RECALLED
+                            // arrives as a second HandoffUpdated when the turn actually stops.
+                            sink.emit(HandoffUpdated(out.handoff))
+                            svc.broadcast(listOf(out.handoff))
+                            scope.launch { svc.settleRecall(frame.handoffId) }
+                        }
+                    }
+                }
+            }
+            is ReturnHandoff -> handoffMutation(sink, origin, guestScope, collabScope, recipientSide = true, handoffId = frame.handoffId) { it.returnHandoff(frame.handoffId, dev, frame.result) }
+            is CompleteHandoff -> handoffMutation(sink, origin, guestScope, collabScope) { it.complete(frame.handoffId, dev) }
+
             else -> sink.emit(PocketError("unsupported", "frame not handled by daemon: ${frame::class.simpleName}"))
         }
     }
+
+    /** A [HandoffGuard.Verdict.Deny] as the wire error the App keys on: code `handoff_<reason>`
+     *  (e.g. `handoff_waiting_locked`, `handoff_not_controller`), message = the guard's client copy. */
+    private fun handoffDenied(deny: HandoffGuard.Verdict.Deny, convoId: String?) =
+        PocketError("handoff_${deny.reason.name.lowercase()}", deny.message, convoId)
+
+    /**
+     * One handoff state-machine mutation through the router: run [op] against the registry, answer the
+     * caller with [HandoffUpdated] (success) or a `handoff_*`-coded [PocketError] (refusal), and fan the
+     * transition out to every other attached client. [reconcile] runs after a success so transitions the
+     * mutation's internal sweep settled (an expiry racing an accept) are announced too, not lost.
+     */
+    private suspend fun handoffMutation(
+        sink: OutboundSink,
+        origin: String?,
+        guestScope: GuestScope?,
+        collab: CollaboratorScope? = null,
+        /** True for the transitions a bound RECIPIENT may drive (accept/decline/return); false for the
+         *  initiator-side ones (cancel/recall/complete), which a collaborator may never touch. */
+        recipientSide: Boolean = false,
+        /** The targeted handoff — required to enforce a collaborator's own-offer binding. */
+        handoffId: String? = null,
+        op: (HandoffRegistry) -> HandoffRegistry.HandoffOutcome,
+    ) {
+        val svc = registry.handoffs
+        if (svc == null) { sink.emit(PocketError("handoff_unavailable", "handoffs are not available on this daemon")); return }
+        if (origin != null || guestScope != null) { sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential")); return }
+        if (collab != null) {
+            if (!recipientSide) { sink.emit(PocketError("handoff_forbidden", "not permitted for a collaborator link")); return }
+            // own-offer binding (§4.1): a collaborator may act ONLY on a handoff addressed to its own
+            // device — an unbound (open-invite) or foreign handoff is refused before the state machine
+            // runs. "Doesn't exist" and "not yours" share one answer on purpose (no probe oracle).
+            val h = handoffId?.let { svc.registry.byId(it) }
+            if (h?.recipientDeviceId != collab.deviceId) {
+                sink.emit(PocketError("handoff_not_allowed", "this handoff is not addressed to you")); return
+            }
+        }
+        when (val out = op(svc.registry)) {
+            is HandoffRegistry.HandoffOutcome.Ok -> {
+                sink.emit(HandoffUpdated(out.handoff))
+                svc.broadcast(listOf(out.handoff))
+                svc.reconcile()
+            }
+            is HandoffRegistry.HandoffOutcome.Refused -> sink.emit(PocketError(handoffCode(out.code), out.message))
+        }
+    }
+
+    /** Registry refusal code → wire error code: already-namespaced codes (`handoff_not_supported`) ride
+     *  through, bare ones (`not_found`, `not_allowed`) get the `handoff_` prefix the App keys on. */
+    private fun handoffCode(code: String) = if (code.startsWith("handoff")) code else "handoff_$code"
 
     /** Resolve a workdir the same way [OpenSession] does (the new-session popover ships `~` paths raw and
      *  claude keys transcript dirs by the REAL cwd) so both the session listing and the group store agree on

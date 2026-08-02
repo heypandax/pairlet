@@ -3,9 +3,11 @@ package dev.ccpocket.daemon.session
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
+import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.daemon.conversation.PushHook
+import dev.ccpocket.daemon.conversation.sinkKey
 import dev.ccpocket.daemon.disk.LiveProcesses
 import dev.ccpocket.daemon.disk.ProjectPaths
 import dev.ccpocket.daemon.disk.SessionGroups
@@ -56,7 +58,7 @@ class SessionRegistry(
     // a temp dir instead of the user's real ~/.claude/projects (every other path resolves via the
     // backends / ProjectPaths directly, same default)
     private val projectsRoot: Path = ProjectPaths.projectsRoot(),
-) {
+) : dev.ccpocket.daemon.handoff.SessionTurnControl {
     private val mutex = Mutex()
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
     private val convos = mutableMapOf<String, Conversation>()
@@ -130,6 +132,107 @@ class SessionRegistry(
     @Volatile
     var askPushHook: AskPushHook? = null
 
+    /** Session Handoff machinery (SESSION-HANDOFF.md) — installed by DaemonCore (tests install their
+     *  own temp-store instance). Null = handoffs disabled: every drive check allows, nothing is
+     *  reap-protected, and the router answers handoff frames as unavailable. Installing it also hands
+     *  the service THIS registry as its [dev.ccpocket.daemon.handoff.SessionTurnControl], so a graceful
+     *  recall (§5.4) can interrupt the live turn and see when it actually stopped. */
+    @Volatile
+    var handoffs: dev.ccpocket.daemon.handoff.HandoffService? = null
+        set(value) {
+            field = value
+            value?.sessions = this
+        }
+
+    /**
+     * Handoff drive gate (SESSION-HANDOFF.md §5.3 items 2/3): may [deviceId] — the TRANSPORT-derived
+     * sender identity, never a frame field — send input (prompt / cancel / question answer / permission
+     * verdict) into [convoId]'s session right now? Null = allowed; a Deny carries the machine-readable
+     * reason + client copy for the caller to map onto a [PocketError].
+     *
+     * Gates on the conversation's PERSISTENT identity (sessionId, else its resume anchor pre-first-turn
+     * — the same identity [open] reattaches by): a brand-new session with neither cannot carry a
+     * handoff (the guard's pre-first-turn rule), so it always allows.
+     */
+    suspend fun driveDenied(convoId: String, deviceId: String): dev.ccpocket.daemon.handoff.HandoffGuard.Verdict.Deny? {
+        val svc = handoffs ?: return null
+        val sid = get(convoId)?.let { it.sessionId ?: it.resumeAnchor } ?: return null
+        return svc.guard.canDrive(sid, deviceId) as? dev.ccpocket.daemon.handoff.HandoffGuard.Verdict.Deny
+    }
+
+    /**
+     * The §4.1 pre-create checks a CreateHandoff must pass: the session is at a stable checkpoint —
+     * no executing turn, no unanswered permission ask / question. Null = clear to create; else a
+     * human-readable refusal for [dev.ccpocket.protocol.HandoffCreated.error]. A session with no live
+     * conversation is idle on disk — a stable checkpoint by definition.
+     *
+     * TODO(§4.1 item 2): "background work that can't be safely handed off" is not classified yet —
+     *  [Conversation.hasBackgroundWork] would block ANY background job, so it is deliberately not
+     *  gated here until a safe/unsafe classification exists.
+     * TODO(§4.1 item 3): verifying [sessionId] is durably resumable (a transcript really exists on
+     *  disk for this workdir/agent) needs the backend's transcript root — not checked yet.
+     */
+    suspend fun handoffBlocker(sessionId: String): String? {
+        if (sessionId.isBlank()) return "a handoff needs the session's persistent id"
+        val convo = convoForSession(sessionId) ?: return null
+        return when {
+            convo.isExecuting() -> "the current turn is still executing — wait for it to finish"
+            convo.hasPendingAsk() -> "a permission ask or question is unanswered — settle it first"
+            else -> null
+        }
+    }
+
+    /** The live conversation driving [sessionId] — matched on the agent-reported id, else (pre-first-turn)
+     *  on the resume anchor, the same persistent identity [open] reattaches by. Null = idle on disk. */
+    private suspend fun convoForSession(sessionId: String): Conversation? = mutex.withLock {
+        convos.values.firstOrNull { it.sessionId == sessionId || (it.sessionId == null && it.resumeAnchor == sessionId) }
+    }
+
+    // ---- SessionTurnControl (SESSION-HANDOFF.md §5.4 graceful recall) ------
+    // The handoff plane knows a session only by its PERSISTENT id; these three map that onto the live
+    // conversation. A session with no live conversation answers "not executing / nothing to interrupt /
+    // no leftovers" — idle on disk IS the stable point a recall waits for.
+
+    override suspend fun turnExecuting(sessionId: String): Boolean = convoForSession(sessionId)?.isExecuting() == true
+
+    override suspend fun interruptTurn(sessionId: String) {
+        val convo = convoForSession(sessionId) ?: return
+        log.info("handoff recall: interrupting the live turn on ${sessionId.take(8)}… (convo ${convo.convoId.take(8)}…)")
+        convo.cancelTurn()
+    }
+
+    override suspend fun hasUnstoppableWork(sessionId: String): Boolean =
+        convoForSession(sessionId)?.hasBackgroundWork() == true
+
+    /**
+     * §5.3 item 7 (the ended Grant's sinks die with it — see [dev.ccpocket.daemon.handoff.HandoffService]).
+     * Cut ONE device's live view of [convoIds], keyed on the relay's stable `dev:<deviceId>` fan-out
+     * identity: whoever else is attached (above all the initiator, auto-migrated here as a spectator by
+     * the §3.3 rebuild) keeps streaming, because its own key is a different one.
+     *
+     * An observe view (read-only tail of a foreign writer) has exactly ONE sink by construction, so
+     * "detach that device" IS "close it" — but only after confirming the sink is that device's, never
+     * blind. Idempotent: an absent convo, an already-detached sink and an already-closed observe all
+     * count 0.
+     */
+    override suspend fun detachDevice(convoIds: Set<String>, deviceId: String): Int {
+        if (convoIds.isEmpty()) return 0
+        // a stub carrying ONLY the identity: every attach/detach path matches on sinkKey, never on the
+        // lambda instance, so this removes the device's real sink without needing a handle to it
+        val probe = KeyedSink("dev:$deviceId", OutboundSink { })
+        val orphaned = mutableListOf<ObserveSession>()
+        var cut = 0
+        mutex.withLock {
+            for (id in convoIds) {
+                convos[id]?.let { c -> if (c.isAttachedTo(probe)) { c.detach(probe); cut++ } }
+                observes[id]?.let { o -> if (o.isAttachedTo(probe)) { observes.remove(id); orphaned += o; cut++ } }
+            }
+        }
+        orphaned.forEach { runCatching { it.close() } } // off the lock: close() cancels its tail scope
+        if (cut > 0) log.info("handoff: detached ${deviceId.take(8)}… from $cut live view(s)")
+        return cut
+    }
+
     /** Returns the opened convoId, or "" if the requested backend is unavailable (a PocketError is
      *  emitted). [origin] names the restricted credential that opened it (issue #91 bridge / #115 guest);
      *  null = interactive. [pathScope] (issue #115) is a GUEST's shared roots — the conversation's
@@ -146,18 +249,53 @@ class SessionRegistry(
         // issue #91 OWNER BYPASS: this session is the bridge owner's OWN dedicated session → its whole
         // PermissionBridge auto-allows. Passed ONLY by trusted in-process code (the built-in engine).
         ownerBypass: Boolean = false,
+        // SESSION-HANDOFF §8.3: non-null exactly for a COLLABORATOR's vetted open — the Handoff Grant's
+        // operation ceiling. It rides into the Conversation's PermissionBridge (REVIEW hard-refuses
+        // write tools before any ask) and keys the hot→cold rebuild below.
+        handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
     ): String {
         val resume = open.resumeId
+        // §3.3 INITIATOR AUTO-SPECTATE: the clients streaming from a conversation the handoff rebuild is
+        // about to close, moved onto the rebuilt one below so the owner keeps watching without re-opening.
+        var spectators: List<OutboundSink> = emptyList()
         if (resume != null) {
             // re-attach to a session the daemon is already running (a cc-pocket background session).
             // Pre-first-turn the agent hasn't reported a sessionId yet — match the resume anchor too,
             // else a reconnect re-open spawns a second Conversation onto the same transcript.
-            val live = mutex.withLock {
+            var live = mutex.withLock {
                 convos.values.firstOrNull {
                     it.convoId == resume || it.sessionId == resume || (it.sessionId == null && it.resumeAnchor == resume)
                 }
             }
-            if (live != null) {
+            // HANDOFF HOT→COLD REBUILD (crypto review MUST-FIX, SESSION-HANDOFF §8.3): a collaborator's
+            // vetted open carries the grant's pathScope + access ceiling + clamped mode, but a plain
+            // reattach onto the OWNER's still-live Conversation would silently drop all three — that
+            // convo's PermissionBridge was built wall-less (owner), and handoff sessions are
+            // reap-protected, so the hot path is the one a collaborator actually hits. Close the live
+            // convo and fall through to the cold path, which rebuilds the PermissionBridge with the
+            // grant's walls. Safe + single-writer: handoffBlocker guaranteed a stable checkpoint at
+            // create (no executing turn, no pending ask) and the drive gate has locked every input
+            // since, so the child process is idle and its transcript flushed on close. Owner devices
+            // attached to the old convo simply re-open (resume) like any reconnect and land on the NEW
+            // convo via this same reattach path — as spectators, since the controller lease denies
+            // their input while the handoff is IN_PROGRESS. A collaborator re-opening its OWN convo
+            // (reconnect) matches the grant walls and reattaches warm instead of churning.
+            val hot = live
+            if (hot != null && handoffAccess != null && !hot.matchesGrant(pathScope, handoffAccess)) {
+                log.info("open ${resume.take(8)}… → handoff grant: closing live convo ${hot.convoId.take(8)}… to rebuild with the grant's walls")
+                // §3.3: snapshot the initiator's (and any other owner client's) views BEFORE the close —
+                // they are migrated onto the rebuilt conversation at the end of this call, so the owner
+                // becomes a live spectator automatically instead of having to re-open. The opener's own
+                // sink is excluded: it is the new conversation's initialSink already.
+                spectators = hot.attachedSinks().filterNot { sinkKey(it) == sinkKey(sink) }
+                mutex.withLock { convos.remove(hot.convoId) }
+                cancelPendingClose(hot.convoId)
+                runCatching { hot.close() }
+                noteSelfClosed(hot)
+                live = null
+            }
+            val attach = live
+            if (attach != null) {
                 // The reattach match is by resumeId ALONE — `open.agent` is deliberately not consulted, so
                 // a client that guessed the agent wrong still lands on the right conversation. That makes
                 // this the choke point for the wire-compat gate: reattaching a peer that cannot decode
@@ -165,13 +303,13 @@ class SessionRegistry(
                 // that reports itself open while every push vanishes. Refuse with something readable
                 // instead — and refuse HERE, so any future path that hands such a client an opencode
                 // session id is covered too.
-                if (live.kind == AgentKind.OPENCODE && !peerSupportsOpencode) {
+                if (attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) {
                     log.info("open ${resume.take(8)}… → refused: opencode session, peer never declared support")
                     sink.emit(PocketError("agent_unavailable", "update the app to open OpenCode sessions"))
                     return ""
                 }
-                log.info("open ${resume.take(8)}… → reattach ${live.convoId.take(8)}…")
-                cancelPendingClose(live.convoId); live.reattach(sink, open.lastEventSeq); return live.convoId
+                log.info("open ${resume.take(8)}… → reattach ${attach.convoId.take(8)}…")
+                cancelPendingClose(attach.convoId); attach.reattach(sink, open.lastEventSeq); return attach.convoId
             }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
             // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
@@ -223,6 +361,7 @@ class SessionRegistry(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
+            handoffAccess = handoffAccess,
         )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
@@ -258,11 +397,30 @@ class SessionRegistry(
             sink.emit(PocketError("agent_unavailable", "${open.agent} CLI not found — is it installed? (${started.exceptionOrNull()?.message})"))
             return ""
         }
+        // §3.3 INITIATOR AUTO-SPECTATE (the other half of the hot→cold rebuild above): move the closed
+        // conversation's clients onto this one. Each gets the ordinary reattach stream — SessionLive with
+        // the NEW convoId, the transcript, live jobs, any pending ask — i.e. exactly what it would have
+        // received had it re-opened by hand, without anyone having to. They arrive as SPECTATORS: the
+        // controller lease denies their input for as long as the handoff is IN_PROGRESS, and the old
+        // wall-less conversation is already gone, so no second writer survives the migration.
+        for (s in spectators) {
+            runCatching { c.reattach(s) }
+                .onFailure { log.warn("handoff rebuild: could not migrate a spectator onto ${convoId.take(8)}…: ${it.message}") }
+        }
+        if (spectators.isNotEmpty()) log.info("handoff rebuild: migrated ${spectators.size} spectator view(s) onto ${convoId.take(8)}…")
         return convoId
     }
 
     /** Test hook: is [convoId] still a live observe view? (the issue-107 stale-observer reap) */
     internal suspend fun observing(convoId: String): Boolean = mutex.withLock { observes.containsKey(convoId) }
+
+    /** Test hook: does [convoId]'s live conversation enforce EXACTLY this collaborator grant
+     *  (pathScope + access ceiling)? False for a gone convo — the hot→cold rebuild assertions. */
+    internal suspend fun enforcesGrant(
+        convoId: String,
+        pathScope: List<String>?,
+        access: dev.ccpocket.protocol.HandoffAccess?,
+    ): Boolean = get(convoId)?.matchesGrant(pathScope, access) == true
 
     /** Resumable sessions for [workdir] across every agent backend (each tags its summaries with its kind),
      *  newest-first, each stamped with its [SessionGroup] membership (issue #119; null = ungrouped). */
@@ -291,9 +449,18 @@ class SessionRegistry(
         // status keeps hasBackgroundWork() true and the session can never be reaped (and the phone's "N running"
         // count never clears). Snapshot outside the lock so the per-conversation emit doesn't hold the mutex.
         mutex.withLock { convos.values.toList() }.forEach { runCatching { it.reapStaleJobs(STALE_JOB_MS) } }
+        // A session with a non-terminal handoff is NEVER idle-reaped (SESSION-HANDOFF.md §9.2): a
+        // WAITING invite outlives any idle window by design, and reaping an IN_PROGRESS session would
+        // strand the recipient on a dead convo. Snapshot OUTSIDE the mutex — the handoff registry
+        // sweeps under its own lock. (scheduleClose/closeIfIdle are deliberately not gated: they only
+        // detach a dead client's view, and a handoff session resumes from disk like any cold session.)
+        val handoffProtected = handoffs?.activeSessionIds().orEmpty()
         val now = System.currentTimeMillis()
         val stale = mutex.withLock {
-            val s = convos.filterValues { now - it.lastActivityMs > idleMs && !it.isBusy() }
+            val s = convos.filterValues {
+                val sid = it.sessionId ?: it.resumeAnchor
+                now - it.lastActivityMs > idleMs && !it.isBusy() && (sid == null || sid !in handoffProtected)
+            }
             convos.keys.removeAll(s.keys)
             s.values.toList()
         }
