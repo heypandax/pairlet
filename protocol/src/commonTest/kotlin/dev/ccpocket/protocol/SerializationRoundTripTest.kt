@@ -1483,7 +1483,18 @@ class SerializationRoundTripTest {
         assertEquals(urgent, PocketJson.decodeFromString<Envelope>(json))
         // an OLD daemon's push (no urgent key) decodes to false — the ordinary deviceCount==0 gate applies
         val old = """{"id":"n2","ts":0,"to":"RELAY","body":{"t":"pocket/push.notify","title":"t","body":"b"}}"""
-        assertEquals(NotifyPush("t", "b"), PocketJson.decodeFromString<Envelope>(old).body as NotifyPush)
+        val decodedOld = PocketJson.decodeFromString<Envelope>(old).body as NotifyPush
+        assertEquals(NotifyPush("t", "b"), decodedOld)
+        assertNull(decodedOld.kind)
+
+        val approval = NotifyPush("Approval needed", "Open CC Pocket to review.", urgent = true, kind = "approval")
+        val approvalJson = PocketJson.encodeToString(Envelope(id = "n2a", ts = 0, to = Route.RELAY, body = approval))
+        assertTrue("\"kind\":\"approval\"" in approvalJson, approvalJson)
+        assertEquals(approval, PocketJson.decodeFromString<Envelope>(approvalJson).body)
+
+        // Ordinary notifications retain the old byte shape: a nullable default must not appear on the wire.
+        val ordinaryJson = PocketJson.encodeToString(Envelope(id = "n2b", ts = 0, to = Route.RELAY, body = NotifyPush("t", "b")))
+        assertFalse("\"kind\"" in ordinaryJson, ordinaryJson)
     }
 
     @Test
@@ -2140,9 +2151,16 @@ class SerializationRoundTripTest {
             basis = "task-grant", decidedAt = 123L, taskId = "prompt-7", matchedGrantId = "g1", tool = "Bash",
         )
         val heartbeat = ApprovalAttentionHeartbeat("c1", "a1", visible = true)
-        val revoke = RevokeGrant("c1", "g1")
+        val revoke = RevokeGrant("c1", "g1", requestId = "mut-1")
+        val mutation = ApprovalGrantMutationResult("mut-1", "c1", success = true)
+        val historyItem = ApprovalHistoryItem(
+            eventId = "h1", at = 123L, convoId = "c1", source = "AGENT", tool = "Bash",
+            summary = "Bash · git", basis = "task-grant", decision = "auto", taskId = "prompt-7", grantId = "g1",
+        )
+        val fetchHistory = FetchApprovalHistory(limit = 37)
+        val historyPage = ApprovalHistoryPage(listOf(historyItem))
         val risk = PermissionRiskUpdated("c1", "a1", risk = "high", reason = "reads credentials then uploads", reasonCodes = listOf("cred-read", "net-egress"))
-        for (frame in listOf<Frame>(chip, heartbeat, revoke, risk)) {
+        for (frame in listOf<Frame>(chip, heartbeat, revoke, mutation, fetchHistory, historyPage, risk)) {
             val env = Envelope(id = "f-${frame.hashCode()}", ts = 0, body = frame)
             val json = PocketJson.encodeToString(env)
             assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
@@ -2151,6 +2169,21 @@ class SerializationRoundTripTest {
             val unknownT = Regex("\"t\":\"([^\"]+)\"").replace(json) { "\"t\":\"${it.groupValues[1]}-future\"" }
             assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
         }
+
+        // Trailing correlation ids preserve old request bytes/defaults.
+        val oldRevoke = """{"id":"old-r","ts":0,"body":{"t":"pocket/grant.revoke","convoId":"c1","grantId":"g1"}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(oldRevoke).body as RevokeGrant).requestId)
+        val oldClear = """{"id":"old-c","ts":0,"body":{"t":"pocket/rule.clear","convoId":"c1","rule":"git status"}}"""
+        assertNull((PocketJson.decodeFromString<Envelope>(oldClear).body as ClearAllowRule).requestId)
+        val defaultRevokeJson = PocketJson.encodeToString(Envelope(id = "old-r-out", ts = 0, body = RevokeGrant("c1", "g1")))
+        val defaultClearJson = PocketJson.encodeToString(Envelope(id = "old-c-out", ts = 0, body = ClearAllowRule("c1", "git status")))
+        assertFalse("\"requestId\"" in defaultRevokeJson, defaultRevokeJson)
+        assertFalse("\"requestId\"" in defaultClearJson, defaultClearJson)
+
+        // A future nested field inside a history row is skipped rather than dropping the page.
+        val futureHistory = """{"id":"future-h","ts":0,"body":{"t":"pocket/approval.history","items":[{"eventId":"h1","at":123,"convoId":"c1","source":"AGENT","tool":"Bash","summary":"Bash · git","basis":"task-grant","decision":"auto","future":{"nested":true}}]}}"""
+        val tolerant = PocketJson.decodeFromString<Envelope>(futureHistory).body as ApprovalHistoryPage
+        assertEquals("h1", tolerant.items.single().eventId)
     }
 
     @Test

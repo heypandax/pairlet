@@ -85,7 +85,7 @@ class WsConnection(
 
     private val sink = OutboundSink { frame ->
         // §18.2 P2-3: V2 approval frames only reach clients that declared the capability
-        if (RequestRouter.approvalV2Only(frame) && !caps.supportsApprovalV2) return@OutboundSink
+        if (!RequestRouter.allowedForCaps(frame, caps)) return@OutboundSink
         outbox.send(Envelope(nextId.getAndIncrement().toString(), System.currentTimeMillis(), body = frame))
     }
 

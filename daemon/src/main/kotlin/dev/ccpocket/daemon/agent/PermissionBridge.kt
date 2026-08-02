@@ -109,16 +109,6 @@ class PermissionBridge(
             respond(ev.requestId, false, false, ev.input, null, "denied — this handoff grant is review/read-only; write tools are disabled")
             return
         }
-        // OWNER BYPASS (issue #91): the configured owner's OWN dedicated session — the one whole-session
-        // trust the design's owner ceiling (§7.3 Full Control) legitimizes, set only by trusted in-process
-        // code at open. Ordinary execution tools auto-run; neverRemember human-decision gates still ask.
-        // Deliberately ABOVE the bridge walls (they exist to confine OTHER chat members, not the owner
-        // driving their own machine); P1-8's hard-wall reorder below targets the request-level grants.
-        if (bridgeSession && ownerBypassSession && !meta.neverRemember) {
-            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-bypass-session")
-            respond(ev.requestId, true, false, ev.input, null, null)
-            return
-        }
         // ── HARD WALLS BEFORE EVERY GRANT (§18.1 P1-8 / design §6: no request approval, remembered rule,
         // task grant or bypass mode may precede a hard policy — a DENY here is never recovered) ────────
         // GUEST folder-share path guard (issue #115) + bridge workdir wall: a built-in file tool whose
@@ -140,6 +130,20 @@ class PermissionBridge(
             respond(ev.requestId, false, false, ev.input, null, "denied — this command is blocked for a bridge (destructive/high-risk)")
             return
         }
+        // ASK is the security backstop for Bash syntax the deterministic bridge classifier cannot prove
+        // safe. In particular, blacklist obfuscations such as `r\m` intentionally classify ASK rather
+        // than DENY; no broad bypass/request grant may turn that fallback into an allow. Only the explicit
+        // BridgeCommandPolicy.ALLOW branch below can skip the per-command phone gate for bridge Bash.
+        val bridgeBashNeedsAsk = bridgeBash == BridgeCommandPolicy.Verdict.ASK
+        // OWNER BYPASS (issue #91): the configured owner's dedicated bridge session skips ordinary
+        // piecemeal asks, but it is still BELOW the non-overridable path and destructive-command walls.
+        // The sender being the owner is an authorization fact, not proof that an IM-origin prompt was
+        // free of injection; deterministic red lines apply to every source.
+        if (bridgeSession && ownerBypassSession && !meta.neverRemember && !bridgeBashNeedsAsk) {
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-bypass-session")
+            respond(ev.requestId, true, false, ev.input, null, null)
+            return
+        }
         // M3: feed the sequence ledger on every ATTEMPT that got past the hard walls (intent matters
         // for the radar) and keep the assessment for the ask below. Deterministic + advisory: no
         // outcome changes.
@@ -155,7 +159,7 @@ class PermissionBridge(
         // approving a natural-language prompt is not a licence for path escapes or `rm -rf /`.
         // AskUserQuestion remains interactive because the answer, rather than permission, rides the
         // verdict. The supplier is trusted in-process state, revoked when the turn ends.
-        if (grant == BridgeGrant.OWNER_APPROVED && ev.toolName != AskQuestions.TOOL) {
+        if (grant == BridgeGrant.OWNER_APPROVED && ev.toolName != AskQuestions.TOOL && !bridgeBashNeedsAsk) {
             coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-approved-request")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
@@ -185,7 +189,7 @@ class PermissionBridge(
         // because its ANSWERS ride in the verdict — an auto-allow would answer nothing ("the user did not
         // answer"). Deliberately meta.neverRemember, not forceNeverRemember: whether a bridge-origin session
         // (#91) should also re-ask under user-chosen bypass is a separate, undecided policy.
-        if (autoAllow && !meta.neverRemember) {
+        if (autoAllow && !meta.neverRemember && !bridgeBashNeedsAsk) {
             coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "bypass-permissions")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
@@ -207,7 +211,7 @@ class PermissionBridge(
         // auto-run with an in-stream audit chip instead of a card. Every hard wall above already ran;
         // a grant can only skip the ASK, never a wall, and it dies with the task/session/2h TTL.
         // §18.1 P1-1: the match is CONTEXT-BOUND — same canonical root, file targets provably inside it,
-        // Bash bound to the granted token prefix; anything unverifiable falls through to the ask.
+        // Bash bound to the exact approved command; anything unverifiable falls through to the ask.
         if (!neverRemember) {
             grants.match(
                 convoId, taskId(), ev.toolName, meta.rule, commandText = command,
@@ -222,16 +226,24 @@ class PermissionBridge(
         val isQuestion = ev.toolName == AskQuestions.TOOL
         val askId = ev.requestId
         val timeoutMs = if (isQuestion) questionTimeoutMs else verdictTimeoutMs
+        // Immutable authority snapshot: a later queued prompt may rotate the conversation's live task while
+        // this card is waiting. The verdict can only form a Grant for the task that minted the card.
+        val askTaskId = taskId()
         val ask = PermissionAsk(
-            convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff,
+            convoId, askId, ev.toolName, meta.preview, currentMode(), meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff,
             questions = if (isQuestion) AskQuestions.parse(ev.input) else null,
             neverRemember = neverRemember,
             timeoutSec = (timeoutMs / 1000).toInt(), // phone counts its local no-response fallback against the REAL window
             // approval design M2: which grant scopes this daemon honors for the ask. A neverRemember
             // decision (plan gate, question, bridge one-off) is strictly one-shot; ordinary tool asks
             // offer 允许本次 / 允许本任务 / Session. Non-null is also the client's heartbeat gate.
-            taskId = taskId(),
-            grantOptions = if (neverRemember) listOf("once") else listOf("once", "task", "session"),
+            taskId = askTaskId,
+            grantOptions = when {
+                neverRemember -> listOf("once")
+                askTaskId == null -> listOf("once", "session")
+                !ApprovalGrantStore.supportsTaskGrant(ev.toolName) -> listOf("once", "session")
+                else -> listOf("once", "task", "session")
+            },
         )
         val input = ev.input
         val rule = meta.rule
@@ -253,7 +265,7 @@ class PermissionBridge(
                             val offered = ask.grantOptions.orEmpty()
                             val scope = v.grantScope?.takeIf { it in offered }
                             if (v.grantScope != null && scope == null) {
-                                coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, rule, "scope-clamped:${v.grantScope}")
+                                coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, rule, "scope-clamped")
                             }
                             // session memory: legacy remember=true OR the M2 grantScope="session" — a
                             // plan-approval/question/bridge/handoff one-off gate is never remembered
@@ -261,8 +273,17 @@ class PermissionBridge(
                             if (remember) allowRules.add(rule) // future matching requests auto-allow this session
                             // M2 "允许本任务": issue a task grant that dies with the task/session/2h TTL,
                             // bound to the session's canonical root + the granted command (P1-1)
-                            if (scope == "task" && !neverRemember) {
-                                taskId()?.let { grants.issueTask(convoId, it, ev.toolName, rule, root = workdir, commandText = command) }
+                            if (scope == "task" && !neverRemember && askTaskId != null) {
+                                if (taskId() == askTaskId) {
+                                    grants.issueTask(convoId, askTaskId, ev.toolName, rule, root = workdir, commandText = command)
+                                } else {
+                                    // The approved action itself remains allow-once, but no standing authority
+                                    // crosses into the task that replaced the ask's original task.
+                                    coordinator.recordAuto(
+                                        ApprovalSource.AGENT, convoId, ev.toolName, rule,
+                                        "task-grant-stale", taskId = askTaskId,
+                                    )
+                                }
                             }
                             // a question verdict carries the picks — merge them into the tool input (claude reads
                             // updatedInput.answers/response); other tools pass the phone's updatedInput through as-is

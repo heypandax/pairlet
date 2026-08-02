@@ -803,7 +803,6 @@ private fun MessageRow(
         )
         // approval design M2 §9.6 (design frame 3 `.achip`): grant-covered auto-run audit chip + 收紧 link
         is ChatItem.AutoRun -> {
-            var tightened by remember(item.eventId) { mutableStateOf(false) }
             Row(
                 Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
                     .padding(horizontal = 10.dp, vertical = 4.dp),
@@ -816,10 +815,12 @@ private fun MessageRow(
                     color = Tok.accent, fontFamily = Dk.ui, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 6.dp, vertical = 1.dp),
                 )
-                if (!tightened) {
+                if (item.tightening) {
+                    Text("…", color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp)
+                } else if (!item.tightened) {
                     Text(
                         stringResource(Res.string.autorun_tighten), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { tightened = true; onTightenAutoRun(item) }.padding(horizontal = 5.dp, vertical = 2.dp),
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onTightenAutoRun(item) }.padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 } else {
                     Text("✓", color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.5.sp)

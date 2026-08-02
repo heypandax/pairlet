@@ -86,7 +86,7 @@ class PermissionBridgeTest {
     // ── OWNER BYPASS (issue #91): the configured owner's OWN turn runs unrestricted; nobody else's does ──
 
     @Test
-    fun owner_bypass_auto_allows_even_a_command_the_bridge_bash_gate_would_deny() = runBlocking {
+    fun owner_bypass_still_obeys_the_bridge_destructive_command_wall() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
@@ -94,11 +94,37 @@ class PermissionBridgeTest {
         val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, ownerBypassSession = true)
-        // rm -rf / is a hard DENY under BridgeCommandPolicy — but the configured owner's own turn is full-trust
+        // Owner identity skips ordinary asks, but an IM-origin prompt can still be injected: hard walls win.
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
         assertTrue(emitted.isEmpty(), "owner bypass must not push an ask")
-        assertTrue(responses.single().allow, "owner bypass must auto-allow, skipping the bridge Bash gate")
+        assertFalse(responses.single().allow, "owner bypass must never skip the deterministic destructive-command wall")
         scope.cancel()
+    }
+
+    @Test
+    fun bridge_bash_ask_cannot_be_promoted_by_owner_or_mode_bypasses() = runBlocking {
+        // The destructive regex is defense-in-depth, not a parser: shell removes the backslash and runs
+        // `rm`. Its classifier result is ASK, which must remain a real per-command gate under every broad
+        // authorization path.
+        suspend fun assertStillAsks(ownerBypass: Boolean, grant: BridgeGrant, mode: PermissionMode) {
+            val scope = CoroutineScope(Dispatchers.Unconfined)
+            val coord = ApprovalCoordinator(scope)
+            val responses = mutableListOf<Resp>()
+            val emitted = mutableListOf<Frame>()
+            val b = PermissionBridge("c1", mode, coord, { emitted += it }, mutableSetOf(),
+                respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+                bridgeSession = true, ownerBypassSession = ownerBypass, bridgeGrant = { grant })
+
+            b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "r\\m -rf ~/Documents") }))
+
+            assertIs<PermissionAsk>(emitted.single(), "ASK must reach the phone")
+            assertTrue(responses.isEmpty(), "broad authorization must not decide ambiguous bridge Bash")
+            scope.cancel()
+        }
+
+        assertStillAsks(ownerBypass = true, grant = BridgeGrant.NONE, mode = PermissionMode.DEFAULT)
+        assertStillAsks(ownerBypass = false, grant = BridgeGrant.OWNER_APPROVED, mode = PermissionMode.DEFAULT)
+        assertStillAsks(ownerBypass = false, grant = BridgeGrant.NONE, mode = PermissionMode.BYPASS_PERMISSIONS)
     }
 
     @Test
@@ -128,9 +154,9 @@ class PermissionBridgeTest {
             bridgeSession = true,
             bridgeGrant = { grant })
 
-        // Full authorization skips the PIECEMEAL approval layer (ordinary Bash, plan gate) — but NOT the
-        // destructive-command red line (§18.1 P1-8: hard walls precede every grant, request approval included).
-        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
+        // Full authorization skips the PIECEMEAL approval layer for classifier-ALLOW Bash and the plan gate,
+        // but NOT the destructive red line or classifier-ASK fallback (§18.1 P1-8).
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "echo ready") }))
         b.onControlRequest(AgentEvent.ControlRequest("r2", "ExitPlanMode", null))
         assertEquals(listOf(true, true), responses.map { it.allow })
         assertTrue(emitted.isEmpty())
@@ -641,7 +667,7 @@ class PermissionBridgeTest {
 
         // a matching follow-up auto-runs with an in-stream audit chip instead of a card
         emitted.clear()
-        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -sb") }))
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status") }))
         assertTrue(responses.last().allow)
         val chip = emitted.filterIsInstance<dev.ccpocket.protocol.AuthorizedActionRecorded>().single()
         assertEquals("task-grant", chip.basis)
@@ -658,6 +684,47 @@ class PermissionBridgeTest {
         emitted.clear()
         b.onControlRequest(AgentEvent.ControlRequest("r4", "Bash", buildJsonObject { put("command", "git status") }))
         assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "a new task never inherits a grant")
+        scope.cancel()
+    }
+
+    @Test
+    fun parameterized_tool_without_matcher_does_not_offer_task_scope() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val emitted = mutableListOf<Frame>()
+        val wd = java.nio.file.Files.createTempDirectory("ccp-grant-webfetch").toFile().canonicalPath
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { _, _, _, _, _, _ -> }, taskId = { "t1" }, workdir = wd)
+
+        b.onControlRequest(AgentEvent.ControlRequest("w1", "WebFetch", buildJsonObject { put("url", "https://docs.example") }))
+        val ask = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals(listOf("once", "session"), ask.grantOptions)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_late_task_verdict_cannot_issue_a_grant_to_the_replacement_task() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
+        var task: String? = "t1"
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val wd = java.nio.file.Files.createTempDirectory("ccp-stale-task-wd").toFile().canonicalPath
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            grants = grants, taskId = { task }, workdir = wd)
+
+        b.onControlRequest(AgentEvent.ControlRequest("a-old", "Bash", buildJsonObject { put("command", "git status") }))
+        assertEquals("t1", emitted.filterIsInstance<PermissionAsk>().single().taskId)
+        task = "t2" // a new top-level prompt arrived while the old card was waiting
+        coord.onVerdict(PermissionVerdict("c1", "a-old", Decision.ALLOW, grantScope = "task"))
+        assertTrue(responses.single().allow, "the approved old action itself remains allow-once")
+
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("a-new", "Bash", buildJsonObject { put("command", "git status") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().any { it.askId == "a-new" },
+            "the replacement task must not inherit a Grant issued by an old card")
         scope.cancel()
     }
 

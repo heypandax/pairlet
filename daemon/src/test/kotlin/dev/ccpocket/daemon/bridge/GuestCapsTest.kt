@@ -88,6 +88,8 @@ class GuestCapsTest {
             "pocket/ask", "pocket/ask.withdrawn", "pocket/commands", "pocket/jobs",
             "pocket/dirs", "pocket/sessions", "pocket/path.entries", "pocket/files",
             "pocket/file.content", "pocket/file.content.chunk", "pocket/diff.content", "pocket/transcript",
+            // daemon acknowledgement for the guest's own rule-clear request; contains no rule/command/path
+            "pocket/grant.mutation.result",
             // the guest's OWN ending notice — "revoked"/"expired" for its terminal card (#115 follow-up)
             "pocket/share.ended",
         )

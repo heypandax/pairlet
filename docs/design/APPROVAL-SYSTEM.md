@@ -1178,22 +1178,28 @@ prompt 或 secret，锁屏不提供直接批准。
 8. Claude Code 完成后应在本节逐项写入“修复落点 + 测试名 + 结果”，供下一轮按代码事实复审；不要仅把
    条目标记为完成。
 
-### 18.4 整改落点记录（2026-08-03，Claude Code）
+### 18.4 整改落点记录（Claude Code 初版；2026-08-02 Codex 安全复核修正）
 
-> 每条：修复落点 → 回归测试 → 结果。全量 `check-all`（protocol + daemon + relay + mobile）通过。
+> 每条：修复落点 → 回归测试 → 结果。全量等价任务（protocol + daemon + relay + mobile desktop）已分模块
+> 串行通过。
 
 - **P1-1** `ApprovalGrantStore.kt` 重写：Grant 绑定 `canonicalRoot`（daemon 侧 canonicalize，签发时无
-  root 则拒发）；Bash matcher 改为「命令前导非 flag token 前缀（exe＋子命令＋任务名，上限 3）」＋元字符
-  墙（含 `\n\r`）；文件工具逐 target canonicalize 后要求落在 root 内，target 不可解析即不命中；Quick
+  root 则拒发）；Bash matcher 最终收紧为「与人工批准的 trimmed command 完全相同」＋元字符墙（含
+  `\n\r`），不再用 token 前缀猜测 shell 语义（`git -C`、`bash -c`、`python -c`、`env` wrapper 均已
+  加攻击回归）；所有带显式 path target 的工具统一 canonical containment，Glob/Grep 无 path 时仅代表
+  session cwd、带 path 时同样不可越界；Quick
   Terminal 的 match 以其已验证 workdir 为 root，跨项目必不命中。测试
   `ApprovalGrantStoreTest`（`grant_matches_only_its_exact_convo_task_tool_rule_and_root` ／
-  `bash_prefix_binds_the_task_name_not_just_two_tokens`（`npm run test` 不盖 `postinstall`）／
+  `bash_grant_binds_the_exact_command_not_a_guessed_prefix`／`bash_wrappers_and_leading_flags_cannot_widen_a_grant`／
+  `search_grants_validate_every_explicit_path_but_allow_the_implicit_cwd`／
   `file_grants_only_cover_targets_provably_inside_the_root`（`..`、symlink、`~`、空 target）／
-  `unbindable_context_issues_nothing`）——全部通过。
+  `unbindable_context_issues_nothing`）——全部通过。Task Grant 另有 matcher 闭集：仅 Bash 与内置文件／搜索
+  工具可签发；WebFetch、MCP 与未来未知工具在没有 typed resource matcher 前只提供 once/session，不会把
+  一次 URL／动作批准扩成 task 内的 tool-name wildcard。
 - **P1-2** `PermissionBridge.kt`：`handoffAccess != null && tool==Bash` 并入 `neverRemember`（daemon 派生
   ceiling，`grantOptions=["once"]`）；Answered 处理器校验 `grantScope ∈ ask.grantOptions`，未提供的
   scope 钳制为 allow-once（人确实点了允许，故不整单拒绝；不产生任何 standing 授权，
-  `recordAuto("scope-clamped:…")` 留痕）。`ShellService` 同规则。测试
+  `recordAuto("scope-clamped")` 留痕，且不把客户端伪造的 scope 写入日志）。`ShellService` 同规则。测试
   `handoff_bash_offers_only_once_and_a_hostile_scope_claim_forms_nothing`、
   `unoffered_scope_on_a_normal_ask_clamps_to_allow_once`——通过。
 - **P1-3** daemon `SessionRegistry.pendingApprovals` 去重键改 `(convoId, askId)`；App 全链路
@@ -1202,9 +1208,11 @@ prompt 或 secret，锁屏不提供直接批准。
   `sameAskIdFromTwoSessionsStaysTwoInboxRows`（App）＋既有 coordinator 复合键 golden——通过。
 - **P1-4** `Conversation.kt`：`rotateTask` 改为每条顶层用户 prompt 必转（与 CLI turn 折叠解耦）；新增
   `maybeEndTaskOnSettle()` 挂在 TurnResult 稳定边界（无 background／pending ask／continuation grace 即
-  结束 task 清 Grant，幂等）；Return／Recall／close／mode switch／TTL 原有清理不变。测试：task 轮换由
-  `allow_for_task_covers_matching_requests_with_a_chip_until_the_task_rotates` 钉住；settle 分支为
-  Conversation 内部状态，暂以代码路径评审为准（无独立进程级测试——遗留标注）。
+  结束 task 清 Grant，幂等；若 prompt ledger 仍有未消费 prompt，不会由旧 TurnResult 清掉替代任务。
+  `PermissionBridge` 在 Ask 创建时冻结 `askTaskId`，迟到 verdict 只有在该 task 仍为当前 task 时才可签发
+  Grant，否则仅允许本次并记录 `task-grant-stale`。Return／Recall／close／mode switch／TTL 原有清理不变。
+  测试：`allow_for_task_covers_matching_requests_with_a_chip_until_the_task_rotates`、
+  `a_late_task_verdict_cannot_issue_a_grant_to_the_replacement_task` 通过。
 - **P1-5** `ApprovalCoordinator.withdrawAllForConvo()`（原子、按 convo 扫全 source）；
   `SessionRegistry.close` 真关闭前先撤回；`ShellService.run` 增 `stillLive` 复核（router 传
   `registry.modeOf != null`）；`FileExportService` 批准后重查 `liveWorkdirOf`。测试
@@ -1214,30 +1222,42 @@ prompt 或 secret，锁屏不提供直接批准。
   `full_control_expiry_bites_the_next_tool_call_even_mid_turn`——通过。
 - **P1-7** `ShellService.clearRule()` 新增；Router 的 `ClearAllowRule` 同时清 Conversation 与 Quick
   Terminal 两个 store（不再按 `grantId==null` 猜目标）。测试
-  `clear_rule_reaches_the_quick_terminal_store`——通过。（daemon 回执确认协议未加——收紧结果以两 store
-  确定性清除保证，UI 乐观更新保留；如需回执另立 additive frame。）
-- **P1-8** `PermissionBridge.onControlRequest` 重排：handoff 只读墙 → ownerBypassSession（owner 本人
-  专属会话的整会话信任，#91 既有语义，非本条对象）→ 路径墙（guest scope／bridge workdir）→
-  destructive Bash 红线 → M3 观察 → `OWNER_APPROVED` → 白名单 ALLOW → AUTO_TRUSTED → bypass →
-  规则/Grant → ask。请求级批准不再解锁路径逃逸与危险命令。测试
+  `clear_rule_reaches_the_quick_terminal_store`——通过。最终新增 additive
+  `ApprovalGrantMutationResult(requestId, convoId, success, error)`；`RevokeGrant`／`ClearAllowRule` 追加可选
+  `requestId`。App 只在 success ACK 后移除本地规则或把收紧 chip 标成完成，失败／旧 daemon 无回执均保持
+  原状态。测试 `ApprovalGrantMutationTest`＋wire round-trip 通过。
+- **P1-8** `PermissionBridge.onControlRequest` 重排：handoff 只读墙 → 路径墙（guest scope／bridge workdir）→
+  destructive Bash 红线 → `ownerBypassSession` → M3 观察 → `OWNER_APPROVED` → 白名单 ALLOW → AUTO_TRUSTED → bypass →
+  规则/Grant → ask。请求级批准不再解锁路径逃逸与危险命令；Bridge Bash 的 `ASK` 是不可被
+  owner bypass／`OWNER_APPROVED`／Full Control 提升的兜底边界（包括 `r\m` 等绕过 destructive regex 的
+  shell 混淆），只有 classifier 明确给出 `ALLOW` 才能免逐命令审批。零点击 `ALLOW` 默认进一步收敛为
+  无路径前缀的 shell builtin（`pwd/echo/printf/true/false/type`）：首 token 含 `/` 或 `\` 必为 `ASK`，
+  防止仓库脚本以 `./tools/echo` 等 basename 冒充；所有 Git 命令也一律 `ASK`（即使 owner allow-list
+  命中），因为仓库／系统 git config 的 external diff、textconv、pager、fsmonitor 都可能把“只读”命令
+  变成代码执行。测试
   `owner_approved_bridge_request_no_longer_unlocks_walls`＋改写后的
-  `approved_bridge_request_is_full_access_only_while_its_turn_grant_is_active`——通过。
+  `owner_bypass_still_obeys_the_bridge_destructive_command_wall`＋
+  `bridge_bash_ask_cannot_be_promoted_by_owner_or_mode_bypasses`＋`BridgeCommandPolicyTest`——通过。
 - **P2-1** 手机 `PermissionSheet`：本地倒计时归零仅在 `grantOptions==null`（旧 daemon）才是终态，
   grant-aware 卡以 daemon 的 `AskWithdrawn(TIMED_OUT)` 为准；桌面心跳以 `LocalWindowInfo.isWindowFocused`
   门控，失焦／dispose 即发 `visible=false` 释放 lease（`askHeartbeatRelease`）。24h 绝对上限已有
   coordinator 测试（`absolute_deadline_terminates_even_a_permanently_leased_ask`）。
-- **P2-2** 新增 `ApprovalHistoryStore`（JSONL 持久化＋轮转上限 5000＋脱敏行：rule 级摘要／basis／决定／
-  ids，绝无 stdout／正文／diff／prompt／secret）；coordinator 人工决定与 auto-run 均落盘；additive
+- **P2-2** 新增 `ApprovalHistoryStore`（JSONL 持久化＋轮转上限 5000＋落盘前强制最小化：Bash 只留
+  工具族 `Bash`，不尝试从不可信 shell 文本提取 executable，其他工具也只留工具族；其余字段 secret
+  scrub＋长度 cap；旧文件启动时重写迁移；POSIX 文件从创建起
+  0600；轮转采用临时文件＋原子替换；分页同时限制 500 行与 3 MiB 编码预算）；coordinator 人工决定与
+  auto-run 均落盘；additive
   协议 `FetchApprovalHistory`／`ApprovalHistoryPage`（owner-only）供离线补拉与重启恢复。App 侧历史
   页 UI 未做（遗留标注）。
 - **P2-3** `ClientCapsHolder.supportsApprovalV2` 已存并在两个 ingress sink（`WsConnection`、
   `DeviceSessions`）过滤 `AuthorizedActionRecorded`／`PermissionRiskUpdated`，未声明的客户端不再收到
-  新 frame；App 声明位已随 M2 发送。混版矩阵回归依托既有 `SerializationRoundTripTest` V2 组。
+  新 frame；App 声明位已随 M2 发送。新增混合 attached device 独立过滤测试，以及 History Fetch/Page、
+  MutationResult、`NotifyPush.kind`、旧 JSON 默认值、nested unknown field 的 wire round-trip／降级测试。
 - **P2-4** 推送链新增 `NotifyPush.kind="approval"`（additive，老 relay 忽略）→ relay `NotifyRoute.kind`
   → APNs `category=APPROVAL`＋`kind` 自定义键／FCM `data.kind`＋`channel_id=approvals`；Android 新增
   「Approvals」独立通知渠道（声音震动随系统渠道独立配置），前台路径按 `kind` 选渠道；桌面新增
   `onApprovalArrived` 钩子（未聚焦时系统横幅＋角标，正文零内容）。锁屏无任何直批动作。**relay 侧改动
   需 redeploy 后生效**；iOS category 的客户端侧处理（自定义声音等）未做（遗留标注）。
 
-遗留（下一轮）：P1-4 settle 分支的进程级测试；P2-2 App 历史页；P2-4 iOS category 客户端处理；
+遗留（下一轮）：P2-2 App 历史页；P2-4 iOS category 客户端处理；
 §18.3-7 的 `SwitchScrollLandingTest` 偶发未再复现（本轮未改动该测试）。

@@ -653,7 +653,8 @@ class SessionRegistry(
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode, s.permissionMode) ?: Unit
     suspend fun switchServiceTier(s: SwitchServiceTier) = get(s.convoId)?.switchServiceTier(s.serviceTier) ?: Unit
-    suspend fun clearRule(c: ClearAllowRule) = get(c.convoId)?.clearAllowRule(c.rule) ?: Unit
+    /** Authoritative mutation result for the App's tighten/clear acknowledgement. */
+    suspend fun clearRule(c: ClearAllowRule): Boolean = get(c.convoId)?.clearAllowRule(c.rule) ?: false
     suspend fun cancelTurn(c: CancelTurn) = get(c.convoId)?.cancelTurn() ?: Unit
     suspend fun stopBackgroundJob(s: StopBackgroundJob) = get(s.convoId)?.stopBackgroundJob(s.jobId) ?: Unit
 

@@ -8,6 +8,7 @@ import dev.ccpocket.protocol.AudioChunk
 import dev.ccpocket.protocol.BackgroundJobs
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.ClearAllowRule
+import dev.ccpocket.protocol.ApprovalGrantMutationResult
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.ConvoHistory
@@ -78,6 +79,7 @@ object GuestCaps {
         // ---- guest-only additions: a guest is a human who approves + browses ----
         is PermissionAsk -> true   // the guest answers its OWN session's asks (a bridge never sees these)
         is AskWithdrawn -> true
+        is ApprovalGrantMutationResult -> true // acknowledgement for the guest's own ClearAllowRule
         is CommandList -> true      // slash-command autocomplete for the guest's composer
         is BackgroundJobs -> true   // the guest's own task panel
         is Directories -> true      // scoped to the shared root by GuestScope (below)

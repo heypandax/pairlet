@@ -33,14 +33,10 @@ class BridgeCommandPolicyTest {
     }
 
     @Test
-    fun only_commands_that_touch_no_filesystem_auto_run() {
-        // the收敛: ALLOW is now provably safe — these touch NO filesystem under any flag
+    fun only_path_free_shell_builtins_auto_run() {
+        // ALLOW is a tiny shell-builtin set: no filesystem, external executable, or repository config.
         for (c in listOf(
-            "pwd", "echo hi", "printf x", "true", "false",
-            "whoami", "hostname", "uname -a", "id", "groups",
-            "which python3", "type ls", "whereis git",
-            // git reads are the ONE kept filesystem family (high-value), sans unsafe flags
-            "git log --oneline", "git status", "git diff HEAD", "git show abc123", "git blame x",
+            "pwd", "echo hi", "printf x", "true", "false", "type ls",
         )) assertEquals(Verdict.ALLOW, v(c), "should ALLOW: $c")
     }
 
@@ -86,12 +82,18 @@ class BridgeCommandPolicyTest {
             "wc --files0-from=/etc/passwd",          // N5
             "cat /Users/v/.ssh/id_rsa",              // content readers all ASK now
             "ls -R ~", "stat /Users/v/.ssh/id_rsa",  // metadata recon → ASK too (收敛)
+            "whoami", "hostname", "uname -a", "id", "groups", "which python3", "whereis git",
+            // Repository/system git config can execute external diff/textconv/pager/fsmonitor hooks.
+            "git log --oneline", "git status", "git diff HEAD", "git show abc123", "git blame x",
         )) assertEquals(Verdict.ASK, v(c), "should ASK (not auto-run): $c")
     }
 
     @Test
-    fun a_path_prefixed_binary_still_classifies_by_its_name() {
-        assertEquals(Verdict.ALLOW, v("/bin/echo hi"))
+    fun a_path_prefixed_binary_can_never_impersonate_an_allowed_name() {
+        assertEquals(Verdict.ASK, v("/bin/echo hi"))
+        assertEquals(Verdict.ASK, v("./tools/echo hi"))
+        assertEquals(Verdict.ASK, v("/tmp/git status"))
+        assertEquals(Verdict.ASK, v("tools\\echo hi"))
         assertEquals(Verdict.ASK, v("/usr/local/bin/python3 x.py"))
         assertEquals(Verdict.ASK, v("/bin/cat secret"))   // cat is no longer auto-allowed
         assertEquals(Verdict.ASK, v("/bin/ls -la"))       // ls now touches fs → ASK (收敛)
@@ -102,14 +104,13 @@ class BridgeCommandPolicyTest {
 
     @Test
     fun whitelisted_prefix_upgrades_an_otherwise_ASK_command_to_ALLOW() {
-        val allow = listOf("npm test", "./gradlew", "pytest")
+        val allow = listOf("npm test", "pytest")
         // exact + prefix matches auto-run
         assertEquals(Verdict.ALLOW, v("npm test", allow))
         assertEquals(Verdict.ALLOW, v("npm test -- --watch=false", allow))   // token-prefix
-        assertEquals(Verdict.ALLOW, v("./gradlew build", allow))
         assertEquals(Verdict.ALLOW, v("pytest -q tests/", allow))
-        // and a path-prefixed binary matches by basename on the head token
-        assertEquals(Verdict.ALLOW, v("/usr/local/bin/pytest -q", allow))
+        assertEquals(Verdict.ASK, v("./npm test", allow), "path-qualified binaries never auto-run")
+        assertEquals(Verdict.ASK, v("/usr/local/bin/pytest -q", allow))
     }
 
     @Test
@@ -118,7 +119,7 @@ class BridgeCommandPolicyTest {
         assertEquals(Verdict.ALLOW, v("npm run build", allow))
         assertEquals(Verdict.ASK, v("npmevil --hack", allow))   // "npm" must not match "npmevil"
         // a 2-token entry needs both tokens: "git push" does NOT auto-run "git pull"
-        assertEquals(Verdict.ALLOW, v("git push origin main", allow))
+        assertEquals(Verdict.ASK, v("git push origin main", allow), "all git commands stay per-command")
         assertEquals(Verdict.ASK, v("git pull", allow))
     }
 
@@ -135,9 +136,9 @@ class BridgeCommandPolicyTest {
     }
 
     @Test
-    fun an_empty_whitelist_is_the_pre_existing_behaviour() {
+    fun an_empty_whitelist_keeps_unproven_commands_at_ask() {
         assertEquals(Verdict.ASK, v("npm test", emptyList()))
-        assertEquals(Verdict.ALLOW, v("git status", emptyList()))   // built-in read-only set unaffected
+        assertEquals(Verdict.ASK, v("git status", emptyList()))
     }
 
     @Test
@@ -148,8 +149,8 @@ class BridgeCommandPolicyTest {
         assertEquals(Verdict.ASK, v("git log --output=/Users/v/.bashrc", listOf("git log")))
         assertEquals(Verdict.ASK, v("git config diff.external /tmp/e.sh", listOf("git")))
         assertEquals(Verdict.ASK, v("git branch -D main", listOf("git branch")))
-        // but a plain whitelisted git command the owner deliberately granted still auto-runs
-        assertEquals(Verdict.ALLOW, v("git diff HEAD", listOf("git diff")))
-        assertEquals(Verdict.ALLOW, v("git push origin main", listOf("git push")))   // owner may widen to push
+        // Even a plain whitelisted git command remains per-command until execution hooks are sandboxed.
+        assertEquals(Verdict.ASK, v("git diff HEAD", listOf("git diff")))
+        assertEquals(Verdict.ASK, v("git push origin main", listOf("git push")))
     }
 }

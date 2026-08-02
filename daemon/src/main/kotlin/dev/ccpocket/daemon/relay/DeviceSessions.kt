@@ -396,7 +396,7 @@ class DeviceSessions(
         val sink = dev.ccpocket.daemon.conversation.KeyedSink(
             "dev:$deviceId",
             OutboundSink { frame ->
-                if (RequestRouter.approvalV2Only(frame) && !capsForDevice.supportsApprovalV2) return@OutboundSink
+                if (!RequestRouter.allowedForCaps(frame, capsForDevice)) return@OutboundSink
                 sealAndSend(deviceId, frame)
             },
         )

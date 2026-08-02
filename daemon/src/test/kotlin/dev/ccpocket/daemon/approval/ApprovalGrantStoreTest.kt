@@ -8,7 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /** TASK grants (approval design M2 §5 / §18.1 P1-1): context-bound to (convo, task, tool, rule,
- *  canonical root), structured Bash prefix matcher, honest about metacharacters, dead the moment the
+ *  canonical root), exact Bash command matcher, honest about metacharacters, dead the moment the
  *  task/session ends. */
 class ApprovalGrantStoreTest {
     private val rootA = Files.createTempDirectory("ccp-grant-a").toFile().canonicalPath
@@ -18,7 +18,8 @@ class ApprovalGrantStoreTest {
     fun grant_matches_only_its_exact_convo_task_tool_rule_and_root() {
         val store = ApprovalGrantStore()
         assertNotNull(store.issueTask("c1", "t1", "Bash", "git status", root = rootA, commandText = "git status"))
-        assertNotNull(store.match("c1", "t1", "Bash", "git status", "git status -sb", root = rootA))
+        assertNotNull(store.match("c1", "t1", "Bash", "git status", "git status", root = rootA))
+        assertNull(store.match("c1", "t1", "Bash", "git status", "git status -sb", root = rootA), "different flags must re-ask")
         // P1-1 验收: a grant approved in project A never covers project B — whatever workdir a client claims
         assertNull(store.match("c1", "t1", "Bash", "git status", "git status", root = rootB), "another project must not match")
         assertNull(store.match("c1", "t1", "Bash", "git status", "git status", root = null), "an unresolvable root must not match")
@@ -35,14 +36,28 @@ class ApprovalGrantStoreTest {
     }
 
     @Test
-    fun bash_prefix_binds_the_task_name_not_just_two_tokens() {
-        // P1-1 验收: `npm run test` must NOT cover `npm run postinstall`
+    fun bash_grant_binds_the_exact_command_not_a_guessed_prefix() {
         val store = ApprovalGrantStore()
         assertNotNull(store.issueTask("c1", "t1", "Bash", "npm run", root = rootA, commandText = "npm run test --ci"))
-        assertNotNull(store.match("c1", "t1", "Bash", "npm run", "npm run test", root = rootA))
-        assertNotNull(store.match("c1", "t1", "Bash", "npm run", "npm run test --watch", root = rootA))
+        assertNotNull(store.match("c1", "t1", "Bash", "npm run", " npm run test --ci ", root = rootA))
+        assertNull(store.match("c1", "t1", "Bash", "npm run", "npm run test", root = rootA))
+        assertNull(store.match("c1", "t1", "Bash", "npm run", "npm run test --watch", root = rootA))
         assertNull(store.match("c1", "t1", "Bash", "npm run", "npm run postinstall", root = rootA), "a different task name must re-ask")
-        assertNull(store.match("c1", "t1", "Bash", "npm run", "npm run", root = rootA), "a SHORTER command than the granted prefix must re-ask")
+    }
+
+    @Test
+    fun bash_wrappers_and_leading_flags_cannot_widen_a_grant() {
+        val store = ApprovalGrantStore()
+        for ((rule, approved, changed) in listOf(
+            Triple("git -C", "git -C $rootA status", "git -C $rootB reset --hard"),
+            Triple("bash -c", "bash -c 'echo ok'", "bash -c 'rm -rf /'"),
+            Triple("python -c", "python -c 'print(1)'", "python -c 'import os; os.remove(\"x\")'"),
+            Triple("env FOO=1", "env FOO=1 make test", "env FOO=1 make publish"),
+        )) {
+            store.issueTask("c1", "t1", "Bash", rule, root = rootA, commandText = approved)
+            assertNotNull(store.match("c1", "t1", "Bash", rule, approved, root = rootA))
+            assertNull(store.match("c1", "t1", "Bash", rule, changed, root = rootA), changed)
+        }
     }
 
     @Test
@@ -63,7 +78,7 @@ class ApprovalGrantStoreTest {
         )) {
             assertNull(store.match("c1", "t1", "Bash", "git status", cmd, root = rootA), "must not ride the grant: $cmd")
         }
-        assertNotNull(store.match("c1", "t1", "Bash", "git status", "git status --short -b", root = rootA))
+        assertNotNull(store.match("c1", "t1", "Bash", "git status", "git status", root = rootA))
     }
 
     @Test
@@ -84,6 +99,28 @@ class ApprovalGrantStoreTest {
         assertNull(store.match("c1", "t1", "Edit", "Edit", root = rootA, targets = listOf(link.toString())), "symlink escape must re-ask")
         // an unresolvable target set never matches (ask, not guess)
         assertNull(store.match("c1", "t1", "Edit", "Edit", root = rootA, targets = emptyList()), "no targets = no match")
+    }
+
+    @Test
+    fun search_grants_validate_every_explicit_path_but_allow_the_implicit_cwd() {
+        val store = ApprovalGrantStore()
+        val outside = Files.createTempDirectory("ccp-grant-search-outside").toFile().canonicalPath
+        for (tool in listOf("Glob", "Grep")) {
+            store.issueTask("c1", "t1", tool, tool, root = rootA)
+            assertNotNull(store.match("c1", "t1", tool, tool, root = rootA), "$tool without a path searches cwd")
+            assertNotNull(store.match("c1", "t1", tool, tool, root = rootA, targets = listOf("src")))
+            assertNull(store.match("c1", "t1", tool, tool, root = rootA, targets = listOf(outside)), "$tool outside root")
+            assertNull(store.match("c1", "t1", tool, tool, root = rootA, targets = listOf("../outside")), "$tool dot-dot escape")
+        }
+    }
+
+    @Test
+    fun parameterized_tools_without_a_typed_matcher_cannot_form_task_grants() {
+        val store = ApprovalGrantStore()
+        for (tool in listOf("WebFetch", "mcp__github__create_issue", "FutureTool")) {
+            assertNull(store.issueTask("c1", "t1", tool, tool, root = rootA), "$tool must not become a wildcard")
+            assertNull(store.match("c1", "t1", tool, tool, root = rootA), "$tool must never ride a name-only grant")
+        }
     }
 
     @Test

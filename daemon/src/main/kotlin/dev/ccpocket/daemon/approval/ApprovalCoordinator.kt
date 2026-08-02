@@ -269,11 +269,12 @@ class ApprovalCoordinator(
     /** M0 observability: one line per auto-decision that skipped the human (bypass mode, remembered rule,
      *  bridge policy, owner grant) — the denominator for "how many asks did the task-grant work remove". */
     fun recordAuto(source: ApprovalSource, convoId: String, tool: String, rule: String?, basis: String, taskId: String? = null, grantId: String? = null) {
-        log.info("auto-allow source=$source tool=$tool rule=$rule basis=$basis convo=$convoId")
+        val summary = ApprovalHistoryStore.safeSummary(tool, rule)
+        log.info("auto-allow source=$source tool=$tool summary=$summary basis=${basis.substringBefore(':').take(80)} convo=$convoId")
         history?.append(
             dev.ccpocket.protocol.ApprovalHistoryItem(
                 eventId = "ah-" + java.util.UUID.randomUUID(), at = System.currentTimeMillis(),
-                convoId = convoId, source = source.name, tool = tool, summary = rule ?: tool,
+                convoId = convoId, source = source.name, tool = tool, summary = summary,
                 basis = basis, decision = "auto", taskId = taskId, grantId = grantId,
             ),
         )
@@ -281,8 +282,9 @@ class ApprovalCoordinator(
 
     private fun record(p: Pending, decision: String) {
         val waitedMs = System.currentTimeMillis() - p.createdAt
+        val summary = ApprovalHistoryStore.safeSummary(p.ask.tool, p.ask.rule)
         log.info(
-            "resolved source=${p.source} tool=${p.ask.tool} rule=${p.ask.rule} decision=$decision " +
+            "resolved source=${p.source} tool=${p.ask.tool} summary=$summary decision=$decision " +
                 "waitedMs=$waitedMs question=${p.isQuestion} convo=${p.ask.convoId} ask=${p.ask.askId}",
         )
         if (!p.isQuestion) { // questions are TaskDecision, not security history (design §4.1)
@@ -290,7 +292,7 @@ class ApprovalCoordinator(
                 dev.ccpocket.protocol.ApprovalHistoryItem(
                     eventId = "ah-" + java.util.UUID.randomUUID(), at = System.currentTimeMillis(),
                     convoId = p.ask.convoId, source = p.source.name, tool = p.ask.tool,
-                    summary = p.ask.rule ?: p.ask.tool, basis = "user-decision", decision = decision,
+                    summary = summary, basis = "user-decision", decision = decision,
                     taskId = p.ask.taskId,
                 ),
             )

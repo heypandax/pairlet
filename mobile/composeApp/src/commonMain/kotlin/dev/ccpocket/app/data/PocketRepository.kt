@@ -129,6 +129,7 @@ import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
 import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
+import dev.ccpocket.protocol.ApprovalGrantMutationResult
 import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionRiskUpdated
@@ -256,6 +257,15 @@ import kotlinx.coroutines.withTimeoutOrNull
  *  the (convoId, askId) composite, mirroring the daemon coordinator's ledger key. */
 data class ApprovalKey(val convoId: String, val askId: String)
 
+/** A local mutation is pending until the daemon explicitly confirms it. Nothing in [allowRules] is
+ * removed merely because bytes were queued to a socket. */
+private data class PendingGrantMutation(
+    val convoId: String,
+    val eventId: String? = null,
+    val rule: String? = null,
+    val clearAll: Boolean = false,
+)
+
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
@@ -305,6 +315,8 @@ sealed interface ChatItem {
         val tool: String? = null,
         val grantId: String? = null,
         val at: Long = 0L,
+        val tightening: Boolean = false,
+        val tightened: Boolean = false,
     ) : ChatItem
 
     /** The compact transcript row left behind after answering an AskUserQuestion card:
@@ -934,6 +946,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(GetWorkflowAgentDetail(convo, runId, agentIndex, agentId)) }
     }
     val allowRules = mutableStateListOf<String>()            // "Always allow" scopes remembered this session
+    private val pendingGrantMutations = mutableMapOf<String, PendingGrantMutation>()
     val switching = mutableStateOf(false)                    // a mode switch is relaunching the session
     val opening = mutableStateOf(false)                      // an OpenSession is in flight — one-tap entries disable on it (a double-tap would open two fresh sessions)
     // A chat→chat switch is in flight (issue #165). [openSession] nulls convoId while it waits for the
@@ -2154,6 +2167,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             }
             is SendPrompt -> demoHandlePrompt(frame.convoId)
             is PermissionVerdict -> if (demoPendingReply) { demoPendingReply = false; demoStream(frame.convoId, DemoData.REPLY_CHUNKS, thinking = false) }
+            is RevokeGrant -> frame.requestId?.let {
+                handle(ApprovalGrantMutationResult(it, frame.convoId, success = true))
+            }
+            is ClearAllowRule -> frame.requestId?.let {
+                handle(ApprovalGrantMutationResult(it, frame.convoId, success = true))
+            }
             is SwitchMode -> handle(
                 SessionLive(
                     frame.convoId,
@@ -2188,7 +2207,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is CreateShare -> handle(ShareCreated(ok = true, invite = DemoData.sampleInvite(frame.path, frame.tier, frame.expiresInSec)))
             is ListShares -> handle(ShareListing(DemoData.shares()))
             is RevokeShare -> handle(ShareRevoked(frame.deviceId, ok = true))
-            else -> {} // CloseSession / ClearAllowRule / SwitchDirectory / AudioCancel / FileUploadCancel — nothing to echo
+            else -> {} // CloseSession / SwitchDirectory / AudioCancel / FileUploadCancel — nothing to echo
         }
     }
 
@@ -2503,6 +2522,20 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is PermissionRiskUpdated -> if (f.convoId == convoId.value) {
                 if (pendingAsk.value?.askId == f.askId || askQueue.any { it.askId == f.askId }) {
                     askRisk[ApprovalKey(f.convoId, f.askId)] = f
+                }
+            }
+            is ApprovalGrantMutationResult -> {
+                val pending = pendingGrantMutations.remove(f.requestId)
+                if (pending != null && pending.convoId == f.convoId) {
+                    pending.eventId?.let { eventId ->
+                        updateAutoRun(eventId) { it.copy(tightening = false, tightened = f.success) }
+                    }
+                    if (f.success && convoId.value == pending.convoId) {
+                        when {
+                            pending.clearAll -> allowRules.clear()
+                            pending.rule != null -> allowRules.remove(pending.rule)
+                        }
+                    }
                 }
             }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
@@ -4556,11 +4589,34 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  matching action asks again. Never claims to roll back what already ran. */
     fun tightenAutoRun(item: ChatItem.AutoRun) {
         val c = convoId.value ?: return
+        if (item.tightening || item.tightened) return
+        val requestId = "gm-${randomCaptureId()}"
+        val pending = PendingGrantMutation(
+            convoId = c,
+            eventId = item.eventId,
+            rule = item.summary.takeIf { item.grantId == null },
+        )
+        pendingGrantMutations[requestId] = pending
+        updateAutoRun(item.eventId) { it.copy(tightening = true) }
+        val frame: Frame = if (item.grantId != null) RevokeGrant(c, item.grantId, requestId)
+        else ClearAllowRule(c, item.summary, requestId) // session-rule hits carry no grant id
+        sendGrantMutation(requestId, pending, frame)
+    }
+
+    private fun updateAutoRun(eventId: String, transform: (ChatItem.AutoRun) -> ChatItem.AutoRun) {
+        val index = messages.indexOfFirst { it is ChatItem.AutoRun && it.eventId == eventId }
+        val item = messages.getOrNull(index) as? ChatItem.AutoRun ?: return
+        messages[index] = transform(item)
+    }
+
+    private fun sendGrantMutation(requestId: String, pending: PendingGrantMutation, frame: Frame) {
         scope.launch {
-            if (item.grantId != null) send(RevokeGrant(c, item.grantId))
-            else send(ClearAllowRule(c, item.summary)) // session-rule hits carry no grant id
+            send(frame)
+            delay(GRANT_MUTATION_ACK_MS)
+            if (pendingGrantMutations.remove(requestId) == pending) {
+                pending.eventId?.let { eventId -> updateAutoRun(eventId) { it.copy(tightening = false) } }
+            }
         }
-        if (item.grantId == null) allowRules.remove(item.summary)
     }
 
     /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
@@ -4689,13 +4745,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun hasSimplify(): Boolean = slashCommands.any { it.name == "simplify" }
 
     fun clearRule(rule: String) {
-        allowRules.remove(rule)
-        convoId.value?.let { c -> scope.launch { send(ClearAllowRule(c, rule)) } }
+        val c = convoId.value ?: return
+        val requestId = "gm-${randomCaptureId()}"
+        val pending = PendingGrantMutation(convoId = c, rule = rule)
+        pendingGrantMutations[requestId] = pending
+        sendGrantMutation(requestId, pending, ClearAllowRule(c, rule, requestId))
     }
 
     fun clearAllRules() {
-        allowRules.clear()
-        convoId.value?.let { c -> scope.launch { send(ClearAllowRule(c, null)) } }
+        val c = convoId.value ?: return
+        val requestId = "gm-${randomCaptureId()}"
+        val pending = PendingGrantMutation(convoId = c, clearAll = true)
+        pendingGrantMutations[requestId] = pending
+        sendGrantMutation(requestId, pending, ClearAllowRule(c, null, requestId))
     }
 
     fun switchDir(wd: String) {
@@ -4845,6 +4907,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val SOCKET_RETIRE_TIMEOUT_MS = 3_000L // #142: bounded wait for the old socket to really close before dialing anew
         const val TRANSPORT_COALESCE_MS = 3_000L    // #143: reconnect triggers within this of an in-flight attempt merge into it
         const val STABLE_LINK_RESET_MS = 60_000L    // #144: the retry ladder resets only after the link stays up this long
+        const val GRANT_MUTATION_ACK_MS = 12_000L   // no daemon ack = keep local authorization state unchanged
 
         /** #143 (pure, for tests): should this reconnect trigger merge into the attempt already in flight?
          *  Only non-forced RECONNECT triggers coalesce, and only while an attempt is actually running and

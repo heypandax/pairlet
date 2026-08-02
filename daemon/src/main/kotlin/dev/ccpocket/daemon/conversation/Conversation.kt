@@ -146,7 +146,9 @@ class Conversation(
      *  and the next prompt. Idempotent; legit continuation/background work keeps the task by definition
      *  of [isBusy]. */
     fun maybeEndTaskOnSettle() {
-        if (isBusy()) return
+        // A queued/unconsumed prompt may already own the next task id even though the prior turn emitted
+        // its result. Do not clear that replacement task at the old turn's settle boundary.
+        if (isBusy() || hasUnconsumedPrompts()) return
         currentTaskId?.let { grants.endTask(convoId, it) }
         currentTaskId = null
     }
@@ -949,8 +951,9 @@ class Conversation(
                 it.all { ch -> ch.isLetterOrDigit() || ch == '-' || ch == '_' }
         }?.let { backend.normalizeServiceTier(model, it) }
 
-    fun clearAllowRule(rule: String?) {
+    fun clearAllowRule(rule: String?): Boolean {
         if (rule == null) allowRules.clear() else allowRules.remove(rule)
+        return true
     }
 
     // Restricted-credential conversations (GUEST folder-share #115, BRIDGE #91) launch their agent

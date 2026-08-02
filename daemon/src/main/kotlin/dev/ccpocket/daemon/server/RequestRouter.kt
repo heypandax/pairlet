@@ -28,6 +28,7 @@ import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
 import dev.ccpocket.protocol.ApprovalHistoryPage
+import dev.ccpocket.protocol.ApprovalGrantMutationResult
 import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
@@ -154,6 +155,10 @@ class RequestRouter(
          *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
         fun approvalV2Only(frame: Frame): Boolean =
             frame is dev.ccpocket.protocol.AuthorizedActionRecorded || frame is dev.ccpocket.protocol.PermissionRiskUpdated
+
+        /** Per-connection/device gate: one modern client must never opt a sibling legacy client in. */
+        fun allowedForCaps(frame: Frame, caps: ClientCapsHolder): Boolean =
+            !approvalV2Only(frame) || caps.supportsApprovalV2
 
         /**
          * [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
@@ -385,8 +390,18 @@ class RequestRouter(
             // §18.1 P1-7: "clear this rule" must reach BOTH stores that can hold it — the conversation's
             // agent allowRules AND the quick terminal's — or tightening leaves a shadow rule auto-running
             is ClearAllowRule -> {
-                registry.clearRule(frame)
+                val success = registry.clearRule(frame)
                 shell.clearRule(frame.convoId, frame.rule)
+                frame.requestId?.let { requestId ->
+                    sink.emit(
+                        ApprovalGrantMutationResult(
+                            requestId = requestId,
+                            convoId = frame.convoId,
+                            success = success,
+                            error = if (success) null else "session is no longer active",
+                        ),
+                    )
+                }
             }
 
             // MUST launch, not await: shell.run suspends on the human approval gate, but the relay transport
@@ -416,7 +431,19 @@ class RequestRouter(
             is ApprovalAttentionHeartbeat -> approvals.heartbeat(frame.convoId, frame.askId, frame.visible)
             // "收紧后续授权" from the autorun chip: owner-only (same gate as ListPendingApprovals); the
             // store re-checks the grant belongs to the named conversation.
-            is RevokeGrant -> if (origin == null && guestScope == null) grants.revoke(frame.convoId, frame.grantId)
+            is RevokeGrant -> if (origin == null && guestScope == null) {
+                val success = grants.revoke(frame.convoId, frame.grantId)
+                frame.requestId?.let { requestId ->
+                    sink.emit(
+                        ApprovalGrantMutationResult(
+                            requestId = requestId,
+                            convoId = frame.convoId,
+                            success = success,
+                            error = if (success) null else "grant is no longer active",
+                        ),
+                    )
+                }
+            }
             // §18.2 P2-2: the recoverable decision trail — owner-only, newest first, redacted rows only
             is FetchApprovalHistory -> if (origin == null && guestScope == null) {
                 sink.emit(ApprovalHistoryPage(approvalHistory?.recent(frame.limit) ?: emptyList()))

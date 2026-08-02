@@ -180,10 +180,16 @@ data class SwitchServiceTier(
     val serviceTier: String? = null,
 ) : ToDaemon
 
-/** Drop a session allow-rule (rule == null clears them all) so it prompts again next time. */
+/** Drop a session allow-rule (rule == null clears them all) so it prompts again next time.
+ * [requestId] is additive: a new daemon answers with [ApprovalGrantMutationResult], allowing a new app
+ * to update its local rule list only after the daemon confirms the security state changed. */
 @Serializable
 @SerialName("pocket/rule.clear")
-data class ClearAllowRule(val convoId: String, val rule: String? = null) : ToDaemon
+data class ClearAllowRule(
+    val convoId: String,
+    val rule: String? = null,
+    val requestId: String? = null,
+) : ToDaemon
 
 /** Interrupt the current turn. */
 @Serializable
@@ -925,7 +931,21 @@ data class ApprovalAttentionHeartbeat(
 data class RevokeGrant(
     val convoId: String,
     val grantId: String,
+    /** Optional for wire compatibility; a new daemon echoes it in [ApprovalGrantMutationResult]. */
+    val requestId: String? = null,
 ) : ToDaemon
+
+/** daemon -> client: authoritative acknowledgement for [RevokeGrant] or [ClearAllowRule]. No rule,
+ * command or path is echoed: [requestId] is the opaque client correlation key. Old clients drop this
+ * additive frame; new clients talking to an old daemon simply keep their local state unchanged. */
+@Serializable
+@SerialName("pocket/grant.mutation.result")
+data class ApprovalGrantMutationResult(
+    val requestId: String,
+    val convoId: String,
+    val success: Boolean,
+    val error: String? = null,
+) : ToPhone
 
 /** One redacted approval-history row (§18.2 P2-2): the rule-level summary, basis and decision — never
  * stdout, file bodies, diffs, prompts, full commands or secrets. */

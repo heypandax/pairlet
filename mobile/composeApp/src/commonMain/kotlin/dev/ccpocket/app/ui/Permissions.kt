@@ -990,7 +990,6 @@ fun AllowChip(rule: String) {
  *  session rule) so the NEXT matching action asks again. Deliberately quieter than a tool card. */
 @Composable
 fun AutoRunChip(item: dev.ccpocket.app.data.ChatItem.AutoRun, onTighten: () -> Unit) {
-    var tightened by remember(item.eventId) { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(999.dp)).background(Tok.surface)
             .border(1.dp, Tok.hair, RoundedCornerShape(999.dp))
@@ -1006,10 +1005,12 @@ fun AutoRunChip(item: dev.ccpocket.app.data.ChatItem.AutoRun, onTighten: () -> U
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent.copy(alpha = 0.12f)).padding(horizontal = 7.dp, vertical = 2.dp),
         )
         Spacer(Modifier.weight(1f))
-        if (!tightened) {
+        if (item.tightening) {
+            Text("…", color = Tok.muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+        } else if (!item.tightened) {
             Text(
                 stringResource(Res.string.autorun_tighten), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { tightened = true; onTighten() }.padding(horizontal = 6.dp, vertical = 3.dp),
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onTighten).padding(horizontal = 6.dp, vertical = 3.dp),
             )
         } else {
             Icon(Icons.Rounded.Check, null, tint = Tok.ok, modifier = Modifier.size(12.dp))

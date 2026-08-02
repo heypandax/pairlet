@@ -3,6 +3,8 @@ package dev.ccpocket.daemon.server
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.DirectoryEntry
+import dev.ccpocket.protocol.AuthorizedActionRecorded
+import dev.ccpocket.protocol.PermissionRiskUpdated
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -96,5 +98,18 @@ class ClientCapsFilterTest {
         assertTrue(e.activeSessions.isEmpty())
         assertNull(e.activeSessionId)
         assertFalse(e.open)
+    }
+
+    @Test
+    fun `approval v2 filtering is independent for mixed attached devices`() {
+        val legacy = RequestRouter.ClientCapsHolder()
+        val modern = RequestRouter.ClientCapsHolder().apply { supportsApprovalV2 = true }
+        val chip = AuthorizedActionRecorded("c1", "e1", "git status", "task-grant", 1L)
+        val risk = PermissionRiskUpdated("c1", "a1", "high")
+
+        for (frame in listOf(chip, risk)) {
+            assertFalse(RequestRouter.allowedForCaps(frame, legacy), "legacy sibling must not receive ${frame::class.simpleName}")
+            assertTrue(RequestRouter.allowedForCaps(frame, modern), "modern sibling should receive ${frame::class.simpleName}")
+        }
     }
 }
