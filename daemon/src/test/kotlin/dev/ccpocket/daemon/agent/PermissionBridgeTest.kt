@@ -599,6 +599,66 @@ class PermissionBridgeTest {
         scope.cancel()
     }
 
+    // ── issue #201: "wait for my decision" — the ask renews instead of auto-denying ──────────────
+
+    @Test
+    fun no_auto_deny_marks_the_card_and_sends_the_renewal_window() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { _, _, _, _, _, _ -> }, verdictTimeoutMs = 45_000, noAutoDeny = { true })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+
+        val ask = emitted.single() as PermissionAsk
+        assertTrue(ask.noAutoDeny, "the client needs this to drop the countdown ring")
+        // the configured window is IGNORED in this mode — the card carries the renewal lease instead
+        assertEquals(86_400, ask.timeoutSec)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_no_auto_deny_ask_survives_its_window_and_a_late_allow_still_runs() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        // tiny ceiling so a renewal happens in milliseconds instead of a day
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 80)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val responses = CopyOnWriteArrayList<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            verdictTimeoutMs = 50, noAutoDeny = { true }, noAutoDenyWindowMs = 60)
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+        delay(400) // several windows past the point a normal ask would have auto-denied
+
+        assertTrue(emitted.none { it is AskWithdrawn }, "renewing must never retire the card")
+        assertTrue(responses.isEmpty(), "and must never answer the CLI on the user's behalf")
+        assertTrue(b.hasPending())
+        // the user finally gets to their phone — the verdict still lands
+        assertTrue(coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW)))
+        assertTrue(responses.single().allow)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_bridge_or_guest_construction_keeps_its_bounded_window() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val emitted = mutableListOf<Frame>()
+        // Conversation passes `origin == null && pathScope == null && …` — a bridge/guest resolves to false.
+        // The default here IS that false: an adapter that forgets to opt in never gets the mode.
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { _, _, _, _, _, _ -> }, verdictTimeoutMs = 120_000)
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
+
+        val ask = emitted.single() as PermissionAsk
+        assertFalse(ask.noAutoDeny, "a card whose approver isn't the session owner must still expire")
+        assertEquals(120, ask.timeoutSec)
+        scope.cancel()
+    }
+
     @Test
     fun late_verdict_after_timeout_is_surfaced_not_silently_dropped() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)

@@ -628,6 +628,14 @@ SecurityApproval 使用“无人关注软超时 + 绝对硬上限”，而不是
    turn cancel 和 daemon restart 的更早终态约束；
 6. heartbeat 只延长阅读时间，不改变 authority、risk、Grant 或请求内容；晚到 heartbeat 和 verdict 都不能
    复活终态请求。
+7. **（issue #201）「等待我手动处理」档**：用户可在 App 设置里关掉自动拒绝。它不是把等待改成无限，而是把
+   单个窗口换成一条**有界的续约链**——每段租约 24h（即等于第 5 条的 absoluteDeadline，续约会重置该基准，
+   所以「任何一段租约都不超过 absoluteDeadline」这条不变量原样成立），最多续 6 次，合计 7 天硬底；每次续约
+   重发同一张卡（同 `(convoId, askId)`，客户端原地刷新并重新触发推送），续约耗尽仍走原有的 `AskWithdrawn`
+   ＋诚实 deny。因此第 13 节依赖的「未决 ask 必然终结」性质不变，`hasPendingAsk()` 对 idle-reaper 与账号切换
+   守卫仍然有界，只是界从 10 分钟放大到 7 天。**覆盖面仅限 owner 自己的会话**：bridge（`origin != null`）、
+   guest（`pathScope != null`）与文件导出一律保留原超时——批准人不是会话主人时，一张不过期的卡就是常驻的
+   立足点。续约不改变 authority、risk 与 Grant（与第 6 条同义）。
 
 TaskDecision 可以采用独立的回答时限和续租策略，不能因为与 SecurityApproval 同屏就共享授权状态机。
 

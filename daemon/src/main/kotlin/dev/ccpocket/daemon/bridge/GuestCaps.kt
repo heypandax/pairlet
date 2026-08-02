@@ -126,7 +126,11 @@ object GuestCaps {
         is FetchHistoryPage -> true
         // DENIED — the management plane a scoped guest must never reach (issue #115 §8):
         //  FetchUsage / FetchAuthStatus / AuthLogin* / AuthLogout (account switching + quota),
-        //  SetPushPrefs (owner's global push toggle), RunShellCommand (the standalone terminal power tool),
+        //  SetPushPrefs (owner's global push toggle), SetApprovalPrefs (how long the OWNER's approvals wait
+        //    — flipping that from a guest would be a straight escalation, issue #201),
+        //  SetSessionArchived / ListArchivedSessions (the owner's project view + a CROSS-project discovery
+        //    surface strictly wider than the scoped listing a guest may have, issue #202),
+        //  RunShellCommand (the standalone terminal power tool),
         //  SwitchDirectory (could move a session out of the shared root — a guest works only in the root),
         //  CreateShare / ListShares / RevokeShare (re-sharing the owner's machine — the core escalation).
         else -> false

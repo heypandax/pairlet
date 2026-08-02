@@ -63,6 +63,10 @@ class DaemonCore(
 
     init {
         registry.handoffs = handoffs
+        // issue #201: mirror the persisted "wait for my decision" preference into the per-ask read. Done
+        // here (not lazily in ApprovalTimeout) so the object never has to know about DaemonPrefs — the
+        // router writes the same pair whenever a client flips it.
+        dev.ccpocket.daemon.agent.ApprovalTimeout.noAutoDeny = prefs.askNoAutoDeny
         // unhide transcripts a crashed previous instance stranded hidden (issue #70) — off the
         // constructor path (file IO over up to 200 journal entries must not delay startup)
         scope.launch(Dispatchers.IO) { runCatching { SpawnedSessions.sweepAtBoot() } }
@@ -107,6 +111,9 @@ class DaemonCore(
                     model = entry.model, mode = entry.mode, agent = entry.agent,
                 ),
                 sink,
+                // headless: same reason as watching=false above — an ask nobody can see must keep its
+                // bounded window, or issue #201's wait would pin a process per fire (repeating schedules).
+                headless = true,
             )
             // the handoff drive gate covers scheduled fires too (SESSION-HANDOFF.md §5.3: a WAITING/
             // handed-off session accepts input from its controller only — the scheduler is never that)

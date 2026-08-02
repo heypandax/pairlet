@@ -44,6 +44,10 @@ class ShellService(
     // approval design M2 §13.5: the SAME grant engine as the agent's Bash tool — "允许本任务" for
     // `./gradlew test` covers the command from either surface. Defaulted for tests.
     private val grants: ApprovalGrantStore = ApprovalGrantStore(),
+    // issue #201: the quick terminal is an owner-only surface (the capability choke point guarantees it), so
+    // it follows the owner's "wait for my decision" preference just like their agent asks. Read per ask.
+    private val noAutoDeny: () -> Boolean = { ApprovalTimeout.noAutoDeny },
+    private val noAutoDenyWindowMs: Long = ApprovalTimeout.NO_AUTO_DENY_WINDOW_MS,
 ) {
     private val log = logger("Shell")
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
@@ -115,15 +119,22 @@ class ShellService(
     ): Boolean {
         val askId = "sh-" + UUID.randomUUID()
         val gate = CompletableDeferred<Boolean>()
+        val infinite = noAutoDeny() // #201: renewing lease chain instead of a one-shot window
+        val windowMs = if (infinite) noAutoDenyWindowMs else verdictTimeoutMs
         val ask = PermissionAsk(
             cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null,
-            timeoutSec = (verdictTimeoutMs / 1000).toInt(),
+            timeoutSec = (windowMs / 1000).toInt(),
             taskId = taskId,
             grantOptions = listOf("once", "task", "session"), // M2: same scopes as the agent's Bash ask
+            noAutoDeny = infinite,
         )
         // the coordinator owns timeout + card retirement (issue #100: the ShellResult(denied) below dismisses
         // the terminal spinner but not the separate PermissionAsk card — AskWithdrawn(TIMED_OUT) retires it)
-        coordinator.submit(ask, ApprovalSource.SHELL, owner = this, timeoutMs = verdictTimeoutMs, emit = emit) { outcome ->
+        coordinator.submit(
+            ask, ApprovalSource.SHELL, owner = this, timeoutMs = windowMs, emit = emit,
+            maxRenewals = if (infinite) ApprovalTimeout.NO_AUTO_DENY_MAX_RENEWALS else 0,
+            renewsAllowed = { noAutoDeny() }, // switching the preference off bounds in-flight cards too
+        ) { outcome ->
             when (outcome) {
                 is ApprovalOutcome.Answered -> {
                     val v = outcome.verdict

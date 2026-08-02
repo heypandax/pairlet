@@ -196,6 +196,8 @@ import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.TurnDone
 import dev.ccpocket.protocol.SetPushPrefs
 import dev.ccpocket.protocol.PushPrefs
+import dev.ccpocket.protocol.SetApprovalPrefs
+import dev.ccpocket.protocol.ApprovalPrefs
 import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.GroupCreate
 import dev.ccpocket.protocol.GroupRename
@@ -2363,6 +2365,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
             }
             is PushPrefs -> pushPrefs.value = f.enabled
+            is ApprovalPrefs -> approvalPrefs.value = f.noAutoDeny
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
@@ -2967,6 +2970,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun fetchPushPrefs() = scope.launch { runCatching { send(SetPushPrefs()) } }
 
     fun setPushEnabled(enabled: Boolean) = scope.launch { runCatching { send(SetPushPrefs(enabled)) } }
+
+    /** Issue #201: whether the owner's own approval asks wait for a manual decision instead of auto-denying.
+     *  Daemon truth via [ApprovalPrefs] — null until first fetched, and PERMANENTLY null against a daemon that
+     *  predates #201 (it drops the request), which is exactly the signal to hide the setting rather than offer
+     *  a switch that would silently do nothing. */
+    val approvalPrefs = mutableStateOf<Boolean?>(null)
+
+    fun fetchApprovalPrefs() = scope.launch { runCatching { send(SetApprovalPrefs()) } }
+
+    fun setAskNoAutoDeny(enabled: Boolean) = scope.launch { runCatching { send(SetApprovalPrefs(enabled)) } }
 
     /** Switch account: the daemon logs the CLI out (when needed) and starts `claude auth login` —
      *  the browser opens on the daemon host; [authState] turns loginPending with the OAuth URL.

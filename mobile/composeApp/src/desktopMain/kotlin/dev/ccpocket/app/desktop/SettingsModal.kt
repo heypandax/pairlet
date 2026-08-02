@@ -382,6 +382,14 @@ private fun GeneralPane(model: DesktopModel) {
                 else -> ToggleRow(stringResource(Res.string.settings_push_toggle), on) { model.setPhonePush(!on) }
             }
         }
+        // issue #201: another daemon-side truth — the group appears only once the daemon proves it can
+        // honor the preference (a pre-#201 daemon never replies, leaving this null).
+        LaunchedEffect(Unit) { model.refreshApprovalPrefs() }
+        model.approvalNoAutoDeny?.let { on ->
+            Group(stringResource(Res.string.approvals_section), stringResource(Res.string.approval_no_auto_deny_sub)) {
+                ToggleRow(stringResource(Res.string.approval_no_auto_deny), on) { model.setApprovalNoAutoDeny(!on) }
+            }
+        }
     }
 }
 

@@ -230,6 +230,22 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 )
             }
 
+            // Approvals (issue #201). Daemon truth: the section appears only once an ApprovalPrefs reply
+            // proves this daemon can honor the preference — against an older one the frame is dropped, and
+            // showing a switch that silently does nothing would be worse than showing none.
+            LaunchedEffect(Unit) { repo.fetchApprovalPrefs() }
+            repo.approvalPrefs.value?.let { noAutoDeny ->
+                SectionLabel(stringResource(Res.string.approvals_section))
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+                    ToggleRow(
+                        label = stringResource(Res.string.approval_no_auto_deny),
+                        sub = stringResource(Res.string.approval_no_auto_deny_sub),
+                        checked = noAutoDeny,
+                        onChange = { repo.setAskNoAutoDeny(it) },
+                    )
+                }
+            }
+
             // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere
             // whisper is already the only voice path and the toggle would be a no-op.
             if (NativeDictation.available) {

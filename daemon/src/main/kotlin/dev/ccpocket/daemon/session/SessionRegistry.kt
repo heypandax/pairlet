@@ -263,6 +263,9 @@ class SessionRegistry(
         // operation ceiling. It rides into the Conversation's PermissionBridge (REVIEW hard-refuses
         // write tools before any ask) and keys the hot→cold rebuild below.
         handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
+        // issue #201: a HEADLESS fire (the scheduler) has no client attached, so its asks must keep the
+        // bounded window even when the owner turned on "wait for my decision" — see Conversation's noAutoDeny.
+        headless: Boolean = false,
     ): String {
         val resume = open.resumeId
         // §3.3 INITIATOR AUTO-SPECTATE: the clients streaming from a conversation the handoff rebuild is
@@ -371,7 +374,7 @@ class SessionRegistry(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
-            handoffAccess = handoffAccess,
+            handoffAccess = handoffAccess, headless = headless,
             approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
         mutex.withLock { convos[convoId] = c }

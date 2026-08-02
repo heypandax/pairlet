@@ -661,6 +661,12 @@ interface DesktopModel {
     fun setPhonePush(enabled: Boolean) {}
     fun refreshPushPrefs() {}
 
+    // "wait for my decision" (pocket/approval.prefs.*, issue #201): daemon truth, same null-means-old-daemon
+    // contract as the push toggle — a daemon that predates #201 never replies, so the row stays hidden.
+    val approvalNoAutoDeny: Boolean? get() = null
+    fun setApprovalNoAutoDeny(enabled: Boolean) {}
+    fun refreshApprovalPrefs() {}
+
     // read-only OBSERVE view (the session is owned by a terminal/VS Code on the computer): the composer
     // must yield — a prompt sent into an observe convo is silently unroutable on the daemon (issue #45 ②)
     val observing: Boolean get() = false

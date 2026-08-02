@@ -40,6 +40,13 @@ class PermissionBridge(
     // retired via [AskWithdrawn]; onCancel (control_cancel_request) and cancelAll clean up the rest.
     private val verdictTimeoutMs: Long = ApprovalTimeout.ms,
     private val questionTimeoutMs: Long = ApprovalTimeout.ms,
+    // issue #201: read PER ASK (not captured at construction) so flipping the setting bites the next card
+    // without relaunching the agent. Conversation wires this to "owner's own session AND the preference is
+    // on"; bridge and guest constructions leave the default, keeping their bounded windows.
+    private val noAutoDeny: () -> Boolean = { false },
+    // The single lease length of a no-auto-deny chain — injectable only so a test can exercise a renewal
+    // without waiting a day.
+    private val noAutoDenyWindowMs: Long = ApprovalTimeout.NO_AUTO_DENY_WINDOW_MS,
     // issue #91: force EVERY ask on this conversation to be a one-off decision (never remembered). Set for
     // bridge-origin sessions so a single owner "always allow" can't be replayed by later attacker-supplied
     // prompts — the whole session is externally driven, so a remembered rule is a standing blank cheque.
@@ -225,7 +232,10 @@ class PermissionBridge(
         }
         val isQuestion = ev.toolName == AskQuestions.TOOL
         val askId = ev.requestId
-        val timeoutMs = if (isQuestion) questionTimeoutMs else verdictTimeoutMs
+        // #201: when the owner opted into "wait for my decision", this ask runs a renewing 24h lease chain
+        // instead of the (env-configurable) one-shot window.
+        val infinite = noAutoDeny()
+        val timeoutMs = if (infinite) noAutoDenyWindowMs else if (isQuestion) questionTimeoutMs else verdictTimeoutMs
         // Immutable authority snapshot: a later queued prompt may rotate the conversation's live task while
         // this card is waiting. The verdict can only form a Grant for the task that minted the card.
         val askTaskId = taskId()
@@ -244,6 +254,7 @@ class PermissionBridge(
                 !ApprovalGrantStore.supportsTaskGrant(ev.toolName) -> listOf("once", "session")
                 else -> listOf("once", "task", "session")
             },
+            noAutoDeny = infinite,
         )
         val input = ev.input
         val rule = meta.rule
@@ -253,6 +264,9 @@ class PermissionBridge(
             // re-pushes through the conversation's ask-push hook (its coalescing bounds the noise) and
             // idempotently refreshes the card client-side
             onReminder = { emit(ask) },
+            maxRenewals = if (infinite) ApprovalTimeout.NO_AUTO_DENY_MAX_RENEWALS else 0,
+            // re-read per renewal: switching the preference off must bound cards ALREADY in flight
+            renewsAllowed = { noAutoDeny() },
         ) { outcome ->
             when (outcome) {
                 is ApprovalOutcome.Answered -> {
@@ -321,7 +335,9 @@ class PermissionBridge(
      *  question the phone hasn't answered is NOT idle, and reaping it mid-wait would silently discard the ask.
      *  This is the daemon half of issue #55: plan mode can emit a premature `result` and only surface the real
      *  AskUserQuestion minutes later — well past the 90s idle window — so without this the pending question is
-     *  reaped while the phone is backgrounded. Self-bounds: [questionTimeoutMs] eventually clears the entry. */
+     *  reaped while the phone is backgrounded. Self-bounds: [questionTimeoutMs] eventually clears the entry —
+     *  or, under issue #201's no-auto-deny preference, the 7-day renewal cap does. Bounded either way, which
+     *  is what keeps this predicate safe for the reaper to trust. */
     fun hasPending(): Boolean = coordinator.hasPendingFor(this)
 
     /** Approval rows only. AskUserQuestion needs its answer UI and remains scoped to the conversation. */

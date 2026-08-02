@@ -174,6 +174,7 @@
 
     <!-- ── 权限弹层 ──────────────────────────────────────────────── -->
     <string name="auto_deny">自动拒绝</string>
+    <string name="ask_waiting_manual">等待你处理</string>
     <string name="auto_denied_title">已自动拒绝</string>
     <string name="auto_denied_body">超时未响应。</string>
     <string name="dismiss">知道了</string>
@@ -311,6 +312,11 @@
     <string name="notifications_section">通知</string>
     <string name="notify_on_complete">任务完成时通知</string>
     <string name="notify_on_complete_sub">应用关闭时，Claude 完成一轮回复就唤醒手机。</string>
+
+    <!-- ── 审批（issue #201） ────────────────────────────────────── -->
+    <string name="approvals_section">审批</string>
+    <string name="approval_no_auto_deny">等待我手动处理</string>
+    <string name="approval_no_auto_deny_sub">权限确认不再超时自动拒绝：最长等待 7 天、每天提醒一次，等待期间会话保持存活。来自 bridge 或共享文件夹的请求仍保留原超时。</string>
 
     <!-- ── 新会话默认模式 ────────────────────────────────────────── -->
     <string name="default_mode_section">新会话默认模式</string>

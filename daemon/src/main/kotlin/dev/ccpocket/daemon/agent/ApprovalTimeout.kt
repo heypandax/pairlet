@@ -13,6 +13,13 @@ package dev.ccpocket.daemon.agent
  * Deliberately NOT infinite: an unanswered ask keeps its conversation off the idle-reaper (`hasPending`) and
  * leaves the CLI turn blocked, so it must eventually resolve — a timeout that emits an HONEST deny ("not a
  * user rejection") plus an `AskWithdrawn` is the graceful bound.
+ *
+ * Issue #201 lets the owner opt out of being denied on their behalf — but it does NOT make the wait infinite,
+ * because every reason above still holds. Instead [noAutoDeny] turns the single window into a chain of
+ * [NO_AUTO_DENY_WINDOW_MS] leases renewed at most [NO_AUTO_DENY_MAX_RENEWALS] times: each renewal re-emits the
+ * card (so the phone gets a fresh push roughly daily), no single lease outlives the coordinator's 24h ceiling,
+ * and the whole chain still resolves — the graceful bound simply moves from 10 minutes to 7 days. Bridge and
+ * guest asks never participate: their approver isn't the session's owner (see [bridgeMs]).
  */
 object ApprovalTimeout {
     /**
@@ -32,4 +39,21 @@ object ApprovalTimeout {
 
     /** Verdict/question window for a bridge-origin session: [ms] but never below [BRIDGE_MIN_MS]. */
     fun bridgeMs(baseMs: Long = ms): Long = baseMs.coerceAtLeast(BRIDGE_MIN_MS)
+
+    // ── issue #201: "wait for my decision" ──────────────────────────────────────────────────────────
+    // Runtime preference (persisted in DaemonPrefs, synced at boot and on every SetApprovalPrefs), NOT an
+    // env knob: the whole point is that a phone can flip it. Read per-ask, so flipping it bites the NEXT
+    // card without relaunching anything. [ms] and its env parsing above stay untouched — this is a second,
+    // orthogonal mode, not a wider clamp.
+    @Volatile
+    var noAutoDeny: Boolean = false
+
+    /**
+     * One lease of the no-auto-deny chain. Deliberately EQUAL to the coordinator's absolute ceiling: a
+     * renewal restarts that ceiling, so making the lease any longer would just be silently truncated.
+     */
+    const val NO_AUTO_DENY_WINDOW_MS = 24 * 60 * 60 * 1000L
+
+    /** How many times a no-auto-deny ask renews before it finally times out — 6 renewals ⇒ a 7-day floor. */
+    const val NO_AUTO_DENY_MAX_RENEWALS = 6
 }

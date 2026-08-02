@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Which gate a [PermissionAsk] came through. Approval semantics (timeout wording, remember rules,
  *  bypass paths) stay with the source adapter; the coordinator only needs the label for observability
@@ -60,7 +61,9 @@ class ApprovalCoordinator(
         val source: ApprovalSource,
         val owner: Any,
         val isQuestion: Boolean,
-        val expiresAt: Long,
+        // var because a #201 renewal moves the deadline forward — snapshots must report the CURRENT
+        // lease's end, not the first one's, or a reattaching phone shows an expiry that already passed
+        @Volatile var expiresAt: Long,
         val createdAt: Long,
         val emit: suspend (Frame) -> Unit,
         val onOutcome: suspend (ApprovalOutcome) -> Unit,
@@ -106,6 +109,15 @@ class ApprovalCoordinator(
         // fired ONCE at half the no-response budget if nobody has looked at the card yet (design §9.5's
         // single non-urgent second reminder) — the caller decides what a reminder means (ask push re-nudge)
         onReminder: (suspend () -> Unit)? = null,
+        // issue #201: how many times an exhausted window RENEWS instead of timing out. 0 (the default, and
+        // the only value for bridge/guest/export asks) reproduces the pre-#201 behavior byte for byte. Each
+        // renewal restarts the budget AND the absolute deadline and re-emits the card, so the invariant
+        // "no single lease outlives absoluteDeadlineMs" survives while the chain stays finite.
+        maxRenewals: Int = 0,
+        // Re-consulted at EVERY renewal, not captured at submit: turning the preference back off is a
+        // safety action, and a safety action has to be retroactive. Without this an ask minted while the
+        // mode was on would keep renewing for its full 7 days after the owner disabled it.
+        renewsAllowed: () -> Boolean = { true },
         onOutcome: suspend (ApprovalOutcome) -> Unit,
     ) {
         val now = System.currentTimeMillis()
@@ -135,14 +147,45 @@ class ApprovalCoordinator(
             var budgetLeftMs = timeoutMs
             var lastTick = System.currentTimeMillis()
             var reminded = onReminder == null
-            val absoluteDeadline = p.createdAt + absoluteDeadlineMs
+            var renewsLeft = maxRenewals
+            var absoluteDeadline = p.createdAt + absoluteDeadlineMs
+            // #201: an exhausted window either RENEWS (fresh budget + fresh ceiling + the card re-emitted,
+            // which is what re-triggers the phone's push) or falls through to the honest timeout below.
+            // Returns true when the caller should keep waiting.
+            suspend fun renew(nowMs: Long): Boolean {
+                if (renewsLeft <= 0 || !runCatching { renewsAllowed() }.getOrDefault(false)) return false
+                renewsLeft--
+                budgetLeftMs = timeoutMs
+                lastTick = nowMs
+                absoluteDeadline = nowMs + absoluteDeadlineMs
+                p.expiresAt = nowMs + timeoutMs
+                // deliberately NOT re-arming the half-budget nudge: the renewal below already re-emits the
+                // card (and so re-pushes). A second reminder per 24h window would just double the plaintext
+                // metadata this ask hands the untrusted relay while nobody is looking at it.
+                log.info(
+                    "renewed ask=${ask.askId} convo=${ask.convoId} tool=${ask.tool} " +
+                        "renewsLeft=$renewsLeft (no-auto-deny)",
+                )
+                // same (convoId, askId) ⇒ clients refresh the card in place. Bounded: a sink that never
+                // returns must not wedge the timeout job, because "the chain always terminates" is what the
+                // idle reaper and the auth-switch guard lean on. Cancellation still propagates.
+                runCatching { withTimeoutOrNull(EMIT_TIMEOUT_MS) { p.emit(ask) } }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                return true
+            }
             while (true) {
                 val nowMs = System.currentTimeMillis()
-                if (nowMs >= absoluteDeadline) break // the hard ceiling always terminates
+                if (nowMs >= absoluteDeadline) { // the hard ceiling always terminates THIS lease
+                    if (renew(nowMs)) continue
+                    break
+                }
                 val lease = p.leaseUntil
                 if (lease <= nowMs) { // unleased: the budget is burning
                     budgetLeftMs -= nowMs - lastTick
-                    if (budgetLeftMs <= 0) break
+                    if (budgetLeftMs <= 0) {
+                        if (renew(nowMs)) continue
+                        break
+                    }
                     if (!reminded && !p.everLeased && budgetLeftMs <= timeoutMs / 2) {
                         reminded = true
                         runCatching { onReminder?.invoke() }
@@ -305,5 +348,6 @@ class ApprovalCoordinator(
         const val LEASED_TICK_MS = 500L            // lease-release detection latency bound
         const val ABSOLUTE_DEADLINE_MS = 24 * 60 * 60 * 1000L // design §17.9: no approval outlives 24h
         const val MAX_TICK_MS = 30_000L            // budget bookkeeping granularity while waiting
+        const val EMIT_TIMEOUT_MS = 5_000L         // #201: a stuck sink must never wedge the renewal chain
     }
 }

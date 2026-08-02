@@ -14,7 +14,11 @@ import java.io.File
  */
 class DaemonPrefs private constructor(private val path: File) {
     @Serializable
-    private data class Stored(val pushEnabled: Boolean = true, val isolatedClaudeAuth: Boolean = false)
+    private data class Stored(
+        val pushEnabled: Boolean = true,
+        val isolatedClaudeAuth: Boolean = false,
+        val askNoAutoDeny: Boolean = false,
+    )
 
     @Volatile
     var pushEnabled: Boolean = true
@@ -31,15 +35,28 @@ class DaemonPrefs private constructor(private val path: File) {
         persist()
     }
 
+    /** Issue #201: the owner's OWN approval asks wait for a manual decision instead of auto-denying.
+     *  Persisted here (not client-side) because the daemon is what runs the timeout — a client-local
+     *  copy would drift the moment a second device flipped it. Mirrored into ApprovalTimeout.noAutoDeny,
+     *  which is what the per-ask read actually consults. */
+    @Volatile
+    var askNoAutoDeny: Boolean = false
+        private set
+
     fun setIsolatedClaudeAuth(v: Boolean) {
         isolatedClaudeAuth = v
+        persist()
+    }
+
+    fun setAskNoAutoDeny(v: Boolean) {
+        askNoAutoDeny = v
         persist()
     }
 
     private fun persist() {
         runCatching {
             path.parentFile?.mkdirs()
-            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth)))
+            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny)))
         }
     }
 
@@ -53,6 +70,7 @@ class DaemonPrefs private constructor(private val path: File) {
                 val s = JSON.decodeFromString<Stored>(path.readText())
                 pushEnabled = s.pushEnabled
                 isolatedClaudeAuth = s.isolatedClaudeAuth
+                askNoAutoDeny = s.askNoAutoDeny
             }
         }
     }

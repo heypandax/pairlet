@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.server
 
 import dev.ccpocket.daemon.DaemonPrefs
+import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.bridge.GuestScope
 import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.claude.AuthService
@@ -89,6 +90,7 @@ import dev.ccpocket.protocol.SessionFiles
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PocketError
+import dev.ccpocket.protocol.ApprovalPrefs
 import dev.ccpocket.protocol.PushPrefs
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.ScheduleCancel
@@ -97,6 +99,7 @@ import dev.ccpocket.protocol.ScheduleList
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionGone
 import dev.ccpocket.protocol.Sessions
+import dev.ccpocket.protocol.SetApprovalPrefs
 import dev.ccpocket.protocol.SetPushPrefs
 import dev.ccpocket.protocol.ShellResult
 import dev.ccpocket.protocol.StopBackgroundJob
@@ -150,6 +153,7 @@ class RequestRouter(
          *  dev socket and trusted in-process callers. One machine-local pseudo-device, so the handoff
          *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
         const val LOCAL_DEVICE_ID = "local"
+
 
         /** §18.2 P2-3: frames only an approvalV2-declaring client should receive — ingress sinks drop
          *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
@@ -265,6 +269,7 @@ class RequestRouter(
                 if (guestScope == null) SessionGroups.assign(groupWorkdir(frame.workdir), frame.sessionId, frame.groupId)
                 emitSessions(frame.workdir, sink, guestScope, caps)
             }
+
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -511,6 +516,21 @@ class RequestRouter(
                 sink.emit(PushPrefs(prefs.pushEnabled))
             }
 
+            // issue #201 "wait for my decision": same single-reply contract as the push toggle. Owner-only
+            // by the same default-deny choke point as the frames above — a guest/bridge can never flip how
+            // long the OWNER's approvals wait. Persist AND mirror into the per-ask read, so the next card
+            // picks it up without a relaunch.
+            // origin/guestScope re-checked here like every other owner-plane approval frame
+            // (ListPendingApprovals / RevokeGrant / FetchApprovalHistory): the capability choke point
+            // already denies it, and this is the second lock the rest of the plane carries.
+            is SetApprovalPrefs -> if (origin == null && guestScope == null) {
+                frame.noAutoDeny?.let {
+                    prefs.setAskNoAutoDeny(it)
+                    ApprovalTimeout.noAutoDeny = it
+                }
+                sink.emit(ApprovalPrefs(prefs.askNoAutoDeny))
+            }
+
             // agent model listing: inspect the Mac daemon's local agent config/cache.
             // On IO, not the shared Default pool: the Claude path may make a blocking HTTP call to the
             // user's gateway (#167 ②), and a gateway that accepts the connection but never answers would
@@ -719,6 +739,7 @@ class RequestRouter(
         // so its client must not show the entry
         sink.emit(Sessions(workdir, items, groups = groups, renameSupported = guestScope == null))
     }
+
 
     // ── ClientCaps filters: strip agent=OPENCODE rows for peers that never declared support, so an
     // already-shipped build (unknown-enum decode = whole-frame drop) keeps its claude/codex lists ──

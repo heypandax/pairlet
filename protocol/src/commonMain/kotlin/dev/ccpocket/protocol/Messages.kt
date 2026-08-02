@@ -55,6 +55,7 @@ data class GroupDelete(val workdir: String, val groupId: String) : ToDaemon
 @SerialName("pocket/group.assign")
 data class GroupAssign(val workdir: String, val sessionId: String, val groupId: String? = null) : ToDaemon
 
+
 /**
  * phone -> daemon: rename session [sessionId] under [workdir] to [title] (issue #158). The daemon lands it
  * as Claude's OWN `custom-title` transcript record — appended by the live CLI itself (a `rename_session`
@@ -421,6 +422,16 @@ data object AuthLogout : ToDaemon
 @SerialName("pocket/push.prefs.set")
 data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
 
+/**
+ * client -> daemon: set (or, with [noAutoDeny] null, just query) whether the owner's OWN approval asks
+ * wait for a manual decision instead of auto-denying after the usual window (issue #201). Reply is one
+ * [ApprovalPrefs]. A daemon that predates this drops the frame — no reply arrives and the client hides
+ * the setting, which is why the reply (not an optimistic local write) is the source of truth.
+ */
+@Serializable
+@SerialName("pocket/approval.prefs.set")
+data class SetApprovalPrefs(val noAutoDeny: Boolean? = null) : ToDaemon
+
 // ── API presets (issue #113): named env overrides for third-party API users ──
 // Every pocket/presets.* request is answered by one [PresetsState]. A daemon that predates these
 // silently drops them (undecodable frame) — the client shows an "update the daemon" line instead,
@@ -628,6 +639,13 @@ const val RUNNER_RESTART = "restart"
 @SerialName("pocket/push.prefs")
 data class PushPrefs(val enabled: Boolean) : ToPhone
 
+/** daemon -> client: the current "wait for my decision" preference — the single reply to every
+ *  [SetApprovalPrefs] (issue #201). Its ARRIVAL is the client's capability gate: a daemon that predates
+ *  #201 never sends one, so the setting stays hidden rather than silently doing nothing. */
+@Serializable
+@SerialName("pocket/approval.prefs")
+data class ApprovalPrefs(val noAutoDeny: Boolean) : ToPhone
+
 /**
  * daemon -> phone: the CLI's auth state — the single reply to every pocket/auth.* request and pushed
  * again when a pending login resolves. The client renders the LATEST one; it never builds its own
@@ -691,6 +709,7 @@ data class Sessions(
     // instead of sending a frame that would be silently dropped; an old app ignores it.
     val renameSupported: Boolean = false,
 ) : ToPhone
+
 
 /**
  * Aggregated token usage (issue #26). [tokensToday]/[requestsToday]/[cacheHitPct]/[costUsdToday] are for the
@@ -839,6 +858,14 @@ data class PermissionAsk(
     // Non-null is ALSO the client's implicit capability gate for [ApprovalAttentionHeartbeat] — a daemon
     // that offers scopes understands heartbeats; one that doesn't would answer "unsupported".
     val grantOptions: List<String>? = null,
+    // This ask does NOT auto-deny (issue #201): instead of timing out, the daemon RENEWS its window —
+    // a daily reminder, bounded by a 7-day hard floor — so someone away from the computer is never
+    // "denied on their behalf". [timeoutSec] still carries the CURRENT window (86400), so an old phone
+    // draws a slow-but-correct ring and, because the daemon re-emits the same ask on every renewal,
+    // that ring keeps refreshing in place. A new client hides the ring and shows a "waiting for you"
+    // badge instead. Old daemons omit this ⇒ false ⇒ exactly the pre-#201 behavior. Bridge/guest asks
+    // never set it — an approver who isn't the session's owner keeps a bounded window.
+    val noAutoDeny: Boolean = false,
 ) : ToPhone
 
 /** One row in [PendingApprovals]. [expiresAt] is epoch millis from the daemon's real deadline, so a

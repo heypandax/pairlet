@@ -1000,6 +1000,11 @@ class RepoDesktopModel(
     override fun setPhonePush(enabled: Boolean) { repo.setPushEnabled(enabled) }
     override fun refreshPushPrefs() { repo.fetchPushPrefs() }
 
+    override val approvalNoAutoDeny: Boolean? get() = repo.approvalPrefs.value
+    override fun setApprovalNoAutoDeny(enabled: Boolean) { repo.setAskNoAutoDeny(enabled) }
+    override fun refreshApprovalPrefs() { repo.fetchApprovalPrefs() }
+
+
     override val observing: Boolean get() = repo.observing.value
     override fun takeOver() { repo.takeOver() }
 

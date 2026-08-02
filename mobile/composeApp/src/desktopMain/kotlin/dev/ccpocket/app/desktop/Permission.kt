@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -85,6 +86,22 @@ fun CountdownRing(diameter: Dp, stroke: Dp, color: Color, fraction: Float = 0.72
         val tl = Offset(sw / 2f, sw / 2f)
         drawArc(Tok.hair, 0f, 360f, false, topLeft = tl, size = arc, style = Stroke(sw))
         drawArc(color, -90f, -360f * fraction, false, topLeft = tl, size = arc, style = Stroke(sw, cap = StrokeCap.Round))
+    }
+}
+
+/** The wait indicator beside an ask's actions: normally the countdown ring, but for a no-auto-deny ask
+ *  (issue #201) an ∞ badge — that card does not expire, so a ring would promise a deadline that isn't there. */
+@Composable
+private fun WaitDial(ask: PermissionAsk, diameter: Dp, stroke: Dp, color: Color) {
+    if (!ask.noAutoDeny) {
+        CountdownRing(diameter, stroke, color)
+        return
+    }
+    Box(
+        Modifier.size(diameter).clip(CircleShape).border(1.dp, Tok.hair, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("∞", color = Tok.muted, fontFamily = Dk.ui, fontSize = (diameter.value * 0.44f).sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -354,7 +371,7 @@ fun InlinePermCard(
                                     )
                                 }
                                 Spacer(Modifier.weight(1f))
-                                CountdownRing(26.dp, 2.2.dp, color)
+                                WaitDial(ask, 26.dp, 2.2.dp, color)
                                 DenyButton(onClick = onDeny)
                                 OnceButton(onClick = { onAllow(false) })
                                 TaskAllowButton(onClick = onAllowTask!!)
@@ -376,7 +393,7 @@ fun InlinePermCard(
                     else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (canRemember(ask)) RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
                         Spacer(Modifier.weight(1f))
-                        CountdownRing(26.dp, 2.2.dp, color)
+                        WaitDial(ask, 26.dp, 2.2.dp, color)
                         DenyButton(onClick = onDeny)
                         AllowButton(key = !isDiff, onClick = { onAllow(rememberRule) })
                     }
@@ -434,7 +451,7 @@ fun FocusedModal(computer: String, ask: PermissionAsk, agent: AgentKind, workdir
                         Text(stringResource(Res.string.agent_needs_permission, agentName(agent)), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp)
                         Text("${ask.title} · ${ask.tool}".trim().removePrefix("· "), color = Tok.tx, fontFamily = Dk.ui, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     }
-                    CountdownRing(34.dp, 2.6.dp, color)
+                    WaitDial(ask, 34.dp, 2.6.dp, color)
                 }
                 Spacer(Modifier.size(14.dp))
                 CommandBox(ask.inputPreview, fontSize = 12.5f)

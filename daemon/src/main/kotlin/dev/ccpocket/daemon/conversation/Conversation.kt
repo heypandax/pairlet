@@ -108,6 +108,11 @@ class Conversation(
      *  the recipient is the lease controller and answers its own asks, so a mere ask is no wall.
      *  Null = not a handoff-granted conversation. */
     private val handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
+    /** This conversation was opened by a HEADLESS fire (the scheduler) — no client is attached and its sink
+     *  is a black hole. It is still the owner's own session in every other respect, but issue #201's
+     *  "wait for my decision" must NOT apply: nobody can see the card, so waiting a week would only pin a
+     *  CLI process and an un-reapable conversation per fire. */
+    private val headless: Boolean = false,
     /** The daemon-wide pending-approval ledger (approval design M1): both this conversation's gates
      *  (request-level + per-tool) register their asks here, so timeout/withdraw/verdict routing and the
      *  account snapshot behave identically to the shell/export gates. Defaulted for tests. */
@@ -725,7 +730,9 @@ class Conversation(
      *  [hasBackgroundWork] this keeps the idle reaper off the conversation: a turn blocked on an unanswered
      *  question is not idle, and reaping it would discard a card the user is expected to answer — the plan-mode
      *  failure in issue #55, where the question lands long after a premature `result` while the phone is
-     *  backgrounded (past the 90s idle window). Bounded by the bridge's question timeout. */
+     *  backgrounded (past the 90s idle window). Bounded by the bridge's question timeout — or, when the owner
+     *  turned on issue #201's "wait for my decision", by that mode's 7-day renewal cap. Still BOUNDED either
+     *  way, which is the property the reaper (and the auth-switch guard) actually depend on. */
     fun hasPendingAsk(): Boolean = bridgeRequestGate.hasPending() || bridge?.hasPending() == true
 
     /** Account-wide approval inbox rows, enriched with provenance the individual gates do not own. */
@@ -1022,6 +1029,19 @@ class Conversation(
             // arrival window into an auto-deny.
             verdictTimeoutMs = if (origin != null) ApprovalTimeout.bridgeMs() else ApprovalTimeout.ms,
             questionTimeoutMs = if (origin != null) ApprovalTimeout.bridgeMs() else ApprovalTimeout.ms,
+            // issue #201 "wait for my decision" — ONLY the owner's own, CLIENT-DRIVEN session. Excluded:
+            //  - BRIDGE (origin != null): driven by whoever is in the chat, approved by someone who isn't
+            //    watching the session — a card that never expires there is a standing foothold.
+            //  - GUEST (pathScope != null) and COLLABORATOR (handoffAccess != null): they answer their own
+            //    asks under access the owner granted. handoffAccess is checked DIRECTLY rather than trusting
+            //    pathScope as a proxy — a collaborator open carries origin == null, and its pathScope is
+            //    derived from canonicalization that can in principle yield an empty list.
+            //  - HEADLESS (the scheduler): nobody can see the card, so waiting would pin one CLI process and
+            //    one un-reapable conversation per fire — a repeating schedule would accumulate them.
+            noAutoDeny = {
+                origin == null && pathScope == null && handoffAccess == null && !headless &&
+                    ApprovalTimeout.noAutoDeny
+            },
             // a bridge-origin ask is a one-off human decision (issue #91): never offer/honor "always
             // allow", so one owner approval can't be replayed by later attacker-supplied prompts
             forceNeverRemember = origin != null,

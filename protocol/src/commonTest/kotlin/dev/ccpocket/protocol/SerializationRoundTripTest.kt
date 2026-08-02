@@ -18,6 +18,17 @@ import kotlin.test.assertTrue
 @kotlinx.serialization.Serializable
 private data class OldSessions(val workdir: String, val items: List<SessionSummary> = emptyList())
 
+/** The pre-#201 `pocket/ask` body shape (no `noAutoDeny`) — proves an already-shipped phone skips the new
+ *  flag and still reads `timeoutSec`, so it draws a correct-if-slow ring instead of dropping the frame. */
+@Serializable
+private data class OldPermissionAsk(
+    val convoId: String,
+    val askId: String,
+    val tool: String,
+    val inputPreview: String,
+    val timeoutSec: Int? = null,
+)
+
 /** The pre-#183 model-list shape — proves an already-shipped client skips the new nested capability rows. */
 @Serializable
 private data class OldModelsList(
@@ -1101,6 +1112,50 @@ class SerializationRoundTripTest {
         val stateJson = PocketJson.encodeToString(state)
         assertTrue("\"t\":\"pocket/push.prefs\"" in stateJson, stateJson)
         assertEquals(state, PocketJson.decodeFromString<Envelope>(stateJson))
+    }
+
+    @Test
+    fun approvalPrefs_set_and_state_roundtrip() {
+        // issue #201, same shape as the push toggle: null field = query, omitted on the wire
+        val query = Envelope(id = "ap1", ts = 0, body = SetApprovalPrefs())
+        val queryJson = PocketJson.encodeToString(query)
+        assertTrue("\"t\":\"pocket/approval.prefs.set\"" in queryJson, queryJson)
+        assertFalse("noAutoDeny" in queryJson, queryJson)
+        assertEquals(query, PocketJson.decodeFromString<Envelope>(queryJson))
+
+        val set = Envelope(id = "ap2", ts = 0, body = SetApprovalPrefs(noAutoDeny = true))
+        assertEquals(set, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(set)))
+
+        val state = Envelope(id = "ap3", ts = 0, body = ApprovalPrefs(noAutoDeny = true))
+        val stateJson = PocketJson.encodeToString(state)
+        assertTrue("\"t\":\"pocket/approval.prefs\"" in stateJson, stateJson)
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(stateJson))
+    }
+
+    @Test
+    fun permissionAsk_noAutoDeny_roundtrips_and_defaults_off_for_old_daemons() {
+        // issue #201 trailing optional. New→new: the flag survives.
+        val ask = PermissionAsk("c1", "a1", "Bash", "git status", timeoutSec = 86_400, noAutoDeny = true)
+        val json = PocketJson.encodeToString(Envelope(id = "n1", ts = 0, body = ask))
+        assertTrue("\"noAutoDeny\":true" in json, json)
+        assertEquals(ask, (PocketJson.decodeFromString<Envelope>(json).body as PermissionAsk))
+
+        // OLD daemon → new app: no key at all ⇒ false ⇒ byte-for-byte the pre-#201 card (a real countdown).
+        val legacy = """{"convoId":"c1","askId":"a1","tool":"Bash","inputPreview":"git status","timeoutSec":600}"""
+        val old = PocketJson.decodeFromString<PermissionAsk>(legacy)
+        assertFalse(old.noAutoDeny)
+        assertEquals(600, old.timeoutSec)
+    }
+
+    @Test
+    fun old_app_skips_noAutoDeny_and_still_reads_the_window() {
+        // new daemon → OLD app: the unknown key is skipped, and because timeoutSec still carries the
+        // CURRENT renewal window the old client draws a 24h ring rather than nothing — slow, but honest,
+        // and the daemon re-emits the same ask on every renewal so it keeps refreshing in place.
+        val newFrame = """{"convoId":"c1","askId":"a1","tool":"Bash","inputPreview":"rm -rf x","timeoutSec":86400,"noAutoDeny":true}"""
+        val back = PocketJson.decodeFromString<OldPermissionAsk>(newFrame)
+        assertEquals("a1", back.askId)
+        assertEquals(86_400, back.timeoutSec)
     }
 
     @Test

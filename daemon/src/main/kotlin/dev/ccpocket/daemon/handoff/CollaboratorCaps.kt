@@ -74,7 +74,9 @@ object CollaboratorCaps {
         is ListSessionFiles -> true  // review surfaces: the granted session's changed files + diffs
         is ReadFile -> true
         is ReadFileDiff -> true
-        // Everything else — discovery, management, mode/tier changes, re-invites — is denied.
+        // Everything else — discovery, management, mode/tier changes, re-invites — is denied. That
+        // includes presets/rename/groups/switch-dir and, since #201/#202, SetApprovalPrefs and the
+        // session-archive pair (a collaborator must not reshape the owner's session lists).
         else -> false
     }
 

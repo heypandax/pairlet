@@ -172,6 +172,104 @@ class ApprovalCoordinatorTest {
         scope.cancel()
     }
 
+    // ── issue #201: "wait for my decision" = a BOUNDED renewal chain, never an infinite wait ──────────
+
+    @Test
+    fun renewable_ask_renews_at_the_deadline_instead_of_terminating() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 150)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val outcomes = CopyOnWriteArrayList<ApprovalOutcome>()
+        coord.submit(
+            ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 100,
+            // 20 renewals × a 100ms window comfortably outlasts the delay below, so this asserts
+            // "renewals keep it alive", not "the cap happens to be far away" (that's the next test)
+            emit = { emitted += it }, maxRenewals = 20,
+        ) { outcomes += it }
+
+        delay(500) // several windows' worth — a maxRenewals=0 ask would have timed out long ago
+        assertTrue(outcomes.isEmpty(), "a renewable ask must not resolve while renewals remain")
+        // each renewal re-emits the SAME card, which is what re-triggers the phone's push
+        val cards = emitted.filterIsInstance<PermissionAsk>()
+        assertTrue(cards.size >= 2, "expected the card to be re-emitted on renewal, saw ${cards.size}")
+        assertTrue(cards.all { it.askId == "a1" }, "a renewal refreshes in place, it never mints a new ask")
+        assertTrue(emitted.none { it is AskWithdrawn }, "renewing must never retire the card")
+        scope.cancel()
+    }
+
+    @Test
+    fun renewals_are_capped_then_the_ask_times_out_honestly() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 10_000)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val outcomes = CopyOnWriteArrayList<ApprovalOutcome>()
+        coord.submit(
+            ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 60,
+            emit = { emitted += it }, maxRenewals = 1,
+        ) { outcomes += it }
+
+        delay(600) // two windows (60ms each) is all one renewal buys
+        assertIs<ApprovalOutcome.TimedOut>(outcomes.single(), "the chain is finite — it must still resolve")
+        val withdrawn = emitted.filterIsInstance<AskWithdrawn>().single()
+        assertEquals(AskWithdrawnReason.TIMED_OUT, withdrawn.reason)
+        scope.cancel()
+    }
+
+    @Test
+    fun a_verdict_during_a_renewed_window_still_resolves() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 120)
+        val outcomes = CopyOnWriteArrayList<ApprovalOutcome>()
+        coord.submit(
+            ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 80,
+            emit = { }, maxRenewals = 5,
+        ) { outcomes += it }
+
+        delay(400) // land well inside a LATER window than the one the ask started in
+        assertTrue(coord.onVerdict(PermissionVerdict("c1", "a1", Decision.ALLOW)))
+        val answered = assertIs<ApprovalOutcome.Answered>(outcomes.single())
+        assertEquals(Decision.ALLOW, answered.verdict.decision)
+        scope.cancel()
+    }
+
+    @Test
+    fun revoking_the_preference_bounds_an_ask_that_is_already_in_flight() = runBlocking {
+        // Turning a safety back ON must be retroactive: an ask minted while "wait for my decision" was
+        // enabled has to stop renewing the moment the owner disables it, not seven days later.
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 10_000)
+        val outcomes = CopyOnWriteArrayList<ApprovalOutcome>()
+        var allowed = true
+        coord.submit(
+            ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 60,
+            emit = { }, maxRenewals = 1_000, renewsAllowed = { allowed },
+        ) { outcomes += it }
+
+        delay(300)
+        assertTrue(outcomes.isEmpty(), "still renewing while the preference is on")
+
+        allowed = false // the owner flipped it back off
+        delay(400)
+        assertIs<ApprovalOutcome.TimedOut>(outcomes.single(), "the very next window must be the last one")
+        scope.cancel()
+    }
+
+    @Test
+    fun a_renewal_moves_the_snapshot_expiry_forward() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 100)
+        coord.submit(
+            ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 100,
+            emit = { }, maxRenewals = 5,
+        ) { }
+        val first = coord.rowsFor(this).single().expiresAt!!
+
+        delay(400) // a few renewals in
+        val later = coord.rowsFor(this).single().expiresAt!!
+        assertTrue(later > first, "a reattaching client must see the CURRENT window's deadline, not a stale one")
+        scope.cancel()
+    }
+
     @Test
     fun reminder_fires_once_at_half_budget_only_while_unwatched() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)

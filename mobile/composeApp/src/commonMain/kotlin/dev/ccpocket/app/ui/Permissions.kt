@@ -596,6 +596,9 @@ fun PermissionSheet(
 ) {
     var seconds by remember(ask.askId) { mutableStateOf(ask.total()) }
     LaunchedEffect(ask.askId) {
+        // #201: a no-auto-deny ask has nothing to count down to — the daemon renews its window instead of
+        // expiring it, so running the ticker would only draw a misleading 24h ring.
+        if (ask.noAutoDeny) return@LaunchedEffect
         seconds = ask.total()
         while (seconds > 0) { delay(1000); seconds -= 1 }
     }
@@ -604,7 +607,9 @@ fun PermissionSheet(
     // daemon (grantOptions != null) can pause its budget under an AttentionLease, so the local countdown may
     // hit zero while the daemon still waits — its zero is a DISPLAY floor, never a terminal state; only the
     // daemon's AskWithdrawn(TIMED_OUT) ends such a card. The local zero stays terminal for pre-M2 daemons.
-    val timedOut = timedOutSignal || (seconds <= 0 && ask.grantOptions == null)
+    // #201: a no-auto-deny card is NEVER locally terminal — only the daemon (after its renewal chain runs
+    // out, 7 days later) can end it, and it says so with AskWithdrawn(TIMED_OUT) → timedOutSignal.
+    val timedOut = timedOutSignal || (seconds <= 0 && ask.grantOptions == null && !ask.noAutoDeny)
     PocketSheet(onDismiss = { if (timedOut) onDismiss() else onDeny() }) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp, top = 2.dp)) {
             queuePosition?.let { (pos, total) ->
@@ -618,8 +623,16 @@ fun PermissionSheet(
                 Box(Modifier.weight(1f).alpha(if (timedOut) 0.5f else 1f)) { PermBody(ask, workdir, risk) }
                 if (!timedOut) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        CountdownRing(seconds, ask.total())
-                        Text(stringResource(Res.string.auto_deny), color = Tok.muted, fontSize = 10.sp)
+                        // #201: the ring means "this expires"; when it doesn't, say so instead of drawing one.
+                        if (ask.noAutoDeny) {
+                            Box(Modifier.size(34.dp).clip(CircleShape).background(Tok.raised).border(1.dp, Tok.hair, CircleShape), contentAlignment = Alignment.Center) {
+                                Text("∞", color = Tok.tx2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Text(stringResource(Res.string.ask_waiting_manual), color = Tok.muted, fontSize = 10.sp)
+                        } else {
+                            CountdownRing(seconds, ask.total())
+                            Text(stringResource(Res.string.auto_deny), color = Tok.muted, fontSize = 10.sp)
+                        }
                     }
                 }
             }

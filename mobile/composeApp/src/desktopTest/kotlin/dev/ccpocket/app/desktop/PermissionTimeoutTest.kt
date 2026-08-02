@@ -104,6 +104,26 @@ class PermissionTimeoutTest {
         assertPresent(str(Res.string.dismiss))
     }
 
+    // ── issue #201: a no-auto-deny card is still an ordinary actionable card, minus the deadline ───
+    @Test
+    fun noAutoDenyCardStaysActionableAndShowsNoDeadline() = runComposeUiTest {
+        setContent {
+            PocketTheme {
+                InlinePermCard(
+                    cmdAsk.copy(timeoutSec = 86_400, noAutoDeny = true), AgentKind.CLAUDE, "~/code/cc-pocket", null,
+                    onAllow = {}, onDeny = {},
+                    timedOut = false, onDismiss = {},
+                )
+            }
+        }
+        // the whole point: it waits, so it must still be answerable whenever the user gets back
+        assertPresent(str(Res.string.allow))
+        assertPresent(str(Res.string.deny))
+        assertFalse(present(str(Res.string.auto_denied_no_response)), "nothing auto-denied it")
+        // and it promises no deadline it isn't going to keep
+        assertPresent("∞")
+    }
+
     // ── the desktop model forwards the repo's timeout signal + retires the dead ask from attention ─
     @Test
     fun repoModelForwardsTimeoutSignalAndClearsAttention() {
