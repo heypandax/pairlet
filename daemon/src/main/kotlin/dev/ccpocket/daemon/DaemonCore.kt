@@ -44,7 +44,12 @@ class DaemonCore(
     codexModels: CodexModelService = CodexModelService(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val registry = SessionRegistry(scope, backends)
+
+    /** ONE pending-approval ledger for the whole daemon (approval design M1): agent tool asks, bridge
+     *  request approvals, quick-shell commands and file exports all register here, so a verdict routes by
+     *  askId in one place and timeout/withdraw/snapshot semantics can't drift between the gates. */
+    val approvals = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope)
+    val registry = SessionRegistry(scope, backends, approvals = approvals)
 
     init {
         // unhide transcripts a crashed previous instance stranded hidden (issue #70) — off the
@@ -55,8 +60,8 @@ class DaemonCore(
     val dirs = DirectoryService()
     val transcribe = TranscribeService(scope, registry::workdirOf)
     val inbox = FileInboxService(registry::workdirOf)
-    val shell = ShellService(scope)
-    val exports = FileExportService(scope, registry::workdirOf)
+    val shell = ShellService(scope, coordinator = approvals)
+    val exports = FileExportService(scope, registry::workdirOf, coordinator = approvals)
     val auth = AuthService(
         scope, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth,
         claudeConfigDir = claudeConfigDir,
@@ -111,6 +116,7 @@ class DaemonCore(
         // model list must be the host the client is showing, with that layer's own credential (#167 ②).
         openCodeModels, codexModels,
         ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
+        approvals = approvals,
     )
 
     /**

@@ -103,6 +103,10 @@ class RequestRouter(
     private val openCodeModels: OpenCodeModelService = OpenCodeModelService(),
     private val codexModels: CodexModelService = CodexModelService(),
     private val claudeModels: ClaudeModelService = ClaudeModelService(),
+    // the daemon-wide pending-approval ledger (approval design M1): the single verdict routing point;
+    // defaulted so router tests that never touch approvals need no wiring
+    private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
+        dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
 ) {
     /** One connection's declared wire vocabulary (see [ClientCaps] in Messages.kt). Mutable: the
      *  declaration frame lands after connect and upgrades the SAME holder the ingress created for
@@ -302,9 +306,14 @@ class RequestRouter(
             }
 
             is SendPrompt -> if (!registry.sendPrompt(frame)) sink.emit(SessionGone(frame.convoId))
-            // a verdict may resolve a SHELL ask (issue #3), an EXPORT ask (issue #67 v2), or an agent tool
-            // ask — each service claims its own by askId (pending-map membership) before the registry
-            is PermissionVerdict -> if (!shell.onVerdict(frame) && !exports.onVerdict(frame)) registry.verdict(frame)
+            // ONE routing point for every verdict — agent tool ask, bridge request approval, quick-shell
+            // command, file export — resolved by askId in the ApprovalCoordinator (approval design M1),
+            // instead of being try-offered to each service's private pending map in turn. An unknown/expired
+            // askId answers the TAPPING device honestly (issue #100): its optimistic card-clear must not
+            // read as success.
+            is PermissionVerdict -> if (!approvals.onVerdict(frame)) {
+                sink.emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", frame.convoId))
+            }
             is SwitchMode -> registry.switchMode(frame)
             is SwitchServiceTier -> registry.switchServiceTier(frame)
             is ClearAllowRule -> registry.clearRule(frame)

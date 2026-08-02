@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.Decision
@@ -44,17 +45,23 @@ class FileExportServiceTest {
         suspend fun next(): Frame = withTimeout(5_000) { frames.receive() }
     }
 
+    private lateinit var coord: ApprovalCoordinator
+
     private fun CoroutineScope.service(
         changed: Boolean = false,
         liveWorkdir: Path? = null,
         timeoutMs: Long = 30_000,
-    ) = FileExportService(
-        this,
-        liveWorkdirOf = { liveWorkdir ?: workdir },
-        isChanged = { _, _, _, _ -> changed },
-        serveChanged = { _, wd, sid, p -> FileContent(wd, sid, p, text = "CHANGED-SET") },
-        verdictTimeoutMs = timeoutMs,
-    )
+    ): FileExportService {
+        coord = ApprovalCoordinator(this)
+        return FileExportService(
+            this,
+            liveWorkdirOf = { liveWorkdir ?: workdir },
+            coordinator = coord,
+            isChanged = { _, _, _, _ -> changed },
+            serveChanged = { _, wd, sid, p -> FileContent(wd, sid, p, text = "CHANGED-SET") },
+            verdictTimeoutMs = timeoutMs,
+        )
+    }
 
     private fun req(path: String) = ExportFile("c1", workdir.toString(), "s1", path, AgentKind.CLAUDE)
 
@@ -80,7 +87,7 @@ class FileExportServiceTest {
         assertEquals("ExportFile", ask.tool)
         assertEquals("c1", ask.convoId)
         assertEquals("report.txt", ask.inputPreview)
-        assertTrue(svc.onVerdict(PermissionVerdict("c1", ask.askId, Decision.ALLOW)))
+        assertTrue(coord.onVerdict(PermissionVerdict("c1", ask.askId, Decision.ALLOW)))
         job.join()
         val reply = out.next() as FileContent
         assertTrue(reply.ok)
@@ -94,7 +101,7 @@ class FileExportServiceTest {
         val svc = service()
         val job = launch { svc.run(req("report.txt"), PermissionMode.DEFAULT, out.emit) }
         val ask = out.next() as PermissionAsk
-        assertTrue(svc.onVerdict(PermissionVerdict("c1", ask.askId, Decision.DENY)))
+        assertTrue(coord.onVerdict(PermissionVerdict("c1", ask.askId, Decision.DENY)))
         job.join()
         val reply = out.next() as FileContent
         assertFalse(reply.ok)
@@ -139,7 +146,7 @@ class FileExportServiceTest {
         val job = launch { svc.run(req("report.txt"), PermissionMode.DEFAULT, first.emit) }
         val ask = first.next() as PermissionAsk
         assertTrue(ask.neverRemember, "an export ask is a one-off decision — the UI must not offer Always allow")
-        svc.onVerdict(PermissionVerdict("c1", ask.askId, Decision.ALLOW, remember = true))
+        coord.onVerdict(PermissionVerdict("c1", ask.askId, Decision.ALLOW, remember = true))
         job.join()
         assertTrue((first.next() as FileContent).ok)
 
@@ -148,7 +155,7 @@ class FileExportServiceTest {
         val again = launch { svc.run(req("report.txt"), PermissionMode.DEFAULT, second.emit) }
         val askAgain = second.next()
         assertTrue(askAgain is PermissionAsk, "remember must never be recorded for exports")
-        svc.onVerdict(PermissionVerdict("c1", (askAgain as PermissionAsk).askId, Decision.DENY))
+        coord.onVerdict(PermissionVerdict("c1", (askAgain as PermissionAsk).askId, Decision.DENY))
         again.join()
     }
 

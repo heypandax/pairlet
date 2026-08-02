@@ -851,6 +851,7 @@ class RepoDesktopModel(
     // next ask (askIds are unique per request) — mirrors the phone's `timedOutAskId == ask.askId` check.
     override val askTimedOut: Boolean
         get() = repo.pendingAsk.value?.askId?.let { it == repo.timedOutAskId.value } ?: false
+    override val askQueuePosition: Pair<Int, Int>? get() = repo.askQueueProgress.value
     override fun resolve(allow: Boolean, remember: Boolean) {
         showPermissionModal = false
         repo.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember)

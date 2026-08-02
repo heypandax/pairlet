@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.daemon.bridge.BridgeGrant
 import dev.ccpocket.protocol.AskWithdrawn
 import dev.ccpocket.protocol.AskWithdrawnReason
@@ -31,9 +32,10 @@ class PermissionBridgeTest {
     @Test
     fun default_asks_then_allow_routes_to_respond() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "echo hi") }))
@@ -42,7 +44,7 @@ class PermissionBridgeTest {
         assertEquals("r1", ask.askId)
         assertEquals("Bash", ask.tool)
 
-        b.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
         val r = responses.single()
         assertEquals("r1", r.askId)
         assertTrue(r.allow)
@@ -53,12 +55,13 @@ class PermissionBridgeTest {
     @Test
     fun deny_routes_with_message() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", null))
-        b.onVerdict(PermissionVerdict("c1", "r2", Decision.DENY, message = "nope"))
+        coord.onVerdict(PermissionVerdict("c1", "r2", Decision.DENY, message = "nope"))
         val r = responses.single()
         assertFalse(r.allow)
         assertEquals("nope", r.deny)
@@ -68,9 +71,10 @@ class PermissionBridgeTest {
     @Test
     fun bypass_mode_allows_without_asking() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         b.onControlRequest(AgentEvent.ControlRequest("r3", "Bash", null))
@@ -84,9 +88,10 @@ class PermissionBridgeTest {
     @Test
     fun owner_bypass_auto_allows_even_a_command_the_bridge_bash_gate_would_deny() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, ownerBypassSession = true)
         // rm -rf / is a hard DENY under BridgeCommandPolicy — but the configured owner's own turn is full-trust
@@ -99,9 +104,10 @@ class PermissionBridgeTest {
     @Test
     fun owner_bypass_off_keeps_the_bridge_bash_gate_denying_for_everyone_else() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, ownerBypassSession = false) // the shared / group session (the default)
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
@@ -113,10 +119,11 @@ class PermissionBridgeTest {
     @Test
     fun approved_bridge_request_is_full_access_only_while_its_turn_grant_is_active() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
         var grant = BridgeGrant.OWNER_APPROVED
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true,
             bridgeGrant = { grant })
@@ -139,9 +146,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_runs_ordinary_tools_with_no_ask() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -158,9 +166,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_does_NOT_widen_bash_beyond_its_normal_verdict() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -187,9 +196,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_still_asks_for_tools_the_walls_cannot_confine() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -211,9 +221,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_asks_for_a_file_that_executes_for_the_owner_later() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -233,9 +244,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_asks_when_the_daemon_could_not_resolve_a_target_at_all() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -253,9 +265,10 @@ class PermissionBridgeTest {
     @Test
     fun a_tilde_target_is_out_of_scope_rather_than_resolving_inside_the_workdir() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -270,9 +283,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_still_hard_denies_a_file_outside_the_workdir() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED },
             workdir = System.getProperty("java.io.tmpdir"))
@@ -286,9 +300,10 @@ class PermissionBridgeTest {
     @Test
     fun auto_trusted_request_still_routes_AskUserQuestion_to_a_human() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeGrant = { BridgeGrant.AUTO_TRUSTED })
         b.onControlRequest(AgentEvent.ControlRequest("q1", "AskUserQuestion", null))
@@ -300,9 +315,10 @@ class PermissionBridgeTest {
     @Test
     fun owner_bypass_still_routes_AskUserQuestion_to_a_human() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, ownerBypassSession = true)
         // AskUserQuestion's ANSWER rides the verdict — auto-allowing it would answer nothing, so even under
@@ -320,9 +336,10 @@ class PermissionBridgeTest {
     @Test
     fun askUserQuestion_carries_questions_and_merges_answers_into_updatedInput() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         val input = kotlinx.serialization.json.Json.parseToJsonElement(
@@ -336,7 +353,7 @@ class PermissionBridgeTest {
         assertEquals("Which color?", ask.questions?.single()?.question) // phone gets the structured card
         assertEquals(listOf("Red", "Blue"), ask.questions?.single()?.options?.map { it.label })
 
-        b.onVerdict(PermissionVerdict("c1", "q1", Decision.ALLOW, answers = mapOf("Which color?" to "Red")))
+        coord.onVerdict(PermissionVerdict("c1", "q1", Decision.ALLOW, answers = mapOf("Which color?" to "Red")))
         val r = responses.single()
         assertTrue(r.allow)
         assertTrue(r.updated!!.contains(""""Which color?":"Red""""))  // answers merged into updatedInput
@@ -347,11 +364,12 @@ class PermissionBridgeTest {
     @Test
     fun askUserQuestion_still_asks_under_bypass_and_ignores_remembered_rules() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
         // a stale "always allow" for AskUserQuestion must not swallow questions either
         val rules = mutableSetOf("AskUserQuestion")
-        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, rules,
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, coord, { emitted += it }, rules,
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         b.onControlRequest(AgentEvent.ControlRequest("q2", "AskUserQuestion", null))
@@ -365,10 +383,11 @@ class PermissionBridgeTest {
         // issue #156: the plan-approval gate is neverRemember — approving a plan is an explicit, per-plan
         // human decision, so bypassPermissions must NOT auto-approve it (and neither may a stale rule).
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
         val rules = mutableSetOf("ExitPlanMode")
-        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, rules,
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, coord, { emitted += it }, rules,
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         b.onControlRequest(AgentEvent.ControlRequest("p1", "ExitPlanMode", buildJsonObject { put("plan", "1. refactor\n2. test") }))
@@ -386,9 +405,10 @@ class PermissionBridgeTest {
         // #156 review follow-up: the CLI has emitted both spellings historically; ToolMeta maps them to the
         // same neverRemember meta, so both must survive bypass. Pins the snake_case leg explicitly.
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         b.onControlRequest(AgentEvent.ControlRequest("p2", "exit_plan_mode", buildJsonObject { put("plan", "step 1") }))
@@ -405,8 +425,9 @@ class PermissionBridgeTest {
         // AskUserQuestion minutes after a premature `result`) must be re-shown the still-open card, and NOT one it
         // already answered. resurfacePending re-emits exactly the open asks, to the reattaching sink only.
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         val input = kotlinx.serialization.json.Json.parseToJsonElement(
@@ -425,7 +446,7 @@ class PermissionBridgeTest {
         assertEquals("Which color?", re.questions?.single()?.question)
 
         // once answered it leaves [pending] — a later reattach must NOT re-show a card the user already handled
-        b.onVerdict(PermissionVerdict("c1", "q1", Decision.ALLOW, answers = mapOf("Which color?" to "Red")))
+        coord.onVerdict(PermissionVerdict("c1", "q1", Decision.ALLOW, answers = mapOf("Which color?" to "Red")))
         assertFalse(b.hasPending())
         val reattachedAgain = mutableListOf<Frame>()
         b.resurfacePending { reattachedAgain += it }
@@ -436,15 +457,16 @@ class PermissionBridgeTest {
     @Test
     fun remembered_rule_auto_allows_next_matching_request() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
         val rules = mutableSetOf<String>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, rules,
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
 
         // first "git status" → ask, allow+remember adds the "git status" rule
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
-        b.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
         // second identical command → no new ask, auto-allowed
         b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -s") }))
         assertEquals(1, emitted.size) // only the first asked
@@ -457,9 +479,10 @@ class PermissionBridgeTest {
     @Test
     fun bridge_whitelisted_command_auto_allows_without_emitting_an_ask() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeAllowedCommands = listOf("npm test"))
 
@@ -474,9 +497,10 @@ class PermissionBridgeTest {
     @Test
     fun bridge_non_whitelisted_command_still_asks_the_owner() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeAllowedCommands = listOf("npm test"))
 
@@ -490,9 +514,10 @@ class PermissionBridgeTest {
     @Test
     fun bridge_whitelist_never_overrides_a_dangerous_command() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             bridgeSession = true, bridgeAllowedCommands = listOf("rm")) // even a reckless "rm" grant
 
@@ -508,8 +533,9 @@ class PermissionBridgeTest {
     @Test
     fun ask_carries_the_configured_timeout_window() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { _, _, _, _, _, _ -> }, verdictTimeoutMs = 45_000, questionTimeoutMs = 600_000)
 
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
@@ -520,10 +546,11 @@ class PermissionBridgeTest {
     @Test
     fun timeout_withdraws_the_card_and_denies_with_an_honest_message() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         // the timeout fires on a background delay thread — thread-safe collectors
         val emitted = CopyOnWriteArrayList<Frame>()
         val responses = CopyOnWriteArrayList<Resp>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             verdictTimeoutMs = 50)
 
@@ -545,29 +572,31 @@ class PermissionBridgeTest {
     @Test
     fun late_verdict_after_timeout_is_surfaced_not_silently_dropped() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val emitted = CopyOnWriteArrayList<Frame>()
         val responses = CopyOnWriteArrayList<Resp>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
             verdictTimeoutMs = 50)
 
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))
         delay(500) // ask times out first
         responses.clear() // ignore the timeout's own deny; focus on the LATE verdict
-        b.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW)) // user tapped Allow a moment too late
+        // user tapped Allow a moment too late: the coordinator reports it unclaimed (false), which is
+        // RequestRouter's cue to answer the tapping device with an ask_expired PocketError
+        assertFalse(coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW)))
 
-        // the orphaned allow must NOT reach the CLI (nothing auto-runs), and the phone is told it expired
+        // the orphaned allow must NOT reach the CLI (nothing auto-runs)
         assertTrue(responses.isEmpty(), responses.toString())
-        val err = emitted.filterIsInstance<PocketError>().single()
-        assertEquals("ask_expired", err.code)
         scope.cancel()
     }
 
     @Test
     fun cancelAll_withdraws_every_open_card() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
         val emitted = mutableListOf<Frame>()
-        val b = PermissionBridge("c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { _, _, _, _, _, _ -> })
 
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", null))

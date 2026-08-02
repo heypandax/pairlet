@@ -1,23 +1,21 @@
 package dev.ccpocket.daemon.agent
 
-import dev.ccpocket.protocol.AskWithdrawn
-import dev.ccpocket.protocol.AskWithdrawnReason
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
+import dev.ccpocket.daemon.approval.ApprovalOutcome
+import dev.ccpocket.daemon.approval.ApprovalSource
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
-import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PendingApproval
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * One-off approval gate for a request submitted through an externally driven bridge.
+ * One-off approval gate for a request submitted through an externally driven bridge — the
+ * BRIDGE_REQUEST source adapter of [ApprovalCoordinator] (approval design M1).
  *
  * This is deliberately separate from [PermissionBridge]: the human approves the request before the
  * agent sees it, not a sequence of tools after execution has already started. An approval is consumed
@@ -25,24 +23,15 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class BridgeRequestApprovalGate(
     private val convoId: String,
+    private val coordinator: ApprovalCoordinator,
     private val scope: CoroutineScope,
     private val emit: suspend (Frame) -> Unit,
     private val timeoutMs: Long = ApprovalTimeout.bridgeMs(),
 ) {
-    private class Pending(
-        val ask: PermissionAsk,
-        val expiresAt: Long,
-        val result: CompletableDeferred<Boolean>,
-        val timeout: Job,
-    )
-
-    private val pending = ConcurrentHashMap<String, Pending>()
-
     /** Ask the owner to approve this exact request. No response is a denial and never starts execution. */
     suspend fun awaitApproval(preview: String): Boolean {
         val askId = "br-" + UUID.randomUUID()
         val result = CompletableDeferred<Boolean>()
-        lateinit var timeout: Job
         val ask = PermissionAsk(
             convoId = convoId,
             askId = askId,
@@ -55,55 +44,28 @@ class BridgeRequestApprovalGate(
             neverRemember = true,
             timeoutSec = (timeoutMs / 1000).toInt(),
         )
-        timeout = scope.launch {
-            delay(timeoutMs)
-            if (pending.remove(askId) != null) {
-                emit(AskWithdrawn(convoId, askId, AskWithdrawnReason.TIMED_OUT))
-                result.complete(false)
-            }
+        coordinator.submit(ask, ApprovalSource.BRIDGE_REQUEST, owner = this, timeoutMs = timeoutMs, emit = emit) { outcome ->
+            // `remember` is intentionally ignored: a request approval is one-off by construction
+            result.complete(outcome is ApprovalOutcome.Answered && outcome.verdict.decision == Decision.ALLOW)
         }
-        pending[askId] = Pending(ask, System.currentTimeMillis() + timeoutMs, result, timeout)
-        emit(ask)
         return try {
             result.await()
         } finally {
-            timeout.cancel()
             // The bridge engine can be stopped/reconfigured while this coroutine waits. Retire the card
-            // from the conversation scope in that cancellation path; otherwise the phone keeps a live-looking
-            // approval whose caller no longer exists. Normal verdict/timeout/cancelAll already removed it.
-            if (pending.remove(askId) != null && !result.isCompleted) {
-                scope.launch { emit(AskWithdrawn(convoId, askId, AskWithdrawnReason.WITHDRAWN)) }
-            }
+            // in that cancellation path; otherwise the phone keeps a live-looking approval whose caller no
+            // longer exists. Normal verdict/timeout/cancelAll already resolved it (withdraw no-ops then).
+            if (!result.isCompleted) scope.launch { coordinator.withdraw(convoId, askId) }
         }
     }
 
-    /** Returns true only when this gate owned the verdict. `remember` is intentionally ignored. */
-    fun onVerdict(verdict: PermissionVerdict): Boolean {
-        val request = pending.remove(verdict.askId) ?: return false
-        request.timeout.cancel()
-        request.result.complete(verdict.decision == Decision.ALLOW)
-        return true
-    }
-
-    fun hasPending(): Boolean = pending.isNotEmpty()
+    fun hasPending(): Boolean = coordinator.hasPendingFor(this)
 
     /** Thread-safe point-in-time rows for the owner approval inbox. */
-    fun pendingApprovals(): List<PendingApproval> =
-        pending.values.map { PendingApproval(it.ask, expiresAt = it.expiresAt) }
+    fun pendingApprovals(): List<PendingApproval> = coordinator.rowsFor(this)
 
-    suspend fun resurfacePending(to: suspend (Frame) -> Unit) {
-        pending.values.forEach { to(it.ask) }
-    }
+    suspend fun resurfacePending(to: suspend (Frame) -> Unit) = coordinator.resurfaceFor(this, to)
 
-    suspend fun cancelAll() {
-        val open = pending.entries.toList()
-        pending.clear()
-        open.forEach { (askId, request) ->
-            request.timeout.cancel()
-            emit(AskWithdrawn(convoId, askId, AskWithdrawnReason.WITHDRAWN))
-            request.result.complete(false)
-        }
-    }
+    suspend fun cancelAll() = coordinator.withdrawAllFor(this)
 
     private companion object {
         const val TOOL = "FeishuRequest"

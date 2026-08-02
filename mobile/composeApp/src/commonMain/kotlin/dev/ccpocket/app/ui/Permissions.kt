@@ -570,6 +570,9 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
 @Composable
 fun PermissionSheet(
     ask: PermissionAsk, workdir: String?, timedOutSignal: Boolean = false,
+    // approval design M1: 1-based position / burst total when several asks queued up behind each other —
+    // null (the overwhelmingly common single-ask case) renders exactly the old sheet
+    queuePosition: Pair<Int, Int>? = null,
     onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit, onDismiss: () -> Unit,
 ) {
     var seconds by remember(ask.askId) { mutableStateOf(ask.total()) }
@@ -583,6 +586,13 @@ fun PermissionSheet(
     val timedOut = timedOutSignal || seconds <= 0
     PocketSheet(onDismiss = { if (timedOut) onDismiss() else onDeny() }) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp, top = 2.dp)) {
+            queuePosition?.let { (pos, total) ->
+                Text(
+                    "$pos / $total",
+                    color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.weight(1f).alpha(if (timedOut) 0.5f else 1f)) { PermBody(ask, workdir) }
                 if (!timedOut) {

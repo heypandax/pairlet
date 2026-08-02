@@ -1,20 +1,18 @@
 package dev.ccpocket.daemon.disk
 
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
+import dev.ccpocket.daemon.approval.ApprovalOutcome
+import dev.ccpocket.daemon.approval.ApprovalSource
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.ExportFile
 import dev.ccpocket.protocol.FileContent
 import dev.ccpocket.protocol.Frame
-import dev.ccpocket.protocol.AskWithdrawn
-import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
-import dev.ccpocket.protocol.PermissionVerdict
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -43,6 +41,7 @@ import java.util.concurrent.ConcurrentHashMap
 class FileExportService(
     private val scope: CoroutineScope,
     private val liveWorkdirOf: suspend (convoId: String) -> Path?,
+    private val coordinator: ApprovalCoordinator = ApprovalCoordinator(scope),
     // seams for unit tests — production wiring keeps the SessionFilesService defaults
     private val isChanged: (dev.ccpocket.protocol.AgentKind, String, String, String) -> Boolean = SessionFilesService::isChanged,
     private val serveChanged: (dev.ccpocket.protocol.AgentKind, String, String, String) -> FileContent = SessionFilesService::readFile,
@@ -52,13 +51,6 @@ class FileExportService(
 ) {
     private val log = logger("FileExport")
 
-    private class Pending(
-        val gate: CompletableDeferred<Boolean>,
-        val ask: PermissionAsk,
-        val expiresAt: Long,
-    )
-
-    private val pending = ConcurrentHashMap<String, Pending>()
     private val inFlight = ConcurrentHashMap.newKeySet<String>() // one export awaiting approval per convo
 
     /** Serve [req] through the gate above; emits exactly one [FileContent] (served, or ok=false with why). */
@@ -102,8 +94,12 @@ class FileExportService(
         }
         try {
             val approved =
-                if (mode == PermissionMode.BYPASS_PERMISSIONS) true
-                else askApproval(req, mode, emit)
+                if (mode == PermissionMode.BYPASS_PERMISSIONS) {
+                    coordinator.recordAuto(ApprovalSource.EXPORT, req.convoId, TOOL, null, "bypass-permissions")
+                    true
+                } else {
+                    askApproval(req, mode, emit)
+                }
             if (!approved) {
                 emit(fail("the export request was not approved"))
                 return
@@ -129,30 +125,16 @@ class FileExportService(
             neverRemember = true, // one file ≠ the whole tree: never offer (or honor) "Always allow"
             timeoutSec = (verdictTimeoutMs / 1000).toInt(),
         )
-        pending[askId] = Pending(gate, ask, System.currentTimeMillis() + verdictTimeoutMs)
-        emit(ask)
-        val timeout = scope.launch {
-            delay(verdictTimeoutMs)
-            if (pending.remove(askId) != null) {
-                emit(AskWithdrawn(req.convoId, askId, AskWithdrawnReason.TIMED_OUT))
-                gate.complete(false) // no answer -> deny, never serve
-            }
+        // [PermissionVerdict.remember] is deliberately ignored: export asks are one-off
+        // ([PermissionAsk.neverRemember]), so nothing is recorded even when a client claims remember=true.
+        coordinator.submit(ask, ApprovalSource.EXPORT, owner = this, timeoutMs = verdictTimeoutMs, emit = emit) { outcome ->
+            gate.complete(outcome is ApprovalOutcome.Answered && outcome.verdict.decision == Decision.ALLOW)
         }
-        return try { gate.await() } finally { timeout.cancel() }
-    }
-
-    /** Route a [PermissionVerdict]; returns true iff it resolved a pending EXPORT ask (the caller stops
-     *  here). [PermissionVerdict.remember] is deliberately ignored: export asks are one-off
-     *  ([PermissionAsk.neverRemember]), so nothing is recorded even when a client claims remember=true. */
-    fun onVerdict(v: PermissionVerdict): Boolean {
-        val request = pending.remove(v.askId) ?: return false
-        request.gate.complete(v.decision == Decision.ALLOW)
-        return true
+        return gate.await()
     }
 
     /** Owner-facing snapshot rows for one-off export approvals. */
-    fun pendingApprovals(): List<PendingApproval> =
-        pending.values.map { PendingApproval(it.ask, expiresAt = it.expiresAt) }
+    fun pendingApprovals(): List<PendingApproval> = coordinator.rowsFor(this)
 
     private companion object {
         const val TOOL = "ExportFile"

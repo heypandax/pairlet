@@ -359,6 +359,15 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                     }
                                 }
                             } else if (ask != null) {
+                                // approval design M1: several asks can queue behind one another — surface the
+                                // burst position so the user knows more cards follow this one
+                                model.askQueuePosition?.let { (pos, total) ->
+                                    Text(
+                                        "$pos / $total", color = Tok.muted,
+                                        fontFamily = Dk.mono, fontSize = 10.sp,
+                                        modifier = Modifier.padding(bottom = 3.dp),
+                                    )
+                                }
                                 // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal
                                 // "auto-denied" state (greyed + Dismiss) rather than staying actionable — the
                                 // repo keeps the pendingAsk and stamps timedOutAskId, so ask is still non-null here.

@@ -749,6 +749,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val chatTitle = mutableStateOf<String?>(null)            // session title for the chat header (client-side)
     private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
+    /** Ordered waiting room behind [pendingAsk] (approval design M1): a same-session ask arriving while a
+     * card is already up QUEUES here instead of overwriting it — three back-to-back asks are shown one by
+     * one, none lost. Invariant: non-empty only while [pendingAsk] is non-null (resolving pops the head). */
+    private val askQueue = mutableListOf<PermissionAsk>()
+    /** "n / m" for the current approval burst (1-based position, burst total) — null while only one card
+     * is in flight, so the single-ask UI stays exactly as before. */
+    val askQueueProgress = mutableStateOf<Pair<Int, Int>?>(null)
+    private var askBurstTotal = 0
+    private var askBurstDone = 0
     /** Daemon-authoritative account-wide approval queue for this machine. Kept across transient reconnects;
      * only a fresh [PendingApprovals] replaces it, so a network blip never masquerades as "all clear". */
     val pendingApprovals = mutableStateMapOf<String, PendingApproval>()
@@ -1714,7 +1723,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         convoId.value = null
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
-        pendingAsk.value = null
+        clearAskQueue()
         pendingApprovals.clear()
         // #165: the busy→idle detector is per-MACHINE state. Carrying this machine's working ids into the
         // next one's first project list would mark every one of them "finished while you were away".
@@ -1843,7 +1852,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
         autoFocusComposer.value = false
-        pendingAsk.value = null
+        clearAskQueue()
         messages.clear(); pendingImages.clear()
         resetHistoryPaging() // #147
         terminalEntries.clear(); terminalBusy.value = false
@@ -2302,8 +2311,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     )
                 }
                 if (f.convoId == convoId.value) {
-                    pendingAsk.value = f
-                    Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool))
+                    // a card sitting in its terminal timed-out display (issue #100) must not dam the queue:
+                    // a NEW live ask retires it (the old single-value model overwrote it here too)
+                    if (pendingAsk.value != null && pendingAsk.value?.askId == timedOutAskId.value) advanceAsk()
+                    val current = pendingAsk.value
+                    val queuedAt = askQueue.indexOfFirst { it.askId == f.askId }
+                    when {
+                        // duplicate frames (resurface on reattach) refresh in place — never double-queue
+                        current?.askId == f.askId -> pendingAsk.value = f
+                        queuedAt >= 0 -> askQueue[queuedAt] = f
+                        current == null -> { // fresh burst — the queue is empty whenever no card is up
+                            askBurstTotal = 1; askBurstDone = 0
+                            updateAskProgress()
+                            pendingAsk.value = f
+                            Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool))
+                        }
+                        else -> { // a card is already up: queue behind it instead of overwriting (design M1)
+                            askQueue.add(f)
+                            askBurstTotal++
+                            updateAskProgress()
+                        }
+                    }
                 }
             }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
@@ -2317,9 +2345,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         // read as success). A tap on it now only dismisses — no more silent no-op.
                         timedOutAskId.value = f.askId
                     } else {
-                        // agent moved on / session closed / a question timed out → dismiss (a question leaves a note)
+                        // agent moved on / session closed / a question timed out → dismiss (a question leaves a
+                        // note) and surface the next queued ask, if any
                         if (ask?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
-                        pendingAsk.value = null
+                        advanceAsk()
+                    }
+                } else if (f.convoId == convoId.value) {
+                    // a QUEUED card the user never saw was retired (agent cancel / timeout) — drop it silently
+                    // and shrink the burst so "n / m" stays honest
+                    if (askQueue.removeAll { it.askId == f.askId }) {
+                        askBurstTotal--
+                        updateAskProgress()
                     }
                 }
             }
@@ -3181,7 +3217,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
-        pendingAsk.value = null
+        clearAskQueue()
         limitOffer.value = null; limitConfirmed.value = null // the auto-continue offer belongs to the session that hit the limit (#137)
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
@@ -3919,10 +3955,37 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private fun randomCaptureId(): String =
         Random.nextBytes(8).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
+    /** Pop the next queued ask into [pendingAsk] (or clear it) after the current card reached a terminal
+     *  state. Ends the burst — resetting the "n / m" chip — once the queue drains. */
+    private fun advanceAsk() {
+        askBurstDone++
+        val next = askQueue.removeFirstOrNull()
+        pendingAsk.value = next
+        if (next == null) {
+            askBurstTotal = 0; askBurstDone = 0
+            askQueueProgress.value = null
+        } else {
+            updateAskProgress()
+            Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to next.tool))
+        }
+    }
+
+    private fun updateAskProgress() {
+        askQueueProgress.value = if (askBurstTotal > 1) (askBurstDone + 1) to askBurstTotal else null
+    }
+
+    /** Drop the whole ask queue with the current card — session switch / machine switch / reset paths. */
+    private fun clearAskQueue() {
+        pendingAsk.value = null
+        askQueue.clear()
+        askBurstTotal = 0; askBurstDone = 0
+        askQueueProgress.value = null
+    }
+
     fun resolve(decision: Decision, remember: Boolean = false, message: String? = null) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
-        pendingAsk.value = null
+        advanceAsk()
         pendingApprovals.remove(a.askId)
         if (decision == Decision.ALLOW && remember) a.rule?.let { r ->
             if (r !in allowRules) allowRules.add(r)
@@ -3935,7 +3998,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
     fun resolvePendingApproval(askId: String, allow: Boolean) {
         val row = pendingApprovals.remove(askId) ?: return
-        if (pendingAsk.value?.askId == askId) pendingAsk.value = null
+        if (pendingAsk.value?.askId == askId) {
+            advanceAsk()
+        } else if (askQueue.removeAll { it.askId == askId }) { // resolved from the inbox while queued
+            askBurstTotal--
+            updateAskProgress()
+        }
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to if (allow) "allow" else "deny"))
         scope.launch {
             send(PermissionVerdict(row.ask.convoId, askId, if (allow) Decision.ALLOW else Decision.DENY))
@@ -3954,7 +4022,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun answerQuestions(answers: Map<String, String>?, response: String? = null) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
-        pendingAsk.value = null
+        advanceAsk()
         val items = response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
             ?: a.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
         messages.add(ChatItem.QuestionsAnswered(items))
@@ -3962,8 +4030,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
 
-    /** Timeout: the daemon already auto-denied at 30s; just clear the prompt without re-sending. */
-    fun dismissAsk() { pendingAsk.value = null }
+    /** Timeout: the daemon already auto-denied; clear the prompt without re-sending, show the next queued ask. */
+    fun dismissAsk() { if (pendingAsk.value != null) advanceAsk() }
 
     /** Switch the execution/permission mode — applied on the next turn (issue #84), never interrupting a
      *  running turn (the daemon relaunches Claude before the next send; Codex carries it in-turn). */

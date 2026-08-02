@@ -1,5 +1,6 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
@@ -33,7 +34,7 @@ class PermissionBridgeGuestPathTest {
         responses: MutableList<Resp>,
         scope: CoroutineScope,
     ) = PermissionBridge(
-        "c1", mode, scope, { emitted += it }, mutableSetOf(),
+        "c1", mode, ApprovalCoordinator(scope), { emitted += it }, mutableSetOf(),
         respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
         pathScope = listOf(root.path),
         workdir = root.path,
@@ -76,7 +77,7 @@ class PermissionBridgeGuestPathTest {
             val scope = CoroutineScope(Dispatchers.Unconfined)
             val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
             val b = PermissionBridge(
-                "c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+                "c1", PermissionMode.DEFAULT, ApprovalCoordinator(scope), { emitted += it }, mutableSetOf(),
                 respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
                 pathScope = null,          // a bridge has none
                 workdir = root.path,
@@ -91,7 +92,7 @@ class PermissionBridgeGuestPathTest {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
         val b = PermissionBridge(
-            "c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            "c1", PermissionMode.DEFAULT, ApprovalCoordinator(scope), { emitted += it }, mutableSetOf(),
             respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
             pathScope = null, workdir = root.path, bridgeSession = true,
         )
@@ -108,7 +109,7 @@ class PermissionBridgeGuestPathTest {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val emitted = mutableListOf<Frame>(); val responses = mutableListOf<Resp>()
         val b = PermissionBridge(
-            "c1", PermissionMode.DEFAULT, scope, { emitted += it }, mutableSetOf(),
+            "c1", PermissionMode.DEFAULT, ApprovalCoordinator(scope), { emitted += it }, mutableSetOf(),
             respond = { id, allow, _, _, _, deny -> responses += Resp(id, allow, deny) },
             pathScope = null, workdir = root.path, bridgeSession = true,
         )
@@ -116,7 +117,7 @@ class PermissionBridgeGuestPathTest {
             val s = CoroutineScope(Dispatchers.Unconfined)
             val em = mutableListOf<Frame>(); val rs = mutableListOf<Resp>()
             val bb = PermissionBridge(
-                "c1", PermissionMode.DEFAULT, s, { em += it }, mutableSetOf(),
+                "c1", PermissionMode.DEFAULT, ApprovalCoordinator(s), { em += it }, mutableSetOf(),
                 respond = { id, allow, _, _, _, deny -> rs += Resp(id, allow, deny) },
                 pathScope = null, workdir = root.path, bridgeSession = true,
             )
@@ -129,7 +130,7 @@ class PermissionBridgeGuestPathTest {
         val s2 = CoroutineScope(Dispatchers.Unconfined)
         val em2 = mutableListOf<Frame>(); val rs2 = mutableListOf<Resp>()
         val b2 = PermissionBridge(
-            "c1", PermissionMode.DEFAULT, s2, { em2 += it }, mutableSetOf(),
+            "c1", PermissionMode.DEFAULT, ApprovalCoordinator(s2), { em2 += it }, mutableSetOf(),
             respond = { id, allow, _, _, _, deny -> rs2 += Resp(id, allow, deny) },
             pathScope = null, workdir = root.path, bridgeSession = true,
         )
@@ -174,7 +175,7 @@ class PermissionBridgeGuestPathTest {
 
         // an OWNER conversation (no pathScope) never path-denies — reads anywhere fall through to an ask
         val emitted2 = mutableListOf<Frame>(); val responses2 = mutableListOf<Resp>()
-        val owner = PermissionBridge("c2", PermissionMode.DEFAULT, scope, { emitted2 += it }, mutableSetOf(),
+        val owner = PermissionBridge("c2", PermissionMode.DEFAULT, ApprovalCoordinator(scope), { emitted2 += it }, mutableSetOf(),
             respond = { id, allow, _, _, _, deny -> responses2 += Resp(id, allow, deny) })
         owner.onControlRequest(req("Read", "file_path", "/etc/passwd"))
         assertTrue(emitted2.single() is PermissionAsk)

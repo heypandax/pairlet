@@ -101,6 +101,11 @@ class Conversation(
      *  command auto-runs on this session with no phone prompt (via BridgeCommandPolicy); empty for owner/guest
      *  and for a bridge whose owner configured none. Only consulted when [bridgeSession] is true. */
     private val bridgeAllowedCommands: List<String> = emptyList(),
+    /** The daemon-wide pending-approval ledger (approval design M1): both this conversation's gates
+     *  (request-level + per-tool) register their asks here, so timeout/withdraw/verdict routing and the
+     *  account snapshot behave identically to the shell/export gates. Defaulted for tests. */
+    private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
+        dev.ccpocket.daemon.approval.ApprovalCoordinator(parentScope),
 ) {
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
@@ -148,6 +153,7 @@ class Conversation(
     // The synthetic ask shares this conversation so the normal phone verdict/resurface paths can resolve it.
     private val bridgeRequestGate = BridgeRequestApprovalGate(
         convoId = convoId,
+        coordinator = approvals,
         scope = scope,
         emit = { frame ->
             sink.emit(frame)
@@ -908,7 +914,7 @@ class Conversation(
                 if (f is dev.ccpocket.protocol.PermissionAsk) maybePushAsk(f)
             }
         val b = PermissionBridge(
-            convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            convoId, mode, approvals, emitWithAskPush, allowRules, respond = backend::respondPermission,
             // verdict + question windows both default to the generous, env-configurable ApprovalTimeout.ms
             // (issue #100 unified them). Bridge-origin sessions keep issue #91's 120s FLOOR on top (#32):
             // the owner arrives via push → tap → reattach, so a deliberately short CC_POCKET_ASK_TIMEOUT_SEC
@@ -1690,10 +1696,6 @@ class Conversation(
     private suspend fun reply(msg: String) {
         sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(msg)))
         sink.emit(TurnDone(convoId, msg, null))
-    }
-
-    suspend fun submitVerdict(v: PermissionVerdict) {
-        if (!bridgeRequestGate.onVerdict(v)) bridge?.onVerdict(v)
     }
 
     /**

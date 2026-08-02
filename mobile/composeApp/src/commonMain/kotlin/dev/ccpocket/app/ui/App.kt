@@ -273,6 +273,7 @@ fun App(scope: CoroutineScope) {
                 PermissionSheet(
                     ask, repo.workdir.value,
                     timedOutSignal = repo.timedOutAskId.value == ask.askId, // issue #100: daemon said this ask timed out
+                    queuePosition = repo.askQueueProgress.value, // "n / m" while a burst is queued (design M1)
                     onDeny = { repo.resolve(Decision.DENY) },
                     onOnce = { repo.resolve(Decision.ALLOW) },
                     onAlways = { repo.resolve(Decision.ALLOW, remember = true) },

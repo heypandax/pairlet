@@ -1,37 +1,31 @@
 package dev.ccpocket.daemon.agent
 
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
+import dev.ccpocket.daemon.approval.ApprovalOutcome
+import dev.ccpocket.daemon.approval.ApprovalSource
 import dev.ccpocket.daemon.bridge.BridgeGrant
 import dev.ccpocket.daemon.bridge.PathScope
-import dev.ccpocket.daemon.util.logger
-import dev.ccpocket.protocol.AskWithdrawn
-import dev.ccpocket.protocol.AskWithdrawnReason
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
-import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PendingApproval
-import dev.ccpocket.protocol.PocketError
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Provider-neutral permission firewall: turns an [AgentEvent.ControlRequest] into a protocol
- * [PermissionAsk], awaits a [PermissionVerdict] (or times out -> deny), and routes the decision to the
- * backend via [respond] (Claude writes a control_response; Codex a JSON-RPC result). The translation
- * of [ToolMetadata] + the session "Always allow" rules live here; the wire format lives in the backend.
- * `askId` == the [AgentEvent.ControlRequest.requestId].
+ * Provider-neutral permission firewall — the AGENT source adapter of [ApprovalCoordinator] (approval
+ * design M1): turns an [AgentEvent.ControlRequest] into a protocol [PermissionAsk], registers it with
+ * the coordinator (which owns pending/timeout/withdraw/verdict-idempotency), and routes the terminal
+ * outcome to the backend via [respond] (Claude writes a control_response; Codex a JSON-RPC result).
+ * The translation of [ToolMetadata], the session "Always allow" rules and every auto-allow policy stay
+ * HERE; the wire format lives in the backend. `askId` == the [AgentEvent.ControlRequest.requestId].
  */
 class PermissionBridge(
     private val convoId: String,
     private val mode: PermissionMode,
-    private val scope: CoroutineScope,
+    private val coordinator: ApprovalCoordinator,
     private val emit: suspend (Frame) -> Unit,
     private val allowRules: MutableSet<String>, // session "Always allow" scopes, owned by the Conversation
     private val respond: suspend (askId: String, allow: Boolean, remember: Boolean, originalInput: JsonObject?, updatedInput: String?, denyMessage: String?) -> Unit,
@@ -77,21 +71,6 @@ class PermissionBridge(
     private val pathScope: List<String>? = null,
     private val workdir: String? = null,
 ) {
-    private val log = logger("Perms")
-    // [ask] is the exact PermissionAsk frame we emitted for this request — kept so a phone that reattaches
-    // after missing the live frame (backgrounded during plan mode's long post-`result` phase, issue #55)
-    // can be re-shown the card verbatim via [resurfacePending].
-    private class Pending(
-        val ask: PermissionAsk,
-        val input: JsonObject?,
-        val rule: String,
-        val neverRemember: Boolean,
-        val isQuestion: Boolean,
-        val expiresAt: Long,
-        val timeoutJob: Job,
-    )
-
-    private val pending = ConcurrentHashMap<String, Pending>()
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
     suspend fun onControlRequest(ev: AgentEvent.ControlRequest) {
@@ -99,6 +78,7 @@ class PermissionBridge(
         // OWNER BYPASS (issue #91): preserve its established semantics — ordinary execution tools auto-run,
         // while neverRemember human-decision gates still ask.
         if (bridgeSession && ownerBypassSession && !meta.neverRemember) {
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-bypass-session")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -109,6 +89,7 @@ class PermissionBridge(
         // interactive because the answer, rather than permission, rides the verdict. The supplier is
         // trusted in-process state; it cannot be claimed over the wire and is revoked when that turn ends.
         if (grant == BridgeGrant.OWNER_APPROVED && ev.toolName != AskQuestions.TOOL) {
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-approved-request")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -132,6 +113,7 @@ class PermissionBridge(
                     return
                 }
                 BridgeCommandPolicy.Verdict.ALLOW -> {
+                    coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "bridge-command-policy")
                     respond(ev.requestId, true, false, ev.input, null, null)
                     return
                 }
@@ -146,6 +128,7 @@ class PermissionBridge(
         // which is the backstop that makes the DANGEROUS blacklist tolerable in the first place. Unknown tools
         // (MCP, WebFetch, a renamed file tool) likewise ask, instead of passing the path wall vacuously.
         if (grant == BridgeGrant.AUTO_TRUSTED && autoTrustedMayRun(ev.toolName, ev.input)) {
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "auto-trusted-chat")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -156,6 +139,7 @@ class PermissionBridge(
         // answer"). Deliberately meta.neverRemember, not forceNeverRemember: whether a bridge-origin session
         // (#91) should also re-ask under user-chosen bypass is a separate, undecided policy.
         if (autoAllow && !meta.neverRemember) {
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "bypass-permissions")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
@@ -164,35 +148,48 @@ class PermissionBridge(
         // (issue #91), so an owner's earlier "always allow" can't auto-clear a new attacker-supplied prompt.
         val neverRemember = meta.neverRemember || forceNeverRemember
         if (!neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
+            coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "remembered-rule")
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
         val isQuestion = ev.toolName == AskQuestions.TOOL
         val askId = ev.requestId
         val timeoutMs = if (isQuestion) questionTimeoutMs else verdictTimeoutMs
-        val timeout = scope.launch {
-            delay(timeoutMs)
-            if (pending.remove(askId) != null) {
-                // issue #100: timing out is the ONE outcome the phone can't observe on its own (from the CLI's
-                // view the request is already answered, so no control_cancel_request ever arrives) — so we MUST
-                // tell it, and we deny with an HONEST reason so claude doesn't report a rejection the user never
-                // made. Different peers, so order doesn't matter: retire the phone's card, unblock the CLI turn.
-                emit(AskWithdrawn(convoId, askId, AskWithdrawnReason.TIMED_OUT))
-                respond(askId, false, false, null, null, TIMEOUT_DENY_MESSAGE)
-            }
-        }
         val ask = PermissionAsk(
             convoId, askId, ev.toolName, meta.preview, mode, meta.title, meta.rule, meta.danger, meta.dangerNote, ev.diff,
             questions = if (isQuestion) AskQuestions.parse(ev.input) else null,
             neverRemember = neverRemember,
             timeoutSec = (timeoutMs / 1000).toInt(), // phone counts its local no-response fallback against the REAL window
         )
-        pending[askId] = Pending(
-            ask, ev.input, meta.rule, neverRemember, isQuestion,
-            expiresAt = System.currentTimeMillis() + timeoutMs,
-            timeoutJob = timeout,
-        )
-        emit(ask)
+        val input = ev.input
+        val rule = meta.rule
+        coordinator.submit(ask, ApprovalSource.AGENT, owner = this, timeoutMs = timeoutMs, isQuestion = isQuestion, emit = emit) { outcome ->
+            when (outcome) {
+                is ApprovalOutcome.Answered -> {
+                    val v = outcome.verdict
+                    when (v.decision) {
+                        Decision.ALLOW -> {
+                            val remember = v.remember && !neverRemember // a plan-approval gate is never remembered (issue #10)
+                            if (remember) allowRules.add(rule) // future matching requests auto-allow this session
+                            // a question verdict carries the picks — merge them into the tool input (claude reads
+                            // updatedInput.answers/response); other tools pass the phone's updatedInput through as-is
+                            val updated =
+                                if (isQuestion) AskQuestions.answeredInput(input, v.answers, v.response) ?: v.updatedInput
+                                else v.updatedInput
+                            respond(askId, true, remember, input, updated, null)
+                        }
+                        Decision.DENY -> respond(askId, false, false, input, null, v.message ?: "denied")
+                    }
+                }
+                // issue #100: timing out is the ONE outcome the phone can't observe on its own (from the CLI's
+                // view the request is already answered, so no control_cancel_request ever arrives) — the
+                // coordinator already retired the phone's card; deny with an HONEST reason so claude doesn't
+                // report a rejection the user never made.
+                ApprovalOutcome.TimedOut -> respond(askId, false, false, null, null, TIMEOUT_DENY_MESSAGE)
+                // agent cancelled its own request / session closing — nothing to answer, the CLI moved on
+                ApprovalOutcome.Withdrawn -> {}
+            }
+        }
     }
 
     /** True while any ask (approval sheet / AskUserQuestion card) is still awaiting the user's verdict. The
@@ -201,63 +198,27 @@ class PermissionBridge(
      *  This is the daemon half of issue #55: plan mode can emit a premature `result` and only surface the real
      *  AskUserQuestion minutes later — well past the 90s idle window — so without this the pending question is
      *  reaped while the phone is backgrounded. Self-bounds: [questionTimeoutMs] eventually clears the entry. */
-    fun hasPending(): Boolean = pending.isNotEmpty()
+    fun hasPending(): Boolean = coordinator.hasPendingFor(this)
 
     /** Approval rows only. AskUserQuestion needs its answer UI and remains scoped to the conversation. */
-    fun pendingApprovals(): List<PendingApproval> =
-        pending.values.filterNot { it.isQuestion }.map { PendingApproval(it.ask, expiresAt = it.expiresAt) }
+    fun pendingApprovals(): List<PendingApproval> = coordinator.rowsFor(this)
 
     /** Re-emit every still-open ask to [to]. A reattaching phone (foregrounded after an iOS background suspend,
      *  or any reconnect / session re-entry) never received the live PermissionAsk that fired while it was away —
      *  without this its card never reappears and the turn wedges forever on a verdict the user was never shown
-     *  (issue #55). Only asks STILL in [pending] are re-emitted (answered / withdrawn / timed-out ones were
-     *  already removed, so a stale card never returns), and only to the reattaching sink, so a device already
+     *  (issue #55). Only still-pending asks are re-emitted (answered / withdrawn / timed-out ones already left
+     *  the coordinator, so a stale card never returns), and only to the reattaching sink, so a device already
      *  showing the card doesn't churn. */
-    suspend fun resurfacePending(to: suspend (Frame) -> Unit) {
-        pending.values.forEach { to(it.ask) }
-    }
-
-    suspend fun onVerdict(v: PermissionVerdict) {
-        val p = pending.remove(v.askId) ?: run {
-            // issue #100: the ask already left [pending] (it timed out, or a rare double-tap raced the
-            // timeout). Don't swallow the verdict silently — the phone optimistically cleared its card the
-            // instant the user tapped, so without a signal that tap just looks like it succeeded. Surface an
-            // inline "expired" row instead. (A late SHELL verdict lands here too: RequestRouter forwards it to
-            // us after ShellService.onVerdict returns false — so this is the single real drop point for both.)
-            log.warn("$convoId verdict for unknown/expired ask ${v.askId} (${v.decision}) — already resolved, timed out, or withdrawn")
-            emit(PocketError("ask_expired", "That approval expired before it reached your computer — ask the agent to try the action again.", convoId))
-            return
-        }
-        p.timeoutJob.cancel()
-        when (v.decision) {
-            Decision.ALLOW -> {
-                val remember = v.remember && !p.neverRemember // a plan-approval gate is never remembered (issue #10)
-                if (remember) allowRules.add(p.rule) // future matching requests auto-allow this session
-                // a question verdict carries the picks — merge them into the tool input (claude reads
-                // updatedInput.answers/response); other tools pass the phone's updatedInput through as-is
-                val updated =
-                    if (p.isQuestion) AskQuestions.answeredInput(p.input, v.answers, v.response) ?: v.updatedInput
-                    else v.updatedInput
-                respond(v.askId, true, remember, p.input, updated, null)
-            }
-            Decision.DENY -> respond(v.askId, false, false, p.input, null, v.message ?: "denied")
-        }
-    }
+    suspend fun resurfacePending(to: suspend (Frame) -> Unit) = coordinator.resurfaceFor(this, to)
 
     suspend fun onCancel(ev: AgentEvent.ControlCancel) {
-        val p = pending.remove(ev.requestId) ?: return
-        p.timeoutJob.cancel()
-        emit(AskWithdrawn(convoId, ev.requestId)) // dismiss the phone's card (old phones drop the frame)
+        coordinator.withdraw(convoId, ev.requestId) // dismiss the phone's card (old phones drop the frame)
     }
 
     suspend fun cancelAll() {
         // issue #100: closing / relaunching the session must retire every open card on the phone too — an ask
         // the user never saw resolved would otherwise linger with live buttons that now do nothing.
-        pending.values.forEach {
-            it.timeoutJob.cancel()
-            emit(AskWithdrawn(convoId, it.ask.askId, AskWithdrawnReason.WITHDRAWN))
-        }
-        pending.clear()
+        coordinator.withdrawAllFor(this)
     }
 
     /**
