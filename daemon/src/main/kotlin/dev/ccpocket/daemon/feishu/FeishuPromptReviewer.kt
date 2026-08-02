@@ -193,7 +193,10 @@ class ReviewedPreflight(
                 contractVersion = snapshot.contractVersion,
                 risk = result.risk.name,
                 confidence = result.confidence.takeIf { it.isFinite() } ?: -1.0,
-                reasonCodes = reasonCodes,
+                // only the KNOWN constant codes persist — a model-invented "code" is free text that could
+                // smuggle prompt content into the durable trail (crypto review Low-2); the in-memory result
+                // keeps the full list for the ring log / policy, which never touch disk
+                reasonCodes = reasonCodes.filter { it in PromptReviewPolicy.FORCE_OWNER_REASON_CODES },
                 decision = result.decision.name,
                 finalOutcome = when {
                     autoRun -> "reviewer_auto_allowed"

@@ -92,6 +92,21 @@ class FeishuReviewedFlowTest {
     }
 
     @Test
+    fun model_invented_reason_codes_never_reach_the_durable_audit_trail() {
+        // reasonCodes from the model are free text — a smuggling channel for prompt content (review Low-2):
+        // only the known constant codes persist, while the in-memory result keeps the full list for policy
+        val smuggle = "SMUGGLED prompt fragment here"
+        val outcome = evaluate(FakeReviewer {
+            allow().copy(risk = PromptReviewRisk.MEDIUM, reasonCodes = listOf(smuggle, PromptReviewPolicy.CREDENTIAL_OR_SECRET_REQUEST))
+        })
+        assertFalse(outcome.autoRun)
+        assertTrue(smuggle in outcome.result.reasonCodes, "the in-memory result keeps the model's codes")
+        val line = auditFile.readLines().single()
+        assertFalse("SMUGGLED" in line, "free-text codes must not persist: $line")
+        assertTrue(PromptReviewPolicy.CREDENTIAL_OR_SECRET_REQUEST in line, "known codes still persist")
+    }
+
+    @Test
     fun shadow_mode_reviews_and_audits_but_never_auto_runs() {
         val reviewer = FakeReviewer { allow() }
         val outcome = evaluate(reviewer, shadow = true)

@@ -107,7 +107,9 @@ enum class BridgeGrant {
             return parts.lastOrNull() in ON_ACCESS_EXEC_FILES
         }
 
-        // direnv runs this on the owner's next `cd` into the project — same class as a git hook
-        private val ON_ACCESS_EXEC_FILES = setOf(".envrc")
+        // direnv runs .envrc on the owner's next `cd`; .mcp.json / .claude.json configure MCP servers the
+        // owner's next session in that project offers to load — all the same class as a git hook: bytes that
+        // turn into the OWNER's execution later, so an unattended write gets a card (reviewed-trust Low-1)
+        private val ON_ACCESS_EXEC_FILES = setOf(".envrc", ".mcp.json", ".claude.json")
     }
 }

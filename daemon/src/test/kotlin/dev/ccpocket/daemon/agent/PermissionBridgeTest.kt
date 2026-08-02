@@ -219,11 +219,11 @@ class PermissionBridgeTest {
             workdir = System.getProperty("java.io.tmpdir"))
         // in-workdir, so the wall passes — but each of these RUNS on the owner's next git/claude/cd, whose
         // sessions are not clean-room. That is a persistence primitive, not a code change, so it gets a card.
-        for ((i, p) in listOf(".git/config", ".git/hooks/pre-commit", ".claude/settings.json", "sub/.envrc").withIndex()) {
+        for ((i, p) in listOf(".git/config", ".git/hooks/pre-commit", ".claude/settings.json", "sub/.envrc", ".mcp.json", ".claude.json").withIndex()) {
             b.onControlRequest(AgentEvent.ControlRequest("x$i", "Write", buildJsonObject { put("file_path", p) }))
         }
         assertTrue(responses.isEmpty(), "an unattended write to an auto-executing file must ask: $responses")
-        assertEquals(4, emitted.size)
+        assertEquals(6, emitted.size)
         // ...and a file that merely LOOKS like one is unaffected (segment match, not substring)
         b.onControlRequest(AgentEvent.ControlRequest("ok", "Write", buildJsonObject { put("file_path", "docs/dotgit-notes.md") }))
         assertTrue(responses.single().allow)
@@ -545,6 +545,7 @@ class PermissionBridgeTest {
             b.onControlRequest(AgentEvent.ControlRequest("d1", "Write", buildJsonObject { put("file_path", ".git/hooks/pre-commit") }))
             b.onControlRequest(AgentEvent.ControlRequest("d2", "Write", buildJsonObject { put("file_path", ".claude/settings.json") }))
             b.onControlRequest(AgentEvent.ControlRequest("d3", "Write", buildJsonObject { put("file_path", "sub/.envrc") }))
+            b.onControlRequest(AgentEvent.ControlRequest("d4", "Write", buildJsonObject { put("file_path", ".mcp.json") }))
             assertTrue(responses.isEmpty(), "$grant: auto-executing files must reach the owner")
 
             // 5. MCP / egress / unknown / plan-gate tools all still ask
