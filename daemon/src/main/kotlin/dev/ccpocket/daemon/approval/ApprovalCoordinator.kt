@@ -45,7 +45,12 @@ sealed interface ApprovalOutcome {
  * [onVerdict] / timeout / [withdraw] removes it and delivers the [ApprovalOutcome]. Late or duplicate
  * verdicts return false (idempotency lives here, not in each gate).
  */
-class ApprovalCoordinator(private val scope: CoroutineScope) {
+class ApprovalCoordinator(
+    private val scope: CoroutineScope,
+    // design §17.9: no approval outlives 24h, however the lease is chained — injectable only so a test
+    // can exercise the ceiling without waiting a day
+    private val absoluteDeadlineMs: Long = ABSOLUTE_DEADLINE_MS,
+) {
     private val log = logger("Approvals")
 
     private class Pending(
@@ -57,7 +62,13 @@ class ApprovalCoordinator(private val scope: CoroutineScope) {
         val createdAt: Long,
         val emit: suspend (Frame) -> Unit,
         val onOutcome: suspend (ApprovalOutcome) -> Unit,
+        val onReminder: (suspend () -> Unit)? = null,
         @Volatile var timeoutJob: Job? = null,
+        // ── AttentionLease (design §10): a foreground-visible card pauses the no-response budget ──
+        // Only extends READING time: authority, grants and the absolute deadline are untouched, and a
+        // late heartbeat for a terminal ask no-ops (the pending entry is already gone).
+        @Volatile var leaseUntil: Long = 0L,
+        @Volatile var everLeased: Boolean = false,
     )
 
     // Keyed by (convoId, askId), NOT askId alone: an askId is only unique within one CLI process — Codex
@@ -90,11 +101,14 @@ class ApprovalCoordinator(private val scope: CoroutineScope) {
         timeoutMs: Long,
         isQuestion: Boolean = false,
         emit: suspend (Frame) -> Unit,
+        // fired ONCE at half the no-response budget if nobody has looked at the card yet (design §9.5's
+        // single non-urgent second reminder) — the caller decides what a reminder means (ask push re-nudge)
+        onReminder: (suspend () -> Unit)? = null,
         onOutcome: suspend (ApprovalOutcome) -> Unit,
     ) {
         val now = System.currentTimeMillis()
         val key = Key(ask.convoId, ask.askId)
-        val p = Pending(ask, source, owner, isQuestion, now + timeoutMs, now, emit, onOutcome)
+        val p = Pending(ask, source, owner, isQuestion, now + timeoutMs, now, emit, onOutcome, onReminder)
         val (replaced, repeat) = synchronized(lock) {
             val prev = pending.put(key, p)
             prev?.timeoutJob?.cancel() // its orphaned timeout must not retire the replacement
@@ -111,8 +125,40 @@ class ApprovalCoordinator(private val scope: CoroutineScope) {
         if (repeat > 1) {
             log.info("repeat ask source=$source tool=${ask.tool} rule=${ask.rule} hit#$repeat convo=${ask.convoId}")
         }
+        // Soft budget + attention lease + absolute cap (design §10): [timeoutMs] is the NO-RESPONSE
+        // budget; a live lease (foreground-visible card, [heartbeat]) pauses its consumption; nothing —
+        // no lease chain — carries the request past createdAt + ABSOLUTE_DEADLINE_MS. Watched-socket
+        // presence alone never pauses anything: only explicit heartbeats do.
         p.timeoutJob = scope.launch {
-            delay(timeoutMs)
+            var budgetLeftMs = timeoutMs
+            var lastTick = System.currentTimeMillis()
+            var reminded = onReminder == null
+            val absoluteDeadline = p.createdAt + absoluteDeadlineMs
+            while (true) {
+                val nowMs = System.currentTimeMillis()
+                if (nowMs >= absoluteDeadline) break // the hard ceiling always terminates
+                val lease = p.leaseUntil
+                if (lease <= nowMs) { // unleased: the budget is burning
+                    budgetLeftMs -= nowMs - lastTick
+                    if (budgetLeftMs <= 0) break
+                    if (!reminded && !p.everLeased && budgetLeftMs <= timeoutMs / 2) {
+                        reminded = true
+                        runCatching { onReminder?.invoke() }
+                    }
+                }
+                lastTick = nowMs
+                val leased = lease > nowMs
+                val next = minOf(
+                    // leased: tick fast enough to notice an early release (visible=false / silence)
+                    // without a wake channel; unleased: sleep straight to the budget's end…
+                    if (leased) minOf(lease - nowMs, LEASED_TICK_MS) else budgetLeftMs,
+                    // …except wake at the half-budget point once, for the single reminder nudge
+                    if (!reminded && !leased) (budgetLeftMs - timeoutMs / 2).coerceAtLeast(10) else Long.MAX_VALUE,
+                    absoluteDeadline - nowMs,
+                    MAX_TICK_MS,
+                ).coerceAtLeast(10)
+                delay(next)
+            }
             // identity check: only remove the exact entry this job guards, never a replacement
             val timedOut = synchronized(lock) { if (pending[key] === p) pending.remove(key) else null } ?: return@launch
             // retire the phone's card FIRST (it can't observe the timeout on its own — issue #100),
@@ -122,6 +168,20 @@ class ApprovalCoordinator(private val scope: CoroutineScope) {
             timedOut.onOutcome(ApprovalOutcome.TimedOut)
         }
         emit(ask)
+    }
+
+    /** A client reports the card is (in)visible in its foreground (design §10 AttentionLease). Grants a
+     *  short lease that pauses the no-response budget; [visible]=false releases it early. A heartbeat can
+     *  only stretch reading time — never the absolute deadline, never authority, never grants — and one
+     *  for an unknown/terminal ask is dropped. */
+    fun heartbeat(convoId: String, askId: String, visible: Boolean) {
+        val p = synchronized(lock) { pending[Key(convoId, askId)] } ?: return
+        if (visible) {
+            p.leaseUntil = System.currentTimeMillis() + LEASE_MS
+            p.everLeased = true
+        } else {
+            p.leaseUntil = 0L
+        }
     }
 
     /** Route a verdict by askId. True iff it resolved a pending request; false = unknown/expired/duplicate
@@ -208,5 +268,9 @@ class ApprovalCoordinator(private val scope: CoroutineScope) {
 
     private companion object {
         const val RULE_COUNT_CAP = 4096
+        const val LEASE_MS = 60_000L               // one heartbeat buys ~60s of paused budget (30s cadence)
+        const val LEASED_TICK_MS = 500L            // lease-release detection latency bound
+        const val ABSOLUTE_DEADLINE_MS = 24 * 60 * 60 * 1000L // design §17.9: no approval outlives 24h
+        const val MAX_TICK_MS = 30_000L            // budget bookkeeping granularity while waiting
     }
 }

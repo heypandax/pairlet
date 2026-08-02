@@ -1,10 +1,12 @@
 package dev.ccpocket.daemon.agent
 
 import dev.ccpocket.daemon.approval.ApprovalCoordinator
+import dev.ccpocket.daemon.approval.ApprovalGrantStore
 import dev.ccpocket.daemon.approval.ApprovalOutcome
 import dev.ccpocket.daemon.approval.ApprovalSource
 import dev.ccpocket.daemon.bridge.BridgeGrant
 import dev.ccpocket.daemon.bridge.PathScope
+import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
@@ -13,6 +15,7 @@ import dev.ccpocket.protocol.PendingApproval
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
+import java.util.UUID
 
 /**
  * Provider-neutral permission firewall — the AGENT source adapter of [ApprovalCoordinator] (approval
@@ -70,6 +73,11 @@ class PermissionBridge(
     // agent runs with the session cwd, which is itself inside the scope).
     private val pathScope: List<String>? = null,
     private val workdir: String? = null,
+    // ── approval design M2 ──
+    /** TASK-scoped grants ("允许本任务") shared with the quick terminal. Defaulted for tests. */
+    private val grants: ApprovalGrantStore = ApprovalGrantStore(),
+    /** The conversation's CURRENT task id (rotates per top-level prompt); stamped on asks + grant matches. */
+    private val taskId: () -> String? = { null },
 ) {
     private val autoAllow = mode == PermissionMode.BYPASS_PERMISSIONS
 
@@ -149,8 +157,21 @@ class PermissionBridge(
         val neverRemember = meta.neverRemember || forceNeverRemember
         if (!neverRemember && meta.rule in allowRules) { // remembered earlier this session → auto-allow without prompting
             coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "remembered-rule")
+            emit(autorunChip(meta.rule, "session-rule", grantId = null, tool = ev.toolName))
             respond(ev.requestId, true, false, ev.input, null, null)
             return
+        }
+        // TASK grant (approval design M2): "允许本任务" issued earlier in this task covers the action —
+        // auto-run with an in-stream audit chip instead of a card. Every hard wall above already ran;
+        // a grant can only skip the ASK, never a wall, and it dies with the task/session/2h TTL.
+        if (!neverRemember) {
+            val command = if (ev.toolName == "Bash") (ev.input?.get("command") as? JsonPrimitive)?.content else null
+            grants.match(convoId, taskId(), ev.toolName, meta.rule, command)?.let { g ->
+                coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "task-grant")
+                emit(autorunChip(meta.rule, "task-grant", grantId = g.id, tool = ev.toolName))
+                respond(ev.requestId, true, false, ev.input, null, null)
+                return
+            }
         }
         val isQuestion = ev.toolName == AskQuestions.TOOL
         val askId = ev.requestId
@@ -160,17 +181,34 @@ class PermissionBridge(
             questions = if (isQuestion) AskQuestions.parse(ev.input) else null,
             neverRemember = neverRemember,
             timeoutSec = (timeoutMs / 1000).toInt(), // phone counts its local no-response fallback against the REAL window
+            // approval design M2: which grant scopes this daemon honors for the ask. A neverRemember
+            // decision (plan gate, question, bridge one-off) is strictly one-shot; ordinary tool asks
+            // offer 允许本次 / 允许本任务 / Session. Non-null is also the client's heartbeat gate.
+            taskId = taskId(),
+            grantOptions = if (neverRemember) listOf("once") else listOf("once", "task", "session"),
         )
         val input = ev.input
         val rule = meta.rule
-        coordinator.submit(ask, ApprovalSource.AGENT, owner = this, timeoutMs = timeoutMs, isQuestion = isQuestion, emit = emit) { outcome ->
+        coordinator.submit(
+            ask, ApprovalSource.AGENT, owner = this, timeoutMs = timeoutMs, isQuestion = isQuestion, emit = emit,
+            // design §9.5: ONE non-urgent second nudge at half the unwatched window — re-emitting the ask
+            // re-pushes through the conversation's ask-push hook (its coalescing bounds the noise) and
+            // idempotently refreshes the card client-side
+            onReminder = { emit(ask) },
+        ) { outcome ->
             when (outcome) {
                 is ApprovalOutcome.Answered -> {
                     val v = outcome.verdict
                     when (v.decision) {
                         Decision.ALLOW -> {
-                            val remember = v.remember && !neverRemember // a plan-approval gate is never remembered (issue #10)
+                            // session memory: legacy remember=true OR the M2 grantScope="session" — a
+                            // plan-approval/question/bridge one-off gate is never remembered (issue #10/#91)
+                            val remember = (v.remember || v.grantScope == "session") && !neverRemember
                             if (remember) allowRules.add(rule) // future matching requests auto-allow this session
+                            // M2 "允许本任务": issue a task grant that dies with the task/session/2h TTL
+                            if (v.grantScope == "task" && !neverRemember) {
+                                taskId()?.let { grants.issueTask(convoId, it, ev.toolName, rule) }
+                            }
                             // a question verdict carries the picks — merge them into the tool input (claude reads
                             // updatedInput.answers/response); other tools pass the phone's updatedInput through as-is
                             val updated =
@@ -178,7 +216,12 @@ class PermissionBridge(
                                 else v.updatedInput
                             respond(askId, true, remember, input, updated, null)
                         }
-                        Decision.DENY -> respond(askId, false, false, input, null, v.message ?: "denied")
+                        // M2 "换种安全方式": a structured retry-under-constraints reads as guidance, not a
+                        // bare refusal — the agent re-plans instead of reporting "the user rejected this"
+                        Decision.DENY -> respond(
+                            askId, false, false, input, null,
+                            if (v.retrySafer) retrySaferMessage(v.constraints, v.message) else v.message ?: "denied",
+                        )
                     }
                 }
                 // issue #100: timing out is the ONE outcome the phone can't observe on its own (from the CLI's
@@ -270,7 +313,28 @@ class PermissionBridge(
         return targets.none { BridgeGrant.executesForTheOwner(it) }
     }
 
-    private companion object {
+    /** The in-stream audit chip for a grant-covered auto-run (approval design M2 §9.6). [summary] is the
+     *  RULE (two tokens / tool family) — deliberately not the full command: chips ride the conversation
+     *  stream to every attached client and must stay as redacted as History. Old clients drop the frame. */
+    private fun autorunChip(summary: String, basis: String, grantId: String?, tool: String) =
+        AuthorizedActionRecorded(
+            convoId = convoId, eventId = "au-" + UUID.randomUUID(), actionSummary = summary,
+            basis = basis, decidedAt = System.currentTimeMillis(),
+            taskId = taskId(), matchedGrantId = grantId, tool = tool,
+        )
+
+    companion object {
+        /** "换种安全方式" (M2): phrase the deny as re-planning guidance the agent can act on. */
+        fun retrySaferMessage(constraints: List<String>?, note: String?): String = buildString {
+            append("The user asked you to try a SAFER approach instead — this is NOT a plain rejection. ")
+            append("Re-plan this step under the following constraints, then continue the task:")
+            constraints.orEmpty().forEach { append("\n- ").append(it) }
+            note?.takeIf { it.isNotBlank() }?.let { append("\n- ").append(it) }
+            if (constraints.isNullOrEmpty() && note.isNullOrBlank()) {
+                append("\n- prefer read-only steps, avoid network access, and keep changes inside the workspace")
+            }
+        }
+
         // issue #100: distinct from a real user "deny" so claude phrases its follow-up honestly — it reads
         // this string as the deny reason. NOT "denied": the user rejected nothing, they just didn't answer.
         const val TIMEOUT_DENY_MESSAGE =

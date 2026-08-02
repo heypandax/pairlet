@@ -124,6 +124,7 @@ class FileExportService(
             title = "Export file to phone",
             neverRemember = true, // one file ≠ the whole tree: never offer (or honor) "Always allow"
             timeoutSec = (verdictTimeoutMs / 1000).toInt(),
+            grantOptions = listOf("once"), // M2: an export stays strictly one-off — no task/session grant
         )
         // [PermissionVerdict.remember] is deliberately ignored: export asks are one-off
         // ([PermissionAsk.neverRemember]), so nothing is recorded even when a client claims remember=true.

@@ -143,6 +143,50 @@ class ApprovalCoordinatorTest {
     }
 
     @Test
+    fun attention_lease_pauses_the_soft_budget_until_released() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val outcomes = CopyOnWriteArrayList<ApprovalOutcome>()
+        coord.submit(ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 200, emit = { }) { outcomes += it }
+        coord.heartbeat("c1", "a1", visible = true) // the user is reading the card
+
+        delay(700) // far past the 200ms no-response budget — but the budget is paused
+        assertTrue(outcomes.isEmpty(), "a watched card must not time out while its lease is live")
+
+        coord.heartbeat("c1", "a1", visible = false) // user looked away → budget resumes
+        delay(700)
+        assertIs<ApprovalOutcome.TimedOut>(outcomes.single())
+        scope.cancel()
+    }
+
+    @Test
+    fun absolute_deadline_terminates_even_a_permanently_leased_ask() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope, absoluteDeadlineMs = 300)
+        val outcomes = CopyOnWriteArrayList<ApprovalOutcome>()
+        coord.submit(ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 10_000, emit = { }) { outcomes += it }
+        coord.heartbeat("c1", "a1", visible = true) // lease (60s) far outlives the 300ms hard ceiling
+
+        delay(900)
+        assertIs<ApprovalOutcome.TimedOut>(outcomes.single(), "no lease chain may cross the absolute deadline")
+        scope.cancel()
+    }
+
+    @Test
+    fun reminder_fires_once_at_half_budget_only_while_unwatched() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        var reminders = 0
+        coord.submit(
+            ask("a1"), ApprovalSource.AGENT, owner = this, timeoutMs = 400, emit = { },
+            onReminder = { reminders++ },
+        ) { }
+        delay(900) // past half-budget AND past expiry
+        assertEquals(1, reminders, "exactly one non-urgent second nudge")
+        scope.cancel()
+    }
+
+    @Test
     fun source_snapshot_only_reports_that_sources_rows() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val coord = ApprovalCoordinator(scope)

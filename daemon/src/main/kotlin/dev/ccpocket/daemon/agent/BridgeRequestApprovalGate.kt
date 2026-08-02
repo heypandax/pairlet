@@ -43,6 +43,7 @@ class BridgeRequestApprovalGate(
             dangerNote = "full access for this request",
             neverRemember = true,
             timeoutSec = (timeoutMs / 1000).toInt(),
+            grantOptions = listOf("once"), // M2: a request approval is one-off by construction
         )
         coordinator.submit(ask, ApprovalSource.BRIDGE_REQUEST, owner = this, timeoutMs = timeoutMs, emit = emit) { outcome ->
             // `remember` is intentionally ignored: a request approval is one-off by construction

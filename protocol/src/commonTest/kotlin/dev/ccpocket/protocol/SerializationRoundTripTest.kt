@@ -2006,4 +2006,73 @@ class SerializationRoundTripTest {
         val unknownT = json.replace("pocket/bridge.create", "pocket/bridge.create-from-the-future")
         assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
     }
+
+    // ── approval design M2: task grants, autorun chips, attention lease ──────────────────────────
+
+    @Test
+    fun approvalV2_ask_and_verdict_fields_are_trailing_optional_and_legacy_safe() {
+        // new daemon → old phone: the ask's taskId/grantOptions ride as unknown keys the old peer skips
+        val ask = PermissionAsk(
+            "c1", "a1", "Bash", "./gradlew test", title = "Run command",
+            taskId = "prompt-7", grantOptions = listOf("once", "task", "session"),
+        )
+        val askJson = PocketJson.encodeToString(Envelope(id = "v1", ts = 0, body = ask))
+        assertEquals(ask, PocketJson.decodeFromString<Envelope>(askJson).body)
+        // old daemon → new phone: a pre-M2 ask (no new keys) decodes with null defaults → legacy buttons
+        val oldAsk = PocketJson.encodeToString(Envelope(id = "v2", ts = 0, body = PermissionAsk("c1", "a2", "Bash", "ls")))
+        // …and a plain new-daemon ask stays byte-free of the new keys (explicitNulls=false), so the
+        // legacy wire shape is literally unchanged until a daemon opts an ask into grants
+        assertFalse("taskId" in oldAsk, oldAsk)
+        assertFalse("grantOptions" in oldAsk, oldAsk)
+        val decoded = PocketJson.decodeFromString<Envelope>(oldAsk).body as PermissionAsk
+        assertEquals(null, decoded.taskId)
+        assertEquals(null, decoded.grantOptions)
+        // old app → new daemon: a hand-written pre-M2 verdict (no retrySafer key) decodes to the safe default
+        val legacyVerdict = """{"id":"v2b","ts":0,"body":{"t":"pocket/verdict","convoId":"c1","askId":"a2","decision":"allow"}}"""
+        val lv = PocketJson.decodeFromString<Envelope>(legacyVerdict).body as PermissionVerdict
+        assertFalse(lv.retrySafer)
+        assertEquals(null, lv.grantScope)
+
+        // new phone → old daemon: grantScope/retrySafer/constraints are unknown keys the old daemon skips,
+        // leaving a plain (strictly narrower) allow/deny — the safe degrade the design requires
+        val verdict = PermissionVerdict(
+            "c1", "a1", Decision.ALLOW, grantScope = "task",
+            retrySafer = false,
+        )
+        val vJson = PocketJson.encodeToString(Envelope(id = "v3", ts = 0, body = verdict))
+        assertEquals(verdict, PocketJson.decodeFromString<Envelope>(vJson).body)
+        val retry = PermissionVerdict("c1", "a1", Decision.DENY, retrySafer = true, constraints = listOf("no network", "read-only"))
+        assertEquals(retry, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(Envelope(id = "v4", ts = 0, body = retry))).body)
+    }
+
+    @Test
+    fun approvalV2_new_frames_roundtrip_and_stay_unknown_to_old_peers() {
+        val chip = AuthorizedActionRecorded(
+            convoId = "c1", eventId = "e1", actionSummary = "./gradlew :daemon:test",
+            basis = "task-grant", decidedAt = 123L, taskId = "prompt-7", matchedGrantId = "g1", tool = "Bash",
+        )
+        val heartbeat = ApprovalAttentionHeartbeat("c1", "a1", visible = true)
+        val revoke = RevokeGrant("c1", "g1")
+        val risk = PermissionRiskUpdated("c1", "a1", risk = "high", reason = "reads credentials then uploads", reasonCodes = listOf("cred-read", "net-egress"))
+        for (frame in listOf<Frame>(chip, heartbeat, revoke, risk)) {
+            val env = Envelope(id = "f-${frame.hashCode()}", ts = 0, body = frame)
+            val json = PocketJson.encodeToString(env)
+            assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+            // an old peer that predates the type drops the single frame (unknown "t" throws at the
+            // tolerant decode site) — same contract as every additive frame
+            val unknownT = Regex("\"t\":\"([^\"]+)\"").replace(json) { "\"t\":\"${it.groupValues[1]}-future\"" }
+            assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
+        }
+    }
+
+    @Test
+    fun clientCaps_approvalV2_flag_is_additive() {
+        val caps = ClientCaps(supportsAgents = listOf("opencode"), supportsApprovalV2 = true)
+        val json = PocketJson.encodeToString(Envelope(id = "cap1", ts = 0, body = caps))
+        assertEquals(caps, PocketJson.decodeFromString<Envelope>(json).body)
+        // an old client's caps (no flag) decode with the safe default
+        val old = PocketJson.encodeToString(Envelope(id = "cap2", ts = 0, body = ClientCaps(supportsAgents = listOf("opencode"))))
+        val decoded = PocketJson.decodeFromString<Envelope>(old).body as ClientCaps
+        assertFalse(decoded.supportsApprovalV2)
+    }
 }

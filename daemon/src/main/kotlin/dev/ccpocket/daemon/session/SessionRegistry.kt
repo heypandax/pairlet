@@ -60,6 +60,9 @@ class SessionRegistry(
     // their asks here; defaulted so tests that never exercise approvals need no wiring
     private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
         dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
+    // the daemon-wide task-grant engine (approval design M2), shared with the quick terminal
+    private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
+        dev.ccpocket.daemon.approval.ApprovalGrantStore(),
 ) {
     private val mutex = Mutex()
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
@@ -227,7 +230,7 @@ class SessionRegistry(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
-            approvals = approvals,
+            approvals = approvals, grants = grants,
         )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
@@ -537,6 +540,10 @@ class SessionRegistry(
 
     /** The conversation's current permission mode — the authoritative input to the shell approval gate (issue #3). */
     suspend fun modeOf(convoId: String): PermissionMode? = get(convoId)?.currentMode()
+
+    /** The conversation's CURRENT task id (approval design M2) — registry truth for the quick terminal's
+     *  shared grant match; never trusted from the client. */
+    suspend fun taskIdOf(convoId: String): String? = get(convoId)?.currentTaskId()
 
     /** Close [convoId]. With a [requester] (a client closing ITS view) this only detaches that client's
      *  sink — the conversation keeps streaming (to any other clients, else headless) when others are still

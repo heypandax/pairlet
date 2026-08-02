@@ -106,7 +106,26 @@ class Conversation(
      *  account snapshot behave identically to the shell/export gates. Defaulted for tests. */
     private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
         dev.ccpocket.daemon.approval.ApprovalCoordinator(parentScope),
+    /** TASK-scoped grants (approval design M2): "允许本任务" lives here, shared with the quick terminal.
+     *  Defaulted for tests. */
+    private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
+        dev.ccpocket.daemon.approval.ApprovalGrantStore(),
 ) {
+    // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
+    // One task per top-level user prompt: rotated when a prompt STARTS a new turn (mid-turn queued
+    // prompts fold into the running turn and keep its task, like the CLI folds them into the same
+    // turn). The daemon owns rotation — an agent can never extend a task. Grants die with the task
+    // (next prompt), the session, a mode switch, or the store's 2h TTL, whichever first.
+    @Volatile
+    private var currentTaskId: String? = null
+
+    /** The task the CURRENT prompt chain runs under — stamped on asks and matched by the grant engine. */
+    fun currentTaskId(): String? = currentTaskId
+
+    private fun rotateTask(promptId: String?) {
+        currentTaskId?.let { grants.endTask(convoId, it) }
+        currentTaskId = promptId ?: ("task-" + java.util.UUID.randomUUID())
+    }
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
 
@@ -765,6 +784,9 @@ class Conversation(
         }
         mode = newMode
         permissionMode = normalizedNative
+        // approval design M2: a mode switch changes the ground the user granted under — every standing
+        // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
+        grants.endSession(convoId)
         recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
     }
 
@@ -915,6 +937,8 @@ class Conversation(
             }
         val b = PermissionBridge(
             convoId, mode, approvals, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            // approval design M2: the shared task-grant engine + the conversation's live task pointer
+            grants = grants, taskId = { currentTaskId() },
             // verdict + question windows both default to the generous, env-configurable ApprovalTimeout.ms
             // (issue #100 unified them). Bridge-origin sessions keep issue #91's 120s FLOOR on top (#32):
             // the owner arrives via push → tap → reattach, so a deliberately short CC_POCKET_ASK_TIMEOUT_SEC
@@ -1505,6 +1529,11 @@ class Conversation(
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
+        // approval design M2 §5.4: a prompt that STARTS a turn begins a new task — the previous task's
+        // grants die right here (a new instruction never inherits an old authorization). A mid-turn
+        // queued prompt (executing) folds into the running turn, so it keeps the current task, mirroring
+        // how the CLI folds it into the same turn.
+        if (!executing) rotateTask(promptId)
         // RELAUNCH-THEN-SEND (issue #84): a mid-session model/mode/effort switch only recorded the desired value
         // + armed pendingRelaunch — relaunching then would have killed the in-flight turn. Now, before this next
         // turn goes out, reconcile a stale process: stop it and re-spawn under the new flags FIRST, then let the
@@ -1848,6 +1877,7 @@ class Conversation(
 
     suspend fun close() {
         bridgeRequestGate.cancelAll()
+        grants.endSession(convoId) // approval design M2: no task grant survives its session
         stopProcess()
         scope.cancel()
     }

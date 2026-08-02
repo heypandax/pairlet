@@ -22,6 +22,8 @@ import dev.ccpocket.daemon.shell.ShellService
 import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.ActiveSession
+import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
+import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.ScheduleState
@@ -107,6 +109,8 @@ class RequestRouter(
     // defaulted so router tests that never touch approvals need no wiring
     private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
         dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
+    private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
+        dev.ccpocket.daemon.approval.ApprovalGrantStore(),
 ) {
     /** One connection's declared wire vocabulary (see [ClientCaps] in Messages.kt). Mutable: the
      *  declaration frame lands after connect and upgrades the SAME holder the ingress created for
@@ -327,10 +331,20 @@ class RequestRouter(
                 if (wd == null) {
                     sink.emit(ShellResult(frame.convoId, frame.command, exitCode = -1, error = "not a readable directory: ${frame.workdir}"))
                 } else {
-                    // the daemon (not the phone) decides the mode → the approval gate can't be spoofed client-side
-                    shell.run(frame.copy(workdir = wd.toString()), registry.modeOf(frame.convoId), sink::emit)
+                    // the daemon (not the phone) decides the mode AND the task id → neither the approval
+                    // gate nor the shared task-grant match can be spoofed client-side
+                    shell.run(frame.copy(workdir = wd.toString()), registry.modeOf(frame.convoId), registry.taskIdOf(frame.convoId), sink::emit)
                 }
             }
+
+            // ── approval design M2 ──
+            // AttentionLease: pauses only the READING budget of a still-pending ask (never authority or the
+            // absolute deadline). Restricted credentials never reach here — their capability whitelists
+            // default-deny unknown frame types at the choke point.
+            is ApprovalAttentionHeartbeat -> approvals.heartbeat(frame.convoId, frame.askId, frame.visible)
+            // "收紧后续授权" from the autorun chip: owner-only (same gate as ListPendingApprovals); the
+            // store re-checks the grant belongs to the named conversation.
+            is RevokeGrant -> if (origin == null && guestScope == null) grants.revoke(frame.convoId, frame.grantId)
 
             is SwitchDirectory -> {
                 val wd = dirs.validateWorkdir(frame.workdir)

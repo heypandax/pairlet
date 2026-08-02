@@ -148,6 +148,17 @@ data class PermissionVerdict(
     // AskUserQuestion only: a freeform reply INSTEAD of answering the structured questions
     // (claude renders it as "The user responded: …").
     val response: String? = null,
+    // ── approval design M2 (trailing optionals: an old daemon ignores all three — safe, strictly narrower) ──
+    // ALLOW only: the grant scope the user chose — "once" (null = legacy allow-once), "task" (auto-allow
+    // matching actions until the task ends), "session". Sent only when the ask offered it via
+    // [PermissionAsk.grantOptions]; an old daemon ignoring it degrades to allow-once. New clients express
+    // the legacy "always allow" as grantScope="session"; `remember` stays for old daemons only.
+    val grantScope: String? = null,
+    // DENY only: "换种安全方式" — the user wants the agent to retry under constraints rather than hearing a
+    // bare refusal. The daemon phrases the structured deny message from [constraints]; an old daemon
+    // ignoring both delivers the plain deny [message], which is a safe degrade.
+    val retrySafer: Boolean = false,
+    val constraints: List<String>? = null,
 ) : ToDaemon
 
 /** Switch the live conversation's permission mode (relaunches claude with --resume + the new mode).
@@ -812,6 +823,16 @@ data class PermissionAsk(
     // hardcoded 30s client countdown. Null from a pre-#100 daemon → the phone keeps its legacy 30s; old
     // phones ignore the field.
     val timeoutSec: Int? = null,
+    // ── approval design M2 (trailing optionals: a pre-M2 daemon omits both, an old phone ignores both) ──
+    // The daemon-side task this ask belongs to (rotates with each top-level user prompt): lets the client
+    // label "allow for this task" honestly and lets an autorun chip point back at its task.
+    val taskId: String? = null,
+    // The grant scopes the daemon will honor for THIS ask, in recommendation order — tolerant wire strings
+    // ("once" / "task" / "session"), NOT an enum, so a future scope degrades to ignored instead of a
+    // frame drop. Null/empty ⇒ pre-M2 daemon: the client renders the legacy buttons and rides `remember`.
+    // Non-null is ALSO the client's implicit capability gate for [ApprovalAttentionHeartbeat] — a daemon
+    // that offers scopes understands heartbeats; one that doesn't would answer "unsupported".
+    val grantOptions: List<String>? = null,
 ) : ToPhone
 
 /** One row in [PendingApprovals]. [expiresAt] is epoch millis from the daemon's real deadline, so a
@@ -856,6 +877,70 @@ data class AskWithdrawn(
     val convoId: String,
     val askId: String,
     val reason: AskWithdrawnReason = AskWithdrawnReason.WITHDRAWN,
+) : ToPhone
+
+// ── approval design M2: task grants, autorun audit chips, attention lease ─────────────────────────
+// All frames below are NEW types: an old peer that doesn't know the @SerialName drops the single frame
+// (envelope-tolerant decode) and everything else keeps working. The daemon additionally only sends the
+// ToPhone ones to clients that declared [ClientCaps.supportsApprovalV2]; clients only send the ToDaemon
+// ones after evidence of a new daemon (an ask that carried [PermissionAsk.grantOptions]).
+
+/** daemon -> client: an action executed WITHOUT a card because a task/session grant covered it — the
+ * "自动执行现场可见" audit event. Clients render a light chip in the conversation stream with a
+ * "tighten" affordance ([RevokeGrant]). [actionSummary] is pre-redacted daemon-side (same trimming rules
+ * as History: no stdout, no file bodies, no secrets); duplicate [eventId]s must be idempotent client-side. */
+@Serializable
+@SerialName("pocket/approval.autorun")
+data class AuthorizedActionRecorded(
+    val convoId: String,
+    val eventId: String,
+    val actionSummary: String,
+    val basis: String,           // tolerant wire string: "task-grant" | "session-rule" | ...
+    val decidedAt: Long,
+    val taskId: String? = null,
+    val matchedGrantId: String? = null,
+    val tool: String? = null,
+) : ToPhone
+
+/** client -> daemon: the user is LOOKING at this approval card right now (app foreground, card visible).
+ * Pauses the ask's no-response budget for a short lease (re-sent ~every 30s while visible; lease ~60s).
+ * NEVER authorization: it only extends reading time — authority, risk, grants and the absolute deadline
+ * (24h) are untouched, and a heartbeat for a terminal ask is dropped. Only sent for asks that carried
+ * [PermissionAsk.grantOptions] — a pre-M2 daemon silently drops the unknown frame type, so the gate is
+ * belt-and-braces; what it really pins is that the daemon release which starts sending grantOptions
+ * also routes this frame. */
+@Serializable
+@SerialName("pocket/approval.attention")
+data class ApprovalAttentionHeartbeat(
+    val convoId: String,
+    val askId: String,
+    val visible: Boolean = true,
+) : ToDaemon
+
+/** client -> daemon: revoke one grant — the autorun chip's "收紧后续授权". Only affects actions the
+ * coordinator has not started yet; never a promise to roll back completed side effects. The daemon
+ * validates the grant belongs to [convoId] (which upstream guards vetted the sender against). */
+@Serializable
+@SerialName("pocket/grant.revoke")
+data class RevokeGrant(
+    val convoId: String,
+    val grantId: String,
+) : ToDaemon
+
+/** daemon -> client (M3 advisory): an async risk update for a STILL-PENDING ask. The client updates the
+ * card's risk badge in place WITHOUT resetting the daemon-given deadline (re-sending the ask would
+ * wrongly restart the client countdown — SMART-APPROVAL §八). [risk] is a tolerant wire string
+ * ("low"/"medium"/"high"/"unknown"): HIGH means "risk found", UNKNOWN means "could not assess reliably" —
+ * the UI must not conflate them. Updates arriving after the ask's terminal state are dropped client-side. */
+@Serializable
+@SerialName("pocket/approval.risk")
+data class PermissionRiskUpdated(
+    val convoId: String,
+    val askId: String,
+    val risk: String,
+    val reason: String? = null,
+    val reasonCodes: List<String>? = null,
+    val assessedAt: Long? = null,
 ) : ToPhone
 
 /** Turn finished. finalText is the result text (if any); usage is token accounting (if present).
@@ -1565,6 +1650,11 @@ const val MIN_SCHEDULE_INTERVAL_MS: Long = 60_000L
 @SerialName("pocket/client.caps")
 data class ClientCaps(
     val supportsAgents: List<String> = emptyList(),
+    // approval design M2 (trailing optional): the client decodes the new approval frames
+    // (AuthorizedActionRecorded / PermissionRiskUpdated). The daemon must not send them to an
+    // undeclared peer — an already-shipped client drops unknown frame types silently, but gating
+    // here keeps the wire quiet and the contract explicit.
+    val supportsApprovalV2: Boolean = false,
 ) : ToDaemon
 
 // ── agent model listing ─────────────────────────────────────────────────

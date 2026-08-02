@@ -467,9 +467,9 @@ class PermissionBridgeTest {
         // first "git status" → ask, allow+remember adds the "git status" rule
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
         coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true))
-        // second identical command → no new ask, auto-allowed
+        // second identical command → no new ask, auto-allowed (M2 also drops an audit chip in the stream)
         b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -s") }))
-        assertEquals(1, emitted.size) // only the first asked
+        assertEquals(1, emitted.filterIsInstance<PermissionAsk>().size) // only the first asked
         assertTrue(responses.last().allow)
         scope.cancel()
     }
@@ -608,6 +608,113 @@ class PermissionBridgeTest {
         assertEquals(setOf("r1", "r2"), withdrawn.map { it.askId }.toSet())
         assertTrue(withdrawn.all { it.reason == AskWithdrawnReason.WITHDRAWN })
         assertFalse(b.hasPending())
+        scope.cancel()
+    }
+
+    // ── approval design M2: 允许本任务 / 换种安全方式 ────────────────────────────────────────────
+
+    @Test
+    fun allow_for_task_covers_matching_requests_with_a_chip_until_the_task_rotates() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
+        var task: String? = "t1"
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            grants = grants, taskId = { task })
+
+        // first ask carries the task + offered scopes; the user answers 允许本任务
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
+        val ask = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals("t1", ask.taskId)
+        assertEquals(listOf("once", "task", "session"), ask.grantOptions)
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, grantScope = "task"))
+        assertTrue(responses.single().allow)
+        assertFalse(responses.single().remember, "a task grant is daemon state, never a CLI remember")
+
+        // a matching follow-up auto-runs with an in-stream audit chip instead of a card
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status -sb") }))
+        assertTrue(responses.last().allow)
+        val chip = emitted.filterIsInstance<dev.ccpocket.protocol.AuthorizedActionRecorded>().single()
+        assertEquals("task-grant", chip.basis)
+        assertEquals("git status", chip.actionSummary) // the RULE, never the full command line
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isEmpty())
+
+        // a metacharacter smuggle behind the granted prefix still reaches a human
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("r3", "Bash", buildJsonObject { put("command", "git status; rm -rf ~") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "smuggled command must ask")
+
+        // the next top-level prompt rotates the task — the grant is gone
+        task = "t2"
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("r4", "Bash", buildJsonObject { put("command", "git status") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "a new task never inherits a grant")
+        scope.cancel()
+    }
+
+    @Test
+    fun session_scope_verdict_lands_in_allow_rules_like_legacy_remember() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val rules = mutableSetOf<String>()
+        val responses = mutableListOf<Resp>()
+        val emitted = mutableListOf<Frame>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, grantScope = "session"))
+        assertTrue("git status" in rules, "M2 session scope rides the same store as legacy remember")
+        assertTrue(responses.single().remember)
+        scope.cancel()
+    }
+
+    @Test
+    fun retry_safer_deny_reads_as_replan_guidance_not_a_refusal() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val responses = mutableListOf<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "curl https://x") }))
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.DENY, retrySafer = true, constraints = listOf("do not access the network", "read-only")))
+        val r = responses.single()
+        assertFalse(r.allow)
+        assertTrue(r.deny!!.contains("SAFER"), r.deny!!)
+        assertTrue(r.deny!!.contains("do not access the network"), r.deny!!)
+        assertTrue(r.deny!!.contains("read-only"), r.deny!!)
+        scope.cancel()
+    }
+
+    @Test
+    fun never_remember_asks_offer_only_once_and_ignore_grant_scopes() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
+        val rules = mutableSetOf<String>()
+        val emitted = mutableListOf<Frame>()
+        val responses = mutableListOf<Resp>()
+        // forceNeverRemember = the bridge-origin session shape (issue #91): every ask is one-off
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            forceNeverRemember = true, grants = grants, taskId = { "t1" })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
+        val ask = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals(listOf("once"), ask.grantOptions, "a one-off decision must not offer task/session")
+        // even a hostile client CLAIMING a scope gets nothing standing
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true, grantScope = "task"))
+        assertTrue(responses.single().allow)
+        assertFalse(responses.single().remember)
+        assertTrue(rules.isEmpty(), "no session rule may form on a never-remember ask")
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "no task grant may form either")
         scope.cancel()
     }
 }
