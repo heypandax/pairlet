@@ -74,8 +74,15 @@ class FcmSender private constructor(
             putJsonObject("message") {
                 put("token", token)
                 putJsonObject("notification") { put("title", title); put("body", body) }
-                // data travels in the tapped launch intent's extras — routes to the right session
-                route?.let { putJsonObject("data") { put("wd", it.workdir); put("sid", it.sessionId) } }
+                // data travels in the tapped launch intent's extras — routes to the right session, or (§3.4,
+                // `hid`) to the offer inbox, which is the only routing an offer alert is allowed to carry
+                route?.let { r ->
+                    putJsonObject("data") {
+                        r.workdir?.let { put("wd", it) }
+                        r.sessionId?.let { put("sid", it) }
+                        r.handoffId?.let { put("hid", it) }
+                    }
+                }
                 putJsonObject("android") { put("priority", "high") }
             }
         }.toString()

@@ -10,6 +10,7 @@ import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
 import dev.ccpocket.protocol.PROTO_V_HEADLESS
+import dev.ccpocket.protocol.PROTO_V_TARGETED_PUSH
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairCodePayload
 import dev.ccpocket.protocol.PairCodeResolve
@@ -26,7 +27,7 @@ import dev.ccpocket.protocol.Role
 import dev.ccpocket.protocol.Route
 import dev.ccpocket.protocol.e2e.Wire
 import dev.ccpocket.relay.push.LoggingPushService
-import dev.ccpocket.relay.push.NotifyRoute
+import dev.ccpocket.relay.push.NotifyGate
 import dev.ccpocket.relay.push.PushService
 import dev.ccpocket.relay.auth.Codec
 import dev.ccpocket.relay.auth.DaemonAuthenticator
@@ -185,7 +186,10 @@ class RelayServer(
             logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
             runCatching { old.close("superseded") }
         }
-        sendControl(Attached(Role.DAEMON, account))
+        // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
+        // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
+        // fan the alert out to the OWNER's phones instead of the addressed contact.
+        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_TARGETED_PUSH))
         // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
         // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
         // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
@@ -220,9 +224,10 @@ class RelayServer(
                 if (!limiter.check("pairbegin:acct:$account", 10, 3_600_000)) {
                     broker.controlToDaemon(account, controlText(AuthError("rate_limited"))); return
                 }
-                // headless marker rides from the MINTING daemon (issue #91) — authoritative, stamped on the
-                // ticket so the redeemed device inherits it regardless of what the redeeming client declares
-                when (val m = pairing.mint(account, headless = body.headless)) {
+                // headless/collaborator markers ride from the MINTING daemon (issue #91, §3.4) —
+                // authoritative, stamped on the ticket so the redeemed device inherits them regardless of
+                // what the redeeming client declares (and `collaborator` has no client-declared form at all)
+                when (val m = pairing.mint(account, headless = body.headless, collaborator = body.collaborator)) {
                     is PairingService.MintResult.Ok -> {
                         val code = codeStore.put(account, body.e2ePub, m.ticket) // 6-digit code resolves to this payload
                         broker.controlToDaemon(account, controlText(PairTicket(m.ticket, m.ttlSec, code)))
@@ -239,27 +244,65 @@ class RelayServer(
                 broker.controlToDaemon(account, controlText(DeviceRevoked(body.deviceId)))
             }
             is Ping -> broker.controlToDaemon(account, controlText(Pong(body.ts))) // app-level liveness echo
-            // wake an offline phone: push only when no INTERACTIVE device socket is live (an online phone
-            // got TurnDone already; an always-on bridge must never mute the owner's pushes — issue #91).
-            // EXCEPTION: an [urgent] notify (a bridge approval) is pushed even with a phone attached — the
-            // ask isn't on the data plane of whatever convo that phone is viewing, so it would otherwise
-            // strand until the timeout→deny.
-            is NotifyPush -> if (body.urgent || broker.interactiveDeviceCount(account) == 0) pushScope.launch {
-                val route = body.workdir?.let { wd -> body.sessionId?.let { sid -> NotifyRoute(wd, sid) } }
-                pushService.notify(account, body.title, body.body, route)
-            }
+            is NotifyPush -> onNotifyPush(account, body)
             else -> {} // daemons send no other control
         }
+    }
+
+    /**
+     * A [NotifyPush] from the daemon, in its two flavors.
+     *
+     * ACCOUNT fan-out ([NotifyPush.deviceId] null — every push before §3.4): wake the owner's phones, but
+     * only when no INTERACTIVE device socket is live (an online phone got TurnDone on the data plane
+     * already; an always-on bridge must never mute the owner's pushes — issue #91). EXCEPTION: an [urgent]
+     * notify (a bridge approval) is pushed even with a phone attached — the ask isn't on the data plane of
+     * whatever convo that phone is viewing, so it would otherwise strand until the timeout→deny.
+     *
+     * TARGETED ([NotifyPush.deviceId] non-null, §3.4): exactly one device, gated on ITS OWN socket and
+     * nothing else. The account-level counter is deliberately not consulted in either direction — a
+     * collaborator inbox is presence-invisible there (so it would look permanently offline), and the
+     * owner's phone being attached says nothing about whether a contact's phone is. [urgent] is likewise
+     * irrelevant: the one device this is for either has the live data plane the frame duplicates, or not.
+     */
+    private suspend fun onNotifyPush(account: String, body: NotifyPush) {
+        val target = body.deviceId
+        if (target == null) {
+            if (!NotifyGate.shouldSend(body, broker.interactiveDeviceCount(account), targetDeviceSockets = 0)) return
+            val route = NotifyGate.routeOf(body)
+            pushScope.launch { pushService.notify(account, body.title, body.body, route) }
+            return
+        }
+        if (!NotifyGate.shouldSend(body, interactiveDevices = 0, targetDeviceSockets = broker.deviceSocketCount(account, target))) return
+        // A targeted push may cross to ANOTHER PERSON's phone, which no push before §3.4 could do. Bound how
+        // often that is possible per target device: without this, an authenticated daemon can hold a
+        // notification firehose open against a contact for as long as the link exists. Generous next to the
+        // one-nudge-per-offer the feature actually needs, and never a lockout — a rate-limited doorbell must
+        // degrade to "the recipient pulls the offer on next connect", not to a punished account.
+        if (!limiter.check("push:dev:$target", MAX_TARGETED_PUSH_PER_HOUR, 3_600_000)) {
+            logConn("push_rate_limited", ip = "-", account = account, deviceId = target)
+            return
+        }
+        // …and launder the copy when the target is a contact's inbox: the sender is on the far side of that
+        // trust boundary, so the relay owns what appears on the lock screen (see NotifyGate.contactAlert).
+        val alert =
+            if (store.getDevice(target)?.collaborator == true) NotifyGate.contactAlert(body) ?: return
+            else NotifyGate.ownAlert(body)
+        pushScope.launch { pushService.notifyDevice(account, target, alert.title, alert.body, alert.route) }
     }
 
     /** device control TEXT plane: only push-token (de)registration; everything else rides the data plane.
      *  A HEADLESS bridge is REFUSED here (issue #91): this plane bypasses the E2E bridge ingress gate, so
      *  without this a leaked bridge could register its OWN push token and receive the owner's turn-complete
      *  alerts (which carry workdir/path/reply-first-line for ANY session). Belt to the pushTargets filter's
-     *  suspenders: even a token that slipped in is dropped at fan-out. */
+     *  suspenders: even a token that slipped in is dropped at fan-out.
+     *
+     *  A COLLABORATOR inbox is headless too but IS allowed to register (§3.4) — it is a real phone whose
+     *  whole purpose is being woken for an offer. That is safe precisely because the two exclusions are
+     *  separate: it still never appears in [RelayStore.pushTargets], so the token it registers can only ever
+     *  be reached by a TARGETED [NotifyPush] naming its own deviceId. */
     private suspend fun handleDeviceControl(deviceId: String, text: String) {
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
-            is RegisterPush -> if (store.getDevice(deviceId)?.headless != true) {
+            is RegisterPush -> if (store.getDevice(deviceId)?.mayRegisterPush == true) {
                 runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
             }
             else -> {}
@@ -303,7 +346,7 @@ class RelayServer(
             logConn("superseded", old.ip, account = old.account, deviceId = old.deviceId, headless = old.headless)
             runCatching { old.close("superseded") }
         }
-        sendControl(Attached(Role.DEVICE, account))
+        sendControl(Attached(Role.DEVICE, account, relayProtoV = PROTO_V_TARGETED_PUSH))
         if (!headless) broker.controlToDaemon(account, controlText(PeerPresence(true)))
         try {
             for (frame in incoming) when (frame) {
@@ -381,5 +424,8 @@ class RelayServer(
         const val MAX_FRAME = 4L * 1024 * 1024
         const val MAX_LIVE_DEVICES = 10   // interactive (phones/desktops), as before
         const val MAX_LIVE_HEADLESS = 5   // bridges get their own, smaller pool (issue #91)
+        // §3.4: ceiling on how often ONE device may be woken by a targeted push. A real workflow rings a
+        // contact a handful of times a day; this only bites a daemon looping the frame.
+        const val MAX_TARGETED_PUSH_PER_HOUR = 20
     }
 }

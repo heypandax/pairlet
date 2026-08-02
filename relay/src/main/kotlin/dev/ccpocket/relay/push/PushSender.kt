@@ -1,10 +1,20 @@
 package dev.ccpocket.relay.push
 
 /**
- * Deep-link routing data carried alongside the visible alert: which session a tapped notification
- * should open. Delivered as APNs custom keys / FCM data (never shown to the user).
+ * Deep-link routing data carried alongside the visible alert: what a tapped notification should open.
+ * Delivered as APNs custom keys / FCM data (never shown to the user).
+ *
+ * Exactly one shape is populated at a time:
+ *  - [workdir]+[sessionId] — a turn-complete / approval alert, opening that session;
+ *  - [handoffId] — a Collaborator Link OFFER alert (§3.4), opening the offer inbox. Nothing else rides
+ *    along: workdir would hand the relay (and the lock screen) the initiator's project path, and the offer
+ *    itself is pulled end-to-end encrypted once the app is awake.
  */
-data class NotifyRoute(val workdir: String, val sessionId: String)
+data class NotifyRoute(
+    val workdir: String? = null,
+    val sessionId: String? = null,
+    val handoffId: String? = null,
+)
 
 /**
  * Outcome of one send, so the caller can prune permanently-dead tokens while retrying transient ones.

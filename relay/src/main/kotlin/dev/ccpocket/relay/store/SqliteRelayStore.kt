@@ -42,10 +42,20 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
         Unit
     }
 
-    override suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long, headless: Boolean) = tx { c ->
-        c.prepareStatement("INSERT INTO pairing_tickets(ticket_hash, account_id, created_at, expires_at, used, headless) VALUES(?,?,?,?,0,?)").use { ps ->
+    override suspend fun insertTicket(
+        ticketHash: ByteArray,
+        accountId: String,
+        createdAt: Long,
+        expiresAt: Long,
+        headless: Boolean,
+        collaborator: Boolean,
+    ) = tx { c ->
+        c.prepareStatement(
+            "INSERT INTO pairing_tickets(ticket_hash, account_id, created_at, expires_at, used, headless, collaborator) VALUES(?,?,?,?,0,?,?)"
+        ).use { ps ->
             ps.setBytes(1, ticketHash); ps.setString(2, accountId); ps.setLong(3, createdAt); ps.setLong(4, expiresAt)
             ps.setInt(5, if (headless) 1 else 0)
+            ps.setInt(6, if (collaborator) 1 else 0)
             ps.executeUpdate()
         }
         Unit
@@ -59,9 +69,11 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
             ps.executeUpdate()
         }
         if (claimed != 1) return@tx null
-        c.prepareStatement("SELECT account_id, headless FROM pairing_tickets WHERE ticket_hash=?").use { ps ->
+        c.prepareStatement("SELECT account_id, headless, collaborator FROM pairing_tickets WHERE ticket_hash=?").use { ps ->
             ps.setBytes(1, ticketHash)
-            ps.executeQuery().use { rs -> if (rs.next()) ClaimedTicket(rs.getString(1), rs.getInt(2) != 0) else null }
+            ps.executeQuery().use { rs ->
+                if (rs.next()) ClaimedTicket(rs.getString(1), rs.getInt(2) != 0, rs.getInt(3) != 0) else null
+            }
         }
     }
 
@@ -74,12 +86,13 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun insertDevice(device: Device) = tx { c ->
         c.prepareStatement(
-            "INSERT INTO devices(device_id, account_id, device_pubkey, credential_hash, created_at, last_seen, revoked, headless) VALUES(?,?,?,?,?,?,0,?)"
+            "INSERT INTO devices(device_id, account_id, device_pubkey, credential_hash, created_at, last_seen, revoked, headless, collaborator) VALUES(?,?,?,?,?,?,0,?,?)"
         ).use { ps ->
             ps.setString(1, device.deviceId); ps.setString(2, device.accountId)
             ps.setBytes(3, device.devicePubkey); ps.setBytes(4, device.credentialHash)
             ps.setLong(5, device.createdAt); ps.setLong(6, device.createdAt)
             ps.setInt(7, if (device.headless) 1 else 0)
+            ps.setInt(8, if (device.collaborator) 1 else 0)
             ps.executeUpdate()
         }
         Unit
@@ -87,7 +100,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun getDevice(deviceId: String): Device? = tx { c ->
         c.prepareStatement(
-            "SELECT account_id, device_pubkey, credential_hash, created_at, last_seen, revoked, headless FROM devices WHERE device_id=?"
+            "SELECT account_id, device_pubkey, credential_hash, created_at, last_seen, revoked, headless, collaborator FROM devices WHERE device_id=?"
         ).use { ps ->
             ps.setString(1, deviceId)
             ps.executeQuery().use { rs ->
@@ -101,6 +114,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
                     lastSeen = rs.getLong(5).takeUnless { rs.wasNull() },
                     revoked = rs.getInt(6) != 0,
                     headless = rs.getInt(7) != 0,
+                    collaborator = rs.getInt(8) != 0,
                 )
             }
         }
@@ -108,7 +122,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
 
     override suspend fun devicesForAccount(accountId: String): List<Device> = tx { c ->
         c.prepareStatement(
-            "SELECT device_id, device_pubkey, credential_hash, created_at, last_seen, headless FROM devices WHERE account_id=? AND revoked=0"
+            "SELECT device_id, device_pubkey, credential_hash, created_at, last_seen, headless, collaborator FROM devices WHERE account_id=? AND revoked=0"
         ).use { ps ->
             ps.setString(1, accountId)
             ps.executeQuery().use { rs ->
@@ -123,6 +137,7 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
                             lastSeen = rs.getLong(5).takeUnless { rs.wasNull() },
                             revoked = false,
                             headless = rs.getInt(6) != 0,
+                            collaborator = rs.getInt(7) != 0,
                         )
                     )
                 }
@@ -177,8 +192,11 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
     override suspend fun pushTargets(accountId: String): List<PushTarget> = tx { c ->
         c.prepareStatement(
             // headless=0: never route the owner's session pushes to a bridge (issue #91)
+            // collaborator=0: nor to a contact's inbox (§3.4) — stated independently so the exclusion does
+            // not rest on the incidental fact that collaborator credentials are also minted headless
             "SELECT device_id, push_platform, push_token FROM devices " +
-                "WHERE account_id=? AND revoked=0 AND headless=0 AND push_token IS NOT NULL AND push_token<>''"
+                "WHERE account_id=? AND revoked=0 AND headless=0 AND collaborator=0 " +
+                "AND push_token IS NOT NULL AND push_token<>''"
         ).use { ps ->
             ps.setString(1, accountId)
             ps.executeQuery().use { rs ->
@@ -188,6 +206,27 @@ class SqliteRelayStore(private val conn: Connection) : RelayStore {
                         val token = rs.getString(3) ?: continue
                         add(PushTarget(rs.getString(1), platform, token))
                     }
+                }
+            }
+        }
+    }
+
+    override suspend fun pushTargetFor(accountId: String, deviceId: String): PushTarget? = tx { c ->
+        c.prepareStatement(
+            // account_id in the WHERE clause IS the authorization check: a daemon may only wake its own.
+            // (headless=0 OR collaborator=1) mirrors Device.mayRegisterPush: a plain bridge that registered
+            // a token BEFORE issue #91 closed that door is still unreachable.
+            "SELECT push_platform, push_token FROM devices " +
+                "WHERE device_id=? AND account_id=? AND revoked=0 AND (headless=0 OR collaborator=1) " +
+                "AND push_token IS NOT NULL AND push_token<>''"
+        ).use { ps ->
+            ps.setString(1, deviceId); ps.setString(2, accountId)
+            ps.executeQuery().use { rs ->
+                if (!rs.next()) null
+                else {
+                    val platform = rs.getString(1)
+                    val token = rs.getString(2)
+                    if (platform == null || token == null) null else PushTarget(deviceId, platform, token)
                 }
             }
         }

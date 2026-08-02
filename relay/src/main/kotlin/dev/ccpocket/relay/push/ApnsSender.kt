@@ -54,8 +54,11 @@ class ApnsSender(
                 putJsonObject("alert") { put("title", title); put("body", body) }
                 put("sound", "default")
             }
-            // custom keys (siblings of `aps`) carry deep-link routing; the OS hands them to the app on tap
-            route?.let { put("wd", it.workdir); put("sid", it.sessionId) }
+            // custom keys (siblings of `aps`) carry deep-link routing; the OS hands them to the app on tap.
+            // `hid` (§3.4) is the offer-inbox route — content-free by construction, unlike wd/sid.
+            route?.workdir?.let { put("wd", it) }
+            route?.sessionId?.let { put("sid", it) }
+            route?.handoffId?.let { put("hid", it) }
         }.toString()
         val req = HttpRequest.newBuilder()
             .uri(URI.create("https://$host/3/device/$token"))

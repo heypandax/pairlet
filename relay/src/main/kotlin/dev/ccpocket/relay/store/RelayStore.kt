@@ -26,14 +26,38 @@ class Device(
     // the attach replay to daemons whose protoV predates bridges, which would otherwise file the key
     // into their FULL-POWER allow-list on downgrade.
     val headless: Boolean = false,
-)
+    /**
+     * §3.4: this device is a Collaborator Link INBOX — someone else's phone, holding a credential that can
+     * only ever see Handoff offers addressed to it. Always minted alongside [headless]=true (it must not
+     * count as "the owner is watching" nor sit in the owner's push fan-out), so this second marker only
+     * re-opens the two doors an inbox genuinely needs:
+     *  - it may register its OWN push token ([RelayServer.handleDeviceControl] refuses a plain bridge);
+     *  - it may be addressed by [dev.ccpocket.protocol.NotifyPush.deviceId] ([pushTargetFor]).
+     * It is still excluded from [pushTargets] — the owner's session alerts never reach a contact.
+     * Authoritative from the MINTING daemon's ticket, exactly like [headless].
+     */
+    val collaborator: Boolean = false,
+) {
+    /**
+     * May this device register its OWN push token over the relay's cleartext control plane?
+     *
+     * A plain HEADLESS bridge may not (issue #91): that plane bypasses the E2E bridge ingress gate, so a
+     * leaked bridge credential could otherwise subscribe itself to the owner's turn-complete alerts, which
+     * carry workdir/path/reply-first-line for ANY session.
+     *
+     * A COLLABORATOR inbox may (§3.4) — it is a real phone whose entire job is being woken for an offer.
+     * That is safe only because the two exclusions are independent: a collaborator is still absent from
+     * [pushTargets], so the token it registers is reachable ONLY by a targeted push naming its deviceId.
+     */
+    val mayRegisterPush: Boolean get() = !headless || collaborator
+}
 
 /** A device the relay can push to: a non-revoked device that has registered a token. */
 data class PushTarget(val deviceId: String, val platform: String, val token: String)
 
-/** A successfully claimed pairing ticket: its account plus the minting daemon's [headless] marker
- *  (issue #91) — the authoritative source the redeemed device's headless flag is set from. */
-data class ClaimedTicket(val accountId: String, val headless: Boolean)
+/** A successfully claimed pairing ticket: its account plus the minting daemon's [headless]/[collaborator]
+ *  markers (issue #91, §3.4) — the authoritative source the redeemed device's flags are set from. */
+data class ClaimedTicket(val accountId: String, val headless: Boolean, val collaborator: Boolean = false)
 
 /**
  * Durable, multi-tenant state for the relay. Stores ONLY fingerprints, public keys, and hashes —
@@ -47,10 +71,18 @@ interface RelayStore {
     suspend fun touchAccount(accountId: String, now: Long)
 
     // ---- pairing tickets (only an authenticated daemon mints; single-use) ----
-    /** [headless] (issue #91) is stamped by the MINTING daemon (PairBegin) and is the authoritative
-     *  bridge marker — the redeemed device inherits it, never the redeeming client's self-declaration. */
-    suspend fun insertTicket(ticketHash: ByteArray, accountId: String, createdAt: Long, expiresAt: Long, headless: Boolean = false)
-    /** Atomically consume an unused, unexpired ticket. Returns (accountId, its headless marker), or null. */
+    /** [headless] (issue #91) / [collaborator] (§3.4) are stamped by the MINTING daemon (PairBegin) and are
+     *  the authoritative markers — the redeemed device inherits both, never the redeeming client's
+     *  self-declaration. */
+    suspend fun insertTicket(
+        ticketHash: ByteArray,
+        accountId: String,
+        createdAt: Long,
+        expiresAt: Long,
+        headless: Boolean = false,
+        collaborator: Boolean = false,
+    )
+    /** Atomically consume an unused, unexpired ticket. Returns (accountId, its markers), or null. */
     suspend fun claimTicket(ticketHash: ByteArray, now: Long): ClaimedTicket?
     suspend fun countUnredeemedTickets(accountId: String, now: Long): Int
 
@@ -74,8 +106,20 @@ interface RelayStore {
     /** Registered, non-revoked, INTERACTIVE push targets for an account (devices holding a token).
      *  HEADLESS bridges are excluded (issue #91): a bridge must never receive the owner's turn-complete
      *  pushes (which carry workdir/path/reply-first-line for ANY session), even if it registered a token
-     *  over the control plane — that plane bypasses the E2E bridge ingress gate. */
+     *  over the control plane — that plane bypasses the E2E bridge ingress gate. COLLABORATOR inboxes are
+     *  excluded on the same terms and by their own predicate (§3.4): the owner's session pushes are never a
+     *  contact's business, and the exclusion must not silently depend on collaborators also being headless. */
     suspend fun pushTargets(accountId: String): List<PushTarget>
+
+    /** §3.4 TARGETED push: the single registered target for [deviceId], or null when it does not exist, is
+     *  revoked, holds no token — or does not belong to [accountId]. The account check is what makes a
+     *  daemon-supplied deviceId safe to honor: a daemon can only ever wake ITS OWN devices.
+     *
+     *  A plain BRIDGE is excluded here too, by the same [Device.mayRegisterPush] rule that refuses it at the
+     *  control plane. The refusal alone is not enough: it arrived with issue #91 and no migration cleared
+     *  tokens a bridge had already registered, so such a row is still sitting in the wild with a live token.
+     *  A COLLABORATOR inbox is of course allowed — being addressable one-by-one is the whole point. */
+    suspend fun pushTargetFor(accountId: String, deviceId: String): PushTarget?
 
     // ---- maintenance ----
     suspend fun sweepExpired(now: Long)

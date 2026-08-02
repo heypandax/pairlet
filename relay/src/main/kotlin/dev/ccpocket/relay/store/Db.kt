@@ -37,6 +37,11 @@ object Db {
             "ALTER TABLE devices ADD COLUMN headless INTEGER NOT NULL DEFAULT 0",
             // issue #91: headless marker stamped on the ticket by the minting daemon (authoritative)
             "ALTER TABLE pairing_tickets ADD COLUMN headless INTEGER NOT NULL DEFAULT 0",
+            // §3.4: Collaborator Link inbox marker — a headless device that MAY still hold a push token and
+            // be addressed by NotifyPush.deviceId. Every pre-existing device/ticket is 0 (a phone or a
+            // bridge), so an upgraded relay behaves exactly as before until a new daemon mints one.
+            "ALTER TABLE devices ADD COLUMN collaborator INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE pairing_tickets ADD COLUMN collaborator INTEGER NOT NULL DEFAULT 0",
         ).forEach { sql -> runCatching { conn.createStatement().use { it.execute(sql) } } }
     }
 
@@ -59,7 +64,8 @@ object Db {
           push_platform   TEXT,
           push_token      TEXT,
           push_updated_at INTEGER,
-          headless        INTEGER NOT NULL DEFAULT 0
+          headless        INTEGER NOT NULL DEFAULT 0,
+          collaborator    INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_devices_account ON devices(account_id);
         CREATE TABLE IF NOT EXISTS pairing_tickets (
@@ -69,7 +75,8 @@ object Db {
           expires_at  INTEGER NOT NULL,
           used        INTEGER NOT NULL DEFAULT 0,
           used_at     INTEGER,
-          headless    INTEGER NOT NULL DEFAULT 0
+          headless    INTEGER NOT NULL DEFAULT 0,
+          collaborator INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_tickets_expiry ON pairing_tickets(expires_at);
     """.trimIndent()

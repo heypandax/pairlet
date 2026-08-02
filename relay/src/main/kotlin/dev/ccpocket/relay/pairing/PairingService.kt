@@ -22,14 +22,14 @@ class PairingService(
         data class Err(val code: String) : MintResult
     }
 
-    /** [headless] (issue #91) is the AUTHORITATIVE bridge marker, known only to the minting daemon and
-     *  stamped onto the ticket here; the redeemed device inherits it in [redeem], regardless of what the
-     *  redeeming client self-declares. */
-    suspend fun mint(accountId: String, headless: Boolean = false): MintResult {
+    /** [headless] (issue #91) and [collaborator] (§3.4) are the AUTHORITATIVE markers, known only to the
+     *  minting daemon and stamped onto the ticket here; the redeemed device inherits both in [redeem],
+     *  regardless of what the redeeming client self-declares. */
+    suspend fun mint(accountId: String, headless: Boolean = false, collaborator: Boolean = false): MintResult {
         if (store.countUnredeemedTickets(accountId, clock()) >= MAX_UNREDEEMED) return MintResult.Err("too_many_tickets")
         val raw = ByteArray(32).also(rng::nextBytes) // 256-bit: brute force infeasible by entropy alone
         val now = clock()
-        store.insertTicket(Codec.sha256(raw), accountId, now, now + TTL_MS, headless = headless)
+        store.insertTicket(Codec.sha256(raw), accountId, now, now + TTL_MS, headless = headless, collaborator = collaborator)
         return MintResult.Ok(Codec.b64uEnc(raw), (TTL_MS / 1000).toInt())
     }
 
@@ -57,8 +57,15 @@ class PairingService(
 
         val deviceId = Codec.b64uEnc(ByteArray(16).also(rng::nextBytes))
         val secretBytes = ByteArray(32).also(rng::nextBytes)
-        // authoritative: the ticket's marker only, never the client's self-declaration
-        store.insertDevice(Device(deviceId, claimed.accountId, devicePub, Codec.sha256(secretBytes), clock(), null, revoked = false, headless = claimed.headless))
+        // authoritative: the ticket's markers only, never the client's self-declaration. The COLLABORATOR
+        // marker (§3.4) has no self-declared wire counterpart at all — it exists solely on the ticket, so a
+        // client cannot mint itself an inbox that would be push-addressable.
+        store.insertDevice(
+            Device(
+                deviceId, claimed.accountId, devicePub, Codec.sha256(secretBytes), clock(), null,
+                revoked = false, headless = claimed.headless, collaborator = claimed.collaborator,
+            )
+        )
         return RedeemResult.Ok(claimed.accountId, deviceId, Codec.b64uEnc(secretBytes), devicePubKeyB64)
     }
 

@@ -79,6 +79,12 @@ class Broker {
     suspend fun headlessDeviceCount(account: String): Int =
         mutex.withLock { devices[account]?.count { it.headless } ?: 0 }
 
+    /** Live sockets of ONE device (§3.4): the only presence a TARGETED push consults. A collaborator inbox
+     *  is presence-invisible at the account level by design, so the account-wide counters say nothing about
+     *  whether IT is reachable — only its own socket does. */
+    suspend fun deviceSocketCount(account: String, deviceId: String): Int =
+        mutex.withLock { devices[account]?.count { it.deviceId == deviceId } ?: 0 }
+
     /** The account's live daemon socket (to read its protoV for replay gating), if any. */
     suspend fun daemonConn(account: String): Conn? = mutex.withLock { daemons[account] }
 

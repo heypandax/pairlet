@@ -1,5 +1,6 @@
 package dev.ccpocket.relay.push
 
+import dev.ccpocket.relay.store.PushTarget
 import dev.ccpocket.relay.store.RelayStore
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -9,12 +10,29 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 interface PushService {
     suspend fun notify(account: String, title: String, body: String, route: NotifyRoute? = null)
+
+    /**
+     * §3.4 TARGETED wake: deliver to [deviceId] ALONE — how a Collaborator Link inbox, deliberately absent
+     * from [RelayStore.pushTargets], is reachable. Silently does nothing when the device is not [account]'s,
+     * is revoked, or holds no token; the account check is enforced in the store, never here.
+     */
+    suspend fun notifyDevice(
+        account: String,
+        deviceId: String,
+        title: String,
+        body: String,
+        route: NotifyRoute? = null,
+    )
 }
 
 /** Default no-op provider — logs intent. Used when no APNs/FCM credentials are configured. */
 class LoggingPushService : PushService {
     override suspend fun notify(account: String, title: String, body: String, route: NotifyRoute?) {
         println("[push] account=$account offline — would notify: \"$title — $body\" route=$route")
+    }
+
+    override suspend fun notifyDevice(account: String, deviceId: String, title: String, body: String, route: NotifyRoute?) {
+        println("[push] account=$account device=${deviceId.take(8)}… offline — would notify: \"$title — $body\" route=$route")
     }
 }
 
@@ -43,6 +61,28 @@ class StorePushService(
             log("[push] account=${account.take(8)}… has NO registered tokens — dropping \"$title\"")
             return
         }
+        fanOut(account, targets, title, body, route)
+    }
+
+    override suspend fun notifyDevice(account: String, deviceId: String, title: String, body: String, route: NotifyRoute?) {
+        val target = store.pushTargetFor(account, deviceId)
+        if (target == null) {
+            // the recipient turned notifications off, never registered, was revoked — or the deviceId simply
+            // is not this account's. Nothing to do; the offer is still waiting on the daemon for the next pull.
+            log("[push] account=${account.take(8)}… device=${deviceId.take(8)}… has NO registered token — dropping \"$title\"")
+            return
+        }
+        fanOut(account, listOf(target), title, body, route)
+    }
+
+    /** Deliver to each [targets] entry, pruning permanently-dead tokens and tracking the failure streak. */
+    private suspend fun fanOut(
+        account: String,
+        targets: List<PushTarget>,
+        title: String,
+        body: String,
+        route: NotifyRoute?,
+    ) {
         var accepted = 0
         var pruned = 0
         for (t in targets) {
