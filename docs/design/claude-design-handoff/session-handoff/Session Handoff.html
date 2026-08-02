@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="design_doc_mode" content="canvas" />
+<title>cc-pocket — Session Handoff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="session-handoff/handoff.css" />
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5L20 7"/></symbol>
+<symbol id="i-relay" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.6"/><circle cx="19" cy="12" r="2.6"/><path d="M8.2 12h5.4"/><path d="M11.6 9.4L14.2 12l-2.6 2.6"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3 8.1-7.5 9.5-4.5-1.4-7.5-4.9-7.5-9.5V6z"/><path d="M9 11.8l2.2 2.2 4-4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.4V12l3.2 2"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.4"/><path d="M12 17.4h.01"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12.5" rx="2.5"/><path d="M15.5 5.5v-1A1.5 1.5 0 0 0 14 3H5A1.5 1.5 0 0 0 3.5 4.5v9A1.5 1.5 0 0 0 5 15h1"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15.5V3.5"/><path d="M8 7l4-3.5L16 7"/><path d="M5 13v6.5A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V13"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M7 10l2.5 2.5L7 15"/><path d="M12.5 15.3h4.5"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6.5" cy="5.5" r="2.5"/><circle cx="6.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="7.5" r="2.5"/><path d="M6.5 8v8"/><path d="M17.5 10v1.5a4 4 0 0 1-4 4H9"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></symbol>
+<symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M4 12h15"/><path d="M13.5 6.5L20 12l-6.5 5.5"/></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.6 2.6 0 0 0-3.7-3.7L4.3 16.3z"/><path d="M13.5 7.5l3 3"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.4"/><path d="M12 7.6h.01"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M13.5 3v5.5H19"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V6"/><path d="M6.5 11.5L12 6l5.5 5.5"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.8" y="9.8" width="4.4" height="4.4" rx="1"/><path d="M12 2.6V6M12 18v3.4M2.6 12H6M18 12h3.4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.6h8.8A1.5 1.5 0 0 1 21 9.1v9.4A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 9.5h9.5A5.5 5.5 0 0 1 19 15v0a5.5 5.5 0 0 1-5.5 5.5H8"/><path d="M8 5L3.5 9.5 8 14"/></symbol>
+<symbol id="i-bat" viewBox="0 0 19 12"><rect y="7.5" width="3.2" height="4.5" rx=".7" fill="currentColor" stroke="none"/><rect x="4.8" y="5" width="3.2" height="7" rx=".7" fill="currentColor" stroke="none"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx=".7" fill="currentColor" stroke="none"/><rect x="14.4" width="3.2" height="12" rx=".7" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-batt" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity=".35" fill="none"/><rect x="2" y="2" width="20" height="9" rx="2" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<div class="secttl" style="left:80px;top:44px;width:1100px">Session Handoff — v1 (Review, read-only)
+<i>One controller at a time. WAITING → IN_PROGRESS → RETURNED → COMPLETED. Terminal: DECLINED / CANCELLED / EXPIRED / RECALLED.<br>Status colour law — waiting = neutral · in-progress = terracotta · returned/completed = green · recalled/expired = amber · declined/cancelled = grey · danger red is reserved for Recall &amp; Revoke.</i></div>
+
+<!-- ══════ FRAME 1 — initiate entry ══════ -->
+<div class="flabel" style="left:80px;top:196px;width:430px">Frame 1 · Initiate — session action menu<i>390×844 · dark · placement only, one new row</i></div>
+<div class="frame t" style="left:80px;top:260px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Refactor auth module</span><span class="tapicon" style="color:var(--accent)"><svg class="ic ic-20"><use href="#i-dots"/></svg></span><span class="modepill">default<svg class="ic ic-12"><use href="#i-chev-d"/></svg></span></div>
+    <div class="subhdr"><span class="livedot"></span><span>Panda · MacBook Pro&nbsp;·&nbsp;<span class="p">~/proj/app/cc-pocket</span></span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">YOU</div><div class="bd">where does the SSE stream get assembled?</div></div>
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">It's in <span class="m">StreamParser.feed()</span> in the protocol module — partial frames buffer there until a blank line terminates the event.</div></div>
+      <div class="strip"></div>
+      <div class="msg"><div class="who">YOU</div><div class="bd">add a unit test for the stream parser</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Bash</span><span class="cmd">gradle :protocol:test</span><span class="ok">42 passed</span></div>
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Suite is green. The parser now emits exactly one event when a frame is split across chunks.</div></div>
+    </div></div>
+    <div class="composer"><span class="tapicon"><svg class="ic ic-20"><use href="#i-plus"/></svg></span><span class="cinput">Message Claude…</span><span class="csend"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+  </div>
+  <div class="scrim" style="top:88px"></div>
+  <div class="menu" style="right:10px;top:92px">
+    <div class="mrow dim"><svg class="ic ic-16"><use href="#i-plus"/></svg>New session</div>
+    <div class="mrow dim"><svg class="ic ic-16"><use href="#i-edit"/></svg>Rename session</div>
+    <div class="mrow dim"><svg class="ic ic-16"><use href="#i-share"/></svg>Share transcript</div>
+    <div class="mrow hi"><svg class="ic ic-16"><use href="#i-relay"/></svg>Hand off to a colleague<span class="nb">NEW</span></div>
+    <div class="mrow dim"><svg class="ic ic-16"><use href="#i-file"/></svg>Export as Markdown</div>
+    <div class="mrow dim"><svg class="ic ic-16"><use href="#i-folder"/></svg>Archive session</div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:80px;top:1124px;width:400px">Anchor: <b>⋯</b> in the chat header (44×44). Popover 256px, r14, raised + hairline.<br>The new row is the only one with a leading terracotta glyph; everything else<br>stays neutral. Scrim starts under the header so the session you're handing<br>off stays legible. <b>NEW</b> badge is temporary (2 releases).</div>
+
+<!-- ══════ FRAME 2 — draft preview ══════ -->
+<div class="flabel" style="left:560px;top:196px;width:430px">Frame 2 · Handoff draft — full sheet<i>390×1420 scrolling sheet · dark · exceeds the 844 viewport — scroll region in Compose<br>hero = trust boundary card</i></div>
+<div class="frame t" style="left:560px;top:260px;width:390px;height:1420px">
+  <div class="col">
+    <div class="dimtop" style="height:26px"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="shhd"><h3>Hand off this session</h3><span class="sp"></span><span class="tapicon" style="margin-right:-10px"><svg class="ic ic-20"><use href="#i-x"/></svg></span></div>
+      <div class="shbody">
+        <div class="sess">
+          <div class="h"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-term"/></svg><span class="n">Refactor auth module</span><span class="chip"><svg class="ic"><use href="#i-chip"/></svg>Claude</span></div>
+          <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-branch"/></svg><span>feat/auth-refactor</span></div>
+        </div>
+        <div>
+          <div class="fl">Role<span class="hint">continue arrives later</span></div>
+          <div class="segbox">
+            <div class="seg on"><span class="s1"><span class="radio on"></span>Review</span><span class="s2">read-only</span></div>
+            <div class="seg dis"><span class="s1"><span class="radio"></span>Continue</span><span class="s2">can edit · later</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="fl">Recipient</div>
+          <div class="rcp"><span class="tagchip">@Frank<span class="x"><svg class="ic ic-12"><use href="#i-x"/></svg></span></span><span class="ph">Add a name or label…</span></div>
+        </div>
+        <div>
+          <div class="fl">Invite expires</div>
+          <div class="pills"><span class="pill">1h</span><span class="pill">4h</span><span class="pill on">24h</span></div>
+        </div>
+        <div class="bcard">
+          <div class="bcol">
+            <h5><span class="tag" style="color:var(--success)">THEY WILL SEE</span></h5>
+            <ul class="bl">
+              <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>The full session transcript</b><span class="sub">every message, tool call and diff</span></span></li>
+              <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Code in the shared roots</b><span class="sub">~/proj/app/cc-pocket<br>~/proj/app/cc-pocket-protocol</span></span></li>
+              <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Read-only tools &amp; diffs</b><span class="sub">Read · Grep · Glob · git diff</span></span></li>
+            </ul>
+          </div>
+          <div class="bcol">
+            <h5><span class="tag" style="color:var(--muted)">THEY CAN'T DO</span></h5>
+            <ul class="bl">
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Edit or write files</span></li>
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Reach your other sessions or folders</span></li>
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Change device settings or credentials</span></li>
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Pass this handoff on to someone else</span></li>
+            </ul>
+          </div>
+          <div class="honest"><svg class="ic ic-16"><use href="#i-alert"/></svg><span>The <b>full conversation history</b> of this session will be visible — including anything you pasted into it.</span></div>
+        </div>
+        <div class="disc">
+          <div class="dh"><svg class="ic ic-16"><use href="#i-file"/></svg>Handoff brief<span class="chip mute" style="margin-left:2px">auto</span><span class="sp"></span><span class="edit"><svg class="ic ic-14"><use href="#i-edit"/></svg>Edit</span></div>
+          <div class="db">
+            <div><div class="mdk">Goal</div><p class="mdp">Split <code>AuthInterceptor</code> so token refresh is testable without a live socket.</p></div>
+            <div><div class="mdk">Done</div><p class="mdp">Extracted <code>TokenStore</code>, moved refresh into <code>RefreshCoordinator</code>, 42 tests green.</p></div>
+            <div><div class="mdk">Current state</div><p class="mdp">Working tree clean on <code>feat/auth-refactor</code>, 6 files changed.</p></div>
+            <div><div class="mdk">Ask</div><p class="mdp">Review the concurrency around the refresh mutex before I open the PR.</p></div>
+            <div><div class="mdk">Focus areas</div><ul class="mdl"><li><code>RefreshCoordinator.kt</code></li><li><code>TokenStore.kt</code> — persistence path</li></ul></div>
+          </div>
+        </div>
+      </div>
+      <div class="shfoot">
+        <button class="btn pri full">Create invite</button>
+        <button class="btn sec full">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:560px;top:1710px;width:400px">The boundary card is the <b>hero</b> — it sits above the fold-adjacent brief and<br>uses the same two-list grammar as folder share. Mobile stacks the two<br>columns; the honest strip spans full width on a raised background.<br>Role is a two-up card segment, not a pill row, so the read-only sub-label<br>always reads. <b>Continue</b> is present-but-disabled to set the roadmap.<br>The <b>@Frank</b> remove glyph draws at 18px but takes a <b>44×44</b> hit slop.</div>
+
+<!-- ══════ FRAME 3a — invite ready ══════ -->
+<div class="flabel" style="left:1040px;top:196px;width:430px">Frame 3a · Invite ready — share sheet<i>390×600 · dark · QR + short code</i></div>
+<div class="frame t" style="left:1040px;top:260px;width:390px;height:600px">
+  <div class="col">
+    <div class="dimtop" style="height:26px"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="shhd"><h3>Invite ready</h3><span class="sp"></span><span class="chip mute">WAITING</span></div>
+      <div class="shbody" style="gap:14px">
+        <div class="qrcard">
+          <div class="qrbox"></div>
+          <div class="scode">H7QX-2MRD</div>
+          <div class="cdown">expires in 23:59:12</div>
+        </div>
+        <div class="recap"><span>Frank</span><span class="d">·</span><span>Review</span><span class="d">·</span><span>read-only</span><span class="d">·</span><span>24h</span></div>
+      </div>
+      <div class="shfoot" style="flex-direction:row">
+        <button class="btn pri" style="flex:1"><svg class="ic ic-16"><use href="#i-share"/></svg>Share…</button>
+        <button class="btn sec" style="flex:1"><svg class="ic ic-16"><use href="#i-copy"/></svg>Copy link</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:1040px;top:880px;width:400px">Short code is the fallback for anyone who can't scan: 8 chars, mono, 27px,<br>0.1em tracking, ambiguous glyphs (0/O, 1/I) excluded from the alphabet.<br>Countdown is caption-weight — informational, never alarming, until &lt;5 min<br>when it turns <span class="g" style="color:#E0A93B">amber</span>.</div>
+
+<!-- ══════ FRAME 3b — WAITING lock ══════ -->
+<div class="flabel" style="left:1040px;top:1024px;width:430px">Frame 3b · Source chat — WAITING lock<i>390×844 · dark · composer disabled, stream still scrollable</i></div>
+<div class="frame t" style="left:1040px;top:1088px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Refactor auth module</span><span class="chip mute" style="margin-right:6px">WAITING</span><span class="modepill">default<svg class="ic ic-12"><use href="#i-chev-d"/></svg></span></div>
+    <div class="subhdr"><span class="livedot"></span><span>Panda · MacBook Pro&nbsp;·&nbsp;<span class="p">~/proj/app/cc-pocket</span></span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">YOU</div><div class="bd">add a unit test for the stream parser</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Bash</span><span class="cmd">gradle :protocol:test</span><span class="ok">42 passed</span></div>
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Suite is green — the parser emits exactly one event when a frame straddles a chunk boundary. Working tree is clean on <span class="m">feat/auth-refactor</span>.</div></div>
+      <div class="strip"></div>
+      <div class="sysrow"><svg class="ic ic-16"><use href="#i-relay"/></svg><span><b>Handoff created</b> for Frank · Review · expires in 24h</span></div>
+    </div></div>
+    <div class="lockbar">
+      <div class="top"><span class="waitdot"></span><div style="flex:1;min-width:0"><div class="t1">Waiting for Frank to accept</div><div class="t2">Review · read-only · H7QX-2MRD · 23:57:04 left</div></div></div>
+      <div class="acts"><button class="btn ghost sm" style="flex:1"><svg class="ic ic-14"><use href="#i-copy"/></svg>Copy invite</button><button class="btn dgr sm" style="flex:1"><svg class="ic ic-14"><use href="#i-undo"/></svg>Recall</button></div>
+    </div>
+    <div class="composer off"><span class="tapicon"><svg class="ic ic-20"><use href="#i-plus"/></svg></span><span class="cinput"><svg class="ic ic-16" style="margin-right:8px"><use href="#i-lock"/></svg>Input locked during handoff</span><span class="csend"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1040px;top:1952px;width:400px">Waiting is <b>neutral</b>, not terracotta — nothing is running yet. The banner is a<br>pinned card above the composer (not a toast) because the lock persists.<br>Composer is dimmed to 45% and shows a lock glyph — it is visibly present,<br>not removed, so the return to normal is obvious. <b>Recall</b> is the only<br>danger-tinted control on the screen. Both banner buttons are <b>44pt</b> tall.</div>
+
+<!-- ══════ FRAME 4 — recipient accept ══════ -->
+<div class="flabel" style="left:1520px;top:196px;width:430px">Frame 4 · Recipient — accept preview<i>390×1312 scrolling · dark · exceeds the 844 viewport — scroll region in Compose<br>the trust screen; footer buttons pinned</i></div>
+<div class="frame t" style="left:1520px;top:260px;width:390px;height:1312px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-x"/></svg></span><span class="ttl">Session handoff</span><span class="chip acc" style="margin-right:8px"><svg class="ic"><use href="#i-relay"/></svg>INVITE</span></div>
+    <div class="scroll"><div class="stream" style="gap:16px;padding:16px 16px 20px">
+      <div class="sess">
+        <div class="h"><span class="av a">P</span><span class="n">Panda · MacBook Pro</span></div>
+        <div class="f" style="padding-bottom:0"><span style="color:var(--text);font-family:'Inter';font-size:14px;font-weight:600">Refactor auth module</span></div>
+        <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-branch"/></svg><span>feat/auth-refactor</span></div>
+      </div>
+      <div class="grpbox">
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-eye"/></svg><span class="tx"><span class="n" style="font-size:14px">Code review</span><span class="s">role</span></span><span class="chip">Review</span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-lock"/></svg><span class="tx"><span class="n" style="font-size:14px">Read-only</span><span class="s">access level</span></span><span class="chip ok">no writes</span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-clock"/></svg><span class="tx"><span class="n" style="font-size:14px">Returns in 4h</span><span class="s">or when you finish</span></span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-chip"/></svg><span class="tx"><span class="n" style="font-size:14px">Runs on Panda's computer</span><span class="s">and Panda's model account — you're not billed</span></span></div>
+      </div>
+      <div class="bcard">
+        <div class="bcol">
+          <h5><span class="tag" style="color:var(--success)">YOU WILL SEE</span></h5>
+          <ul class="bl">
+            <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Panda's full session transcript</b><span class="sub">every message, tool call and diff</span></span></li>
+            <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Code in the shared roots</b><span class="sub">~/proj/app/cc-pocket<br>~/proj/app/cc-pocket-protocol</span></span></li>
+            <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Read-only tools &amp; diffs</b><span class="sub">Read · Grep · Glob · git diff</span></span></li>
+          </ul>
+        </div>
+        <div class="bcol">
+          <h5><span class="tag" style="color:var(--muted)">YOU CAN'T DO</span></h5>
+          <ul class="bl">
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Edit, write or commit files</span></li>
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Open Panda's other sessions or folders</span></li>
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Touch device settings or credentials</span></li>
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Hand this session on to anyone else</span></li>
+          </ul>
+        </div>
+        <div class="honest"><svg class="ic ic-16"><use href="#i-alert"/></svg><span>Panda can <b>recall control</b> at any time. Your messages are recorded in their session.</span></div>
+      </div>
+      <div class="disc">
+        <div class="dh"><svg class="ic ic-16"><use href="#i-file"/></svg>Handoff brief<span class="sp"></span><svg class="ic ic-16"><use href="#i-chev-d"/></svg></div>
+        <div class="db">
+          <div><div class="mdk">Goal</div><p class="mdp">Split <code>AuthInterceptor</code> so token refresh is testable without a live socket.</p></div>
+          <div><div class="mdk">Ask</div><p class="mdp">Review the concurrency around the refresh mutex before the PR opens.</p></div>
+          <div><div class="mdk">Focus areas</div><ul class="mdl"><li><code>RefreshCoordinator.kt</code></li><li><code>TokenStore.kt</code> — persistence path</li></ul></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="shfoot"><button class="btn pri full">Accept &amp; continue session</button><button class="btn sec full">Decline</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1520px;top:1592px;width:400px">Mirror of Frame 2, second person. Facts first (<b>who / what / where</b>), then the<br>same boundary grammar, then the brief. The cost note is a row, not fine<br>print — “runs on Panda's computer and model account” is the single<br>question every recipient asks.</div>
+
+<!-- ══════ FRAME 4b — expired ══════ -->
+<div class="flabel" style="left:1520px;top:1716px;width:430px">Frame 4b · Recipient — expired invite<i>390×560 · dark · inline error variant</i></div>
+<div class="frame t" style="left:1520px;top:1780px;width:390px;height:560px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-x"/></svg></span><span class="ttl">Session handoff</span><span class="chip warn" style="margin-right:8px">EXPIRED</span></div>
+    <div style="margin:8px 16px 0;padding:13px 14px;border:1px solid #4A3A1C;background:var(--warning-bg);border-radius:12px;display:flex;gap:10px;align-items:flex-start">
+      <svg class="ic ic-16" style="color:var(--warning);margin-top:1px"><use href="#i-alert"/></svg>
+      <div><div style="font-size:13.5px;font-weight:600;color:var(--warning)">This invite has expired</div><div style="font:400 11.5px/1.5 'JetBrains Mono',monospace;color:var(--sec);margin-top:3px">H7QX-2MRD · expired 12 min ago<br>Ask Panda to send a new one.</div></div>
+    </div>
+    <div class="scroll" style="opacity:.32"><div class="stream" style="padding:14px 16px">
+      <div class="sess">
+        <div class="h"><span class="av">P</span><span class="n">Panda · MacBook Pro</span></div>
+        <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><span>feat/auth-refactor</span></div>
+      </div>
+      <div class="grpbox">
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-eye"/></svg><span class="tx"><span class="n" style="font-size:14px">Code review</span><span class="s">role</span></span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-lock"/></svg><span class="tx"><span class="n" style="font-size:14px">Read-only</span><span class="s">access level</span></span></div>
+      </div>
+    </div></div>
+    <div class="shfoot"><button class="btn sec full">Close</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1520px;top:2360px;width:400px">Expired keeps the content visible at 32% so the recipient can still tell<br><em style="color:#8A9096">what</em> they missed — but every action collapses to a single <b>Close</b>.<br>Same shell serves DECLINED, CANCELLED and RECALLED with a swapped<br>banner string and chip.</div>
+
+<!-- ══════ FRAME 5 — light variant ══════ -->
+<div class="flabel" style="left:2000px;top:196px;width:430px">Frame 5 · Recipient trust screen — light<i>390×1312 scrolling · light · token-for-token lock of Frame 4</i></div>
+<div class="frame t lt" style="left:2000px;top:260px;width:390px;height:1312px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-x"/></svg></span><span class="ttl">Session handoff</span><span class="chip acc" style="margin-right:8px"><svg class="ic"><use href="#i-relay"/></svg>INVITE</span></div>
+    <div class="scroll"><div class="stream" style="gap:16px;padding:16px 16px 20px">
+      <div class="sess">
+        <div class="h"><span class="av a">P</span><span class="n">Panda · MacBook Pro</span></div>
+        <div class="f" style="padding-bottom:0"><span style="color:var(--text);font-family:'Inter';font-size:14px;font-weight:600">Refactor auth module</span></div>
+        <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-branch"/></svg><span>feat/auth-refactor</span></div>
+      </div>
+      <div class="grpbox">
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-eye"/></svg><span class="tx"><span class="n" style="font-size:14px">Code review</span><span class="s">role</span></span><span class="chip">Review</span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-lock"/></svg><span class="tx"><span class="n" style="font-size:14px">Read-only</span><span class="s">access level</span></span><span class="chip ok">no writes</span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-clock"/></svg><span class="tx"><span class="n" style="font-size:14px">Returns in 4h</span><span class="s">or when you finish</span></span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-chip"/></svg><span class="tx"><span class="n" style="font-size:14px">Runs on Panda's computer</span><span class="s">and Panda's model account — you're not billed</span></span></div>
+      </div>
+      <div class="bcard">
+        <div class="bcol">
+          <h5><span class="tag" style="color:var(--success)">YOU WILL SEE</span></h5>
+          <ul class="bl">
+            <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Panda's full session transcript</b><span class="sub">every message, tool call and diff</span></span></li>
+            <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Code in the shared roots</b><span class="sub">~/proj/app/cc-pocket<br>~/proj/app/cc-pocket-protocol</span></span></li>
+            <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Read-only tools &amp; diffs</b><span class="sub">Read · Grep · Glob · git diff</span></span></li>
+          </ul>
+        </div>
+        <div class="bcol">
+          <h5><span class="tag" style="color:var(--muted)">YOU CAN'T DO</span></h5>
+          <ul class="bl">
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Edit, write or commit files</span></li>
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Open Panda's other sessions or folders</span></li>
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Touch device settings or credentials</span></li>
+            <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Hand this session on to anyone else</span></li>
+          </ul>
+        </div>
+        <div class="honest"><svg class="ic ic-16"><use href="#i-alert"/></svg><span>Panda can <b>recall control</b> at any time. Your messages are recorded in their session.</span></div>
+      </div>
+      <div class="disc">
+        <div class="dh"><svg class="ic ic-16"><use href="#i-file"/></svg>Handoff brief<span class="sp"></span><svg class="ic ic-16"><use href="#i-chev-d"/></svg></div>
+        <div class="db">
+          <div><div class="mdk">Goal</div><p class="mdp">Split <code>AuthInterceptor</code> so token refresh is testable without a live socket.</p></div>
+          <div><div class="mdk">Ask</div><p class="mdp">Review the concurrency around the refresh mutex before the PR opens.</p></div>
+          <div><div class="mdk">Focus areas</div><ul class="mdl"><li><code>RefreshCoordinator.kt</code></li><li><code>TokenStore.kt</code> — persistence path</li></ul></div>
+        </div>
+      </div>
+    </div></div>
+    <div class="shfoot"><button class="btn pri full">Accept &amp; continue session</button><button class="btn sec full">Decline</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2000px;top:1592px;width:400px">Light swaps tokens only — no layout change. Accent darkens to <b>#C75A38</b><br>for AA on warm white; primary button text goes white. Success/muted<br>marks keep their roles so the two lists stay distinguishable without<br>relying on colour alone (glyph shape carries it).</div>
+
+<!-- ══════ FRAME 6 — recipient in control ══════ -->
+<div class="flabel" style="left:2480px;top:196px;width:430px">Frame 6 · Recipient in control — IN_PROGRESS<i>390×844 · dark · terracotta ribbon, actor attribution</i></div>
+<div class="frame t" style="left:2480px;top:260px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Refactor auth module</span><span class="modepill"><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-shield"/></svg>read-only</span></div>
+    <div class="ribbon rib-acc"><span class="avpair"><span class="av">P</span><svg class="ic ic-12" style="color:var(--accent)"><use href="#i-arrow-r"/></svg><span class="av a">F</span></span><span>Continuing Panda's session · Review</span><span class="cd">3:41:22</span></div>
+    <div class="subhdr"><span class="livedot"></span><span>Panda · MacBook Pro&nbsp;·&nbsp;<span class="p">~/proj/app/cc-pocket</span></span><span class="sp"></span><span class="shieldcap"><svg class="ic ic-12"><use href="#i-shield"/></svg>read-only tools</span></div>
+    <div class="scroll"><div class="stream">
+      <div class="sysrow"><svg class="ic ic-16"><use href="#i-relay"/></svg><span>You joined this session for <b>code review</b> — see the Handoff brief</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+      <div class="msg"><div class="who">PANDA</div><div class="bd">add a unit test for the stream parser</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Bash</span><span class="cmd">gradle :protocol:test</span><span class="ok">42 passed</span></div>
+      <div class="strip"></div>
+      <div class="msg"><div class="who"><span class="tick"></span><span class="self">FRANK (YOU)</span></div><div class="bd">show me every call site that touches the refresh mutex</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Grep</span><span class="cmd">refreshMutex --glob *.kt</span><span class="ok">7 hits</span></div>
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Seven call sites. Six take the mutex before reading <span class="m">TokenStore</span>; <span class="m">RefreshCoordinator.kt:88</span> reads it outside the lock<span class="caret"></span></div></div>
+    </div></div>
+    <div style="flex:none;padding:0 12px 10px"><button class="btn outacc md full"><svg class="ic ic-16"><use href="#i-undo"/></svg>Finish &amp; return</button></div>
+    <div class="composer"><span class="tapicon"><svg class="ic ic-20"><use href="#i-plus"/></svg></span><span class="cinput" style="color:var(--text)">where else is the store read?</span><span class="csend on"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2480px;top:1124px;width:400px">Terracotta means <b>in progress</b> — the ribbon is the only tinted surface.<br>Attribution appears only once a session has had more than one actor;<br>solo sessions keep the plain YOU / CLAUDE labels. The recipient's own<br>label carries a 5px accent tick. Tool rows are untouched — the actor of a<br>tool call is always the agent.</div>
+
+<!-- ══════ FRAME 7 — initiator spectating ══════ -->
+<div class="flabel" style="left:2960px;top:196px;width:430px">Frame 7 · Initiator spectating<i>390×844 · dark · neutral ribbon, input locked</i></div>
+<div class="frame t" style="left:2960px;top:260px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Refactor auth module</span><span class="chip acc" style="margin-right:8px"><span class="progdot" style="width:6px;height:6px;box-shadow:none"></span>IN PROGRESS</span></div>
+    <div class="ribbon rib-neu"><span class="avpair"><span class="av a">F</span></span><span>Frank is continuing this session · Review</span><span class="cd">3:41:22</span></div>
+    <div class="subhdr"><span class="livedot"></span><span>Panda · MacBook Pro&nbsp;·&nbsp;<span class="p">~/proj/app/cc-pocket</span></span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">YOU</div><div class="bd">add a unit test for the stream parser</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Bash</span><span class="cmd">gradle :protocol:test</span><span class="ok">42 passed</span></div>
+      <div class="strip"></div>
+      <div class="sysrow"><svg class="ic ic-16"><use href="#i-relay"/></svg><span><b>Frank accepted</b> · took control 18 min ago</span></div>
+      <div class="msg"><div class="who">FRANK</div><div class="bd">show me every call site that touches the refresh mutex</div></div>
+      <div class="toolrow"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Grep</span><span class="cmd">refreshMutex --glob *.kt</span><span class="ok">7 hits</span></div>
+      <div class="msg"><div class="who">CLAUDE</div><div class="bd">Seven call sites. Six take the mutex before reading <span class="m">TokenStore</span>; <span class="m">RefreshCoordinator.kt:88</span> reads it outside the lock<span class="caret"></span></div></div>
+    </div></div>
+    <div class="watchbar"><span class="lb"><svg class="ic ic-16"><use href="#i-eye"/></svg>Watching — input locked</span><button class="btn dgr sm"><svg class="ic ic-14"><use href="#i-undo"/></svg>Recall control</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2960px;top:1124px;width:400px">Same stream, different chrome. The initiator's ribbon is <b>neutral</b> — they are<br>not the actor, so no terracotta. The composer is <em style="color:#8A9096">replaced</em> here (not dimmed):<br>during IN_PROGRESS there is no draft to preserve, and the bar carries the<br>one escape hatch. Streaming output keeps rendering live.</div>
+
+<!-- ══════ FRAME 8 — return flow ══════ -->
+<div class="flabel" style="left:3440px;top:196px;width:430px">Frame 8 · Return flow — result draft<i>390×900 · dark · structured, editable</i></div>
+<div class="frame t" style="left:3440px;top:260px;width:390px;height:900px">
+  <div class="col">
+    <div class="dimtop" style="height:26px"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="shhd"><h3>Return session to Panda</h3><span class="sp"></span><span class="tapicon" style="margin-right:-10px"><svg class="ic ic-20"><use href="#i-x"/></svg></span></div>
+      <div class="shbody" style="gap:14px">
+        <p class="mdp" style="margin:-4px 0 0">Panda gets control back and this result is added to the session.</p>
+        <div class="rescard">
+          <div class="rh"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-file"/></svg><span class="n">Return result</span><span class="chip mute">draft · auto</span><span class="edit" style="font:500 12px/1 'Inter';color:var(--accent);display:flex;align-items:center;gap:5px"><svg class="ic ic-14"><use href="#i-edit"/></svg>Edit</span></div>
+          <div class="rb">
+            <div><div class="mdk" style="margin-bottom:8px">Verdict</div><div style="display:flex;gap:8px;flex-wrap:wrap"><span class="chip warn lg">Approve with fixes</span><span class="chip lg mute">Approve</span><span class="chip lg mute">Request changes</span></div></div>
+            <div class="hr"></div>
+            <div><div class="mdk" style="margin-bottom:10px">Findings · 3</div>
+              <div style="display:flex;flex-direction:column;gap:11px">
+                <div class="find"><span class="sev hi"></span><span class="ft">Token store read outside the refresh mutex<span class="fp">RefreshCoordinator.kt:88</span></span></div>
+                <div class="find"><span class="sev md"></span><span class="ft">Retry backoff resets on every 401, so it never grows<span class="fp">RefreshCoordinator.kt:142</span></span></div>
+                <div class="find"><span class="sev lo"></span><span class="ft">Test covers the split-chunk case but not an empty frame<span class="fp">StreamParserTest.kt:61</span></span></div>
+              </div>
+            </div>
+            <div class="hr"></div>
+            <div><div class="mdk" style="margin-bottom:9px">Verified</div>
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <div class="vrow"><svg class="ic ic-14 pass"><use href="#i-check"/></svg><span>gradle :protocol:test</span><span class="sp"></span><span class="pass">42 passed</span></div>
+                <div class="vrow"><svg class="ic ic-14 pass"><use href="#i-check"/></svg><span>gradle :app:lint</span><span class="sp"></span><span class="pass">clean</span></div>
+                <div class="vrow"><svg class="ic ic-14 fail"><use href="#i-x"/></svg><span>gradle :app:test</span><span class="sp"></span><span class="fail">1 failed</span></div>
+              </div>
+            </div>
+            <div class="hr"></div>
+            <div><div class="mdk" style="margin-bottom:8px">Suggested next steps</div>
+              <ul class="mdl"><li>Move the <code>TokenStore</code> read inside <code>withLock</code>.</li><li>Make backoff state survive a 401 burst.</li><li>Add an empty-frame case to the parser test.</li></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="shfoot"><button class="btn pri full"><svg class="ic ic-16"><use href="#i-undo"/></svg>Return session</button><button class="btn sec full">Keep working</button></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:3440px;top:1180px;width:400px">The result is <b>structured, not prose</b> — verdict + findings + verification +<br>next steps — so it can be rendered as a card, injected into the session as<br>context, and later diffed. Severity is a 7px dot: red / amber / secondary.<br>Every finding carries a mono <b>file:line</b>. Verdict chips use the status<br>palette (amber = attention, not failure).</div>
+
+<!-- ══════ FRAME 9 — result + completion ══════ -->
+<div class="flabel" style="left:3920px;top:196px;width:430px">Frame 9 · Initiator — RETURNED, result in stream<i>390×844 · dark · composer unlocked</i></div>
+<div class="frame t" style="left:3920px;top:260px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Refactor auth module</span><span class="chip ok" style="margin-right:6px">RETURNED</span><span class="modepill">default<svg class="ic ic-12"><use href="#i-chev-d"/></svg></span></div>
+    <div class="subhdr"><span class="livedot"></span><span>Panda · MacBook Pro&nbsp;·&nbsp;<span class="p">~/proj/app/cc-pocket</span></span></div>
+    <div class="scroll"><div class="stream">
+      <div class="msg"><div class="who">FRANK</div><div class="bd">show me every call site that touches the refresh mutex</div></div>
+      <div class="strip"></div>
+      <div class="rescard">
+        <div class="rh"><span class="av a">F</span><span class="n">Frank returned this session</span><span class="chip warn">Approve with fixes</span></div>
+        <div class="rb">
+          <div class="find"><span class="sev hi"></span><span class="ft">Token store read outside the refresh mutex<span class="fp">RefreshCoordinator.kt:88</span></span></div>
+          <div class="find"><span class="sev md"></span><span class="ft">Retry backoff resets on every 401<span class="fp">RefreshCoordinator.kt:142</span></span></div>
+          <a class="morelink" href="#">View all 5 findings →</a>
+          <div class="hr"></div>
+          <div class="vrow"><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-file"/></svg><span>6 files reviewed · 0 changed</span></div>
+          <div class="vrow"><svg class="ic ic-14 pass"><use href="#i-check"/></svg><span>protocol:test 42 ✓ · app:lint clean · app:test 1 ✗</span></div>
+        </div>
+        <div class="ra"><button class="btn pri sm">Mark reviewed</button><button class="btn sec sm">Open full result</button><span class="sp"></span><span class="chip mute">18 min</span></div>
+      </div>
+      <div class="sysrow"><svg class="ic ic-16"><use href="#i-info"/></svg><span>Result injected into the session for Claude to continue.</span></div>
+    </div></div>
+    <div class="composer"><span class="tapicon"><svg class="ic ic-20"><use href="#i-plus"/></svg></span><span class="cinput">Message Claude…</span><span class="csend"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:3920px;top:1124px;width:400px">RETURNED is <span class="g">green</span> — the loop closed successfully; the verdict chip carries<br>its own (amber) severity independently. The card is an in-stream artefact,<br>not a modal, so it stays scrollable in history. <b>Mark reviewed</b> is the only<br>transition to COMPLETED. The system row is deliberately plain: the user<br>should know the result became context.</div>
+
+<!-- ══════ FRAME 10 — history ══════ -->
+<div class="flabel" style="left:4400px;top:196px;width:430px">Frame 10 · Session info — Handoffs<i>390×620 · dark · status chip legend in situ</i></div>
+<div class="frame t" style="left:4400px;top:260px;width:390px;height:620px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Session info</span></div>
+    <div class="scroll"><div style="padding:12px 16px">
+      <div class="grpl">Handoffs<span class="chip mute">6</span></div>
+      <div class="grpbox">
+        <div class="hrow"><span class="av a">F</span><span class="tx"><span class="n">Frank<span class="chip">Review</span></span><span class="s">18 min · 5 findings</span></span><span class="chip acc"><span class="progdot" style="width:6px;height:6px;box-shadow:none"></span>In progress</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        <div class="hrow"><span class="av">M</span><span class="tx"><span class="n">Mei<span class="chip">Review</span></span><span class="s">yesterday · approved</span></span><span class="chip ok">Completed</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        <div class="hrow"><span class="av">F</span><span class="tx"><span class="n">Frank<span class="chip">Review</span></span><span class="s">2 days ago · pulled back after 4 min</span></span><span class="chip warn">Recalled</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        <div class="hrow"><span class="av">A</span><span class="tx"><span class="n">Aiko<span class="chip">Review</span></span><span class="s">3 days ago</span></span><span class="chip mute">Declined</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        <div class="hrow"><span class="av">M</span><span class="tx"><span class="n">Mei<span class="chip">Review</span></span><span class="s">last week · never opened</span></span><span class="chip warn">Expired</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        <div class="hrow"><span class="av">?</span><span class="tx"><span class="n">Unsent invite<span class="chip">Review</span></span><span class="s">last week</span></span><span class="chip mute">Cancelled</span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+      </div>
+    </div></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="flabel" style="left:4400px;top:940px;width:430px">Frame 10b · Handoffs — empty<i>390×300 · dark</i></div>
+<div class="frame t" style="left:4400px;top:1004px;width:390px;height:300px">
+  <div style="padding:16px">
+    <div class="grpl">Handoffs</div>
+    <div class="grpbox">
+      <div class="empty">
+        <svg class="ic ic-22" style="color:var(--muted)"><use href="#i-relay"/></svg>
+        <p>Hand off this session to get a colleague's eyes on it.</p>
+        <button class="btn ghost sm"><svg class="ic ic-14"><use href="#i-relay"/></svg>Hand off…</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:4400px;top:1324px;width:400px">Rows are 60px, whole row tappable, chevron trailing. The status chip is<br>the row's only colour. <b>In progress</b> pulses (1.4s, opacity 1→.45) — it is<br>the one live state. Expired and Recalled share amber because both mean<br>“ended without a result”; Declined / Cancelled are grey — a non-event.</div>
+
+<!-- ══════ DESKTOP ══════ -->
+<div class="secttl" style="left:80px;top:2560px;width:1000px">Desktop — 1200pt two-pane<i>Left session sidebar 288px · right chat pane. Same tokens, same status law, denser rhythm.</i></div>
+
+<div class="flabel" style="left:80px;top:2680px;width:700px">Frame 11 · Desktop — WAITING + draft modal<i>1200×800 · dark · two-column dialog</i></div>
+<div class="frame t" style="left:80px;top:2750px;width:1200px;height:800px;background:#0B0C0D;padding:0">
+  <div class="dwin">
+    <div class="dside">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span class="sp"></span><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-plus"/></svg></div>
+      <div class="dslist">
+        <div class="grpl" style="padding:6px 10px 6px">Panda · MacBook Pro</div>
+        <div class="dsrow on"><span class="sdot" style="background:var(--sec)"></span><span class="tx"><span class="n">Refactor auth module</span><span class="s">~/proj/app/cc-pocket · waiting for Frank</span></span><svg class="ic ic-14" style="color:var(--sec)"><use href="#i-lock"/></svg></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--success)"></span><span class="tx"><span class="n">Fix flaky socket test</span><span class="s">~/proj/app/cc-pocket-protocol</span></span></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Release notes 1.6</span><span class="s">~/proj/app/cc-pocket</span></span></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Gateway model presets</span><span class="s">~/proj/app/gateway</span></span></div>
+      </div>
+    </div>
+    <div class="dpane">
+      <div class="dph"><span class="n">Refactor auth module</span><span class="chip mute">WAITING</span><span class="s">feat/auth-refactor</span><span class="sp"></span><span class="modepill">default<svg class="ic ic-12"><use href="#i-chev-d"/></svg></span></div>
+      <div class="dstream">
+        <div class="msg"><div class="who">YOU</div><div class="bd">add a unit test for the stream parser</div></div>
+        <div class="toolrow" style="max-width:640px"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Bash</span><span class="cmd">gradle :protocol:test</span><span class="ok">42 passed</span></div>
+        <div class="msg"><div class="who">CLAUDE</div><div class="bd" style="max-width:720px">Suite is green — the parser emits exactly one event when a frame straddles a chunk boundary. Working tree is clean on <span class="m">feat/auth-refactor</span>.</div></div>
+        <div class="sysrow" style="max-width:640px"><svg class="ic ic-16"><use href="#i-relay"/></svg><span><b>Handoff created</b> for Frank · Review · expires in 24h</span></div>
+      </div>
+      <div class="dlock">
+        <span class="waitdot"></span>
+        <div style="flex:1;min-width:0"><div style="font-size:13.5px;font-weight:600">Waiting for Frank to accept</div><div style="font:400 11px/1.4 'JetBrains Mono',monospace;color:var(--muted);margin-top:2px">Review · read-only · H7QX-2MRD · 23:57:04 left</div></div>
+        <button class="btn ghost sm"><svg class="ic ic-14"><use href="#i-copy"/></svg>Copy invite</button>
+        <button class="btn dgr sm"><svg class="ic ic-14"><use href="#i-undo"/></svg>Recall</button>
+      </div>
+      <div class="dcomposer" style="opacity:.45"><svg class="ic ic-20" style="color:var(--muted)"><use href="#i-plus"/></svg><span class="ci"><svg class="ic ic-16" style="margin-right:8px"><use href="#i-lock"/></svg>Input locked during handoff</span><span class="csend"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="dmodal">
+      <div class="dmh"><svg class="ic ic-20" style="color:var(--accent)"><use href="#i-relay"/></svg><h3>Hand off this session</h3><span class="sp"></span><svg class="ic ic-20" style="color:var(--muted)"><use href="#i-x"/></svg></div>
+      <div class="dmb">
+        <div class="lc">
+          <div class="sess">
+            <div class="h"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-term"/></svg><span class="n">Refactor auth module</span><span class="chip"><svg class="ic"><use href="#i-chip"/></svg>Claude</span></div>
+            <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-branch"/></svg><span>feat/auth-refactor</span></div>
+          </div>
+          <div><div class="fl">Role<span class="hint">continue arrives later</span></div>
+            <div class="segbox"><div class="seg on"><span class="s1"><span class="radio on"></span>Review</span><span class="s2">read-only</span></div><div class="seg dis"><span class="s1"><span class="radio"></span>Continue</span><span class="s2">can edit · later</span></div></div>
+          </div>
+          <div><div class="fl">Recipient</div><div class="rcp"><span class="tagchip">@Frank<span class="x"><svg class="ic ic-12"><use href="#i-x"/></svg></span></span><span class="ph">Add a name or label…</span></div></div>
+          <div><div class="fl">Invite expires</div><div class="pills"><span class="pill">1h</span><span class="pill">4h</span><span class="pill on">24h</span></div></div>
+        </div>
+        <div class="rc">
+          <div class="bcard two">
+            <div class="bcol">
+              <h5><span class="tag" style="color:var(--success)">THEY WILL SEE</span></h5>
+              <ul class="bl">
+                <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>The full session transcript</b><span class="sub">every message, tool call and diff</span></span></li>
+                <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Code in the shared roots</b><span class="sub">~/proj/app/cc-pocket<br>~/proj/app/cc-pocket-protocol</span></span></li>
+                <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Read-only tools &amp; diffs</b><span class="sub">Read · Grep · Glob · git diff</span></span></li>
+              </ul>
+            </div>
+            <div class="bcol">
+              <h5><span class="tag" style="color:var(--muted)">THEY CAN'T DO</span></h5>
+              <ul class="bl">
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Edit or write files</span></li>
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Reach your other sessions or folders</span></li>
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Change device settings or credentials</span></li>
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Pass this handoff on to someone else</span></li>
+              </ul>
+            </div>
+            <div class="honest"><svg class="ic ic-16"><use href="#i-alert"/></svg><span>The <b>full conversation history</b> of this session will be visible — including anything you pasted into it.</span></div>
+          </div>
+          <div class="disc">
+            <div class="dh"><svg class="ic ic-16"><use href="#i-file"/></svg>Handoff brief<span class="chip mute" style="margin-left:2px">auto</span><span class="sp"></span><span class="edit"><svg class="ic ic-14"><use href="#i-edit"/></svg>Edit</span></div>
+            <div class="db">
+              <div><div class="mdk">Goal</div><p class="mdp">Split <code>AuthInterceptor</code> so token refresh is testable without a live socket.</p></div>
+              <div><div class="mdk">Ask</div><p class="mdp">Review the concurrency around the refresh mutex before I open the PR.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dmf"><span class="chip mute"><svg class="ic"><use href="#i-lock"/></svg>Your input locks until Frank returns</span><span class="sp"></span><button class="btn sec md">Cancel</button><button class="btn pri md">Create invite</button></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:3570px;width:560px">Desktop keeps the mobile <b>information order</b> but splits it across two columns: decisions left,<br>consequences right. The boundary card goes back to its native two-up form. The dialog footer<br>restates the cost of the action next to the primary button — desktop users click faster.<br>Sidebar: the active session row gains a <b>status dot</b> (neutral = waiting) and a lock glyph;<br>other rows are unaffected, so a handoff never disturbs the rest of the fleet.</div>
+
+<div class="flabel" style="left:1400px;top:2680px;width:700px">Frame 12 · Desktop — recipient in control + result<i>1200×800 · dark · terracotta ribbon, two-column findings</i></div>
+<div class="frame t" style="left:1400px;top:2750px;width:1200px;height:800px;background:#0B0C0D">
+  <div class="dwin">
+    <div class="dside">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span class="sp"></span><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-plus"/></svg></div>
+      <div class="dslist">
+        <div class="grpl" style="padding:6px 10px 6px">Panda · MacBook Pro <span class="chip acc" style="margin-left:auto">guest</span></div>
+        <div class="dsrow on"><span class="sdot" style="background:var(--accent)"></span><span class="tx"><span class="n">Refactor auth module</span><span class="s">~/proj/app/cc-pocket · you have control</span></span><svg class="ic ic-14" style="color:var(--accent)"><use href="#i-relay"/></svg></div>
+        <div class="dsrow off" style="opacity:.4"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Not shared with you</span><span class="s">Panda's other sessions stay hidden</span></span></div>
+      </div>
+    </div>
+    <div class="dpane">
+      <div class="dph"><span class="n">Refactor auth module</span><span class="chip acc"><span class="progdot" style="width:6px;height:6px;box-shadow:none"></span>IN PROGRESS</span><span class="s">feat/auth-refactor</span><span class="sp"></span><span class="shieldcap"><svg class="ic ic-12"><use href="#i-shield"/></svg>read-only tools</span><button class="btn outacc sm"><svg class="ic ic-14"><use href="#i-undo"/></svg>Finish &amp; return</button></div>
+      <div class="ribbon rib-acc" style="padding:9px 18px"><span class="avpair"><span class="av">P</span><svg class="ic ic-12" style="color:var(--accent)"><use href="#i-arrow-r"/></svg><span class="av a">F</span></span><span>Continuing Panda's session · Review</span><span class="cd">returns in 3:41:22</span></div>
+      <div class="dstream" style="gap:16px">
+        <div class="msg"><div class="who">PANDA</div><div class="bd" style="max-width:720px">add a unit test for the stream parser</div></div>
+        <div class="msg"><div class="who"><span class="tick"></span><span class="self">FRANK (YOU)</span></div><div class="bd" style="max-width:720px">show me every call site that touches the refresh mutex</div></div>
+        <div class="toolrow" style="max-width:640px"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Grep</span><span class="cmd">refreshMutex --glob *.kt</span><span class="ok">7 hits</span></div>
+        <div class="rescard" style="max-width:820px">
+          <div class="rh"><span class="av a">F</span><span class="n">Frank returned this session</span><span class="chip warn">Approve with fixes</span><span class="sp"></span><span class="chip mute">18 min</span></div>
+          <div class="rb">
+            <div class="mdk">Findings · 5</div>
+            <div class="findgrid">
+              <div class="find"><span class="sev hi"></span><span class="ft">Token store read outside the refresh mutex<span class="fp">RefreshCoordinator.kt:88</span></span></div>
+              <div class="find"><span class="sev md"></span><span class="ft">Retry backoff resets on every 401<span class="fp">RefreshCoordinator.kt:142</span></span></div>
+              <div class="find"><span class="sev md"></span><span class="ft">Refresh failure swallows the cause<span class="fp">AuthInterceptor.kt:57</span></span></div>
+              <div class="find"><span class="sev lo"></span><span class="ft">Empty-frame case missing from the parser test<span class="fp">StreamParserTest.kt:61</span></span></div>
+              <div class="find"><span class="sev lo"></span><span class="ft">Persistence path is hard-coded<span class="fp">TokenStore.kt:24</span></span></div>
+              <div class="find"><span class="sev lo"></span><span class="ft">Two unused imports after the split<span class="fp">AuthInterceptor.kt:1</span></span></div>
+            </div>
+            <div class="hr"></div>
+            <div style="display:flex;gap:26px;flex-wrap:wrap">
+              <div class="vrow"><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-file"/></svg><span>6 files reviewed · 0 changed</span></div>
+              <div class="vrow"><svg class="ic ic-14 pass"><use href="#i-check"/></svg><span>protocol:test 42 ✓</span></div>
+              <div class="vrow"><svg class="ic ic-14 pass"><use href="#i-check"/></svg><span>app:lint clean</span></div>
+              <div class="vrow"><svg class="ic ic-14 fail"><use href="#i-x"/></svg><span>app:test 1 ✗</span></div>
+            </div>
+          </div>
+          <div class="ra"><button class="btn pri sm">Mark reviewed</button><button class="btn sec sm">Open full result</button></div>
+        </div>
+      </div>
+      <div class="dcomposer"><svg class="ic ic-20" style="color:var(--muted)"><use href="#i-plus"/></svg><span class="ci" style="color:var(--text)">where else is the store read?</span><span class="csend on"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:1400px;top:3570px;width:560px">The guest's sidebar shows exactly one session plus an explicit “not shared with you” row —<br>absence is stated, never implied. <b>Finish &amp; return</b> is a pane-header button on desktop<br>(persistent, top-right) instead of the mobile pill above the composer.<br>The result card grows to 820px and findings go two-up; the card is capped so long results<br>scroll inside the stream rather than stretching the pane.</div>
+
+<div style="position:absolute;top:3800px;left:0;width:5000px;height:1px"></div>
+
+<script src="session-handoff/qr.js"></script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+/* cc-pocket — Handoff Contacts. Extends session-handoff/handoff.css; tokens unchanged. */
+
+/* ── contact rows ──────────────────────────────────────────── */
+.crow{display:flex;align-items:center;gap:11px;min-height:60px;padding:10px 13px;border-bottom:1px solid var(--hair)}
+.crow:last-child{border-bottom:0}
+.crow .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.crow .n{font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:8px;min-width:0}
+.crow .s{font:400 11px/1.35 'JetBrains Mono',monospace;color:var(--muted)}
+.crow.sel{background:var(--raised)}
+.crow.gone{opacity:.45}
+.crow.gone .n{text-decoration:none;color:var(--sec)}
+.av.lg{width:34px;height:34px;font-size:13px}
+.av.md{width:28px;height:28px;font-size:11px}
+.dir{font:400 13px/1 'JetBrains Mono',monospace;color:var(--muted);flex:none;letter-spacing:0}
+.tagm{white-space:nowrap;font:400 10px/1 'JetBrains Mono',monospace;color:var(--muted);border:1px solid var(--hair);border-radius:4px;padding:4px 6px;flex:none}
+
+/* ── search ────────────────────────────────────────────────── */
+.srch{display:flex;align-items:center;gap:9px;min-height:44px;padding:0 12px;border:1px solid var(--hair);border-radius:12px;background:var(--surface);font-size:14px;color:var(--muted);flex:none}
+.srch .ic{color:var(--muted)}
+
+/* ── the one QR entry point ────────────────────────────────── */
+.connrow{display:flex;align-items:center;gap:11px;min-height:56px;padding:10px 13px;border:1px solid var(--hair);border-radius:12px;background:var(--surface)}
+.connrow .n{flex:1;min-width:0;font-size:14.5px;font-weight:600}
+.connrow .qg{width:34px;height:34px;border-radius:9px;background:var(--raised);border:1px solid var(--hair);display:flex;align-items:center;justify-content:center;color:var(--sec);flex:none}
+.sepnote{font:400 10.5px/1.5 'JetBrains Mono',monospace;color:var(--muted);text-align:center;padding:2px 8px 0}
+
+/* ── recipient row, contact selected ───────────────────────── */
+.rcp.picked{justify-content:space-between;padding:0 12px 0 8px}
+.cchip{display:inline-flex;flex:none;align-items:center;gap:8px;height:38px;padding:0 12px 0 5px;border-radius:999px;background:var(--raised);border:1px solid var(--hair);min-width:0}
+.cchip .n{font-size:14px;font-weight:600;color:var(--text);white-space:nowrap}
+.chg{font:500 12.5px/1 'Inter';color:var(--accent);flex:none;display:flex;align-items:center;height:44px;padding-left:10px}
+
+/* ── safety fingerprint ────────────────────────────────────── */
+.fpr{border:1px solid var(--hair);border-radius:12px;background:var(--raised);padding:15px 16px;display:flex;flex-direction:column;gap:9px;align-items:center}
+.t .btn{white-space:nowrap}
+.fpr .btn{flex:none}
+.fpr .w{font:500 16px/1.35 'JetBrains Mono',monospace;color:var(--text);letter-spacing:.02em;text-align:center}
+.fpcap{font-size:12.5px;line-height:1.55;color:var(--sec);text-align:center;margin:0}
+.fpcap b{color:var(--text);font-weight:600}
+
+/* ── honest / info card (non-warning) ──────────────────────── */
+.infocard{border:1px solid var(--hair);border-radius:12px;background:var(--surface);padding:13px 14px;display:flex;gap:10px;align-items:flex-start;font-size:12.5px;line-height:1.5;color:var(--sec)}
+.infocard .ic{color:var(--muted);flex:none;margin-top:1px}
+.infocard b{color:var(--text);font-weight:600}
+.waitline{display:flex;align-items:center;gap:9px;justify-content:center;font:400 12px/1 'JetBrains Mono',monospace;color:var(--sec)}
+
+/* ── offer card ────────────────────────────────────────────── */
+.stack{position:relative}
+.stack .peek{position:absolute;left:9px;right:9px;top:0;height:40px;border:1px solid var(--hair);border-radius:14px;background:var(--surface);opacity:.55}
+.offer{position:relative;border:1px solid var(--accent-hair);border-radius:14px;background:var(--surface);overflow:hidden}
+.offer .oh{display:flex;align-items:center;gap:10px;padding:13px 14px 0}
+.offer .ot{font-size:14.5px;font-weight:600;line-height:1.4;flex:1;min-width:0}
+.offer .ob{padding:9px 14px 0;display:flex;flex-direction:column;gap:8px}
+.offer .meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font:400 11.5px/1 'JetBrains Mono',monospace;color:var(--muted)}
+.offer .oa{display:flex;gap:8px;padding:12px 14px 13px}
+.offer .oa .btn{flex:1}
+
+/* ── push ──────────────────────────────────────────────────── */
+.push{margin:8px 12px 0;padding:11px 13px;border-radius:14px;background:var(--raised);border:1px solid var(--hair);display:flex;gap:10px;align-items:flex-start;box-shadow:0 14px 34px -16px rgba(0,0,0,.8)}
+.push .ap{width:26px;height:26px;border-radius:7px;background:var(--accent);color:var(--onacc);display:flex;align-items:center;justify-content:center;flex:none}
+.push .pt{font-size:13px;font-weight:600;line-height:1.35}
+.push .ps{font:400 11px/1.45 'JetBrains Mono',monospace;color:var(--muted);margin-top:3px}
+.push .tm{font:400 10.5px/1 'JetBrains Mono',monospace;color:var(--muted);flex:none;margin-left:auto}
+
+/* ── settings-style rows ───────────────────────────────────── */
+.srow{display:flex;align-items:center;gap:11px;min-height:56px;padding:11px 14px;border-bottom:1px solid var(--hair)}
+.srow:last-child{border-bottom:0}
+.srow .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.srow .n{font-size:14px;font-weight:600}
+.srow .s{font:400 11px/1.45 'JetBrains Mono',monospace;color:var(--muted)}
+.srow.dgrow .n{color:var(--danger)}
+.srow.dgrow .ic{color:var(--danger)}
+.srow.disr{opacity:.45}
+
+/* ── swipe action ──────────────────────────────────────────── */
+.swipe{position:relative;overflow:hidden;border-bottom:1px solid var(--hair)}
+.swipe .act{position:absolute;right:0;top:0;bottom:0;width:96px;background:color-mix(in oklab,var(--danger) 22%,var(--surface));display:flex;align-items:center;justify-content:center;gap:7px;color:var(--danger);font:600 13px/1 'Inter'}
+.swipe .crow{transform:translateX(-96px);border-bottom:0;background:var(--surface);position:relative}
+
+/* ── desktop additions ─────────────────────────────────────── */
+.popover{position:absolute;z-index:60;width:340px;background:var(--raised);border:1px solid var(--hair);border-radius:14px;overflow:hidden;box-shadow:0 28px 70px -20px rgba(0,0,0,.8)}
+.popover .ph2{padding:10px 12px;border-bottom:1px solid var(--hair)}
+.popover .grpl{padding:9px 12px 5px;margin:0}
+.popover .crow{padding:7px 12px;min-height:48px;border-bottom:0}
+.popover .crow.sel{background:var(--surface)}
+.popover .foot{border-top:1px solid var(--hair);display:flex;align-items:center;gap:10px;min-height:46px;padding:0 12px;font-size:13.5px;font-weight:600}
+.popover .foot .ic{color:var(--sec)}
+.setgrid{flex:1;min-height:0;display:grid;grid-template-columns:340px 1fr}
+.setlist{border-right:1px solid var(--hair);padding:12px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.setdet{padding:20px 24px;display:flex;flex-direction:column;gap:16px;min-height:0}
+.dethd{display:flex;align-items:center;gap:12px}
+.dethd .n{font-size:17px;font-weight:600;letter-spacing:-.01em}
+.setcol{display:flex;flex-direction:column;gap:10px;max-width:560px}

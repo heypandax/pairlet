@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="design_doc_mode" content="canvas" />
+<title>cc-pocket — Handoff Contacts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="session-handoff/handoff.css" />
+<link rel="stylesheet" href="session-handoff-contacts/contacts.css" />
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5L20 7"/></symbol>
+<symbol id="i-relay" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.6"/><circle cx="19" cy="12" r="2.6"/><path d="M8.2 12h5.4"/><path d="M11.6 9.4L14.2 12l-2.6 2.6"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3 8.1-7.5 9.5-4.5-1.4-7.5-4.9-7.5-9.5V6z"/><path d="M9 11.8l2.2 2.2 4-4"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.4V12l3.2 2"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.4"/><path d="M12 17.4h.01"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12.5" rx="2.5"/><path d="M15.5 5.5v-1A1.5 1.5 0 0 0 14 3H5A1.5 1.5 0 0 0 3.5 4.5v9A1.5 1.5 0 0 0 5 15h1"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="M7 10l2.5 2.5L7 15"/><path d="M12.5 15.3h4.5"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6.5" cy="5.5" r="2.5"/><circle cx="6.5" cy="18.5" r="2.5"/><circle cx="17.5" cy="7.5" r="2.5"/><path d="M6.5 8v8"/><path d="M17.5 10v1.5a4 4 0 0 1-4 4H9"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M4 12h15"/><path d="M13.5 6.5L20 12l-6.5 5.5"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.6 2.6 0 0 0-3.7-3.7L4.3 16.3z"/><path d="M13.5 7.5l3 3"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.4"/><path d="M12 7.6h.01"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M13.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M13.5 3v5.5H19"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V6"/><path d="M6.5 11.5L12 6l5.5 5.5"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.8" y="9.8" width="4.4" height="4.4" rx="1"/><path d="M12 2.6V6M12 18v3.4M2.6 12H6M18 12h3.4"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M4 9.5h9.5A5.5 5.5 0 0 1 19 15v0a5.5 5.5 0 0 1-5.5 5.5H8"/><path d="M8 5L3.5 9.5 8 14"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.2l2 2.6h8.8A1.5 1.5 0 0 1 21 9.1v9.4A1.5 1.5 0 0 1 19.5 20h-15A1.5 1.5 0 0 1 3 18.5z"/></symbol>
+<symbol id="i-qr" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M13.5 13.5h3v3"/><path d="M20.5 16.5v4h-4"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8L20.5 20.5"/></symbol>
+<symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15"/><path d="M9 6.5V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8v1.7"/><path d="M6.5 6.5l1 13a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4l1-13"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 10a6 6 0 0 1 12 0c0 4 1.4 5.5 1.4 5.5H4.6S6 14 6 10z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0"/><path d="M16 5.2a3.4 3.4 0 0 1 0 6.6"/><path d="M17.6 14.2a6.2 6.2 0 0 1 3.6 5.3"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.9 1.9M7.4 16.6l-1.9 1.9M18.5 18.5l-1.9-1.9M7.4 7.4L5.5 5.5"/></symbol>
+<symbol id="i-bat" viewBox="0 0 19 12"><rect y="7.5" width="3.2" height="4.5" rx=".7" fill="currentColor" stroke="none"/><rect x="4.8" y="5" width="3.2" height="7" rx=".7" fill="currentColor" stroke="none"/><rect x="9.6" y="2.5" width="3.2" height="9.5" rx=".7" fill="currentColor" stroke="none"/><rect x="14.4" width="3.2" height="12" rx=".7" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-batt" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.5" stroke="currentColor" stroke-opacity=".35" fill="none"/><rect x="2" y="2" width="20" height="9" rx="2" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<div class="secttl" style="left:80px;top:44px;width:1180px">Handoff Contacts — Collaborator Links &amp; per-handoff Grants
+<i>Spec update: QR is now <b style="color:#D97757">only</b> for establishing a first-time Collaborator Link — a long-lived E2E trust binding that proves identity and gives a delivery address, and grants zero session access.<br>Starting a handoff = picking a contact; the daemon delivers the offer over the existing link plus a content-free push. Per-handoff access is a separate temporary Grant (contact + handoff + session + scope + expiry).<br>Links are one-directional (A→B) or mutual (⇄). “Connected” means the trust binding is valid — never presence. Status colour law unchanged: waiting = neutral · in-progress = terracotta · returned/completed = green · recalled/expired = amber · declined/cancelled = grey · red reserved for Recall, Revoke &amp; Remove.</i></div>
+
+<!-- ══════ FRAME 1 — recipient picker ══════ -->
+<div class="flabel" style="left:80px;top:236px;width:430px">Frame 1 · Recipient picker<i>390×844 · dark · draft sheet, page 2 — replaces the free-text recipient row</i></div>
+<div class="frame t" style="left:80px;top:300px;width:390px;height:844px">
+  <div class="col">
+    <div class="dimtop" style="height:26px"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="shhd"><span class="tapicon" style="margin-left:-12px"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><h3>Choose recipient</h3><span class="sp"></span><span class="tapicon" style="margin-right:-10px"><svg class="ic ic-20"><use href="#i-x"/></svg></span></div>
+      <div class="shbody" style="gap:14px">
+        <div class="srch"><svg class="ic ic-16"><use href="#i-search"/></svg><span>Search collaborators…</span></div>
+        <div>
+          <div class="grpl">Recent</div>
+          <div class="grpbox">
+            <div class="crow"><span class="av lg a">F</span><span class="tx"><span class="n">Frank Osei<span class="dir" title="mutual link">⇄</span></span><span class="s">2 handoffs · last week</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+            <div class="crow"><span class="av lg">M</span><span class="tx"><span class="n">Mei Tanaka<span class="dir" title="mutual link">⇄</span></span><span class="s">5 handoffs · 3 days ago</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+          </div>
+        </div>
+        <div>
+          <div class="grpl">All contacts<span class="chip mute">5</span></div>
+          <div class="grpbox">
+            <div class="crow"><span class="av lg">A</span><span class="tx"><span class="n">Aiko Sato<span class="dir" title="you can send to Aiko">→</span></span><span class="s">connected 12d ago</span></span><span class="tagm">no daemon</span></div>
+            <div class="crow"><span class="av lg">D</span><span class="tx"><span class="n">Dev Rao<span class="dir">⇄</span></span><span class="s">connected 2mo ago · 1 handoff</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+            <div class="crow"><span class="av lg a">F</span><span class="tx"><span class="n">Frank Osei<span class="dir">⇄</span></span><span class="s">connected 6w ago · 2 handoffs</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+            <div class="crow"><span class="av lg">M</span><span class="tx"><span class="n">Mei Tanaka<span class="dir">⇄</span></span><span class="s">connected 4mo ago · 5 handoffs</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+            <div class="crow"><span class="av lg">S</span><span class="tx"><span class="n">Sofia Lindqvist<span class="dir">→</span></span><span class="s">connected 5mo ago</span></span><span class="tagm">no daemon</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="shfoot" style="gap:7px">
+        <div class="connrow"><span class="qg"><svg class="ic ic-20"><use href="#i-qr"/></svg></span><span class="n">Connect a new colleague…</span><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        <div class="sepnote">one-time QR · establishes trust only</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:1164px;width:400px">Tapping the Recipient row <b>pushes</b> this page inside the same sheet — back<br>chevron, no new modal. Tap a row = select and pop straight back; there is<br>no confirm step, so rows are 60pt and the chevron is decoration.<br>Direction glyphs are <b>muted mono</b>, never accent: <b>⇄</b> mutual, <b>→</b> you can send<br>to them only. <b>no daemon</b> is a quiet fact, not a warning — they can still<br>receive and review a handoff from a phone.<br>The connect row sits in the footer, separated by the hairline: it is the<br><em style="color:#8A9096">only</em> surface in the whole flow that still shows a QR.</div>
+
+<div class="flabel" style="left:80px;top:1480px;width:430px">Frame 1b · Picker — no contacts yet<i>390×520 · dark · first-run empty</i></div>
+<div class="frame t" style="left:80px;top:1544px;width:390px;height:520px">
+  <div class="col">
+    <div class="dimtop" style="height:26px"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="shhd"><span class="tapicon" style="margin-left:-12px"><svg class="ic ic-20"><use href="#i-chev-l"/></svg></span><h3>Choose recipient</h3><span class="sp"></span><span class="tapicon" style="margin-right:-10px"><svg class="ic ic-20"><use href="#i-x"/></svg></span></div>
+      <div class="shbody" style="gap:14px;justify-content:center">
+        <div class="grpbox">
+          <div class="empty">
+            <svg class="ic ic-22" style="color:var(--muted)"><use href="#i-users"/></svg>
+            <p>You haven't connected anyone yet. Connecting is a one-time QR scan that proves who they are — it shares no sessions.</p>
+          </div>
+        </div>
+      </div>
+      <div class="shfoot"><button class="btn pri full"><svg class="ic ic-16"><use href="#i-qr"/></svg>Connect a colleague</button></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:2084px;width:400px">Empty state carries the whole mental model in one sentence, then a single<br>primary. No secondary “skip” — there is no handoff without a contact.</div>
+
+<!-- ══════ FRAME 2 — draft with contact ══════ -->
+<div class="flabel" style="left:560px;top:236px;width:430px">Frame 2 · Draft sheet — contact selected<i>390×1210 scrolling · dark · delta vs shipped draft = recipient row + footer verb</i></div>
+<div class="frame t" style="left:560px;top:300px;width:390px;height:1210px">
+  <div class="col">
+    <div class="dimtop" style="height:26px"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="shhd"><h3>Hand off this session</h3><span class="sp"></span><span class="tapicon" style="margin-right:-10px"><svg class="ic ic-20"><use href="#i-x"/></svg></span></div>
+      <div class="shbody">
+        <div class="sess">
+          <div class="h"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-term"/></svg><span class="n">Refactor auth module</span><span class="chip"><svg class="ic"><use href="#i-chip"/></svg>Claude</span></div>
+          <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-branch"/></svg><span>feat/auth-refactor</span></div>
+        </div>
+        <div>
+          <div class="fl">Role<span class="hint">continue arrives later</span></div>
+          <div class="segbox">
+            <div class="seg on"><span class="s1"><span class="radio on"></span>Review</span><span class="s2">read-only</span></div>
+            <div class="seg dis"><span class="s1"><span class="radio"></span>Continue</span><span class="s2">can edit · later</span></div>
+          </div>
+        </div>
+        <div>
+          <div class="fl">Recipient</div>
+          <div class="rcp picked"><span class="cchip"><span class="av md a">F</span><span class="n">Frank Osei</span><span class="dir">⇄</span></span><span class="chg">Change</span></div>
+        </div>
+        <div>
+          <div class="fl">Offer expires<span class="hint">access, not the link</span></div>
+          <div class="pills"><span class="pill">1h</span><span class="pill">4h</span><span class="pill on">24h</span></div>
+        </div>
+        <div class="bcard">
+          <div class="bcol">
+            <h5><span class="tag" style="color:var(--success)">THEY WILL SEE</span></h5>
+            <ul class="bl">
+              <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>The full session transcript</b><span class="sub">every message, tool call and diff</span></span></li>
+              <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Code in the shared roots</b><span class="sub">~/proj/app/cc-pocket<br>~/proj/app/cc-pocket-protocol</span></span></li>
+              <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Read-only tools &amp; diffs</b><span class="sub">Read · Grep · Glob · git diff</span></span></li>
+            </ul>
+          </div>
+          <div class="bcol">
+            <h5><span class="tag" style="color:var(--muted)">THEY CAN'T DO</span></h5>
+            <ul class="bl">
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Edit or write files</span></li>
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Reach your other sessions or folders</span></li>
+              <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Pass this handoff on to someone else</span></li>
+            </ul>
+          </div>
+          <div class="honest"><svg class="ic ic-16"><use href="#i-alert"/></svg><span>The <b>full conversation history</b> of this session will be visible — including anything you pasted into it.</span></div>
+        </div>
+        <div class="disc">
+          <div class="dh"><svg class="ic ic-16"><use href="#i-file"/></svg>Handoff brief<span class="chip mute" style="margin-left:2px">auto</span><span class="sp"></span><span class="edit"><svg class="ic ic-14"><use href="#i-edit"/></svg>Edit</span></div>
+          <div class="db">
+            <div><div class="mdk">Goal</div><p class="mdp">Split <code>AuthInterceptor</code> so token refresh is testable without a live socket.</p></div>
+            <div><div class="mdk">Ask</div><p class="mdp">Review the concurrency around the refresh mutex before I open the PR.</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="shfoot">
+        <button class="btn pri full">Send to Frank</button>
+        <button class="btn sec full">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:560px;top:1530px;width:400px">Nothing else moved: session card, Role segment, expiry pills, boundary<br>card and brief are the shipped components, unchanged. Two deltas only —<br>the recipient field now holds a <b>contact chip</b> (28pt avatar + label + direction<br>glyph, whole chip tappable, <b>Change</b> re-opens Frame 1), and the primary<br>reads <b>Send to Frank</b>: the offer is delivered over the existing link, so<br>there is no artefact for the user to carry anywhere.<br>Expiry now labels the <em style="color:#8A9096">Grant</em>, not the link — hence the hint. The link outlives<br>every handoff; the grant dies on return, decline or timeout.</div>
+
+<!-- ══════ FRAME 3 — connect, initiator ══════ -->
+<div class="flabel" style="left:1040px;top:236px;width:430px">Frame 3 · Connect a colleague — initiator<i>390×800 · dark · the only QR left in the product</i></div>
+<div class="frame t" style="left:1040px;top:300px;width:390px;height:800px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Connect a colleague</span></div>
+    <div class="scroll"><div class="stream" style="gap:14px;padding:16px 16px 20px">
+      <div class="qrcard">
+        <div class="qrbox"></div>
+        <div class="scode">K4TP-9BRX</div>
+        <div class="cdown">ticket valid 10:00</div>
+      </div>
+      <div class="infocard"><svg class="ic ic-16"><use href="#i-shield"/></svg><span>This QR only establishes a <b>trusted connection</b>. It shares no sessions, folders or code.</span></div>
+      <div class="waitline"><span class="waitdot"></span><span>waiting for scan…</span></div>
+    </div></div>
+    <div class="shfoot"><button class="btn sec full">Cancel</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1040px;top:1120px;width:400px">A <b>collaborator ticket</b>, not an invite: it carries a public key and a delivery<br>address, no session id and no scope. Short code is the fallback for<br>anyone who can't scan — same 8-char alphabet as the shipped invite.<br>“waiting for scan…” uses the <b>neutral</b> dot; nothing is running, and it must<br>not read as presence. Ticket TTL is short (10 min) because it is a<br>one-shot introduction, unlike the link it creates.</div>
+
+<div class="flabel" style="left:1040px;top:1372px;width:430px">Frame 3b · Connected — return to the draft<i>390×520 · dark · success sub-state of Frame 3</i></div>
+<div class="frame t" style="left:1040px;top:1436px;width:390px;height:520px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Connect a colleague</span></div>
+    <div class="scroll"><div class="stream" style="gap:16px;padding:22px 16px 20px;align-items:center">
+      <span class="av lg a" style="width:56px;height:56px;font-size:20px">A</span>
+      <div style="display:flex;align-items:center;gap:9px"><span style="font-size:18px;font-weight:600;letter-spacing:-.01em">Aiko Sato</span><span class="chip ok"><svg class="ic"><use href="#i-check"/></svg>Connected</span></div>
+      <div class="infocard" style="width:100%"><svg class="ic ic-16"><use href="#i-info"/></svg><span>Aiko can now <b>receive handoffs from you</b>. They still see nothing until you send one and they accept it.</span></div>
+    </div></div>
+    <div class="shfoot"><button class="btn pri full">Back to handoff</button><button class="btn sec full">Done</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1040px;top:1976px;width:400px">“Connected” is <span class="g">green</span> because the binding <em style="color:#8A9096">succeeded</em> — it is a completion,<br>not a presence light. The primary returns to the interrupted draft with<br>Aiko pre-selected; <b>Done</b> exists for people who came from Settings.</div>
+
+<!-- ══════ FRAME 4 — confirm, recipient ══════ -->
+<div class="flabel" style="left:1520px;top:236px;width:430px">Frame 4 · Confirm connection — recipient<i>390×844 · dark · trust screen, same seriousness as accept</i></div>
+<div class="frame t" style="left:1520px;top:300px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-x"/></svg></span><span class="ttl">Confirm connection</span><span class="chip"><svg class="ic"><use href="#i-shield"/></svg>TRUST</span><span style="width:8px"></span></div>
+    <div class="scroll"><div class="stream" style="gap:14px;padding:16px 16px 20px">
+      <div class="sess">
+        <div class="h"><span class="av lg a">P</span><span class="n">Panda · MacBook Pro</span></div>
+        <div class="f"><span class="p">first connection</span><span class="d">·</span><span>scanned just now</span></div>
+      </div>
+      <div>
+        <div class="fl">Safety fingerprint</div>
+        <div class="fpr">
+          <div class="w">tiger — brick — mango — void</div>
+          <div class="w">amber — pilot — nine — harbor</div>
+        </div>
+        <p class="fpcap" style="margin-top:10px">Compare these words with <b>Panda</b> in person or on a call. If they don't match, cancel — someone else may be in the middle.</p>
+      </div>
+      <div class="grpbox">
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-arrow-r"/></svg><span class="tx"><span class="n" style="font-size:14px">Panda → you</span><span class="s">Panda can send you handoffs. You can't see anything of theirs until you accept one.</span></span></div>
+        <div class="hrow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-lock"/></svg><span class="tx"><span class="n" style="font-size:14px">No access is granted now</span><span class="s">no sessions · no folders · no code</span></span></div>
+      </div>
+    </div></div>
+    <div class="shfoot"><button class="btn pri full">Confirm connection</button><button class="btn sec full">Cancel</button></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:1520px;top:1164px;width:400px">The fingerprint is the whole point of the screen, so it gets the largest<br>type on it (16px mono, two lines of four words) on a raised card. Word<br>groups beat hex: people read them aloud correctly.<br>Direction is stated in the <em style="color:#8A9096">second person</em> and includes the negative half —<br>the recipient's first question is always “what can they see of mine?”.<br>Cancel is a plain secondary; refusing a connection is not dangerous.<br>Hit targets: both footer buttons 48pt, spaced 8pt.</div>
+
+<!-- ══════ FRAME 5 — collaborators management ══════ -->
+<div class="flabel" style="left:2000px;top:236px;width:430px">Frame 5 · Settings ▸ Collaborators<i>390×760 · dark · a management surface, not a feed</i></div>
+<div class="frame t" style="left:2000px;top:300px;width:390px;height:760px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Collaborators</span><span class="tapicon"><svg class="ic ic-20"><use href="#i-qr"/></svg></span></div>
+    <div class="scroll"><div style="padding:12px 16px;display:flex;flex-direction:column;gap:14px">
+      <div class="srch"><svg class="ic ic-16"><use href="#i-search"/></svg><span>Search collaborators…</span></div>
+      <div>
+        <div class="grpl">Connected<span class="chip mute">4</span></div>
+        <div class="grpbox">
+          <div class="crow"><span class="av lg a">F</span><span class="tx"><span class="n">Frank Osei<span class="dir">⇄</span></span><span class="s">connected 12d ago · 3 handoffs</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+          <div class="swipe">
+            <div class="act"><svg class="ic ic-16"><use href="#i-trash"/></svg>Remove</div>
+            <div class="crow"><span class="av lg">M</span><span class="tx"><span class="n">Mei Tanaka<span class="dir">⇄</span></span><span class="s">connected 4mo ago · 5 handoffs</span></span></div>
+          </div>
+          <div class="crow"><span class="av lg">A</span><span class="tx"><span class="n">Aiko Sato<span class="dir">→</span></span><span class="s">connected 2m ago · no handoffs yet</span></span><span class="tagm">no daemon</span></div>
+          <div class="crow"><span class="av lg">D</span><span class="tx"><span class="n">Dev Rao<span class="dir">⇄</span></span><span class="s">connected 2mo ago · 1 handoff</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        </div>
+      </div>
+      <div>
+        <div class="grpl">Removed</div>
+        <div class="grpbox">
+          <div class="crow gone"><span class="av lg">S</span><span class="tx"><span class="n">Sofia Lindqvist</span><span class="s">link revoked 8d ago · 2 past handoffs</span></span><span class="chip mute">removed</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2000px;top:1080px;width:400px">Reached from Settings; the header QR glyph is the second (and last) entry<br>to Frame 3. Rows carry <b>facts only</b> — when the link was made and how<br>many handoffs have run over it. No avatars-with-status, no “last seen”:<br>we don't have presence and won't imply it.<br>Swipe reveals a single <b style="color:#E5604D">Remove</b> action — the only danger colour on the<br>screen. Removed contacts fall to a terminal group at 45%: past handoffs<br>still reference them, so the row can't just disappear.</div>
+
+<div class="flabel" style="left:2000px;top:1372px;width:430px">Frame 5b · Collaborators — empty<i>390×340 · dark</i></div>
+<div class="frame t" style="left:2000px;top:1436px;width:390px;height:340px">
+  <div class="col">
+    <div class="nav" style="padding-top:6px"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Collaborators</span></div>
+    <div style="padding:14px 16px">
+      <div class="grpbox">
+        <div class="empty">
+          <svg class="ic ic-22" style="color:var(--muted)"><use href="#i-users"/></svg>
+          <p>No collaborators yet. A connection is a one-time QR scan; it proves who someone is and gives your daemon a way to reach them.</p>
+          <button class="btn ghost sm"><svg class="ic ic-14"><use href="#i-qr"/></svg>Connect a colleague</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:2000px;top:1796px;width:400px">Same empty grammar as the shipped Handoffs empty state — glyph,<br>one sentence, ghost button.</div>
+
+<!-- ══════ FRAME 6 — contact detail ══════ -->
+<div class="flabel" style="left:2480px;top:236px;width:430px">Frame 6 · Contact detail<i>390×1000 scrolling · dark · viewer has no daemon of their own</i></div>
+<div class="frame t" style="left:2480px;top:300px;width:390px;height:1000px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-chev-l"/></svg></span><span class="ttl">Collaborator</span></div>
+    <div class="scroll"><div class="stream" style="gap:16px;padding:16px 16px 20px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="av lg a" style="width:48px;height:48px;font-size:18px">P</span>
+        <div style="min-width:0"><div style="font-size:19px;font-weight:600;letter-spacing:-.01em;display:flex;align-items:center;gap:9px">Panda<span class="dir">→</span></div><div style="font:400 11px/1.5 'JetBrains Mono',monospace;color:var(--muted);margin-top:3px">MacBook Pro · connected 12d ago</div></div>
+      </div>
+      <div>
+        <div class="fl">Safety fingerprint</div>
+        <div class="fpr">
+          <div class="w">tiger — brick — mango — void</div>
+          <div class="w">amber — pilot — nine — harbor</div>
+          <button class="btn ghost sm" style="margin-top:4px"><svg class="ic ic-14"><use href="#i-shield"/></svg>Re-verify</button>
+        </div>
+      </div>
+      <div>
+        <div class="fl">Direction</div>
+        <div class="grpbox">
+          <div class="srow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-arrow-r"/></svg><span class="tx"><span class="n">Panda → you</span><span class="s">Panda can send you handoffs.<br>You can't send them one.</span></span></div>
+          <div class="srow disr"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-relay"/></svg><span class="tx"><span class="n">Complete the reverse link</span><span class="s">needs a daemon on your computer</span></span><svg class="ic ic-14" style="color:var(--muted)"><use href="#i-chev-r"/></svg></div>
+        </div>
+      </div>
+      <div>
+        <div class="fl">Handoffs with Panda<span class="hint">3</span></div>
+        <div class="grpbox">
+          <div class="hrow"><span class="tx"><span class="n" style="font-size:14px">Refactor auth module</span><span class="s">18 min · 5 findings · today</span></span><span class="chip ok">Completed</span></div>
+          <div class="hrow"><span class="tx"><span class="n" style="font-size:14px">Fix flaky socket test</span><span class="s">never opened · last week</span></span><span class="chip warn">Expired</span></div>
+          <div class="hrow"><span class="tx"><span class="n" style="font-size:14px">Release notes 1.6</span><span class="s">3 weeks ago</span></span><span class="chip mute">Declined</span></div>
+        </div>
+      </div>
+      <div class="grpbox">
+        <div class="srow dgrow"><svg class="ic ic-16"><use href="#i-trash"/></svg><span class="tx"><span class="n">Remove connection</span><span class="s">Panda can no longer reach you; past handoffs stay in history.</span></span></div>
+      </div>
+    </div></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2480px;top:1320px;width:400px">Shown from the recipient's side, where the link is one-directional and the<br>reverse leg is <b>disabled with a reason</b> rather than hidden — the mono hint<br>tells them exactly what's missing.<br>History reuses the shipped status chips verbatim, so the colour law reads<br>identically here and in Session info.<br><b style="color:#E5604D">Remove</b> is the last row, states its consequence in one line, and is the only<br>red on the screen. No confirmation dialog is drawn here — it exists,<br>and it repeats this same sentence.</div>
+
+<!-- ══════ FRAME 7 — offer, recipient ══════ -->
+<div class="flabel" style="left:2960px;top:236px;width:430px">Frame 7a · Offer on the home surface<i>390×844 · dark · content-free push, then the card</i></div>
+<div class="frame t" style="left:2960px;top:300px;width:390px;height:844px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="push"><span class="ap"><svg class="ic ic-16"><use href="#i-relay"/></svg></span><div style="min-width:0"><div class="pt">cc-pocket</div><div class="ps">You have a new handoff offer.<br>Open the app to see the details.</div></div><span class="tm">now</span></div>
+    <div class="nav" style="margin-top:6px"><span class="ttl" style="font-size:19px;padding-left:12px">Handoffs</span><span class="tapicon"><svg class="ic ic-20"><use href="#i-users"/></svg></span><span class="tapicon"><svg class="ic ic-20"><use href="#i-gear"/></svg></span></div>
+    <div class="scroll"><div class="stream" style="gap:16px;padding:8px 16px 20px">
+      <div class="stack">
+        <div class="peek"></div>
+        <div class="offer" style="margin-top:14px">
+          <div class="oh"><span class="av lg a">P</span><span class="ot">Panda asked you to review a session</span></div>
+          <div class="ob">
+            <div class="meta"><span class="chip">Review</span><span class="chip mute">read-only</span><span>cc-pocket</span></div>
+            <div class="meta"><svg class="ic ic-12"><use href="#i-clock"/></svg><span>expires in 23:57:04</span></div>
+          </div>
+          <div class="oa"><button class="btn pri sm"><svg class="ic ic-14"><use href="#i-eye"/></svg>View</button><button class="btn ghost sm">Decline</button></div>
+        </div>
+      </div>
+      <div>
+        <div class="grpl">Earlier</div>
+        <div class="grpbox">
+          <div class="hrow"><span class="av">M</span><span class="tx"><span class="n" style="font-size:14px">Mei · Fix flaky socket test</span><span class="s">yesterday · you approved</span></span><span class="chip ok">Completed</span></div>
+          <div class="hrow"><span class="av">D</span><span class="tx"><span class="n" style="font-size:14px">Dev · Gateway model presets</span><span class="s">3 days ago</span></span><span class="chip mute">Declined</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2960px;top:1164px;width:400px">The push is deliberately <b>content-free</b> — “you have a new handoff offer”,<br>no project name, no sender detail — because notification payloads leave<br>the E2E envelope. Everything specific arrives over the link and renders<br>in-app.<br>Two pending offers stack (the peek behind); three or more collapse into<br>a counted group. <b>View</b> is terracotta: this is a needs-you moment. It opens<br>the shipped accept preview unchanged — the card is a doorway, not a<br>second trust screen, so it never lists scope details.</div>
+
+<div class="flabel" style="left:2960px;top:1480px;width:430px">Frame 7b · Notification-tap landing<i>390×620 · dark · same card, focused containment</i></div>
+<div class="frame t" style="left:2960px;top:1544px;width:390px;height:620px">
+  <div class="col">
+    <div class="sb"><span>9:41</span><span class="r"><svg class="ic" style="width:16px;height:11px"><use href="#i-bat"/></svg><svg class="ic" style="width:24px;height:12px"><use href="#i-batt"/></svg></span></div>
+    <div class="nav"><span class="tapicon"><svg class="ic"><use href="#i-x"/></svg></span><span class="ttl">Handoff offer</span><span class="chip acc" style="margin-right:8px"><svg class="ic"><use href="#i-relay"/></svg>NEW</span></div>
+    <div class="scroll"><div class="stream" style="gap:14px;padding:16px 16px 20px">
+      <div class="offer">
+        <div class="oh"><span class="av lg a">P</span><span class="ot">Panda asked you to review a session</span></div>
+        <div class="ob">
+          <div class="meta"><span class="chip">Review</span><span class="chip mute">read-only</span><span>cc-pocket</span></div>
+          <div class="meta"><svg class="ic ic-12"><use href="#i-clock"/></svg><span>expires in 23:57:04</span></div>
+        </div>
+        <div class="oa" style="padding-bottom:14px"><button class="btn pri md" style="flex:2"><svg class="ic ic-16"><use href="#i-eye"/></svg>View</button><button class="btn ghost md" style="flex:1">Decline</button></div>
+      </div>
+      <div class="infocard"><svg class="ic ic-16"><use href="#i-shield"/></svg><span>Viewing shows you what Panda is sharing. <b>Nothing opens until you accept</b> on the next screen.</span></div>
+    </div></div>
+  </div>
+  <div class="hind"></div>
+</div>
+<div class="note" style="left:2960px;top:2184px;width:400px">Tapping the push lands on the offer, never straight in the session —<br>the accept preview must always be crossed on purpose. Same card,<br>bigger buttons, plus one line explaining that View is safe.</div>
+
+<!-- ══════ FRAME 8 — waiting banner delta ══════ -->
+<div class="flabel" style="left:3440px;top:236px;width:430px">Frame 8 · WAITING banner — delta<i>390×272 · dark · banner region only; rest of the screen unchanged</i></div>
+<div class="frame t" style="left:3440px;top:300px;width:390px;height:272px">
+  <div class="col">
+    <div class="strip" style="margin-top:14px"></div>
+    <div class="sysrow" style="margin:14px 12px 0">
+      <svg class="ic ic-16"><use href="#i-relay"/></svg><span><b>Offer sent</b> to Frank · Review · expires in 24h</span>
+    </div>
+    <div class="sp"></div>
+    <div class="lockbar">
+      <div class="top"><span class="waitdot"></span><div style="flex:1;min-width:0"><div class="t1">Waiting for Frank to accept</div><div class="t2">offer sent · Frank notified · expires 23:57:04</div></div></div>
+      <div class="acts"><button class="btn ghost sm" style="flex:1"><svg class="ic ic-14"><use href="#i-bell"/></svg>Resend notify</button><button class="btn dgr sm" style="flex:1"><svg class="ic ic-14"><use href="#i-undo"/></svg>Recall</button></div>
+    </div>
+    <div class="composer off" style="padding-bottom:14px"><span class="tapicon"><svg class="ic ic-20"><use href="#i-plus"/></svg></span><span class="cinput"><svg class="ic ic-16" style="margin-right:8px"><use href="#i-lock"/></svg>Input locked during handoff</span><span class="csend"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+  </div>
+</div>
+<div class="note" style="left:3440px;top:592px;width:400px">Same card, same neutral dot, same 44pt buttons — only the strings and<br>the left action change. The mono line drops the short code (there is no<br>code any more) and states delivery instead: <b>offer sent · Frank notified</b>.<br>“Notified” is honest about what we know — the push was accepted by<br>the service; it does not claim Frank saw it, and never claims he is online.<br><b>Resend notify</b> re-pings over the same link and rate-limits to once a<br>minute; it does not mint anything new. <b style="color:#E5604D">Recall</b> keeps its danger tint and<br>stays the rightmost, destructive option.</div>
+
+<!-- ══════ DESKTOP ══════ -->
+<div class="secttl" style="left:80px;top:2420px;width:1100px">Desktop — 1200pt<i>Same tokens, same status law. The picker becomes an anchored popover; Collaborators becomes a two-column settings pane.</i></div>
+
+<div class="flabel" style="left:80px;top:2540px;width:700px">Frame 9a · Desktop draft modal — contact dropdown<i>1200×800 · dark · popover anchored to the Recipient field</i></div>
+<div class="frame t" style="left:80px;top:2610px;width:1200px;height:800px;background:#0B0C0D;padding:0">
+  <div class="dwin">
+    <div class="dside">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span class="sp"></span><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-plus"/></svg></div>
+      <div class="dslist">
+        <div class="grpl" style="padding:6px 10px 6px">Panda · MacBook Pro</div>
+        <div class="dsrow on"><span class="sdot" style="background:var(--sec)"></span><span class="tx"><span class="n">Refactor auth module</span><span class="s">~/proj/app/cc-pocket</span></span></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--success)"></span><span class="tx"><span class="n">Fix flaky socket test</span><span class="s">~/proj/app/cc-pocket-protocol</span></span></div>
+        <div class="dsrow off"><span class="sdot" style="background:var(--hair)"></span><span class="tx"><span class="n">Release notes 1.6</span><span class="s">~/proj/app/cc-pocket</span></span></div>
+      </div>
+    </div>
+    <div class="dpane">
+      <div class="dph"><span class="n">Refactor auth module</span><span class="s">feat/auth-refactor</span><span class="sp"></span><span class="modepill">default<svg class="ic ic-12"><use href="#i-chev-d"/></svg></span></div>
+      <div class="dstream">
+        <div class="msg"><div class="who">YOU</div><div class="bd">add a unit test for the stream parser</div></div>
+        <div class="toolrow" style="max-width:640px"><svg class="ic ic-16" style="color:var(--sec)"><use href="#i-term"/></svg><span>Bash</span><span class="cmd">gradle :protocol:test</span><span class="ok">42 passed</span></div>
+      </div>
+      <div class="dcomposer"><svg class="ic ic-20" style="color:var(--muted)"><use href="#i-plus"/></svg><span class="ci">Message Claude…</span><span class="csend"><svg class="ic ic-20"><use href="#i-send"/></svg></span></div>
+    </div>
+    <div class="scrim"></div>
+    <div class="dmodal" style="width:760px">
+      <div class="dmh"><svg class="ic ic-20" style="color:var(--accent)"><use href="#i-relay"/></svg><h3>Hand off this session</h3><span class="sp"></span><svg class="ic ic-20" style="color:var(--muted)"><use href="#i-x"/></svg></div>
+      <div class="dmb" style="grid-template-columns:340px 1fr">
+        <div class="lc">
+          <div class="sess">
+            <div class="h"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-term"/></svg><span class="n">Refactor auth module</span><span class="chip"><svg class="ic"><use href="#i-chip"/></svg>Claude</span></div>
+            <div class="f"><span class="p">~/proj/app/cc-pocket</span><span class="d">·</span><svg class="ic ic-12" style="color:var(--muted)"><use href="#i-branch"/></svg><span>feat/auth-refactor</span></div>
+          </div>
+          <div><div class="fl">Role<span class="hint">continue arrives later</span></div>
+            <div class="segbox"><div class="seg on"><span class="s1"><span class="radio on"></span>Review</span><span class="s2">read-only</span></div><div class="seg dis"><span class="s1"><span class="radio"></span>Continue</span><span class="s2">can edit · later</span></div></div>
+          </div>
+          <div style="position:relative">
+            <div class="fl">Recipient</div>
+            <div class="rcp" style="border-color:var(--accent)"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-search"/></svg><span class="ph" style="color:var(--text)">fra</span><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-chev-d"/></svg></div>
+            <div class="popover" style="left:0;top:76px">
+              <div class="grpl">Recent</div>
+              <div class="crow sel"><span class="av md a">F</span><span class="tx"><span class="n">Frank Osei<span class="dir">⇄</span></span><span class="s">2 handoffs · last week</span></span><svg class="ic ic-14" style="color:var(--accent)"><use href="#i-check"/></svg></div>
+              <div class="crow"><span class="av md">M</span><span class="tx"><span class="n">Mei Tanaka<span class="dir">⇄</span></span><span class="s">5 handoffs · 3 days ago</span></span></div>
+              <div class="grpl">All contacts</div>
+              <div class="crow"><span class="av md">A</span><span class="tx"><span class="n">Aiko Sato<span class="dir">→</span></span><span class="s">connected 12d ago</span></span><span class="tagm">no daemon</span></div>
+              <div class="crow"><span class="av md">D</span><span class="tx"><span class="n">Dev Rao<span class="dir">⇄</span></span><span class="s">connected 2mo ago</span></span></div>
+              <div class="foot"><svg class="ic ic-16"><use href="#i-qr"/></svg>Connect a new colleague…</div>
+            </div>
+          </div>
+          <div><div class="fl">Offer expires<span class="hint">access, not the link</span></div><div class="pills"><span class="pill">1h</span><span class="pill">4h</span><span class="pill on">24h</span></div></div>
+        </div>
+        <div class="rc">
+          <div class="bcard two">
+            <div class="bcol">
+              <h5><span class="tag" style="color:var(--success)">THEY WILL SEE</span></h5>
+              <ul class="bl">
+                <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>The full session transcript</b><span class="sub">every message, tool call and diff</span></span></li>
+                <li class="yes"><span class="mk"><svg class="ic ic-16"><use href="#i-check"/></svg></span><span><b>Code in the shared roots</b><span class="sub">~/proj/app/cc-pocket<br>~/proj/app/cc-pocket-protocol</span></span></li>
+              </ul>
+            </div>
+            <div class="bcol">
+              <h5><span class="tag" style="color:var(--muted)">THEY CAN'T DO</span></h5>
+              <ul class="bl">
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Edit or write files</span></li>
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Reach your other sessions or folders</span></li>
+                <li class="no"><span class="mk"><svg class="ic ic-16"><use href="#i-x"/></svg></span><span>Pass this handoff on to someone else</span></li>
+              </ul>
+            </div>
+            <div class="honest"><svg class="ic ic-16"><use href="#i-alert"/></svg><span>The <b>full conversation history</b> of this session will be visible — including anything you pasted into it.</span></div>
+          </div>
+          <div class="disc">
+            <div class="dh"><svg class="ic ic-16"><use href="#i-file"/></svg>Handoff brief<span class="chip mute" style="margin-left:2px">auto</span><span class="sp"></span><span class="edit"><svg class="ic ic-14"><use href="#i-edit"/></svg>Edit</span></div>
+            <div class="db">
+              <div><div class="mdk">Ask</div><p class="mdp">Review the concurrency around the refresh mutex before I open the PR.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dmf"><span class="chip mute"><svg class="ic"><use href="#i-lock"/></svg>Your input locks until Frank returns</span><span class="sp"></span><button class="btn sec md">Cancel</button><button class="btn pri md">Send to Frank</button></div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:80px;top:3430px;width:560px">The picker is a <b>type-ahead popover</b> anchored to the field, matching the model popover:<br>340px, raised, hairline, same group labels as mobile. Typing filters; ↑↓ moves; ⏎ selects.<br>The connect row is pinned to the popover footer so the QR path is reachable without<br>abandoning the draft — choosing it opens Frame 3 as a small dialog and returns here.<br>Desktop footer keeps the shipped cost-restatement chip; only the primary verb changed.</div>
+
+<div class="flabel" style="left:1400px;top:2540px;width:700px">Frame 9b · Desktop Settings ▸ Collaborators<i>1200×800 · dark · list + detail, existing two-column settings grammar</i></div>
+<div class="frame t" style="left:1400px;top:2610px;width:1200px;height:800px;background:#0B0C0D;padding:0">
+  <div class="dwin">
+    <div class="dside">
+      <div class="dsh"><span class="tl"><i></i><i></i><i></i></span><span class="sp"></span><span class="chip mute">Settings</span></div>
+      <div class="dslist">
+        <div class="grpl" style="padding:6px 10px 6px">Settings</div>
+        <div class="dsrow off"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-chip"/></svg><span class="tx"><span class="n">Daemon &amp; devices</span></span></div>
+        <div class="dsrow off"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-folder"/></svg><span class="tx"><span class="n">Shared folders</span></span></div>
+        <div class="dsrow on"><svg class="ic ic-16" style="color:var(--accent)"><use href="#i-users"/></svg><span class="tx"><span class="n">Collaborators</span></span></div>
+        <div class="dsrow off"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-relay"/></svg><span class="tx"><span class="n">Handoffs</span></span></div>
+        <div class="dsrow off"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-gear"/></svg><span class="tx"><span class="n">Advanced</span></span></div>
+      </div>
+    </div>
+    <div class="dpane">
+      <div class="dph"><span class="n">Collaborators</span><span class="chip mute">4 connected</span><span class="sp"></span><button class="btn sec sm"><svg class="ic ic-14"><use href="#i-qr"/></svg>Connect a colleague</button></div>
+      <div class="setgrid">
+        <div class="setlist">
+          <div class="srch"><svg class="ic ic-16"><use href="#i-search"/></svg><span>Search…</span></div>
+          <div class="grpbox">
+            <div class="crow sel"><span class="av lg a">F</span><span class="tx"><span class="n">Frank Osei<span class="dir">⇄</span></span><span class="s">connected 12d ago · 3 handoffs</span></span><svg class="ic ic-14" style="color:var(--accent)"><use href="#i-chev-r"/></svg></div>
+            <div class="crow"><span class="av lg">M</span><span class="tx"><span class="n">Mei Tanaka<span class="dir">⇄</span></span><span class="s">connected 4mo ago · 5 handoffs</span></span></div>
+            <div class="crow"><span class="av lg">A</span><span class="tx"><span class="n">Aiko Sato<span class="dir">→</span></span><span class="s">connected 2m ago · no handoffs yet</span></span><span class="tagm">no daemon</span></div>
+            <div class="crow"><span class="av lg">D</span><span class="tx"><span class="n">Dev Rao<span class="dir">⇄</span></span><span class="s">connected 2mo ago · 1 handoff</span></span></div>
+            <div class="crow gone"><span class="av lg">S</span><span class="tx"><span class="n">Sofia Lindqvist</span><span class="s">link revoked 8d ago</span></span><span class="chip mute">removed</span></div>
+          </div>
+        </div>
+        <div class="setdet">
+          <div class="dethd"><span class="av lg a" style="width:44px;height:44px;font-size:16px">F</span><div><div class="n">Frank Osei <span class="dir">⇄</span></div><div style="font:400 11px/1.5 'JetBrains Mono',monospace;color:var(--muted);margin-top:3px">Frank's Mac mini · connected 12d ago</div></div></div>
+          <div class="setcol">
+            <div class="fl">Safety fingerprint</div>
+            <div class="fpr" style="align-items:flex-start;flex-direction:row;justify-content:space-between">
+              <div style="display:flex;flex-direction:column;gap:8px"><div class="w">tiger — brick — mango — void</div><div class="w">amber — pilot — nine — harbor</div></div>
+              <button class="btn ghost sm"><svg class="ic ic-14"><use href="#i-shield"/></svg>Re-verify</button>
+            </div>
+          </div>
+          <div class="setcol">
+            <div class="fl">Direction</div>
+            <div class="grpbox">
+              <div class="srow"><svg class="ic ic-16" style="color:var(--muted)"><use href="#i-relay"/></svg><span class="tx"><span class="n">Mutual</span><span class="s">you can send Frank handoffs · Frank can send you handoffs</span></span><span class="chip ok"><svg class="ic"><use href="#i-check"/></svg>Both ways</span></div>
+            </div>
+          </div>
+          <div class="setcol">
+            <div class="fl">Handoffs with Frank<span class="hint">3</span></div>
+            <div class="grpbox">
+              <div class="hrow"><span class="tx"><span class="n" style="font-size:14px">Refactor auth module</span><span class="s">18 min · 5 findings · today</span></span><span class="chip ok">Completed</span></div>
+              <div class="hrow"><span class="tx"><span class="n" style="font-size:14px">Fix flaky socket test</span><span class="s">pulled back after 4 min · 2d ago</span></span><span class="chip warn">Recalled</span></div>
+              <div class="hrow"><span class="tx"><span class="n" style="font-size:14px">Release notes 1.6</span><span class="s">3 weeks ago</span></span><span class="chip mute">Declined</span></div>
+            </div>
+          </div>
+          <div class="setcol">
+            <div class="grpbox">
+              <div class="srow dgrow"><svg class="ic ic-16"><use href="#i-trash"/></svg><span class="tx"><span class="n">Remove connection</span><span class="s">Frank can no longer reach you and you can't send him handoffs; past handoffs stay in history.</span></span><span class="sp"></span><button class="btn dgr sm">Remove</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="note" style="left:1400px;top:3430px;width:560px">List left, detail right — the same 340px + fluid split the draft modal uses, so Settings and<br>dialogs share one rhythm. Selection is a <b>raised</b> row, not a tinted one: terracotta stays<br>reserved for needs-you moments.<br>Mutual links collapse to a single row with a <span class="g">Both ways</span> chip rather than two entries;<br>the pane never implies presence — “connected 12d ago” is when the binding was made.<br><b style="color:#E5604D">Remove</b> gets an explicit button on desktop (no swipe affordance) and states both halves of<br>the consequence for a mutual link.</div>
+
+<div style="position:absolute;top:3680px;left:0;width:3900px;height:1px"></div>
+
+<script src="session-handoff-contacts/qr.js"></script>
+</body>
+</html>
