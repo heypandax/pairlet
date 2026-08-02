@@ -3,6 +3,7 @@ package dev.ccpocket.app.desktop
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -845,5 +846,62 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.bridge_request_approval).uppercase())
         assertPresent(str(Res.string.bridge_manage_toggle))
+    }
+
+    // ── session archive (issue #202) ──────────────────────────────────────────────────────────────
+
+    @Test
+    fun archiveEntryIsHiddenUnlessTheDaemonSupportsIt() = runComposeUiTest {
+        // the seed model leaves canArchiveSessions=false (an older daemon / a guest), so the sidebar must
+        // not offer an entry whose frames the daemon would silently drop
+        setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        waitForIdle()
+        assertTrue(!present(str(Res.string.sidebar_archived)), "no archive row without the capability stamp")
+    }
+
+    @Test
+    fun archiveEntryRendersWithItsCountWhenSupported() = runComposeUiTest {
+        val archived = listOf(
+            DkSession("a1", "~/code/cc-pocket", "Old spike", running = false),
+            DkSession("a2", "~/code/other", "Retired experiment", running = false),
+        )
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val canArchiveSessions = true
+            override val archivedSessions = archived
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(str(Res.string.sidebar_archived))
+        // the count IS the desktop's receipt for an archive action — that's why this shell shows no toast
+        assertPresent("2")
+    }
+
+    @Test
+    fun archivedPaletteScopeListsEveryProjectsRowsWithTheUnarchiveVerb() = runComposeUiTest {
+        val archived = listOf(
+            DkSession("a1", "~/code/cc-pocket", "Old spike", running = false),
+            DkSession("a2", "~/code/other", "Retired experiment", running = false),
+        )
+        var unarchived: String? = null
+        val model = object : DesktopModel by SeedDesktopModel() {
+            override val canArchiveSessions = true
+            override val archivedSessions = archived
+            override var palette: PaletteScope? = PaletteScope.ARCHIVED
+            override fun unarchiveSession(s: DkSession) { unarchived = s.sessionId }
+        }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+
+        // the scope spans projects — that is the whole point of the entry
+        assertPresent("Old spike")
+        assertPresent("Retired experiment")
+        // the persistent legend, not a hover-only hint: this is what makes the second verb discoverable
+        assertPresent(str(Res.string.archive_unarchive))
+
+        // by tag, not by text: the footer legend deliberately carries the same word, and the thing under
+        // test is the SELECTED ROW's control
+        onNodeWithTag("palette-secondary").performClick()
+        waitForIdle()
+        assertEquals("a1", unarchived, "the row's second verb restores that exact session")
     }
 }

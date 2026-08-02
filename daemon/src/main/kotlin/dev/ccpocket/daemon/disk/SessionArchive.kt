@@ -16,14 +16,14 @@ import java.nio.file.attribute.PosixFilePermissions
  * Daemon-side truth like [SessionGroups]: archiving on the phone must hide the row on the desktop too, and it
  * has to survive an app reinstall, so no client keeps an archive of its own.
  *
- *   { "<dirKey>": { "workdir": "/Users/x/proj", "sessions": { "<sessionId>": <archivedAt epoch ms> } } }
+ *   { "<canonical workdir>": { "workdir": "/Users/x/proj", "sessions": { "<sessionId>": <archivedAt> } } }
  *
  * Deliberately its OWN file rather than a field on [SessionGroups]'s:
  *  - a machine that rolls back to a pre-#202 daemon would silently DROP every archive entry the next time it
  *    rewrote a shared file (its schema lacks the key, `ignoreUnknownKeys` strips it, `persist` writes back the
  *    stripped map). A separate file an old daemon never opens survives the round trip untouched.
- *  - the cross-project view has to RE-LIST each project, which needs the real path — and [ProjectPaths.dirKey]
- *    is lossy (every non-alphanumeric becomes `-`), so it can't be inverted. Hence the stored [workdir].
+ *  - the cross-project view has to RE-LIST each project, which needs a real path to hand back to the
+ *    backends. Hence the stored [workdir] (and the canonical key — see [keyOf]).
  * It also means this object owns a separate cache trio, so neither store's mtime snapshot invalidates the other.
  *
  * The key set is load-bearing: `sessions` is pruned to nothing ⇒ the project entry is REMOVED, which keeps
@@ -77,18 +77,28 @@ object SessionArchive {
     private fun persist(file: File, data: Map<String, ArchivedProject>) {
         runCatching {
             file.parentFile?.mkdirs()
-            val tmp = File(file.parentFile, "${file.name}.tmp")
+            // a UNIQUE tmp name: two daemons running at once is a documented recurring state here, and a
+            // shared fixed name lets them interleave writeText+move into a torn file — which `load` then
+            // silently reads as an empty archive, un-archiving everything with no visible error
+            val tmp = Files.createTempFile(file.parentFile.toPath(), file.name, ".tmp").toFile()
             tmp.writeText(json.encodeToString(data))
             // owner-only, like identity.json — the file maps project paths to session ids
             runCatching { Files.setPosixFilePermissions(tmp.toPath(), PosixFilePermissions.fromString("rw-------")) }
             runCatching { Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING) }
                 .recoverCatching { Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING) }
+                .onFailure { runCatching { tmp.delete() } }
                 .getOrThrow()
             cacheFile = file; cacheMtime = file.lastModified(); cache = data
         }.onFailure { log.warn("archive write failed: ${it.message}") }
     }
 
-    private fun keyOf(workdir: String) = ProjectPaths.dirKey(workdir)
+    // Keyed on the CANONICAL path, not [ProjectPaths.dirKey]. dirKey collapses every non-alphanumeric to
+    // '-', so `~/x/my-app` and `~/x/my_app` share one key — and since each entry keeps a single [workdir],
+    // the second project to be archived would overwrite the first's path and the enumeration would re-list
+    // only one of them. The other project's archived rows would then be invisible in BOTH the regular list
+    // (filtered) and the archive view (never listed), with no way to restore them. That directly breaks
+    // "archiving never loses anything", so the key has to be lossless.
+    private fun keyOf(workdir: String) = ProjectPaths.canonicalKey(workdir)
 
     // ── reads ────────────────────────────────────────────────────────────────
 

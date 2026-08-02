@@ -188,7 +188,10 @@ class RequestRouterArchiveTest {
 
         assertFalse(sessions.archiveSupported, "a guest client must not render archive affordances")
         assertEquals(listOf("s1"), sessions.items.map { it.sessionId }, "the mutation was a no-op")
-        assertTrue(SessionArchiveProbe.isEmpty(archiveFile), "nothing was written to the owner's store")
+        assertTrue(
+            !archiveFile.exists() || archiveFile.readText().trim().let { it.isEmpty() || it == "{}" },
+            "nothing was written to the owner's store",
+        )
     }
 
     @Test
@@ -210,7 +213,75 @@ class RequestRouterArchiveTest {
         assertEquals(listOf("s1"), archived.items.map { it.sessionId })
     }
 
-    private object SessionArchiveProbe {
-        fun isEmpty(file: java.io.File): Boolean = !file.exists() || file.readText().trim().let { it == "{}" || it.isEmpty() }
+    @Test
+    fun a_guest_cannot_reach_the_cross_project_scan_through_the_archive_view_branch() = runBlocking {
+        // emitArchivedSessions is a WHOLE-MACHINE enumeration and takes no guest scope, so the branch that
+        // reaches it has to be gated on ownership too — not just the mutation above it. Without this a
+        // non-owner would get a full cross-project scan computed on every frame, outside its shared root.
+        val scope = CoroutineScope(Dispatchers.Default)
+        val r = router(scope, mapOf(dirA to listOf(summary("s1", dirA))))
+        val guest = GuestScope(
+            roots = listOf(dirA), ownedSessions = setOf("s1"), label = "shared",
+            expiresAt = null, tier = dev.ccpocket.protocol.AccessTier.REVIEW,
+        )
+
+        val emitted = mutableListOf<Frame>()
+        r.handle(
+            SetSessionArchived(dirA, "s1", archived = true, fromArchiveView = true),
+            { synchronized(emitted) { emitted += it } },
+            guestScope = guest,
+        )
+        val reply = awaitFrame(emitted).single()
+
+        assertTrue(reply is Sessions, "a guest must fall through to its scoped list, got ${reply::class.simpleName}")
+        assertTrue(emitted.none { it is ArchivedSessions }, "no cross-project enumeration for a non-owner")
+    }
+
+    @Test
+    fun a_collaborator_can_neither_archive_nor_enumerate() = runBlocking {
+        // A COLLABORATOR arrives with origin == null AND guestScope == null — only collabScope is set — so
+        // guarding on the first two alone is vacuous for exactly the weakest credential the product hands
+        // out (a link sent to a contact). Sabotage here is silent: hiding the owner's sessions everywhere.
+        val scope = CoroutineScope(Dispatchers.Default)
+        val r = router(scope, mapOf(dirA to listOf(summary("s1", dirA))))
+        val collab = dev.ccpocket.daemon.handoff.CollaboratorScope(deviceId = "dev-collab")
+
+        val emitted = mutableListOf<Frame>()
+        r.handle(
+            SetSessionArchived(dirA, "s1", archived = true),
+            { synchronized(emitted) { emitted += it } },
+            collabScope = collab,
+        )
+        val sessions = awaitFrame(emitted).single() as Sessions
+        assertEquals(listOf("s1"), sessions.items.map { it.sessionId }, "the mutation must not have applied")
+
+        val after = mutableListOf<Frame>()
+        r.handle(ListArchivedSessions, { synchronized(after) { after += it } }, collabScope = collab)
+        kotlinx.coroutines.delay(200)
+        assertTrue(synchronized(after) { after.isEmpty() }, "no archive enumeration for a collaborator")
+    }
+
+    @Test
+    fun the_archive_view_clips_first_prompt_so_one_frame_cannot_overrun_the_relay() = runBlocking {
+        // firstPrompt is untruncated on the wire and can be enormous (skill injection has produced ~800KB
+        // single messages here). Unlike a per-project Sessions frame this one aggregates the WHOLE machine,
+        // and the archive screen refetches on every open — an oversize frame would drop the relay socket in
+        // a loop. The view renders title + cwd and never reads firstPrompt, so clipping costs nothing.
+        val huge = "x".repeat(50_000)
+        val scope = CoroutineScope(Dispatchers.Default)
+        val r = router(
+            scope,
+            mapOf(dirA to listOf(summary("s1", dirA).copy(firstPrompt = huge))),
+        )
+        r.handle(SetSessionArchived(dirA, "s1", archived = true), { })
+
+        val emitted = mutableListOf<Frame>()
+        r.handle(ListArchivedSessions, { synchronized(emitted) { emitted += it } })
+        val archived = awaitFrame(emitted).filterIsInstance<ArchivedSessions>().single()
+
+        assertTrue(
+            archived.items.single().firstPrompt.length <= RequestRouter.ARCHIVE_PROMPT_CLIP,
+            "expected a clipped prompt, got ${archived.items.single().firstPrompt.length} chars",
+        )
     }
 }

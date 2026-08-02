@@ -54,6 +54,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -369,7 +370,7 @@ private fun PaletteRow(item: PItem, query: String, selected: Boolean, onClick: (
                 Text(
                     item.secondaryLabel.orEmpty(), color = Tok.accent, fontFamily = Dk.ui, fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                    modifier = Modifier.testTag("palette-secondary").clip(RoundedCornerShape(6.dp))
                         .clickable { item.secondary.invoke() }.padding(horizontal = 6.dp, vertical = 3.dp),
                 )
             }

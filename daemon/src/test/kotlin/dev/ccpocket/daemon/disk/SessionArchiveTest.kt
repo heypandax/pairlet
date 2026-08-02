@@ -60,15 +60,31 @@ class SessionArchiveTest {
     }
 
     @Test
-    fun the_entry_keeps_the_real_workdir_because_dirKey_is_lossy() {
+    fun the_entry_keeps_the_real_workdir_for_the_cross_project_relist() {
         val f = tempFile()
-        // dirKey mangles every non-alphanumeric to '-', so it can NOT be inverted back into a path —
-        // the cross-project view needs the original to re-list the project.
         val wd = "/Users/panda/my_proj.v2"
         SessionArchive.setArchived(wd, "sid-1", true, f)
 
         assertEquals(wd, SessionArchive.all(f).single().workdir)
-        assertTrue(ProjectPaths.dirKey(wd) in f.readText(), "partitioned by dirKey like the group store")
+    }
+
+    @Test
+    fun projects_whose_dirKeys_collide_stay_separate() {
+        // `-Users-x-my-app` is the dirKey of BOTH of these. Keying on it would make the second archive
+        // overwrite the first entry's stored workdir, and the cross-project view would then re-list only
+        // one project — leaving the other's rows filtered out of the regular list AND absent from the
+        // archive view, i.e. unrecoverable. Archiving must never lose anything, so the key is lossless.
+        val f = tempFile()
+        SessionArchive.setArchived("/Users/x/my-app", "sid-1", true, f)
+        SessionArchive.setArchived("/Users/x/my_app", "sid-2", true, f)
+
+        assertEquals(setOf("sid-1"), SessionArchive.archivedIds("/Users/x/my-app", f))
+        assertEquals(setOf("sid-2"), SessionArchive.archivedIds("/Users/x/my_app", f))
+        assertEquals(
+            setOf("/Users/x/my-app", "/Users/x/my_app"),
+            SessionArchive.all(f).map { it.workdir }.toSet(),
+            "both projects must be enumerable, or one project's archive is a black hole",
+        )
     }
 
     @Test

@@ -165,6 +165,10 @@ class RequestRouter(
          *  unbounded ledger, and one frame must stay bounded however long a machine has accumulated. */
         const val MAX_ARCHIVE_ROWS = 500
 
+        /** Per-row clip for the archive view's [SessionSummary.firstPrompt] — the view never renders it,
+         *  and leaving it unbounded is how one machine-wide frame overruns the relay's 4MB limit. */
+        const val ARCHIVE_PROMPT_CLIP = 200
+
         /** §18.2 P2-3: frames only an approvalV2-declaring client should receive — ingress sinks drop
          *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
         fun approvalV2Only(frame: Frame): Boolean =
@@ -283,17 +287,32 @@ class RequestRouter(
             // session archive (issue #202): same daemon-side-truth + re-push contract as the groups above.
             // Acting from the cross-project archive view answers with the ARCHIVE list instead, so restoring
             // a row there never repoints the client's currently-listed directory to that row's project.
+            // OWNER means all three credential classes are absent. A COLLABORATOR arrives with origin ==
+            // null AND guestScope == null (only collabScope is set — see DeviceSessions), so testing the
+            // first two alone is vacuous for exactly the weakest credential we hand out. The handoff plane
+            // in this same file already spells all three out; so does this.
             is SetSessionArchived -> {
-                if (guestScope == null) {
-                    SessionArchive.setArchived(groupWorkdir(frame.workdir), frame.sessionId, frame.archived, archiveFile)
+                val owner = origin == null && guestScope == null && collabScope == null
+                if (owner) {
+                    val ok = SessionArchive.setArchived(groupWorkdir(frame.workdir), frame.sessionId, frame.archived, archiveFile)
+                    // a refused write (bad id, cap hit) must not read as success: the re-pushed list would
+                    // look unchanged and the client would still show "Archived"
+                    if (!ok) {
+                        sink.emit(PocketError("archive_failed", "could not update the archive for this session"))
+                        return
+                    }
                 }
-                if (frame.fromArchiveView) scope.launch { emitArchivedSessions(sink, caps) }
+                // the emit is gated too, not just the mutation: emitArchivedSessions is a whole-machine
+                // enumeration with no scope filter, so a non-owner must never reach it through this door
+                if (owner && frame.fromArchiveView) scope.launch { emitArchivedSessions(sink, caps) }
                 else emitSessions(frame.workdir, sink, guestScope, caps)
             }
             // a multi-project scan → off the inbound pump like FetchUsage. Owner only: this is a
             // cross-project discovery surface, strictly more than the per-dir listing a guest may have.
             is ListArchivedSessions ->
-                if (origin == null && guestScope == null) scope.launch { emitArchivedSessions(sink, caps) }
+                if (origin == null && guestScope == null && collabScope == null) {
+                    scope.launch { emitArchivedSessions(sink, caps) }
+                }
 
             // session rename (issue #158): lands claude's own custom-title record (live daemon session:
             // the CLI appends it itself over a control_request; idle: a one-line transcript append) —
@@ -788,9 +807,16 @@ class RequestRouter(
                 .map { (if (it.sessionId in busy) it.copy(busy = true) else it) to (entry.sessions[it.sessionId] ?: 0L) }
         }.sortedByDescending { it.second }.map { it.first }
         if (caps?.supportsOpencode != true) rows = rows.filter { it.agent != AgentKind.OPENCODE }
-        // soft cap: the archive is "put it away", not an unbounded ledger — keep the frame bounded however
-        // long the machine has been accumulating. Newest-archived survive the cut.
-        sink.emit(ArchivedSessions(rows.take(MAX_ARCHIVE_ROWS)))
+        // Bound the FRAME, not just the row count. firstPrompt is untruncated and can be huge (a skill
+        // injection has produced ~800KB single messages here), and unlike a per-project Sessions frame this
+        // one aggregates the whole machine — blowing the relay's 4MB cap would drop the socket, and the
+        // archive screen re-fetches on every open, so it would loop. The archive view renders title + cwd
+        // and never reads firstPrompt, so clipping it costs nothing.
+        sink.emit(
+            ArchivedSessions(
+                rows.take(MAX_ARCHIVE_ROWS).map { it.copy(firstPrompt = it.firstPrompt.take(ARCHIVE_PROMPT_CLIP)) },
+            ),
+        )
     }
 
     // ── ClientCaps filters: strip agent=OPENCODE rows for peers that never declared support, so an
