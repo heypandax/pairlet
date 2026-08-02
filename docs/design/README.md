@@ -9,6 +9,11 @@ cc-pocket 移动端设计资料，**统一采用 claude.ai/design**。Stitch 的
 | `UI-DESIGN.md` | 设计规格：设计系统 ／ 7 屏逐屏 ／ 组件 ／ 状态 ／ 无障碍 ＋ i18n ／ §10 可粘贴生成 prompt |
 | `CLAUDE-DESIGN-PROMPT.md` | 喂给 claude.ai/design 的开场 + 逐屏 prompt（生成本设计所用） |
 | `claude-design-handoff/` | **设计版本本体** —— claude.ai/design 的 Handoff bundle：7 屏 `.html/.jsx` + 设计对话 `chats/` + `README`（coding agent 落地指引） |
+| `SESSION-HANDOFF.md` | **已确认，作为实现依据** —— 首次扫码建立协作联系人，后续直接选择并接力 Session；含 Handoff 实体、独占控制权、内置 Skill、临时 Grant、wire/daemon 落点与验收标准 |
+| `SESSION-HANDOFF-IMPLEMENTATION-REVIEW.md` | **当前实现修复清单** —— Claude 首轮实现复审：Recipient 收件/接受闭环、Handoff History、稳定边界 Recall、v1 授权校验、深链与测试验收 |
+| `PEER-CALL.md` | ⏸️ **已暂停** —— daemon-to-daemon Agent 互调的历史技术探索，已被 Session Handoff 主线取代 |
+| `APPROVAL-SYSTEM.md` | **审批最终方案，作为实现与评审的唯一依据** —— 现有场景盘点、统一 Approval Coordinator、Task Contract/Grant、Agent 自主参与、审批路由、通知/队列/软超时、自动执行留痕、协议与分期验收 |
+| `SMART-APPROVAL.md` | **风险评估子设计** —— 纳入统一审批系统：确定性行为序列＋Agent 风险建议＋高风险审批升级；不再作为独立审批架构 |
 | `CHANNEL-INTEGRATIONS-EVALUATING.md` | ⚠️ **评估中** —— 官方渠道集成（Claude Channels / Slack、Codex Slack / Linear）机制调研与机会分析。含五条方向层候选，**均未定案、未录台账**；定案后去掉 `-EVALUATING` 后缀 |
 
 > 命名约定：文件名带 `-EVALUATING` 后缀 = 调研 / 提案阶段，结论未定，不可作为实现依据。
