@@ -188,6 +188,7 @@ open class SeedDesktopModel : DesktopModel {
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
+    override var showHandoff by mutableStateOf(false)
     override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)

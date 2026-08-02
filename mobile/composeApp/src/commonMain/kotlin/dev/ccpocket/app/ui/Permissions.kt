@@ -566,10 +566,24 @@ private fun RulesReview(rules: List<String>, onClear: (String) -> Unit, onClearA
     }
 }
 
+/**
+ * A tool token that RUNS A COMMAND. The daemon normalizes every backend onto Claude-shaped names
+ * (ToolMeta synthesizes "Bash" for Codex too), so this is one token in practice — the tolerant match is
+ * for a backend whose naming drifts, because getting this wrong the SAFE way (treating something as a
+ * shell) only costs an extra confirmation.
+ */
+fun isShellTool(tool: String): Boolean = tool.lowercase() in setOf(
+    "bash", "shell", "local_shell", "exec_command", "execute_command", "run_command",
+)
+
 // ── upgraded permission sheet (3-way + remember) ────────────────
 @Composable
 fun PermissionSheet(
     ask: PermissionAsk, workdir: String?, timedOutSignal: Boolean = false,
+    /** True while a REVIEW handoff is in progress on this device (implementation review §2.2/§4.3):
+     *  shell is the ONE way a "read-only" review can still change files, so it is confirmed one command
+     *  at a time — "Always allow" is withdrawn for it — and the recipient is told it leaves a record. */
+    handoffReview: Boolean = false,
     onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit, onDismiss: () -> Unit,
 ) {
     var seconds by remember(ask.askId) { mutableStateOf(ask.total()) }
@@ -605,7 +619,21 @@ fun PermissionSheet(
                     Text(stringResource(Res.string.dismiss), color = Tok.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onDismiss() }.padding(6.dp))
                 }
             } else {
-                Decision(ask, onDeny, onOnce, onAlways)
+                val recorded = handoffReview && isShellTool(ask.tool)
+                if (recorded) {
+                    Row(
+                        Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 13.dp, vertical = 11.dp),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                    ) {
+                        Icon(Icons.Outlined.Shield, null, tint = Tok.tx2, modifier = Modifier.padding(top = 1.dp).size(14.dp))
+                        Text(stringResource(Res.string.ho_bash_recorded), color = Tok.tx2, fontSize = 12.sp, lineHeight = 17.sp)
+                    }
+                }
+                // withdrawing "Always allow" is the enforcement half of the same rule: a remembered shell
+                // rule would turn "confirmed one by one" back into a blanket grant for the whole handoff
+                Decision(ask, onDeny, onOnce, onAlways, allowRemember = !recorded)
             }
         }
     }
@@ -680,8 +708,15 @@ private fun DiffView(diff: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Decision(ask: PermissionAsk, onDeny: () -> Unit, onOnce: () -> Unit, onAlways: () -> Unit) {
-    if (ask.oneOff) {
+private fun Decision(
+    ask: PermissionAsk,
+    onDeny: () -> Unit,
+    onOnce: () -> Unit,
+    onAlways: () -> Unit,
+    /** False collapses the card to Deny / Allow once — a decision that must not become a standing rule. */
+    allowRemember: Boolean = true,
+) {
+    if (ask.oneOff || !allowRemember) {
         // A one-off human decision (plan approval etc.) — never "Always allow"; the flag rides the ask
         // from the daemon's ToolMeta (issue #10), with a legacy tool-name fallback inside oneOff.
         Row(Modifier.padding(top = 16.dp).height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

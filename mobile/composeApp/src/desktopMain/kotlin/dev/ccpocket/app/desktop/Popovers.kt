@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupPositionProvider
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.ho_menu_row
+import dev.ccpocket.app.resources.ho_new_badge
 import dev.ccpocket.app.resources.label_agent
 import dev.ccpocket.app.resources.label_effort
 import dev.ccpocket.app.resources.label_mode
@@ -349,6 +351,11 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 val canOpenTerminal = remember(model.chatWorkdir) { TerminalLauncher.canOpen(model.chatWorkdir) }
                 if (canOpenTerminal) {
                     QaRow(stringResource(Res.string.qa_terminal)) { model.openTerminalPreferred(); onDismiss() }
+                }
+                // "Hand off to a colleague" (design Frame 1): only while the session is handoff-free —
+                // one non-terminal handoff per session, and the daemon refuses a second anyway
+                if (!model.observing && model.activeHandoff == null) {
+                    QaRow(stringResource(Res.string.ho_menu_row), value = stringResource(Res.string.ho_new_badge)) { onDismiss(); model.showHandoff = true }
                 }
                 QaRow(stringResource(Res.string.qa_compact)) { model.compactConversation(); onDismiss() }
                 QaRow(

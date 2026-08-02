@@ -115,6 +115,33 @@ class RepoDesktopModel(
     override var showPermissionModal by mutableStateOf(false)
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
+    override var showHandoff by mutableStateOf(false)
+
+    // ── session handoff: straight repo passthrough (daemon truth) ──
+    override val activeHandoff get() = repo.activeHandoff.value
+    override val handoffInvite get() = repo.lastHandoffInvite.value
+    override val handoffCreating get() = repo.handoffCreating.value
+    override val handoffError get() = repo.handoffError.value
+    override fun handoffIsRecipient() = activeHandoff?.let { repo.isHandoffRecipient(it) } == true
+    override fun handoffIsInitiator() = activeHandoff?.let { repo.isHandoffInitiator(it) } == true
+    override fun handoffCreate(recipient: String, expiresHours: Int, request: String, recipientDeviceId: String?) =
+        repo.createHandoff(recipient, expiresHours, request, recipientDeviceId)
+
+    // ── collaborator links: repo passthrough ──
+    override val collaborators get() = repo.collaborators.toList()
+    override val collaboratorTicket get() = repo.collaboratorTicket.value
+    override val lastCollaboratorConnected get() = repo.lastCollaboratorConnected.value
+    override val collaboratorError get() = repo.collaboratorError.value
+    override fun listCollaborators() { repo.listCollaborators() }
+    override fun createCollaboratorTicket() { repo.lastCollaboratorConnected.value = null; repo.createCollaboratorTicket() }
+    override fun removeCollaborator(deviceId: String) { repo.removeCollaborator(deviceId) }
+    override fun handoffCancel() { activeHandoff?.let { repo.cancelHandoff(it.id) } }
+    override fun handoffRecall() { activeHandoff?.let { repo.recallHandoff(it.id) } }
+    override fun handoffComplete() { activeHandoff?.let { repo.completeHandoff(it.id) } }
+    override fun handoffReturn(verdict: String?) {
+        activeHandoff?.let { repo.returnHandoff(it.id, dev.ccpocket.protocol.HandoffResult(summary = verdict ?: "", verdict = verdict)) }
+    }
+    override fun dismissHandoffInvite() { repo.lastHandoffInvite.value = null }
     override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)

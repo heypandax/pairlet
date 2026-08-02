@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.epochMillis
+import dev.ccpocket.app.ui.handoff.toHistoryItem
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
@@ -149,7 +150,7 @@ fun contextColor(frac: Float, base: Color = Tok.accent): Color = when {
 //  Session info (read-only): model · effort · mode · dir · context bar
 // ════════════════════════════════════════════════════════════════════
 @Composable
-fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
+fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit, onHandoff: (() -> Unit)? = null) {
     val modeLabel =
         if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) stringResource(AUTO_MODE.short)
         else MODE_BY[repo.mode.value]?.tech ?: repo.mode.value.name
@@ -184,6 +185,13 @@ fun SessionInfoSheet(repo: PocketRepository, onDismiss: () -> Unit) {
                 Text(stringResource(Res.string.label_workdir), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
                 TailPathText(repo.workdir.value ?: "", fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
             }
+            // Handoff history (design Frame 10/10b): status-chipped rows, or the one-line empty hint
+            val historyItems = repo.handoffs.mapNotNull { it.toHistoryItem() }
+            dev.ccpocket.app.ui.handoff.HandoffHistorySection(
+                historyItems,
+                onOpen = { /* v1: rows are a record; the RETURNED result docks in the chat itself */ },
+                onHandoff = { onDismiss(); onHandoff?.invoke() },
+            )
         }
     }
 }
@@ -311,6 +319,7 @@ fun QuickActionsSheet(
     onMode: () -> Unit,
     onFiles: () -> Unit,
     onHelp: () -> Unit,
+    onHandoff: (() -> Unit)? = null, // session handoff entry (design Frame 1); null hides the row
     onDismiss: () -> Unit,
 ) {
     var sub by remember { mutableStateOf(QaSub.MAIN) }
@@ -342,6 +351,13 @@ fun QuickActionsSheet(
                             chevron = true,
                         ) { onMode(); onDismiss() }
                         ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
+                        // "Hand off to a colleague" — the one accent-glyph row in the menu (design Frame 1);
+                        // the NEW badge is temporary (2 releases)
+                        if (onHandoff != null) ActionRow(
+                            stringResource(Res.string.ho_menu_row),
+                            value = stringResource(Res.string.ho_new_badge),
+                            accent = true,
+                        ) { onHandoff(); onDismiss() }
                         ActionRow(stringResource(Res.string.qa_files)) { onFiles(); onDismiss() }
                         ActionRow(stringResource(Res.string.support_title)) { onHelp(); onDismiss() }
                         ActionRow(stringResource(Res.string.qa_compact)) { repo.sendPrompt("/compact"); onDismiss() }
@@ -425,14 +441,27 @@ fun ModelSheet(repo: PocketRepository, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun ActionRow(label: String, value: String? = null, danger: Boolean = false, chevron: Boolean = false, onClick: () -> Unit) {
+private fun ActionRow(label: String, value: String? = null, danger: Boolean = false, chevron: Boolean = false, accent: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (accent) Tok.accent.copy(alpha = 0.10f) else Tok.surface)
             .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = if (danger) Tok.danger else Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-        value?.let { Text(it, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1) }
+        if (accent) {
+            dev.ccpocket.app.ui.handoff.HandoffRelayGlyph(Tok.accent)
+            Spacer(Modifier.width(11.dp))
+        }
+        Text(
+            label, color = when { danger -> Tok.danger; accent -> Tok.accent; else -> Tok.tx },
+            fontSize = 14.5.sp, fontWeight = if (accent) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.weight(1f),
+        )
+        value?.let {
+            if (accent) Text(
+                it, color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.8.sp,
+                modifier = Modifier.clip(RoundedCornerShape(4.dp)).border(1.dp, Tok.accent.copy(alpha = 0.4f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 3.dp),
+            )
+            else Text(it, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1)
+        }
         if (chevron) Text(" ›", color = Tok.muted, fontSize = 16.sp)
     }
 }

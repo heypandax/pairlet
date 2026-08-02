@@ -166,6 +166,19 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                 SettingsModal(model) { model.showSettings = false }
             }
         }
+        if (model.showHandoff && model.handoffInvite == null) {
+            // session-handoff draft dialog (design Frame 11) — centered scrim, two-column trust layout.
+            // A fresh invite yields to the QR card below (the draft's job is done once the invite exists).
+            Overlay(onDismiss = { model.showHandoff = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                HandoffModal(model) { model.showHandoff = false }
+            }
+        }
+        if (model.handoffInvite != null) {
+            // fresh invite → the QR/short-code card; also closes the draft dialog (state flips it)
+            Overlay(onDismiss = { model.dismissHandoffInvite() }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                HandoffInviteModal(model) { model.dismissHandoffInvite() }
+            }
+        }
         if (model.showPermissionModal) {
             // the focused modal is for permission gates only; an AskUserQuestion docks inline in ChatPane (#57)
             model.ask?.takeIf { !it.isQuestion }?.let { ask ->

@@ -20,6 +20,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +59,23 @@ fun JoinFolderScreen(repo: PocketRepository, onBack: () -> Unit, onJoined: () ->
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     var preview by remember { mutableStateOf<ShareInvite?>(null) }
 
+    // collaborator connect tickets (SESSION-HANDOFF.md §4.1) ride the same scan/paste entry: the
+    // blob decides which trust screen opens — folder accept-preview vs fingerprint confirm
+    var collabPreview by remember { mutableStateOf<dev.ccpocket.protocol.CollaboratorInvite?>(null) }
+    val collab = collabPreview
+    if (collab != null) {
+        // the redeem is asynchronous now (it mints an inbox link, not a computer) — hold the waiting state
+        // and leave only once the link is actually stored, so a failure isn't reported as a join
+        dev.ccpocket.app.ui.handoff.ConfirmConnectionScreen(
+            collab,
+            confirming = repo.collabRedeeming.value,
+            onConfirm = { repo.redeemCollaboratorInvite(collab) },
+            onCancel = { collabPreview = null },
+        )
+        val links = repo.collaboratorLinks.toList()
+        LaunchedEffect(links.size) { if (links.any { it.accountId == collab.accountId }) onJoined() }
+        return
+    }
     val invite = preview
     if (invite != null) {
         AcceptPreview(
@@ -67,18 +85,23 @@ fun JoinFolderScreen(repo: PocketRepository, onBack: () -> Unit, onJoined: () ->
         )
         return
     }
-    RedeemScreen(onBack = onBack, onInvite = { preview = it })
+    RedeemScreen(onBack = onBack, onInvite = { preview = it }, onCollabInvite = { collabPreview = it })
 }
 
 // ── frame 3a / 3a-err: redeem (scan or paste) ──
 
 @Composable
-private fun RedeemScreen(onBack: () -> Unit, onInvite: (ShareInvite) -> Unit) {
+private fun RedeemScreen(onBack: () -> Unit, onInvite: (ShareInvite) -> Unit, onCollabInvite: (dev.ccpocket.protocol.CollaboratorInvite) -> Unit = {}) {
     var pasted by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    // §7: the SAME parser every other entry point uses. This is the one place `allowBareBlob` is on — a
+    // human deliberately pasted a code here, whereas a deep link must never be probed as a naked blob.
     fun tryDecode(raw: String) {
-        val inv = decodeShareInvite(raw)
-        if (inv != null) onInvite(inv) else error = true
+        when (val link = dev.ccpocket.app.pairing.parseIncomingLink(raw, allowBareBlob = true)) {
+            is dev.ccpocket.app.pairing.IncomingLink.Share -> onInvite(link.invite)
+            is dev.ccpocket.app.pairing.IncomingLink.Collab -> onCollabInvite(link.invite)
+            else -> error = true
+        }
     }
 
     Column(Modifier.fillMaxSize().background(Tok.base)) {
@@ -160,8 +183,10 @@ private fun ScanBox(onScanned: (String) -> Unit) {
 
 // ── frame 3b: accept preview (the guest trust screen) ──
 
+/** Public because §7 routes a `ccpocket://share#…` deep link straight here from the app root — the same
+ *  trust screen a pasted invite gets, rather than a silent no-op or a "invalid link" toast. */
 @Composable
-private fun AcceptPreview(invite: ShareInvite, onJoin: () -> Unit, onDecline: () -> Unit) {
+fun AcceptPreview(invite: ShareInvite, onJoin: () -> Unit, onDecline: () -> Unit) {
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDecline() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
         ShareTopBar(stringResource(Res.string.join_review_title), onDecline)

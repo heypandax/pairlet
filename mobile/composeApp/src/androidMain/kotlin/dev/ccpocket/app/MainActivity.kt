@@ -58,8 +58,18 @@ class MainActivity : FragmentActivity() {
         routeFromIntent(intent)
     }
 
-    /** A tapped task-complete notification carries `wd`/`sid` extras (FCM `data`) → open that session. */
+    /**
+     * Two ways an intent routes us somewhere:
+     *  - a tapped task-complete notification carries `wd`/`sid` extras (FCM `data`) → open that session;
+     *  - a `ccpocket://` VIEW intent → the unified deep-link parser (§7). The manifest has declared this
+     *    scheme all along, but nothing ever read `intent.data`, so every Android deep link (pairing,
+     *    collaborator and share invites alike) silently did nothing.
+     */
     private fun routeFromIntent(intent: Intent?) {
+        intent?.data?.takeIf { it.scheme.equals("ccpocket", ignoreCase = true) }?.let {
+            DeepLink.handle(it.toString())
+            return
+        }
         val wd = intent?.getStringExtra("wd") ?: return
         val sid = intent.getStringExtra("sid") ?: return
         PushRoute.open(wd, sid)

@@ -108,8 +108,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
+import dev.ccpocket.app.epochMillis
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -141,6 +144,30 @@ import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.ui.fleet.fleetMachines
 import dev.ccpocket.app.ui.fleet.MachineStatus
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.ui.handoff.ConnectColleagueFlow
+import dev.ccpocket.app.ui.handoff.HandoffAcceptScreen
+import dev.ccpocket.app.ui.handoff.IncomingHandoffScreen
+import dev.ccpocket.app.ui.handoff.HandoffAvatar
+import dev.ccpocket.app.ui.handoff.HandoffAvatarPair
+import dev.ccpocket.app.ui.handoff.HandoffDraftSheet
+import dev.ccpocket.app.ui.handoff.HandoffFinishReturnButton
+import dev.ccpocket.app.ui.handoff.HandoffInviteSheet
+import dev.ccpocket.app.ui.handoff.HandoffLockBanner
+import dev.ccpocket.app.ui.handoff.HandoffLockedComposer
+import dev.ccpocket.app.ui.handoff.HandoffResultCard
+import dev.ccpocket.app.ui.handoff.HandoffReturnSheet
+import dev.ccpocket.app.ui.handoff.HandoffRibbon
+import dev.ccpocket.app.ui.handoff.HandoffStatusChip
+import dev.ccpocket.app.ui.handoff.HandoffUiStatus
+import dev.ccpocket.app.ui.handoff.HandoffWatchBar
+import dev.ccpocket.app.ui.handoff.elapsedLabel
+import dev.ccpocket.app.ui.handoff.expiresCountdown
+import dev.ccpocket.app.ui.handoff.inviteBlob
+import dev.ccpocket.app.ui.handoff.shortCode
+import dev.ccpocket.app.ui.handoff.toSections
+import dev.ccpocket.app.ui.handoff.toUi
+import dev.ccpocket.protocol.HandoffResult
+import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.app.ui.share.GuestEnding
 import dev.ccpocket.app.ui.share.ShareFolderScreen
 import dev.ccpocket.app.ui.share.SharedPill
@@ -177,12 +204,20 @@ fun App(scope: CoroutineScope) {
     var fleetOpen by remember { mutableStateOf(false) }
     var inboxOpen by remember { mutableStateOf(false) }
     var appForeground by remember { mutableStateOf(true) }
+    // Collaborator Links are contacts, not computers (SESSION-HANDOFF.md §4.1): their links live in their
+    // own always-on inbox rather than the fleet, and they carry exactly one thing — Handoff offers.
+    val collabInbox = remember { dev.ccpocket.app.data.CollaboratorInbox(scope).also { it.start() } }
+    // a fresh redeem shouldn't wait for the next launch to start listening — the offer that prompted the QR
+    // is usually already sitting on the colleague's daemon
+    remember { repo.onCollaboratorLinkAdded = { binding, ticket -> collabInbox.add(binding, ticket) } }
     LaunchedEffect(Unit) {
         dev.ccpocket.app.telemetry.Telemetry.track(dev.ccpocket.app.telemetry.TelEvent.AppLaunch)
         if (repo.paired.value != null) repo.startRelay() // already paired -> straight to the list
     }
     val pendingLink by dev.ccpocket.app.DeepLink.pending.collectAsState()
-    LaunchedEffect(pendingLink) { pendingLink?.let { repo.handlePairUrl(it); dev.ccpocket.app.DeepLink.pending.value = null } }
+    // §7: ONE parse for every entry point. A collaborator link parks in pendingCollabInvite for the
+    // fingerprint confirm screen below — a deep link must never redeem on sight.
+    LaunchedEffect(pendingLink) { pendingLink?.let { repo.handleIncomingLink(it); dev.ccpocket.app.DeepLink.pending.value = null } }
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
@@ -191,6 +226,7 @@ fun App(scope: CoroutineScope) {
         appForeground = true
         repo.onAppForeground()
         dev.ccpocket.app.data.FleetRuntime.coordinator?.onAppForeground()
+        collabInbox.onAppForeground() // §3.2.3: and re-pull each contact's offers (a missed push heals here)
         (dev.ccpocket.app.data.FleetRuntime.coordinator?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
         appLock.onForeground() // App Lock (issue #109): re-lock per policy / drop the cover on return
     }
@@ -273,6 +309,12 @@ fun App(scope: CoroutineScope) {
                 PermissionSheet(
                     ask, repo.workdir.value,
                     timedOutSignal = repo.timedOutAskId.value == ask.askId, // issue #100: daemon said this ask timed out
+                    // §2.2/§4.3: during a REVIEW handoff a shell command is the one way a "read-only"
+                    // review can still touch files — so it's confirmed each time (no standing rule) and
+                    // the card says it leaves a record
+                    handoffReview = repo.activeHandoff.value?.let {
+                        it.status == HandoffStatus.IN_PROGRESS && repo.isHandoffRecipient(it)
+                    } == true,
                     onDeny = { repo.resolve(Decision.DENY) },
                     onOnce = { repo.resolve(Decision.ALLOW) },
                     onAlways = { repo.resolve(Decision.ALLOW, remember = true) },
@@ -280,6 +322,27 @@ fun App(scope: CoroutineScope) {
                 )
             }
         }
+        // ── root-level trust screens (implementation review §3.2.5 / §7) ──────────────────────────────
+        // Both ride ABOVE everything except App Lock, and neither depends on a session, a workdir or even
+        // a connected computer: a collaborator's very first interaction with this app is one of these.
+        repo.pendingCollabInvite.value?.let { invite ->
+            dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.pendingCollabInvite.value = null }
+            dev.ccpocket.app.ui.handoff.ConfirmConnectionScreen(
+                invite,
+                confirming = repo.collabRedeeming.value,
+                onConfirm = { repo.redeemCollaboratorInvite(invite) },
+                onCancel = { repo.pendingCollabInvite.value = null },
+            )
+        }
+        repo.pendingShareInvite.value?.let { invite ->
+            dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.pendingShareInvite.value = null }
+            dev.ccpocket.app.ui.share.AcceptPreview(
+                invite,
+                onJoin = { repo.redeemShareInvite(invite); repo.pendingShareInvite.value = null },
+                onDecline = { repo.pendingShareInvite.value = null },
+            )
+        }
+        IncomingHandoffRoot(repo, collabInbox)
         // App Lock (issue #109): the gate blocks ALL content (incl. the permission sheet) until biometrics
         // pass; the cover masks the app-switcher snapshot while briefly backgrounded. Both reuse the same
         // branded lockup. Desktop never reaches App(), so this overlay is Android/iOS-only by construction.
@@ -287,6 +350,57 @@ fun App(scope: CoroutineScope) {
         else if (appLock.covered.value) AppLockCover()
       }
     }
+}
+
+/**
+ * The root-level incoming-handoff doorway (implementation review §3.2.5). Independent of convoId, workdir
+ * and sessionKey by construction: it aggregates the WAITING offers addressed to this device across the
+ * PRIMARY link (another of your own devices handing you work) and every Collaborator Link inbox, and it
+ * shows itself the moment one exists — that is the whole "the first offer has to be able to arrive"
+ * requirement. Dismissing it is per-offer-set: a NEW offer re-opens it.
+ */
+@Composable
+private fun IncomingHandoffRoot(repo: PocketRepository, inbox: dev.ccpocket.app.data.CollaboratorInbox) {
+    // a trust screen the user opened deliberately owns the screen first
+    if (repo.pendingCollabInvite.value != null || repo.pendingShareInvite.value != null) return
+    // (owning repo, offer) — the repo is who can answer it; an inbox offer must be accepted over the
+    // collaborator link that received it, never over the primary
+    val all: List<Pair<PocketRepository, dev.ccpocket.protocol.SessionHandoff>> =
+        repo.incomingOffers().map { repo to it } + inbox.offers().map { it.repo to it.handoff }
+    var dismissedFor by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    // a deep link / push tap names an offer directly (§3.4): honour it even if the sheet was dismissed
+    val routed = repo.pendingOfferId.value
+    LaunchedEffect(routed) {
+        if (routed != null && all.any { it.second.id == routed }) {
+            dismissedFor = dismissedFor - routed
+            selectedId = routed
+            repo.pendingOfferId.value = null
+        }
+    }
+    val live = all.filterNot { it.second.id in dismissedFor }
+    if (live.isEmpty()) { if (selectedId != null) selectedId = null; return }
+    val owning = live.firstOrNull { it.second.id == selectedId }
+    val answerRepo = owning?.first ?: live.first().first
+    dev.ccpocket.app.SystemBackHandler(enabled = true) {
+        if (selectedId != null) selectedId = null else dismissedFor = dismissedFor + live.map { it.second.id }
+    }
+    IncomingHandoffScreen(
+        offers = live.map { it.second },
+        selected = owning?.second,
+        ownerLabelOf = { it.initiatorLabel ?: "?" },
+        accepting = answerRepo.handoffAccepting.value,
+        errorNote = answerRepo.handoffAcceptError.value?.let { stringResource(it) }
+            ?: answerRepo.handoffUnsupported.value,
+        onSelect = { selectedId = it.id },
+        onAccept = { h -> live.firstOrNull { it.second.id == h.id }?.first?.acceptHandoff(h.id) },
+        onDecline = { h ->
+            live.firstOrNull { it.second.id == h.id }?.first?.declineHandoff(h.id)
+            selectedId = null
+        },
+        onBack = { selectedId = null },
+        onClose = { dismissedFor = dismissedFor + live.map { it.second.id }; selectedId = null },
+    )
 }
 
 /** Slim status strip above the content — reconnecting (danger-red) or computer-offline (amber). */
@@ -1444,6 +1558,26 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     var showTerminal by remember { mutableStateOf(false) }
     var showChangedFiles by remember { mutableStateOf(false) }
     var showScheduleSheet by remember { mutableStateOf(false) } // send long-press → schedule send (issue #137)
+    // ── session handoff (SESSION-HANDOFF.md; design session-handoff/) ──
+    var showHandoffDraft by remember { mutableStateOf(false) }
+    var showHandoffReturn by remember { mutableStateOf(false) }
+    var showHandoffAccept by remember { mutableStateOf(false) }
+    var showConnectColleague by remember { mutableStateOf(false) } // contacts Frame 3: reached from the picker
+    val activeHandoff = repo.activeHandoff.value
+    val hoStatus = activeHandoff?.status
+    val hoIsRecipient = activeHandoff?.let { repo.isHandoffRecipient(it) } == true
+    LaunchedEffect(repo.convoId.value) { if (repo.convoId.value != null) repo.listHandoffs() }
+    // a fresh invite closes the draft sheet and opens the invite sheet (lastHandoffInvite drives it)
+    LaunchedEffect(repo.lastHandoffInvite.value) { if (repo.lastHandoffInvite.value != null) showHandoffDraft = false }
+    // the recipient's return lands → their sheet closes on the daemon's state flip
+    LaunchedEffect(hoStatus) { if (hoStatus != HandoffStatus.IN_PROGRESS) showHandoffReturn = false }
+    // live second ticker only while a handoff needs a countdown/elapsed readout on screen
+    var hoNow by remember { mutableStateOf(epochMillis()) }
+    LaunchedEffect(hoStatus) {
+        if (hoStatus == HandoffStatus.WAITING || hoStatus == HandoffStatus.IN_PROGRESS) {
+            while (true) { delay(1000); hoNow = epochMillis() }
+        }
+    }
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
         HelpCenterScreen(
@@ -1469,6 +1603,42 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 controls = listOf("composer", "quick_actions", "changed_files", "terminal", "model_picker"),
             ),
         )
+        return
+    }
+    // Connect a colleague (contacts Frame 3): full-screen; success returns to the interrupted draft
+    if (showConnectColleague) {
+        ConnectColleagueFlow(
+            repo, fromDraft = true,
+            onBackToHandoff = { showConnectColleague = false; showHandoffDraft = true },
+            onClose = { showConnectColleague = false },
+        )
+        return
+    }
+    // Recipient trust screen (design Frames 4/4b): full-screen over the chat, same early-return pattern
+    if (showHandoffAccept && activeHandoff != null) {
+        val expired = activeHandoff.status != HandoffStatus.WAITING
+        HandoffAcceptScreen(
+            ownerLabel = activeHandoff.initiatorLabel ?: repo.paired.value?.displayName() ?: "?",
+            sessionTitle = repo.chatTitle.value ?: stringResource(Res.string.chat_title),
+            path = activeHandoff.workdir.ifBlank { repo.workdir.value ?: "" },
+            branch = null,
+            returnsIn = "2h",
+            roots = listOf(activeHandoff.workdir.ifBlank { repo.workdir.value ?: "" }),
+            briefSections = activeHandoff.brief.toSections(),
+            expiredNote = if (expired) activeHandoff.shortCode() else null,
+            // §3.2.7: the screen closes on DAEMON truth (the handoff leaves WAITING), not on the tap —
+            // an accept that loses the race or hits an old daemon states so instead of vanishing
+            accepting = repo.handoffAccepting.value == activeHandoff.id,
+            onAccept = { repo.acceptHandoff(activeHandoff.id) },
+            onDecline = { repo.declineHandoff(activeHandoff.id); showHandoffAccept = false },
+            onClose = { showHandoffAccept = false },
+            kind = activeHandoff.kind,     // §6: rendered from the daemon's grant, never hardcoded
+            access = activeHandoff.access,
+            errorNote = repo.handoffAcceptError.value?.let { stringResource(it) } ?: repo.handoffUnsupported.value,
+        )
+        LaunchedEffect(activeHandoff.status) {
+            if (activeHandoff.status == HandoffStatus.IN_PROGRESS) showHandoffAccept = false
+        }
         return
     }
     if (showTerminal) { TerminalScreen(repo) { showTerminal = false }; return } // full-screen, replaces chat (issue #3)
@@ -1609,6 +1779,16 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     }
                 }
                 if (!repo.observing.value) {
+                    // handoff status chip (design 3b/7/9): WAITING mute · IN PROGRESS pulse · RETURNED green.
+                    // On a device that ISN'T the initiator, tapping a WAITING chip opens the accept preview.
+                    activeHandoff?.status?.toUi()?.let { st ->
+                        Box(
+                            Modifier.padding(end = 6.dp).clip(RoundedCornerShape(6.dp)).clickable {
+                                if (st == HandoffUiStatus.WAITING && !repo.isHandoffInitiator(activeHandoff)) showHandoffAccept = true
+                                else showSessionInfo = true
+                            },
+                        ) { HandoffStatusChip(st) }
+                    }
                     // execution state gets its own persistent header chip (issue #52): re-entering a mid-turn
                     // session showed nothing alive — the connection dot only says "linked", not "working",
                     // and the composer stays enabled (queueing), which read as "disconnected".
@@ -1627,6 +1807,33 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                         Modifier.size(32.dp).clip(CircleShape).clickable { showQuickActions = true },
                         contentAlignment = Alignment.Center,
                     ) { Text("⋯", color = Tok.tx2, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+            // Role ribbon (design Frames 6/7): terracotta only when THIS device is the acting recipient;
+            // the spectating initiator gets the neutral strip. The trailing readout is elapsed-in-control.
+            if (hoStatus == HandoffStatus.IN_PROGRESS && activeHandoff != null) {
+                val elapsed = elapsedLabel(activeHandoff.acceptedAt, hoNow)
+                val ownerLabel = activeHandoff.initiatorLabel ?: repo.paired.value?.displayName() ?: "?"
+                val recipientLabel = activeHandoff.recipientLabel ?: "?"
+                if (hoIsRecipient) HandoffRibbon(
+                    accent = true,
+                    text = stringResource(Res.string.ho_continuing, ownerLabel),
+                    countdown = elapsed,
+                    avatars = { HandoffAvatarPair(ownerLabel, recipientLabel, Tok.accent) },
+                ) else HandoffRibbon(
+                    accent = false,
+                    text = stringResource(Res.string.ho_spectating, recipientLabel),
+                    countdown = elapsed,
+                    avatars = { HandoffAvatar(recipientLabel, accent = true) },
+                )
+                // §2.2: the execution page states the REAL boundary next to the ribbon. A bare "read-only
+                // tools" note here would contradict the Bash approvals this same screen is about to show.
+                if (activeHandoff.access == dev.ccpocket.protocol.HandoffAccess.REVIEW_READ_ONLY) {
+                    Text(
+                        stringResource(Res.string.ho_exec_note), color = Tok.muted, fontSize = 11.sp, lineHeight = 15.sp,
+                        modifier = Modifier.fillMaxWidth().background(if (hoIsRecipient) Tok.accent.copy(alpha = 0.06f) else Tok.surface)
+                            .padding(horizontal = 14.dp, vertical = 5.dp),
+                    )
                 }
             }
             Box(Modifier.weight(1f)) {
@@ -1751,6 +1958,17 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             if (repo.sessionDegraded.value) {
                 StatusBanner(Tok.danger, stringResource(Res.string.session_degraded_banner))
             }
+            // RETURNED result card (design Frame 9): docks above the composer until the initiator
+            // acknowledges — "Mark reviewed" is the only transition to COMPLETED.
+            val hoResult = activeHandoff?.result
+            if (hoStatus == HandoffStatus.RETURNED && activeHandoff != null && hoResult != null) {
+                HandoffResultCard(
+                    hoResult.toUi(activeHandoff.recipientLabel ?: "?", elapsedLabel(activeHandoff.returnedAt, hoNow)),
+                    onMarkReviewed = { repo.completeHandoff(activeHandoff.id) },
+                    onOpenFull = { showSessionInfo = true },
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp),
+                )
+            }
             // Claude paused its turn to ask questions — the card docks above the composer; the
             // stream above stays scrollable so the user can re-read context before answering.
             // While one of the card's text fields owns input, the composer hides (design ③).
@@ -1767,6 +1985,33 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             }
             if (questionAsk != null && cardOwnsInput) {
                 // composer yields while the card's field has the keyboard
+            } else if (hoStatus == HandoffStatus.WAITING && activeHandoff != null) {
+                // WAITING lock (design Frame 3b): a pinned banner + the composer dimmed-but-present,
+                // so the return to normal is obvious. Neutral — nothing is running yet.
+                val hoClipboard = LocalClipboardManager.current
+                Column(Modifier.fillMaxWidth().background(Tok.base)) {
+                    // Contacts Frame 8 delta: a recipient-bound offer has no code to show — the mono
+                    // line states delivery honestly ("notified", never "seen"/"online").
+                    val direct = activeHandoff.recipientDeviceId != null
+                    HandoffLockBanner(
+                        recipientLabel = activeHandoff.recipientLabel ?: "?",
+                        metaLine = if (direct)
+                            stringResource(Res.string.ho_notified_line, activeHandoff.recipientLabel ?: "?", activeHandoff.expiresCountdown(hoNow))
+                        else
+                            // §6: the recap names THIS grant, not a hardcoded "Review · Read-only"
+                            "${dev.ccpocket.app.ui.handoff.kindChip(activeHandoff.kind)} · ${dev.ccpocket.app.ui.handoff.accessChip(activeHandoff.access)} · ${activeHandoff.shortCode()} · ${activeHandoff.expiresCountdown(hoNow)}",
+                        onCopyInvite = { hoClipboard.setText(AnnotatedString(activeHandoff.inviteBlob())) },
+                        onRecall = { repo.cancelHandoff(activeHandoff.id) },
+                        onViewInvite = if (repo.isHandoffInitiator(activeHandoff)) null else ({ showHandoffAccept = true }),
+                        directDelivery = direct,
+                        modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp),
+                    )
+                    HandoffLockedComposer()
+                }
+            } else if (hoStatus == HandoffStatus.IN_PROGRESS && activeHandoff != null && !hoIsRecipient) {
+                // spectating (design Frame 7): the composer is REPLACED — no draft to preserve, and the
+                // bar carries the one escape hatch
+                HandoffWatchBar(onRecall = { repo.recallHandoff(activeHandoff.id) })
             } else if (repo.observing.value) {
                 Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(Res.string.observing_notice), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
@@ -1795,6 +2040,13 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 val atListing = repo.pathListing.value
                 val atFileMatches = remember(atListing, atToken, atDir, atLeaf) {
                     if (atToken == null || atListing?.subPath != atDir) emptyList() else atMatches(atListing.entries, atLeaf)
+                }
+                // Recipient in control (design Frame 6): the prominent return affordance rides above
+                // the (fully active) composer — finishing is the recipient's primary next action.
+                if (hoStatus == HandoffStatus.IN_PROGRESS && hoIsRecipient) {
+                    Box(Modifier.fillMaxWidth().background(Tok.base).padding(horizontal = 12.dp).padding(bottom = 10.dp)) {
+                        HandoffFinishReturnButton({ showHandoffReturn = true })
+                    }
                 }
                 Column(Modifier.fillMaxWidth().background(Tok.surface)) {
                     LimitResetBanner(repo) // usage-limit hit → one-tap "auto-continue after reset" (issue #137)
@@ -2005,7 +2257,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onDismiss = { showScheduleSheet = false },
             )
         }
-        if (showSessionInfo) SessionInfoSheet(repo) { showSessionInfo = false }
+        if (showSessionInfo) SessionInfoSheet(repo, onDismiss = { showSessionInfo = false }, onHandoff = { showHandoffDraft = true })
         if (showQuickActions) {
             QuickActionsSheet(
                 repo,
@@ -2013,7 +2265,63 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 onMode = { showModeSheet = true },
                 onFiles = { repo.fetchChangedFiles(); showChangedFiles = true },
                 onHelp = { showHelp = true },
+                // entry only while the session is handoff-free — one non-terminal handoff per session
+                onHandoff = if (activeHandoff == null) ({ showHandoffDraft = true }) else null,
             ) { showQuickActions = false }
+        }
+        // ── session handoff sheets (design Frames 2 / 3a / 8; contacts increment Frames 1/2) ──
+        if (showHandoffDraft) {
+            val hoDefaultRequest = stringResource(Res.string.ho_default_request)
+            LaunchedEffect(Unit) { repo.listCollaborators() }
+            HandoffDraftSheet(
+                sessionTitle = repo.chatTitle.value ?: stringResource(Res.string.chat_title),
+                path = repo.workdir.value ?: "",
+                branch = null,
+                agentLabel = (repo.sessionAgent.value ?: AgentKind.CLAUDE).name.lowercase().replaceFirstChar { it.uppercase() },
+                roots = listOfNotNull(repo.workdir.value),
+                briefSections = emptyList(),
+                creating = repo.handoffCreating.value,
+                error = repo.handoffError.value,
+                contacts = repo.collaborators.toList(),
+                onConnectNew = { showConnectColleague = true },
+                onCreate = { contact, hours ->
+                    repo.createHandoff(contact.label, hours, request = hoDefaultRequest, recipientDeviceId = contact.deviceId)
+                },
+                onDismiss = { showHandoffDraft = false; repo.handoffError.value = null },
+            )
+        }
+        // A contact-bound offer is delivered over the link — there is no invite artefact to show,
+        // so the QR sheet only opens for the legacy open-invite path (recipientDeviceId == null).
+        repo.lastHandoffInvite.value?.takeIf { it.recipientDeviceId == null }?.let { inv ->
+            val hoInviteClipboard = LocalClipboardManager.current
+            HandoffInviteSheet(
+                qrBlob = inv.inviteBlob(),
+                shortCode = inv.shortCode(),
+                countdown = inv.expiresCountdown(hoNow),
+                // §6: the recap names THIS grant, not a hardcoded "Review · Read-only"
+                recapLine = "${inv.recipientLabel ?: "?"} · ${dev.ccpocket.app.ui.handoff.kindChip(inv.kind)} · ${dev.ccpocket.app.ui.handoff.accessChip(inv.access)}",
+                onShare = { hoInviteClipboard.setText(AnnotatedString(inv.inviteBlob())) },
+                onCopyLink = { hoInviteClipboard.setText(AnnotatedString(inv.inviteBlob())) },
+                onDismiss = { repo.lastHandoffInvite.value = null },
+            )
+        }
+        if (showHandoffReturn && activeHandoff != null) {
+            var verdict by remember(activeHandoff.id) { mutableStateOf<String?>(null) }
+            val verdictOptions = listOf(
+                stringResource(Res.string.ho_verdict_approve),
+                stringResource(Res.string.ho_verdict_fixes),
+                stringResource(Res.string.ho_verdict_changes),
+            )
+            HandoffReturnSheet(
+                ownerLabel = activeHandoff.initiatorLabel ?: repo.paired.value?.displayName() ?: "?",
+                result = dev.ccpocket.app.ui.handoff.HandoffResultUi(verdict = null, returnedByLabel = activeHandoff.recipientLabel ?: "?"),
+                verdictOptions = verdictOptions,
+                selectedVerdict = verdict,
+                onPickVerdict = { verdict = it },
+                returning = false,
+                onReturn = { repo.returnHandoff(activeHandoff.id, HandoffResult(summary = verdict ?: "", verdict = verdict)) },
+                onDismiss = { showHandoffReturn = false },
+            )
         }
         // the composer chip's direct model sheet (issue #157) — same picker, no quick-actions detour
         if (showModelSheet) ModelSheet(repo) { showModelSheet = false }

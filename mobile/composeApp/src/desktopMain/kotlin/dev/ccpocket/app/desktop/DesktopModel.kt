@@ -192,17 +192,41 @@ interface DesktopModel {
     var showModelPopover: Boolean // the composer chip's anchored model popover (issue #157) — the ⋯ Model row shortcuts here too
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
+    var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
+
+    // ── session handoff (SESSION-HANDOFF.md) — defaults are the "no handoff" seed/preview state ──
+    val activeHandoff: dev.ccpocket.protocol.SessionHandoff? get() = null
+    val handoffInvite: dev.ccpocket.protocol.SessionHandoff? get() = null
+    val handoffCreating: Boolean get() = false
+    val handoffError: String? get() = null
+    fun handoffIsRecipient(): Boolean = false
+    fun handoffIsInitiator(): Boolean = false
+    fun handoffCreate(recipient: String, expiresHours: Int, request: String, recipientDeviceId: String? = null) {}
+
+    // ── collaborator links (contacts increment): picker + management + one-time connect ticket ──
+    val collaborators: List<dev.ccpocket.protocol.Collaborator> get() = emptyList()
+    val collaboratorTicket: dev.ccpocket.protocol.CollaboratorInvite? get() = null
+    val lastCollaboratorConnected: dev.ccpocket.protocol.Collaborator? get() = null
+    val collaboratorError: String? get() = null
+    fun listCollaborators() {}
+    fun createCollaboratorTicket() {}
+    fun removeCollaborator(deviceId: String) {}
+    fun handoffCancel() {}
+    fun handoffRecall() {}
+    fun handoffComplete() {}
+    fun handoffReturn(verdict: String?) {}
+    fun dismissHandoffInvite() {}
 
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts

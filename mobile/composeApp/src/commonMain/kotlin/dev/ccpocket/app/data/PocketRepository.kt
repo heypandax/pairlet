@@ -15,8 +15,11 @@ import dev.ccpocket.app.net.RelayConnection
 import dev.ccpocket.app.net.RelayControlDial
 import dev.ccpocket.app.net.RelayE2EConnection
 import kotlinx.coroutines.flow.merge
+import dev.ccpocket.app.pairing.BindingRole
+import dev.ccpocket.app.pairing.IncomingLink
 import dev.ccpocket.app.pairing.PairedDaemon
 import dev.ccpocket.app.pairing.Pairing
+import dev.ccpocket.app.pairing.parseIncomingLink
 import dev.ccpocket.app.push.PushController
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
@@ -60,7 +63,33 @@ import dev.ccpocket.protocol.ShareInfo
 import dev.ccpocket.protocol.ShareInvite
 import dev.ccpocket.protocol.ShareListing
 import dev.ccpocket.protocol.ShareRevoked
+import dev.ccpocket.protocol.AcceptHandoff
+import dev.ccpocket.protocol.CancelHandoff
+import dev.ccpocket.protocol.Collaborator
+import dev.ccpocket.protocol.CollaboratorConnected
+import dev.ccpocket.protocol.CollaboratorInvite
+import dev.ccpocket.protocol.CollaboratorListing
+import dev.ccpocket.protocol.CollaboratorTicketCreated
+import dev.ccpocket.protocol.CollaboratorUpdated
+import dev.ccpocket.protocol.CreateCollaboratorTicket
+import dev.ccpocket.protocol.ListCollaborators
+import dev.ccpocket.protocol.RemoveCollaborator
+import dev.ccpocket.protocol.CompleteHandoff
+import dev.ccpocket.protocol.CreateHandoff
+import dev.ccpocket.protocol.DeclineHandoff
+import dev.ccpocket.protocol.HandoffBrief
+import dev.ccpocket.protocol.HandoffCreated
+import dev.ccpocket.protocol.HandoffListing
+import dev.ccpocket.protocol.HandoffResult
+import dev.ccpocket.protocol.HandoffStatus
+import dev.ccpocket.protocol.HandoffUpdated
+import dev.ccpocket.protocol.ListHandoffs
+import dev.ccpocket.protocol.RecallHandoff
+import dev.ccpocket.protocol.ReturnHandoff
+import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.isTerminal
 import dev.ccpocket.app.pairing.toPairingInfo
+import dev.ccpocket.app.pairing.toCollabPairingInfo
 import dev.ccpocket.protocol.CommandList
 import dev.ccpocket.protocol.SlashCommand
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
@@ -170,6 +199,12 @@ import dev.ccpocket.protocol.GroupDelete
 import dev.ccpocket.protocol.GroupAssign
 import dev.ccpocket.app.isPreviewMode
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.ho_accept_declined
+import dev.ccpocket.app.resources.ho_accept_expired
+import dev.ccpocket.app.resources.ho_accept_no_reply
+import dev.ccpocket.app.resources.ho_accept_taken
+import dev.ccpocket.app.resources.ho_accept_withdrawn
+import dev.ccpocket.app.resources.ho_daemon_too_old
 import dev.ccpocket.app.resources.preview_cmd_title
 import dev.ccpocket.app.resources.preview_cmd_note
 import dev.ccpocket.app.resources.status_checking_network
@@ -391,6 +426,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     internal var presenceProbeMs = LIST_WAIT_MS           // test seam
     internal var linkHealthOverride: (() -> Boolean)? = null // test seam for transportHealthy()
     private var directoriesRev = 0          // bumped on every Directories reply — the #145 probe's "did the computer answer" check
+    private var handoffListingRev = 0       // the inbox-mode counterpart: bumped on every HandoffListing reply
     // per-session connection bookkeeping (plain vars; [phase]/[directoriesLoaded] hold the observable truth)
     private var attachedThisSession = false // relay Attached seen (or, direct mode, socket + first Directories)
     private var daemonOffline = false       // explicit: got PeerPresence(false), or the post-attach list-wait elapsed
@@ -716,6 +752,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val directories = mutableStateListOf<DirectoryEntry>()
     /** True once the first Directories of a session arrives — distinguishes "empty" from "still loading". */
     val directoriesLoaded = mutableStateOf(false)
+
+    /**
+     * INBOX MODE (SESSION-HANDOFF-IMPLEMENTATION-REVIEW §3.2.3): this link speaks a Collaborator credential,
+     * whose baseline grants ZERO session access. Everything the ordinary connect sequence does — ClientCaps,
+     * ListDirectories, ListPendingApprovals — is refused by the daemon's collaborator capability whitelist,
+     * so the app used to sit on the loading skeleton and then claim "computer offline" ~6s later.
+     *
+     * An inbox link instead asks for the ONE thing it may have (its own Handoff offers) and treats the reply
+     * as its readiness proof. It is a background link: it drives no content screen, so it must never show a
+     * connection failure state either.
+     */
+    val isCollaboratorInbox: Boolean get() = paired.value?.role == BindingRole.COLLABORATOR
+
+    /** Inbox mode's [directoriesLoaded]: the first HandoffListing proves the collaborator channel is up. */
+    val handoffsLoaded = mutableStateOf(false)
     val refreshing = mutableStateOf(false)
     val sessions = mutableStateListOf<SessionSummary>()
     val sessionsDir = mutableStateOf<String?>(null)
@@ -1079,11 +1130,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { doPair("link") { info } }
     }
 
-    /** A scanned/opened `ccpocket://pair?...` URL — either a short ?code= or a full link. */
-    fun handlePairUrl(url: String) {
-        val code = Regex("[?&]code=([0-9]{6})").find(url)?.groupValues?.get(1)
-        if (code != null) pairWithCode(code) else pair(url)
-    }
+    /** A scanned/opened `ccpocket://…` URL. Kept as the historical name for the pairing call sites, but it
+     *  is now just [handleIncomingLink]: the scanner that used to see only pair links routes collaborator
+     *  and share invites to their trust screens instead of rejecting them (§7). */
+    fun handlePairUrl(url: String) { handleIncomingLink(url) }
 
     /** Pair from the 6-digit code shown by `cc-pocket pair` on the computer. */
     fun pairWithCode(code: String) {
@@ -1143,7 +1193,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** Recompute the observable [phase] from the per-session flags. Call after every relevant event. */
     private fun recomputePhase() {
-        val ready = attachedThisSession && directoriesLoaded.value && !daemonOffline
+        // inbox mode has its own readiness proof: a collaborator credential is REFUSED directory discovery,
+        // so waiting for Directories here would keep the link permanently "not ready" (§3.2.3)
+        val listed = if (isCollaboratorInbox) handoffsLoaded.value else directoriesLoaded.value
+        val ready = attachedThisSession && listed && !daemonOffline
         val next = when {
             pairingInvalid                                   -> ConnPhase.PairingInvalid
             ready                                            -> ConnPhase.Ready
@@ -1214,12 +1267,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private fun onComputerBackOnline() {
         if (!transportHealthy()) { launchTransport(reconnect = true); return }
         presenceProbeJob?.cancel()
-        val seenRev = directoriesRev
+        val inbox = isCollaboratorInbox
+        val seenRev = if (inbox) handoffListingRev else directoriesRev
         presenceProbeJob = scope.launch {
-            send(ListDirectories())
+            if (inbox) send(ListHandoffs()) else send(ListDirectories())
             restoreAfterReconnect()
             delay(presenceProbeMs)
-            if (sessionActive.value && directoriesRev == seenRev) launchTransport(reconnect = true, force = true)
+            val rev = if (inbox) handoffListingRev else directoriesRev
+            if (sessionActive.value && rev == seenRev) launchTransport(reconnect = true, force = true)
         }
     }
 
@@ -1453,8 +1508,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         listWaitJob?.cancel()
         listWaitJob = scope.launch {
             delay(LIST_WAIT_MS)
-            if (sessionActive.value && attachedThisSession && !directoriesLoaded.value && !daemonOffline && !pairingInvalid) {
-                daemonOffline = true
+            val listed = if (isCollaboratorInbox) handoffsLoaded.value else directoriesLoaded.value
+            if (sessionActive.value && attachedThisSession && !listed && !daemonOffline && !pairingInvalid) {
+                // §3.2.3: an inbox link must NEVER report "computer offline" — it is a background contact
+                // channel with no screen of its own, and a quiet colleague's machine is not an app error.
+                // The deaf-link re-handshake below still runs: that's a real self-heal, not a claim.
+                if (!isCollaboratorInbox) daemonOffline = true
                 recomputePhase()
                 // A silent computer here is EITHER really offline or a DEAF E2E link: the daemon keeps one
                 // session per device, so if another of this device's sockets (fleet satellite, reconnect
@@ -1484,7 +1543,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         presenceProbeJob?.cancel(); presenceProbeJob = null // a full relaunch moots the #145 probe
         connected.value = true // internal "attempt active/attached" guard for retry/foreground — NOT the UI
         attachedThisSession = false; daemonOffline = false; relayDeadlinePassed = false; listWaitJob?.cancel()
-        if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false }
+        if (!reconnect) { pairingInvalid = false; hadReadyThisSession = false; directoriesLoaded.value = false; handoffsLoaded.value = false }
         recomputePhase() // Connecting, or Reconnecting if we were Ready before — recomputePhase is the sole writer of phase
         status.value = StatusMsg(if (reconnect) Res.string.status_reconnecting else Res.string.status_connecting)
         if (inboundJob == null) {
@@ -1555,9 +1614,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // ClientCaps FIRST: it declares this build understands agent="opencode", so the daemon stops
         // filtering those rows out of the lists that follow (old builds never send it — see Messages.kt).
         scope.launch {
-            send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE)))
-            send(ListDirectories())
-            send(ListPendingApprovals)
+            if (isCollaboratorInbox) {
+                // §3.2.3: a collaborator credential may send exactly one thing on connect — an UNFILTERED
+                // ListHandoffs, which the daemon answers with (and registers a fan-out sink for) only the
+                // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
+                send(ListHandoffs())
+            } else {
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE)))
+                send(ListDirectories())
+                send(ListPendingApprovals)
+            }
             if (reconnect) restoreAfterReconnect()
         }
         startGrace(reconnect)
@@ -1644,7 +1710,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // `connected` may be a lie after a background suspension (the heartbeat was frozen; the TCP died
             // silently). Exercise a WRITE right now: healthy link → this merely refreshes the stale project
             // list; wedged link → the bounded send trips DeadLink in ≤10s instead of ~25s of fake Ready.
-            refreshDirectoriesSilently()
+            // Inbox links do the same with the one frame they're allowed — which doubles as the §3.2.3
+            // "foreground → re-pull ListHandoffs" requirement (a missed offer push heals here).
+            if (isCollaboratorInbox) refreshHandoffsSilently() else refreshDirectoriesSilently()
         }
     }
 
@@ -1664,6 +1732,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val wd = workdir.value
         val dir = sessionsDir.value
         val convo = convoId.value
+        // §3.2.8: offer/accept/decline/return/recall/expire are all recovered from DAEMON TRUTH after a
+        // reconnect — the inbox re-pulls its whole list rather than trusting whatever it held locally.
+        if (isCollaboratorInbox) send(ListHandoffs())
         when {
             // daemon finds the still-live conversation by sessionId → reattach + history replay, which the
             // ConvoHistory MERGE turns into a backfill of whatever streamed while the link was down (#107)
@@ -1697,6 +1768,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
+        handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
         pushDialJob?.cancel(); pushDialJob = null // an in-flight LAN-side token dial dies with the link
         pushRegistered = null // a fresh connect (or a switched daemon) must re-register the token
         // per-daemon truth must not survive a machine switch: a stale non-null presetsState would keep
@@ -2375,7 +2447,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is WorkflowAgentDetail -> if (f.convoId == convoId.value) {
                 workflowAgentDetails["${f.runId}#${f.agentIndex}"] = f
             }
-            is PocketError -> if (f.code == "rename_failed") {
+            // §6: the daemon accepts exactly REVIEW + REVIEW_READ_ONLY in v1 and refuses every other known
+            // (but not yet fully implemented) combination by name. Route it to the handoff surfaces instead
+            // of dropping an "error:" line into an unrelated transcript.
+            is PocketError -> if (f.code == "handoff_not_supported") {
+                handoffCreating.value = false
+                handoffAccepting.value = null
+                handoffError.value = f.message
+                handoffUnsupported.value = f.message
+            } else if (f.code == "rename_failed") {
                 // #158: a rename refusal answers to the SESSIONS surface (the sidebar/list row that
                 // asked) — the common case (renaming a terminal-held session) has no chat open, and an
                 // open chat is an UNRELATED session whose transcript must not absorb the error line.
@@ -2539,6 +2619,49 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // guest side (#115 follow-up): the daemon's precise "your share ended" — arrives right before
             // the cut, so the terminal card can say revoked-vs-expired instead of a bare disconnect
             is ShareEnded -> onShareEnded(f)
+            // ── session handoff (SESSION-HANDOFF.md): daemon truth replaces local state wholesale ──
+            is HandoffCreated -> {
+                handoffCreating.value = false
+                val h = f.handoff
+                if (f.ok && h != null) {
+                    handoffError.value = null
+                    upsertHandoff(h)
+                    lastHandoffInvite.value = h
+                } else handoffError.value = f.error
+            }
+            is HandoffListing -> {
+                replace(handoffs, f.items.sortedByDescending { it.createdAt })
+                recomputeActiveHandoff()
+                handoffListingRev++
+                // §3.2.3: for an inbox link THIS is the readiness proof — the collaborator channel answered,
+                // which (unlike Directories, which it may never send) is all such a credential can prove.
+                handoffsLoaded.value = true
+                if (isCollaboratorInbox) {
+                    daemonOffline = false; listWaitJob?.cancel()
+                    connected.value = true; relayDeadlinePassed = false
+                    if (!hadReadyThisSession) {
+                        hadReadyThisSession = true
+                        Telemetry.track(TelEvent.Connected, mapOf(TelKey.Transport to transportName()))
+                    }
+                    recomputePhase()
+                }
+                // a wholesale replace also has to reconcile the accept spinner and the auto-open rule
+                // against daemon truth — a listing is how a reconnect learns the accept already landed
+                f.items.forEach(::reconcileHandoffLifecycle)
+            }
+            is HandoffUpdated -> upsertHandoff(f.handoff)
+            // ── collaborator links (SESSION-HANDOFF.md §4.1) ──
+            is CollaboratorTicketCreated -> {
+                collaboratorTicketCreating.value = false
+                if (f.ok && f.invite != null) { collaboratorTicket.value = f.invite; collaboratorError.value = null }
+                else collaboratorError.value = f.error
+            }
+            is CollaboratorListing -> { replace(collaborators, f.items); collaboratorsLoaded.value = true }
+            is CollaboratorUpdated -> upsertCollaborator(f.collaborator)
+            is CollaboratorConnected -> {
+                upsertCollaborator(f.collaborator)
+                lastCollaboratorConnected.value = f.collaborator // flips "waiting for scan…" → Connected
+            }
             else -> {}
         }
     }
@@ -3091,11 +3214,310 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Owner: revoke a share by its guest [deviceId] — cuts the live link now, kills the credential. */
     fun revokeShare(deviceId: String) { sharesRefreshing.value = true; scope.launch { runCatching { send(RevokeShare(deviceId)) } } }
 
+    // ════════════════════════════════════════════════════════════════
+    //  Session handoff (SESSION-HANDOFF.md; design session-handoff/)
+    // ════════════════════════════════════════════════════════════════
+    /** The open session's handoffs, newest first (daemon truth via HandoffListing/HandoffUpdated). */
+    val handoffs = mutableStateListOf<SessionHandoff>()
+
+    /** The at-most-one non-terminal handoff on the open session — drives the WAITING lock banner,
+     *  the IN_PROGRESS ribbons and the RETURNED result card. Null = a plain session. */
+    val activeHandoff = mutableStateOf<SessionHandoff?>(null)
+
+    val handoffCreating = mutableStateOf(false)
+    val handoffError = mutableStateOf<String?>(null)
+
+    /** The daemon's `handoff_not_supported` refusal (§6): this build asked for a kind/access combination the
+     *  daemon knows about but hasn't fully implemented. Surfaced verbatim rather than swallowed, so the UI
+     *  can say WHY the offer can't be taken instead of showing a dead Accept button. */
+    val handoffUnsupported = mutableStateOf<String?>(null)
+
+    /** The just-minted handoff, so the UI can flip from the draft sheet to the invite sheet. */
+    val lastHandoffInvite = mutableStateOf<SessionHandoff?>(null)
+
+    /** This device's role relative to [activeHandoff]: true when WE hold the controller lease side. */
+    fun isHandoffRecipient(h: SessionHandoff): Boolean =
+        h.recipientDeviceId != null && h.recipientDeviceId == paired.value?.deviceId
+
+    fun isHandoffInitiator(h: SessionHandoff): Boolean = h.initiatorDeviceId == paired.value?.deviceId
+
+    private fun upsertHandoff(h: SessionHandoff) {
+        val i = handoffs.indexOfFirst { it.id == h.id }
+        if (i >= 0) handoffs[i] = h else handoffs.add(0, h)
+        recomputeActiveHandoff()
+        reconcileHandoffLifecycle(h)
+    }
+
+    private fun recomputeActiveHandoff() {
+        val sid = sessionKey.value ?: currentSessionId
+        activeHandoff.value = handoffs.firstOrNull { !it.status.isTerminal && it.status != HandoffStatus.UNKNOWN && (sid == null || it.sourceSessionId == sid) }
+    }
+
+    // ── recipient: offers, the accept round-trip, and auto-entering the source session ──────────────
+
+    /** WAITING offers addressed to THIS device, newest first — what the root-level incoming entry shows
+     *  (§3.2.5). Never inferred from a local flag: an offer exists exactly while daemon truth says so, so
+     *  a decline/cancel/expiry that happened while we were away simply drops out of the next listing. */
+    fun incomingOffers(): List<SessionHandoff> {
+        val me = paired.value?.deviceId ?: return emptyList()
+        return handoffs.filter { it.status == HandoffStatus.WAITING && it.recipientDeviceId == me }
+            .sortedByDescending { it.createdAt }
+    }
+
+    /** The handoff id whose AcceptHandoff is in flight — the Accept button's honest waiting state (§3.2.7).
+     *  Cleared only by daemon truth (the handoff leaving WAITING) or by [handoffAcceptError]. */
+    val handoffAccepting = mutableStateOf<String?>(null)
+
+    /** Why the last accept could not be honoured (a race lost, an expired offer, an old daemon that dropped
+     *  the frame). Non-null means the tap did NOT succeed — never silently swallowed. Held as a resource so
+     *  the non-suspending frame handler can set it without a locale round-trip. */
+    val handoffAcceptError = mutableStateOf<StringResource?>(null)
+
+    /** Handoffs this process already auto-opened, so a replayed IN_PROGRESS (reconnect listing, a second
+     *  HandoffUpdated) can't re-enter — or worse, churn — the session. */
+    private val autoOpenedHandoffs = mutableSetOf<String>()
+
+    /**
+     * Daemon truth landed for [h] — settle the two things the recipient's UI owes the user (§3.2.6/§3.2.7):
+     *
+     *  1. the Accept spinner: it clears only when the daemon says the handoff left WAITING. Won by us →
+     *     success; DECLINED/CANCELLED/EXPIRED/RECALLED, or IN_PROGRESS on someone ELSE's device → an
+     *     explicit error, because "accepted" would be a lie;
+     *  2. auto-open: an IN_PROGRESS handoff addressed to this device means the Grant is live and the source
+     *     session is ours to drive — walk straight in instead of leaving the recipient on a dead-end card.
+     *     mode / takeOver / pathScope are deliberately NOT sent: the daemon clamps them from the Grant.
+     */
+    private fun reconcileHandoffLifecycle(h: SessionHandoff) {
+        val me = paired.value?.deviceId
+        val mine = me != null && h.recipientDeviceId == me
+        if (handoffAccepting.value == h.id && h.status != HandoffStatus.WAITING) {
+            handoffAccepting.value = null
+            if (!(mine && h.status == HandoffStatus.IN_PROGRESS)) {
+                handoffAcceptError.value = handoffStatusRefusal(h.status)
+            }
+        }
+        if (!mine || h.status != HandoffStatus.IN_PROGRESS) return
+        // an owner device that merely OBSERVES someone else's handoff must not be yanked anywhere; only the
+        // inbox link (whose sole purpose is this) and the device that just accepted walk in automatically
+        if (!isCollaboratorInbox && h.id !in acceptedHere) return
+        if (h.id in autoOpenedHandoffs) return
+        if (convoId.value != null && currentSessionId == h.sourceSessionId) { autoOpenedHandoffs += h.id; return }
+        autoOpenedHandoffs += h.id
+        openSession(wd = h.workdir, resumeId = h.sourceSessionId, agent = h.agent)
+    }
+
+    /** Ids this device sent an AcceptHandoff for in this process — see [reconcileHandoffLifecycle]. */
+    private val acceptedHere = mutableSetOf<String>()
+
+    private fun handoffStatusRefusal(status: HandoffStatus): StringResource = when (status) {
+        HandoffStatus.EXPIRED -> Res.string.ho_accept_expired
+        HandoffStatus.CANCELLED, HandoffStatus.RECALLED -> Res.string.ho_accept_withdrawn
+        HandoffStatus.DECLINED -> Res.string.ho_accept_declined
+        else -> Res.string.ho_accept_taken
+    }
+
+    /** Owner: create a Handoff on the open session (v1: REVIEW read-only). [recipientDeviceId] non-null
+     *  binds the Grant to that collaborator's device — only it may accept, and the daemon delivers the
+     *  offer over the existing link (no invite artefact). The daemon replies with [HandoffCreated]; an
+     *  old daemon drops the unknown frame — the timeout below surfaces that as the "update the daemon"
+     *  error instead of hanging the sheet forever. */
+    fun createHandoff(recipientLabel: String, expiresHours: Int, request: String, recipientDeviceId: String? = null) {
+        val wd = workdir.value ?: return
+        val sid = sessionKey.value ?: currentSessionId ?: return
+        handoffCreating.value = true; handoffError.value = null
+        val brief = HandoffBrief(request = request)
+        scope.launch {
+            runCatching {
+                send(
+                    CreateHandoff(
+                        workdir = wd, sessionId = sid, brief = brief,
+                        agent = sessionAgent.value ?: AgentKind.CLAUDE,
+                        expiresInSec = expiresHours * 3600L,
+                        recipientLabel = recipientLabel.takeIf { it.isNotBlank() },
+                        sourceConvoId = convoId.value,
+                        recipientDeviceId = recipientDeviceId,
+                    ),
+                )
+            }
+            delay(8000)
+            if (handoffCreating.value) {
+                handoffCreating.value = false
+                handoffError.value = getString(Res.string.ho_daemon_too_old)
+            }
+        }
+    }
+
+    // ── collaborator links (SESSION-HANDOFF.md §4.1): contacts + one-time connect tickets ──
+    /** My collaborator contacts, removed ones included (terminal group). Daemon truth via listing/updates. */
+    val collaborators = mutableStateListOf<Collaborator>()
+
+    val collaboratorTicket = mutableStateOf<CollaboratorInvite?>(null)
+    val collaboratorTicketCreating = mutableStateOf(false)
+    val collaboratorError = mutableStateOf<String?>(null)
+
+    /** Someone redeemed the pending ticket — the connect screen flips to its Connected sub-state. */
+    val lastCollaboratorConnected = mutableStateOf<Collaborator?>(null)
+
+    private fun upsertCollaborator(c: Collaborator) {
+        val i = collaborators.indexOfFirst { it.deviceId == c.deviceId }
+        if (i >= 0) collaborators[i] = c else collaborators.add(0, c)
+    }
+
+    /** Set once any collaborator listing lands — distinguishes "none yet" from "old daemon dropped the frame". */
+    val collaboratorsLoaded = mutableStateOf(false)
+
+    fun listCollaborators() {
+        scope.launch {
+            runCatching { send(ListCollaborators) }
+            delay(8000)
+            if (!collaboratorsLoaded.value && collaboratorError.value == null) {
+                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+            }
+        }
+    }
+
+    /** Mint a one-time connect ticket (short TTL). Reply lands in [collaboratorTicket]; old daemons drop it. */
+    fun createCollaboratorTicket(label: String? = null) {
+        collaboratorTicket.value = null; collaboratorTicketCreating.value = true; collaboratorError.value = null
+        scope.launch {
+            runCatching { send(CreateCollaboratorTicket(label)) }
+            delay(8000)
+            if (collaboratorTicketCreating.value) {
+                collaboratorTicketCreating.value = false
+                collaboratorError.value = getString(Res.string.ho_daemon_too_old)
+            }
+        }
+    }
+
+    fun removeCollaborator(deviceId: String) = scope.launch { runCatching { send(RemoveCollaborator(deviceId)) } }
+
+    /** Pull this caller's handoffs. An inbox link asks UNFILTERED (§3.2.3 — it has no session to scope by,
+     *  and the daemon answers with exactly the offers bound to its device); an ordinary link scopes to the
+     *  session on screen, and simply skips when there isn't one. */
+    fun listHandoffs() {
+        if (isCollaboratorInbox) { refreshHandoffsSilently(); return }
+        val sid = sessionKey.value ?: currentSessionId ?: return
+        scope.launch { runCatching { send(ListHandoffs(sessionId = sid)) } }
+    }
+
+    /** The unfiltered pull, used by the inbox on connect / foreground / reconnect. */
+    fun refreshHandoffsSilently() = scope.launch { runCatching { send(ListHandoffs()) } }
+
+    fun cancelHandoff(id: String) = scope.launch { runCatching { send(CancelHandoff(id)) } }
+    fun recallHandoff(id: String) = scope.launch { runCatching { send(RecallHandoff(id)) } }
+    fun completeHandoff(id: String) = scope.launch { runCatching { send(CompleteHandoff(id)) } }
+
+    /**
+     * Accept an offer (§3.2.7). The button stays in its waiting state until the DAEMON says what happened:
+     * a compare-and-set the second device loses, an offer that expired a moment ago, and an old daemon that
+     * drops the unknown frame entirely must all read as "not accepted", never as a silent success.
+     */
+    fun acceptHandoff(id: String) {
+        if (handoffAccepting.value == id) return // a double-tap is not a second accept
+        handoffAccepting.value = id
+        handoffAcceptError.value = null
+        acceptedHere += id
+        scope.launch {
+            runCatching { send(AcceptHandoff(id)) }
+            delay(ACCEPT_TIMEOUT_MS)
+            if (handoffAccepting.value == id) { // no HandoffUpdated/HandoffListing ever arrived
+                handoffAccepting.value = null
+                handoffAcceptError.value = Res.string.ho_accept_no_reply
+            }
+        }
+    }
+
+    fun declineHandoff(id: String, reason: String? = null) = scope.launch { runCatching { send(DeclineHandoff(id, reason)) } }
+    fun returnHandoff(id: String, result: HandoffResult?) = scope.launch { runCatching { send(ReturnHandoff(id, result)) } }
+
     /** Guest: redeem a scanned/pasted folder-share invite — the same relay redeem as pairing a computer,
      *  but the daemon scopes this binding to the one shared folder (issue #115). */
     fun redeemShareInvite(invite: ShareInvite) {
         status.value = StatusMsg(Res.string.status_pairing)
         scope.launch { doPair("share") { invite.toPairingInfo() } }
+    }
+
+    /**
+     * Recipient: redeem a confirmed collaborator connect ticket (§4.1). Same relay redeem as pairing, but
+     * everything AFTER it is different, which is why this is not [doPair]:
+     *
+     *  - the credential the daemon mints is COLLABORATOR-kind — zero session access, an offer inbox;
+     *  - it is stored in [Pairing.collaboratorLinks], NOT the computer list, so it never appears as a
+     *    machine, never becomes a fleet satellite, and never joins the ⌘K switcher;
+     *  - the active account does not move: connecting a colleague must not switch you off your own computer.
+     *
+     * The resulting link is handed to [onCollaboratorLinkAdded] so the app root can bring its inbox
+     * connection up immediately (the offer that prompted the QR is usually already waiting).
+     */
+    fun redeemCollaboratorInvite(invite: CollaboratorInvite) {
+        if (collabRedeeming.value) return
+        collabRedeeming.value = true
+        collabRedeemError.value = null
+        scope.launch {
+            val client = HttpClient()
+            try {
+                val link = Pairing.redeemCollaboratorLink(invite.toCollabPairingInfo(), Pairing.deviceKeys(), client)
+                replace(collaboratorLinks, Pairing.collaboratorLinks())
+                pendingCollabInvite.value = null
+                Telemetry.track(TelEvent.Paired, mapOf(TelKey.Source to "collaborator"))
+                onCollaboratorLinkAdded?.invoke(link, invite.ticket)
+            } catch (t: Throwable) {
+                collabRedeemError.value = t.message ?: t::class.simpleName ?: "error"
+                Telemetry.track(TelEvent.PairFailed)
+                Telemetry.recordError(t.message ?: "collaborator redeem failed", "pairing")
+            } finally {
+                collabRedeeming.value = false
+                client.close()
+            }
+        }
+    }
+
+    /** Collaborator Links held by this device (observable mirror of [Pairing.collaboratorLinks]). */
+    val collaboratorLinks = mutableStateListOf<PairedDaemon>().also { if (pinnedTo == null) it.addAll(Pairing.collaboratorLinks()) }
+
+    /** True while a confirmed collaborator ticket is being redeemed — the confirm screen's waiting state. */
+    val collabRedeeming = mutableStateOf(false)
+    val collabRedeemError = mutableStateOf<String?>(null)
+
+    /** A scanned/opened `ccpocket://collab#…` waiting for the fingerprint confirm screen (§7): a deep link
+     *  or a QR must NEVER redeem on sight — the user reads the safety words and says yes first. */
+    val pendingCollabInvite = mutableStateOf<CollaboratorInvite?>(null)
+
+    /** A scanned/opened `ccpocket://share#…` waiting for the guest accept-preview (same rule as above). */
+    val pendingShareInvite = mutableStateOf<ShareInvite?>(null)
+
+    /** The offer id a push/deep link asked us to show, if any — consumed by the root incoming entry. */
+    val pendingOfferId = mutableStateOf<String?>(null)
+
+    /** Set by the app root: a fresh Collaborator Link (and its one-time ticket, the first connect's PSK)
+     *  so the inbox connection for it comes up now rather than at the next app launch. */
+    var onCollaboratorLinkAdded: ((PairedDaemon, String) -> Unit)? = null
+
+    /** The one-time ticket doubles as the PSK on a binding's FIRST relay connect — a freshly redeemed inbox
+     *  link is constructed after the redeem, so it needs it handed over explicitly. */
+    internal fun armFirstTicket(ticket: String?) { firstTicket = ticket }
+
+    /**
+     * THE deep-link front door (§7). iOS `onOpenURL`, the Android VIEW intent, the pairing scanner and the
+     * Join Folder paste field all come through here, so the routing table lives in exactly one place and a
+     * collaborator QR can't be redeemed by whichever entry point happens to see it first.
+     *
+     * [allowBareBlob] is the explicit-paste opt-in: a naked base64 string is only treated as an invite when
+     * a human deliberately pasted it into a field that asks for one.
+     */
+    fun handleIncomingLink(raw: String, allowBareBlob: Boolean = false): IncomingLink {
+        val link = parseIncomingLink(raw, allowBareBlob)
+        when (link) {
+            is IncomingLink.Code -> pairWithCode(link.code)
+            is IncomingLink.Pair -> pair(link.url)
+            // both invite kinds park in a trust screen; neither redeems here
+            is IncomingLink.Collab -> pendingCollabInvite.value = link.invite
+            is IncomingLink.Share -> pendingShareInvite.value = link.invite
+            is IncomingLink.Session -> requestOpenSession(link.workdir, link.sessionId)
+            is IncomingLink.Handoff -> pendingOfferId.value = link.handoffId
+            IncomingLink.Unknown -> status.value = StatusMsg(Res.string.status_invalid_link)
+        }
+        return link
     }
 
     fun listSessions(wd: String) = scope.launch { send(ListSessions(wd)) }
@@ -4199,6 +4621,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val RECONNECT_BANNER_GRACE_MS = 2_500L // hold the Ready look this long on a blip before the Reconnecting banner (#28)
         const val LIST_WAIT_MS = 6_000L       // after Attached, wait this long for the list before "computer offline"
         const val CONNECT_TIMEOUT_MS = 12_000L // no Attached within this → treat the connect as wedged, force a retry
+        /** §3.2.7: the Accept button waits this long for daemon truth before it says so — an old daemon
+         *  DROPS the unknown accept frame entirely, and a permanent spinner would read as success. */
+        const val ACCEPT_TIMEOUT_MS = 12_000L
         const val SOCKET_RETIRE_TIMEOUT_MS = 3_000L // #142: bounded wait for the old socket to really close before dialing anew
         const val TRANSPORT_COALESCE_MS = 3_000L    // #143: reconnect triggers within this of an in-flight attempt merge into it
         const val STABLE_LINK_RESET_MS = 60_000L    // #144: the retry ladder resets only after the link stays up this long
