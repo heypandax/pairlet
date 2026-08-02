@@ -1,6 +1,8 @@
 # 飞书群智能审核信任模式（Reviewed Trust）
 
-> 状态：**实现方案，尚未落地**（2026-08-02）。
+> 状态：**已按本方案实现**（2026-08-03，分支 `feat/feishu-reviewed-trust`；直接实现阶段 B，
+> `FEISHU_REVIEW_SHADOW` 影子配置点保留、默认关）。Reviewer CLI 契约回归见
+> `scripts/probe-feishu-reviewer.py`（升级 claude CLI 后必跑）。
 >
 > 面向实现者：本文已收敛 MVP 产品语义、权限边界、数据迁移、代码改动、测试与验收标准，可直接据此实现。
 >
