@@ -58,6 +58,16 @@ class SessionRegistry(
     // a temp dir instead of the user's real ~/.claude/projects (every other path resolves via the
     // backends / ProjectPaths directly, same default)
     private val projectsRoot: Path = ProjectPaths.projectsRoot(),
+    // the daemon-wide pending-approval ledger (approval design M1) — every conversation's gates register
+    // their asks here; defaulted so tests that never exercise approvals need no wiring
+    private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
+        dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
+    // the daemon-wide task-grant engine (approval design M2), shared with the quick terminal
+    private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
+        dev.ccpocket.daemon.approval.ApprovalGrantStore(),
+    // M3 deterministic risk radar (advisory) — daemon-wide so the sequence ledger survives relaunches
+    private val riskEngine: dev.ccpocket.daemon.approval.ApprovalRiskEngine? =
+        dev.ccpocket.daemon.approval.ApprovalRiskEngine(),
 ) : dev.ccpocket.daemon.handoff.SessionTurnControl {
     private val mutex = Mutex()
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
@@ -362,6 +372,7 @@ class SessionRegistry(
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
             handoffAccess = handoffAccess,
+            approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
         mutex.withLock { convos[convoId] = c }
         // For an explicit take-over we bypassed the ObserveSession guard above, so a desktop `claude --resume`
@@ -637,7 +648,6 @@ class SessionRegistry(
         return convo.sendTrustedBridgePrompt(p.text, p.promptId)
     }
 
-    suspend fun verdict(v: PermissionVerdict) = get(v.convoId)?.submitVerdict(v) ?: Unit
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit
     suspend fun switchMode(s: SwitchMode) = get(s.convoId)?.switchMode(s.mode, s.permissionMode) ?: Unit
     suspend fun switchServiceTier(s: SwitchServiceTier) = get(s.convoId)?.switchServiceTier(s.serviceTier) ?: Unit
@@ -700,6 +710,10 @@ class SessionRegistry(
 
     /** The conversation's current permission mode — the authoritative input to the shell approval gate (issue #3). */
     suspend fun modeOf(convoId: String): PermissionMode? = get(convoId)?.currentMode()
+
+    /** The conversation's CURRENT task id (approval design M2) — registry truth for the quick terminal's
+     *  shared grant match; never trusted from the client. */
+    suspend fun taskIdOf(convoId: String): String? = get(convoId)?.currentTaskId()
 
     /** Close [convoId]. With a [requester] (a client closing ITS view) this only detaches that client's
      *  sink — the conversation keeps streaming (to any other clients, else headless) when others are still

@@ -1,6 +1,7 @@
 package dev.ccpocket.daemon.session
 
 import dev.ccpocket.daemon.agent.AgentBackend
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
@@ -66,9 +67,11 @@ class SessionRegistryBridgeApprovalRouteTest {
     fun pre_first_turn_push_anchor_reattaches_and_resurfaces_the_exact_request() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Default)
         val backend = LazyBackend()
+        val approvals = ApprovalCoordinator(scope)
         val registry = SessionRegistry(
             scope,
             backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }),
+            approvals = approvals,
         )
         val workdir = Files.createTempDirectory("ccp-bridge-request").toString()
         val bridgeFrames = mutableListOf<Frame>()
@@ -110,7 +113,7 @@ class SessionRegistryBridgeApprovalRouteTest {
             assertNull(live.sessionId)
             assertEquals(ask, synchronized(ownerFrames) { ownerFrames.filterIsInstance<PermissionAsk>().last() })
 
-            registry.verdict(PermissionVerdict(convoId, ask.askId, Decision.ALLOW, remember = true))
+            approvals.onVerdict(PermissionVerdict(convoId, ask.askId, Decision.ALLOW, remember = true))
             assertTrue(approved.await())
             assertTrue(registry.pendingApprovals().isEmpty())
             assertNull(backend.launchedSpec, "the request text must not reach an agent before approval")

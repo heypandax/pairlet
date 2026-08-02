@@ -128,7 +128,11 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PeerPresence
+import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
+import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.PermissionAsk
+import dev.ccpocket.protocol.PermissionRiskUpdated
+import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PendingApprovals
 import dev.ccpocket.protocol.PermissionMode
@@ -286,6 +290,18 @@ sealed interface ChatItem {
     ) : ChatItem
     data class Sys(val text: String) : ChatItem
     data class RuleChip(val rule: String) : ChatItem // "Always allowing X this session" confirmation
+
+    /** Approval design M2 §9.6: an action auto-ran under a task/session grant — the in-stream audit
+     *  chip ("自动执行 · <rule> · 依据"). [grantId] non-null enables "收紧" (RevokeGrant); a
+     *  session-rule hit tightens via ClearAllowRule([summary]) instead. Daemon-redacted summary only. */
+    data class AutoRun(
+        val eventId: String,
+        val summary: String,
+        val basis: String,       // "task-grant" | "session-rule" | tolerant future values
+        val tool: String? = null,
+        val grantId: String? = null,
+        val at: Long = 0L,
+    ) : ChatItem
 
     /** The compact transcript row left behind after answering an AskUserQuestion card:
      *  (question → answer) pairs; a freeform reply is a single ("" → response) pair. */
@@ -801,6 +817,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val chatTitle = mutableStateOf<String?>(null)            // session title for the chat header (client-side)
     private var thinkStartMs: Long? = null                   // first Thinking chunk of the in-progress block
     val pendingAsk = mutableStateOf<PermissionAsk?>(null)
+    /** Ordered waiting room behind [pendingAsk] (approval design M1): a same-session ask arriving while a
+     * card is already up QUEUES here instead of overwriting it — three back-to-back asks are shown one by
+     * one, none lost. Invariant: non-empty only while [pendingAsk] is non-null (resolving pops the head). */
+    private val askQueue = mutableListOf<PermissionAsk>()
+    /** "n / m" for the current approval burst (1-based position, burst total) — null while only one card
+     * is in flight, so the single-ask UI stays exactly as before. */
+    val askQueueProgress = mutableStateOf<Pair<Int, Int>?>(null)
+    /** M3 advisory risk per pending askId — updates the card badge in place, never the daemon deadline. */
+    val askRisk = mutableStateMapOf<String, PermissionRiskUpdated>()
+    private var askBurstTotal = 0
+    private var askBurstDone = 0
     /** Daemon-authoritative account-wide approval queue for this machine. Kept across transient reconnects;
      * only a fresh [PendingApprovals] replaces it, so a network blip never masquerades as "all clear". */
     val pendingApprovals = mutableStateMapOf<String, PendingApproval>()
@@ -1664,7 +1691,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE)))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE), supportsApprovalV2 = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -1834,7 +1861,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         convoId.value = null
         sessionsDir.value = null
         workdir.value = null // clear with the rest so a stale path can't leak into the next machine's ⌘N (issue #56)
-        pendingAsk.value = null
+        clearAskQueue()
         pendingApprovals.clear()
         // #165: the busy→idle detector is per-MACHINE state. Carrying this machine's working ids into the
         // next one's first project list would mark every one of them "finished while you were away".
@@ -1963,7 +1990,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         chatTitle.value = null; observing.value = false; streaming.value = false
         opening.value = false; openTimedOut.value = false; switching.value = false; switchingSession.value = false
         autoFocusComposer.value = false
-        pendingAsk.value = null
+        clearAskQueue()
         messages.clear(); pendingImages.clear()
         resetHistoryPaging() // #147
         terminalEntries.clear(); terminalBusy.value = false
@@ -2422,8 +2449,41 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     )
                 }
                 if (f.convoId == convoId.value) {
-                    pendingAsk.value = f
-                    Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool))
+                    // a card sitting in its terminal timed-out display (issue #100) must not dam the queue:
+                    // a NEW live ask retires it (the old single-value model overwrote it here too)
+                    if (pendingAsk.value != null && pendingAsk.value?.askId == timedOutAskId.value) advanceAsk()
+                    val current = pendingAsk.value
+                    val queuedAt = askQueue.indexOfFirst { it.askId == f.askId }
+                    when {
+                        // duplicate frames (resurface on reattach) refresh in place — never double-queue
+                        current?.askId == f.askId -> pendingAsk.value = f
+                        queuedAt >= 0 -> askQueue[queuedAt] = f
+                        current == null -> { // fresh burst — the queue is empty whenever no card is up
+                            askBurstTotal = 1; askBurstDone = 0
+                            updateAskProgress()
+                            pendingAsk.value = f
+                            Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to f.tool))
+                        }
+                        else -> { // a card is already up: queue behind it instead of overwriting (design M1)
+                            askQueue.add(f)
+                            askBurstTotal++
+                            updateAskProgress()
+                        }
+                    }
+                }
+            }
+            // approval design M2 §9.6: an action auto-ran under a grant — drop the audit chip into the
+            // stream. Idempotent by eventId (reminder re-emits / reattach replays must not duplicate).
+            is AuthorizedActionRecorded -> if (f.convoId == convoId.value) {
+                if (messages.none { it is ChatItem.AutoRun && it.eventId == f.eventId }) {
+                    messages.add(ChatItem.AutoRun(f.eventId, f.actionSummary, f.basis, f.tool, f.matchedGrantId, f.decidedAt))
+                }
+            }
+            // M3 advisory risk: update a STILL-PENDING card's badge in place — never reset the daemon
+            // deadline, and drop updates for asks already terminal (SMART-APPROVAL §八)
+            is PermissionRiskUpdated -> if (f.convoId == convoId.value) {
+                if (pendingAsk.value?.askId == f.askId || askQueue.any { it.askId == f.askId }) {
+                    askRisk[f.askId] = f
                 }
             }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
@@ -2437,9 +2497,17 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                         // read as success). A tap on it now only dismisses — no more silent no-op.
                         timedOutAskId.value = f.askId
                     } else {
-                        // agent moved on / session closed / a question timed out → dismiss (a question leaves a note)
+                        // agent moved on / session closed / a question timed out → dismiss (a question leaves a
+                        // note) and surface the next queued ask, if any
                         if (ask?.questions != null) messages.add(ChatItem.QuestionsWithdrawn)
-                        pendingAsk.value = null
+                        advanceAsk()
+                    }
+                } else if (f.convoId == convoId.value) {
+                    // a QUEUED card the user never saw was retired (agent cancel / timeout) — drop it silently
+                    // and shrink the burst so "n / m" stays honest
+                    if (askQueue.removeAll { it.askId == f.askId }) {
+                        askBurstTotal--
+                        updateAskProgress()
                     }
                 }
             }
@@ -3656,7 +3724,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
         streaming.value = false // the previous session's in-flight turn must not leak the ■ button
         turnStartMark = null // …nor stamp its send time onto this session's TurnEnded duration / stop-refill window
-        pendingAsk.value = null
+        clearAskQueue()
         limitOffer.value = null; limitConfirmed.value = null // the auto-continue offer belongs to the session that hit the limit (#137)
         chatTitle.value = title // resumed sessions carry their list title; new sessions fill in from the first prompt
         autoFocusComposer.value = resumeId == null // a just-created session opens on an empty composer — pop the keyboard right away
@@ -4394,23 +4462,97 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private fun randomCaptureId(): String =
         Random.nextBytes(8).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
-    fun resolve(decision: Decision, remember: Boolean = false, message: String? = null) {
+    /** Pop the next queued ask into [pendingAsk] (or clear it) after the current card reached a terminal
+     *  state. Ends the burst — resetting the "n / m" chip — once the queue drains. */
+    private fun advanceAsk() {
+        askBurstDone++
+        pendingAsk.value?.let { askRisk.remove(it.askId) } // the badge dies with its card
+        val next = askQueue.removeFirstOrNull()
+        pendingAsk.value = next
+        if (next == null) {
+            askBurstTotal = 0; askBurstDone = 0
+            askQueueProgress.value = null
+        } else {
+            updateAskProgress()
+            Telemetry.track(TelEvent.ApprovalShown, mapOf(TelKey.Tool to next.tool))
+        }
+    }
+
+    private fun updateAskProgress() {
+        askQueueProgress.value = if (askBurstTotal > 1) (askBurstDone + 1) to askBurstTotal else null
+    }
+
+    /** Drop the whole ask queue with the current card — session switch / machine switch / reset paths. */
+    private fun clearAskQueue() {
+        pendingAsk.value = null
+        askQueue.clear()
+        askBurstTotal = 0; askBurstDone = 0
+        askQueueProgress.value = null
+        askRisk.clear()
+    }
+
+    fun resolve(
+        decision: Decision, remember: Boolean = false, message: String? = null,
+        // approval design M2 (only sent for asks whose grantOptions offered them):
+        grantScope: String? = null,          // "task" | "session" — 允许本任务 / Session 记忆
+        retrySafer: Boolean = false,         // 换种安全方式 (rides a DENY)
+        constraints: List<String>? = null,
+    ) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
-        pendingAsk.value = null
+        advanceAsk()
         pendingApprovals.remove(a.askId)
-        if (decision == Decision.ALLOW && remember) a.rule?.let { r ->
+        if (decision == Decision.ALLOW && (remember || grantScope == "session")) a.rule?.let { r ->
             if (r !in allowRules) allowRules.add(r)
             messages.add(ChatItem.RuleChip(r)) // drop the "always allowing X" chip into the stream
         }
-        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to (if (remember) "always" else decision.name.lowercase())))
-        scope.launch { send(PermissionVerdict(c, a.askId, decision, message = message, remember = remember)) }
+        val decisionLabel = when {
+            retrySafer -> "retry-safer"
+            grantScope != null -> "allow-$grantScope"
+            remember -> "always"
+            else -> decision.name.lowercase()
+        }
+        Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to decisionLabel))
+        scope.launch {
+            send(
+                PermissionVerdict(
+                    c, a.askId, decision, message = message, remember = remember,
+                    grantScope = grantScope, retrySafer = retrySafer, constraints = constraints,
+                ),
+            )
+        }
+    }
+
+    /** M2 AttentionLease: the visible approval card's read-time heartbeat (30s cadence from the UI).
+     *  Only for asks a grant-aware daemon opted in via [PermissionAsk.grantOptions] — an old daemon never
+     *  sees the frame. Pauses ONLY the reading budget; the daemon's absolute deadline still rules. */
+    fun sendAskHeartbeat(visible: Boolean) {
+        val a = pendingAsk.value ?: return
+        val c = convoId.value ?: return
+        if (a.grantOptions == null) return
+        scope.launch { send(ApprovalAttentionHeartbeat(c, a.askId, visible)) }
+    }
+
+    /** "收紧后续授权" on an autorun chip: revoke the task grant (or clear the session rule) so the NEXT
+     *  matching action asks again. Never claims to roll back what already ran. */
+    fun tightenAutoRun(item: ChatItem.AutoRun) {
+        val c = convoId.value ?: return
+        scope.launch {
+            if (item.grantId != null) send(RevokeGrant(c, item.grantId))
+            else send(ClearAllowRule(c, item.summary)) // session-rule hits carry no grant id
+        }
+        if (item.grantId == null) allowRules.remove(item.summary)
     }
 
     /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
     fun resolvePendingApproval(askId: String, allow: Boolean) {
         val row = pendingApprovals.remove(askId) ?: return
-        if (pendingAsk.value?.askId == askId) pendingAsk.value = null
+        if (pendingAsk.value?.askId == askId) {
+            advanceAsk()
+        } else if (askQueue.removeAll { it.askId == askId }) { // resolved from the inbox while queued
+            askBurstTotal--
+            updateAskProgress()
+        }
         Telemetry.track(TelEvent.ApprovalDecided, mapOf(TelKey.Decision to if (allow) "allow" else "deny"))
         scope.launch {
             send(PermissionVerdict(row.ask.convoId, askId, if (allow) Decision.ALLOW else Decision.DENY))
@@ -4429,7 +4571,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     fun answerQuestions(answers: Map<String, String>?, response: String? = null) {
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
-        pendingAsk.value = null
+        advanceAsk()
         val items = response?.takeIf { it.isNotBlank() }?.let { listOf("" to it.trim()) }
             ?: a.questions.orEmpty().mapNotNull { q -> answers?.get(q.question)?.takeIf { it.isNotBlank() }?.let { q.question to it } }
         messages.add(ChatItem.QuestionsAnswered(items))
@@ -4437,8 +4579,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         scope.launch { send(PermissionVerdict(c, a.askId, Decision.ALLOW, answers = answers, response = response)) }
     }
 
-    /** Timeout: the daemon already auto-denied at 30s; just clear the prompt without re-sending. */
-    fun dismissAsk() { pendingAsk.value = null }
+    /** Timeout: the daemon already auto-denied; clear the prompt without re-sending, show the next queued ask. */
+    fun dismissAsk() { if (pendingAsk.value != null) advanceAsk() }
 
     /** Switch the execution/permission mode — applied on the next turn (issue #84), never interrupting a
      *  running turn (the daemon relaunches Claude before the next send; Codex carries it in-turn). */

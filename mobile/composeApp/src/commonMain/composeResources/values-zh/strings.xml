@@ -187,6 +187,28 @@
     <string name="always_allow_scope">「总是允许」仅在本会话中记住 %1$s。</string>
     <string name="allow_chip_prefix">本会话内总是允许</string>
     <string name="allow_chip_suffix"></string>
+    <!-- 审批系统 M2：任务级授权、换安全方式、自动执行留痕、风险徽标 -->
+    <string name="allow_for_task">允许本任务</string>
+    <string name="allow_for_task_note">本任务内同类操作自动执行（最长 2 小时）。</string>
+    <string name="retry_safer">换安全方式</string>
+    <string name="retry_safer_title">让它换个更安全的做法</string>
+    <string name="retry_safer_send">发送约束</string>
+    <string name="rs_no_network">不要联网</string>
+    <string name="rs_read_only">只读，不改文件</string>
+    <string name="rs_tests_only">只运行测试</string>
+    <string name="rs_stay_workspace">不出项目目录</string>
+    <string name="rs_patch_only">只生成 patch 给我看，不直接应用</string>
+    <string name="rs_custom_hint">其他约束……</string>
+    <string name="more_options">更多</string>
+    <string name="allow_session_option">本会话内总是允许</string>
+    <string name="autorun_label">自动执行</string>
+    <string name="autorun_basis_task">本任务授权</string>
+    <string name="autorun_basis_session">会话规则</string>
+    <string name="autorun_tighten">收紧</string>
+    <string name="risk_low">低风险</string>
+    <string name="risk_medium">中风险</string>
+    <string name="risk_high">发现风险</string>
+    <string name="risk_unknown">无法可靠评估</string>
 
     <!-- ── 语音输入 ──────────────────────────────────────────────── -->
     <string name="cancel_recording">取消录音</string>

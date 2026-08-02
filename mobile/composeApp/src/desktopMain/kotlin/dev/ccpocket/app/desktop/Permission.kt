@@ -45,6 +45,19 @@ import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.agent_needs_permission
 import dev.ccpocket.app.resources.agent_wants_edit
 import dev.ccpocket.app.resources.allow
+import dev.ccpocket.app.resources.allow_once
+import dev.ccpocket.app.resources.allow_for_task
+import dev.ccpocket.app.resources.allow_session_option
+import dev.ccpocket.app.resources.cancel
+import dev.ccpocket.app.resources.retry_safer
+import dev.ccpocket.app.resources.retry_safer_send
+import dev.ccpocket.app.resources.retry_safer_title
+import dev.ccpocket.app.resources.rs_custom_hint
+import dev.ccpocket.app.resources.rs_no_network
+import dev.ccpocket.app.resources.rs_patch_only
+import dev.ccpocket.app.resources.rs_read_only
+import dev.ccpocket.app.resources.rs_stay_workspace
+import dev.ccpocket.app.resources.rs_tests_only
 import dev.ccpocket.app.resources.auto_denied_body
 import dev.ccpocket.app.resources.auto_denied_no_response
 import dev.ccpocket.app.resources.deny
@@ -126,6 +139,92 @@ private fun AllowButton(big: Boolean = false, key: Boolean = true, onClick: () -
     }
 }
 
+/** M2 "允许本次" (outline) — the V2 row splits the legacy Allow into once vs task scopes. */
+@Composable
+private fun OnceButton(onClick: () -> Unit) {
+    Text(
+        stringResource(Res.string.allow_once), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(9.dp)).border(1.dp, Tok.hair, RoundedCornerShape(9.dp))
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+    )
+}
+
+/** M2 "允许本任务" — the recommended action (design `.btn.rec`): accent fill + ⌘⏎. */
+@Composable
+private fun TaskAllowButton(onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(9.dp)).background(Tok.accent).clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text(stringResource(Res.string.allow_for_task), color = Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Key("⌘⏎")
+    }
+}
+
+/** M2 "换种安全方式" constraint picker (design frame 2): preset chips + free text → structured
+ *  RETRY_SAFER deny the agent re-plans under. */
+@Composable
+private fun DesktopSaferPanel(onBack: () -> Unit, onSend: (List<String>) -> Unit) {
+    val presets = listOf(
+        stringResource(Res.string.rs_no_network),
+        stringResource(Res.string.rs_read_only),
+        stringResource(Res.string.rs_tests_only),
+        stringResource(Res.string.rs_stay_workspace),
+        stringResource(Res.string.rs_patch_only),
+    )
+    val picked = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var custom by remember { mutableStateOf("") }
+    Column {
+        Text(stringResource(Res.string.retry_safer_title), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            presets.take(3).forEach { c -> SaferChip(c, c in picked) { if (c in picked) picked.remove(c) else picked.add(c) } }
+        }
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            presets.drop(3).forEach { c -> SaferChip(c, c in picked) { if (c in picked) picked.remove(c) else picked.add(c) } }
+        }
+        androidx.compose.foundation.text.BasicTextField(
+            value = custom, onValueChange = { custom = it }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = Tok.tx, fontFamily = Dk.ui, fontSize = 12.5.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(Tok.accent),
+            decorationBox = { inner ->
+                Box(
+                    Modifier.padding(top = 7.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.base)
+                        .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 7.dp),
+                ) {
+                    if (custom.isEmpty()) Text(stringResource(Res.string.rs_custom_hint), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp)
+                    inner()
+                }
+            },
+        )
+        Row(Modifier.padding(top = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Spacer(Modifier.weight(1f))
+            Text(
+                stringResource(Res.string.cancel), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onBack).padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+            val enabled = picked.isNotEmpty() || custom.isNotBlank()
+            Text(
+                stringResource(Res.string.retry_safer_send), color = if (enabled) Tok.base else Tok.muted, fontFamily = Dk.ui, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (enabled) Tok.accent else Tok.surface)
+                    .clickable(enabled = enabled) { onSend(picked + listOfNotNull(custom.trim().takeIf { it.isNotBlank() })) }
+                    .padding(horizontal = 14.dp, vertical = 7.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SaferChip(label: String, on: Boolean, onToggle: () -> Unit) {
+    Text(
+        label, color = if (on) Tok.tx else Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, maxLines = 1,
+        modifier = Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (on) Tok.accent.copy(alpha = 0.16f) else Tok.surface)
+            .border(1.dp, if (on) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
+            .clickable(onClick = onToggle).padding(horizontal = 10.dp, vertical = 5.dp),
+    )
+}
+
 @Composable
 private fun DirBranchLine(workdir: String, branch: String?, fontSize: Float = 10.5f) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -183,10 +282,16 @@ fun InlinePermCard(
     onDeny: () -> Unit,
     timedOut: Boolean = false,
     onDismiss: () -> Unit = {},
+    // approval design M2/M3 (all optional — a pre-M2 daemon renders exactly the legacy card)
+    risk: String? = null,
+    onAllowTask: (() -> Unit)? = null,
+    onRetrySafer: ((List<String>) -> Unit)? = null,
 ) {
     val color = agentColor(agent)
     val isDiff = ask.diff != null
     var rememberRule by remember(ask.askId) { mutableStateOf(false) }
+    var safer by remember(ask.askId) { mutableStateOf(false) }
+    val v2 = ask.grantOptions?.contains("task") == true && onAllowTask != null && onRetrySafer != null
     val bodyAlpha = if (timedOut) 0.5f else 1f // grey the (now inert) request, like the phone's terminal sheet
     Column(
         Modifier.widthIn(max = 680.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.raised)
@@ -202,6 +307,7 @@ fun InlinePermCard(
                             color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.sp,
                         )
                         AgentBadge(agent)
+                        risk?.let { dev.ccpocket.app.ui.RiskBadge(it) } // M3 advisory (shape-distinct four states)
                     }
                     if (isDiff) {
                         val diff = ask.diff!!
@@ -225,10 +331,49 @@ fun InlinePermCard(
                     }
                 }
                 Spacer(Modifier.size(12.dp))
-                if (timedOut) {
-                    TimedOutBlock(onDismiss)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                when {
+                    timedOut -> TimedOutBlock(onDismiss)
+                    // M2 four-action row (design frame 3 `.actrow`): Safer way (link) · session under ⋯ ·
+                    // Deny / Allow once / Allow for task (recommended). The safer panel replaces the row.
+                    v2 && safer -> DesktopSaferPanel(
+                        onBack = { safer = false },
+                        onSend = { onRetrySafer!!(it) },
+                    )
+                    v2 -> {
+                        var moreOpen by remember(ask.askId) { mutableStateOf(false) }
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text(
+                                    stringResource(Res.string.retry_safer), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { safer = true }.padding(horizontal = 7.dp, vertical = 4.dp),
+                                )
+                                if (canRemember(ask) && ask.grantOptions?.contains("session") == true) {
+                                    Text(
+                                        "⋯", color = Tok.muted, fontFamily = Dk.ui, fontSize = 13.sp,
+                                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { moreOpen = !moreOpen }.padding(horizontal = 7.dp, vertical = 4.dp),
+                                    )
+                                }
+                                Spacer(Modifier.weight(1f))
+                                CountdownRing(26.dp, 2.2.dp, color)
+                                DenyButton(onClick = onDeny)
+                                OnceButton(onClick = { onAllow(false) })
+                                TaskAllowButton(onClick = onAllowTask!!)
+                            }
+                            if (moreOpen) {
+                                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
+                                    Spacer(Modifier.weight(1f))
+                                    if (rememberRule) {
+                                        Text(
+                                            stringResource(Res.string.allow_session_option), color = Tok.accent, fontFamily = Dk.ui, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onAllow(true) }.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (canRemember(ask)) RememberCheck(stringResource(Res.string.perm_remember_session), rememberRule) { rememberRule = !rememberRule }
                         Spacer(Modifier.weight(1f))
                         CountdownRing(26.dp, 2.2.dp, color)

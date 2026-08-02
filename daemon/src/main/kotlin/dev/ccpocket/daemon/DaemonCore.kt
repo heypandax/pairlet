@@ -49,7 +49,16 @@ class DaemonCore(
     val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val registry = SessionRegistry(scope, backends)
+
+    /** ONE pending-approval ledger for the whole daemon (approval design M1): agent tool asks, bridge
+     *  request approvals, quick-shell commands and file exports all register here, so a verdict routes by
+     *  askId in one place and timeout/withdraw/snapshot semantics can't drift between the gates. */
+    val approvals = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope)
+
+    /** ONE task-grant engine for the whole daemon (approval design M2): the agent's Bash tool and the
+     *  quick terminal share it, so "允许本任务" from either surface covers both. */
+    val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
+    val registry = SessionRegistry(scope, backends, approvals = approvals, grants = grants)
 
     init {
         registry.handoffs = handoffs
@@ -64,8 +73,8 @@ class DaemonCore(
     val dirs = DirectoryService()
     val transcribe = TranscribeService(scope, registry::workdirOf)
     val inbox = FileInboxService(registry::workdirOf)
-    val shell = ShellService(scope)
-    val exports = FileExportService(scope, registry::workdirOf)
+    val shell = ShellService(scope, coordinator = approvals, grants = grants)
+    val exports = FileExportService(scope, registry::workdirOf, coordinator = approvals)
     val auth = AuthService(
         scope, registry::busyForAuth, registry::closeIdleForAuth, registry::closeBusyForAuth,
         claudeConfigDir = claudeConfigDir,
@@ -124,6 +133,8 @@ class DaemonCore(
         // model list must be the host the client is showing, with that layer's own credential (#167 ②).
         openCodeModels, codexModels,
         ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
+        approvals = approvals,
+        grants = grants,
     )
 
     /**

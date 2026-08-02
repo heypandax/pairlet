@@ -878,6 +878,18 @@ class RepoDesktopModel(
     // next ask (askIds are unique per request) — mirrors the phone's `timedOutAskId == ask.askId` check.
     override val askTimedOut: Boolean
         get() = repo.pendingAsk.value?.askId?.let { it == repo.timedOutAskId.value } ?: false
+    override val askQueuePosition: Pair<Int, Int>? get() = repo.askQueueProgress.value
+    override val askRisk: String? get() = repo.pendingAsk.value?.let { repo.askRisk[it.askId]?.risk }
+    override fun resolveTaskGrant() {
+        showPermissionModal = false
+        repo.resolve(Decision.ALLOW, grantScope = "task")
+    }
+    override fun retrySafer(constraints: List<String>) {
+        showPermissionModal = false
+        repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints)
+    }
+    override fun tightenAutoRun(item: ChatItem.AutoRun) = repo.tightenAutoRun(item)
+    override fun askHeartbeat() = repo.sendAskHeartbeat(visible = true)
     override fun resolve(allow: Boolean, remember: Boolean) {
         showPermissionModal = false
         repo.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember)

@@ -573,7 +573,21 @@ interface DesktopModel {
      *  click can't send a verdict the CLI already stopped waiting for. Default false so seed/preview models
      *  render the ordinary actionable card. */
     val askTimedOut: Boolean get() = false
+    /** "n / m" while several asks queued behind one another (approval design M1); null for the single-ask
+     *  case, which renders exactly the old card. */
+    val askQueuePosition: Pair<Int, Int>? get() = null
+    /** M3 advisory risk of the current [ask] ("low"/"medium"/"high"/"unknown"); null = no assessment. */
+    val askRisk: String? get() = null
     fun resolve(allow: Boolean, remember: Boolean)
+    // ── approval design M2 (defaults keep seed/preview models inert) ──
+    /** 允许本任务: issue a TASK grant — matching actions auto-run until this task ends. */
+    fun resolveTaskGrant() {}
+    /** 换种安全方式: structured retry-under-constraints rides a DENY back to the agent. */
+    fun retrySafer(constraints: List<String>) {}
+    /** "收紧" on an autorun chip: revoke its grant / clear its session rule. */
+    fun tightenAutoRun(item: ChatItem.AutoRun) {}
+    /** AttentionLease heartbeat while the approval card is on screen (30s cadence). */
+    fun askHeartbeat() {}
     fun dismissAsk()
     // AskUserQuestion (ask.questions != null): the picks/free-text ride an ALLOW verdict; skip DENIES with a
     // note. Kept distinct from resolve() because a bare ALLOW carries no answers → the CLI reads "did not

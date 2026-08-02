@@ -302,10 +302,12 @@ class CollaboratorGrantEnforcementTest {
         emitted: MutableList<Frame>,
         responses: MutableList<Resp>,
         access: HandoffAccess = HandoffAccess.REVIEW_READ_ONLY,
+        coordinator: dev.ccpocket.daemon.approval.ApprovalCoordinator =
+            dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
     ) = PermissionBridge(
         convoId = "c1",
         mode = PermissionMode.DEFAULT,
-        scope = scope,
+        coordinator = coordinator,
         emit = { emitted += it },
         allowRules = java.util.concurrent.ConcurrentHashMap.newKeySet(),
         respond = { askId, allow, _, _, _, deny -> responses += Resp(askId, allow, deny) },
@@ -345,16 +347,18 @@ class CollaboratorGrantEnforcementTest {
     fun a_recipients_verdict_cannot_release_a_hard_refused_write() = runBlocking {
         val wd = Files.createTempDirectory("ccp-review-wd2").toString()
         val emitted = frames(); val responses: MutableList<Resp> = CopyOnWriteArrayList()
-        val bridge = reviewBridge(CoroutineScope(Dispatchers.Default), wd, emitted, responses)
+        val testScope = CoroutineScope(Dispatchers.Default)
+        val coordinator = dev.ccpocket.daemon.approval.ApprovalCoordinator(testScope)
+        val bridge = reviewBridge(testScope, wd, emitted, responses, coordinator = coordinator)
 
         bridge.onControlRequest(AgentEvent.ControlRequest("w1", "Write", buildJsonObject { put("file_path", "$wd/a.txt") }))
         assertEquals(listOf(false), responses.map { it.allow }, "the deny already reached the agent")
 
         // the recipient IS the lease controller — its self-approval must find NOTHING to release: the
-        // deny preceded the verdict channel structurally, so the verdict lands on the expired-ask path
-        bridge.onVerdict(PermissionVerdict("c1", "w1", Decision.ALLOW))
+        // deny preceded the verdict channel structurally, so the verdict lands on the coordinator's
+        // unclaimed path (false — RequestRouter then answers the tapping device with ask_expired)
+        assertTrue(!coordinator.onVerdict(PermissionVerdict("c1", "w1", Decision.ALLOW)))
         assertTrue(responses.none { it.allow }, "no allow may ever reach the agent for a banned write")
-        assertTrue(emitted.filterIsInstance<PocketError>().any { it.code == "ask_expired" })
     }
 
     @Test

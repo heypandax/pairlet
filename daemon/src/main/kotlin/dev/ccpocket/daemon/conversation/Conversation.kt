@@ -41,6 +41,7 @@ import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowUpdate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -107,7 +108,37 @@ class Conversation(
      *  the recipient is the lease controller and answers its own asks, so a mere ask is no wall.
      *  Null = not a handoff-granted conversation. */
     private val handoffAccess: dev.ccpocket.protocol.HandoffAccess? = null,
+    /** The daemon-wide pending-approval ledger (approval design M1): both this conversation's gates
+     *  (request-level + per-tool) register their asks here, so timeout/withdraw/verdict routing and the
+     *  account snapshot behave identically to the shell/export gates. Defaulted for tests. */
+    private val approvals: dev.ccpocket.daemon.approval.ApprovalCoordinator =
+        dev.ccpocket.daemon.approval.ApprovalCoordinator(parentScope),
+    /** TASK-scoped grants (approval design M2): "允许本任务" lives here, shared with the quick terminal.
+     *  Defaulted for tests. */
+    private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
+        dev.ccpocket.daemon.approval.ApprovalGrantStore(),
+    /** M3 deterministic risk radar (advisory badges only). Null in tests keeps pre-M3 behavior. */
+    private val riskEngine: dev.ccpocket.daemon.approval.ApprovalRiskEngine? = null,
 ) {
+    // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
+    // One task per top-level user prompt: rotated when a prompt STARTS a new turn (mid-turn queued
+    // prompts fold into the running turn and keep its task, like the CLI folds them into the same
+    // turn). The daemon owns rotation — an agent can never extend a task. Grants die with the task
+    // (next prompt), the session, a mode switch, or the store's 2h TTL, whichever first.
+    @Volatile
+    private var currentTaskId: String? = null
+
+    /** The task the CURRENT prompt chain runs under — stamped on asks and matched by the grant engine. */
+    fun currentTaskId(): String? = currentTaskId
+
+    private fun rotateTask(promptId: String?) {
+        currentTaskId?.let { grants.endTask(convoId, it) }
+        // ALWAYS daemon-minted (crypto review hardening): the grant key must never be wire-influenced —
+        // a client-supplied promptId as the key would make grant identity attacker-chosen if the
+        // sweep-on-rotate invariant above ever regressed. promptId stays a log-side correlation tag only.
+        currentTaskId = "task-" + java.util.UUID.randomUUID()
+        if (promptId != null) log.info("$convoId task $currentTaskId ← prompt ${promptId.take(8)}…")
+    }
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
 
@@ -154,6 +185,7 @@ class Conversation(
     // The synthetic ask shares this conversation so the normal phone verdict/resurface paths can resolve it.
     private val bridgeRequestGate = BridgeRequestApprovalGate(
         convoId = convoId,
+        coordinator = approvals,
         scope = scope,
         emit = { frame ->
             sink.emit(frame)
@@ -769,6 +801,14 @@ class Conversation(
     /** Switch the permission mode — next-turn semantics (issue #84): a running turn is never interrupted.
      *  Claude defers its relaunch to the next sendPrompt; Codex carries the new approval policy next turn. */
     suspend fun switchMode(newMode: PermissionMode, nativeMode: String? = null) {
+        // M5 source ceiling (approval design §7.3): a RESTRICTED origin (bridge/guest) can never reach
+        // Full Control — the credential guards already deny most of these frames, this is the daemon-side
+        // floor that holds even if a guard regresses. Re-announce the unchanged truth instead of obeying.
+        if (origin != null && newMode == PermissionMode.BYPASS_PERMISSIONS) {
+            log.warn("$convoId refusing BYPASS_PERMISSIONS for restricted origin $origin (source ceiling)")
+            sink.emit(live(sessionId))
+            return
+        }
         val normalizedNative = normalizePermissionMode(nativeMode)
         if (newMode == mode && normalizedNative == permissionMode) {
             // no-op, but still announce: an out-of-sync phone badge corrects itself from this
@@ -777,7 +817,35 @@ class Conversation(
         }
         mode = newMode
         permissionMode = normalizedNative
+        // approval design M2: a mode switch changes the ground the user granted under — every standing
+        // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
+        grants.endSession(convoId)
+        armFullControlExpiry() // M5: Full Control never runs open-ended
         recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
+    }
+
+    // ── M5 (approval design §17.5): Full Control auto-expires — min(session close, 1h) — back to the
+    // default ask-driven mode. Renewing it is an explicit re-confirmation, never automatic. ──
+    private var fullControlExpiry: Job? = null
+
+    private fun armFullControlExpiry() {
+        fullControlExpiry?.cancel()
+        if (mode != PermissionMode.BYPASS_PERMISSIONS) return
+        fullControlExpiry = scope.launch {
+            delay(FULL_CONTROL_TTL_MS)
+            if (mode != PermissionMode.BYPASS_PERMISSIONS) return@launch // already left it
+            log.info("$convoId Full Control expired after ${FULL_CONTROL_TTL_MS / 60_000}min — back to default mode")
+            mode = PermissionMode.DEFAULT
+            permissionMode = null
+            grants.endSession(convoId) // the ground changed again — nothing standing survives
+            recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
+            sink.emit(live(sessionId)) // every attached client's mode badge corrects itself
+        }
+    }
+
+    init {
+        // a session OPENED in Full Control (OpenSession.mode = bypass) starts its expiry clock immediately
+        armFullControlExpiry()
     }
 
     /** Switch the model — next-turn semantics (issue #84): the running turn is untouched; the change takes
@@ -926,7 +994,10 @@ class Conversation(
                 if (f is dev.ccpocket.protocol.PermissionAsk) maybePushAsk(f)
             }
         val b = PermissionBridge(
-            convoId, mode, scope, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            convoId, mode, approvals, emitWithAskPush, allowRules, respond = backend::respondPermission,
+            // approval design M2: the shared task-grant engine + the conversation's live task pointer
+            grants = grants, taskId = { currentTaskId() },
+            risk = riskEngine, // M3 advisory badges
             // verdict + question windows both default to the generous, env-configurable ApprovalTimeout.ms
             // (issue #100 unified them). Bridge-origin sessions keep issue #91's 120s FLOOR on top (#32):
             // the owner arrives via push → tap → reattach, so a deliberately short CC_POCKET_ASK_TIMEOUT_SEC
@@ -1519,6 +1590,11 @@ class Conversation(
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
+        // approval design M2 §5.4: a prompt that STARTS a turn begins a new task — the previous task's
+        // grants die right here (a new instruction never inherits an old authorization). A mid-turn
+        // queued prompt (executing) folds into the running turn, so it keeps the current task, mirroring
+        // how the CLI folds it into the same turn.
+        if (!executing) rotateTask(promptId)
         // RELAUNCH-THEN-SEND (issue #84): a mid-session model/mode/effort switch only recorded the desired value
         // + armed pendingRelaunch — relaunching then would have killed the in-flight turn. Now, before this next
         // turn goes out, reconcile a stale process: stop it and re-spawn under the new flags FIRST, then let the
@@ -1712,10 +1788,6 @@ class Conversation(
         sink.emit(TurnDone(convoId, msg, null))
     }
 
-    suspend fun submitVerdict(v: PermissionVerdict) {
-        if (!bridgeRequestGate.onVerdict(v)) bridge?.onVerdict(v)
-    }
-
     /**
      * Arm the user-cancel interrupt (Claude: stream-json control, Codex: turn/interrupt — either way the
      * turn aborts and the session/process stay alive). Only WHILE a turn is executing: arming
@@ -1866,12 +1938,17 @@ class Conversation(
 
     suspend fun close() {
         bridgeRequestGate.cancelAll()
+        grants.endSession(convoId) // approval design M2: no task grant survives its session
+        riskEngine?.forget(convoId) // M3: the sequence ledger dies with the conversation
         stopProcess()
         scope.cancel()
     }
 
     companion object {
         val CONSERVATIVE_EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh")
+
+        /** M5 (approval design §17.5): Full Control auto-expires after min(session close, this). */
+        const val FULL_CONTROL_TTL_MS = 60 * 60 * 1000L
 
         // claude's session-lock refusal on stderr: "Error: Session <id> is currently running as a
         // background agent (<kind>). … add --fork-session to branch off a copy." The kind varies

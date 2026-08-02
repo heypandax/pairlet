@@ -2,14 +2,16 @@ package dev.ccpocket.daemon.shell
 
 import dev.ccpocket.daemon.agent.ApprovalTimeout
 import dev.ccpocket.daemon.agent.ToolMetadata
+import dev.ccpocket.daemon.approval.ApprovalCoordinator
+import dev.ccpocket.daemon.approval.ApprovalGrantStore
+import dev.ccpocket.daemon.approval.ApprovalOutcome
+import dev.ccpocket.daemon.approval.ApprovalSource
 import dev.ccpocket.daemon.util.logger
-import dev.ccpocket.protocol.AskWithdrawn
-import dev.ccpocket.protocol.AskWithdrawnReason
+import dev.ccpocket.protocol.AuthorizedActionRecorded
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.Frame
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
-import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.ShellResult
@@ -17,8 +19,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
@@ -33,30 +33,28 @@ import java.util.concurrent.TimeUnit
  * a single [ShellResult]. A paired phone can already run commands through the agent's Bash tool, so this adds
  * no new trust boundary — but it still reuses the SAME approval firewall as that tool: a command auto-runs
  * only in bypass mode or when its rule was remembered; otherwise the phone must approve it (dangerous commands
- * are flagged, and time out to "denied"). Approval routing is by [PermissionAsk.askId] (the "sh-" prefix keeps
- * it distinct from agent asks, but [onVerdict] matches purely by pending-map membership).
+ * are flagged, and time out to "denied"). The SHELL source adapter of [ApprovalCoordinator] (approval design
+ * M1): the coordinator owns pending/timeout/verdict routing (the "sh-" askId prefix stays for log legibility);
+ * remembered command scopes stay here.
  */
 class ShellService(
     private val scope: CoroutineScope,
+    private val coordinator: ApprovalCoordinator = ApprovalCoordinator(scope),
     private val verdictTimeoutMs: Long = ApprovalTimeout.ms, // issue #100: injectable so a test drives a short timeout
+    // approval design M2 §13.5: the SAME grant engine as the agent's Bash tool — "允许本任务" for
+    // `./gradlew test` covers the command from either surface. Defaulted for tests.
+    private val grants: ApprovalGrantStore = ApprovalGrantStore(),
 ) {
     private val log = logger("Shell")
     private val isWindows = System.getProperty("os.name").lowercase().contains("win")
 
-    private class Pending(
-        val gate: CompletableDeferred<Boolean>,
-        val convoId: String,
-        val rule: String,
-        val ask: PermissionAsk,
-        val expiresAt: Long,
-    )
-
-    private val pending = ConcurrentHashMap<String, Pending>()
     private val allowRules = ConcurrentHashMap<String, MutableSet<String>>() // convoId -> remembered command scopes
     private val inFlight = ConcurrentHashMap.newKeySet<String>() // convoIds with a command in progress (one at a time)
 
-    /** Run [cmd] in its (already-validated) workdir, gated by the conversation's [mode]; emit one [ShellResult]. */
-    suspend fun run(cmd: RunShellCommand, mode: PermissionMode?, emit: suspend (Frame) -> Unit) {
+    /** Run [cmd] in its (already-validated) workdir, gated by the conversation's [mode]; emit one [ShellResult].
+     *  [taskId] is the conversation's CURRENT task (registry truth, never client-claimed) — it keys the
+     *  shared task-grant match and any "允许本任务" issued from this command's own ask. */
+    suspend fun run(cmd: RunShellCommand, mode: PermissionMode?, taskId: String? = null, emit: suspend (Frame) -> Unit) {
         // server-side backpressure: one command per conversation at a time (the phone enforces this too, but a
         // buggy/hostile client must not be able to spawn unbounded processes / pending approvals)
         if (!inFlight.add(cmd.convoId)) {
@@ -65,10 +63,24 @@ class ShellService(
         }
         try {
             val meta = ToolMetadata.of("Bash", buildJsonObject { put("command", cmd.command) })
+            // shared task grant (M2): "允许本任务" issued from either surface covers this command too
+            val taskGrant = grants.match(cmd.convoId, taskId, "Bash", meta.rule, cmd.command)
             val approved = when {
-                mode == PermissionMode.BYPASS_PERMISSIONS -> true
-                allowRules[cmd.convoId]?.contains(meta.rule) == true -> true
-                else -> askApproval(cmd, meta.preview, meta.title, meta.rule, meta.danger, meta.dangerNote, mode, emit)
+                mode == PermissionMode.BYPASS_PERMISSIONS -> {
+                    coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "bypass-permissions")
+                    true
+                }
+                allowRules[cmd.convoId]?.contains(meta.rule) == true -> {
+                    coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "remembered-rule")
+                    emit(autorunChip(cmd.convoId, taskId, meta.rule, "session-rule", grantId = null))
+                    true
+                }
+                taskGrant != null -> {
+                    coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "task-grant")
+                    emit(autorunChip(cmd.convoId, taskId, meta.rule, "task-grant", grantId = taskGrant.id))
+                    true
+                }
+                else -> askApproval(cmd, meta.preview, meta.title, meta.rule, meta.danger, meta.dangerNote, mode, taskId, emit)
             }
             if (!approved) {
                 emit(ShellResult(cmd.convoId, cmd.command, exitCode = -1, denied = true))
@@ -83,41 +95,49 @@ class ShellService(
     @Suppress("LongParameterList")
     private suspend fun askApproval(
         cmd: RunShellCommand, preview: String, title: String, rule: String, danger: Boolean, dangerNote: String?,
-        mode: PermissionMode?, emit: suspend (Frame) -> Unit,
+        mode: PermissionMode?, taskId: String?, emit: suspend (Frame) -> Unit,
     ): Boolean {
         val askId = "sh-" + UUID.randomUUID()
         val gate = CompletableDeferred<Boolean>()
-        val ask = PermissionAsk(cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null, timeoutSec = (verdictTimeoutMs / 1000).toInt())
-        pending[askId] = Pending(gate, cmd.convoId, rule, ask, System.currentTimeMillis() + verdictTimeoutMs)
-        emit(ask)
-        val timeout = scope.launch {
-            delay(verdictTimeoutMs)
-            if (pending.remove(askId) != null) {
-                // issue #100: retire the phone's card too — the ShellResult(denied) below dismisses the terminal
-                // spinner but not the separate PermissionAsk card, so without this it'd linger (worse now that
-                // the window is minute-scale). Then deny → the command never runs ("no answer -> deny").
-                emit(AskWithdrawn(cmd.convoId, askId, AskWithdrawnReason.TIMED_OUT))
-                gate.complete(false)
+        val ask = PermissionAsk(
+            cmd.convoId, askId, "Bash", preview, mode, title, rule, danger, dangerNote, null,
+            timeoutSec = (verdictTimeoutMs / 1000).toInt(),
+            taskId = taskId,
+            grantOptions = listOf("once", "task", "session"), // M2: same scopes as the agent's Bash ask
+        )
+        // the coordinator owns timeout + card retirement (issue #100: the ShellResult(denied) below dismisses
+        // the terminal spinner but not the separate PermissionAsk card — AskWithdrawn(TIMED_OUT) retires it)
+        coordinator.submit(ask, ApprovalSource.SHELL, owner = this, timeoutMs = verdictTimeoutMs, emit = emit) { outcome ->
+            when (outcome) {
+                is ApprovalOutcome.Answered -> {
+                    val v = outcome.verdict
+                    val allow = v.decision == Decision.ALLOW
+                    if (allow && (v.remember || v.grantScope == "session")) {
+                        allowRules.getOrPut(cmd.convoId) { ConcurrentHashMap.newKeySet() }.add(rule)
+                    }
+                    // M2 "允许本任务" from the quick terminal — the agent's Bash rides the same grant
+                    if (allow && v.grantScope == "task" && taskId != null) {
+                        grants.issueTask(cmd.convoId, taskId, "Bash", rule)
+                    }
+                    gate.complete(allow)
+                }
+                ApprovalOutcome.TimedOut, ApprovalOutcome.Withdrawn -> gate.complete(false) // no answer -> deny, never run
             }
         }
-        return try { gate.await() } finally { timeout.cancel() }
+        return gate.await()
     }
 
-    /** Route a [PermissionVerdict]; returns true iff it resolved a pending SHELL ask (so the caller stops here).
-     *  A verdict we don't own (unknown askId — e.g. a late one whose shell ask already timed out) returns false
-     *  so RequestRouter forwards it to the conversation bridge, where an orphaned verdict is surfaced to the user
-     *  (issue #100). So `return false` here is a hand-off, not a silent drop. */
-    fun onVerdict(v: PermissionVerdict): Boolean {
-        val p = pending.remove(v.askId) ?: return false
-        val allow = v.decision == Decision.ALLOW
-        if (allow && v.remember) allowRules.getOrPut(p.convoId) { ConcurrentHashMap.newKeySet() }.add(p.rule)
-        p.gate.complete(allow)
-        return true
-    }
+    /** The in-stream audit chip for a grant/rule-covered auto-run (design §9.6) — redacted like History:
+     *  the RULE (two tokens), never the full command line. Old clients drop the unknown frame type. */
+    private fun autorunChip(convoId: String, taskId: String?, summary: String, basis: String, grantId: String?) =
+        AuthorizedActionRecorded(
+            convoId = convoId, eventId = "au-" + UUID.randomUUID(), actionSummary = summary,
+            basis = basis, decidedAt = System.currentTimeMillis(),
+            taskId = taskId, matchedGrantId = grantId, tool = "Bash",
+        )
 
     /** Owner-facing snapshot rows for quick-terminal approvals. */
-    fun pendingApprovals(): List<PendingApproval> =
-        pending.values.map { PendingApproval(it.ask, expiresAt = it.expiresAt) }
+    fun pendingApprovals(): List<PendingApproval> = coordinator.rowsFor(this)
 
     /** Drop remembered command scopes for a closed conversation. */
     fun forget(convoId: String) { allowRules.remove(convoId) }
