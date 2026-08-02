@@ -128,16 +128,20 @@ class PermissionBridgeTest {
             bridgeSession = true,
             bridgeGrant = { grant })
 
-        // Full authorization skips both the destructive Bash wall and the plan's second approval gate.
-        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        // Full authorization skips the PIECEMEAL approval layer (ordinary Bash, plan gate) — but NOT the
+        // destructive-command red line (§18.1 P1-8: hard walls precede every grant, request approval included).
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
         b.onControlRequest(AgentEvent.ControlRequest("r2", "ExitPlanMode", null))
         assertEquals(listOf(true, true), responses.map { it.allow })
         assertTrue(emitted.isEmpty())
+        b.onControlRequest(AgentEvent.ControlRequest("rX", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        assertFalse(responses.last().allow, "P1-8: approving a prompt never unlocks destructive Bash")
 
         // Revoking the one-turn supplier locks the same conversation again; no standing grant was recorded.
         grant = BridgeGrant.NONE
-        b.onControlRequest(AgentEvent.ControlRequest("r3", "Bash", buildJsonObject { put("command", "rm -rf /") }))
-        assertFalse(responses.last().allow)
+        // an ambiguous command (not on the provably-safe list) must return to the owner's card
+        b.onControlRequest(AgentEvent.ControlRequest("r3", "Bash", buildJsonObject { put("command", "python deploy.py") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().any { it.askId == "r3" }, "revoked grant → back to the ask")
         scope.cancel()
     }
 
@@ -621,9 +625,10 @@ class PermissionBridgeTest {
         var task: String? = "t1"
         val responses = mutableListOf<Resp>()
         val emitted = mutableListOf<Frame>()
+        val wd = java.nio.file.Files.createTempDirectory("ccp-grant-wd").toFile().canonicalPath
         val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
-            grants = grants, taskId = { task })
+            grants = grants, taskId = { task }, workdir = wd)
 
         // first ask carries the task + offered scopes; the user answers 允许本任务
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
@@ -702,7 +707,8 @@ class PermissionBridgeTest {
         // forceNeverRemember = the bridge-origin session shape (issue #91): every ask is one-off
         val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
             respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
-            forceNeverRemember = true, grants = grants, taskId = { "t1" })
+            forceNeverRemember = true, grants = grants, taskId = { "t1" },
+            workdir = java.nio.file.Files.createTempDirectory("ccp-nr-wd").toFile().canonicalPath)
 
         b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
         val ask = emitted.filterIsInstance<PermissionAsk>().single()
@@ -715,6 +721,104 @@ class PermissionBridgeTest {
         emitted.clear()
         b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status") }))
         assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "no task grant may form either")
+        scope.cancel()
+    }
+
+    // ── §18.1 P1 attack paths ────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun handoff_bash_offers_only_once_and_a_hostile_scope_claim_forms_nothing() = runBlocking {
+        // P1-2: the ceiling is DAEMON state — a modified client claiming task/session gets nothing standing
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
+        val rules = mutableSetOf<String>()
+        val emitted = mutableListOf<Frame>()
+        val responses = mutableListOf<Resp>()
+        val wd = java.nio.file.Files.createTempDirectory("ccp-ho-wd").toFile().canonicalPath
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, rules,
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            handoffAccess = dev.ccpocket.protocol.HandoffAccess.REVIEW_READ_ONLY,
+            grants = grants, taskId = { "t1" }, workdir = wd)
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "git status") }))
+        val ask = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals(listOf("once"), ask.grantOptions, "a handoff shell decision is one-command-at-a-time")
+        coord.onVerdict(PermissionVerdict("c1", "r1", Decision.ALLOW, remember = true, grantScope = "task"))
+        assertTrue(responses.single().allow)
+        assertFalse(responses.single().remember)
+        assertTrue(rules.isEmpty(), "no session rule may form on a handoff shell ask")
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "git status") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "the second command must re-ask — no task grant formed")
+        scope.cancel()
+    }
+
+    @Test
+    fun full_control_expiry_bites_the_next_tool_call_even_mid_turn() = runBlocking {
+        // P1-6: the bypass authority is read per decision, never cached at construction
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        var live = PermissionMode.BYPASS_PERMISSIONS
+        val emitted = mutableListOf<Frame>()
+        val responses = mutableListOf<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.BYPASS_PERMISSIONS, coord, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            currentMode = { live })
+
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Bash", buildJsonObject { put("command", "ls") }))
+        assertTrue(responses.single().allow, "before expiry: bypass auto-allows")
+        live = PermissionMode.DEFAULT // the 1h expiry (or a user switch) flipped the daemon's live mode
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "ls") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().any { it.askId == "r2" },
+            "after expiry the SAME turn's next tool call must ask")
+        scope.cancel()
+    }
+
+    @Test
+    fun owner_approved_bridge_request_no_longer_unlocks_walls() = runBlocking {
+        // P1-8: request-level approval sits BEHIND the workdir wall and the destructive-Bash red line
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val emitted = mutableListOf<Frame>()
+        val responses = mutableListOf<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            bridgeSession = true, bridgeGrant = { BridgeGrant.OWNER_APPROVED },
+            workdir = System.getProperty("java.io.tmpdir"))
+
+        val home = System.getProperty("user.home")
+        b.onControlRequest(AgentEvent.ControlRequest("r1", "Read", buildJsonObject { put("file_path", "$home/.ssh/id_rsa") }))
+        assertFalse(responses.single().allow, "approving a prompt is not a licence for path escapes")
+        b.onControlRequest(AgentEvent.ControlRequest("r2", "Bash", buildJsonObject { put("command", "rm -rf /") }))
+        assertFalse(responses.last().allow, "…nor for destructive Bash")
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isEmpty(), "walls deny outright — no card")
+        // in-scope ordinary work still rides the request approval with no piecemeal card
+        b.onControlRequest(AgentEvent.ControlRequest("r3", "Write", buildJsonObject { put("file_path", "notes.md") }))
+        assertTrue(responses.last().allow)
+        scope.cancel()
+    }
+
+    @Test
+    fun unoffered_scope_on_a_normal_ask_clamps_to_allow_once() = runBlocking {
+        // P1-2 general form: scope ∈ grantOptions is validated for EVERY ask, not only handoff
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val grants = dev.ccpocket.daemon.approval.ApprovalGrantStore()
+        val emitted = mutableListOf<Frame>()
+        val responses = mutableListOf<Resp>()
+        val b = PermissionBridge("c1", PermissionMode.DEFAULT, coord, { emitted += it }, mutableSetOf(),
+            respond = { id, allow, remember, _, upd, deny -> responses += Resp(id, allow, remember, upd, deny) },
+            grants = grants, taskId = { "t1" },
+            workdir = java.nio.file.Files.createTempDirectory("ccp-scope-wd").toFile().canonicalPath)
+        b.onControlRequest(AgentEvent.ControlRequest("p1", "ExitPlanMode", buildJsonObject { put("plan", "step") }))
+        val ask = emitted.filterIsInstance<PermissionAsk>().single()
+        assertEquals(listOf("once"), ask.grantOptions) // a plan approval is one-off
+        coord.onVerdict(PermissionVerdict("c1", "p1", Decision.ALLOW, grantScope = "task"))
+        assertTrue(responses.single().allow)
+        emitted.clear()
+        b.onControlRequest(AgentEvent.ControlRequest("p2", "ExitPlanMode", buildJsonObject { put("plan", "step2") }))
+        assertTrue(emitted.filterIsInstance<PermissionAsk>().isNotEmpty(), "no grant formed from the unoffered scope")
         scope.cancel()
     }
 }

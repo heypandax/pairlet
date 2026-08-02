@@ -927,6 +927,33 @@ data class RevokeGrant(
     val grantId: String,
 ) : ToDaemon
 
+/** One redacted approval-history row (§18.2 P2-2): the rule-level summary, basis and decision — never
+ * stdout, file bodies, diffs, prompts, full commands or secrets. */
+@Serializable
+data class ApprovalHistoryItem(
+    val eventId: String,
+    val at: Long,
+    val convoId: String,
+    val source: String,          // tolerant wire string: "AGENT"/"SHELL"/"EXPORT"/"BRIDGE_REQUEST"/…
+    val tool: String,
+    val summary: String,
+    val basis: String,           // "user-decision" | "task-grant" | "session-rule" | "bypass-permissions" | …
+    val decision: String,        // "ALLOW"/"DENY"/"TIMED_OUT"/"WITHDRAWN"/"auto"
+    val taskId: String? = null,
+    val grantId: String? = null,
+)
+
+/** client -> daemon (§18.2 P2-2): pull the newest approval-history page — the recoverable counterpart
+ * of the live autorun chips (offline clients and daemon restarts don't lose the trail). Owner-only. */
+@Serializable
+@SerialName("pocket/approval.history.fetch")
+data class FetchApprovalHistory(val limit: Int = 100) : ToDaemon
+
+/** daemon -> client: the newest-first history page answering [FetchApprovalHistory]. */
+@Serializable
+@SerialName("pocket/approval.history")
+data class ApprovalHistoryPage(val items: List<ApprovalHistoryItem> = emptyList()) : ToPhone
+
 /** daemon -> client (M3 advisory): an async risk update for a STILL-PENDING ask. The client updates the
  * card's risk badge in place WITHOUT resetting the daemon-given deadline (re-sending the ask would
  * wrongly restart the client countdown — SMART-APPROVAL §八). [risk] is a tolerant wire string
@@ -1898,6 +1925,10 @@ data class NotifyPush(
      * cleartext to the relay and would leak the initiator's project path.
      */
     val handoffId: String? = null,
+    /** §18.2 P2-4: notification CATEGORY hint ("approval" | null=turn-complete). Lets the phone route to
+     * a dedicated notification channel (own sound/vibration) and iOS set a category — content stays as
+     * minimized as ever (no command/file/diff rides any push). Old relays ignore the unknown key. */
+    val kind: String? = null,
 ) : ToRelay
 
 // ---- pairing redeem (REST DTOs over POST /v1/pair/redeem; not Frames) ----

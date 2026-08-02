@@ -22,8 +22,8 @@ class ApprovalQueueRepoTest {
 
         repo.receiveForTest(PendingApprovals(listOf(PendingApproval(ask, expiresAt = 123_456, workdir = "/repo"))))
 
-        assertEquals(ask, repo.pendingApprovals["ask-1"]?.ask)
-        assertEquals("/repo", repo.pendingApprovals["ask-1"]?.workdir)
+        assertEquals(ask, repo.pendingApprovals[ApprovalKey("bridge-convo", "ask-1")]?.ask)
+        assertEquals("/repo", repo.pendingApprovals[ApprovalKey("bridge-convo", "ask-1")]?.workdir)
         assertNull(repo.pendingAsk.value, "an account-wide ask must not masquerade as the current chat sheet")
 
         repo.receiveForTest(PendingApprovals())
@@ -88,6 +88,25 @@ class ApprovalQueueRepoTest {
     }
 
     @Test
+    fun sameAskIdFromTwoSessionsStaysTwoInboxRows() {
+        // §18.1 P1-3: askId is only unique per agent connection — Codex mints "1","2",… per session
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val repo = PocketRepository(scope)
+        repo.receiveForTest(PermissionAsk("convo-a", "1", "Bash", "ls", timeoutSec = 60))
+        repo.receiveForTest(PermissionAsk("convo-b", "1", "Bash", "rm -rf /", timeoutSec = 60))
+        assertEquals(2, repo.pendingApprovals.size, "two sessions asking as \"1\" must stay two rows")
+
+        // resolving one composite key never touches the other
+        repo.resolvePendingApproval("convo-a", "1", allow = true)
+        assertEquals(setOf(ApprovalKey("convo-b", "1")), repo.pendingApprovals.keys)
+
+        // withdraw is composite too
+        repo.receiveForTest(AskWithdrawn("convo-b", "1"))
+        assertTrue(repo.pendingApprovals.isEmpty())
+        scope.cancel()
+    }
+
+    @Test
     fun liveAskAndWithdrawalUpdateTheQueueEvenForAnotherConversationButQuestionsStayScoped() {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val repo = PocketRepository(scope)
@@ -95,7 +114,7 @@ class ApprovalQueueRepoTest {
         val approval = PermissionAsk("other-convo", "ask-2", "Bash", "./gradlew test", timeoutSec = 60)
 
         repo.receiveForTest(approval)
-        assertEquals(approval, repo.pendingApprovals[approval.askId]?.ask)
+        assertEquals(approval, repo.pendingApprovals[ApprovalKey(approval.convoId, approval.askId)]?.ask)
         assertNull(repo.pendingAsk.value)
 
         repo.receiveForTest(
@@ -104,7 +123,7 @@ class ApprovalQueueRepoTest {
                 questions = listOf(AskQuestion("Which option?")),
             ),
         )
-        assertEquals(setOf("ask-2"), repo.pendingApprovals.keys)
+        assertEquals(setOf(ApprovalKey("other-convo", "ask-2")), repo.pendingApprovals.keys)
 
         repo.receiveForTest(AskWithdrawn("other-convo", "ask-2"))
         assertTrue(repo.pendingApprovals.isEmpty())

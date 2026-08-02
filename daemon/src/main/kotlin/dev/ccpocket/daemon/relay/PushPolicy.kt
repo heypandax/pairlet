@@ -117,6 +117,7 @@ object PushPolicy {
                 workdir = workdir.toString(),
                 sessionId = sessionId,
                 urgent = true, // deliver even if a phone is attached elsewhere — the ask isn't on its data plane
+                kind = "approval", // P2-4: dedicated notification category
             )
             !watched -> NotifyPush(
                 title = "Approval needed — $project",
@@ -124,6 +125,7 @@ object PushPolicy {
                 workdir = workdir.toString(),
                 sessionId = sessionId,
                 urgent = true, // no client holds the card; an online-but-elsewhere phone must still hear it
+                kind = "approval",
             )
             !peerOnline && !lanConnected -> NotifyPush(
                 title = "Approval needed — $project",
@@ -131,6 +133,7 @@ object PushPolicy {
                 workdir = workdir.toString(),
                 sessionId = sessionId,
                 urgent = false, // relay re-checks interactive sockets — belt and suspenders on stale presence
+                kind = "approval",
             )
             else -> null
         }

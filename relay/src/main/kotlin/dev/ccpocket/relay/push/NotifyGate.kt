@@ -17,8 +17,8 @@ object NotifyGate {
      * relay and to the lock screen. A daemon should never populate both — this is the belt to that brace.
      */
     fun routeOf(body: NotifyPush): NotifyRoute? = when {
-        body.handoffId != null -> NotifyRoute(handoffId = body.handoffId)
-        body.workdir != null && body.sessionId != null -> NotifyRoute(body.workdir, body.sessionId)
+        body.handoffId != null -> NotifyRoute(handoffId = body.handoffId, kind = body.kind)
+        body.workdir != null && body.sessionId != null -> NotifyRoute(body.workdir, body.sessionId, kind = body.kind)
         else -> null
     }
 

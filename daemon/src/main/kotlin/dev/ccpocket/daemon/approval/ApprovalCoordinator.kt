@@ -50,6 +50,8 @@ class ApprovalCoordinator(
     // design §17.9: no approval outlives 24h, however the lease is chained — injectable only so a test
     // can exercise the ceiling without waiting a day
     private val absoluteDeadlineMs: Long = ABSOLUTE_DEADLINE_MS,
+    // §18.2 P2-2: the persistent, redacted decision trail; null (tests) keeps log-only behavior
+    private val history: ApprovalHistoryStore? = null,
 ) {
     private val log = logger("Approvals")
 
@@ -213,8 +215,20 @@ class ApprovalCoordinator(
 
     /** Retire every request [owner] registered (session close, relaunch, engine stop). */
     suspend fun withdrawAllFor(owner: Any) {
+        withdrawAll { it.owner === owner }
+    }
+
+    /** §18.1 P1-5: retire every pending request of [convoId] across ALL sources — the shell/export
+     *  services hold their pending in daemon-global scope, so a closing session must sweep them here or
+     *  a later ALLOW from the account inbox would execute for a dead session. Atomic per entry; the
+     *  clients see WITHDRAWN (never a fake user-deny), and the blocked service coroutines unblock false. */
+    suspend fun withdrawAllForConvo(convoId: String) {
+        withdrawAll { it.ask.convoId == convoId }
+    }
+
+    private suspend fun withdrawAll(select: (Pending) -> Boolean) {
         val mine = synchronized(lock) {
-            val hits = pending.values.filter { it.owner === owner }
+            val hits = pending.values.filter(select)
             hits.forEach { pending.remove(Key(it.ask.convoId, it.ask.askId)) }
             hits
         }
@@ -254,8 +268,15 @@ class ApprovalCoordinator(
 
     /** M0 observability: one line per auto-decision that skipped the human (bypass mode, remembered rule,
      *  bridge policy, owner grant) — the denominator for "how many asks did the task-grant work remove". */
-    fun recordAuto(source: ApprovalSource, convoId: String, tool: String, rule: String?, basis: String) {
+    fun recordAuto(source: ApprovalSource, convoId: String, tool: String, rule: String?, basis: String, taskId: String? = null, grantId: String? = null) {
         log.info("auto-allow source=$source tool=$tool rule=$rule basis=$basis convo=$convoId")
+        history?.append(
+            dev.ccpocket.protocol.ApprovalHistoryItem(
+                eventId = "ah-" + java.util.UUID.randomUUID(), at = System.currentTimeMillis(),
+                convoId = convoId, source = source.name, tool = tool, summary = rule ?: tool,
+                basis = basis, decision = "auto", taskId = taskId, grantId = grantId,
+            ),
+        )
     }
 
     private fun record(p: Pending, decision: String) {
@@ -264,6 +285,16 @@ class ApprovalCoordinator(
             "resolved source=${p.source} tool=${p.ask.tool} rule=${p.ask.rule} decision=$decision " +
                 "waitedMs=$waitedMs question=${p.isQuestion} convo=${p.ask.convoId} ask=${p.ask.askId}",
         )
+        if (!p.isQuestion) { // questions are TaskDecision, not security history (design §4.1)
+            history?.append(
+                dev.ccpocket.protocol.ApprovalHistoryItem(
+                    eventId = "ah-" + java.util.UUID.randomUUID(), at = System.currentTimeMillis(),
+                    convoId = p.ask.convoId, source = p.source.name, tool = p.ask.tool,
+                    summary = p.ask.rule ?: p.ask.tool, basis = "user-decision", decision = decision,
+                    taskId = p.ask.taskId,
+                ),
+            )
+        }
     }
 
     private companion object {

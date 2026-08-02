@@ -1329,4 +1329,6 @@
     <string name="ho_inbox_dismiss">Not now</string>
     <string name="co_pairing_linked">Connected as a collaborator</string>
     <string name="co_pairing_linked_sub">%1$s can send you handoffs — they arrive here even without pairing a computer of your own.</string>
+    <string name="notify_approval_title">Approval needed</string>
+    <string name="notify_approval_body">An agent is waiting for your decision</string>
 </resources>

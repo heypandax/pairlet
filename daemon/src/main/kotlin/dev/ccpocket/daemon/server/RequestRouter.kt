@@ -27,6 +27,8 @@ import dev.ccpocket.daemon.transcribe.TranscribeService
 import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.ApprovalAttentionHeartbeat
+import dev.ccpocket.protocol.ApprovalHistoryPage
+import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
@@ -126,6 +128,7 @@ class RequestRouter(
         dev.ccpocket.daemon.approval.ApprovalCoordinator(scope),
     private val grants: dev.ccpocket.daemon.approval.ApprovalGrantStore =
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
+    private val approvalHistory: dev.ccpocket.daemon.approval.ApprovalHistoryStore? = null,
 ) {
     /** One connection's declared wire vocabulary (see [ClientCaps] in Messages.kt). Mutable: the
      *  declaration frame lands after connect and upgrades the SAME holder the ingress created for
@@ -134,6 +137,11 @@ class RequestRouter(
      *  rows must never reach a peer that didn't declare them. */
     class ClientCapsHolder {
         @Volatile var supportsOpencode: Boolean = false
+
+        /** §18.2 P2-3: the client decodes the approval-V2 frame types. The INGRESS sinks consult this to
+         *  drop [AuthorizedActionRecorded]/[PermissionRiskUpdated] for undeclared peers — old clients
+         *  would drop the unknown types anyway, but gating keeps the wire quiet and the contract real. */
+        @Volatile var supportsApprovalV2: Boolean = false
     }
 
     companion object {
@@ -141,6 +149,11 @@ class RequestRouter(
          *  dev socket and trusted in-process callers. One machine-local pseudo-device, so the handoff
          *  gate still arbitrates it (it is never a lease holder unless it accepted a handoff itself). */
         const val LOCAL_DEVICE_ID = "local"
+
+        /** §18.2 P2-3: frames only an approvalV2-declaring client should receive — ingress sinks drop
+         *  them for undeclared peers instead of relying on the client's unknown-type tolerance. */
+        fun approvalV2Only(frame: Frame): Boolean =
+            frame is dev.ccpocket.protocol.AuthorizedActionRecorded || frame is dev.ccpocket.protocol.PermissionRiskUpdated
 
         /**
          * [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
@@ -209,7 +222,10 @@ class RequestRouter(
             // next list request answers unfiltered. Ingress handlers may process frames concurrently,
             // so a burst's first list can still race the declaration: worst case one filtered snapshot,
             // corrected by the client's next fetch.
-            is ClientCaps -> caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
+            is ClientCaps -> {
+                caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
+                caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
+            }
 
             is ListDirectories ->
                 if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
@@ -366,7 +382,12 @@ class RequestRouter(
             }
             is SwitchMode -> registry.switchMode(frame)
             is SwitchServiceTier -> registry.switchServiceTier(frame)
-            is ClearAllowRule -> registry.clearRule(frame)
+            // §18.1 P1-7: "clear this rule" must reach BOTH stores that can hold it — the conversation's
+            // agent allowRules AND the quick terminal's — or tightening leaves a shadow rule auto-running
+            is ClearAllowRule -> {
+                registry.clearRule(frame)
+                shell.clearRule(frame.convoId, frame.rule)
+            }
 
             // MUST launch, not await: shell.run suspends on the human approval gate, but the relay transport
             // pumps inbound frames sequentially & inline — awaiting here would wedge the whole socket (for every
@@ -378,8 +399,13 @@ class RequestRouter(
                     sink.emit(ShellResult(frame.convoId, frame.command, exitCode = -1, error = "not a readable directory: ${frame.workdir}"))
                 } else {
                     // the daemon (not the phone) decides the mode AND the task id → neither the approval
-                    // gate nor the shared task-grant match can be spoofed client-side
-                    shell.run(frame.copy(workdir = wd.toString()), registry.modeOf(frame.convoId), registry.taskIdOf(frame.convoId), sink::emit)
+                    // gate nor the shared task-grant match can be spoofed client-side. stillLive (P1-5):
+                    // re-checked right before the side effect, so a close during the approval wait wins.
+                    shell.run(
+                        frame.copy(workdir = wd.toString()), registry.modeOf(frame.convoId), registry.taskIdOf(frame.convoId),
+                        stillLive = { registry.modeOf(frame.convoId) != null },
+                        emit = sink::emit,
+                    )
                 }
             }
 
@@ -391,6 +417,10 @@ class RequestRouter(
             // "收紧后续授权" from the autorun chip: owner-only (same gate as ListPendingApprovals); the
             // store re-checks the grant belongs to the named conversation.
             is RevokeGrant -> if (origin == null && guestScope == null) grants.revoke(frame.convoId, frame.grantId)
+            // §18.2 P2-2: the recoverable decision trail — owner-only, newest first, redacted rows only
+            is FetchApprovalHistory -> if (origin == null && guestScope == null) {
+                sink.emit(ApprovalHistoryPage(approvalHistory?.recent(frame.limit) ?: emptyList()))
+            }
 
             is SwitchDirectory -> {
                 val wd = dirs.validateWorkdir(frame.workdir)

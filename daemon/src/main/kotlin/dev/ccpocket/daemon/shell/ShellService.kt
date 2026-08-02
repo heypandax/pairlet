@@ -53,8 +53,16 @@ class ShellService(
 
     /** Run [cmd] in its (already-validated) workdir, gated by the conversation's [mode]; emit one [ShellResult].
      *  [taskId] is the conversation's CURRENT task (registry truth, never client-claimed) — it keys the
-     *  shared task-grant match and any "允许本任务" issued from this command's own ask. */
-    suspend fun run(cmd: RunShellCommand, mode: PermissionMode?, taskId: String? = null, emit: suspend (Frame) -> Unit) {
+     *  shared task-grant match and any "允许本任务" issued from this command's own ask. [stillLive]
+     *  (§18.1 P1-5) re-checks right before the side effect that the owning session still exists — an
+     *  approval that arrives after CloseSession must not start a process. */
+    suspend fun run(
+        cmd: RunShellCommand,
+        mode: PermissionMode?,
+        taskId: String? = null,
+        stillLive: suspend () -> Boolean = { true },
+        emit: suspend (Frame) -> Unit,
+    ) {
         // server-side backpressure: one command per conversation at a time (the phone enforces this too, but a
         // buggy/hostile client must not be able to spawn unbounded processes / pending approvals)
         if (!inFlight.add(cmd.convoId)) {
@@ -63,8 +71,10 @@ class ShellService(
         }
         try {
             val meta = ToolMetadata.of("Bash", buildJsonObject { put("command", cmd.command) })
-            // shared task grant (M2): "允许本任务" issued from either surface covers this command too
-            val taskGrant = grants.match(cmd.convoId, taskId, "Bash", meta.rule, cmd.command)
+            // shared task grant (M2): "允许本任务" issued from either surface covers this command too.
+            // §18.1 P1-1: bound to the grant's canonical root — this command's workdir must BE that root,
+            // so a grant approved in project A never auto-runs from project B's quick terminal.
+            val taskGrant = grants.match(cmd.convoId, taskId, "Bash", meta.rule, cmd.command, root = cmd.workdir)
             val approved = when {
                 mode == PermissionMode.BYPASS_PERMISSIONS -> {
                     coordinator.recordAuto(ApprovalSource.SHELL, cmd.convoId, "Bash", meta.rule, "bypass-permissions")
@@ -84,6 +94,12 @@ class ShellService(
             }
             if (!approved) {
                 emit(ShellResult(cmd.convoId, cmd.command, exitCode = -1, denied = true))
+                return
+            }
+            // §18.1 P1-5: the approval wait can outlive the session — re-check RIGHT BEFORE the side
+            // effect. A command whose session died while the card was pending never runs.
+            if (!stillLive()) {
+                emit(ShellResult(cmd.convoId, cmd.command, exitCode = -1, error = "the session closed before this command was approved"))
                 return
             }
             emit(execute(cmd))
@@ -112,12 +128,15 @@ class ShellService(
                 is ApprovalOutcome.Answered -> {
                     val v = outcome.verdict
                     val allow = v.decision == Decision.ALLOW
-                    if (allow && (v.remember || v.grantScope == "session")) {
+                    // §18.1 P1-2: only scopes this ask actually OFFERED may form anything standing
+                    val scope = v.grantScope?.takeIf { it in ask.grantOptions.orEmpty() }
+                    if (allow && (v.remember || scope == "session")) {
                         allowRules.getOrPut(cmd.convoId) { ConcurrentHashMap.newKeySet() }.add(rule)
                     }
-                    // M2 "允许本任务" from the quick terminal — the agent's Bash rides the same grant
-                    if (allow && v.grantScope == "task" && taskId != null) {
-                        grants.issueTask(cmd.convoId, taskId, "Bash", rule)
+                    // M2 "允许本任务" from the quick terminal — the agent's Bash rides the same grant,
+                    // bound to THIS command's validated workdir as the canonical root (P1-1)
+                    if (allow && scope == "task" && taskId != null) {
+                        grants.issueTask(cmd.convoId, taskId, "Bash", rule, root = cmd.workdir, commandText = cmd.command)
                     }
                     gate.complete(allow)
                 }
@@ -141,6 +160,13 @@ class ShellService(
 
     /** Drop remembered command scopes for a closed conversation. */
     fun forget(convoId: String) { allowRules.remove(convoId) }
+
+    /** §18.1 P1-7: "收紧" must reach THIS store too — [ClearAllowRule] clears the conversation rule AND
+     *  the quick-terminal rule of the same name, so tightening never leaves a shadow rule auto-running.
+     *  Null [rule] clears every quick-terminal rule of the conversation. */
+    fun clearRule(convoId: String, rule: String?) {
+        if (rule == null) allowRules.remove(convoId) else allowRules[convoId]?.remove(rule)
+    }
 
     private suspend fun execute(cmd: RunShellCommand): ShellResult = withContext(Dispatchers.IO) {
         try {

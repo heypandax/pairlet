@@ -53,12 +53,16 @@ class ApnsSender(
             putJsonObject("aps") {
                 putJsonObject("alert") { put("title", title); put("body", body) }
                 put("sound", "default")
+                // P2-4: a dedicated category for approval alerts (own handling/settings on the device;
+                // never lock-screen approve — v1 categories carry no action buttons)
+                if (route?.kind == "approval") put("category", "APPROVAL")
             }
             // custom keys (siblings of `aps`) carry deep-link routing; the OS hands them to the app on tap.
             // `hid` (§3.4) is the offer-inbox route — content-free by construction, unlike wd/sid.
             route?.workdir?.let { put("wd", it) }
             route?.sessionId?.let { put("sid", it) }
             route?.handoffId?.let { put("hid", it) }
+            route?.kind?.let { put("kind", it) }
         }.toString()
         val req = HttpRequest.newBuilder()
             .uri(URI.create("https://$host/3/device/$token"))

@@ -591,7 +591,9 @@ class SessionRegistry(
                     sessionId = row.sessionId ?: convo.sessionId ?: convo.resumeAnchor,
                     origin = row.origin ?: convo.origin,
                 )
-            }.distinctBy { it.ask.askId }.sortedBy { it.expiresAt ?: Long.MAX_VALUE }
+            // §18.1 P1-3: askId is only unique per agent connection — the account-wide dedupe key must
+            // be the composite, or two sessions both asking as "1" collapse into one row
+            }.distinctBy { it.ask.convoId to it.ask.askId }.sortedBy { it.expiresAt ?: Long.MAX_VALUE }
         }
 
     /**
@@ -742,6 +744,11 @@ class SessionRegistry(
         val (job, convo, obs) = mutex.withLock {
             Triple(pendingClose.remove(convoId), convos.remove(convoId), observes.remove(convoId))
         }
+        // §18.1 P1-5: a REAL close sweeps every pending approval of this conversation across ALL sources
+        // (agent asks die with the conversation anyway; shell/export pending live in daemon-global
+        // services and would otherwise stay approvable from the account inbox after the session is gone).
+        // BEFORE convo.close() so the withdraw frames still ride the fan-out sinks.
+        if (convo != null || obs != null) approvals.withdrawAllForConvo(convoId)
         job?.cancel(); convo?.close(); obs?.close()
         if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
         convo?.let { noteSelfClosed(it) }

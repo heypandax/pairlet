@@ -53,7 +53,8 @@ class DaemonCore(
     /** ONE pending-approval ledger for the whole daemon (approval design M1): agent tool asks, bridge
      *  request approvals, quick-shell commands and file exports all register here, so a verdict routes by
      *  askId in one place and timeout/withdraw/snapshot semantics can't drift between the gates. */
-    val approvals = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope)
+    val approvalHistory = dev.ccpocket.daemon.approval.ApprovalHistoryStore.load()
+    val approvals = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope, history = approvalHistory)
 
     /** ONE task-grant engine for the whole daemon (approval design M2): the agent's Bash tool and the
      *  quick terminal share it, so "允许本任务" from either surface covers both. */
@@ -135,6 +136,7 @@ class DaemonCore(
         ClaudeModelService(claudeConfigDir, presetEnv = { runCatching { presetStore.activeEnv() }.getOrNull() }),
         approvals = approvals,
         grants = grants,
+        approvalHistory = approvalHistory,
     )
 
     /**

@@ -41,6 +41,8 @@ import dev.ccpocket.app.desktop.PaletteScope
 import dev.ccpocket.app.desktop.RepoDesktopModel
 import dev.ccpocket.app.desktop.toggleEmbeddedTerminal
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.notify_approval_body
+import dev.ccpocket.app.resources.notify_approval_title
 import dev.ccpocket.app.resources.notify_turn_complete
 import dev.ccpocket.app.secure.SecureStore
 import org.jetbrains.compose.resources.stringResource
@@ -261,12 +263,24 @@ fun main() = application {
         // the turn-finished seam must ride along or notifications/badges silently die after the first switch
         // (resolved at composable scope: the callback below is a plain lambda and can't call stringResource)
         val turnCompleteFallback = stringResource(Res.string.notify_turn_complete)
+        val approvalTitle = stringResource(Res.string.notify_approval_title)
+        val approvalBody = stringResource(Res.string.notify_approval_body)
         DisposableEffect(repo) {
             repo.onTurnFinished = { title, preview, sessionId ->
                 if (!windowFocused) {
                     unseenDone++
                     DesktopNotify.badge(unseenDone)
                     DesktopNotify.notify(title, preview ?: turnCompleteFallback, sessionId)
+                }
+            }
+            // §18.2 P2-4: an approval arriving while the window is backgrounded raises a system banner +
+            // badge; clicking activates the app (the card is already on screen — snapshot-true by
+            // construction). The banner carries NO command/file/diff content.
+            repo.onApprovalArrived = {
+                if (!windowFocused) {
+                    unseenDone++
+                    DesktopNotify.badge(unseenDone)
+                    DesktopNotify.notify(approvalTitle, approvalBody, null)
                 }
             }
             // banner clicked (issue #99): the OS already activated the app (bundle identity); surface the
@@ -282,6 +296,7 @@ fun main() = application {
             }
             onDispose {
                 repo.onTurnFinished = null
+                repo.onApprovalArrived = null
                 DesktopNotify.onActivate = null
             }
         }

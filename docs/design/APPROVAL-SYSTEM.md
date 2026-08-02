@@ -1,6 +1,8 @@
 # cc-pocket 统一审批系统设计
 
 > 状态：**最终方案，作为后续实现与评审的唯一依据**（2026-08-02）。
+> **M1／M2／M3／M5 已实现并随 merge `f134f44` 合入 `feat/session-handoff-collaborator`**（同日），
+> 落地明细与偏差见文末【§18 落地状态】；M4 未开工。
 >
 > 本文是审批领域的主设计。`SMART-APPROVAL.md` 作为风险评估与审批升级的子设计保留；
 > `SESSION-HANDOFF.md` 继续负责接力领域，但其中涉及审批路由的部分以本文为准。
@@ -930,3 +932,312 @@ token/secret 或 AUTO_TRUSTED 变化必须经过 `crypto-security-reviewer`。
 
 这些默认值优先解决个人开发者的便利性，不引入企业审批后台，同时保留统一 Coordinator、任务级
 Grant、三类交互分离、Agent 只在授权包络内自主、daemon 始终是授权事实源这五个核心架构结论。
+
+---
+
+## 18. 合并实现审核与整改清单（2026-08-02）
+
+> 审核对象：合并提交 `f134f44`，实现差异范围 `6070730..f134f44`。
+>
+> 审核结论：**当前实现未通过发布审核**。Coordinator、Task Grant、AttentionLease、风险提示和
+> Full Control 到期等主体框架已经落地，但仍存在 8 项 P1 授权边界/生命周期问题。以下条目是下一轮
+> 实现的发布门槛；Claude Code 应逐条修复并补回归测试，不能只调整 App 展示或注释。
+
+### 18.1 P1：发布前必须修复
+
+#### P1-1 Task Grant 没有绑定资源和执行上下文
+
+**当前实现**
+
+- `ApprovalGrantStore.Grant` 只保存 `convoId + taskId + tool + rule`；
+- Edit/Write 的 rule 只是工具家族，未记录规范化项目根目录或目标范围；
+- Bash rule 只是命令前两个 token，例如 `npm run`；
+- `RequestRouter` 接受 Quick Terminal 提交的任意可读 `workdir`，再使用该 Session 当前 taskId 匹配
+  同一个 Grant。因此项目 A 中批准的 Grant 可被项目 B 的 Quick Terminal 命中。
+
+**必须调整**
+
+1. Grant 由 daemon 生成并绑定规范化 `canonicalRoot/resourceScope`、结构化 action matcher 和 source ceiling；
+2. 文件工具只能在 Grant 明确的目录/文件范围内匹配，匹配前重新 canonicalize，防止 `..` 和符号链接逃逸；
+3. Bash 不再只用两个 token 表达授权；至少绑定 executable、subcommand/任务名、参数约束和工作目录；
+4. Quick Terminal 与 Agent 可以共享 Grant Engine，但不能跨 Grant 的项目根目录，也不能扩大来源权限；
+5. matcher 不确定时回到 ASK，不能猜测匹配。
+
+**验收用例**
+
+- 项目 A 的 Edit/Read/Bash Task Grant 在项目 B 中全部不命中；
+- `npm run test` 的 Grant 不覆盖 `npm run postinstall`；
+- 相同命令在不同工作目录执行时，只有 Grant 明确覆盖的目录可自动运行；
+- symlink/`..` 不能把文件目标带出 Grant resourceScope。
+
+#### P1-2 REVIEW Handoff 的一次性确认没有由 daemon 强制
+
+**当前实现**
+
+`PermissionBridge` 的 `neverRemember` 只考虑 `ToolMeta.neverRemember` 和 `forceNeverRemember`。
+Handoff collaborator 通常没有 bridge origin，因此 REVIEW_READ_ONLY 下的 Bash ask 仍会由 daemon 提供并接受
+TASK/SESSION scope。官方 App 虽然隐藏了对应按钮，但修改后的客户端可以直接提交
+`grantScope=task/session`。
+
+**必须调整**
+
+1. daemon 根据 `handoffAccess` 派生不可绕过的 scope ceiling；
+2. REVIEW_READ_ONLY 的 Bash 只允许 `once`，服务端发出的 `grantOptions` 也只能是 `once`；
+3. Coordinator/Adapter 在处理 Verdict 时校验 `grantScope` 属于原 Ask 的 `grantOptions`，非法 scope 直接拒绝，
+   不能依赖客户端诚实；
+4. 保留 REVIEW 文件写工具的硬拒绝，并确保它发生在所有 auto-allow/Grant 分支之前。
+
+**验收用例**
+
+- 构造恶意 Verdict，在 REVIEW Bash ask 上提交 `task`、`session`、`remember=true` 均不能产生 Grant/rule；
+- 同一 Bash 命令第二次执行仍必须重新 ASK；
+- REVIEW 下 Write/Edit/apply_patch 在任何 Profile 下仍硬拒绝。
+
+#### P1-3 账户级审批队列错误地以 askId 单独作为主键
+
+**当前实现**
+
+`ApprovalCoordinator` 已使用 `(convoId, askId)`，但 `SessionRegistry.pendingApprovals()` 又按 askId
+`distinctBy`，`PocketRepository.pendingApprovals`、插入、撤回和 resolve 也都只使用 askId。askId 只保证单个
+Agent 连接内唯一，不同 Session 可同时产生相同值。
+
+**必须调整**
+
+1. daemon snapshot、App 状态表、风险表、超时状态、withdraw 和 resolve 全链路统一使用
+   `ApprovalKey(convoId, askId)`；
+2. UI 回调必须携带完整 key，禁止在 resolve 时再从 askId 反查；
+3. legacy 单 Session UI 也应内部使用复合 key，只在展示层隐藏 convoId。
+
+**验收用例**
+
+- 两个 Session 同时产生 askId=`1` 时，Needs You 展示两条；
+- 允许/拒绝/撤回其中一条不会覆盖、删除或改变另一条；
+- 风险更新和超时只作用于对应 `(convoId, askId)`。
+
+#### P1-4 Task Grant 没有在任务终态及时失效
+
+**当前实现**
+
+`Conversation` 只在 `!executing` 时收到下一条 Prompt 才调用 `rotateTask`。因此：
+
+- TurnDone 到下一条 Prompt 之间，旧 Task Grant 仍可被 Quick Terminal 使用；
+- 执行中追加的另一条顶层用户指令会继承当前 Task Grant；
+- `ApprovalGrantStore.endTask()` 没有接入稳定 TurnDone/terminal state。
+
+**必须调整**
+
+1. Task 身份与底层 CLI 是否把消息折叠进同一 turn 解耦；每条顶层用户意图由 daemon 创建新 task；
+2. 稳定 TurnDone 且没有 continuation/background/pending 时立即结束 task 并清除 Grant；
+3. 只有显式 continuation 或属于同一 task 的后台工作可以继承，不能用“当前仍 executing”隐式继承；
+4. Return、Recall、Session close、mode switch 和 TTL 同样立即失效，清理操作必须幂等。
+
+**验收用例**
+
+- TurnDone 后、下一条 Prompt 前运行同 matcher 的 Quick Terminal 命令会重新 ASK；
+- 执行中追加的新顶层指令不能使用前一任务 Grant；
+- continuation/background 的合法继承有单独正向测试；
+- late Verdict 不能复活已经结束的 task 或 Grant。
+
+#### P1-5 Session 关闭后 Shell/Export Pending 仍可能执行
+
+**当前实现**
+
+Shell 和 File Export 请求由 daemon 全局 scope 中的 Service/Coordinator 持有。`CloseSession` 仅关闭
+Conversation 并调用 `shell.forget()` 清 remembered rules，没有撤回这些 Pending 或取消等待协程。用户之后
+仍可能从账户审批中心允许它，使命令/导出在 Session 已关闭后执行。
+
+**必须调整**
+
+1. Coordinator 提供按 `convoId + source/owner` 撤回 Pending 的原子接口；
+2. Session 真正关闭前撤回 Agent、Shell、Export 等全部请求并取消相应等待任务；
+3. Shell/Export 在产生副作用前再次校验 Session、authority、workdir/resourceScope 和请求状态仍有效；
+4. 关闭产生的客户端终态统一为 WITHDRAWN，不伪装成用户拒绝或成功。
+
+**验收用例**
+
+- Shell/Export 等待审批时 force close Session，卡片立即撤回；
+- close 前已排队、close 后才到达的 ALLOW Verdict 不会执行副作用；
+- 普通 detach 但 Session 因 busy 保活时，不应误撤回合法 Pending。
+
+#### P1-6 Full Control 到期没有使当前 PermissionBridge 失效
+
+**当前实现**
+
+`PermissionBridge` 创建时把 mode 缓存为 `autoAllow`。一小时后 `Conversation` 虽将 mode 改回 DEFAULT，
+当前 Bridge 的 `autoAllow` 仍为 true；一个长时间运行的 Turn 可以在 TTL 后继续自动批准工具调用。
+
+**必须调整**
+
+1. PermissionBridge 每次决策读取 daemon 的动态 effective execution profile/mode，不能缓存授权结论；或在
+   到期点原子撤销旧 Bridge 的 bypass authority；
+2. 到期先收回 authority，再更新 UI；通知/徽标不能成为唯一执行效果；
+3. 到期后的下一次工具调用必须进入正常硬策略/Grant/ASK 路径，即使仍是同一个 Turn。
+
+**验收用例**
+
+- 使用可控时钟让 Full Control 在同一 Turn 中到期，到期前 auto-allow、到期后立即 ASK；
+- 到期与工具请求并发时不能多放行一次；
+- 续期必须产生新的明确确认，旧 expiry job 不得误撤销新授权。
+
+#### P1-7 Quick Terminal 的“收紧后续授权”清理了错误的规则存储
+
+**当前实现**
+
+Quick Terminal 的 Session rule 保存在 `ShellService.allowRules`，但无 grantId 的 auto-run chip 发送
+`ClearAllowRule` 后只调用 `SessionRegistry.clearRule()`，清的是 Conversation allowRules。界面看似已收紧，
+ShellService 中的 rule 仍在，下一条匹配命令继续自动执行。
+
+**必须调整**
+
+1. Session rule 由统一 Grant/Policy store 管理，或让撤销协议明确携带 source/store identity；
+2. 收紧操作由 daemon 返回成功/失败结果，App 只有收到成功确认后才更新状态；
+3. 不能再用 `grantId == null` 猜测需要清理哪类权限。
+
+**验收用例**
+
+- Quick Terminal session-rule 自动执行后点击收紧，下一条相同命令重新 ASK；
+- Agent rule 与 Shell rule 同名时，撤销目标明确，不误删也不漏删；
+- 不存在的 rule/grant 返回明确失败，不在 UI 上显示虚假成功。
+
+#### P1-8 Bridge Request Approval 位于硬安全墙之前
+
+**当前实现**
+
+`PermissionBridge` 对 `BridgeGrant.OWNER_APPROVED` 的 auto-allow 分支早于 bridge 工作目录限制和
+`BridgeCommandPolicy`。批准一条飞书自然语言请求，实际会允许该 Turn 内除 AskUserQuestion 外的所有工具，
+包括路径逃逸和危险 Bash。这违反“硬策略永远先于所有 Grant/Profile”的核心不变量。
+
+**必须调整**
+
+1. pathScope/source ceiling、Handoff write wall、确定性危险命令 DENY 等硬规则放到所有 bypass、request
+   approval、remembered rule 和 Task Grant 分支之前；
+2. Bridge Request Approval 转换成绑定 project/root/action ceiling 的结构化 Task Grant，而不是“本 Turn
+   full access”；
+3. Request approval 不能授权输入中未声明或 daemon 无法约束的工具家族；未知工具回到 ASK/DENY。
+
+**验收用例**
+
+- owner 已批准 bridge request 时，workspace 外 Read/Edit 仍被硬拒绝；
+- destructive Bash 仍被 `BridgeCommandPolicy` 拒绝；
+- 允许范围内的动作可以顺畅执行，但新增工具/资源范围需要增量审批。
+
+### 18.2 P2：本轮一并补齐
+
+#### P2-1 AttentionLease 的客户端倒计时与 daemon 预算不一致
+
+daemon 收到前台 heartbeat 后会暂停 no-response budget，但 App 仍按 Ask 初始 `timeoutSec` 本地倒计时，
+归零后直接显示“已自动拒绝”并禁用操作。此时 daemon 可能仍在等待。桌面端只要卡片 Composable 存在就
+持续 heartbeat，也没有按窗口失焦、最小化或退到后台释放 lease。
+
+调整要求：超时终态以 daemon 的 `AskWithdrawn(TIMED_OUT)` 为准；或者 daemon 发布动态剩余预算/软截止
+时间。桌面仅在窗口前台可见且卡片真实展示时发送 heartbeat，并在失焦/dispose 时立即发送
+`visible=false`。增加前后台切换、断网和 24h absolute deadline 测试。
+
+#### P2-2 自动授权 History 目前不是可恢复的历史
+
+`ApprovalCoordinator.recordAuto()` 只写日志，`AuthorizedActionRecorded` 只是实时 Frame。客户端离线、
+daemon 重启或重新加载历史后记录会消失；`actionSummary` 也只有 Edit 或命令前两个 token，无法完成方案所说
+的事后定位与复盘。
+
+调整要求：实现 daemon 侧持久 `ApprovalHistoryStore`，记录 eventId、convo/task、source、tool、脱敏动作
+摘要、Grant/Policy 依据、决定、时间和结果；禁止保存 stdout、文件正文、diff、prompt、secret 或完整敏感
+命令。重连/恢复时支持分页查询或安全 snapshot，并测试离线补发、daemon 重启恢复和脱敏。
+
+#### P2-3 `supportsApprovalV2` 能力声明尚未接入下发策略
+
+协议已有 `ClientCaps.supportsApprovalV2`，App 也会声明，但 `RequestRouter.ClientCapsHolder` 只保存
+`supportsOpencode`。daemon 当前会向所有客户端发送新的审批 Frame，注释声明的 capability gating 没有实现。
+
+调整要求：保存并使用 `supportsApprovalV2`；旧客户端继续收到 legacy projection，新 Frame 只发给声明支持
+的客户端。补新 daemon/旧 App、新 App/旧 daemon 和混合多设备 attach 的 wire 兼容测试。
+
+#### P2-4 审批专属通知尚未实现
+
+M1 要求的桌面系统通知、Dock/托盘角标、手机审批独立通知类别/声音震动设置和点击 deep-link 未看到实现。
+补齐后必须从 Coordinator snapshot 复核 request 仍为 Pending；通知正文不得包含 command、文件名、diff、
+prompt 或 secret，锁屏不提供直接批准。
+
+### 18.3 实现与复审要求
+
+1. 先修 P1，再处理 P2；P1 未清零前不得把该实现标记为审批重构完成；
+2. 安全不变量只能在 daemon 强制，App 隐藏按钮、文案提示和历史记录均不能替代服务端校验；
+3. 新增/修改协议 shape 必须保持可选字段默认值并经过 wire backward-compatibility review；
+4. PermissionBridge、Bridge、Handoff、Grant、Verdict、authority 或 token 处理变化必须再次做 crypto/security review；
+5. 每个条目至少包含一个攻击/异常路径测试，不能只有 happy path；
+6. 修复后重新执行：
+
+   ```bash
+   JAVA_HOME=/opt/homebrew/opt/openjdk@17 \
+     ./gradlew :protocol:jvmTest :daemon:test :mobile:composeApp:desktopTest --rerun-tasks
+   ```
+
+7. 本次审核执行上述全量测试时，Desktop 共 543 个测试中
+   `SwitchScrollLandingTest.aSecondHistoryFrameAfterSwitchingStillLandsAtTheEnd` 首次失败；单独重跑
+   `SwitchScrollLandingTest` 通过，暂判为时序类偶发失败。实现整改不能通过忽略/删除该测试掩盖问题，若再次
+   出现需单独稳定它；
+8. Claude Code 完成后应在本节逐项写入“修复落点 + 测试名 + 结果”，供下一轮按代码事实复审；不要仅把
+   条目标记为完成。
+
+### 18.4 整改落点记录（2026-08-03，Claude Code）
+
+> 每条：修复落点 → 回归测试 → 结果。全量 `check-all`（protocol + daemon + relay + mobile）通过。
+
+- **P1-1** `ApprovalGrantStore.kt` 重写：Grant 绑定 `canonicalRoot`（daemon 侧 canonicalize，签发时无
+  root 则拒发）；Bash matcher 改为「命令前导非 flag token 前缀（exe＋子命令＋任务名，上限 3）」＋元字符
+  墙（含 `\n\r`）；文件工具逐 target canonicalize 后要求落在 root 内，target 不可解析即不命中；Quick
+  Terminal 的 match 以其已验证 workdir 为 root，跨项目必不命中。测试
+  `ApprovalGrantStoreTest`（`grant_matches_only_its_exact_convo_task_tool_rule_and_root` ／
+  `bash_prefix_binds_the_task_name_not_just_two_tokens`（`npm run test` 不盖 `postinstall`）／
+  `file_grants_only_cover_targets_provably_inside_the_root`（`..`、symlink、`~`、空 target）／
+  `unbindable_context_issues_nothing`）——全部通过。
+- **P1-2** `PermissionBridge.kt`：`handoffAccess != null && tool==Bash` 并入 `neverRemember`（daemon 派生
+  ceiling，`grantOptions=["once"]`）；Answered 处理器校验 `grantScope ∈ ask.grantOptions`，未提供的
+  scope 钳制为 allow-once（人确实点了允许，故不整单拒绝；不产生任何 standing 授权，
+  `recordAuto("scope-clamped:…")` 留痕）。`ShellService` 同规则。测试
+  `handoff_bash_offers_only_once_and_a_hostile_scope_claim_forms_nothing`、
+  `unoffered_scope_on_a_normal_ask_clamps_to_allow_once`——通过。
+- **P1-3** daemon `SessionRegistry.pendingApprovals` 去重键改 `(convoId, askId)`；App 全链路
+  `ApprovalKey(convoId, askId)`（`pendingApprovals` map／`timedOutAskId`／`askRisk`／withdraw／
+  `resolvePendingApproval(convoId, askId, allow)`，Fleet 行携带 convoId）。测试
+  `sameAskIdFromTwoSessionsStaysTwoInboxRows`（App）＋既有 coordinator 复合键 golden——通过。
+- **P1-4** `Conversation.kt`：`rotateTask` 改为每条顶层用户 prompt 必转（与 CLI turn 折叠解耦）；新增
+  `maybeEndTaskOnSettle()` 挂在 TurnResult 稳定边界（无 background／pending ask／continuation grace 即
+  结束 task 清 Grant，幂等）；Return／Recall／close／mode switch／TTL 原有清理不变。测试：task 轮换由
+  `allow_for_task_covers_matching_requests_with_a_chip_until_the_task_rotates` 钉住；settle 分支为
+  Conversation 内部状态，暂以代码路径评审为准（无独立进程级测试——遗留标注）。
+- **P1-5** `ApprovalCoordinator.withdrawAllForConvo()`（原子、按 convo 扫全 source）；
+  `SessionRegistry.close` 真关闭前先撤回；`ShellService.run` 增 `stillLive` 复核（router 传
+  `registry.modeOf != null`）；`FileExportService` 批准后重查 `liveWorkdirOf`。测试
+  `convo_scoped_withdraw_sweeps_every_source_but_only_that_convo`（含 close 后迟到 ALLOW 找不到目标）——通过。
+- **P1-6** `PermissionBridge.autoAllow` 改动态 getter（`currentMode()` 每次决策读取，Conversation 传
+  live mode）；Full Control 到期即刻生效于同一 turn 的下一次工具调用。测试
+  `full_control_expiry_bites_the_next_tool_call_even_mid_turn`——通过。
+- **P1-7** `ShellService.clearRule()` 新增；Router 的 `ClearAllowRule` 同时清 Conversation 与 Quick
+  Terminal 两个 store（不再按 `grantId==null` 猜目标）。测试
+  `clear_rule_reaches_the_quick_terminal_store`——通过。（daemon 回执确认协议未加——收紧结果以两 store
+  确定性清除保证，UI 乐观更新保留；如需回执另立 additive frame。）
+- **P1-8** `PermissionBridge.onControlRequest` 重排：handoff 只读墙 → ownerBypassSession（owner 本人
+  专属会话的整会话信任，#91 既有语义，非本条对象）→ 路径墙（guest scope／bridge workdir）→
+  destructive Bash 红线 → M3 观察 → `OWNER_APPROVED` → 白名单 ALLOW → AUTO_TRUSTED → bypass →
+  规则/Grant → ask。请求级批准不再解锁路径逃逸与危险命令。测试
+  `owner_approved_bridge_request_no_longer_unlocks_walls`＋改写后的
+  `approved_bridge_request_is_full_access_only_while_its_turn_grant_is_active`——通过。
+- **P2-1** 手机 `PermissionSheet`：本地倒计时归零仅在 `grantOptions==null`（旧 daemon）才是终态，
+  grant-aware 卡以 daemon 的 `AskWithdrawn(TIMED_OUT)` 为准；桌面心跳以 `LocalWindowInfo.isWindowFocused`
+  门控，失焦／dispose 即发 `visible=false` 释放 lease（`askHeartbeatRelease`）。24h 绝对上限已有
+  coordinator 测试（`absolute_deadline_terminates_even_a_permanently_leased_ask`）。
+- **P2-2** 新增 `ApprovalHistoryStore`（JSONL 持久化＋轮转上限 5000＋脱敏行：rule 级摘要／basis／决定／
+  ids，绝无 stdout／正文／diff／prompt／secret）；coordinator 人工决定与 auto-run 均落盘；additive
+  协议 `FetchApprovalHistory`／`ApprovalHistoryPage`（owner-only）供离线补拉与重启恢复。App 侧历史
+  页 UI 未做（遗留标注）。
+- **P2-3** `ClientCapsHolder.supportsApprovalV2` 已存并在两个 ingress sink（`WsConnection`、
+  `DeviceSessions`）过滤 `AuthorizedActionRecorded`／`PermissionRiskUpdated`，未声明的客户端不再收到
+  新 frame；App 声明位已随 M2 发送。混版矩阵回归依托既有 `SerializationRoundTripTest` V2 组。
+- **P2-4** 推送链新增 `NotifyPush.kind="approval"`（additive，老 relay 忽略）→ relay `NotifyRoute.kind`
+  → APNs `category=APPROVAL`＋`kind` 自定义键／FCM `data.kind`＋`channel_id=approvals`；Android 新增
+  「Approvals」独立通知渠道（声音震动随系统渠道独立配置），前台路径按 `kind` 选渠道；桌面新增
+  `onApprovalArrived` 钩子（未聚焦时系统横幅＋角标，正文零内容）。锁屏无任何直批动作。**relay 侧改动
+  需 redeploy 后生效**；iOS category 的客户端侧处理（自定义声音等）未做（遗留标注）。
+
+遗留（下一轮）：P1-4 settle 分支的进程级测试；P2-2 App 历史页；P2-4 iOS category 客户端处理；
+§18.3-7 的 `SwitchScrollLandingTest` 偶发未再复现（本轮未改动该测试）。

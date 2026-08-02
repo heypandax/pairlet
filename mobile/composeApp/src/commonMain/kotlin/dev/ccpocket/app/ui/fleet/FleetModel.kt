@@ -197,11 +197,14 @@ object DemoFleet {
 fun PocketRepository.resolveAttention(entry: AttentionEntry, allow: Boolean) {
     if (demoMode.value) { DemoFleet.resolve(entry.askId); return }
     val repo = FleetRuntime.forPrimary(this)?.repoFor(entry.accountId) ?: this.takeIf { entry.current }
-    repo?.resolvePendingApproval(entry.askId, allow)
+    repo?.resolvePendingApproval(entry.convoId, entry.askId, allow)
 }
 
-/** The full ask behind an attention row, from whichever link holds it. */
+/** The full ask behind an attention row, from whichever link holds it (composite-keyed, P1-3). */
 fun PocketRepository.attentionAsk(entry: AttentionEntry): PermissionAsk? {
     val repo = FleetRuntime.forPrimary(this)?.repoFor(entry.accountId) ?: this.takeIf { entry.current }
-    return repo?.pendingApprovals?.get(entry.askId)?.ask
+        ?: return null
+    val key = entry.convoId?.let { dev.ccpocket.app.data.ApprovalKey(it, entry.askId) }
+        ?: repo.pendingApprovals.keys.firstOrNull { it.askId == entry.askId } ?: return null
+    return repo.pendingApprovals[key]?.ask
 }

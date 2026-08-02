@@ -81,9 +81,15 @@ class FcmSender private constructor(
                         r.workdir?.let { put("wd", it) }
                         r.sessionId?.let { put("sid", it) }
                         r.handoffId?.let { put("hid", it) }
+                        r.kind?.let { put("kind", it) }
                     }
                 }
-                putJsonObject("android") { put("priority", "high") }
+                putJsonObject("android") {
+                    put("priority", "high")
+                    // P2-4: background (system-displayed) approval alerts land on the dedicated channel,
+                    // whose sound/vibration the user configures independently of task-complete
+                    if (route?.kind == "approval") putJsonObject("notification") { put("channel_id", "approvals") }
+                }
             }
         }.toString()
         val resp = withContext(Dispatchers.IO) {

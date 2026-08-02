@@ -187,6 +187,26 @@ class ApprovalCoordinatorTest {
     }
 
     @Test
+    fun convo_scoped_withdraw_sweeps_every_source_but_only_that_convo() = runBlocking {
+        // §18.1 P1-5: CloseSession must retire agent AND shell AND export pending of the conversation —
+        // an ALLOW from the account inbox after close must find nothing
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val coord = ApprovalCoordinator(scope)
+        val outcomes = mutableListOf<Pair<String, ApprovalOutcome>>()
+        coord.submit(ask("a1", convo = "closing"), ApprovalSource.AGENT, Any(), timeoutMs = 10_000, emit = { }) { outcomes += "a1" to it }
+        coord.submit(ask("sh-1", convo = "closing"), ApprovalSource.SHELL, Any(), timeoutMs = 10_000, emit = { }) { outcomes += "sh-1" to it }
+        coord.submit(ask("xp-1", convo = "closing"), ApprovalSource.EXPORT, Any(), timeoutMs = 10_000, emit = { }) { outcomes += "xp-1" to it }
+        coord.submit(ask("b1", convo = "alive"), ApprovalSource.SHELL, Any(), timeoutMs = 10_000, emit = { }) { outcomes += "b1" to it }
+
+        coord.withdrawAllForConvo("closing")
+        assertEquals(setOf("a1", "sh-1", "xp-1"), outcomes.map { it.first }.toSet())
+        assertTrue(outcomes.all { it.second is ApprovalOutcome.Withdrawn })
+        assertFalse(coord.onVerdict(PermissionVerdict("closing", "sh-1", Decision.ALLOW)), "a late ALLOW must find nothing")
+        assertTrue(coord.onVerdict(PermissionVerdict("alive", "b1", Decision.ALLOW)), "the other convo's pending survives")
+        scope.cancel()
+    }
+
+    @Test
     fun source_snapshot_only_reports_that_sources_rows() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)
         val coord = ApprovalCoordinator(scope)

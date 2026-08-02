@@ -1329,4 +1329,6 @@
     <string name="ho_inbox_dismiss">先不处理</string>
     <string name="co_pairing_linked">已作为协作者连接</string>
     <string name="co_pairing_linked_sub">%1$s 可以给你发接力邀请——即使你没有配对自己的电脑，邀请也会送到这里。</string>
+    <string name="notify_approval_title">需要你的批准</string>
+    <string name="notify_approval_body">Agent 正在等待你的决定</string>
 </resources>

@@ -600,9 +600,11 @@ fun PermissionSheet(
         while (seconds > 0) { delay(1000); seconds -= 1 }
     }
     // issue #100: the daemon's authoritative TIMED_OUT signal flips the card to its terminal state even when the
-    // local countdown never ran (phone backgrounded/locked — the real scenario). The countdown is now just the
-    // fallback for a pre-#100 daemon, and it counts against the daemon's real window (timeoutSec) not a fixed 30s.
-    val timedOut = timedOutSignal || seconds <= 0
+    // local countdown never ran (phone backgrounded/locked — the real scenario). §18.2 P2-1: a GRANT-AWARE
+    // daemon (grantOptions != null) can pause its budget under an AttentionLease, so the local countdown may
+    // hit zero while the daemon still waits — its zero is a DISPLAY floor, never a terminal state; only the
+    // daemon's AskWithdrawn(TIMED_OUT) ends such a card. The local zero stays terminal for pre-M2 daemons.
+    val timedOut = timedOutSignal || (seconds <= 0 && ask.grantOptions == null)
     PocketSheet(onDismiss = { if (timedOut) onDismiss() else onDeny() }) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp, top = 2.dp)) {
             queuePosition?.let { (pos, total) ->

@@ -139,6 +139,17 @@ class Conversation(
         currentTaskId = "task-" + java.util.UUID.randomUUID()
         if (promptId != null) log.info("$convoId task $currentTaskId ← prompt ${promptId.take(8)}…")
     }
+
+    /** §18.1 P1-4: a task ends at the STABLE turn boundary, not at the next prompt — called after every
+     *  turn settle. When nothing keeps the task alive (no running turn, background job, pending ask or
+     *  continuation grace), its grants die immediately: the quick terminal must re-ask between TurnDone
+     *  and the next prompt. Idempotent; legit continuation/background work keeps the task by definition
+     *  of [isBusy]. */
+    fun maybeEndTaskOnSettle() {
+        if (isBusy()) return
+        currentTaskId?.let { grants.endTask(convoId, it) }
+        currentTaskId = null
+    }
     /** Which agent backend drives this conversation — live project rows tag it so a tap resumes the right CLI. */
     val kind: AgentKind get() = backend.kind
 
@@ -998,6 +1009,9 @@ class Conversation(
             // approval design M2: the shared task-grant engine + the conversation's live task pointer
             grants = grants, taskId = { currentTaskId() },
             risk = riskEngine, // M3 advisory badges
+            // §18.1 P1-6: the bridge reads the LIVE mode per decision — a Full Control expiry mid-turn
+            // must bite the very next tool call, so no cached bypass authority survives it
+            currentMode = { currentMode() },
             // verdict + question windows both default to the generous, env-configurable ApprovalTimeout.ms
             // (issue #100 unified them). Bridge-origin sessions keep issue #91's 120s FLOOR on top (#32):
             // the owner arrives via push → tap → reattach, so a deliberately short CC_POCKET_ASK_TIMEOUT_SEC
@@ -1345,6 +1359,10 @@ class Conversation(
                         // separately so the push is worded as a failure (usage-limit hits included — #138),
                         // never as a normal turn-complete.
                         pushHookProvider()?.let { hook -> val sid = sessionId; scope.launch { hook.onTurnComplete(workdir, sid, ev.finalText, error) } }
+                        // §18.1 P1-4: the STABLE turn boundary ends the task — unless background work,
+                        // a pending ask or a continuation grace legitimately keeps it alive. Between
+                        // here and the next prompt the quick terminal re-asks.
+                        maybeEndTaskOnSettle()
                     }
                     is AgentEvent.ControlRequest -> b.onControlRequest(ev)
                     is AgentEvent.ControlCancel -> b.onCancel(ev)
@@ -1590,11 +1608,11 @@ class Conversation(
             promptId?.let { sink.emit(PromptAck(convoId, it)) } // handled by the daemon = delivered
             return
         }
-        // approval design M2 §5.4: a prompt that STARTS a turn begins a new task — the previous task's
-        // grants die right here (a new instruction never inherits an old authorization). A mid-turn
-        // queued prompt (executing) folds into the running turn, so it keeps the current task, mirroring
-        // how the CLI folds it into the same turn.
-        if (!executing) rotateTask(promptId)
+        // approval design M2 §5.4 / §18.1 P1-4: EVERY top-level user prompt begins a new task — the
+        // previous task's grants die right here, whether or not the CLI folds the message into a running
+        // turn. A new instruction never inherits an old authorization; task identity is decoupled from
+        // the backend's turn-folding behavior.
+        rotateTask(promptId)
         // RELAUNCH-THEN-SEND (issue #84): a mid-session model/mode/effort switch only recorded the desired value
         // + armed pendingRelaunch — relaunching then would have killed the in-flight turn. Now, before this next
         // turn goes out, reconcile a stale process: stop it and re-spawn under the new flags FIRST, then let the

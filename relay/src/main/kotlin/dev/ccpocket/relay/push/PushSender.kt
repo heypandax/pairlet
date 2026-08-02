@@ -14,6 +14,7 @@ data class NotifyRoute(
     val workdir: String? = null,
     val sessionId: String? = null,
     val handoffId: String? = null,
+    val kind: String? = null, // P2-4: notification category hint ("approval") — content-free
 )
 
 /**

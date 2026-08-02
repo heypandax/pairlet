@@ -122,7 +122,7 @@ class PermissionTimeoutTest {
         assertTrue(model.attention.any { it.id == "ask-1" }, "a live ask is a waiting item")
 
         // the daemon reports TIMED_OUT: the repo keeps the pendingAsk and stamps timedOutAskId
-        repo.timedOutAskId.value = "ask-1"
+        repo.timedOutAskId.value = dev.ccpocket.app.data.ApprovalKey("c1", "ask-1")
 
         assertTrue(model.askTimedOut, "the model forwards the timeout signal to the inline card")
         assertNotNull(model.ask) // the card is KEPT (it flips terminal) — not vanished

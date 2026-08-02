@@ -9,6 +9,7 @@ import dev.ccpocket.protocol.RunShellCommand
 import dev.ccpocket.protocol.ShellResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -23,6 +24,36 @@ import kotlin.test.assertTrue
  *  agent bridge. On timeout it must now retire the phone's card (AskWithdrawn) as well as report the command
  *  denied. (Late-verdict feedback is the bridge's job — RequestRouter forwards an unclaimed shell verdict there.) */
 class ShellServiceTest {
+    @Test
+    fun clear_rule_reaches_the_quick_terminal_store() = runBlocking {
+        // §18.1 P1-7: "收紧" must clear THIS store too — a session rule here kept auto-running after the
+        // chip's ClearAllowRule only cleared the conversation store
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val emitted = CopyOnWriteArrayList<Frame>()
+        val coordinator = dev.ccpocket.daemon.approval.ApprovalCoordinator(scope)
+        val shell = ShellService(scope, coordinator = coordinator, verdictTimeoutMs = 5_000)
+
+        // approve once with session memory → the rule forms
+        val first = scope.async { shell.run(RunShellCommand("c1", "git status", "/tmp"), PermissionMode.DEFAULT) { emitted += it } }
+        kotlinx.coroutines.withTimeout(5_000) {
+            while (emitted.filterIsInstance<PermissionAsk>().isEmpty()) delay(10)
+        }
+        val ask = emitted.filterIsInstance<PermissionAsk>().single()
+        coordinator.onVerdict(dev.ccpocket.protocol.PermissionVerdict("c1", ask.askId, dev.ccpocket.protocol.Decision.ALLOW, remember = true))
+        first.await()
+
+        shell.clearRule("c1", ask.rule) // the tighten path
+        emitted.clear()
+        val second = scope.async { shell.run(RunShellCommand("c1", "git status", "/tmp"), PermissionMode.DEFAULT) { emitted += it } }
+        kotlinx.coroutines.withTimeout(5_000) {
+            while (emitted.filterIsInstance<PermissionAsk>().isEmpty()) delay(10)
+        }
+        val again = emitted.filterIsInstance<PermissionAsk>().single() // re-asks: the shadow rule is gone
+        coordinator.onVerdict(dev.ccpocket.protocol.PermissionVerdict("c1", again.askId, dev.ccpocket.protocol.Decision.DENY))
+        second.await()
+        scope.cancel()
+    }
+
     @Test
     fun approval_timeout_withdraws_the_card_and_reports_denied() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Unconfined)

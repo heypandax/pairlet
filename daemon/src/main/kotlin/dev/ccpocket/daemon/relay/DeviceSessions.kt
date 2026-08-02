@@ -390,8 +390,16 @@ class DeviceSessions(
         log.info("← ${env.body::class.simpleName} from ${deviceId.take(8)}…")
 
         // keyed: relay sinks are minted per frame — the deviceId key makes every frame from this device
-        // read as the SAME attached client in a conversation's fan-out set (issue #47)
-        val sink = dev.ccpocket.daemon.conversation.KeyedSink("dev:$deviceId", OutboundSink { frame -> sealAndSend(deviceId, frame) })
+        // read as the SAME attached client in a conversation's fan-out set (issue #47).
+        // §18.2 P2-3: V2 approval frames only reach devices whose ClientCaps declared the capability.
+        val capsForDevice = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }
+        val sink = dev.ccpocket.daemon.conversation.KeyedSink(
+            "dev:$deviceId",
+            OutboundSink { frame ->
+                if (RequestRouter.approvalV2Only(frame) && !capsForDevice.supportsApprovalV2) return@OutboundSink
+                sealAndSend(deviceId, frame)
+            },
+        )
 
         // ---- restricted INGRESS gates: both checks live HERE, on the only path where deviceId is
         // authenticated (proven by the Noise static key that just decrypted the frame). Bridge (#91) and

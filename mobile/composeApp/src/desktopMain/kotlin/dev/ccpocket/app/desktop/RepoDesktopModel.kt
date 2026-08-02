@@ -327,7 +327,7 @@ class RepoDesktopModel(
                 // a timed-out ask (issue #100) is terminal — dismiss-only on its inline card — so it's no
                 // longer "waiting": drop it from the bell/palette/badge instead of offering a Deny/Allow that
                 // would only hit the daemon's ask_expired. Matched by id (askIds are unique per request).
-                val ask = r.pendingAsk.value?.takeIf { it.askId != r.timedOutAskId.value } ?: return@mapNotNull null
+                val ask = r.pendingAsk.value?.takeIf { !r.askTimedOut(it) } ?: return@mapNotNull null
                 val d = r.paired.value ?: return@mapNotNull null
                 DkAttention(
                     id = ask.askId, accountId = d.accountId, machine = d.displayName(), os = d.dkOs(),
@@ -877,9 +877,9 @@ class RepoDesktopModel(
     // stamps timedOutAskId on AskWithdrawn(TIMED_OUT); matched by id, so a stale id can never bleed onto the
     // next ask (askIds are unique per request) — mirrors the phone's `timedOutAskId == ask.askId` check.
     override val askTimedOut: Boolean
-        get() = repo.pendingAsk.value?.askId?.let { it == repo.timedOutAskId.value } ?: false
+        get() = repo.pendingAsk.value?.let { repo.askTimedOut(it) } ?: false
     override val askQueuePosition: Pair<Int, Int>? get() = repo.askQueueProgress.value
-    override val askRisk: String? get() = repo.pendingAsk.value?.let { repo.askRisk[it.askId]?.risk }
+    override val askRisk: String? get() = repo.pendingAsk.value?.let { repo.riskFor(it) }
     override fun resolveTaskGrant() {
         showPermissionModal = false
         repo.resolve(Decision.ALLOW, grantScope = "task")
@@ -890,6 +890,7 @@ class RepoDesktopModel(
     }
     override fun tightenAutoRun(item: ChatItem.AutoRun) = repo.tightenAutoRun(item)
     override fun askHeartbeat() = repo.sendAskHeartbeat(visible = true)
+    override fun askHeartbeatRelease() = repo.sendAskHeartbeat(visible = false)
     override fun resolve(allow: Boolean, remember: Boolean) {
         showPermissionModal = false
         repo.resolve(if (allow) Decision.ALLOW else Decision.DENY, remember)

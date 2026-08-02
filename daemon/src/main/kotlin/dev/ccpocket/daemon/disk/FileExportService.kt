@@ -104,6 +104,12 @@ class FileExportService(
                 emit(fail("the export request was not approved"))
                 return
             }
+            // §18.1 P1-5: the approval wait can outlive the session — re-verify RIGHT BEFORE the read.
+            // An export whose session died while the card was pending never serves.
+            if (liveWorkdirOf(req.convoId) == null) {
+                emit(fail("the session closed before the export was approved"))
+                return
+            }
             // serveExport re-runs the containment at READ time: the approval wait is up to 30s, and a
             // path component swapped for a symlink in that window must not turn an approved in-tree
             // path into an out-of-tree read (TOCTOU). The residual sub-ms window between the re-check

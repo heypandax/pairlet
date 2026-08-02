@@ -588,6 +588,8 @@ interface DesktopModel {
     fun tightenAutoRun(item: ChatItem.AutoRun) {}
     /** AttentionLease heartbeat while the approval card is on screen (30s cadence). */
     fun askHeartbeat() {}
+    /** Release the lease early (window unfocused / card left composition) — P2-1. */
+    fun askHeartbeatRelease() {}
     fun dismissAsk()
     // AskUserQuestion (ask.questions != null): the picks/free-text ride an ALLOW verdict; skip DENIES with a
     // note. Kept distinct from resolve() because a bare ALLOW carries no answers → the CLI reads "did not

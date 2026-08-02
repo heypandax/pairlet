@@ -398,11 +398,22 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 // unconditional infinite delay-loop keeps the virtual frame clock busy and
                                 // waitForIdle never returns (desktopTest hang, 08-02).
                                 if (ask.grantOptions != null) {
-                                    LaunchedEffect(ask.askId) {
+                                    // §18.2 P2-1: only a FOCUSED window with the card composed counts as
+                                    // "the user is looking" — unfocus/minimize/dispose releases the lease
+                                    // explicitly instead of pausing the daemon budget forever
+                                    val focused = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+                                    LaunchedEffect(ask.askId, focused) {
+                                        if (!focused) {
+                                            model.askHeartbeatRelease()
+                                            return@LaunchedEffect
+                                        }
                                         while (true) {
                                             model.askHeartbeat()
                                             kotlinx.coroutines.delay(30_000)
                                         }
+                                    }
+                                    androidx.compose.runtime.DisposableEffect(ask.askId) {
+                                        onDispose { model.askHeartbeatRelease() }
                                     }
                                 }
                                 // issue #100: on the daemon's TIMED_OUT signal the card flips to its terminal

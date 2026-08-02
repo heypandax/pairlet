@@ -333,7 +333,7 @@ fun App(scope: CoroutineScope) {
                 }
                 PermissionSheet(
                     ask, repo.workdir.value,
-                    timedOutSignal = repo.timedOutAskId.value == ask.askId, // issue #100: daemon said this ask timed out
+                    timedOutSignal = repo.askTimedOut(ask), // issue #100: daemon said this ask timed out (composite-matched, P1-3)
                     // §2.2/§4.3: during a REVIEW handoff a shell command is the one way a "read-only"
                     // review can still touch files — so it's confirmed each time (no standing rule) and
                     // the card says it leaves a record
@@ -341,7 +341,7 @@ fun App(scope: CoroutineScope) {
                         it.status == HandoffStatus.IN_PROGRESS && repo.isHandoffRecipient(it)
                     } == true,
                     queuePosition = repo.askQueueProgress.value, // "n / m" while a burst is queued (design M1)
-                    risk = repo.askRisk[ask.askId]?.risk, // M3 advisory badge, updated in place
+                    risk = repo.riskFor(ask), // M3 advisory badge, updated in place
                     onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
                     onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
                     onDeny = { repo.resolve(Decision.DENY) },

@@ -37,7 +37,10 @@ class CcPocketMessagingService : FirebaseMessagingService() {
         val tap = launch?.let {
             PendingIntent.getActivity(this, reqCode, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }
-        val notif = Notification.Builder(this, CHANNEL_ID)
+        // §18.2 P2-4: approval alerts ride their OWN channel, so their sound/vibration is configurable
+        // independently of turn-complete (system channel settings). Old daemons/relays omit `kind`.
+        val channel = if (message.data["kind"] == "approval") APPROVALS_CHANNEL_ID else CHANNEL_ID
+        val notif = Notification.Builder(this, channel)
             .setSmallIcon(applicationInfo.icon)
             .setContentTitle(n.title)
             .setContentText(n.body)
@@ -49,12 +52,18 @@ class CcPocketMessagingService : FirebaseMessagingService() {
 
     companion object {
         const val CHANNEL_ID = "task_complete"
+        const val APPROVALS_CHANNEL_ID = "approvals" // P2-4: independent sound/vibration settings
 
-        /** Create the notification channel if absent. minSdk 26 → NotificationChannel always available. */
+        /** Create the notification channels if absent. minSdk 26 → NotificationChannel always available. */
         fun ensureChannel(nm: NotificationManager) {
             if (nm.getNotificationChannel(CHANNEL_ID) == null) {
                 nm.createNotificationChannel(
                     NotificationChannel(CHANNEL_ID, "Task complete", NotificationManager.IMPORTANCE_HIGH),
+                )
+            }
+            if (nm.getNotificationChannel(APPROVALS_CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(APPROVALS_CHANNEL_ID, "Approvals", NotificationManager.IMPORTANCE_HIGH),
                 )
             }
         }

@@ -252,6 +252,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** §18.1 P1-3: askId is only unique per agent connection — every client-side approval table keys on
+ *  the (convoId, askId) composite, mirroring the daemon coordinator's ledger key. */
+data class ApprovalKey(val convoId: String, val askId: String)
+
 sealed interface ChatItem {
     /** [pending] = sent from this device but the daemon hasn't echoed any evidence back yet (stream
      *  chunk / tool event / turn end). Stays true while the link is down so the UI can say so —
@@ -824,17 +828,26 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** "n / m" for the current approval burst (1-based position, burst total) — null while only one card
      * is in flight, so the single-ask UI stays exactly as before. */
     val askQueueProgress = mutableStateOf<Pair<Int, Int>?>(null)
-    /** M3 advisory risk per pending askId — updates the card badge in place, never the daemon deadline. */
-    val askRisk = mutableStateMapOf<String, PermissionRiskUpdated>()
+    /** M3 advisory risk per pending ask (composite key, P1-3) — updates the card badge in place, never
+     * the daemon deadline. */
+    val askRisk = mutableStateMapOf<ApprovalKey, PermissionRiskUpdated>()
+
+    /** The current card's advisory risk, if any (M3). */
+    fun riskFor(ask: PermissionAsk): String? = askRisk[ApprovalKey(ask.convoId, ask.askId)]?.risk
+
+    /** issue #100: is THIS exact ask the one the daemon reported TIMED_OUT? Composite-matched (P1-3). */
+    fun askTimedOut(ask: PermissionAsk): Boolean = timedOutAskId.value == ApprovalKey(ask.convoId, ask.askId)
     private var askBurstTotal = 0
     private var askBurstDone = 0
     /** Daemon-authoritative account-wide approval queue for this machine. Kept across transient reconnects;
-     * only a fresh [PendingApprovals] replaces it, so a network blip never masquerades as "all clear". */
-    val pendingApprovals = mutableStateMapOf<String, PendingApproval>()
+     * only a fresh [PendingApprovals] replaces it, so a network blip never masquerades as "all clear".
+     * §18.1 P1-3: keyed by the COMPOSITE [ApprovalKey] — askId alone is only unique per agent connection,
+     * so two sessions both asking as "1" must stay two rows. */
+    val pendingApprovals = mutableStateMapOf<ApprovalKey, PendingApproval>()
     // issue #100: the askId the daemon reported as TIMED_OUT — the permission sheet for THIS exact ask renders
     // its terminal "timed out / auto-denied" state instead of vanishing. Matched by id, so a stale value can
     // never bleed onto the next card (askIds are unique per request).
-    val timedOutAskId = mutableStateOf<String?>(null)
+    val timedOutAskId = mutableStateOf<ApprovalKey?>(null)
     val slashCommands = mutableStateListOf<SlashCommand>()   // composer "/" autocomplete, pushed by the daemon
     val terminalEntries = mutableStateListOf<TerminalEntry>() // quick-terminal history for the active session (issue #3)
     val terminalBusy = mutableStateOf(false)                  // a shell command is awaiting approval/result
@@ -1059,6 +1072,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  [sessionId] identifies the finished session (null before the daemon named it) so a clicked
      *  notification can jump back to it (issue #99). */
     var onTurnFinished: ((title: String, preview: String?, sessionId: String?) -> Unit)? = null
+
+    /** §18.2 P2-4 (desktop): a NEW security approval arrived — the shell notifies (system banner + badge)
+     *  when the window is unfocused. Fired for approval asks only (questions are conversation UI); the
+     *  callback receives NO command/path content, matching the push minimization contract. */
+    var onApprovalArrived: (() -> Unit)? = null
 
     /** Real turn evidence (chunk / tool / turn-end / error) or a terminal frame (process exit, session gone):
      *  the agent is actually producing — or the whole turn is being torn down. Cancels BOTH the delivery
@@ -2437,13 +2455,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             is ToolEvent -> if (f.convoId == convoId.value) { promptEvidence(); finishThinking(); onToolEvent(f) }
             is PendingApprovals -> {
                 pendingApprovals.clear()
-                f.items.filterNot { it.ask.isQuestion }.forEach { pendingApprovals[it.ask.askId] = it }
+                f.items.filterNot { it.ask.isQuestion }.forEach { pendingApprovals[ApprovalKey(it.ask.convoId, it.ask.askId)] = it }
             }
             is PermissionAsk -> {
                 // Every approval contributes to the machine-wide inbox, even when its conversation is not
                 // the screen currently open. AskUserQuestion remains in its conversation-specific answer UI.
                 if (!f.isQuestion) {
-                    pendingApprovals[f.askId] = PendingApproval(
+                    onApprovalArrived?.invoke() // P2-4: desktop banner/badge hook (content-free)
+                    pendingApprovals[ApprovalKey(f.convoId, f.askId)] = PendingApproval(
                         ask = f,
                         expiresAt = f.timeoutSec?.let { epochMillis() + it * 1000L },
                     )
@@ -2451,7 +2470,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 if (f.convoId == convoId.value) {
                     // a card sitting in its terminal timed-out display (issue #100) must not dam the queue:
                     // a NEW live ask retires it (the old single-value model overwrote it here too)
-                    if (pendingAsk.value != null && pendingAsk.value?.askId == timedOutAskId.value) advanceAsk()
+                    if (pendingAsk.value?.let { ApprovalKey(it.convoId, it.askId) } == timedOutAskId.value && pendingAsk.value != null) advanceAsk()
                     val current = pendingAsk.value
                     val queuedAt = askQueue.indexOfFirst { it.askId == f.askId }
                     when {
@@ -2483,19 +2502,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // deadline, and drop updates for asks already terminal (SMART-APPROVAL §八)
             is PermissionRiskUpdated -> if (f.convoId == convoId.value) {
                 if (pendingAsk.value?.askId == f.askId || askQueue.any { it.askId == f.askId }) {
-                    askRisk[f.askId] = f
+                    askRisk[ApprovalKey(f.convoId, f.askId)] = f
                 }
             }
             // claude withdrew the ask (interrupt / moved on) — drop the card; a question card leaves a muted notice
             is AskWithdrawn -> {
-                pendingApprovals.remove(f.askId)
+                pendingApprovals.remove(ApprovalKey(f.convoId, f.askId))
                 if (f.convoId == convoId.value && pendingAsk.value?.askId == f.askId) {
                     val ask = pendingAsk.value
                     if (f.reason == AskWithdrawnReason.TIMED_OUT && ask?.questions == null) {
                         // issue #100: keep the permission card up but flip it to its terminal "timed out" state,
                         // so a returning user sees what happened instead of a card that silently vanished (which
                         // read as success). A tap on it now only dismisses — no more silent no-op.
-                        timedOutAskId.value = f.askId
+                        timedOutAskId.value = ApprovalKey(f.convoId, f.askId)
                     } else {
                         // agent moved on / session closed / a question timed out → dismiss (a question leaves a
                         // note) and surface the next queued ask, if any
@@ -4466,7 +4485,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  state. Ends the burst — resetting the "n / m" chip — once the queue drains. */
     private fun advanceAsk() {
         askBurstDone++
-        pendingAsk.value?.let { askRisk.remove(it.askId) } // the badge dies with its card
+        pendingAsk.value?.let { askRisk.remove(ApprovalKey(it.convoId, it.askId)) } // the badge dies with its card
         val next = askQueue.removeFirstOrNull()
         pendingAsk.value = next
         if (next == null) {
@@ -4501,7 +4520,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         val a = pendingAsk.value ?: return
         val c = convoId.value ?: return
         advanceAsk()
-        pendingApprovals.remove(a.askId)
+        pendingApprovals.remove(ApprovalKey(a.convoId, a.askId))
         if (decision == Decision.ALLOW && (remember || grantScope == "session")) a.rule?.let { r ->
             if (r !in allowRules) allowRules.add(r)
             messages.add(ChatItem.RuleChip(r)) // drop the "always allowing X" chip into the stream
@@ -4545,11 +4564,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     /** Resolve any account-wide inbox row directly, without opening or attaching its conversation. */
-    fun resolvePendingApproval(askId: String, allow: Boolean) {
-        val row = pendingApprovals.remove(askId) ?: return
-        if (pendingAsk.value?.askId == askId) {
+    fun resolvePendingApproval(convoId: String?, askId: String, allow: Boolean) {
+        // P1-3: exact composite removal; a caller that (legacy) only knows the askId falls back to the
+        // first row carrying it — single-session behavior, unchanged
+        val key = if (convoId != null) ApprovalKey(convoId, askId)
+        else pendingApprovals.keys.firstOrNull { it.askId == askId } ?: return
+        val row = pendingApprovals.remove(key) ?: return
+        if (pendingAsk.value?.let { ApprovalKey(it.convoId, it.askId) } == key) {
             advanceAsk()
-        } else if (askQueue.removeAll { it.askId == askId }) { // resolved from the inbox while queued
+        } else if (askQueue.removeAll { it.convoId == key.convoId && it.askId == key.askId }) { // resolved from the inbox while queued
             askBurstTotal--
             updateAskProgress()
         }
