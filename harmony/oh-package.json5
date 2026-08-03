@@ -1,0 +1,11 @@
+{
+  "name": "cc-pocket-harmony",
+  "version": "0.1.0",
+  "modelVersion": "5.0.0",
+  "description": "cc-pocket HarmonyOS client: drive the desktop Claude Code daemon over the zero-knowledge E2E relay",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {},
+  "devDependencies": {}
+}

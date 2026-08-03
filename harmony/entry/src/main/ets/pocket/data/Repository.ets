@@ -1,0 +1,896 @@
+import { util } from '@kit.ArkTS';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { image } from '@kit.ImageKit';
+import { common } from '@kit.AbilityKit';
+import { E2EKeyPair } from '../crypto/E2ECrypto';
+import { RelayConnection } from '../net/RelayConnection';
+import { Push } from '../net/Push';
+import { DEFAULT_RELAY, Pairing } from '../net/Pairing';
+import { PairedDaemon, Store } from '../store/Store';
+import { mergeHistory } from './TranscriptMerge';
+import { ThemeMode, Tok } from '../ui/Theme';
+import { b64Encode, b64Len } from '../util/B64';
+import {
+  compressImage, pickFiles, pickImages, readFileInChunks,
+  FILE_CHUNK_RAW, MAX_UPLOAD_BYTES, PickedFileRef,
+} from '../media/Attach';
+import {
+  DirectoryEntry, FileUploaded, HistoryMessage, ImageData, PermissionAsk, SessionSummary,
+  controlRegisterPush,
+  frameCancelTurn, frameClientCaps, frameCloseSession, frameFileCancel, frameFileChunk,
+  frameListDirectories, frameListPendingApprovals, frameListSessions, frameModeSwitch, frameOpenSession,
+  framePermissionVerdict, frameRuleClear, frameSendPrompt,
+  ja, jb, jo, js, jstr,
+} from '../protocol/Protocol';
+
+/**
+ * 应用状态仓库（ArkTS 移植 PocketRepository 的 M1 子集）。
+ * V1 状态管理约定：@Observed 类的数组字段一律"改后重赋"（不可变式更新），
+ * ChatMessage 自身是 @Observed，流式追加直接改 text 即可驱动 UI。
+ */
+
+const TAG = 'ccpocket';
+
+export type Screen = 'pairing' | 'projects' | 'sessions' | 'chat' | 'settings';
+export type ConnState = 'connecting' | 'online' | 'offline' | 'auth_failed';
+
+/** 已落盘文件的展示模型（随用户消息气泡渲染，对齐 SentFile）。 */
+export class SentFile {
+  name: string = '';
+  size: number = 0;
+  path: string = '';
+  mediaType: string = '';
+}
+
+@Observed
+export class ChatMessage {
+  id: string = '';
+  role: 'user' | 'assistant' | 'tool' | 'thinking' | 'error' = 'assistant';
+  text: string = '';
+  tool: string | null = null;
+  streaming: boolean = false;
+  delivered: boolean = true; // user 消息的 PromptAck 回执
+  promptId: string | null = null;
+  ok: boolean | null = null;
+  images: image.PixelMap[] = []; // user 消息内联图片（本会话内有效；历史回放不带图）
+  files: SentFile[] = [];        // user 消息附带的落盘文件 chip
+}
+
+// ── 附件（对齐 PocketRepository 的 pendingImages / pendingFiles 语义与常量） ──
+
+export type ImgState = 'compressing' | 'ready' | 'rejected';
+export type FileUpState = 'queued' | 'uploading' | 'landed' | 'failed';
+
+const MAX_IMAGES = 4;
+const IMAGE_BUDGET_B64 = 240_000; // 一条 SendPrompt 帧内全部图片的 base64 预算
+const MAX_FILES = 6;
+const UPLOAD_ACK_TIMEOUT_MS = 20_000;
+
+@Observed
+export class PendingImage {
+  id: number = 0;
+  bytes: Uint8Array = new Uint8Array(0); // 压缩后的 JPEG
+  preview: image.PixelMap | null = null;
+  state: ImgState = 'compressing';
+}
+
+@Observed
+export class PendingFile {
+  id: number = 0;
+  uri: string = '';
+  name: string = '';
+  size: number = 0;
+  mediaType: string = '';
+  state: FileUpState = 'queued';
+  progress: number = 0;
+  error: string = '';
+  captureId: string = '';
+  path: string | null = null;   // 落盘后 daemon 回报的 @path
+  landedName: string = '';
+}
+
+@Observed
+export class Repository {
+  static readonly instance = new Repository();
+
+  // ── 导航与连接状态 ──
+  screen: Screen = 'pairing';
+  connState: ConnState = 'connecting';
+  statusLine: string = '';
+  peerOnline: boolean = false;
+
+  // ── 数据 ──
+  paired: PairedDaemon | null = null;
+  bindings: PairedDaemon[] = []; // 全部已配对电脑（多机切换）
+  directories: DirectoryEntry[] = [];
+  sessions: SessionSummary[] = [];
+  currentWorkdir: string = '';
+  messages: ChatMessage[] = [];
+  executing: boolean = false;
+  activity: string = ''; // 回合内当前活动（思考中 / 工具名 / 回复中），空 = 静默
+  currentAsk: PermissionAsk | null = null;
+  selfTestLine: string = ''; // 开发期自检结果（配对页展示）
+
+  // ── 设置 ──
+  themeMode: ThemeMode = 'dark';
+  themeVersion: number = 0;    // 主题切换时 +1，Index 用它整树重建（Tok 是 static，build 时读取）
+  allowRules: string[] = [];   // 本会话"始终允许"的规则（本地镜像，对齐 PocketRepository.allowRules）
+  defaultMode: string = 'default'; // 新会话默认权限模式（'default'|'auto'|'acceptEdits'|'plan'|'bypassPermissions'）
+
+  // ── 会话权限模式（session.live 同步；显示在聊天顶栏） ──
+  mode: string = 'default';
+  permissionMode: string = ''; // 后端原生模式（'auto'），空 = 无
+
+  // ── 附件（输入条上方的暂存区） ──
+  pendingImages: PendingImage[] = [];
+  pendingFiles: PendingFile[] = [];
+
+  // ── 内部 ──
+  private conn: RelayConnection | null = null;
+  private keys: E2EKeyPair | null = null;
+  private convoId: string | null = null;
+  private currentSessionId: string | null = null;
+  private retryTimer = -1;
+  private retryDelay = 2000;
+  private intentionalDown = false;
+  private initialized = false;
+  private pendingIdSeq = 1;
+  private uploadRunning = false;      // 一次只传一个文件（对齐 Kotlin：chunks 不饿死心跳）
+  private uploadCancelCap: string | null = null;
+  private fileAckTimer = -1;
+  private pendingDefaultMode = '';    // 新会话待应用的默认模式（首个 session.live 后补 mode.switch）
+
+  // ═══ 生命周期 ═══
+
+  async init(): Promise<void> {
+    if (this.initialized) return;
+    this.initialized = true;
+    // 主题：首帧渲染前应用（Tok 是 static，build 时读取）
+    this.themeMode = (Store.loadThemeMode() ?? 'dark') as ThemeMode;
+    Tok.apply(Tok.resolveDark(this.themeMode));
+    this.defaultMode = Store.loadDefaultMode() ?? 'default';
+    this.bindings = Store.loadBindings();
+    this.paired = Store.loadActive();
+    this.keys = await Store.deviceKeys(); // 提前生成，配对时直接用
+    if (this.paired === null) {
+      this.screen = 'pairing';
+      this.connState = 'offline';
+    } else {
+      this.screen = 'projects';
+      this.connect();
+    }
+  }
+
+  /** 切换主题：换 token + 整树重建（themeVersion 驱动 Index 的 if 分支销毁重建）。 */
+  setThemeMode(mode: ThemeMode): void {
+    if (mode === this.themeMode) return;
+    this.themeMode = mode;
+    Store.saveThemeMode(mode);
+    Tok.apply(Tok.resolveDark(mode));
+    this.themeVersion = this.themeVersion + 1;
+  }
+
+  // ═══ 权限模式 ═══
+
+  /** 当前会话模式的统一显示键（'auto' 优先于枚举 mode）。 */
+  currentModeKey(): string {
+    return this.permissionMode.length > 0 ? this.permissionMode : this.mode;
+  }
+
+  /** 会话内切换权限模式（对齐 switchMode：下个回合生效，绝不打断进行中的回合）。 */
+  switchMode(modeKey: string): void {
+    const convoId = this.convoId;
+    if (convoId === null || modeKey === this.currentModeKey()) return;
+    // 乐观更新；daemon 的 session.live 重播报会校正
+    this.mode = modeKey === 'auto' ? 'default' : modeKey;
+    this.permissionMode = modeKey === 'auto' ? 'auto' : '';
+    this.conn?.send(frameModeSwitch(convoId, modeKey));
+  }
+
+  /** 新会话默认模式（设置页）；持久化，开新会话时经 OpenSession + 首个 session.live 校正应用。 */
+  setDefaultMode(modeKey: string): void {
+    this.defaultMode = modeKey;
+    Store.saveDefaultMode(modeKey);
+  }
+
+  /** 回前台：掉线则立即重连（对齐 OnAppForeground 语义）。 */
+  onAppForeground(): void {
+    if (this.paired !== null && this.connState !== 'online' && this.connState !== 'connecting') {
+      this.retryDelay = 2000;
+      this.connect();
+    }
+  }
+
+  // ═══ 配对 ═══
+
+  async pair(code: string): Promise<string> {
+    try {
+      const keys = this.keys ?? await Store.deviceKeys();
+      this.keys = keys;
+      const resolved = await Pairing.resolveCode(code.trim());
+      this.paired = await Pairing.redeem(DEFAULT_RELAY, resolved.accountId, resolved.daemonPub, resolved.ticket, keys);
+      this.bindings = Store.loadBindings();
+      this.screen = 'projects';
+      this.connect();
+      return '';
+    } catch (e) {
+      return `配对失败：${(e as Error).message}`;
+    }
+  }
+
+  /**
+   * 扫码/粘贴的 ccpocket://pair?... 链接（对齐 PocketRepository.handlePairUrl）：
+   * ?code=123456 短链走 code 路径；完整 ?relay=&acct=&dpk=&ticket= 直接 redeem（relay 以二维码为准）。
+   */
+  async pairLink(link: string): Promise<string> {
+    const codeMatch = link.trim().match(/[?&]code=([0-9]{6})/);
+    if (codeMatch !== null) return this.pair(codeMatch[1]);
+    const info = Pairing.parseLink(link.trim());
+    if (info === null) return '无效的配对链接';
+    try {
+      const keys = this.keys ?? await Store.deviceKeys();
+      this.keys = keys;
+      this.paired = await Pairing.redeem(info.relay, info.accountId, info.daemonPub, info.ticket, keys);
+      this.bindings = Store.loadBindings();
+      this.screen = 'projects';
+      this.connect();
+      return '';
+    } catch (e) {
+      return `配对失败：${(e as Error).message}`;
+    }
+  }
+
+  // ═══ 多电脑 ═══
+
+  /** 切换活跃电脑：断当前连接 → 换绑定 → 清会话状态 → 重连。 */
+  switchComputer(accountId: string): void {
+    if (this.paired !== null && this.paired.accountId === accountId) return;
+    this.intentionalDown = true;
+    this.conn?.disconnect();
+    this.conn = null;
+    Store.setActive(accountId);
+    this.bindings = Store.loadBindings();
+    this.paired = Store.loadActive();
+    this.directories = [];
+    this.sessions = [];
+    this.messages = [];
+    this.convoId = null;
+    this.currentSessionId = null;
+    this.currentAsk = null;
+    this.executing = false;
+    this.activity = '';
+    this.clearAttachments();
+    this.screen = 'projects';
+    this.connect();
+  }
+
+  /** 进入"添加电脑"（保留现有绑定，配对页提供返回）。 */
+  addComputer(): void {
+    this.screen = 'pairing';
+  }
+
+  /** 系统返回键：应用内导航优先（chat→sessions→projects），项目页/首配页才放行退出。 */
+  handleBack(): boolean {
+    if (this.screen === 'chat') {
+      this.closeSession();
+      return true;
+    }
+    if (this.screen === 'sessions' || this.screen === 'settings') {
+      this.backToProjects();
+      return true;
+    }
+    if (this.screen === 'pairing' && this.bindings.length > 0) {
+      this.screen = 'projects';
+      return true;
+    }
+    return false;
+  }
+
+  /** 解配当前电脑：还有别的绑定就切过去，没有才回配对页。 */
+  unpair(): void {
+    this.intentionalDown = true;
+    this.conn?.disconnect();
+    this.conn = null;
+    Store.unpair();
+    this.bindings = Store.loadBindings();
+    this.paired = Store.loadActive();
+    this.directories = [];
+    this.sessions = [];
+    this.messages = [];
+    this.convoId = null;
+    this.currentSessionId = null;
+    this.clearAttachments();
+    if (this.paired === null) {
+      this.screen = 'pairing';
+      this.connState = 'offline';
+    } else {
+      this.screen = 'projects';
+      this.connect();
+    }
+  }
+
+  // ═══ 连接 ═══
+
+  connect(): void {
+    const paired = this.paired;
+    const keys = this.keys;
+    if (paired === null || keys === null) return;
+    this.cancelRetry();
+    this.intentionalDown = false;
+    this.conn?.disconnect();
+    this.connState = 'connecting';
+    this.statusLine = '连接中…';
+
+    const firstTicket = Store.takeFirstTicket();
+    const repo = this;
+    const conn = new RelayConnection({
+      onReady: () => {
+        repo.connState = 'online';
+        repo.statusLine = '';
+        repo.retryDelay = 2000;
+        conn.send(frameClientCaps());
+        conn.send(frameListDirectories());
+        conn.send(frameListPendingApprovals());
+        // 推送 token 注册：每次（重）连重发（对齐 RegisterPush 协议注释）
+        Push.token().then((t) => {
+          if (t.length > 0 && repo.conn === conn) {
+            conn.sendControl(controlRegisterPush('huawei', t));
+          }
+        });
+        // 重连后恢复打开的会话（对齐 restoreAfterReconnect 的最小版）；带当前模式避免重置
+        if (repo.convoId !== null && repo.currentWorkdir.length > 0) {
+          conn.send(frameOpenSession(repo.currentWorkdir, repo.currentSessionId, null, repo.mode));
+        }
+      },
+      onFrame: (body) => repo.handleFrame(body),
+      onControl: () => {},
+      onPeerPresence: (online) => {
+        repo.peerOnline = online;
+      },
+      onDown: (reason) => repo.onDown(reason),
+    });
+    this.conn = conn;
+    conn.connect(paired, keys, firstTicket).catch((e: Error) => repo.onDown(`connect:${e.message}`));
+  }
+
+  private onDown(reason: string): void {
+    if (this.intentionalDown) return;
+    hilog.info(0x0000, TAG, `link down: ${reason}`);
+    if (reason.startsWith('auth:')) {
+      // 凭证被吊销/失效——只能重新配对（对齐 RelayAuthException 语义）
+      this.connState = 'auth_failed';
+      this.statusLine = `配对凭证已失效（${reason}），请重新配对`;
+      return;
+    }
+    this.connState = 'offline';
+    this.statusLine = `连接断开（${reason}），重连中…`;
+    this.scheduleRetry();
+  }
+
+  private scheduleRetry(): void {
+    this.cancelRetry();
+    const delay = this.retryDelay;
+    this.retryDelay = Math.min(this.retryDelay * 2, 30000);
+    this.retryTimer = setTimeout(() => this.connect(), delay);
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer >= 0) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = -1;
+    }
+  }
+
+  // ═══ 导航动作 ═══
+
+  openProject(dir: DirectoryEntry): void {
+    this.currentWorkdir = dir.path;
+    this.sessions = [];
+    this.screen = 'sessions';
+    this.conn?.send(frameListSessions(dir.path));
+  }
+
+  openSession(sessionId: string | null): void {
+    this.currentSessionId = sessionId;
+    this.convoId = null;
+    this.messages = [];
+    this.currentAsk = null;
+    this.executing = false;
+    this.activity = '';
+    this.allowRules = []; // 规则是会话级的（对齐：换会话即清空本地镜像）
+    this.clearAttachments();
+    // 新会话带默认模式；OpenSession 无原生模式字段，'auto' 经首个 session.live 后补 mode.switch
+    this.pendingDefaultMode = sessionId === null ? this.defaultMode : '';
+    this.mode = sessionId === null ? (this.defaultMode === 'auto' ? 'default' : this.defaultMode) : 'default';
+    this.permissionMode = sessionId === null && this.defaultMode === 'auto' ? 'auto' : '';
+    this.screen = 'chat';
+    this.conn?.send(frameOpenSession(this.currentWorkdir, sessionId, null, this.mode));
+  }
+
+  backToProjects(): void {
+    this.screen = 'projects';
+    this.conn?.send(frameListDirectories());
+  }
+
+  backToSessions(): void {
+    this.screen = 'sessions';
+    if (this.currentWorkdir.length > 0) {
+      this.conn?.send(frameListSessions(this.currentWorkdir));
+    }
+  }
+
+  openSettings(): void {
+    this.screen = 'settings';
+  }
+
+  // ═══ 聊天动作 ═══
+
+  sendPrompt(text: string): void {
+    const convoId = this.convoId;
+    if (convoId === null) return;
+    const ready = this.pendingImages.filter((p: PendingImage) => p.state === 'ready');
+    const landed = this.pendingFiles.filter((p: PendingFile) => p.state === 'landed' && p.path !== null);
+    if (text.trim().length === 0 && ready.length === 0 && landed.length === 0) return;
+    if (this.uploadsBusy()) return; // 还有文件在传——发送键在 UI 层已禁用，这里双保险
+    const images = ready.map((p: PendingImage): ImageData => {
+      const d: ImageData = { mediaType: 'image/jpeg', base64: b64Encode(p.bytes) };
+      return d;
+    });
+    // 落盘文件以 @path 引用折进 prompt 文本（issue #75 机制：agent 按路径 Read）
+    const refs = landed.map((p: PendingFile) => `@${p.path}`).join('\n');
+    const outText = landed.length === 0 ? text : (text.trim().length === 0 ? refs : `${text}\n\n${refs}`);
+    const promptId = util.generateRandomUUID();
+    const m = new ChatMessage();
+    m.id = promptId;
+    m.role = 'user';
+    m.text = text;
+    m.delivered = false;
+    m.promptId = promptId;
+    m.images = ready.map((p: PendingImage) => p.preview).filter((pm: image.PixelMap | null) => pm !== null) as image.PixelMap[];
+    m.files = landed.map((p: PendingFile): SentFile => {
+      const f = new SentFile();
+      f.name = p.landedName.length > 0 ? p.landedName : p.name;
+      f.size = p.size;
+      f.path = p.path ?? '';
+      f.mediaType = p.mediaType;
+      return f;
+    });
+    this.messages = [...this.messages, m];
+    this.executing = true;
+    this.pendingImages = [];
+    this.pendingFiles = [];
+    this.conn?.send(frameSendPrompt(convoId, outText, promptId, images));
+  }
+
+  // ═══ 附件 ═══
+
+  uploadsBusy(): boolean {
+    return this.pendingFiles.some((p: PendingFile) => p.state === 'uploading' || p.state === 'queued');
+  }
+
+  /** 相册选图 → 暂存（压缩中）→ 压缩完按预算标 ready/rejected。 */
+  async attachImages(ctx: common.UIAbilityContext): Promise<void> {
+    const room = MAX_IMAGES - this.pendingImages.length;
+    if (room <= 0) return;
+    const uris = await pickImages(ctx, room);
+    for (const uri of uris) {
+      const p = new PendingImage();
+      p.id = this.pendingIdSeq++;
+      this.pendingImages = [...this.pendingImages, p];
+      compressImage(uri).then((c) => {
+        p.bytes = c.bytes;
+        p.preview = c.preview;
+        p.state = 'ready';
+        this.revalidateImageBudget();
+      }).catch(() => {
+        this.pendingImages = this.pendingImages.filter((x: PendingImage) => x.id !== p.id);
+      });
+    }
+  }
+
+  removePendingImage(id: number): void {
+    this.pendingImages = this.pendingImages.filter((p: PendingImage) => p.id !== id);
+    this.revalidateImageBudget(); // 释放预算可能让之前超预算的图回到 ready
+  }
+
+  /** 累计 base64 超 IMAGE_BUDGET_B64 的图标 rejected（对齐 Kotlin revalidatePending）。 */
+  private revalidateImageBudget(): void {
+    let used = 0;
+    for (const p of this.pendingImages) {
+      if (p.state === 'compressing') continue;
+      const cost = b64Len(p.bytes.length);
+      const ok = used + cost <= IMAGE_BUDGET_B64;
+      if (ok) used += cost;
+      p.state = ok ? 'ready' : 'rejected';
+    }
+    this.pendingImages = [...this.pendingImages];
+  }
+
+  /** 文档选择 → 暂存排队 → 启动上传泵。 */
+  async attachFiles(ctx: common.UIAbilityContext): Promise<void> {
+    const room = MAX_FILES - this.pendingFiles.length;
+    if (room <= 0) return;
+    const picked = await pickFiles(ctx, room);
+    for (const ref of picked) {
+      const p = new PendingFile();
+      p.id = this.pendingIdSeq++;
+      p.uri = ref.uri;
+      p.name = ref.name;
+      p.size = ref.size;
+      p.mediaType = ref.mediaType;
+      if (ref.size > MAX_UPLOAD_BYTES) {
+        p.state = 'failed';
+        p.error = '超过 200 MB 上限';
+      }
+      this.pendingFiles = [...this.pendingFiles, p];
+    }
+    this.pumpFileUploads();
+  }
+
+  removePendingFile(id: number): void {
+    const victim = this.pendingFiles.find((p: PendingFile) => p.id === id);
+    if (victim === undefined) return;
+    if (victim.state === 'uploading') {
+      this.uploadCancelCap = victim.captureId;
+      const convoId = this.convoId;
+      if (convoId !== null && victim.captureId.length > 0) {
+        this.conn?.send(frameFileCancel(convoId, victim.captureId));
+      }
+    }
+    this.pendingFiles = this.pendingFiles.filter((p: PendingFile) => p.id !== id);
+    this.pumpFileUploads();
+  }
+
+  retryPendingFile(id: number): void {
+    const p = this.pendingFiles.find((f: PendingFile) => f.id === id);
+    if (p === undefined || p.state !== 'failed') return;
+    if (p.uri.length === 0) return; // 超限文件没有可重传的来源
+    p.state = 'queued';
+    p.error = '';
+    p.progress = 0;
+    p.captureId = '';
+    this.pendingFiles = [...this.pendingFiles];
+    this.pumpFileUploads();
+  }
+
+  /**
+   * 上传泵：一次一个文件，768KB 原始字节一块，每块独立 base64（daemon 边收边写盘）。
+   * 最后一块发出后等 pocket/file.uploaded 回执，20s 无回执判失败（daemon 太旧不认这个帧）。
+   */
+  private pumpFileUploads(): void {
+    if (this.uploadRunning) return;
+    const next = this.pendingFiles.find((p: PendingFile) => p.state === 'queued');
+    if (next === undefined) return;
+    const convoId = this.convoId;
+    if (convoId === null) {
+      next.state = 'failed';
+      next.error = '没有活跃会话';
+      this.pendingFiles = [...this.pendingFiles];
+      return;
+    }
+    this.uploadRunning = true;
+    this.uploadCancelCap = null;
+    next.state = 'uploading';
+    next.captureId = util.generateRandomUUID();
+    next.progress = 0;
+    this.pendingFiles = [...this.pendingFiles];
+    const capId = next.captureId;
+    const total = next.size;
+    const parts = Math.max(1, Math.ceil(total / FILE_CHUNK_RAW));
+    readFileInChunks(next.uri, async (idx: number, bytes: Uint8Array, last: boolean) => {
+      if (this.uploadCancelCap === capId) throw new Error('cancelled');
+      this.conn?.send(frameFileChunk(
+        convoId, capId, idx, last, next.name, next.mediaType,
+        b64Encode(bytes), idx === 0 ? total : 0));
+      next.progress = (idx + 1) / parts;
+      // 每块让出一次事件循环，避免大文件 base64 卡住 UI
+      await new Promise<void>((r) => setTimeout(r, 0));
+    }).then((ok) => {
+      if (this.uploadCancelCap === capId) {
+        this.finishUpload(capId);
+        return;
+      }
+      if (!ok) {
+        next.state = 'failed';
+        next.error = '文件读取失败';
+        this.pendingFiles = [...this.pendingFiles];
+        this.finishUpload(capId);
+        return;
+      }
+      // 等回执
+      this.armFileAckDeadline(capId);
+    });
+  }
+
+  private armFileAckDeadline(capId: string): void {
+    if (this.fileAckTimer >= 0) clearTimeout(this.fileAckTimer);
+    this.fileAckTimer = setTimeout(() => {
+      const p = this.pendingFiles.find((f: PendingFile) => f.captureId === capId && f.state === 'uploading');
+      if (p !== undefined) {
+        p.state = 'failed';
+        p.error = '电脑端无回执——daemon 版本可能太旧不支持文件上传';
+        this.pendingFiles = [...this.pendingFiles];
+      }
+      this.finishUpload(capId);
+    }, UPLOAD_ACK_TIMEOUT_MS);
+  }
+
+  private onFileUploaded(f: FileUploaded): void {
+    const p = this.pendingFiles.find((x: PendingFile) => x.captureId === f.captureId && x.state === 'uploading');
+    if (p === undefined) return; // 已被取消/消费
+    if (f.ok && f.path !== null) {
+      p.state = 'landed';
+      p.progress = 1;
+      p.path = f.path;
+      p.landedName = f.name ?? p.name;
+    } else {
+      p.state = 'failed';
+      p.error = f.error ?? '上传失败';
+    }
+    this.pendingFiles = [...this.pendingFiles];
+    this.finishUpload(f.captureId);
+  }
+
+  /** 当前上传收尾（无论成败），启动队列里的下一个。 */
+  private finishUpload(capId: string): void {
+    if (this.fileAckTimer >= 0) {
+      clearTimeout(this.fileAckTimer);
+      this.fileAckTimer = -1;
+    }
+    if (this.uploadCancelCap === capId) this.uploadCancelCap = null;
+    this.uploadRunning = false;
+    this.pumpFileUploads();
+  }
+
+  /** 会话切换/关闭：丢掉暂存附件（已落盘的副本留在旧会话 inbox，无害）。 */
+  private clearAttachments(): void {
+    this.uploadCancelCap = this.pendingFiles.find((p: PendingFile) => p.state === 'uploading')?.captureId ?? null;
+    if (this.fileAckTimer >= 0) {
+      clearTimeout(this.fileAckTimer);
+      this.fileAckTimer = -1;
+    }
+    this.pendingImages = [];
+    this.pendingFiles = [];
+    this.uploadRunning = false;
+  }
+
+  answerAsk(decision: 'allow' | 'deny', remember: boolean = false, answers: Record<string, string> | null = null): void {
+    const ask = this.currentAsk;
+    const convoId = this.convoId;
+    if (ask === null || convoId === null) return;
+    // "始终允许"落账：本地镜像规则（对齐 PocketRepository.resolve 的 allowRules.add）
+    if (decision === 'allow' && remember && ask.rule !== null && !this.allowRules.includes(ask.rule)) {
+      this.allowRules = [...this.allowRules, ask.rule];
+    }
+    this.conn?.send(framePermissionVerdict(convoId, ask.askId, decision, remember, answers));
+    this.currentAsk = null;
+  }
+
+  /** 删除一条"始终允许"规则（设置页）；daemon 侧同步遗忘，下次同类操作重新询问。 */
+  clearRule(rule: string): void {
+    const convoId = this.convoId;
+    this.allowRules = this.allowRules.filter((r: string) => r !== rule);
+    if (convoId !== null) {
+      this.conn?.send(frameRuleClear(convoId, rule));
+    }
+  }
+
+  clearAllRules(): void {
+    const convoId = this.convoId;
+    this.allowRules = [];
+    if (convoId !== null) {
+      this.conn?.send(frameRuleClear(convoId, null));
+    }
+  }
+
+  cancelTurn(): void {
+    const convoId = this.convoId;
+    if (convoId !== null) {
+      this.conn?.send(frameCancelTurn(convoId));
+    }
+  }
+
+  closeSession(): void {
+    const convoId = this.convoId;
+    if (convoId !== null) {
+      this.conn?.send(frameCloseSession(convoId));
+    }
+    this.convoId = null;
+    this.clearAttachments();
+    this.backToSessions();
+  }
+
+  // ═══ 入站帧分发 ═══
+
+  private handleFrame(body: Record<string, Object>): void {
+    const t = js(body['t']);
+    switch (t) {
+      case 'pocket/dirs': {
+        this.directories = ja(body['entries']).map((v: Object) => DirectoryEntry.from(v));
+        break;
+      }
+      case 'pocket/sessions': {
+        const workdir = js(body['workdir']);
+        if (workdir === this.currentWorkdir) {
+          this.sessions = ja(body['items']).map((v: Object) => SessionSummary.from(v));
+        }
+        break;
+      }
+      case 'pocket/session.live': {
+        this.convoId = js(body['convoId']);
+        const sid = jstr(body['sessionId']);
+        if (sid !== null) this.currentSessionId = sid;
+        const executing = body['executing'];
+        this.executing = typeof executing === 'boolean' ? executing : false;
+        // 权限模式同步（可选字段：老 daemon 不带则保持现状）
+        const liveMode = jstr(body['mode']);
+        if (liveMode !== null) this.mode = liveMode;
+        const liveNative = jstr(body['permissionMode']);
+        this.permissionMode = liveNative ?? '';
+        // 新会话默认 'auto'：OpenSession 无原生字段，拿到 convoId 后补发 mode.switch
+        if (this.pendingDefaultMode.length > 0) {
+          const want = this.pendingDefaultMode;
+          this.pendingDefaultMode = '';
+          if (want !== this.currentModeKey()) {
+            this.conn?.send(frameModeSwitch(this.convoId, want));
+          }
+        }
+        break;
+      }
+      case 'pocket/history': {
+        const delta = jb(body['delta']);
+        const rows = ja(body['messages']).map((v: Object) => this.historyToChat(HistoryMessage.from(v)));
+        if (delta) {
+          this.messages = [...this.messages, ...rows];
+        } else {
+          // 锚点合并（TranscriptMerge）：不盲目替换——老 scrollback 不被窗口截掉、
+          // 排队气泡原地保留、流式泡泡不被回放打断。
+          this.messages = mergeHistory(this.messages, rows);
+        }
+        break;
+      }
+      case 'pocket/chunk': {
+        const piece = jo(body['piece']);
+        const kind = js(piece['t']);
+        const text = js(piece['text']);
+        if (kind === 'thinking') {
+          this.activity = '思考中';
+          this.appendStream('thinking', text);
+        } else {
+          this.activity = '回复中';
+          this.appendStream('assistant', text);
+        }
+        break;
+      }
+      case 'pocket/tool': {
+        const phase = js(body['phase']);
+        const tool = js(body['tool']);
+        const preview = jstr(body['inputPreview']);
+        const output = jstr(body['output']);
+        const ok = body['ok'];
+        if (phase === 'result' && output !== null) {
+          const m = this.newMessage('tool');
+          m.tool = tool;
+          m.text = output;
+          m.ok = typeof ok === 'boolean' ? ok : null;
+          this.pushMessage(m);
+        } else if (phase === 'start') {
+          this.activity = `执行 ${tool}`;
+          const m = this.newMessage('tool');
+          m.tool = tool;
+          m.text = preview ?? '';
+          this.pushMessage(m);
+        }
+        break;
+      }
+      case 'pocket/ask': {
+        this.currentAsk = PermissionAsk.from(body);
+        break;
+      }
+      case 'pocket/ask.withdrawn': {
+        const askId = js(body['askId']);
+        if (this.currentAsk !== null && this.currentAsk.askId === askId) {
+          this.currentAsk = null;
+        }
+        break;
+      }
+      case 'pocket/turn.done': {
+        this.executing = false;
+        this.activity = '';
+        this.finalizeStreaming();
+        const error = jstr(body['error']);
+        if (error !== null) {
+          const m = this.newMessage('error');
+          m.text = error;
+          this.pushMessage(m);
+        }
+        break;
+      }
+      case 'pocket/prompt.ack': {
+        const promptId = js(body['promptId']);
+        this.messages = this.messages.map((m: ChatMessage) => {
+          if (m.promptId === promptId) m.delivered = true;
+          return m;
+        });
+        break;
+      }
+      case 'pocket/error': {
+        const m = this.newMessage('error');
+        m.text = js(body['message'], js(body['code'], 'error'));
+        this.pushMessage(m);
+        break;
+      }
+      case 'pocket/session.gone': {
+        // daemon 丢了这个会话（对齐：自动重开）。M1：重开当前会话。
+        if (this.currentWorkdir.length > 0) {
+          this.conn?.send(frameOpenSession(this.currentWorkdir, this.currentSessionId, null, this.mode));
+        }
+        break;
+      }
+      case 'pocket/daemon.info': {
+        const host = jstr(body['hostname']);
+        if (host !== null && this.paired !== null) {
+          this.paired.hostName = host;
+          Store.saveHostName(host);
+          this.bindings = Store.loadBindings(); // 切换器里的名字同步更新
+        }
+        break;
+      }
+      case 'pocket/file.uploaded': {
+        this.onFileUploaded(FileUploaded.from(body));
+        break;
+      }
+      default:
+        break; // 其余帧（usage / commands / jobs / approvals…）M1 不渲染
+    }
+  }
+
+  // ═══ 消息流组装 ═══
+
+  private newMessage(role: 'user' | 'assistant' | 'tool' | 'thinking' | 'error'): ChatMessage {
+    const m = new ChatMessage();
+    m.id = util.generateRandomUUID();
+    m.role = role;
+    return m;
+  }
+
+  private pushMessage(m: ChatMessage): void {
+    this.finalizeStreaming();
+    this.messages = [...this.messages, m];
+  }
+
+  /** 流式追加：连续的同类流片并入同一条气泡（对齐 Kotlin 的流式组装语义）。 */
+  private appendStream(role: 'assistant' | 'thinking', text: string): void {
+    const last = this.messages.length > 0 ? this.messages[this.messages.length - 1] : null;
+    if (last !== null && last.streaming && last.role === role) {
+      last.text = last.text + text;
+    } else {
+      const m = this.newMessage(role);
+      m.text = text;
+      m.streaming = true;
+      this.messages = [...this.messages, m];
+    }
+  }
+
+  private finalizeStreaming(): void {
+    let changed = false;
+    const next = this.messages.map((m: ChatMessage) => {
+      if (m.streaming) {
+        m.streaming = false;
+        changed = true;
+      }
+      return m;
+    });
+    if (changed) this.messages = [...next];
+  }
+
+  private historyToChat(h: HistoryMessage): ChatMessage {
+    const m = new ChatMessage();
+    m.id = util.generateRandomUUID();
+    m.role = h.error ? 'error' : h.role;
+    m.text = h.text;
+    m.tool = h.tool;
+    m.ok = h.ok;
+    return m;
+  }
+}
