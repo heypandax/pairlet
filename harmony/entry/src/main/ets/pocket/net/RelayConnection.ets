@@ -26,6 +26,7 @@ const TAG = 'ccpocket';
 const HANDSHAKE_TIMEOUT_MS = 15000;
 const PING_INTERVAL_MS = 20000;
 const PONG_TIMEOUT_MS = 10000;
+const PONG_MAX_MISSES = 2; // 连续未收到 pong 达此次数才判定掉线（配合 relay Ping 回显，抖动时少一次全量重连）
 
 export interface RelayCallbacks {
   /** 完成 Attached + E2E 握手，transport 可用。 */
@@ -61,7 +62,12 @@ export class RelayConnection {
   private pingTimer = -1;
   private handshakeTimer = -1;
   private pongTimer = -1;
+  private pongMisses = 0; // 连续未命中 pong 计数；收到 pong 或停止心跳清零（见 armPongWait/onPongTimeout）
   private alive = false; // 本连接是否仍被需要（主动断开后回调全部丢弃）
+  // 出/入站各持一条 promise 链，把 AES seal/open 串行化：保证「取号顺序 = 上线顺序」「按到达顺序解密投递」，
+  // 否则各帧异步加密完成先后不定 → daemon 严格递增计数器检查把迟到的小计数器帧当重放静默丢弃（对齐 Kotlin 单协程写端）。
+  private sendChain: Promise<void> = Promise.resolve();
+  private recvChain: Promise<void> = Promise.resolve();
   private cb: RelayCallbacks;
 
   constructor(cb: RelayCallbacks) {
@@ -159,18 +165,23 @@ export class RelayConnection {
       return;
     }
     if (this.phase === 'transport' && type === 2 && this.session !== null) {
-      this.session.open(payload).then((pt) => {
-        if (pt === null) {
-          hilog.warn(0x0000, TAG, 'transport frame dropped (decrypt/replay)');
-          return;
-        }
-        try {
-          const env = JSON.parse(fromUtf8(pt)) as Record<string, Object>;
-          const body = (env['body'] ?? {}) as Record<string, Object>;
-          this.cb.onFrame(body);
-        } catch (e) {
-          hilog.warn(0x0000, TAG, 'bad envelope json');
-        }
+      const session = this.session;
+      // 进入 recvChain：open→dispatch 按到达顺序串行，避免异步解密乱序回写 recvCtr 小值 + 乱序投递。
+      this.recvChain = this.recvChain.then((): Promise<void> => {
+        if (!this.alive || this.session === null) return Promise.resolve();
+        return session.open(payload).then((pt) => {
+          if (pt === null) {
+            hilog.warn(0x0000, TAG, 'transport frame dropped (decrypt/replay)');
+            return;
+          }
+          try {
+            const env = JSON.parse(fromUtf8(pt)) as Record<string, Object>;
+            const body = (env['body'] ?? {}) as Record<string, Object>;
+            this.cb.onFrame(body);
+          } catch (e) {
+            hilog.warn(0x0000, TAG, 'bad envelope json');
+          }
+        });
       }).catch((e: Error) => this.fail(`decrypt:${e.message}`));
     }
   }
@@ -214,9 +225,15 @@ export class RelayConnection {
   private sealAndSend(envelopeJsonText: string): void {
     const session = this.session;
     if (session === null) return;
-    session.seal(utf8(envelopeJsonText)).then((sealed) => {
-      if (!this.alive) return;
-      this.sendBinary(concatBytes(new Uint8Array([2]), sealed));
+    // 进入 sendChain：把 seal 的「取号 + 上线」整体串行，保证取号顺序 = 上线顺序。
+    // .catch 正常返回 → 链复位为 resolved，一次失败不永久卡死后续帧（fail 已置 alive=false，后续帧自动短路）。
+    this.sendChain = this.sendChain.then((): Promise<void> => {
+      if (!this.alive || this.session === null) return Promise.resolve();
+      return session.seal(utf8(envelopeJsonText)).then((sealed) => {
+        if (this.alive) {
+          this.sendBinary(concatBytes(new Uint8Array([2]), sealed));
+        }
+      });
     }).catch((e: Error) => this.fail(`seal:${e.message}`));
   }
 
@@ -248,7 +265,18 @@ export class RelayConnection {
       this.pongTimer = -1;
     }
     if (arm) {
-      this.pongTimer = setTimeout(() => this.fail('pong-timeout'), PONG_TIMEOUT_MS);
+      this.pongTimer = setTimeout(() => this.onPongTimeout(), PONG_TIMEOUT_MS);
+    } else {
+      this.pongMisses = 0; // 收到 pong（或停止心跳）→ 清零连续未命中计数
+    }
+  }
+
+  private onPongTimeout(): void {
+    this.pongTimer = -1;
+    this.pongMisses++;
+    // 未达阈值不立即断连：下一个 ping 周期（PING_INTERVAL_MS > PONG_TIMEOUT_MS）会再次 armPongWait 复探。
+    if (this.pongMisses >= PONG_MAX_MISSES) {
+      this.fail('pong-timeout');
     }
   }
 
@@ -294,5 +322,8 @@ export class RelayConnection {
     this.session = null;
     this.initiator = null;
     this.outbox = [];
+    this.sendChain = Promise.resolve(); // 复位串行链，避免复用连接对象时残留旧的 rejected/pending 态
+    this.recvChain = Promise.resolve();
+    this.pongMisses = 0;
   }
 }

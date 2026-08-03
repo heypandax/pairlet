@@ -201,7 +201,12 @@ export interface BodyPing {
 }
 
 export function frameClientCaps(): FrameClientCaps {
-  return { t: 'pocket/client.caps', supportsAgents: ['opencode'] };
+  // M1 只支持 claude 后端（frameOpenSession 硬编码 agent:'claude'）：绝不能谎报 'opencode'。
+  // daemon 看到该声明会把 opencode 会话行下发给手机（RequestRouter.emitSessions：
+  // supportsOpencode==true 才不过滤），用户点开一条 opencode 会话会被以 claude resume → fork
+  // 出一个新会话。空列表 = 诚实声明，daemon 会为本端过滤掉 opencode 行（claude/codex 行照常）。
+  // 后续支持 opencode 时：须把 agent 从 SessionSummary 透传进 frameOpenSession，再在这里加回 'opencode'。
+  return { t: 'pocket/client.caps', supportsAgents: [] };
 }
 
 export function frameListDirectories(root: string | null = null): FrameDirsList {

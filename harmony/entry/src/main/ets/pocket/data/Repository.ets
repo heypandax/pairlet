@@ -92,6 +92,18 @@ export class PendingFile {
   landedName: string = '';
 }
 
+/**
+ * session.gone 恢复用的"最近一条 prompt"暂存（对齐 PocketRepository.PromptRetry）。
+ * daemon 丢了会话（断线期被回收 / daemon 重启）时，自动 resume 同一会话后把这条 prompt
+ * 补发一次；promptId 随行，若原发其实已落地，daemon 会去重（issue #66）。
+ */
+class PendingPrompt {
+  text: string = '';
+  images: ImageData[] = [];
+  workdir: string = '';
+  promptId: string = '';
+}
+
 @Observed
 export class Repository {
   static readonly instance = new Repository();
@@ -166,6 +178,8 @@ export class Repository {
   private pendingDefaultMode = '';    // 新会话待应用的默认模式（首个 session.live 后补 mode.switch）
   private changedFilesTimer = -1;
   private viewerTimer = -1;
+  private pendingPrompt: PendingPrompt | null = null; // session.gone 恢复：最近一条待补发的 prompt
+  private promptResendArmed = false;  // session.gone 已触发重开、等下一个匹配的 session.live 补发
 
   // ═══ 生命周期 ═══
 
@@ -287,6 +301,8 @@ export class Repository {
     this.currentAsk = null;
     this.executing = false;
     this.activity = '';
+    this.pendingPrompt = null;
+    this.promptResendArmed = false;
     this.clearAttachments();
     this.screen = 'projects';
     this.connect();
@@ -327,6 +343,8 @@ export class Repository {
     this.messages = [];
     this.convoId = null;
     this.currentSessionId = null;
+    this.pendingPrompt = null;
+    this.promptResendArmed = false;
     this.clearAttachments();
     if (this.paired === null) {
       this.screen = 'pairing';
@@ -364,8 +382,12 @@ export class Repository {
             conn.sendControl(controlRegisterPush('huawei', t));
           }
         });
-        // 重连后恢复打开的会话（对齐 restoreAfterReconnect 的最小版）；带当前模式避免重置
-        if (repo.convoId !== null && repo.currentWorkdir.length > 0) {
+        // 重连后恢复打开的会话（对齐 restoreAfterReconnect 的最小版）；带当前模式避免重置。
+        // 必须同时握有 convoId 与具体 sessionId 才自动 resume（对齐 mobile 的
+        // `convo != null && sid != null && wd != null`）：新会话在 session.live 回填 sessionId
+        // 前断线重连时，resumeId=null 会被 daemon 当成"开全新会话" → fork（本仓库修过的
+        // "冗余会话=fork"老病）。宁可不自动重开、让用户手动重进，也不制造分叉。
+        if (repo.convoId !== null && repo.currentSessionId !== null && repo.currentWorkdir.length > 0) {
           conn.send(frameOpenSession(repo.currentWorkdir, repo.currentSessionId, null, repo.mode));
         }
       },
@@ -437,6 +459,8 @@ export class Repository {
     this.changedFiles = [];
     this.changedFilesError = '';
     this.closeFileViewer();
+    this.pendingPrompt = null; // 换会话即丢弃上个会话的补发暂存（否则同 workdir 换会话会误投）
+    this.promptResendArmed = false;
     this.clearAttachments();
     this.chatTitle = title.length > 0 ? title : '新会话';
     this.model = '';
@@ -504,6 +528,15 @@ export class Repository {
     }
     this.pendingImages = [];
     this.pendingFiles = [];
+    // session.gone 恢复暂存：这条 prompt 打进了活会话，若 daemon 已把会话回收，收到
+    // session.gone 后自动 resume 并补发这份（单次）。首个真·回合证据（chunk/tool/turn.done）到达即清。
+    const pending = new PendingPrompt();
+    pending.text = outText;
+    pending.images = images;
+    pending.workdir = this.currentWorkdir;
+    pending.promptId = promptId;
+    this.pendingPrompt = pending;
+    this.promptResendArmed = false;
     this.conn?.send(frameSendPrompt(convoId, outText, promptId, images));
   }
 
@@ -625,6 +658,21 @@ export class Repository {
       clearTimeout(this.viewerTimer);
       this.viewerTimer = -1;
     }
+  }
+
+  /** 真·回合证据到达（chunk/tool/turn.done）：prompt 已被处理，丢掉补发暂存（对齐 promptEvidence）。 */
+  private promptEvidence(): void {
+    this.pendingPrompt = null;
+  }
+
+  /**
+   * 会话域帧 convoId 门（跨会话转录污染防线，对齐 PocketRepository 各 `f.convoId == convoId.value`）：
+   * 当前无活跃会话，或帧的 convoId 与当前会话不符，一律忽略。session.live 是"确立 convoId"的帧、
+   * 不走此门；列表/审批清单/usage 等非会话域帧同样不受影响。
+   */
+  private forCurrentConvo(body: Record<string, Object>): boolean {
+    const c = this.convoId;
+    return c !== null && js(body['convoId']) === c;
   }
 
   // ═══ 附件 ═══
@@ -861,6 +909,8 @@ export class Repository {
       this.conn?.send(frameCloseSession(convoId));
     }
     this.convoId = null;
+    this.pendingPrompt = null;
+    this.promptResendArmed = false;
     this.clearAttachments();
     this.backToSessions();
   }
@@ -910,9 +960,20 @@ export class Repository {
             this.conn?.send(frameModeSwitch(this.convoId, want));
           }
         }
+        // session.gone 恢复（对齐 PocketRepository 的 SessionLive 分支）：重开已落地，补发那条
+        // 打进死会话的 prompt。单次——同 promptId 让 daemon 去重；workdir 匹配防止用户中途
+        // 导航走后误投。第二次 session.gone 会走诚实报错分支，绝不成环。
+        const retry = this.pendingPrompt;
+        if (this.promptResendArmed && retry !== null && retry.workdir === this.currentWorkdir) {
+          this.pendingPrompt = null;
+          this.promptResendArmed = false;
+          this.executing = true;
+          this.conn?.send(frameSendPrompt(this.convoId, retry.text, retry.promptId, retry.images));
+        }
         break;
       }
       case 'pocket/history': {
+        if (!this.forCurrentConvo(body)) break; // 跨会话回放会污染/清空当前 transcript
         const delta = jb(body['delta']);
         const rows = ja(body['messages']).map((v: Object) => this.historyToChat(HistoryMessage.from(v)));
         if (delta) {
@@ -925,6 +986,8 @@ export class Repository {
         break;
       }
       case 'pocket/chunk': {
+        if (!this.forCurrentConvo(body)) break; // 刚离开的会话的流尾不能渲染进当前会话
+        this.promptEvidence();
         const piece = jo(body['piece']);
         const kind = js(piece['t']);
         const text = js(piece['text']);
@@ -938,6 +1001,8 @@ export class Repository {
         break;
       }
       case 'pocket/tool': {
+        if (!this.forCurrentConvo(body)) break;
+        this.promptEvidence();
         const phase = js(body['phase']);
         const tool = js(body['tool']);
         const preview = jstr(body['inputPreview']);
@@ -959,10 +1024,12 @@ export class Repository {
         break;
       }
       case 'pocket/ask': {
+        if (!this.forCurrentConvo(body)) break; // 别的会话的审批不弹进当前会话
         this.currentAsk = PermissionAsk.from(body);
         break;
       }
       case 'pocket/ask.withdrawn': {
+        if (!this.forCurrentConvo(body)) break;
         const askId = js(body['askId']);
         if (this.currentAsk !== null && this.currentAsk.askId === askId) {
           this.currentAsk = null;
@@ -970,6 +1037,8 @@ export class Repository {
         break;
       }
       case 'pocket/turn.done': {
+        if (!this.forCurrentConvo(body)) break;
+        this.promptEvidence();
         this.executing = false;
         this.activity = '';
         this.finalizeStreaming();
@@ -982,6 +1051,7 @@ export class Repository {
         break;
       }
       case 'pocket/prompt.ack': {
+        if (!this.forCurrentConvo(body)) break;
         const promptId = js(body['promptId']);
         this.messages = this.messages.map((m: ChatMessage) => {
           if (m.promptId === promptId) m.delivered = true;
@@ -990,15 +1060,31 @@ export class Repository {
         break;
       }
       case 'pocket/error': {
+        // convoId 缺省 = 连接级错误，照单展示；带了别的会话的 convoId 则不属于当前会话，忽略
+        const ec = jstr(body['convoId']);
+        if (ec !== null && ec !== this.convoId) break;
         const m = this.newMessage('error');
         m.text = js(body['message'], js(body['code'], 'error'));
         this.pushMessage(m);
         break;
       }
       case 'pocket/session.gone': {
-        // daemon 丢了这个会话（对齐：自动重开）。M1：重开当前会话。
-        if (this.currentWorkdir.length > 0) {
+        // daemon 丢了这个会话（断线期被回收 / daemon 重启）。对齐 PocketRepository 的 SessionGone：
+        // 有待补发的 prompt 才自动 resume——重开落地后由 session.live 分支补发那条 prompt（单次）；
+        // 没有 pending prompt（或已重试过一次），诚实报错、别空转。convoId 必须匹配（跨会话不处理）。
+        if (!this.forCurrentConvo(body)) break;
+        const retry = this.pendingPrompt;
+        if (retry !== null && !this.promptResendArmed && this.currentSessionId !== null && this.currentWorkdir.length > 0) {
+          this.promptResendArmed = true;
           this.conn?.send(frameOpenSession(this.currentWorkdir, this.currentSessionId, null, this.mode));
+        } else {
+          this.promptResendArmed = false;
+          this.pendingPrompt = null;
+          this.executing = false;
+          this.activity = '';
+          const m = this.newMessage('error');
+          m.text = '电脑端已回收该会话——再发一条消息可重新拉起';
+          this.pushMessage(m);
         }
         break;
       }
@@ -1012,6 +1098,7 @@ export class Repository {
         break;
       }
       case 'pocket/file.uploaded': {
+        if (!this.forCurrentConvo(body)) break;
         this.onFileUploaded(FileUploaded.from(body));
         break;
       }

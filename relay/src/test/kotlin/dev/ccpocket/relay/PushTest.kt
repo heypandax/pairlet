@@ -1,5 +1,7 @@
 package dev.ccpocket.relay
 
+import dev.ccpocket.protocol.PocketJson
+import dev.ccpocket.relay.push.HuaweiSender
 import dev.ccpocket.relay.push.LoggingPushService
 import dev.ccpocket.relay.push.NotifyRoute
 import dev.ccpocket.relay.push.PushConfig
@@ -12,10 +14,13 @@ import dev.ccpocket.relay.store.InMemoryRelayStore
 import dev.ccpocket.relay.store.RelayStore
 import dev.ccpocket.relay.store.SqliteRelayStore
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PushTest {
@@ -177,6 +182,25 @@ class PushTest {
 
     @Test fun configFallsBackToLoggingWithoutCredentials() {
         assertIs<LoggingPushService>(PushConfig.load(InMemoryRelayStore()) { null })
+    }
+
+    /** Huawei route → clickAction data: a Windows workdir's backslashes and any quotes must escape into
+     *  valid JSON (the old hand-spliced string emitted `"wd":"C:\Users\…"` that JSON.parse rejects). */
+    @Test fun huaweiRouteDataEscapesBackslashesAndQuotes() {
+        val json = HuaweiSender.routeData(NotifyRoute(workdir = """C:\Users\me\a"b""", sessionId = "s1"))
+        // it must round-trip back to the exact original strings
+        val obj = PocketJson.parseToJsonElement(json!!).jsonObject
+        assertEquals("""C:\Users\me\a"b""", obj["wd"]!!.jsonPrimitive.content)
+        assertEquals("s1", obj["sid"]!!.jsonPrimitive.content)
+        // and be literally escaped in the wire text, not raw
+        assertTrue(json.contains("""C:\\Users\\me\\a\"b"""))
+    }
+
+    /** 空对象不放 semantics preserved: no route (or an all-null route) yields no `data` key at all. */
+    @Test fun huaweiRouteDataOmitsEmpty() {
+        assertNull(HuaweiSender.routeData(null))
+        assertNull(HuaweiSender.routeData(NotifyRoute()))
+        assertEquals("""{"hid":"h1"}""", HuaweiSender.routeData(NotifyRoute(handoffId = "h1")))
     }
 
     private class RecordingSender : PushSender {
