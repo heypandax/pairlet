@@ -9,9 +9,12 @@ HarmonyOS 工程（stage 模型，API 12+），按 `protocol/` 的 wire 规范�
 - 6 位码配对（POST /v1/pair/code → /v1/pair/redeem）
 - relay WebSocket 连接 + DeviceHello/Attached + 4-DH E2E 握手 + AES-256-GCM transport
 - 应用层 pocket/ping 心跳（鸿蒙 webSocket API 不暴露协议层 ping）
-- 项目列表 → 会话列表 → 聊天（历史回放 / 流式 chunk / 工具行 / 思考块）
-- 权限审批卡（允许一次 / 始终允许 / 拒绝）+ AskUserQuestion 单选问答卡
-- 断线指数退避重连（2s→30s），回前台立即重连；会话自动重开（restoreAfterReconnect 最小版）
+- 项目列表 → 会话列表 → 聊天（历史回放 / 流式 chunk / 工具行 / 思考块 / Markdown 渲染）
+- 权限审批卡（允许一次 / 始终允许 / 拒绝）+ AskUserQuestion 单选 / 多选问答卡
+- 图片 / 文件附件（相册选图内联、文档分块上传落 `.ccpocket/inbox/`、`@path` 引用折进 prompt）
+- 会话内权限模式切换 + 新会话默认模式（设置页）
+- Push Kit 离线推送（`pocket/push.register` → relay `HuaweiSender`，见下节）
+- 断线指数退避重连（2s→30s），回前台立即重连；会话自动重开（仅在握有具体 sessionId 时 resume，避免 fork）
 
 ## 架构决策（与 Kotlin 端的对应关系）
 
@@ -37,8 +40,13 @@ cryptoFramework 的 `AsyKeySpec` 系列（ECCKeyPairSpec / getAsyKeySpecBigInt�
 ## Push Kit（离线推送）
 
 链路：鸿蒙 App `pushService.getToken()` → `pocket/push.register`（platform=`"huawei"`，每次重连重发）
-→ relay `HuaweiSender`（AGC REST，`IM` 类目）→ 系统通知。**不需要受限 ACL**，与 DevEco
-自动化签名兼容。
+→ relay `HuaweiSender`（HarmonyOS NEXT Push Kit v3 REST，`IM` 自分类）→ 系统通知。**不需要受限 ACL**，
+与 DevEco 自动化签名兼容。
+
+> ⚠️ **relay 必须先合入本修复分支并 redeploy**（Ping 回显 + `HuaweiSender` v3 端点修正）。现网
+> 1.6.0 relay 的 device 腿不回显应用层 `pocket/pong`，鸿蒙端 10s 收不到 pong 即断连 →
+> 每约 30s 掉线循环；且旧 `HuaweiSender` 用的是 HMS Android 旧端点，推送会静默不发。两者都在
+> 本分支的 relay 侧修复里，未 redeploy 前鸿蒙端不可用。
 
 启用步骤（一次性，AGC 控制台操作为主）：
 
@@ -48,12 +56,13 @@ cryptoFramework 的 `AsyKeySpec` 系列（ECCKeyPairSpec / getAsyKeySpecBigInt�
 2. **开通 Push Kit**：项目 → 增长 → 推送服务 → 开通。
 3. **（建议）申请自分类权益**：推送服务 → 配置 → 自分类权益，申请 IM 类目。
    不申请也能推，但会落入资讯营销通道（限量、可能折叠）。
-4. **拿三个值**（项目设置 → 常规）：`Client ID`、`Client Secret`、`App ID`。
+4. **拿三个值**（项目设置 → 常规）：`Client ID`、`Client Secret`、`项目 ID`（Project ID，
+   Push Kit v3 端点 `POST /v3/{projectId}/messages:send` 的路径参数）。
 5. **App 端**：把 Client ID 填进 `entry/src/main/module.json5` 的
    `metadata.client_id`（替换 `REPLACE_WITH_AGC_CLIENT_ID`），重新打包装机。
    首次启动会弹通知授权。
 6. **relay 端**：主机环境变量加三行后重启 relay：
-   `CCPOCKET_HUAWEI_APP_ID` / `CCPOCKET_HUAWEI_CLIENT_ID` / `CCPOCKET_HUAWEI_CLIENT_SECRET`。
+   `CCPOCKET_HUAWEI_PROJECT_ID` / `CCPOCKET_HUAWEI_CLIENT_ID` / `CCPOCKET_HUAWEI_CLIENT_SECRET`。
    启动日志应见 `[push] Huawei sender ready`。
 7. **验证**：杀掉 App，让 daemon 产生一次审批/回复，手机应收系统通知；relay 侧
    `journalctl -u cc-pocket-relay` 能看到 huawei 发送记录。
@@ -95,8 +104,11 @@ modelVersion 必须与 hvigor/hvigor-config.json5 一致（均 "5.0.0"），否�
 
 ## 未覆盖（后续里程碑）
 
-- Push Kit 推送唤醒（M2，含 relay 侧 huawei sender）
-- 图片/文件附件、语音输入
-- Markdown 渲染 / 代码高亮（聊天文本当前是纯文本）
+> Push Kit 推送、图片 / 文件附件、Markdown 渲染均已在 M1 落地（见「功能范围」），不在此列。
+
+- 语音输入
+- 代码高亮（Markdown 已渲染，代码块暂无语法着色）
 - 多设备绑定管理、folder-share / bridge 管理面
-- Usage 统计、模型/模式切换、调度任务
+- Usage 统计、模型切换、调度任务
+- opencode 后端（M1 仅 claude：`frameClientCaps` 诚实声明空 `supportsAgents`，
+  开放前须把 agent 从 `SessionSummary` 透传进 `frameOpenSession`）
