@@ -3,15 +3,47 @@
 手机 App 的 HarmonyOS NEXT 移植。daemon / relay / protocol 不动，本目录是一个独立的
 HarmonyOS 工程（stage 模型，API 12+），按 `protocol/` 的 wire 规范重新实现客户端。
 
-## 功能范围（M1）
+## 功能范围（真机验证：华为 Pura X 折叠屏 · HarmonyOS NEXT API 24 · 端到端闭环通过）
 
-- 扫码配对（Scan Kit 系统扫码 UI 识别 `ccpocket://pair?relay=&acct=&dpk=&ticket=`，无需相机权限）
-- 6 位码配对（POST /v1/pair/code → /v1/pair/redeem）
-- relay WebSocket 连接 + DeviceHello/Attached + 4-DH E2E 握手 + AES-256-GCM transport
+**连接与安全**
+- 配对：扫码（Scan Kit 系统扫码 UI，识别 `ccpocket://pair?...`，无需相机权限）/ 6 位码
+  （POST /v1/pair/code → /v1/pair/redeem）
+- relay WebSocket + DeviceHello/Attached + 4-DH E2E 握手 + AES-256-GCM transport
+  （软件 P-256 + CryptoFramework GCM/HMAC；配对页自检：RFC 5869 / P-256 2G / ECDH 互验 /
+  GCM 篡改拒绝 / 全链路握手 / Asset Store 往返）
 - 应用层 pocket/ping 心跳（鸿蒙 webSocket API 不暴露协议层 ping）
-- 项目列表 → 会话列表 → 聊天（历史回放 / 流式 chunk / 工具行 / 思考块）
+- 断线指数退避重连（2s→30s）、回前台立即重连、会话自动重开（restoreAfterReconnect 最小版）
+
+**聊天**
+- 项目列表 → 会话列表 → 聊天；历史回放（TranscriptMerge 锚点合并）、流式 chunk、
+  工具卡、思考块、错误行
+- Markdown 渲染（标题/列表/代码围栏/**粗体**/`行内码`/斜体）
 - 权限审批卡（允许一次 / 始终允许 / 拒绝）+ AskUserQuestion 单选问答卡
-- 断线指数退避重连（2s→30s），回前台立即重连；会话自动重开（restoreAfterReconnect 最小版）
+- 回合中排队发送（daemon/CLI 排队 mid-turn prompt）、活动反馈（思考中/执行工具/回复中）、
+  「运行中」呼吸 chip
+- 顶栏 ⋮ 快捷操作：切换模型 / 思考深度 / 权限模式 / 改动文件 / 压缩上下文 / 简化 / 清空会话；
+  模型目录走 daemon `models.list`（网关 id 优先）、思考深度走 `supportedEfforts`
+- 输入栏模型 chip、上下文占用圈（点开看确切 token 数 + 压缩入口）、「回到最新」悬浮 pill、
+  自动跟随滚动
+
+**附件**
+- 图片：相册选择 → 压缩（≤1024px / ~90KB）→ 内联 `SendPrompt.images`，历史气泡内渲染
+- 文件：文档选择 → 768KB 分块 `file.chunk` 流式上传 → 落盘工作区 inbox → 随 prompt 以
+  `@path` 引用发出；20s 回执守卫（老 daemon 不认帧会提示升级）
+- 改动文件：`files.list` → 列表（操作符/增删行数）→ `file.read` → 全文查看器
+
+**多电脑与设置**
+- 多设备绑定：绑定列表持久化（旧单绑定自动迁移）、项目页顶栏 ▾ 切换、设置页解配
+- 设置页：主题（深/浅/跟随系统，token 逐值对齐 Android Palette）、新会话默认权限模式、
+  本会话"始终允许"规则管理、账号、关于
+- 权限模式切换：询问 / 自动（Claude 原生 auto）/ 自动编辑 / 计划 / 绕过权限（下回合生效）
+- 系统返回键应用内导航；折叠屏内容限宽居中（CONTENT_MAX=860vp）
+
+**安全加固**
+- 机密存储：设备私钥 / relay 凭证 / 首连票据迁入 **Asset Store**（系统加密、TEE 保护、
+  不随明文 preferences 进云备份）；写后读回校验防设备不对称；Asset Store 不可用时回落明文
+- Push Kit 注册链路（`getToken` + `pocket/push.register`，platform="huawei"），
+  未配 AGC 凭据时静默降级（不影响使用）
 
 ## 架构决策（与 Kotlin 端的对应关系）
 
@@ -21,8 +53,11 @@ HarmonyOS 工程（stage 模型，API 12+），按 `protocol/` 的 wire 规范�
 | `pocket/crypto/E2ESession.ets` | `protocol/e2e/E2ESession.kt` | 4-DH + transcript HKDF + 计数器 nonce，逐行对齐 |
 | `pocket/protocol/Protocol.ets` | `protocol/` | Envelope{t,id,ts,to,body}，宽松 JSON 解析（天然 ignoreUnknownKeys） |
 | `pocket/net/RelayConnection.ets` | `mobile/net/RelayE2EConnection.kt` | outbox 缓冲、握手超时、心跳 |
-| `pocket/data/Repository.ets` | `mobile/data/PocketRepository.kt` | M1 子集；数组一律改后重赋（ArkUI V1 观察语义） |
-| `pocket/store/Store.ets` | `mobile/pairing/Pairing.kt` 存储部分 | preferences 落盘 |
+| `pocket/data/Repository.ets` | `mobile/data/PocketRepository.kt` | 状态仓库；数组改后重赋（ArkUI V1 观察语义） |
+| `pocket/data/TranscriptMerge.ets` | `mobile/data/TranscriptMerge.kt` | 全量回放锚点合并（防排队气泡丢失/旧消息复制） |
+| `pocket/store/Store.ets` + `Vault.ets` | `mobile/pairing/Pairing.kt` 存储部分 | 机密落 Asset Store（`@kit.AssetStoreKit`），非机密落 preferences |
+| `pocket/media/Attach.ets` | `mobile/media/*` | 图片压缩（ImageKit）、文件分块读取（fileIo） |
+| `pocket/ui/*` | `mobile/ui/*` | ArkUI V1；Theme.ets token 逐值对齐 Android Palette |
 
 ### 为什么 ECDH 是软件实现
 
@@ -31,8 +66,8 @@ cryptoFramework 的 `AsyKeySpec` 系列（ECCKeyPairSpec / getAsyKeySpecBigInt�
 （RFC 5869 case1、P-256 2G、ECDH 互验、GCM 往返+篡改拒绝），配对页会展示自检结果。
 
 **TODO(hardening)**：
-1. 对照 SDK d.ts 核实 `AsyKeySpecItem`/`ECCKeyPairSpec` 后，ECDH 换 cryptoFramework（密钥不出 TEE、抗时序）。
-2. 设备私钥 / relay 凭证从 preferences 迁移到 HUKS / Asset Store（对齐 Android Keystore / iOS Keychain）。
+1. 对照 SDK d.ts 核实 `AsyKeySpecItem`/`ECCKeyPairSpec` 后，ECDH 换 cryptoFramework / HUKS（密钥不出 TEE、抗时序）。
+2. ~~设备私钥 / relay 凭证迁移到 Asset Store~~（已完成：`store/Vault.ets`，写后读回校验 + 明文回落）。
 
 ## Push Kit（离线推送）
 
@@ -95,8 +130,11 @@ modelVersion 必须与 hvigor/hvigor-config.json5 一致（均 "5.0.0"），否�
 
 ## 未覆盖（后续里程碑）
 
-- Push Kit 推送唤醒（M2，含 relay 侧 huawei sender）
-- 图片/文件附件、语音输入
-- Markdown 渲染 / 代码高亮（聊天文本当前是纯文本）
-- 多设备绑定管理、folder-share / bridge 管理面
-- Usage 统计、模型/模式切换、调度任务
+- **Push Kit 实际启用**：代码链路已就绪，需在 AGC 控制台建应用/开通推送/申请自分类权益、
+  填 `client_id` + relay 环境变量（见上方「Push Kit」节）。未启用前推送功能静默关闭。
+- **会话归档（#202）/ 审批 V2 / Handoff 协作（上游 1.6.0 增量帧）**：协议已宽松兼容（未知帧
+  自然忽略），功能本身未实现。
+- **HUKS 替换软件 P-256 ECDH**：当前 ECDH 是纯 bigint 软件实现（密钥在内存），
+  hardening 项——换 cryptoFramework 后密钥不出 TEE、抗时序。
+- 图片/二进制文件查看器（`file.read` 目前只接文本；base64 通道留给后续）。
+- 语音输入、folder-share / bridge 管理面、Usage 统计、调度任务。

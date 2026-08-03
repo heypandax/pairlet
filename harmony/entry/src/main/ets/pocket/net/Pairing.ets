@@ -121,7 +121,7 @@ export class Pairing {
       throw new Error('pairing failed');
     }
     const paired = new PairedDaemon(relay, accountId, daemonPub, deviceId, credential);
-    Store.savePaired(paired, ticket);
+    await Store.savePaired(paired, ticket);
     return paired;
   }
 }

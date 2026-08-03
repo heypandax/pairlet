@@ -8,19 +8,21 @@ import { Push } from '../net/Push';
 import { DEFAULT_RELAY, Pairing } from '../net/Pairing';
 import { PairedDaemon, Store } from '../store/Store';
 import { mergeHistory } from './TranscriptMerge';
-import { ThemeMode, Tok } from '../ui/Theme';
+import { ThemeMode, Tok, fmtSize } from '../ui/Theme';
 import { b64Encode, b64Len } from '../util/B64';
 import {
   compressImage, pickFiles, pickImages, readFileInChunks,
   FILE_CHUNK_RAW, MAX_UPLOAD_BYTES, PickedFileRef,
 } from '../media/Attach';
 import {
-  DirectoryEntry, FileUploaded, HistoryMessage, ImageData, PermissionAsk, SessionSummary,
+  ChangedFile, DirectoryEntry, FileContent, FileUploaded, HistoryMessage, ImageData, ModelsList,
+  PermissionAsk, SessionSummary, SlashCommand,
   controlRegisterPush,
-  frameCancelTurn, frameClientCaps, frameCloseSession, frameFileCancel, frameFileChunk,
+  frameCancelTurn, frameClientCaps, frameCloseSession, frameCommand, frameFetchModels,
+  frameFileCancel, frameFileChunk, frameListSessionFiles,
   frameListDirectories, frameListPendingApprovals, frameListSessions, frameModeSwitch, frameOpenSession,
-  framePermissionVerdict, frameRuleClear, frameSendPrompt,
-  ja, jb, jo, js, jstr,
+  framePermissionVerdict, frameReadFile, frameRuleClear, frameSendPrompt,
+  ja, jb, jo, js, jstr, jnum,
 } from '../protocol/Protocol';
 
 /**
@@ -65,6 +67,7 @@ const MAX_IMAGES = 4;
 const IMAGE_BUDGET_B64 = 240_000; // 一条 SendPrompt 帧内全部图片的 base64 预算
 const MAX_FILES = 6;
 const UPLOAD_ACK_TIMEOUT_MS = 20_000;
+const CHANGED_FILES_TIMEOUT_MS = 15_000; // files.list / file.read 回执守卫（老 daemon 丢帧不答）
 
 @Observed
 export class PendingImage {
@@ -120,6 +123,28 @@ export class Repository {
   // ── 会话权限模式（session.live 同步；显示在聊天顶栏） ──
   mode: string = 'default';
   permissionMode: string = ''; // 后端原生模式（'auto'），空 = 无
+  model: string = '';   // session.live 同步的当前模型（空 = daemon 默认）
+  effort: string = '';  // 当前思考深度（空 = 默认）
+  chatTitle: string = ''; // 聊天顶栏标题（会话标题或首条 prompt 截断，对齐 Android）
+
+  // ── 模型与指令目录（daemon 推送；模型选择层用） ──
+  models: string[] = [];          // 标准别名（sonnet/opus/…）
+  gatewayModels: string[] = [];   // 网关 /v1/models 原始 id（自定义网关用户看到的就是这些）
+  supportedEfforts: string[] = [];// 后端支持的思考深度档位（空 = 用内置兜底表）
+  modelsError: string = '';       // models.list 携带的 error（空 = 正常/未拉取）
+  slashCommands: string[] = [];   // 本会话可用的斜杠指令名（pocket/commands）
+
+  // ── 上下文占用（session.live 同步；输入栏圈圈） ──
+  contextWindow: number = 0; // 0 = 未知（老 daemon 或首回合前）
+  contextUsed: number = 0;
+
+  // ── 改动文件与文件查看器 ──
+  changedFiles: ChangedFile[] = [];
+  changedFilesError: string = ''; // '' = 正常；非空 = 提示文案
+  viewerPath: string = '';        // 空 = 查看器关闭
+  viewerText: string = '';
+  viewerMeta: string = '';        // 截断提示等
+  viewerError: string = '';
 
   // ── 附件（输入条上方的暂存区） ──
   pendingImages: PendingImage[] = [];
@@ -139,6 +164,8 @@ export class Repository {
   private uploadCancelCap: string | null = null;
   private fileAckTimer = -1;
   private pendingDefaultMode = '';    // 新会话待应用的默认模式（首个 session.live 后补 mode.switch）
+  private changedFilesTimer = -1;
+  private viewerTimer = -1;
 
   // ═══ 生命周期 ═══
 
@@ -149,6 +176,7 @@ export class Repository {
     this.themeMode = (Store.loadThemeMode() ?? 'dark') as ThemeMode;
     Tok.apply(Tok.resolveDark(this.themeMode));
     this.defaultMode = Store.loadDefaultMode() ?? 'default';
+    await Store.migrateToVault(); // 老版本明文敏感数据搬进 Asset Store（幂等）
     this.bindings = Store.loadBindings();
     this.paired = Store.loadActive();
     this.keys = await Store.deviceKeys(); // 提前生成，配对时直接用
@@ -321,7 +349,6 @@ export class Repository {
     this.connState = 'connecting';
     this.statusLine = '连接中…';
 
-    const firstTicket = Store.takeFirstTicket();
     const repo = this;
     const conn = new RelayConnection({
       onReady: () => {
@@ -350,7 +377,13 @@ export class Repository {
       onDown: (reason) => repo.onDown(reason),
     });
     this.conn = conn;
-    conn.connect(paired, keys, firstTicket).catch((e: Error) => repo.onDown(`connect:${e.message}`));
+    // credential / 首连票据都在 Asset Store：异步补齐后再点火（防竞态：连接已被取代则丢弃）
+    Store.credentialOf(paired).then(async (cred) => {
+      const firstTicket = await Store.takeFirstTicket();
+      if (repo.conn !== conn) return;
+      conn.connect(paired.withCredential(cred), keys, firstTicket)
+        .catch((e: Error) => repo.onDown(`connect:${e.message}`));
+    }).catch((e: Error) => repo.onDown(`credential:${(e as Error).message}`));
   }
 
   private onDown(reason: string): void {
@@ -390,7 +423,7 @@ export class Repository {
     this.conn?.send(frameListSessions(dir.path));
   }
 
-  openSession(sessionId: string | null): void {
+  openSession(sessionId: string | null, title: string = ''): void {
     this.currentSessionId = sessionId;
     this.convoId = null;
     this.messages = [];
@@ -398,7 +431,16 @@ export class Repository {
     this.executing = false;
     this.activity = '';
     this.allowRules = []; // 规则是会话级的（对齐：换会话即清空本地镜像）
+    this.slashCommands = []; // 指令目录随会话重推（pocket/commands）
+    this.contextWindow = 0;
+    this.contextUsed = 0;
+    this.changedFiles = [];
+    this.changedFilesError = '';
+    this.closeFileViewer();
     this.clearAttachments();
+    this.chatTitle = title.length > 0 ? title : '新会话';
+    this.model = '';
+    this.effort = '';
     // 新会话带默认模式；OpenSession 无原生模式字段，'auto' 经首个 session.live 后补 mode.switch
     this.pendingDefaultMode = sessionId === null ? this.defaultMode : '';
     this.mode = sessionId === null ? (this.defaultMode === 'auto' ? 'default' : this.defaultMode) : 'default';
@@ -457,9 +499,132 @@ export class Repository {
     });
     this.messages = [...this.messages, m];
     this.executing = true;
+    if (this.chatTitle === '新会话' && text.trim().length > 0) {
+      this.chatTitle = text.trim().substring(0, 48); // 新会话首条 prompt 成为标题（对齐 Android）
+    }
     this.pendingImages = [];
     this.pendingFiles = [];
     this.conn?.send(frameSendPrompt(convoId, outText, promptId, images));
+  }
+
+  // ═══ 会话指令（/model /effort /compact /simplify /clear——daemon 拦截或透传给 agent） ═══
+
+  /** 发一条斜杠指令：不产生本地用户气泡（对齐 switchViaCommand/clearConversation）。 */
+  sendCommand(text: string): void {
+    const convoId = this.convoId;
+    if (convoId === null) return;
+    this.conn?.send(frameCommand(convoId, text));
+  }
+
+  /** 切换模型（下个回合生效，不打断进行中的回合；session.live 重播报校正显示）。 */
+  switchModel(modelId: string): void {
+    if (this.convoId === null || modelId === this.model) return;
+    this.model = modelId; // 乐观更新
+    this.sendCommand(`/model ${modelId}`);
+  }
+
+  /** 思考深度：'' = 恢复默认（/effort default）。 */
+  switchEffort(level: string): void {
+    if (this.convoId === null || level === this.effort) return;
+    this.effort = level;
+    this.sendCommand(level.length > 0 ? `/effort ${level}` : '/effort default');
+  }
+
+  /** 清空会话：daemon 在原地开新会话（保留模型/深度/模式），本地消息清空（对齐 clearConversation）。 */
+  clearConversation(): void {
+    this.messages = [];
+    this.chatTitle = '新会话';
+    this.sendCommand('/clear');
+  }
+
+  // ═══ 模型目录 ═══
+
+  /** 拉取模型列表（模型选择层打开时调；daemon 回 pocket/models.list）。 */
+  fetchModels(): void {
+    if (this.currentWorkdir.length === 0) return;
+    this.conn?.send(frameFetchModels(this.currentWorkdir));
+  }
+
+  /** 选择层展示用模型表：网关模型优先（自定义网关的真实 id），否则标准别名表。 */
+  modelChoices(): string[] {
+    if (this.gatewayModels.length > 0) return this.gatewayModels;
+    if (this.models.length > 0) return this.models;
+    return ['sonnet', 'opus', 'haiku']; // daemon 未答时的兜底（对齐 Android CLAUDE_MODEL_OPTIONS 别名）
+  }
+
+  /** 思考深度档位：daemon 下发优先，空则用内置兜底（对齐 LEGACY_EFFORT_OPTIONS）。 */
+  effortOptions(): string[] {
+    return this.supportedEfforts.length > 0 ? this.supportedEfforts : ['low', 'medium', 'high', 'xhigh', 'max'];
+  }
+
+  /** /simplify 是否可用（指令目录里有才显示该行，对齐 Android hasSimplify）。 */
+  hasSimplify(): boolean {
+    return this.slashCommands.includes('simplify');
+  }
+
+  // ═══ 改动文件（pocket/files.list → pocket/files；老 daemon 丢帧，15s 无回执提示升级） ═══
+
+  fetchChangedFiles(): void {
+    const sid = this.currentSessionId;
+    if (sid === null || sid.length === 0) {
+      this.changedFiles = [];
+      this.changedFilesError = '新会话还没有可回放的记录';
+      return;
+    }
+    this.changedFiles = [];
+    this.changedFilesError = '';
+    this.armChangedFilesDeadline(sid);
+    this.conn?.send(frameListSessionFiles(this.currentWorkdir, sid));
+  }
+
+  /** 打开文件查看器（pocket/file.read → pocket/file.content）。 */
+  openChangedFile(path: string): void {
+    const sid = this.currentSessionId;
+    if (sid === null || sid.length === 0) return;
+    this.viewerPath = path;
+    this.viewerText = '';
+    this.viewerMeta = '加载中…';
+    this.viewerError = '';
+    this.armViewerDeadline(sid, path);
+    this.conn?.send(frameReadFile(this.currentWorkdir, sid, path));
+  }
+
+  closeFileViewer(): void {
+    this.viewerPath = '';
+    this.viewerText = '';
+    this.viewerMeta = '';
+    this.viewerError = '';
+    this.cancelFileDeadlines();
+  }
+
+  private armChangedFilesDeadline(sid: string): void {
+    if (this.changedFilesTimer >= 0) clearTimeout(this.changedFilesTimer);
+    this.changedFilesTimer = setTimeout(() => {
+      if (this.changedFiles.length === 0 && this.changedFilesError.length === 0) {
+        this.changedFilesError = '电脑端无回执——daemon 版本可能太旧，不支持改动文件';
+      }
+    }, CHANGED_FILES_TIMEOUT_MS);
+  }
+
+  private armViewerDeadline(sid: string, path: string): void {
+    if (this.viewerTimer >= 0) clearTimeout(this.viewerTimer);
+    this.viewerTimer = setTimeout(() => {
+      if (this.viewerPath === path && this.viewerText.length === 0 && this.viewerError.length === 0) {
+        this.viewerMeta = '';
+        this.viewerError = '电脑端无回执——daemon 版本可能太旧，不支持文件查看';
+      }
+    }, CHANGED_FILES_TIMEOUT_MS);
+  }
+
+  private cancelFileDeadlines(): void {
+    if (this.changedFilesTimer >= 0) {
+      clearTimeout(this.changedFilesTimer);
+      this.changedFilesTimer = -1;
+    }
+    if (this.viewerTimer >= 0) {
+      clearTimeout(this.viewerTimer);
+      this.viewerTimer = -1;
+    }
   }
 
   // ═══ 附件 ═══
@@ -727,6 +892,16 @@ export class Repository {
         if (liveMode !== null) this.mode = liveMode;
         const liveNative = jstr(body['permissionMode']);
         this.permissionMode = liveNative ?? '';
+        // 上下文占用（输入栏圈圈；0 = 未知不显示）
+        const cw = jnum(body['contextWindow']);
+        if (cw !== null) this.contextWindow = cw;
+        const cu = jnum(body['contextUsed']);
+        if (cu !== null) this.contextUsed = cu;
+        // 模型 / 思考深度同步（顶栏副标题与快捷操作面板显示）
+        const liveModel = jstr(body['model']);
+        if (liveModel !== null) this.model = liveModel;
+        const liveEffort = jstr(body['effort']);
+        if (liveEffort !== null) this.effort = liveEffort;
         // 新会话默认 'auto'：OpenSession 无原生字段，拿到 convoId 后补发 mode.switch
         if (this.pendingDefaultMode.length > 0) {
           const want = this.pendingDefaultMode;
@@ -840,8 +1015,48 @@ export class Repository {
         this.onFileUploaded(FileUploaded.from(body));
         break;
       }
+      case 'pocket/models.list': {
+        const ml = ModelsList.from(body);
+        this.models = ml.models;
+        this.gatewayModels = ml.gatewayModels;
+        this.supportedEfforts = ml.supportedEfforts;
+        this.modelsError = ml.error ?? '';
+        break;
+      }
+      case 'pocket/commands': {
+        this.slashCommands = ja(body['commands']).map((v: Object) => SlashCommand.from(v).name);
+        break;
+      }
+      case 'pocket/files': {
+        if (this.changedFilesTimer >= 0) {
+          clearTimeout(this.changedFilesTimer);
+          this.changedFilesTimer = -1;
+        }
+        const err = jstr(body['error']);
+        this.changedFiles = ja(body['files']).map((v: Object) => ChangedFile.from(v));
+        this.changedFilesError = err ?? (this.changedFiles.length === 0 ? '这个会话还没有改动过文件' : '');
+        break;
+      }
+      case 'pocket/file.content': {
+        if (this.viewerTimer >= 0) {
+          clearTimeout(this.viewerTimer);
+          this.viewerTimer = -1;
+        }
+        const fc = FileContent.from(body);
+        if (this.viewerPath !== fc.path) break; // 迟到的回包（已关/已换文件）
+        if (fc.ok && fc.text !== null) {
+          this.viewerText = fc.text;
+          this.viewerMeta = fc.truncated ? `只显示前 ${Math.floor(fc.text.length / 1024)} KB（共 ${fmtSize(fc.totalBytes)}）` : '';
+          this.viewerError = '';
+        } else {
+          this.viewerText = '';
+          this.viewerMeta = '';
+          this.viewerError = fc.error ?? '读取失败';
+        }
+        break;
+      }
       default:
-        break; // 其余帧（usage / commands / jobs / approvals…）M1 不渲染
+        break; // 其余帧（usage / jobs / approvals…）不渲染
     }
   }
 

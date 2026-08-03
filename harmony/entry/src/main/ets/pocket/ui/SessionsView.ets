@@ -72,7 +72,7 @@ export struct SessionsView {
             .padding({ left: 16, right: 16, top: 12, bottom: 12 })
           }
           .backgroundColor(Tok.base)
-          .onClick(() => this.repo.openSession(s.sessionId))
+          .onClick(() => this.repo.openSession(s.sessionId, s.title.length > 0 ? s.title : s.firstPrompt))
         }, (s: SessionSummary) => s.sessionId)
       }
       .layoutWeight(1)

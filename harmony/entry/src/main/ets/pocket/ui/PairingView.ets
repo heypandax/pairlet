@@ -2,6 +2,7 @@ import { scanBarcode } from '@kit.ScanKit';
 import { E2ECrypto } from '../crypto/E2ECrypto';
 import { selfTestHandshake } from '../crypto/E2ESession';
 import { Repository } from '../data/Repository';
+import { Vault } from '../store/Vault';
 import { Tok } from './Theme';
 
 /** 配对页：扫码（主路径，对齐手机 App）/ 6 位码 → redeem → 自动连接。附开发期加密自检结果。 */
@@ -17,8 +18,11 @@ export struct PairingView {
       this.repo.selfTestLine = '自检中…';
       E2ECrypto.selfTest().then(async (failures) => {
         const all = failures.concat(await selfTestHandshake());
+        if (!(await Vault.selfTest())) {
+          all.push('vault-roundtrip（Asset Store 读写往返失败，机密将回落明文存储）');
+        }
         this.repo.selfTestLine = all.length === 0
-          ? '✓ 加密自检通过（HKDF / P-256 / ECDH / GCM / 全链路握手）'
+          ? '✓ 加密自检通过（HKDF / P-256 / ECDH / GCM / 全链路握手 / Asset Store）'
           : `✗ 自检失败：${all.join(' | ')}`;
       });
     }
