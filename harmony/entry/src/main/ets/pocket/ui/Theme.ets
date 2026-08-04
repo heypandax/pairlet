@@ -70,3 +70,14 @@ export function middleTrunc(name: string, head: number = 10, tail: number = 8): 
   if (name.length <= head + tail + 1) return name;
   return `${name.substring(0, head)}…${name.substring(name.length - tail)}`;
 }
+
+/** 123456 → "123,456"（对齐 Android groupDigits，上下文 token 数用）。 */
+export function groupDigits(n: number): string {
+  const s = `${Math.floor(n)}`;
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 === 0) out += ',';
+    out += s.charAt(i);
+  }
+  return out;
+}

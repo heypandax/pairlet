@@ -335,21 +335,33 @@ class CollaboratorPushTest {
         }
 
         // first open: the additive migration lands, and the pre-existing row defaults to "not a collaborator"
+        // (connections are closed explicitly: on Windows an unclosed SQLite handle keeps the file locked
+        // past GC and the deleteIfExists below then fails with FileSystemException)
         runBlocking {
-            val store = SqliteRelayStore(Db.open(path))
-            val legacy = assertNotNull(store.getDevice("legacy"))
-            assertFalse(legacy.collaborator, "every pre-existing device is a phone or a bridge, never an inbox")
-            assertFalse(legacy.headless)
-            store.setPushToken("legacy", "apns", "legacy-tok", 2)
-            assertEquals(listOf("legacy"), store.pushTargets("acct").map { it.deviceId })
+            val conn = Db.open(path)
+            try {
+                val store = SqliteRelayStore(conn)
+                val legacy = assertNotNull(store.getDevice("legacy"))
+                assertFalse(legacy.collaborator, "every pre-existing device is a phone or a bridge, never an inbox")
+                assertFalse(legacy.headless)
+                store.setPushToken("legacy", "apns", "legacy-tok", 2)
+                assertEquals(listOf("legacy"), store.pushTargets("acct").map { it.deviceId })
+            } finally {
+                conn.close()
+            }
         }
 
         // second open: ALTER TABLE now fails with "duplicate column" and must be swallowed, and no data moves
         runBlocking {
-            val store = SqliteRelayStore(Db.open(path))
-            assertEquals("legacy-tok", store.pushTargetFor("acct", "legacy")?.token, "a re-run must not disturb existing rows")
-            val inbox = device(store, "acct", 5, headless = true, collaborator = true)
-            assertTrue(store.getDevice(inbox)!!.collaborator, "the migrated column must be writable after a re-run")
+            val conn = Db.open(path)
+            try {
+                val store = SqliteRelayStore(conn)
+                assertEquals("legacy-tok", store.pushTargetFor("acct", "legacy")?.token, "a re-run must not disturb existing rows")
+                val inbox = device(store, "acct", 5, headless = true, collaborator = true)
+                assertTrue(store.getDevice(inbox)!!.collaborator, "the migrated column must be writable after a re-run")
+            } finally {
+                conn.close()
+            }
         }
         Files.deleteIfExists(java.nio.file.Path.of(path))
     }

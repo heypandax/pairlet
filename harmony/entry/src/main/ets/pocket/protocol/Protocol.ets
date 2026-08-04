@@ -105,7 +105,7 @@ export interface FramePrompt {
   convoId: string;
   text: string;
   images: ImageData[];
-  promptId: string;
+  promptId?: string; // 缺省 = 客户端不要求回执（/model 等命令通道，对齐 Kotlin promptId: String?）
 }
 
 /** pocket/file.chunk（issue #90）：分块上传，daemon 落盘到 <cwd>/.ccpocket/inbox/。 */
@@ -152,6 +152,27 @@ export interface FrameRuleClear {
   t: string;
   convoId: string;
   rule?: string; // 缺省 = 清空全部（对齐 ClearAllowRule(rule: String? = null)）
+}
+
+export interface FrameModelsFetch {
+  t: string;
+  agent: string;
+  workdir?: string;
+}
+
+export interface FrameFilesList {
+  t: string;
+  workdir: string;
+  sessionId: string;
+  agent: string;
+}
+
+export interface FrameFileRead {
+  t: string;
+  workdir: string;
+  sessionId: string;
+  path: string;
+  agent: string;
 }
 
 export interface FrameModeSwitch {
@@ -219,6 +240,11 @@ export function frameSendPrompt(convoId: string, text: string, promptId: string,
   return { t: 'pocket/prompt', convoId, text, images, promptId };
 }
 
+/** 命令通道（/model、/effort、/clear、/compact、/simplify）：无 promptId、不产生本地气泡（对齐 Android switchViaCommand）。 */
+export function frameCommand(convoId: string, text: string): FramePrompt {
+  return { t: 'pocket/prompt', convoId, text, images: [] };
+}
+
 export function frameFileChunk(
   convoId: string,
   captureId: string,
@@ -284,6 +310,92 @@ export function frameRuleClear(convoId: string, rule: string | null): FrameRuleC
   const f: FrameRuleClear = { t: 'pocket/rule.clear', convoId };
   if (rule !== null) f.rule = rule;
   return f;
+}
+
+/** 拉取后端模型列表（对齐 FetchModels；daemon 回 pocket/models.list）。鸿蒙端只驱动 claude。 */
+export function frameFetchModels(workdir: string): FrameModelsFetch {
+  return { t: 'pocket/models.fetch', agent: 'claude', workdir };
+}
+
+/** 本会话改动的文件清单（对齐 ListSessionFiles；daemon 回 pocket/files）。 */
+export function frameListSessionFiles(workdir: string, sessionId: string): FrameFilesList {
+  return { t: 'pocket/files.list', workdir, sessionId, agent: 'claude' };
+}
+
+/** 读会话项目内一个文件（对齐 ReadFile；daemon 回 pocket/file.content）。 */
+export function frameReadFile(workdir: string, sessionId: string, path: string): FrameFileRead {
+  return { t: 'pocket/file.read', workdir, sessionId, path, agent: 'claude' };
+}
+
+/** pocket/files 的单条改动文件（对齐 ChangedFile）。 */
+export class ChangedFile {
+  path: string = '';
+  op: string = 'edit'; // create | edit | delete
+  edits: number = 1;
+  adds: number = -1;   // -1 = 未知
+  dels: number = -1;
+
+  static from(v: Object): ChangedFile {
+    const o = jo(v);
+    const f = new ChangedFile();
+    f.path = js(o['path']);
+    f.op = js(o['op'], 'edit');
+    f.edits = jn(o['edits'], 1);
+    f.adds = jn(o['adds'], -1);
+    f.dels = jn(o['dels'], -1);
+    return f;
+  }
+}
+
+/** pocket/file.content 回包（ToPhone）：text 或 base64 其一（v1 只用 text；图片二进制留待后续）。 */
+export class FileContent {
+  path: string = '';
+  ok: boolean = true;
+  error: string | null = null;
+  text: string | null = null;
+  truncated: boolean = false;
+  totalBytes: number = 0;
+
+  static from(body: Record<string, Object>): FileContent {
+    const f = new FileContent();
+    f.path = js(body['path']);
+    f.ok = jb(body['ok'], true);
+    f.error = jstr(body['error']);
+    f.text = jstr(body['text']);
+    f.truncated = jb(body['truncated']);
+    f.totalBytes = jn(body['totalBytes'], 0);
+    return f;
+  }
+}
+
+/** pocket/models.list 回包（ToPhone）。models=标准别名；gatewayModels=网关 /v1/models 原始 id（对齐 #167）。 */
+export class ModelsList {
+  models: string[] = [];
+  gatewayModels: string[] = [];
+  supportedEfforts: string[] = [];
+  permissionModes: string[] = [];
+  error: string | null = null;
+
+  static from(body: Record<string, Object>): ModelsList {
+    const m = new ModelsList();
+    m.models = ja(body['models']).map((v: Object) => js(v));
+    m.gatewayModels = ja(body['gatewayModels']).map((v: Object) => js(v));
+    m.supportedEfforts = ja(body['supportedEfforts']).map((v: Object) => js(v));
+    m.permissionModes = ja(body['permissionModes']).map((v: Object) => js(v));
+    m.error = jstr(body['error']);
+    return m;
+  }
+}
+
+/** pocket/commands 的单个斜杠指令（渲染只需要 name；description 可选）。 */
+export class SlashCommand {
+  name: string = '';
+
+  static from(v: Object): SlashCommand {
+    const c = new SlashCommand();
+    c.name = js(jo(v)['name']);
+    return c;
+  }
 }
 
 /**
