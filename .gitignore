@@ -80,3 +80,5 @@ harmony/.appanalyzer/
 harmony/local.properties
 harmony/.signing/
 harmony/tools/
+# 构建产物（HAP 等二进制不进 git，挂 GitHub Release 分发）
+harmony/release/

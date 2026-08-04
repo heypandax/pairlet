@@ -80,6 +80,13 @@ cryptoFramework 的 `AsyKeySpec` 系列（ECCKeyPairSpec / getAsyKeySpecBigInt�
 > 每约 30s 掉线循环；且旧 `HuaweiSender` 用的是 HMS Android 旧端点，推送会静默不发。两者都在
 > 本分支的 relay 侧修复里，未 redeploy 前鸿蒙端不可用。
 
+## 预览包下载（开发调试用）
+
+未签名 HAP 挂在 GitHub Release（pre-release，如 `harmony-preview-20260804`），**二进制不进
+git**（`harmony/release/` 已 gitignore）。无 DevEco 环境的协作者可用小白调试助手等工具自签
+安装；自签指纹与 AGC 项目不一致时 Push Kit 自动关闭，其余功能不受影响。本机构建：
+`bash scripts/build-harmony.sh`（macOS，需 DevEco Studio）。
+
 启用步骤（一次性，AGC 控制台操作为主）：
 
 1. **AGC 建应用**：AppGallery Connect → 我的项目 → 添加应用，包名 `dev.ccpocket.app`
