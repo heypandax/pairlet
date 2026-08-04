@@ -1,0 +1,49 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "phone"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ]
+      }
+    ],
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      }
+    ],
+    "metadata": [
+      {
+        // Push Kit：AGC 项目设置 → 常规 → 应用 → Client ID。占位值时 getToken 会失败并静默降级
+        // （应用照常工作，只是没有离线推送）。真机启用推送时把它换成真实 Client ID。
+        "name": "client_id",
+        "value": "REPLACE_WITH_AGC_CLIENT_ID"
+      }
+    ]
+  }
+}

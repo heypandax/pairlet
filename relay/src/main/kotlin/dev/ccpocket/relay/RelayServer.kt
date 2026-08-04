@@ -300,11 +300,16 @@ class RelayServer(
      *  whole purpose is being woken for an offer. That is safe precisely because the two exclusions are
      *  separate: it still never appears in [RelayStore.pushTargets], so the token it registers can only ever
      *  be reached by a TARGETED [NotifyPush] naming its own deviceId. */
-    private suspend fun handleDeviceControl(deviceId: String, text: String) {
+    internal suspend fun handleDeviceControl(conn: Conn, text: String) {
+        val deviceId = conn.deviceId ?: return
         when (val body = runCatching { PocketJson.decodeFromString<Envelope>(text).body }.getOrNull()) {
             is RegisterPush -> if (store.getDevice(deviceId)?.mayRegisterPush == true) {
                 runCatching { store.setPushToken(deviceId, body.platform, body.token, clock()) }
             }
+            // app-level liveness echo on THIS socket only (mirrors the daemon leg's Ping handling). Clients
+            // with no protocol-layer ping (HarmonyOS webSocket API) drive pocket/ping→pocket/pong themselves
+            // and drop the link on a missed pong — without the echo they loop-reconnect every ~30s.
+            is Ping -> runCatching { conn.sendText(controlText(Pong(body.ts))) }
             else -> {}
         }
     }
@@ -351,7 +356,7 @@ class RelayServer(
         try {
             for (frame in incoming) when (frame) {
                 is Frame.Binary -> broker.toDaemonFrom(account, hello.deviceId, frame.data)
-                is Frame.Text -> handleDeviceControl(hello.deviceId, frame.readText())
+                is Frame.Text -> handleDeviceControl(conn, frame.readText())
                 else -> {}
             }
         } finally {

@@ -1,0 +1,32 @@
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        // 未配置签名时 assembleHap 产出未签名 HAP；真机安装前用 DevEco 的自动化签名
+        // (File → Project Structure → Signing Configs) 生成调试证书后在此补：
+        // "signingConfigs": [{ "name": "default", "type": "HarmonyOS", "material": { ... } }]
+        // "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS"
+      }
+    ],
+    "buildModeSet": [
+      { "name": "debug" },
+      { "name": "release" }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": ["default"]
+        }
+      ]
+    }
+  ]
+}

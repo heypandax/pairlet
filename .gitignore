@@ -66,3 +66,17 @@ scripts/__pycache__/
 
 # opencode project-local config/state
 .opencode/
+
+# HarmonyOS (harmony/) build artifacts + local signing/IDE state
+harmony/.idea/
+harmony/.hvigor/
+harmony/.cxx/
+harmony/.clangd/
+harmony/.preview/
+harmony/oh_modules/
+harmony/**/oh_modules/
+harmony/**/build/
+harmony/.appanalyzer/
+harmony/local.properties
+harmony/.signing/
+harmony/tools/

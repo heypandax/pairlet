@@ -1,0 +1,9 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "cc-pocket HarmonyOS client entry module",
+  "main": "",
+  "author": "",
+  "license": "",
+  "dependencies": {}
+}

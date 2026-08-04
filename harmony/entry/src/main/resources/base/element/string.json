@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "cc-pocket HarmonyOS client"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "cc-pocket main ability"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "CC Pocket"
+    }
+  ]
+}
