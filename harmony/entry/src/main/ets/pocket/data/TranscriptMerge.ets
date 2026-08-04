@@ -111,8 +111,28 @@ export function mergeHistory(local: ChatMessage[], replay: ChatMessage[]): ChatM
     const r = replay[ri];
     if (couldPair(l, r)) {
       if (l.role === 'assistant') {
-        // 流式泡泡与磁盘行对齐：谁在文本上延伸就取谁（回放滞后保住流式，离线回补补全文本）
-        l.text = r.text.startsWith(l.text) ? r.text : l.text;
+        // 一条本地流式气泡可能跨回放里的多条 assistant 行：appendStream 把同回合连续的 text
+        // block 粘成一条气泡，回放却按 block 分行落地。只在本地文本"还有未匹配余量"时才继续
+        // 吃下一条回放行——一旦覆盖，后面的 assistant 行就是真正的新内容（各自成泡），不能再吞，
+        // 否则重连回放会被误当断线回补追加 → 内容重复（对齐 TranscriptMerge.kt 61-83 的 acc 逻辑）。
+        let acc = r.text;
+        while (ri + 1 < replay.length && acc.length < l.text.length) {
+          const nx = replay[ri + 1];
+          if (nx.role !== 'assistant') break;
+          const cand = acc + nx.text;
+          if (l.text.startsWith(cand) || cand.startsWith(l.text)) {
+            acc = cand;
+            ri++;
+          } else {
+            break;
+          }
+        }
+        // 回放追上（或越过）气泡 → 采用回放全文；本地仍领先且回放后面还有 assistant 行 =
+        // 本地泡泡是跨掉块粘起来的、信磁盘 → 也采用 acc；否则是磁盘读落后于流 → 保留本地。
+        const nextIsAssistant = ri + 1 < replay.length && replay[ri + 1].role === 'assistant';
+        if (acc.startsWith(l.text) || nextIsAssistant) {
+          l.text = acc;
+        }
       } else if (l.role === 'tool' && l.ok === null && r.ok !== null) {
         l.ok = r.ok;
       }

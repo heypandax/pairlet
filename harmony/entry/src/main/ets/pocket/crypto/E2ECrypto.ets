@@ -195,7 +195,7 @@ export class E2ECrypto {
   /** AES-256-GCM seal：nonce 12 字节；返回 ciphertext‖tag（16 字节），同 Java AES/GCM 输出布局。 */
   static async seal(key: Uint8Array, nonce: Uint8Array, plaintext: Uint8Array, aad: Uint8Array): Promise<Uint8Array> {
     const symKey = await E2ECrypto.aesKey(key);
-    const cipher = cryptoFramework.createCipher('AES256|GCM|PKCS7');
+    const cipher = cryptoFramework.createCipher('AES256|GCM|NoPadding');
     const spec = E2ECrypto.gcmSpec(nonce, aad, new Uint8Array(0));
     cipher.initSync(cryptoFramework.CryptoMode.ENCRYPT_MODE, symKey, spec);
     const part1 = cipher.updateSync({ data: plaintext });
@@ -218,7 +218,7 @@ export class E2ECrypto {
     const tag = ctTag.slice(ctTag.length - 16);
     try {
       const symKey = await E2ECrypto.aesKey(key);
-      const cipher = cryptoFramework.createCipher('AES256|GCM|PKCS7');
+      const cipher = cryptoFramework.createCipher('AES256|GCM|NoPadding');
       const spec = E2ECrypto.gcmSpec(nonce, aad, tag);
       cipher.initSync(cryptoFramework.CryptoMode.DECRYPT_MODE, symKey, spec);
       const part1 = cipher.updateSync({ data: ct });
@@ -315,6 +315,24 @@ export class E2ECrypto {
       if ((await E2ECrypto.open(key, nonce, tampered, aad)) !== null) failures.push('gcm-tamper-accepted');
     } catch (e) {
       failures.push(`gcm-throw:${e}`);
+    }
+    try {
+      // 跨端已知答案向量（KAT）：与 JVM 参考实现逐字节一致，钉死「无填充」（ct 长 = pt 长 + 16 tag）
+      // 与字节序，防止 seal/open 自封自解两侧同错却全绿。
+      const katKey = hexToBytes('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f');
+      const katNonce = hexToBytes('000000000000000000000001'); // 11 字节 0x00 ‖ 0x01（4 零 ‖ 8B BE 计数器 ctr=1）
+      const katAad = utf8('ccpocket-e2e-v1');
+      const katPt = utf8('cc-pocket cross-impl gcm kat');
+      const katExpect = hexToBytes(
+        '76b5928c2b975b7b7a0e324b83d549da' +
+        '7cf26c3844d537e9536b62ad215d7e15' +
+        'c886c3bc7001a3af2836aa5d');
+      const katSealed = await E2ECrypto.seal(katKey, katNonce, katPt, katAad);
+      if (!bytesEqual(katSealed, katExpect)) failures.push('gcm-kat-ximpl');
+      const katOpened = await E2ECrypto.open(katKey, katNonce, katExpect, katAad);
+      if (katOpened === null || !bytesEqual(katOpened, katPt)) failures.push('gcm-kat-open');
+    } catch (e) {
+      failures.push(`gcm-kat-throw:${e}`);
     }
     return failures;
   }
