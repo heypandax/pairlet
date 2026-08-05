@@ -145,6 +145,8 @@ daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon pair
 - 公开用户手册（链接可直接发给 AI 助手）—— <https://pocket.ark-nexus.cc/manual/zh/>
 - 完整功能列表 —— <https://heypandax.github.io/cc-pocket/features.html>
 - 使用文档（中文）—— [`docs/USAGE.md`](docs/USAGE.md)
+- 运行时上下文协作接力说明 —— [`docs/COLLABORATION-HANDOFF.md`](docs/COLLABORATION-HANDOFF.md)
+- 任务上下文评审（ReviewRequest，预览） —— [`docs/design/REVIEW-REQUEST.md`](docs/design/REVIEW-REQUEST.md)；配套 Claude Code Skill 随仓库分发在 [`packaging/skills/review-request/SKILL.md`](packaging/skills/review-request/SKILL.md)，拷到 `~/.claude/skills/review-request/` 即可使用
 - 运行 / 运维 daemon —— [`docs/RUN.md`](docs/RUN.md)
 - 安全模型与威胁分析 —— [`docs/SECURITY.md`](docs/SECURITY.md)
 - 智能客服知识闭环与 OpenClaw 部署 —— [`docs/SUPPORT-KNOWLEDGE.md`](docs/SUPPORT-KNOWLEDGE.md)

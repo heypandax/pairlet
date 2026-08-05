@@ -3,10 +3,10 @@
 > 对应 issue [#197](https://github.com/heypandax/cc-pocket/issues/197)。
 > 状态：**已暂停，不作为当前实现依据。**
 >
-> 2026-08-01 产品方向已收敛为“用户把当前 Session 临时交给同事接续”，不再优先建设
-> daemon-to-daemon Agent 互调、长期 Peer Grant 或 AgentSpace。已确认的实现规格见
-> [`SESSION-HANDOFF.md`](./SESSION-HANDOFF.md)。本文仅保留为历史技术探索；除非新的用户证据证明
-> 必须在接收者电脑执行任务，否则不要按本文 M1–M4 开发。
+> 当前协作能力分为两类：[`SESSION-HANDOFF.md`](./SESSION-HANDOFF.md) 交接运行时上下文；
+> [`REVIEW-REQUEST.md`](./REVIEW-REQUEST.md) 交接任务上下文。ReviewRequest 虽然由接收者自己的 Agent
+> 处理，但仍由人发起、接受和返回，不等于 daemon 远程调用另一个 Agent。本文讨论的自主 Agent 互调、
+> 长期 Peer Grant 和 AgentSpace 继续暂停，不要把它与 ReviewRequest 合并实现。
 
 ---
 
