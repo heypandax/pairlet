@@ -1,12 +1,12 @@
 {
   "version": "1.6.1",
-  "description": "Drive Claude Code from your phone — the cc-pocket daemon.",
+  "description": "Drive Claude Code from your phone \u2014 the cc-pocket daemon.",
   "homepage": "https://github.com/heypandax/cc-pocket",
   "license": "MIT",
   "architecture": {
     "64bit": {
       "url": "https://github.com/heypandax/cc-pocket/releases/download/v1.6.1/cc-pocket-daemon-1.6.1-windows-x86_64.zip",
-      "hash": "33c776a1a215cb697f45ae8c17ecae6775e84ac92dce152fc1fc7d17470678fb"
+      "hash": "aea1030a696418d44115935e29ca7fbf32c51f153da6cfd52ba8ab8bef10c899"
     }
   },
   "extract_dir": "cc-pocket-daemon",
@@ -17,7 +17,7 @@
   "notes": [
     "The daemon now runs in the background (a logon Scheduled Task was registered).",
     "Pair your phone:   cc-pocket-daemon pair",
-    "Requires the Claude Code CLI on PATH or at ~\\.local\\bin\\claude.exe — the daemon drives it."
+    "Requires the Claude Code CLI on PATH or at ~\\.local\\bin\\claude.exe \u2014 the daemon drives it."
   ],
   "checkver": "github",
   "autoupdate": {

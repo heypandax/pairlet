@@ -11,8 +11,8 @@ cask "cc-pocket" do
   arch arm: "arm64", intel: "x86_64"
 
   version "1.6.1"
-  sha256 arm:   "d650841121b09c1e965bcc5942436e9b14809fbe41debbec8caf6fbeae089ed9",
-         intel: "0c210d32794e15807f317768f377eee443f6fa8c142a5ca1a06216bca3748928"
+  sha256 arm:   "4c06188fdf837ef0d7befb72a52590806f04ede5f48c6455f052c8ddccb03f68",
+         intel: "a58f7535a10085cc0409f499859ec793837a15275838bd0cd698ce635aaa2a0f"
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
   name "CC Pocket daemon"
@@ -54,3 +54,4 @@ cask "cc-pocket" do
       brew install whisper-cpp
   EOS
 end
+
