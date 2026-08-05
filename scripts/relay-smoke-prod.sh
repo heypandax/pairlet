@@ -32,7 +32,9 @@ TICKET=$(echo "$PAIR" | sed -E 's/.*"ticket":"([^"]+)".*/\1/')
 DPUB=$(echo "$PAIR" | sed -E 's/.*"daemonPub":"([^"]+)".*/\1/')
 [ -n "$TICKET" ] && [ "$TICKET" != "$PAIR" ] || { echo "FAIL: mint: $PAIR"; exit 1; }
 
-( printf 'dirs\n'; sleep 6; printf 'quit\n' ) \
+# A freshly restarted relay may need a few seconds for the daemon's replay and the device's E2E
+# channel to settle before the first command response; six seconds made this smoke test flaky.
+( printf 'dirs\n'; sleep 15; printf 'quit\n' ) \
   | CC_POCKET_IDENTITY="$WORK/dev.json" "$D" test-client --relay "$RELAY" --daemon-pub "$DPUB" --ticket "$TICKET" >"$WORK/tc.log" 2>&1 || true
 
 grep -q "E2E channel up" "$WORK/tc.log" || { echo "FAIL: E2E handshake"; cat "$WORK/tc.log"; echo "--- daemon ---"; tail "$WORK/daemon.log"; exit 1; }
