@@ -59,6 +59,26 @@ fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (fra
     else -> false
 }
 
+/**
+ * Owner frames that the ROUTER handles but which still must not run on the relay reader loop.
+ *
+ * [isOwnerControlFrame] covers the frames intercepted before the router; this covers the ones that go
+ * through it and nevertheless end up inside the same mint. `pocket/review.contact_invite` is one:
+ * ReviewOwnerService.invite → CollaboratorControl.createTicket → mintTicket, which suspends until the
+ * relay answers with a `PairTicket` — a frame only THIS reader can deliver. Dispatched inline it waits
+ * for a reply it is itself blocking, times out, and starves every other device for the duration.
+ *
+ * NOT a serialization point, and worth being exact about: `createTicket` checks `intentPending()` BEFORE
+ * the suspending mint and records the intent only after, so two owner mints dispatched concurrently can
+ * both pass the check and both mint — the loser's ticket then lives at the relay with no daemon-side
+ * intent. That race predates this predicate (the share/bridge/collaborator mints are already off-reader)
+ * and is not introduced by it, but this frame adds a second class and a new UI button onto the same
+ * unserialized mint. The fix belongs in `createTicket`: hold the mint across the round trip so
+ * `intentPending()` is true for its whole duration.
+ */
+fun isOffReaderRouterFrame(frame: dev.ccpocket.protocol.Frame): Boolean =
+    frame is dev.ccpocket.protocol.CreateReviewInvite
+
 suspend fun dispatchOwnerControl(
     frame: dev.ccpocket.protocol.Frame,
     share: ShareControl?,
@@ -77,7 +97,9 @@ suspend fun dispatchOwnerControl(
         is ControlBridgeRunner -> emit((bridge ?: return false).controlRunner(frame))
         is dev.ccpocket.protocol.DetachBridgeRunner -> emit((bridge ?: return false).detachRunner(frame.name))
         // Collaborator Link contact management (SESSION-HANDOFF.md §4.1) — same owner-only footing
-        is dev.ccpocket.protocol.CreateCollaboratorTicket -> emit((collaborator ?: return false).createTicket(frame))
+        // no purpose argument: this frame is the App's SESSION HANDOFF invite and always has been, so it
+        // takes the mint's historical default. The Review Center mints through pocket/review.contact_invite.
+        is dev.ccpocket.protocol.CreateCollaboratorTicket -> emit((collaborator ?: return false).createTicket(frame.label))
         is dev.ccpocket.protocol.ListCollaborators -> emit((collaborator ?: return false).list())
         is dev.ccpocket.protocol.RemoveCollaborator -> emit((collaborator ?: return false).remove(frame.deviceId))
         else -> return false

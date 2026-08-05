@@ -116,7 +116,16 @@ class DeviceSessions(
      *  (not even a crash window) does a would-be bridge key sit in the full-power allow-list the LAN
      *  gate and older daemons trust. The classification is only FINALIZED when the first transport
      *  frame decrypts under that exact ticket-PSK ([transport] → [BridgeRegistry.finalize]) — proof the
-     *  device really holds the headless ticket, immune to relay announce-order games. */
+     *  device really holds the headless ticket, immune to relay announce-order games.
+     *
+     *  UNANCHORED announce: entering the full-power allow-list requires that a ticket THIS daemon minted
+     *  was still armed here — the arming fact, not the byte value the handshake ends up using. With
+     *  nothing armed (we restarted after minting a restricted invite but before it was redeemed, or the
+     *  announce is unsolicited) the intent that says "this is a REVIEW collaborator / a bridge / a guest"
+     *  is gone with it: promoting the key would silently hand a colleague a full owner slot, past
+     *  [dev.ccpocket.protocol.CollaboratorPurpose] and every restricted capability gate. Such a key is
+     *  held provisional instead — never persisted, never allow-listed — so its first frame hits the same
+     *  fail-closed `recognized` check in [transport] and the owner mints a fresh invite. */
     suspend fun onDevicePaired(deviceId: String, devicePubB64: String) {
         val pub = runCatching { B64dec.decode(devicePubB64) }.getOrNull() ?: return
         if (bridges.isRestricted(deviceId)) { // confirmed bridge/guest: replay must not leak the key into devices.json
@@ -124,6 +133,7 @@ class DeviceSessions(
             return
         }
         var provisionalBridge = false
+        var unanchored = false
         val known = mutex.withLock {
             seenThisAttach.add(deviceId)
             val already = devicePubs[deviceId]?.contentEquals(pub) == true ||
@@ -131,20 +141,25 @@ class DeviceSessions(
             if (!already) {
                 // LIFO: the device scanned the most recently minted link. Attach-replays of an
                 // already-known key must NOT re-arm a PSK (that would lock its next LAN connect out).
-                val psk = synchronized(psks) { psks.removeLastOrNull() } ?: ByteArray(0)
-                pskFor[deviceId] = psk
-                if (psk.isNotEmpty() && bridges.looksHeadless(psk)) {
-                    provisionalBridge = true
-                    bridges.holdProvisional(deviceId, pub)
-                } else {
-                    devicePubs[deviceId] = pub
-                }
+                // `armed` is the ARMING FACT and is what decides authority below; the empty fallback is
+                // only the byte value the responder handshake needs.
+                val armed = synchronized(psks) { psks.removeLastOrNull() }?.takeIf { it.isNotEmpty() }
+                pskFor[deviceId] = armed ?: ByteArray(0)
+                unanchored = armed == null
+                provisionalBridge = armed != null && bridges.looksHeadless(armed)
+                if (unanchored || provisionalBridge) bridges.holdProvisional(deviceId, pub)
+                else devicePubs[deviceId] = pub
             }
             already
         }
         if (!known) {
-            if (!provisionalBridge) persist() // a provisional bridge never touches devices.json
-            log.info("device paired: ${deviceId.take(8)}… (e2e pub ${pub.size}B${if (provisionalBridge) ", provisional bridge" else ""})")
+            if (!provisionalBridge && !unanchored) persist() // nothing provisional ever touches devices.json
+            val how = when {
+                unanchored -> ", unanchored — no ticket armed here, its first frame is refused"
+                provisionalBridge -> ", provisional bridge"
+                else -> ""
+            }
+            log.info("device paired: ${deviceId.take(8)}… (e2e pub ${pub.size}B$how)")
         }
     }
 
@@ -377,7 +392,8 @@ class DeviceSessions(
         // FAIL CLOSED: a device that is neither a confirmed RESTRICTED credential (bridge/guest) nor in the
         // full-power allow-list is a provisional credential whose intent lapsed before this first frame
         // (slow pairing near the ticket TTL edge, or a daemon restart that wiped the in-memory
-        // provisional/PSK maps). It must NOT route as an ungated full-power device — drop it; the owner
+        // provisional/PSK maps — the UNANCHORED announce [onDevicePaired] deliberately parks here rather
+        // than in devices.json). It must NOT route as an ungated full-power device — drop it; the owner
         // re-issues the invite. (isRestricted covers guests too — else a just-confirmed guest is dropped.)
         val recognized = bridges.isRestricted(deviceId) || mutex.withLock { devicePubs.containsKey(deviceId) }
         if (!recognized) {
@@ -465,7 +481,11 @@ class DeviceSessions(
                 // requires an IN_PROGRESS handoff bound to THIS device for every session-shaped frame.
                 val svc = core.registry.handoffs
                 val guard = svc?.collaboratorGuard(deviceId)
-                if (guard == null || !dev.ccpocket.daemon.handoff.CollaboratorCaps.ingressAllowed(env.body)) {
+                // what the OWNER minted this link for (REVIEW-REQUEST.md §13.3). Read from the credential's
+                // own spec, never from anything the peer sends; a spec we cannot read leaves the purpose
+                // UNKNOWN, which admits neither plane.
+                val purpose = bridges.specOf(deviceId)?.purpose ?: dev.ccpocket.protocol.CollaboratorPurpose.UNKNOWN
+                if (guard == null || !dev.ccpocket.daemon.handoff.CollaboratorCaps.ingressAllowed(env.body, purpose)) {
                     log.warn("collaborator ${deviceId.take(8)}… sent forbidden ${env.body::class.simpleName} — refused")
                     runCatching { sink.emit(PocketError("collaborator_forbidden", "not permitted for a collaborator link: ${env.body::class.simpleName}", convoIdOf(env.body))) }
                     return
@@ -474,6 +494,10 @@ class DeviceSessions(
                 // owner attach; the recipient filter — not just the egress whitelist — keeps every other
                 // handoff's updates away from this sink.
                 svc.attach(sink, recipientDeviceId = deviceId)
+                // …and the same filter for the ReviewRequest plane (REVIEW-REQUEST.md §11.1): this sink
+                // only ever receives rows addressed to THIS deviceId. A handoff-purpose link attaches too
+                // and is filtered on the way out instead — one gate to reason about, not two.
+                core.reviews.attach(sink, recipientDeviceId = deviceId)
                 when (val v = guard.vet(env.body)) {
                     is dev.ccpocket.daemon.handoff.CollaboratorGuard.Verdict.Deny -> {
                         log.warn("collaborator ${deviceId.take(8)}… ${env.body::class.simpleName} denied: ${v.code}")
@@ -501,6 +525,7 @@ class DeviceSessions(
                 // frame just refreshes the same slot; owner devices only (a restricted credential's egress
                 // whitelist would drop HandoffUpdated anyway — this keeps it out of the target set entirely).
                 core.registry.handoffs?.attach(sink)
+                core.reviews.attach(sink) // an owner device sees every review request this machine sent
                 if (isOwnerControlFrame(env.body)) {
                     // OFF the reader loop: a mint suspends ~10s waiting for the relay's PairTicket reply,
                     // which arrives through the SAME single ws reader that called us — dispatching inline
@@ -515,12 +540,33 @@ class DeviceSessions(
                     }
                     return
                 }
+                if (isOffReaderRouterFrame(env.body)) {
+                    // Same head-of-line argument as the branch above, for an owner frame the ROUTER
+                    // handles: it reaches a mint that waits on a PairTicket this very reader delivers.
+                    // The owner checks live in the router, so the frame still goes through it — just not
+                    // on the loop it depends on.
+                    val body = env.body
+                    core.scope.launch { route(body, sink, origin, guestScope, collabScope, deviceId) }
+                    return
+                }
             }
         }
+        route(toRoute, sink, origin, guestScope, collabScope, deviceId)
+    }
+
+    /** The router hand-off, extracted so a frame can take it either inline or off the reader loop. */
+    private suspend fun route(
+        frame: Frame,
+        sink: OutboundSink,
+        origin: String?,
+        guestScope: GuestScope?,
+        collabScope: dev.ccpocket.daemon.handoff.CollaboratorScope?,
+        deviceId: String,
+    ) {
         try {
             // deviceId is the Noise-authenticated transport identity — the handoff gate's ONLY input for
             // "who is driving" (SESSION-HANDOFF.md §5.3: never a frame field)
-            core.router.handle(toRoute, sink, origin, guestScope, caps = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }, deviceId = deviceId, collabScope = collabScope) { convoId ->
+            core.router.handle(frame, sink, origin, guestScope, caps = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }, deviceId = deviceId, collabScope = collabScope) { convoId ->
                 mutex.withLock { owned.getOrPut(deviceId) { mutableListOf() }.add(convoId) }
                 bridges.guardOf(deviceId)?.noteOpened(convoId)     // bridge (#91)
                 bridges.guestGuardOf(deviceId)?.noteOpened(convoId) // guest (#115)
@@ -528,7 +574,7 @@ class DeviceSessions(
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            log.warn("handle ${env.body::class.simpleName} failed: ${e.message}")
+            log.warn("handle ${frame::class.simpleName} failed: ${e.message}")
             runCatching { sink.emit(PocketError("internal", e.message ?: "request failed")) }
         }
     }
@@ -559,7 +605,11 @@ class DeviceSessions(
             // BRIDGE whitelist until the first transport frame confirms the kind (fail closed).
             val allowed = when (bridges.kindOf(deviceId)) {
                 CredentialKind.GUEST -> GuestCaps.egressAllowed(frame)
-                CredentialKind.COLLABORATOR -> dev.ccpocket.daemon.handoff.CollaboratorCaps.egressAllowed(frame)
+                CredentialKind.COLLABORATOR -> dev.ccpocket.daemon.handoff.CollaboratorCaps.egressAllowed(
+                    frame,
+                    // same source of truth as ingress: the credential's own spec, fail-closed when absent
+                    bridges.specOf(deviceId)?.purpose ?: dev.ccpocket.protocol.CollaboratorPurpose.UNKNOWN,
+                )
                 else -> BridgeCaps.egressAllowed(frame)
             }
             if (!allowed) return

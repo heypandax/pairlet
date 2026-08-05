@@ -217,6 +217,10 @@ class RelayClient(
         )
         sessions.collaboratorControl = collaboratorService
         core.handoffs.collaborators = collaboratorService
+        // ReviewRequest reuses the SAME contact ledger (REVIEW-REQUEST.md §13.1): one address book, one
+        // "is this link still alive" answer. Until this line runs, `review send` refuses rather than
+        // minting a request addressed to a contact nobody has verified.
+        core.reviews.collaborators = collaboratorService
         // §3.4: the content-free, device-TARGETED offer nudge for an offline contact. The whole payload is
         // built by PushPolicy from two opaque ids — nothing about the work rides the alert.
         //

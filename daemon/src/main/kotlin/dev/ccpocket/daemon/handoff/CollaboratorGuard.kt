@@ -4,22 +4,29 @@ import dev.ccpocket.daemon.bridge.PathScope
 import dev.ccpocket.daemon.bridge.TierClamp
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.AcceptHandoff
+import dev.ccpocket.protocol.AcknowledgeReviewRequest
 import dev.ccpocket.protocol.CancelTurn
 import dev.ccpocket.protocol.CloseSession
 import dev.ccpocket.protocol.DeclineHandoff
+import dev.ccpocket.protocol.DeclineReviewRequest
 import dev.ccpocket.protocol.FetchHistoryPage
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.GetReviewRequest
 import dev.ccpocket.protocol.HandoffAccess
 import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.protocol.ListHandoffs
+import dev.ccpocket.protocol.ListReviewRequests
 import dev.ccpocket.protocol.ListSessionFiles
+import dev.ccpocket.protocol.MarkReviewDelivered
 import dev.ccpocket.protocol.OpenSession
 import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.ReadFile
 import dev.ccpocket.protocol.ReadFileDiff
+import dev.ccpocket.protocol.RespondReviewRequest
 import dev.ccpocket.protocol.ReturnHandoff
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.StartReviewRequest
 import dev.ccpocket.protocol.AgentKind
 
 /** What the router needs to know about a vetted COLLABORATOR frame: the transport-proven deviceId
@@ -87,6 +94,16 @@ class CollaboratorGuard(
     fun vet(frame: Frame, now: Long = System.currentTimeMillis()): Verdict = when (frame) {
         // handoff-plane: structural pass — the router + registry enforce the own-offer binding
         is AcceptHandoff, is DeclineHandoff, is ReturnHandoff, is ListHandoffs -> Verdict.Allow(frame)
+        // ReviewRequest RECIPIENT plane (REVIEW-REQUEST.md §11.1): structural pass for the same reason —
+        // there is nothing session-shaped to vet here. These frames grant NO session access, carry no
+        // workdir/convoId to clamp, and their one real constraint (the request must be addressed to THIS
+        // device) is checked in the router against the transport-proven deviceId, where the authoritative
+        // ledger lives. Passing them through this guard must never look like a session grant, so they are
+        // deliberately listed apart from vetOpen/grantedConvo/grantedRead below.
+        is ListReviewRequests, is GetReviewRequest, is MarkReviewDelivered,
+        is AcknowledgeReviewRequest, is StartReviewRequest, is DeclineReviewRequest,
+        is RespondReviewRequest,
+        -> Verdict.Allow(frame)
         is OpenSession -> vetOpen(frame, now)
         is SendPrompt -> grantedConvo(frame.convoId, frame)
         is CancelTurn -> grantedConvo(frame.convoId, frame)

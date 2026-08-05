@@ -322,6 +322,25 @@ class SessionRegistry(
                     return ""
                 }
                 log.info("open ${resume.take(8)}… → reattach ${attach.convoId.take(8)}…")
+                // Issue #50 on the HOT path — parity with the cold resume below, which builds the
+                // Conversation from open.mode: re-opening a still-live conversation applies the caller's
+                // mode instead of silently reviving whatever the convo drifted to. Since M5 (Full Control
+                // auto-expiry) the drift is real: a convo alive past the TTL has fallen back to DEFAULT,
+                // and before this line every re-open kept that fallback — reading as "Settings' default
+                // mode is ignored". Safe for every credential class: each restricted ingress
+                // (guest/bridge/collaborator guard) already clamps open.mode to its tier ceiling before
+                // it gets here, so applying it can never widen beyond what the cold path would have
+                // granted, and switchMode's own source ceiling still backstops BYPASS for a restricted
+                // origin. Same-mode re-opens no-op inside switchMode (grants and the M5 expiry clock are
+                // untouched — merely re-entering never renews Full Control). A BUSY conversation is left
+                // alone: peeking at a running task must not yank its grants/autonomy mid-flight (the
+                // idle-only spirit of the reaper and the client's close-on-switch).
+                if (!attach.isBusy()) {
+                    if (attach.currentMode() != open.mode) {
+                        log.info("open ${resume.take(8)}… → reattach applies caller mode ${open.mode} (was ${attach.currentMode()})")
+                    }
+                    attach.switchMode(open.mode, open.permissionMode)
+                }
                 cancelPendingClose(attach.convoId); attach.reattach(sink, open.lastEventSeq); return attach.convoId
             }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.

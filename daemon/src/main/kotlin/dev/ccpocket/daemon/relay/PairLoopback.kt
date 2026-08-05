@@ -1,6 +1,10 @@
 package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.bridge.BridgeSpec
+import dev.ccpocket.daemon.control.LOCAL_CONTROL_PREFIX
+import dev.ccpocket.daemon.control.LocalControlDeps
+import dev.ccpocket.daemon.control.LocalControlToken
+import dev.ccpocket.daemon.control.installLocalControl
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AccessTier
 import dev.ccpocket.protocol.CreateBridge
@@ -128,6 +132,10 @@ class PairLoopback(
     private val relayWsBase: String,
     private val daemonPubB64: String,
     private val port: Int,
+    /** The daemon's services, for the TOKEN-AUTHENTICATED local control API (REVIEW-REQUEST.md §6).
+     *  Null keeps only the legacy unauthenticated routes — the shape a caller that predates the review
+     *  plane gets, and what unit tests of the pairing routes construct. */
+    private val core: dev.ccpocket.daemon.DaemonCore? = null,
 ) {
     private val log = logger("PairLoopback")
 
@@ -143,6 +151,15 @@ class PairLoopback(
     }
 
     fun start() {
+        val localControlToken = core?.let {
+            runCatching { LocalControlToken.loadOrCreate() }.getOrElse { failure ->
+                // Keep the legacy loopback API available. Starting the new routes without a token would
+                // turn a disk-permission problem into an unauthenticated control plane, so disable only
+                // that plane and make the reason visible in the daemon log.
+                log.warn("local control API disabled: token setup failed (${failure::class.simpleName})")
+                null
+            }
+        }
         embeddedServer(CIO, host = "127.0.0.1", port = port) {
             routing {
                 post("/pair") {
@@ -339,8 +356,22 @@ class PairLoopback(
                         ContentType.Application.Json,
                     )
                 }
+
+                // ---- the TOKEN-AUTHENTICATED local control API (REVIEW-REQUEST.md §6) ----
+                // Deliberately NOT folded into the routes above: those trade on "reaching loopback ==
+                // local-user authority", which is fine for minting a QR the user is looking at and is
+                // NOT fine for a surface carrying a colleague's brief and a reviewer's result. New
+                // prefix, new rules (token + Content-Type + no browser Origin); the legacy routes keep
+                // working byte-for-byte so no shipped `cc-pocket-daemon pair` breaks.
+                core?.let { c -> localControlToken?.let { token ->
+                    installLocalControl(
+                        LocalControlDeps({ c.collaboratorControl }, c.reviews, c.peerInbox, c.reviewOwner),
+                        token,
+                    )
+                } }
             }
         }.start(wait = false)
         log.info("pair loopback on http://127.0.0.1:$port (POST /pair, POST /pair/headless, GET /bridges, POST /bridge/revoke, POST /share, GET /shares, POST /share/revoke, GET /status)")
+        if (localControlToken != null) log.info("local control API on http://127.0.0.1:$port$LOCAL_CONTROL_PREFIX (token-authenticated)")
     }
 }

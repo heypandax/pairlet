@@ -26,11 +26,19 @@ class DeviceSessionsRevocationTest {
 
     private fun pub(seed: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(seed.encodeToByteArray())
 
+    /** A whole interactive pairing: the daemon mints the ticket, the relay announces the redeemed key.
+     *  The mint is what anchors the key into the allow-list at all — an announce with nothing armed here
+     *  is held provisional instead (see DeviceSessionsUnanchoredPairTest), so it can't stand in for one. */
+    private suspend fun DeviceSessions.pair(deviceId: String, seed: String) {
+        onMintedTicket("ticket-$seed")
+        onDevicePaired(deviceId, pub(seed))
+    }
+
     @Test
     fun deviceRevoked_prunes_key_and_bumps_epoch() = runBlocking {
         val s = sessions()
-        s.onDevicePaired("devA", pub("A"))
-        s.onDevicePaired("devB", pub("B"))
+        s.pair("devA", "A")
+        s.pair("devB", "B")
         val epochBefore = PairedDevices.epoch
         s.onDeviceRevoked("devA")
         assertEquals(setOf("devB"), PairedDevices.load(store).keys)
@@ -40,8 +48,8 @@ class DeviceSessionsRevocationTest {
     @Test
     fun attach_replay_reconcile_prunes_devices_the_relay_no_longer_announces() = runBlocking {
         val s = sessions()
-        s.onDevicePaired("devA", pub("A"))
-        s.onDevicePaired("devB", pub("B"))
+        s.pair("devA", "A")
+        s.pair("devB", "B")
         s.beginAttachReplay()
         s.onDevicePaired("devA", pub("A")) // relay re-announces only the non-revoked device
         s.reconcileReplay()
@@ -51,7 +59,7 @@ class DeviceSessionsRevocationTest {
     @Test
     fun empty_replay_prunes_nothing() = runBlocking {
         val s = sessions()
-        s.onDevicePaired("devA", pub("A"))
+        s.pair("devA", "A")
         s.beginAttachReplay()
         s.reconcileReplay() // older/foreign relay with no re-announce — must not brick the binding
         assertEquals(setOf("devA"), PairedDevices.load(store).keys)
@@ -60,7 +68,7 @@ class DeviceSessionsRevocationTest {
     @Test
     fun first_contact_gate_arms_on_fresh_pair_and_clears_on_revoke() = runBlocking {
         val s = sessions()
-        s.onDevicePaired("devA", pub("A"))
+        s.pair("devA", "A")
         assertTrue(s.firstContactPending("devA")) // fresh pair: LAN refused until the relay handshake proves the ticket
         s.onDevicePaired("devA", pub("A"))        // attach replay of a KNOWN key must not re-arm...
         s.onDeviceRevoked("devA")

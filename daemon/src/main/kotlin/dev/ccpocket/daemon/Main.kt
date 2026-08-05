@@ -196,6 +196,8 @@ private class RunCmd : CliktCommand(name = "run") {
             claudeBin = claudeBin,
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
+            reviews = dev.ccpocket.daemon.review.ReviewService(),
+            peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
         if (claudeHome != null) {
             echo("claude credential isolation: ON — daemon login store: $claudeHome")
@@ -260,7 +262,7 @@ private class RunCmd : CliktCommand(name = "run") {
             // already up — the cask's KeepAlive LaunchAgent, or a stray dev run — don't bind/attach a
             // duplicate that fights it on the relay; exit cleanly (or --takeover to replace it).
             SingleInstance.ensureSolo(pairPort, takeover) { echo(it) }
-            PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort).start()
+            PairLoopback(relayClient, relay, identity.e2ePubB64, pairPort, core).start()
             // daily new-version check: log + one phone push per version; --auto-update (or the env
             // toggle, so the flag survives service reinstalls) hot-swaps installer-managed installs
             val auto = autoUpdate || System.getenv("CC_POCKET_AUTO_UPDATE") == "1"
@@ -788,5 +790,12 @@ fun main(args: Array<String>) {
     // timestamp-less lines made the 07-04 observe/fork incident unreconstructable from the logs
     System.setProperty("org.slf4j.simpleLogger.showDateTime", "true")
     System.setProperty("org.slf4j.simpleLogger.dateTimeFormat", "MM-dd HH:mm:ss.SSS")
-    Root().subcommands(RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(), UpdateCmd(), ConfigCmd(), ServiceInstallCmd()).main(args)
+    Root().subcommands(
+        RunCmd(), TestClientCmd(), PairCmd(), BridgesCmd(), ShareCmd(), StatusCmd(), VersionCmd(),
+        UpdateCmd(), ConfigCmd(), ServiceInstallCmd(),
+        // ReviewRequest M1 (REVIEW-REQUEST.md §4): the daemon-only collaboration loop — establish a
+        // contact, send a task, answer one. Both talk to the ALREADY-RUNNING daemon over its
+        // token-authenticated local control API; neither can start a second daemon.
+        collaboratorCommand(), reviewCommand(),
+    ).main(args)
 }

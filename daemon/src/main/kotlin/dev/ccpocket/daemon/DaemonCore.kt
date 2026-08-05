@@ -49,6 +49,17 @@ class DaemonCore(
      *  checks, the graceful-recall turn control and the idle-reaper protection all read one truth.
      *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
     val handoffs: dev.ccpocket.daemon.handoff.HandoffService = dev.ccpocket.daemon.handoff.HandoffService(),
+    /** ReviewRequest (REVIEW-REQUEST.md) — the TASK-context sibling of [handoffs], deliberately BESIDE it
+     *  rather than inside it: it has its own store, its own state machine and its own capability set, and
+     *  Session Handoff's runtime semantics must not leak into it (§13.2). Sender-authoritative side.
+     *  Injectable so a test can hand in a temp-store instance instead of the real ~/.cc-pocket one. */
+    val reviews: dev.ccpocket.daemon.review.ReviewService = dev.ccpocket.daemon.review.ReviewService(
+        dev.ccpocket.daemon.review.ReviewRegistry(dev.ccpocket.daemon.review.ReviewStore.inMemory()),
+    ),
+    /** Production supplies the durable implementation explicitly in Main. The in-memory default keeps
+     * unit tests and embedded cores from reading ~/.cc-pocket or opening peer relay connections. */
+    peerInboxFactory: (CoroutineScope) -> dev.ccpocket.daemon.review.PeerInboxService =
+        dev.ccpocket.daemon.review.PeerInboxService::inMemory,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -82,6 +93,21 @@ class DaemonCore(
         // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
         // pump below, so BOTH transports (relay client + local server) get it for free
         scope.launch { handoffs.sweepLoop() }
+        // the ReviewRequest expiry sweep, on the same footing and for the same reason
+        scope.launch { reviews.sweepLoop() }
+    }
+
+    /**
+     * The RECIPIENT half of ReviewRequest (REVIEW-REQUEST.md §9): inbound peer links and their inbox
+     * connections. Lives here — not on the relay client — because it is not this account's relay leg at
+     * all: each link dials the PEER's relay with a credential minted in the PEER's account, so it works
+     * (and must keep retrying) whether or not this machine's own relay link is up.
+     */
+    val peerInbox = peerInboxFactory(scope)
+
+    init {
+        // one supervised inbox per stored link; a peer that is unreachable simply keeps backing off
+        runCatching { peerInbox.start() }
     }
 
     val dirs = DirectoryService()
@@ -144,6 +170,15 @@ class DaemonCore(
         scope.launch { scheduler.runLoop() }
     }
 
+    /**
+     * The OWNER-LOCAL review plane (REVIEW-REQUEST.md §6 + §12). ONE instance for the whole daemon: the
+     * wire router (App/desktop Review Center) and the local control API (CLI/Skill) both drive it, which
+     * is what keeps "contacts, prepare and queued actions mean the same thing on every surface" true in
+     * code rather than in a comment. [collaboratorControl] is read lazily — it only exists once the relay
+     * link is up, and a review contact list must not capture the null it saw at construction.
+     */
+    val reviewOwner = dev.ccpocket.daemon.review.ReviewOwnerService({ collaboratorControl }, reviews, peerInbox)
+
     val router = RequestRouter(
         registry, dirs, transcribe, inbox, shell, exports, scope, auth, prefs, presets, scheduler,
         // presetEnv shares PresetStore with the DaemonInfo gateway pill (Main.kt): the host we ask for a
@@ -153,6 +188,8 @@ class DaemonCore(
         approvals = approvals,
         grants = grants,
         approvalHistory = approvalHistory,
+        reviews = reviews,
+        reviewOwner = reviewOwner,
     )
 
     /**
