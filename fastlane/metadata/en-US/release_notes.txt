@@ -1,12 +1,8 @@
-What's new in 1.6.1
-
-Added
-• Task-context review (preview): hand a colleague a review task instead of your machine — they work in their own repo, with their own AI account and approval policy, and return a structured result. No session control is transferred and nobody enters your computer
-• Review Center: draft a request, see what is waiting on you, and send results back from one place. With both apps closed, delivery, retries and history keep running on your computer's daemon
-• Review contacts and session-handoff contacts stay separate: a link can only do the one thing it was authorized for
+What's new in 1.6.2
 
 Fixed
-• Continuing a session now uses the permission mode from your Settings. Re-opening a still-live session used to keep whatever mode that session had drifted to (for example after Full Control expired back to per-request approval), which read as "my default mode is ignored"
+• Reconnecting a daemon no longer prunes valid paired phones before the relay finishes replaying its device list, preventing clients from being silently disconnected after a restart
+• Removed daemons are now kept removed across reconnects instead of being restored by stale relay state
 
 Improved
-• Pairing with a colleague now validates their key on the spot, so an invalid QR fails immediately instead of leaving a link that reconnects forever and never works
+• Phone and desktop apps can remove an already-paired daemon from their device list

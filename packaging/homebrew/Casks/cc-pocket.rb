@@ -10,7 +10,7 @@ cask "cc-pocket" do
   # bit-reproducible, so even the arm64 sha changes on a rebuild).
   arch arm: "arm64", intel: "x86_64"
 
-  version "1.6.1"
+  version "1.6.2"
   sha256 arm:   "4c06188fdf837ef0d7befb72a52590806f04ede5f48c6455f052c8ddccb03f68",
          intel: "a58f7535a10085cc0409f499859ec793837a15275838bd0cd698ce635aaa2a0f"
 
@@ -54,4 +54,3 @@ cask "cc-pocket" do
       brew install whisper-cpp
   EOS
 end
-
