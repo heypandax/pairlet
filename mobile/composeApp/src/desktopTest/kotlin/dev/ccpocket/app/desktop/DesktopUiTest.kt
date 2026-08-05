@@ -581,7 +581,7 @@ class DesktopUiTest {
         waitForIdle()
         assertPresent(str(Res.string.settings_paired_computers))
         assertPresent(str(Res.string.device_rename))              // per-computer actions (also fixes the accountId-label gap)
-        assertPresent(str(Res.string.share_revoke))
+        assertPresent(str(Res.string.device_remove))
     }
 
     @Test

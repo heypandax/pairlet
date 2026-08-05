@@ -1617,6 +1617,14 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun deviceReplayComplete_is_an_additive_control_barrier() {
+        val env = Envelope(id = "replay", ts = 0, to = Route.RELAY, body = DeviceReplayComplete)
+        val json = PocketJson.encodeToString(env)
+        assertTrue("pocket/device.replayComplete" in json, json)
+        assertEquals(DeviceReplayComplete, PocketJson.decodeFromString<Envelope>(json).body)
+    }
+
+    @Test
     fun pairBegin_collaborator_roundtrips_and_old_frames_default_false() {
         // §3.4: a Collaborator Link ticket is minted headless AND collaborator-marked — two orthogonal
         // markers, so "presence-invisible" and "may hold its own push token" stay separable

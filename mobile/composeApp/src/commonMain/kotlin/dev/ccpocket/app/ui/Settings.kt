@@ -148,8 +148,16 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                 .padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 20.dp),
         ) {
 
-            // Paired computers are NOT managed here — switching/adding happens on the disconnected picker
-            // (ConnectScreen) reached via Exit below. Keeps Settings to per-session preferences.
+            // Keep daemon management reachable while connected as well as from the disconnected picker.
+            // Removing only changes this app's local credential; it does not delete the daemon or its
+            // sessions. A fresh pairing can be performed from the same list afterwards.
+            SectionLabel(stringResource(Res.string.settings_paired_computers))
+            DeviceList(
+                repo = repo,
+                onSwitch = { target -> onBack(); repo.switchDaemon(target) },
+                onAdd = { onBack(); repo.beginAddDevice() },
+            )
+            Spacer(Modifier.height(12.dp))
 
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)

@@ -6,12 +6,13 @@ import dev.ccpocket.daemon.conversation.PushHook
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.Attached
-import dev.ccpocket.protocol.PROTO_V_HEADLESS
+import dev.ccpocket.protocol.PROTO_V_ATTACH_REPLAY_COMPLETE
 import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.Challenge
 import dev.ccpocket.protocol.DaemonAuth
 import dev.ccpocket.protocol.DaemonHello
 import dev.ccpocket.protocol.DevicePaired
+import dev.ccpocket.protocol.DeviceReplayComplete
 import dev.ccpocket.protocol.DeviceRevoked
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
@@ -334,11 +335,17 @@ class RelayClient(
                 // reconnect backoff, and offers created in that window would queue a targeted push.
                 try {
                     log.info("attached to relay as daemon (account=${identity.accountId})")
-                    // the relay re-announces every non-revoked device right after attach; once that replay
-                    // settles, prune local keys it didn't include (devices revoked while we were away) so the
-                    // direct-LAN gate stops honoring them. Cancelled harmlessly if the link drops first.
+                    // The relay re-announces every non-revoked device right after attach and then sends an
+                    // explicit DeviceReplayComplete barrier. Reconcile only at that barrier; a fixed delay
+                    // used to delete healthy devices when replay was delayed by relay/network backpressure.
                     sessions.beginAttachReplay()
-                    val reconcile = launch { delay(ATTACH_REPLAY_SETTLE_MS); sessions.reconcileReplay() }
+                    // An older relay cannot prove that its replay is complete. Retain the local allow-list
+                    // in that compatibility mode rather than pruning from a partial snapshot; immediate
+                    // DeviceRevoked controls still prune explicit revocations, and the v4 relay's barrier
+                    // restores offline-revocation reconciliation once deployed.
+                    if (relayProtoV < PROTO_V_ATTACH_REPLAY_COMPLETE) {
+                        log.warn("old relay did not advertise attach replay barrier; retaining local device allow-list")
+                    }
 
                     val outbox = Channel<ByteArray>(Channel.BUFFERED)
                     dataOut = outbox
@@ -388,7 +395,7 @@ class RelayClient(
                         }
                     } finally {
                         dataOut = null
-                        outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel(); reconcile.cancel()
+                        outbox.close(); dataWriter.cancel(); ctrlWriter.cancel(); heartbeat.cancel()
                         withContext(NonCancellable) { sessions.onDisconnect() }
                     }
                 } finally {
@@ -409,9 +416,9 @@ class RelayClient(
 
     /** DaemonHello -> Challenge -> DaemonAuth -> Attached. Throws on rejection (caller retries). */
     private suspend fun DefaultClientWebSocketSession.authenticate() {
-        // protoV = PROTO_V_HEADLESS: tells the relay we understand headless bridge devices, so it may
+        // protoV = PROTO_V_ATTACH_REPLAY_COMPLETE: this also covers headless replay support, so the relay may
         // replay their DevicePaired rows to us (it withholds them from older daemons — issue #91)
-        outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64, protoV = PROTO_V_HEADLESS))))
+        outgoing.send(WsFrame.Text(controlText(DaemonHello(identity.accountId, identity.ed25519PubB64, protoV = PROTO_V_ATTACH_REPLAY_COMPLETE))))
         val challenge = nextControl() as? Challenge ?: error("expected challenge")
         outgoing.send(WsFrame.Text(controlText(DaemonAuth(identity.signChallenge(challenge.nonce)))))
         relayProtoV = 0 // fail closed until THIS link says otherwise
@@ -433,6 +440,18 @@ class RelayClient(
         when (body) {
             is PairTicket -> inboundControl.emit(body)
             is DevicePaired -> sessions.onDevicePaired(body.deviceId, body.devicePubKey)
+            is DeviceReplayComplete -> {
+                if (relayProtoV >= PROTO_V_ATTACH_REPLAY_COMPLETE) {
+                    // An empty v4 snapshot is authoritative: every paired row was revoked while this
+                    // daemon was offline, so the local LAN allow-list must be emptied as well. A marker
+                    // from an older/untrusted relay is ignored rather than turning an incomplete replay
+                    // into a destructive prune.
+                    sessions.reconcileReplay(authoritativeEmpty = true)
+                    log.info("attach device replay complete (relay protoV=$relayProtoV)")
+                } else {
+                    log.warn("ignoring attach replay marker from relay protoV=$relayProtoV")
+                }
+            }
             is DeviceRevoked -> sessions.onDeviceRevoked(body.deviceId)
             is PeerPresence -> { peerOnline = body.online; log.info("peer ${if (body.online) "online" else "offline"}") }
             is Pong -> { if (!sawPong) log.info("relay heartbeat armed (pong received)"); sawPong = true; lastPongAt = System.currentTimeMillis() }
@@ -451,7 +470,6 @@ class RelayClient(
         const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
         const val GUEST_EXPIRY_SCAN_MS = 30 * 1000L // how often to sweep for expired folder shares (issue #115)
         const val REVOKE_NOTICE_GRACE_MS = 250L   // head start for the guest's ShareEnded notice before RevokeDevice cuts its socket
-        const val ATTACH_REPLAY_SETTLE_MS = 3_000L // relay device re-announce rides the attach; settled well within this
         const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
         const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this of attach/the last one -> reconnect

@@ -196,7 +196,7 @@ open class SeedDesktopModel : DesktopModel {
     // honest inert state rather than faked ledger data
     override var showReviewCenter by mutableStateOf(false)
 
-    override val appVersion = "1.6.1"
+    override val appVersion = "1.6.2"
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
@@ -215,7 +215,7 @@ open class SeedDesktopModel : DesktopModel {
     override val phonePush: Boolean? get() = phonePushState
     override fun setPhonePush(enabled: Boolean) { phonePushState = enabled }
     override fun renameComputer(c: DkComputer, label: String?) {}
-    override fun revokeComputer(c: DkComputer) {}
+    override fun removeComputer(c: DkComputer) {}
     override val composerState = ComposerState()
 
     // account + API presets (issue #113): canned masked state, exactly the shape a daemon replies with —

@@ -163,18 +163,20 @@ class DeviceSessions(
         }
     }
 
-    /** A relay (re)attach begins: reset the replay set — [reconcileReplay] prunes against what follows. */
+    /** A relay (re)attach begins: reset the replay set. [reconcileReplay] is called only after the relay's
+     * explicit DeviceReplayComplete barrier; an old relay leaves the local allow-list intact until upgraded. */
     suspend fun beginAttachReplay() = mutex.withLock { seenThisAttach.clear() }
 
     /**
      * The relay re-announces every NON-REVOKED device right after attach — that replay is the
      * authoritative set. Prune anything we still hold that wasn't in it (revoked while we were offline),
-     * so the direct-LAN gate stops honoring keys the user already revoked. An EMPTY replay means an
-     * older/foreign relay that doesn't re-announce — do nothing rather than brick every binding.
+     * so the direct-LAN gate stops honoring keys the user already revoked. An EMPTY replay is safe to
+     * reconcile only when the v4 relay has explicitly sent the completion barrier; without that marker,
+     * it may simply be an older/foreign relay that doesn't re-announce, so retain every local binding.
      */
-    suspend fun reconcileReplay() {
+    suspend fun reconcileReplay(authoritativeEmpty: Boolean = false) {
         val (stale, staleBridges) = mutex.withLock {
-            if (seenThisAttach.isEmpty()) return
+            if (seenThisAttach.isEmpty() && !authoritativeEmpty) return
             val s = (devicePubs.keys - seenThisAttach).toList().onEach {
                 devicePubs.remove(it); sessions.remove(it); pskFor.remove(it)
             }

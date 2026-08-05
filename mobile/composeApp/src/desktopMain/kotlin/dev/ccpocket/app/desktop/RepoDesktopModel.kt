@@ -1098,7 +1098,7 @@ class RepoDesktopModel(
 
     private fun paired(c: DkComputer) = repo.pairedList.firstOrNull { it.accountId == c.accountId }
     override fun renameComputer(c: DkComputer, label: String?) { paired(c)?.let { repo.renameDaemon(it, label) } }
-    override fun revokeComputer(c: DkComputer) { paired(c)?.let { repo.unpair(it) } }
+    override fun removeComputer(c: DkComputer) { paired(c)?.let { repo.unpair(it) } }
 
     // ── folder-share (issue #115) ──
     override val shares get() = repo.shares.toList()

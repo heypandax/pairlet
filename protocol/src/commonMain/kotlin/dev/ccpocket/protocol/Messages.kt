@@ -1858,6 +1858,11 @@ const val PROTO_V_HEADLESS: Int = 2
  *  offer on its next connect/foreground pull. */
 const val PROTO_V_TARGETED_PUSH: Int = 3
 
+/** The [Attached.relayProtoV] from which a relay sends [DeviceReplayComplete] after the complete
+ * attach-time device snapshot. New daemons use this barrier instead of guessing that a replay has
+ * settled after a wall-clock delay. */
+const val PROTO_V_ATTACH_REPLAY_COMPLETE: Int = 4
+
 /** relay -> daemon: a single-use nonce to sign (bound to this socket, short TTL). */
 @Serializable
 @SerialName("pocket/challenge")
@@ -1927,6 +1932,13 @@ data class PairTicket(val ticket: String, val expiresInSec: Int, val code: Strin
 @Serializable
 @SerialName("pocket/device.paired")
 data class DevicePaired(val deviceId: String, val devicePubKey: String) : ToRelay
+
+/** relay -> daemon: the attach-time [DevicePaired] snapshot is complete. Reconciliation MUST happen
+ * only after this marker; a missing marker means the snapshot is incomplete and local devices must be
+ * retained. This is a control-plane barrier, not a device pairing event. */
+@Serializable
+@SerialName("pocket/device.replayComplete")
+data object DeviceReplayComplete : ToRelay
 
 /** daemon -> relay: revoke a device; the relay marks it revoked and force-closes its socket. */
 @Serializable

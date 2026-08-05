@@ -711,7 +711,8 @@ interface DesktopModel {
     // re-run a delivered-but-no-turn prompt (issue #104) under a fresh id; no-op unless turnStalled
     fun resendStalled() {}
     fun renameComputer(c: DkComputer, label: String?) // null clears back to the accountId fallback
-    fun revokeComputer(c: DkComputer)
+    /** Remove this daemon binding from the desktop's local credential list; the daemon itself is unchanged. */
+    fun removeComputer(c: DkComputer)
 
     // ── folder-share (issue #115): owner management + guest redeem. All default to inert so the
     //    seed/preview model needs no changes; the live [RepoDesktopModel] wires them to the repo. ──

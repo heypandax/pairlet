@@ -66,6 +66,31 @@ class DeviceSessionsRevocationTest {
     }
 
     @Test
+    fun authoritative_empty_replay_prunes_all_devices() = runBlocking {
+        val s = sessions()
+        s.pair("devA", "A")
+        s.pair("devB", "B")
+        s.beginAttachReplay()
+        s.reconcileReplay(authoritativeEmpty = true) // v4 relay sent the explicit completion barrier
+        assertEquals(emptySet(), PairedDevices.load(store).keys)
+    }
+
+    @Test
+    fun delayed_replay_keeps_local_devices_until_completion_barrier() = runBlocking {
+        val s = sessions()
+        s.pair("devA", "A")
+        s.pair("devB", "B")
+        s.beginAttachReplay()
+        s.onDevicePaired("devA", pub("A"))
+
+        // The relay may deliver the second announce well after attach. No timer or partial snapshot is
+        // allowed to prune devB before the explicit replay-complete callback invokes reconcile.
+        assertEquals(setOf("devA", "devB"), PairedDevices.load(store).keys)
+        s.reconcileReplay()
+        assertEquals(setOf("devA"), PairedDevices.load(store).keys)
+    }
+
+    @Test
     fun first_contact_gate_arms_on_fresh_pair_and_clears_on_revoke() = runBlocking {
         val s = sessions()
         s.pair("devA", "A")

@@ -187,4 +187,21 @@ class RelayCoreTest {
         superseded!!.close("superseded")
         assertTrue(oldClosed)
     }
+
+    @Test fun stale_daemon_replay_cannot_send_to_the_replacement_connection() = runBlocking {
+        val broker = Broker()
+        val oldTexts = mutableListOf<String>()
+        val newTexts = mutableListOf<String>()
+        val old = Conn("acct", Role.DAEMON, null, sendText = { oldTexts += it }, sendBinary = {}, close = {})
+        val replacement = Conn("acct", Role.DAEMON, null, sendText = { newTexts += it }, sendBinary = {}, close = {})
+
+        broker.attachDaemon(old)
+        broker.controlToDaemon(old, "old-before-supersede")
+        broker.attachDaemon(replacement)
+        broker.controlToDaemon(old, "stale-replay")
+        broker.controlToDaemon(replacement, "replacement-replay")
+
+        assertEquals(listOf("old-before-supersede"), oldTexts)
+        assertEquals(listOf("replacement-replay"), newTexts)
+    }
 }

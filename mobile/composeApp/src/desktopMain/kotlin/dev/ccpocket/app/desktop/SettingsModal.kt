@@ -60,9 +60,11 @@ import dev.ccpocket.app.ui.share.groupShares
 import dev.ccpocket.app.ui.share.shareStatus
 import dev.ccpocket.app.ui.share.tierLabel
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1311,6 +1313,7 @@ private fun isHttpUrl(s: String): Boolean = runCatching {
 private fun ComputersPane(model: DesktopModel) {
     var editingId by remember { mutableStateOf<String?>(null) }
     var draft by remember { mutableStateOf("") }
+    var removing by remember { mutableStateOf<DkComputer?>(null) }
     Column {
         Text(stringResource(Res.string.settings_paired_computers), color = Tok.tx, fontFamily = Dk.ui, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 12.dp))
         if (model.computers.isEmpty()) {
@@ -1341,7 +1344,7 @@ private fun ComputersPane(model: DesktopModel) {
                         PulseDot(Tok.ok, 6.dp); Text(stringResource(Res.string.presence_online), color = Tok.ok, fontFamily = Dk.mono, fontSize = 10.sp)
                     } else Text(stringResource(Res.string.presence_offline), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.sp)
                     TextBtn(stringResource(Res.string.device_rename), Tok.tx2) { editingId = c.accountId; draft = "" }
-                    TextBtn(stringResource(Res.string.share_revoke), Tok.danger) { model.revokeComputer(c) }
+                    TextBtn(stringResource(Res.string.device_remove), Tok.danger) { removing = c }
                 }
             }
         }
@@ -1353,6 +1356,35 @@ private fun ComputersPane(model: DesktopModel) {
             Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
             Text(stringResource(Res.string.add_device), color = Tok.accent, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
+    }
+    removing?.let { computer ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            containerColor = Tok.raised,
+            titleContentColor = Tok.tx,
+            textContentColor = Tok.tx2,
+            title = { Text(stringResource(Res.string.remove_device_title), fontFamily = Dk.ui) },
+            text = {
+                Column {
+                    Text(computer.name, color = Tok.tx, fontFamily = Dk.ui, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        stringResource(Res.string.remove_device_confirm),
+                        color = Tok.tx2, fontFamily = Dk.ui, fontSize = 13.sp, lineHeight = 18.sp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { model.removeComputer(computer); removing = null }) {
+                    Text(stringResource(Res.string.device_remove), color = Tok.danger, fontFamily = Dk.ui)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removing = null }) {
+                    Text(stringResource(Res.string.cancel), color = Tok.muted, fontFamily = Dk.ui)
+                }
+            },
+        )
     }
 }
 

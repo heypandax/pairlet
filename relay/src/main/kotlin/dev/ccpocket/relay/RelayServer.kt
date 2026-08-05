@@ -5,12 +5,14 @@ import dev.ccpocket.protocol.AuthError
 import dev.ccpocket.protocol.DaemonAuth
 import dev.ccpocket.protocol.DaemonHello
 import dev.ccpocket.protocol.DevicePaired
+import dev.ccpocket.protocol.DeviceReplayComplete
 import dev.ccpocket.protocol.DeviceRevoked
 import dev.ccpocket.protocol.DeviceHello
 import dev.ccpocket.protocol.Envelope
 import dev.ccpocket.protocol.NotifyPush
 import dev.ccpocket.protocol.PROTO_V_HEADLESS
 import dev.ccpocket.protocol.PROTO_V_TARGETED_PUSH
+import dev.ccpocket.protocol.PROTO_V_ATTACH_REPLAY_COMPLETE
 import dev.ccpocket.protocol.PairBegin
 import dev.ccpocket.protocol.PairCodePayload
 import dev.ccpocket.protocol.PairCodeResolve
@@ -189,15 +191,19 @@ class RelayServer(
         // relayProtoV is OUR capability level, the mirror of DaemonHello.protoV (§3.4): the daemon gates its
         // targeted offer push on it, because an older relay would silently ignore NotifyPush.deviceId and
         // fan the alert out to the OWNER's phones instead of the addressed contact.
-        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_TARGETED_PUSH))
+        sendControl(Attached(Role.DAEMON, account, relayProtoV = PROTO_V_ATTACH_REPLAY_COMPLETE))
         // re-announce known devices so a daemon that missed a DevicePaired (e.g. offline at redeem)
         // re-learns them. HEADLESS rows only go to daemons that understand bridges (issue #91): an
         // older daemon would file the announced key into its FULL-POWER devices.json — a bridge
         // credential silently escalating to a complete device on daemon downgrade.
         store.devicesForAccount(account).forEach { d ->
             if (d.headless && hello.protoV < PROTO_V_HEADLESS) return@forEach
-            broker.controlToDaemon(account, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
+            broker.controlToDaemon(conn, controlText(DevicePaired(d.deviceId, Codec.b64uEnc(d.devicePubkey))))
         }
+        // This marker is the replay barrier. The daemon must not infer completion from a timer: a
+        // reconnecting relay may be serving a durable snapshot while the socket is under backpressure.
+        // Sending it through the same control writer after every DevicePaired preserves ordering.
+        broker.controlToDaemon(conn, controlText(DeviceReplayComplete))
         broker.controlToDevices(account, controlText(PeerPresence(true)))
         try {
             for (frame in incoming) when (frame) {
