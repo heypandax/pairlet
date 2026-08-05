@@ -35,6 +35,32 @@ object E2ECrypto {
         )
     }
 
+    /** A raw uncompressed P-256 point is 65 bytes: the `0x04` prefix plus two 32-byte coordinates. */
+    const val PUBLIC_KEY_SIZE = 65
+    private const val UNCOMPRESSED_PREFIX: Byte = 0x04
+
+    /**
+     * Is [publicRaw] a real P-256 public key this build could actually agree with?
+     *
+     * Length and the `0x04` prefix are only the cheap first half: 65 well-shaped bytes whose coordinates
+     * are not a point on the curve pass both, and on the JDK backend they pass DECODING too — that
+     * provider defers point validation to the agreement itself. So the check runs the agreement: the
+     * question "will a handshake with this key work" is answered by attempting the handshake's own
+     * primitive rather than by a proxy for it.
+     *
+     * The probe keypair is generated fresh and discarded with the shared secret, which is never used,
+     * returned or compared — so this cannot become an oracle about any real key, and the classic
+     * invalid-curve attack has nothing to read.
+     *
+     * Callers use this at the ESTABLISHMENT boundary (an invite naming a daemon's static key). A pinned
+     * key no handshake can complete is not a slightly-wrong link, it is a link that reconnects and fails
+     * until a human deletes it.
+     */
+    fun isValidPublicKey(publicRaw: ByteArray): Boolean {
+        if (publicRaw.size != PUBLIC_KEY_SIZE || publicRaw[0] != UNCOMPRESSED_PREFIX) return false
+        return runCatching { agree(generateKeyPair().privateRaw, publicRaw) }.isSuccess
+    }
+
     /** ECDH: raw 32-byte shared secret from our private key and the peer's public key. */
     fun agree(privateRaw: ByteArray, peerPublicRaw: ByteArray): ByteArray {
         val priv = ecdh.privateKeyDecoder(EC.Curve.P256).decodeFromByteArrayBlocking(EC.PrivateKey.Format.RAW, privateRaw)

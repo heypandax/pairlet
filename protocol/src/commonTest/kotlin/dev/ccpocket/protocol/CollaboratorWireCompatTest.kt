@@ -59,6 +59,71 @@ class CollaboratorWireCompatTest {
         val inv = (PocketJson.decodeFromString<Envelope>(bare).body as CollaboratorTicketCreated).invite!!
         assertEquals(600, inv.ttlSec)
         assertNull(inv.ownerLabel)
+        assertEquals(CollaboratorPurpose.SESSION_HANDOFF, inv.purpose, "a v1 QR is a Session Handoff invite")
+    }
+
+    /**
+     * The invite says WHAT IT ESTABLISHES, because the redeemer has to tell the two features apart before
+     * burning a single-use ticket (REVIEW-REQUEST.md §13.3).
+     *
+     * The mint FRAME being new is not enough: the artifact that actually crosses machines is this one, and
+     * without a marker a phone's ordinary scanner would redeem a Review QR as a handoff contact — consuming
+     * the ticket the colleague's daemon was meant to redeem.
+     */
+    @Test
+    fun the_invite_declares_its_purpose_additively() {
+        val review = CollaboratorInvite("wss://r", "acct", "pk", "tkt", purpose = CollaboratorPurpose.REVIEW)
+        val env = Envelope(id = "16", ts = 0, body = CollaboratorTicketCreated(ok = true, invite = review))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"purpose\":\"review\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // an OLD peer skips the unknown key rather than failing the whole invite — the usual
+        // ignoreUnknownKeys contract, pinned here as the shape it takes for this field
+        val fromNewer = """{"id":"17","ts":0,"to":"PEER","body":{"t":"pocket/collaborator.ticket_created","ok":true,
+            "invite":{"relay":"wss://r","accountId":"acct","daemonPub":"pk","ticket":"tkt","futureField":"x"}}}""".replace("\n", "")
+        assertEquals(
+            CollaboratorPurpose.SESSION_HANDOFF,
+            (PocketJson.decodeFromString<Envelope>(fromNewer).body as CollaboratorTicketCreated).invite!!.purpose,
+        )
+
+        // a purpose only a newer build knows is UNKNOWN, which no redeem path accepts
+        val futurePurpose = """{"id":"18","ts":0,"to":"PEER","body":{"t":"pocket/collaborator.ticket_created","ok":true,
+            "invite":{"relay":"wss://r","accountId":"acct","daemonPub":"pk","ticket":"tkt","purpose":"pair_programming"}}}""".replace("\n", "")
+        assertEquals(
+            CollaboratorPurpose.UNKNOWN,
+            (PocketJson.decodeFromString<Envelope>(futurePurpose).body as CollaboratorTicketCreated).invite!!.purpose,
+        )
+    }
+
+    /**
+     * …and the purpose ALONE is not enough, which is why the two features also travel through different
+     * URI doors (REVIEW-REQUEST.md §13.3).
+     *
+     * `purpose` is a trailing field: an ALREADY-RELEASED app does not read it, decodes the default, and
+     * redeems a Review ticket at its ordinary collaborator scanner — burning the single-use ticket the
+     * colleague's daemon was waiting for. It cannot be taught otherwise after the fact; the only thing
+     * that reaches it is a host it does not recognise, which it declines instead of consuming.
+     *
+     * So the host is a wire contract in its own right, pinned here rather than in either of the two
+     * PORTED codecs (the daemon's and the app's), because those two may drift on everything EXCEPT which
+     * door a ticket was addressed to.
+     */
+    @Test
+    fun the_two_invite_doors_are_distinct_and_the_legacy_one_is_frozen() {
+        // frozen: printed QRs and pasted links from every released build parse against this exact string
+        assertEquals("ccpocket://collab#", COLLAB_INVITE_URI_PREFIX)
+        assertEquals("ccpocket://review-contact#", REVIEW_CONTACT_INVITE_URI_PREFIX)
+        assertTrue(COLLAB_INVITE_URI_PREFIX != REVIEW_CONTACT_INVITE_URI_PREFIX)
+        // …and neither is a prefix of the other, so a host match can never be ambiguous
+        assertFalse(REVIEW_CONTACT_INVITE_URI_PREFIX.startsWith(COLLAB_INVITE_URI_PREFIX.removeSuffix("#")))
+
+        // the mapping every producer uses: only REVIEW leaves the legacy door
+        assertEquals(COLLAB_INVITE_URI_PREFIX, inviteUriPrefix(CollaboratorPurpose.SESSION_HANDOFF))
+        assertEquals(REVIEW_CONTACT_INVITE_URI_PREFIX, inviteUriPrefix(CollaboratorPurpose.REVIEW))
+        // a purpose this build cannot read never gets published as a Review invite; the decoders' exact
+        // purpose match is what makes UNKNOWN unusable at BOTH doors
+        assertEquals(COLLAB_INVITE_URI_PREFIX, inviteUriPrefix(CollaboratorPurpose.UNKNOWN))
     }
 
     // ---- old/minimal JSON → defaults --------------------------------------
@@ -103,6 +168,55 @@ class CollaboratorWireCompatTest {
         // every ingress wraps decode in runCatching — a failed decode IS the silent drop
         val json = """{"id":"13","ts":0,"to":"PEER","body":{"t":"pocket/collaborator.presence","deviceId":"devB"}}"""
         assertFailsWith<Exception> { PocketJson.decodeFromString<Envelope>(json) }
+    }
+
+    // ---- purpose: the two features' recipient sets are not interchangeable -
+
+    @Test
+    fun a_collaborator_without_purpose_stays_a_session_handoff_contact() {
+        // Every contact minted before the field existed carries no `purpose`, and its historical meaning
+        // is exactly Session Handoff. Reading it as anything else would silently re-scope a link the
+        // owner already established and verified by fingerprint — an upgrade may not do that.
+        val json = """{"id":"14","ts":0,"to":"PEER","body":{"t":"pocket/collaborator.updated",
+            "collaborator":{"deviceId":"devB","label":"Frank","direction":"outbound","connectedAt":1000}}}""".replace("\n", "")
+        val c = (PocketJson.decodeFromString<Envelope>(json).body as CollaboratorUpdated).collaborator
+        assertEquals(CollaboratorPurpose.SESSION_HANDOFF, c.purpose)
+        assertTrue(c.acceptsSessionHandoff, "an upgrade must not take away a recipient the owner already had")
+        assertFalse(
+            c.acceptsReviewRequest,
+            "…and must not GIVE it a new one either: an existing contact is a person's App, established " +
+                "to receive a runtime lease. Using ReviewRequest with someone means making a Review link.",
+        )
+    }
+
+    @Test
+    fun purpose_roundtrips_and_gates_the_two_features_apart() {
+        val review = collaborator().copy(purpose = CollaboratorPurpose.REVIEW)
+        val env = Envelope(id = "15", ts = 0, body = CollaboratorUpdated(review))
+        val json = PocketJson.encodeToString(env)
+        assertTrue("\"purpose\":\"review\"" in json, json)
+        assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+
+        // a REVIEW peer is a colleague's DAEMON: binding a runtime handoff to it would hand a
+        // task-context contact the session drive lease it was never established for
+        assertFalse(review.acceptsSessionHandoff)
+        assertTrue(review.acceptsReviewRequest)
+
+        // a severed link is a recipient for nothing, whatever it was established for
+        assertFalse(review.copy(removed = true).acceptsReviewRequest)
+        assertFalse(collaborator().copy(removed = true).acceptsSessionHandoff)
+    }
+
+    @Test
+    fun an_unknown_purpose_degrades_to_UNKNOWN_and_is_eligible_for_neither_feature() {
+        val json = """{"id":"16","ts":0,"to":"PEER","body":{"t":"pocket/collaborator.updated",
+            "collaborator":{"deviceId":"devB","purpose":"something_new"}}}""".replace("\n", "")
+        val c = (PocketJson.decodeFromString<Envelope>(json).body as CollaboratorUpdated).collaborator
+        assertEquals(CollaboratorPurpose.UNKNOWN, c.purpose)
+        // fail closed: a purpose this build cannot read is one it cannot honour, so the contact is
+        // offered as a recipient for NEITHER feature rather than guessed into the wrong one
+        assertFalse(c.acceptsSessionHandoff)
+        assertFalse(c.acceptsReviewRequest)
     }
 
     // ---- fingerprint golden values (a cross-version human contract) -------

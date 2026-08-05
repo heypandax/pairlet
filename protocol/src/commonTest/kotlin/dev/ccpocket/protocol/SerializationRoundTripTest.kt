@@ -2241,6 +2241,90 @@ class SerializationRoundTripTest {
         assertEquals("h1", tolerant.items.single().eventId)
     }
 
+    /**
+     * ReviewRequest's contact PURPOSE (REVIEW-REQUEST.md §13.3). The whole security argument rests on one
+     * decode rule: a row minted before this field existed is a SESSION HANDOFF contact — that is what it
+     * has always meant — and an upgrade must not re-scope it into anything else.
+     */
+    @Test
+    fun collaborator_purpose_defaults_to_session_handoff_and_is_tolerant() {
+        for (purpose in listOf(CollaboratorPurpose.SESSION_HANDOFF, CollaboratorPurpose.REVIEW)) {
+            val row = Collaborator(deviceId = "dev1", label = "Frank", connectedAt = 7, purpose = purpose)
+            val env = Envelope(id = "c-$purpose", ts = 0, body = CollaboratorUpdated(row))
+            val json = PocketJson.encodeToString(env)
+            assertEquals(env, PocketJson.decodeFromString<Envelope>(json))
+        }
+
+        // a PRE-PURPOSE row on the wire: no `purpose` key at all
+        val legacy = """{"id":"old","ts":0,"body":{"t":"pocket/collaborator.updated","collaborator":{"deviceId":"devOld","label":"from an old build","connectedAt":3}}}"""
+        val decodedLegacy = (PocketJson.decodeFromString<Envelope>(legacy).body as CollaboratorUpdated).collaborator
+        assertEquals(CollaboratorPurpose.SESSION_HANDOFF, decodedLegacy.purpose, "the historical meaning, unchanged")
+        assertTrue(decodedLegacy.acceptsSessionHandoff)
+        assertFalse(decodedLegacy.acceptsReviewRequest, "an upgrade must not widen an existing link")
+
+        // a NEWER peer's purpose decodes to UNKNOWN and is eligible for NEITHER feature (fail closed)
+        val future = """{"id":"new","ts":0,"body":{"t":"pocket/collaborator.updated","collaborator":{"deviceId":"devNew","label":"Frank","purpose":"pair_programming"}}}"""
+        val decodedFuture = (PocketJson.decodeFromString<Envelope>(future).body as CollaboratorUpdated).collaborator
+        assertEquals(CollaboratorPurpose.UNKNOWN, decodedFuture.purpose)
+        assertFalse(decodedFuture.acceptsSessionHandoff)
+        assertFalse(decodedFuture.acceptsReviewRequest)
+
+        // a removed REVIEW contact is not a review recipient either
+        assertFalse(Collaborator(deviceId = "d", purpose = CollaboratorPurpose.REVIEW, removed = true).acceptsReviewRequest)
+    }
+
+    /** The OWNER-LOCAL review frames (§6 + §12): additive defaults, tolerant enums, unknown-key skip. */
+    @Test
+    fun review_owner_frames_roundtrip_and_stay_additive() {
+        val contact = ReviewContact(
+            id = "pl_1", label = "Frank", direction = CollaboratorDirection.INBOUND,
+            fingerprint = "tiger-brick-mango-void · ember-delta-canvas-orbit",
+            connectedAt = 12, purpose = CollaboratorPurpose.REVIEW, canSend = false,
+        )
+        val request = ReviewRequest(
+            id = "rr_1", senderDeviceId = "devA", recipientDeviceId = "devB", title = "the wire",
+            brief = ReviewBrief(request = "check the fence"),
+            artifacts = listOf(ArtifactRef(ArtifactKind.MERGE_REQUEST, url = "https://git.example/mr/1")),
+            status = ReviewStatus.DELIVERED, revision = 2, createdAt = 1, updatedAt = 2,
+        )
+        val frames = listOf<Frame>(
+            ListReviewContacts,
+            ReviewContactsListing(listOf(contact)),
+            CreateReviewInvite("Frank"),
+            ReviewInviteCreated(ok = true, invite = "ccpocket://review-contact#abc", ttlSec = 120, label = "Frank"),
+            JoinReviewContact("ccpocket://review-contact#abc", "Panda"),
+            RemoveReviewContact("pl_1", CollaboratorDirection.INBOUND),
+            ReviewContactUpdated(ok = true, contact = contact),
+            ListReviewInbox(ReviewStatus.DELIVERED),
+            ReviewInboxListing(listOf(ReviewInboxItem("pl_1", "Frank", "tiger-brick", request, listOf("acknowledge")))),
+            PrepareReviewRequest("rr_1"),
+            ActOnReviewInbox("rr_1", ReviewInboxAction.ACKNOWLEDGE),
+            ReviewInboxActed(ok = true, requestId = "rr_1", queued = true, status = ReviewStatus.ACKNOWLEDGED),
+        )
+        for (frame in frames) {
+            val env = Envelope(id = "rv-${frame::class.simpleName}", ts = 0, body = frame)
+            val json = PocketJson.encodeToString(env)
+            assertEquals(env, PocketJson.decodeFromString<Envelope>(json), json)
+            // an old peer that predates the type drops the single frame — the family's stated contract
+            val unknownT = Regex("\"t\":\"([^\"]+)\"").replace(json) { "\"t\":\"${it.groupValues[1]}-future\"" }
+            assertTrue(runCatching { PocketJson.decodeFromString<Envelope>(unknownT) }.isFailure)
+        }
+
+        // OMITTED trailing fields take their defaults, and a FUTURE key is skipped rather than fatal
+        val sparse = """{"id":"sparse","ts":0,"body":{"t":"pocket/review.contacts_listing","items":[{"id":"pl_2","future":{"x":1}}]}}"""
+        val row = (PocketJson.decodeFromString<Envelope>(sparse).body as ReviewContactsListing).items.single()
+        assertEquals("pl_2", row.id)
+        assertEquals(CollaboratorPurpose.REVIEW, row.purpose, "an inbound peer link is a review link by construction")
+        assertFalse(row.canSend, "eligibility must default to NO — the daemon says yes explicitly or not at all")
+        assertEquals(CollaboratorDirection.UNKNOWN, row.direction)
+
+        // tolerant enums: a verb/status only a newer build knows reads as UNKNOWN, which acts as no-op
+        val futureAction = """{"id":"fa","ts":0,"body":{"t":"pocket/review.inbox_act","requestId":"rr_1","action":"delegate"}}"""
+        assertEquals(ReviewInboxAction.UNKNOWN, (PocketJson.decodeFromString<Envelope>(futureAction).body as ActOnReviewInbox).action)
+        val futureStatus = """{"id":"fs","ts":0,"body":{"t":"pocket/review.inbox_acted","ok":true,"status":"escalated"}}"""
+        assertEquals(ReviewStatus.UNKNOWN, (PocketJson.decodeFromString<Envelope>(futureStatus).body as ReviewInboxActed).status)
+    }
+
     @Test
     fun clientCaps_approvalV2_flag_is_additive() {
         val caps = ClientCaps(supportsAgents = listOf("opencode"), supportsApprovalV2 = true)
