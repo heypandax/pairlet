@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Visibility
@@ -204,6 +205,9 @@ fun App(scope: CoroutineScope) {
     // name → Fleet home; attention banner / cross-machine banner → inbox. UI-local like the sheets.
     var fleetOpen by remember { mutableStateOf(false) }
     var inboxOpen by remember { mutableStateOf(false) }
+    // the ReviewRequest centre (REVIEW-REQUEST.md §12) — a full-screen route on the same overlay footing
+    // as the fleet surfaces, because it is about the ACTIVE machine's ledger and follows the same switch
+    var reviewsOpen by remember { mutableStateOf(false) }
     var appForeground by remember { mutableStateOf(true) }
     // Collaborator Links are contacts, not computers (SESSION-HANDOFF.md §4.1): their links live in their
     // own always-on inbox rather than the fleet, and they carry exactly one thing — Handoff offers.
@@ -219,6 +223,10 @@ fun App(scope: CoroutineScope) {
     // §7: ONE parse for every entry point. A collaborator link parks in pendingCollabInvite for the
     // fingerprint confirm screen below — a deep link must never redeem on sight.
     LaunchedEffect(pendingLink) { pendingLink?.let { repo.handleIncomingLink(it); dev.ccpocket.app.DeepLink.pending.value = null } }
+    // …and a review-contact link is addressed to the Review Center rather than the pairing door
+    // (REVIEW-REQUEST.md §13.3): open it so the Center's join page can show the fingerprint. The ticket
+    // is still redeemed by the DAEMON, and only after the human accepts these words.
+    LaunchedEffect(repo.pendingReviewInvite.value) { if (repo.pendingReviewInvite.value != null) reviewsOpen = true }
     // a tapped task-complete push deep-links straight into its session (connecting first if needed)
     val pushOpen by dev.ccpocket.app.PushRoute.pending.collectAsState()
     LaunchedEffect(pushOpen) { pushOpen?.let { repo.requestOpenSession(it.workdir, it.sessionId); dev.ccpocket.app.PushRoute.pending.value = null } }
@@ -294,13 +302,18 @@ fun App(scope: CoroutineScope) {
                                     repo.convoId.value != null || repo.switchingSession.value ->
                                         ChatScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
                                     repo.sessionsDir.value != null -> SessionsScreen(repo, onOpenInbox = { inboxOpen = true })
-                                    else -> DirectoryScreen(repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true })
+                                    else -> DirectoryScreen(
+                                        repo, onOpenFleet = { fleetOpen = true }, onOpenInbox = { inboxOpen = true },
+                                        onOpenReviews = { reviewsOpen = true },
+                                    )
                                 }
                             }
                             // fleet overlays ride ABOVE the gate: the fleet view is exactly where you
                             // want to be while this machine is reconnecting or another one has news
                             if (fleetOpen) dev.ccpocket.app.ui.fleet.FleetHomeScreen(repo, onBack = { fleetOpen = false }, onOpenInbox = { inboxOpen = true })
                             if (inboxOpen) dev.ccpocket.app.ui.fleet.AttentionInboxScreen(repo) { inboxOpen = false }
+                            // registered after the fleet surfaces, so its back handler wins while it is up
+                            if (reviewsOpen) dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { reviewsOpen = false }
                         }
                     }
                 }
@@ -657,7 +670,12 @@ private fun ConnectScreen(repo: PocketRepository) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}, onOpenInbox: () -> Unit = {}) {
+private fun DirectoryScreen(
+    repo: PocketRepository,
+    onOpenFleet: () -> Unit = {},
+    onOpenInbox: () -> Unit = {},
+    onOpenReviews: () -> Unit = {},
+) {
     var query by remember { mutableStateOf("") }
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
@@ -753,6 +771,15 @@ private fun DirectoryScreen(repo: PocketRepository, onOpenFleet: () -> Unit = {}
             }
             ViewToggle(tree) { repo.setTreeView(!tree) }
             Spacer(Modifier.width(4.dp))
+            // the Review Center's header entry (REVIEW-REQUEST.md §12). A DOT rather than a count: at
+            // 36dp a number is unreadable, and the only thing this affordance has to say is "somebody is
+            // waiting" — the Center itself shows who and how many.
+            IconButton(onOpenReviews, modifier = Modifier.size(36.dp)) {
+                Box(contentAlignment = Alignment.TopEnd) {
+                    Icon(Icons.Outlined.RateReview, stringResource(Res.string.rv_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
+                    dev.ccpocket.app.ui.review.ReviewPendingDot(repo.reviewPendingCount)
+                }
+            }
             IconButton({ showHelp = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
             }

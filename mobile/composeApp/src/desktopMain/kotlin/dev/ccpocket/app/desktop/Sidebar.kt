@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.RateReview
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Add
@@ -97,6 +98,7 @@ import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.add_device
 import dev.ccpocket.app.resources.archive_remove_from_recents
 import dev.ccpocket.app.resources.archive_session
+import dev.ccpocket.app.resources.rv_title
 import dev.ccpocket.app.resources.sidebar_archived
 import dev.ccpocket.app.resources.dir_pinned
 import dev.ccpocket.app.resources.group_delete
@@ -171,6 +173,7 @@ fun Sidebar(model: DesktopModel, width: Dp = Dk.sidebarWidth, modifier: Modifier
         RecentZone(model, Modifier.weight(1f))
         AllProjectsRow { model.browseProjects() }
         if (model.canArchiveSessions) ArchivedRow(model.archivedSessions.size) { model.browseArchived() }
+        ReviewsRow(model.reviewPending) { model.openReviewCenter() }
         FooterActions(
             updateAvailable = model.updateState is DkUpdateState.Available,
             onHelp = { openWebUrl(SUPPORT_URL) },
@@ -868,6 +871,27 @@ private fun ArchivedRow(count: Int, onClick: () -> Unit) {
         Icon(Icons.Outlined.Inventory2, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
         Text(stringResource(Res.string.sidebar_archived), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
         if (count > 0) Text("$count", color = Tok.muted, fontFamily = Dk.mono, fontSize = 11.sp)
+    }
+}
+
+/**
+ * The Review Center entry (REVIEW-REQUEST.md §12). Docked beside Archived rather than hidden in the
+ * palette, because the number on its right edge is the point: a colleague's review sits in the daemon
+ * whether or not this window is open, and a count you have to go looking for is a count you miss.
+ *
+ * The count is terracotta — this is the sidebar's one "somebody is waiting on you" row, and the muted
+ * mono count Archived uses would read as inventory instead of work.
+ */
+@Composable
+private fun ReviewsRow(pending: Int, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().height(34.dp).hoverFill().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Outlined.RateReview, null, tint = Tok.tx2, modifier = Modifier.size(14.dp))
+        Text(stringResource(Res.string.rv_title), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+        if (pending > 0) AttentionBadge(pending)
     }
 }
 

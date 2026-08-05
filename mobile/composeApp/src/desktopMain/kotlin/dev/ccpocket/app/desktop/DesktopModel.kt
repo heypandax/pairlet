@@ -196,6 +196,7 @@ interface DesktopModel {
     var showChanges: Boolean // the Changes two-pane diff browser (chat-header ± pill / palette verb)
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
     var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
+    var showReviewCenter: Boolean // the ReviewRequest centre (REVIEW-REQUEST.md §12; sidebar row / ⌘⇧R)
 
     // ── session handoff (SESSION-HANDOFF.md) — defaults are the "no handoff" seed/preview state ──
     val activeHandoff: dev.ccpocket.protocol.SessionHandoff? get() = null
@@ -220,16 +221,33 @@ interface DesktopModel {
     fun handoffReturn(verdict: String?) {}
     fun dismissHandoffInvite() {}
 
+    // ── ReviewRequest (REVIEW-REQUEST.md §12) ──
+    //
+    // The Review Center is the ONE surface that gets the live repository handed to it whole, rather than
+    // a per-field pass-through like everything above. Two reasons: its UI is shared verbatim with mobile
+    // (ui/review/ReviewCenterFlow), so re-projecting a dozen fields through this interface would be a
+    // second copy of the same binding; and a seed/preview model has nothing meaningful to fake here —
+    // an inert Center is the honest preview, which is exactly what a null gives.
+    val reviewRepo: dev.ccpocket.app.data.PocketRepository? get() = null
+
+    /** Received reviews still waiting on this machine — the sidebar count. 0 in seed/preview models. */
+    val reviewPending: Int get() = 0
+
+    /** Open the Center and re-pull, in the [openSkills] idiom: an overlay showing yesterday's ledger is
+     *  worse than one that is briefly loading. */
+    fun openReviewCenter() { showReviewCenter = true; refreshReviews() }
+    fun refreshReviews() {}
+
     /** Open the ⌘K palette scoped to projects — the sidebar's browse affordance for the full list. */
     fun browseProjects() { palette = PaletteScope.PROJECTS }
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || showReviewCenter || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; showReviewCenter = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts

@@ -128,6 +128,11 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
         dev.ccpocket.app.ui.handoff.CollaboratorsFlow(repo, onConnectNew = { showConnectColleague = true }, onBack = { showCollaborators = false })
         return
     }
+    // ReviewRequest (REVIEW-REQUEST.md §12): the discoverable fallback. The routine path is the header
+    // action on the projects screen — a feature reachable only through Settings is a feature people
+    // forget they have, and this one's whole value is that a colleague's ask does not go unseen.
+    var showReviews by remember { mutableStateOf(false) }
+    if (showReviews) { dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { showReviews = false }; return }
     // back closes Settings — register a handler so it doesn't fall through to the app-level navigation
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
@@ -208,6 +213,18 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(stringResource(Res.string.co_screen_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    Text("›", color = Tok.muted, fontSize = 16.sp)
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+                Row(
+                    Modifier.fillMaxWidth().clickable { showReviews = true }.padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(Res.string.rv_settings_row), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    if (repo.reviewPendingCount > 0) {
+                        Text("${repo.reviewPendingCount}", color = Tok.accent, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(6.dp))
+                    }
                     Text("›", color = Tok.muted, fontSize = 16.sp)
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))

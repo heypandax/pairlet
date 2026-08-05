@@ -19,6 +19,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
@@ -203,6 +204,11 @@ fun main() = application {
                 // the one it has. While the SHELL owns the keyboard AWT keeps the keystroke — the
                 // engine's own dispatcher forwards it, so the toggle works from either side.
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.J && connected -> { model.toggleEmbeddedTerminal(); true }
+                // ⌘⇧R (the Review Center) must be tested BEFORE plain ⌘R: the refresh branch below
+                // matches Key.R whatever the modifiers, so the shifted case has to claim it first.
+                e.type == KeyEventType.KeyDown && mod && e.isShiftPressed && e.key == Key.R && connected -> {
+                    model.openReviewCenter(); true
+                }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.R && connected -> { model.refresh(); true }
                 e.type == KeyEventType.KeyDown && mod && e.key == Key.Zero && connected -> { model.switcherOpen = !model.switcherOpen; true }
                 e.type == KeyEventType.KeyDown && digit >= 0 && connected && model.switcherOpen -> {

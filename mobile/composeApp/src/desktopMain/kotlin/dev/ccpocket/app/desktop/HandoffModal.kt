@@ -150,8 +150,10 @@ fun HandoffModal(model: DesktopModel, onDismiss: () -> Unit) {
                             Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                 .background(Tok.raised).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
                         ) {
-                            val live = dev.ccpocket.app.ui.handoff.filterCollaborators(model.collaborators, query)
-                            val recent = if (query.isBlank()) dev.ccpocket.app.ui.handoff.recentCollaborators(model.collaborators) else emptyList()
+                            // recipients, not merely "not removed": a REVIEW contact is a colleague's
+                            // daemon the handoff bind refuses (§13.3), so it never enters the dropdown
+                            val live = dev.ccpocket.app.ui.handoff.handoffRecipients(model.collaborators, query)
+                            val recent = if (query.isBlank()) dev.ccpocket.app.ui.handoff.recentHandoffRecipients(model.collaborators) else emptyList()
                             if (recent.isNotEmpty()) {
                                 Text(
                                     stringResource(Res.string.co_recent).uppercase(), color = Tok.muted, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,

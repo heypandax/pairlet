@@ -145,6 +145,7 @@ class RepoDesktopModel(
     override var showModelPopover by mutableStateOf(false)
     override var showChanges by mutableStateOf(false)
     override var showSkills by mutableStateOf(false)
+    override var showReviewCenter by mutableStateOf(false)
     override val composerState = ComposerState()
 
     // ── composer draft follows the session (issue #88) ────────────────────────────────────────────
@@ -210,6 +211,14 @@ class RepoDesktopModel(
     override val selectedContent: dev.ccpocket.protocol.FileContent? get() = repo.viewedFile.value
     override val selectedContentProgress: Pair<Long, Long>? get() = repo.viewedFileProgress.value
     override fun selectChangedFile(path: String) = repo.openChangedFile(path)
+
+    // ── ReviewRequest (REVIEW-REQUEST.md §12) ──
+    // The whole repository, not field-by-field: the Center's UI is shared verbatim with mobile, and
+    // `repo` already follows the fleet's primary — so switching machines re-points the ledger for free,
+    // which is exactly the "the active daemon owns what you see" rule the Center needs.
+    override val reviewRepo: PocketRepository get() = repo
+    override val reviewPending: Int get() = repo.reviewPendingCount
+    override fun refreshReviews() { repo.refreshReviews() }
 
     // ── installed skills/plugins browser (issue #132): straight repo pass-throughs ──
     override val skillCatalog: dev.ccpocket.protocol.SkillCatalog? get() = repo.skillCatalog.value

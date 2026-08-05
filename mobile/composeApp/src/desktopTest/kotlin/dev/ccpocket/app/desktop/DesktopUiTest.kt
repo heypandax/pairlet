@@ -57,7 +57,11 @@ class DesktopUiTest {
         assertPresent("Lidapeng-MacBook")      // machine switcher header
         assertPresent("Refactor auth module")  // selected session (sidebar + chat header)
         assertPresent("Tidy CI workflow")      // a Codex session in the list
-        assertPresent("Bump maxFrame to 4MB")  // a previously visited project's session — no expanding needed
+        // the docked rows above Settings (Archived, Reviews) each take a row off the RECENT viewport, so
+        // the last group sits below the fold at test size — the claim is that no EXPANDING is needed
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
+        assertPresent("Bump maxFrame to 4MB")  // a previously visited project's session, already listed
         assertPresent("sonnet", substring = true) // Claude session header model line
     }
 
@@ -82,6 +86,10 @@ class DesktopUiTest {
     @Test
     fun recentGroupsCollapse() = runComposeUiTest {
         setContent { PocketTheme { DesktopApp(SeedDesktopModel()) } }
+        // the last RECENT group sits below the fold at test size (the docked Archived/Reviews rows take
+        // the space) — scroll it in, then the assertion is about EXPANDED vs collapsed, not visibility
+        onNodeWithTag("sidebar-list").performScrollToNode(hasText("Bump maxFrame to 4MB"))
+        waitForIdle()
         assertPresent("Bump maxFrame to 4MB")                // the relay group renders expanded
         // "relay" labels a RUNNING row first, then the RECENT group header — the header composes last
         onAllNodes(hasText("relay")).onLast().performClick()
@@ -903,5 +911,31 @@ class DesktopUiTest {
         onNodeWithTag("palette-secondary").performClick()
         waitForIdle()
         assertEquals("a1", unarchived, "the row's second verb restores that exact session")
+    }
+
+    // ── Review Center (REVIEW-REQUEST.md §12) ─────────────────────────────────────────────────────
+
+    @Test
+    fun reviewCenterOverlayRendersOnTheModelFlag() = runComposeUiTest {
+        val model = SeedDesktopModel().apply { showReviewCenter = true }
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertPresent(str(Res.string.rv_title))
+        // the seed has no daemon behind it, and a canned ledger would be the one place this feature is
+        // allowed to show rows nobody's machine holds — so it states the absence instead
+        assertPresent(str(Res.string.rv_offline))
+    }
+
+    @Test
+    fun sidebarReviewsRowOpensTheCenter() = runComposeUiTest {
+        val model = SeedDesktopModel()
+        setContent { PocketTheme { DesktopApp(model) } }
+        waitForIdle()
+        assertTrue(!model.showReviewCenter, "the Center is closed until asked for")
+        // docked beside Archived rather than buried in ⌘K: a colleague's review lands in the daemon
+        // whether or not this window is open, and a count you go looking for is a count you miss
+        onAllNodes(hasText(str(Res.string.rv_title))).onFirst().performClick()
+        waitForIdle()
+        assertTrue(model.showReviewCenter)
     }
 }

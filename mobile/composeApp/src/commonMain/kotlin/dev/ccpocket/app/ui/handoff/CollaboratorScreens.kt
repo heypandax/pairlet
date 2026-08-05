@@ -72,8 +72,11 @@ fun CollaboratorPickerPage(
             Text("‹ ", color = Tok.tx2, fontSize = 18.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 4.dp))
             Text(stringResource(Res.string.co_picker_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
-        val live = filterCollaborators(contacts, query)
-        if (contacts.none { !it.removed }) {
+        // eligibility, not merely "still connected": a REVIEW contact is a colleague's daemon and
+        // binding a handoff to it is refused by the daemon (§13.3) — never offer it as a recipient
+        val recipients = handoffRecipients(contacts)
+        val live = filterCollaborators(recipients, query)
+        if (recipients.isEmpty()) {
             // first-run empty: the whole mental model in one sentence, then a single primary
             Column(Modifier.padding(top = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 CollaboratorGroupBox {
@@ -100,7 +103,7 @@ fun CollaboratorPickerPage(
         }
         Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             CollaboratorSearchField(query) { query = it }
-            val recent = if (query.isBlank()) recentCollaborators(contacts) else emptyList()
+            val recent = if (query.isBlank()) recentHandoffRecipients(contacts) else emptyList()
             if (recent.isNotEmpty()) {
                 Column {
                     CollaboratorGroupLabel(stringResource(Res.string.co_recent))
