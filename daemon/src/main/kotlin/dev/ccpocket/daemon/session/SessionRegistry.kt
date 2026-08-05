@@ -326,20 +326,33 @@ class SessionRegistry(
                 // Conversation from open.mode: re-opening a still-live conversation applies the caller's
                 // mode instead of silently reviving whatever the convo drifted to. Since M5 (Full Control
                 // auto-expiry) the drift is real: a convo alive past the TTL has fallen back to DEFAULT,
-                // and before this line every re-open kept that fallback — reading as "Settings' default
-                // mode is ignored". Safe for every credential class: each restricted ingress
-                // (guest/bridge/collaborator guard) already clamps open.mode to its tier ceiling before
-                // it gets here, so applying it can never widen beyond what the cold path would have
-                // granted, and switchMode's own source ceiling still backstops BYPASS for a restricted
-                // origin. Same-mode re-opens no-op inside switchMode (grants and the M5 expiry clock are
+                // and without this every re-open kept that fallback — reading as "Settings' default mode
+                // is ignored", which is exactly what #50 reported.
+                //
+                // GATED on the reattacher carrying the SAME authority the conversation's walls were built
+                // for. The tempting argument — "every restricted ingress already clamps open.mode to its
+                // tier ceiling before it gets here" — only covers opens BY a restricted credential. An
+                // OWNER open lands here too (see the spectator note above) carrying the owner's own
+                // Settings default, which nobody clamped; and a COLLABORATOR conversation has origin ==
+                // null, so switchMode's M5 source ceiling (`origin != null && BYPASS`) does not backstop
+                // it either. Ungated, an owner peeking at a session they handed out under
+                // REVIEW_READ_ONLY would hand it Full Control — unattended write + shell for the
+                // colleague. Matching grant shape AND origin keeps #50's actual case (owner re-opening
+                // their own session) working, while a grant-bearing conversation keeps the mode its own
+                // grant clamped.
+                //
+                // Same-mode re-opens no-op inside switchMode (grants and the M5 expiry clock are
                 // untouched — merely re-entering never renews Full Control). A BUSY conversation is left
                 // alone: peeking at a running task must not yank its grants/autonomy mid-flight (the
                 // idle-only spirit of the reaper and the client's close-on-switch).
-                if (!attach.isBusy()) {
+                val sameAuthority = attach.matchesGrant(pathScope, handoffAccess) && attach.origin == origin
+                if (!attach.isBusy() && sameAuthority) {
                     if (attach.currentMode() != open.mode) {
                         log.info("open ${resume.take(8)}… → reattach applies caller mode ${open.mode} (was ${attach.currentMode()})")
                     }
                     attach.switchMode(open.mode, open.permissionMode)
+                } else if (!attach.isBusy() && !sameAuthority && attach.currentMode() != open.mode) {
+                    log.info("open ${resume.take(8)}… → reattach keeps convo mode ${attach.currentMode()}: caller's grant shape differs (mode ${open.mode} not applied)")
                 }
                 cancelPendingClose(attach.convoId); attach.reattach(sink, open.lastEventSeq); return attach.convoId
             }

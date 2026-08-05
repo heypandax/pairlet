@@ -5,5 +5,8 @@ Added
 • Review Center: draft a request, see what is waiting on you, and send results back from one place. With both apps closed, delivery, retries and history keep running on your computer's daemon
 • Review contacts and session-handoff contacts stay separate: a link can only do the one thing it was authorized for
 
+Fixed
+• Continuing a session now uses the permission mode from your Settings. Re-opening a still-live session used to keep whatever mode that session had drifted to (for example after Full Control expired back to per-request approval), which read as "my default mode is ignored"
+
 Improved
 • Pairing with a colleague now validates their key on the spot, so an invalid QR fails immediately instead of leaving a link that reconnects forever and never works

@@ -10,6 +10,7 @@ import dev.ccpocket.daemon.conversation.OutboundSink
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.Frame
+import dev.ccpocket.protocol.HandoffAccess
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.OpenSession
@@ -133,6 +134,38 @@ class SessionRegistryReattachModeTest {
             assertEquals(
                 PermissionMode.DEFAULT, registry.modeOf(convoId),
                 "peeking at a running task must not change the mode it executes under",
+            )
+        }
+    }
+
+    @Test
+    fun an_owner_reopen_never_relaxes_a_conversation_built_for_someone_elses_grant() {
+        if (isWindows()) return
+        // The escalation #50's hot-path fix would otherwise open: the owner hands a session to a
+        // collaborator under REVIEW_READ_ONLY (clamped to DEFAULT), then taps that session to watch it.
+        // The owner's open carries their OWN Settings default — Full Control — and a collaborator convo
+        // has origin == null, so switchMode's `origin != null && BYPASS` ceiling never fires. Applying
+        // the caller's mode here would give the colleague unattended write + shell under the owner's
+        // credentials. Only a reattacher whose grant shape and origin match may re-apply a mode.
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(listOf(init, toolUse, result).joinToString("\n") + "\n") } // turn completes → idle
+        withRegistry(ScriptedBackend(script)) { registry, dir, frames ->
+            val sink = OutboundSink { f -> synchronized(frames) { frames.add(f) } }
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), mode = PermissionMode.DEFAULT),
+                sink,
+                handoffAccess = HandoffAccess.REVIEW_READ_ONLY,
+            )
+            registry.sendPrompt(SendPrompt(convoId = convoId, text = "run"))
+            awaitFrame(frames) { it is TurnDone }
+            val again = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode", mode = PermissionMode.BYPASS_PERMISSIONS),
+                sink,
+            )
+            assertEquals(convoId, again, "the owner still reattaches as a spectator — no fork")
+            assertEquals(
+                PermissionMode.DEFAULT, registry.modeOf(convoId),
+                "an owner re-open must not hand its Settings default to a session the handoff grant clamped",
             )
         }
     }
