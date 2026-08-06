@@ -57,32 +57,38 @@ class ShareService(
         if (interactivePairingPending()) {
             return ShareCreated(ok = false, error = "a phone pairing is still valid — try again in ~2 minutes")
         }
-        if (registry.intentPending()) {
+        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip (see
+        // CollaboratorService.createTicket — the bare intentPending() check raced overlapping mints)
+        if (!registry.reserveMint()) {
             return ShareCreated(ok = false, error = "another pairing is in progress — try again shortly")
         }
-        val lifetime = req.expiresInSec.coerceIn(MIN_SHARE_SEC, MAX_SHARE_SEC)
-        val expiresAt = now() + lifetime * 1000
-        val spec = BridgeSpec.guest(
-            name = req.label?.trim()?.takeIf { it.isNotEmpty() } ?: "guest",
-            root = root.path,
-            tier = req.tier.takeUnless { it == AccessTier.UNKNOWN } ?: AccessTier.REVIEW, // unknown → safest
-            expiresAt = expiresAt,
-        )
-        val ticket = mintTicket(true) ?: return ShareCreated(ok = false, error = "can't reach the relay — check the connection")
-        // bindable window = the redeem ticket's TTL + grace (mirrors PairLoopback's headless path), so a
-        // slow-to-redeem guest is still classified as a guest, never mis-promoted to a full device
-        if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + INTENT_GRACE_MS)) {
-            return ShareCreated(ok = false, error = "another pairing is in progress — try again shortly")
+        try {
+            val lifetime = req.expiresInSec.coerceIn(MIN_SHARE_SEC, MAX_SHARE_SEC)
+            val expiresAt = now() + lifetime * 1000
+            val spec = BridgeSpec.guest(
+                name = req.label?.trim()?.takeIf { it.isNotEmpty() } ?: "guest",
+                root = root.path,
+                tier = req.tier.takeUnless { it == AccessTier.UNKNOWN } ?: AccessTier.REVIEW, // unknown → safest
+                expiresAt = expiresAt,
+            )
+            val ticket = mintTicket(true) ?: return ShareCreated(ok = false, error = "can't reach the relay — check the connection")
+            // bindable window = the redeem ticket's TTL + grace (mirrors PairLoopback's headless path), so a
+            // slow-to-redeem guest is still classified as a guest, never mis-promoted to a full device
+            if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + INTENT_GRACE_MS)) {
+                return ShareCreated(ok = false, error = "another pairing is in progress — try again shortly")
+            }
+            log.info("folder share minted for \"${root.name}\" (tier=${req.tier}, ${lifetime}s)")
+            return ShareCreated(
+                ok = true,
+                invite = ShareInvite(
+                    relay = relayWsBase, accountId = accountId, daemonPub = daemonPubB64, ticket = ticket.ticket,
+                    folderName = root.name, tier = spec.tier, expiresAt = expiresAt, ttlSec = ticket.expiresInSec,
+                    ownerLabel = ownerLabel(),
+                ),
+            )
+        } finally {
+            registry.releaseMint()
         }
-        log.info("folder share minted for \"${root.name}\" (tier=${req.tier}, ${lifetime}s)")
-        return ShareCreated(
-            ok = true,
-            invite = ShareInvite(
-                relay = relayWsBase, accountId = accountId, daemonPub = daemonPubB64, ticket = ticket.ticket,
-                folderName = root.name, tier = spec.tier, expiresAt = expiresAt, ttlSec = ticket.expiresInSec,
-                ownerLabel = ownerLabel(),
-            ),
-        )
     }
 
     override suspend fun list(): ShareListing {

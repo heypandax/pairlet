@@ -68,13 +68,10 @@ fun isOwnerControlFrame(frame: dev.ccpocket.protocol.Frame): Boolean = when (fra
  * relay answers with a `PairTicket` — a frame only THIS reader can deliver. Dispatched inline it waits
  * for a reply it is itself blocking, times out, and starves every other device for the duration.
  *
- * NOT a serialization point, and worth being exact about: `createTicket` checks `intentPending()` BEFORE
- * the suspending mint and records the intent only after, so two owner mints dispatched concurrently can
- * both pass the check and both mint — the loser's ticket then lives at the relay with no daemon-side
- * intent. That race predates this predicate (the share/bridge/collaborator mints are already off-reader)
- * and is not introduced by it, but this frame adds a second class and a new UI button onto the same
- * unserialized mint. The fix belongs in `createTicket`: hold the mint across the round trip so
- * `intentPending()` is true for its whole duration.
+ * NOT a serialization point — that lives in the mint itself (issue #207): every ticket-backed mint
+ * claims the one [BridgeRegistry.reserveMint] slot BEFORE its suspending relay round-trip and releases
+ * it in a `finally` once the intent is recorded (or the mint failed), so two owner mints dispatched
+ * concurrently can no longer both pass the pre-mint check and both burn a ticket.
  */
 fun isOffReaderRouterFrame(frame: dev.ccpocket.protocol.Frame): Boolean =
     frame is dev.ccpocket.protocol.CreateReviewInvite
@@ -188,41 +185,47 @@ class BridgeService(
         if (interactivePairingPending()) {
             return BridgeCreated(ok = false, error = "a phone pairing is still valid — try again in ~2 minutes")
         }
-        if (registry.intentPending()) {
+        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip (see
+        // CollaboratorService.createTicket — the bare intentPending() check raced overlapping mints)
+        if (!registry.reserveMint()) {
             return BridgeCreated(ok = false, error = "another pairing is in progress — try again shortly")
         }
-        val spec = BridgeSpec.clamped(
-            name,
-            roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) },
-            req.maxSessions, req.opensPerMin, req.promptsPerMin,
-            tier = req.tier,
-            allowedCommands = req.allowedCommands,
-        )
-        val ticket = mintTicket(true) ?: return BridgeCreated(ok = false, error = "can't reach the relay — check the connection")
-        if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + BridgeRegistry.INTENT_GRACE_MS)) {
-            return BridgeCreated(ok = false, error = "another pairing is in progress — try again shortly")
-        }
-        log.info("bridge credential minted for \"${spec.name}\" (workdirs=${spec.workdirs}, tier=${spec.tier})")
-        val credential = BridgeCredential(
-            name = spec.name, accountId = accountId, daemonPub = daemonPubB64, ticket = ticket.ticket,
-            relay = relayWsBase, workdirs = spec.workdirs, ttlSec = ticket.expiresInSec,
-        )
-        if (runnerSpec == null) return BridgeCreated(ok = true, credential = credential)
+        try {
+            val spec = BridgeSpec.clamped(
+                name,
+                roots.map { runCatching { it.canonicalFile.path }.getOrDefault(it.path) },
+                req.maxSessions, req.opensPerMin, req.promptsPerMin,
+                tier = req.tier,
+                allowedCommands = req.allowedCommands,
+            )
+            val ticket = mintTicket(true) ?: return BridgeCreated(ok = false, error = "can't reach the relay — check the connection")
+            if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + BridgeRegistry.INTENT_GRACE_MS)) {
+                return BridgeCreated(ok = false, error = "another pairing is in progress — try again shortly")
+            }
+            log.info("bridge credential minted for \"${spec.name}\" (workdirs=${spec.workdirs}, tier=${spec.tier})")
+            val credential = BridgeCredential(
+                name = spec.name, accountId = accountId, daemonPub = daemonPubB64, ticket = ticket.ticket,
+                relay = relayWsBase, workdirs = spec.workdirs, ttlSec = ticket.expiresInSec,
+            )
+            if (runnerSpec == null) return BridgeCreated(ok = true, credential = credential)
 
-        // MANAGED external adapter (a script path was given): this is the only moment the plaintext ticket
-        // exists, so hand it to the runner now and never return it to the owner — nothing to copy, nothing
-        // to leave lying in a downloads folder.
-        val rs = runners
-        if (rs == null) return BridgeCreated(ok = false, error = "this daemon can't manage adapter processes")
-        rs.attach(spec.name, runnerSpec, credential)
-        val startErr = rs.start(spec.name)
-        if (startErr != null) {
-            // The credential is already minted and bound; the process just won't run. Keep the bridge and
-            // report why, rather than silently leaving a half-made thing the page can't explain.
-            log.warn("bridge \"${spec.name}\" minted but its adapter didn't start: $startErr")
-            return BridgeCreated(ok = false, error = startErr, runner = rs.state(spec.name))
+            // MANAGED external adapter (a script path was given): this is the only moment the plaintext ticket
+            // exists, so hand it to the runner now and never return it to the owner — nothing to copy, nothing
+            // to leave lying in a downloads folder.
+            val rs = runners
+            if (rs == null) return BridgeCreated(ok = false, error = "this daemon can't manage adapter processes")
+            rs.attach(spec.name, runnerSpec, credential)
+            val startErr = rs.start(spec.name)
+            if (startErr != null) {
+                // The credential is already minted and bound; the process just won't run. Keep the bridge and
+                // report why, rather than silently leaving a half-made thing the page can't explain.
+                log.warn("bridge \"${spec.name}\" minted but its adapter didn't start: $startErr")
+                return BridgeCreated(ok = false, error = startErr, runner = rs.state(spec.name))
+            }
+            return BridgeCreated(ok = true, runner = rs.state(spec.name))
+        } finally {
+            registry.releaseMint()
         }
-        return BridgeCreated(ok = true, runner = rs.state(spec.name))
     }
 
     override suspend fun configureRunner(req: ConfigureBridgeRunner): BridgeRunnerStatus {

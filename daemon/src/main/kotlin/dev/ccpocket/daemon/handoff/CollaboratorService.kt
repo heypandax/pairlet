@@ -129,35 +129,42 @@ class CollaboratorService(
         if (interactivePairingPending()) {
             return CollaboratorTicketCreated(ok = false, error = "a phone pairing is still valid — try again in ~2 minutes")
         }
-        if (registry.intentPending()) {
-            return CollaboratorTicketCreated(ok = false, error = "another pairing is in progress — try again shortly")
-        }
         // an UNKNOWN purpose can only come from a newer peer's value this build cannot honour: refuse the
         // mint rather than establish a link whose scope nobody here can enforce
         if (purpose == CollaboratorPurpose.UNKNOWN) {
             return CollaboratorTicketCreated(ok = false, error = "unsupported contact purpose — update this daemon")
         }
-        val spec = BridgeSpec.collaborator(
-            label = label?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_LABEL,
-            purpose = purpose,
-        )
-        val ticket = mintTicket() ?: return CollaboratorTicketCreated(ok = false, error = "can't reach the relay — check the connection")
-        // bindable window = the redeem ticket's TTL + grace (mirrors ShareService), so a slow-to-redeem
-        // contact is still classified as a collaborator, never mis-promoted to a full device
-        if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + BridgeRegistry.INTENT_GRACE_MS)) {
+        // issue #207: claim the one mint slot BEFORE the suspending relay round-trip. A bare
+        // intentPending() check here used to let two overlapping mints both pass (both burned a ticket,
+        // both got PSK-armed LIFO, only one intent recorded) — the mis-promotion race.
+        if (!registry.reserveMint()) {
             return CollaboratorTicketCreated(ok = false, error = "another pairing is in progress — try again shortly")
         }
-        log.info("collaborator connect ticket minted for \"${spec.name}\" (ttl ${ticket.expiresInSec}s)")
-        return CollaboratorTicketCreated(
-            ok = true,
-            invite = CollaboratorInvite(
-                relay = relayWsBase, accountId = accountId, daemonPub = daemonPubB64, ticket = ticket.ticket,
-                ownerLabel = ownerLabel(), ttlSec = ticket.expiresInSec,
-                // says what the redeemer is being invited INTO, so a scanner can refuse the wrong one
-                // before it burns the ticket
+        try {
+            val spec = BridgeSpec.collaborator(
+                label = label?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_LABEL,
                 purpose = purpose,
-            ),
-        )
+            )
+            val ticket = mintTicket() ?: return CollaboratorTicketCreated(ok = false, error = "can't reach the relay — check the connection")
+            // bindable window = the redeem ticket's TTL + grace (mirrors ShareService), so a slow-to-redeem
+            // contact is still classified as a collaborator, never mis-promoted to a full device
+            if (!registry.recordIntent(ticket.ticket, spec, ttlMs = ticket.expiresInSec * 1000L + BridgeRegistry.INTENT_GRACE_MS)) {
+                return CollaboratorTicketCreated(ok = false, error = "another pairing is in progress — try again shortly")
+            }
+            log.info("collaborator connect ticket minted for \"${spec.name}\" (ttl ${ticket.expiresInSec}s)")
+            return CollaboratorTicketCreated(
+                ok = true,
+                invite = CollaboratorInvite(
+                    relay = relayWsBase, accountId = accountId, daemonPub = daemonPubB64, ticket = ticket.ticket,
+                    ownerLabel = ownerLabel(), ttlSec = ticket.expiresInSec,
+                    // says what the redeemer is being invited INTO, so a scanner can refuse the wrong one
+                    // before it burns the ticket
+                    purpose = purpose,
+                ),
+            )
+        } finally {
+            registry.releaseMint()
+        }
     }
 
     // the legacy frame family carries SESSION HANDOFF contacts and nothing else (see [CollaboratorControl.list])

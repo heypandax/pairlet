@@ -172,19 +172,33 @@ class PairLoopback(
                         )
                         return@post
                     }
-                    val ticket = relay.mintTicket()
-                    if (ticket == null) {
-                        // carry the link state so the CLI can say WHY instead of a bare relay_offline:
-                        // attached=false → still (re)connecting (backoff reaches 30s, the mint window is 10s);
-                        // attached=true with a stale pong → a wedged link the watchdog is about to recycle
-                        val age = relay.lastPongAgeMs()
+                    // issue #207: hold the ONE mint slot across the suspending mint round-trip, so a
+                    // restricted mint can't interleave into THIS mint's suspension window either — the
+                    // mirror image of the intentPending() gate above
+                    if (!relay.bridges.reserveMint()) {
                         call.respondText(
-                            """{"error":"relay_offline","attached":${relay.attached},"lastPongAgeMs":${age ?: "null"}}""",
-                            ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
+                            """{"error":"headless_pairing_pending","message":"another pairing is in progress — retry shortly"}""",
+                            ContentType.Application.Json, HttpStatusCode.Conflict,
                         )
-                    } else {
-                        val info = LoopbackPair(relay.accountId, daemonPubB64, ticket.ticket, ticket.code, ticket.expiresInSec, relayWsBase)
-                        call.respondText(PocketJson.encodeToString(info), ContentType.Application.Json)
+                        return@post
+                    }
+                    try {
+                        val ticket = relay.mintTicket()
+                        if (ticket == null) {
+                            // carry the link state so the CLI can say WHY instead of a bare relay_offline:
+                            // attached=false → still (re)connecting (backoff reaches 30s, the mint window is 10s);
+                            // attached=true with a stale pong → a wedged link the watchdog is about to recycle
+                            val age = relay.lastPongAgeMs()
+                            call.respondText(
+                                """{"error":"relay_offline","attached":${relay.attached},"lastPongAgeMs":${age ?: "null"}}""",
+                                ContentType.Application.Json, HttpStatusCode.ServiceUnavailable,
+                            )
+                        } else {
+                            val info = LoopbackPair(relay.accountId, daemonPubB64, ticket.ticket, ticket.code, ticket.expiresInSec, relayWsBase)
+                            call.respondText(PocketJson.encodeToString(info), ContentType.Application.Json)
+                        }
+                    } finally {
+                        relay.bridges.releaseMint()
                     }
                 }
 
