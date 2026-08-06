@@ -47,6 +47,7 @@ data class Palette(
     val codex: Color,
     val codexPressed: Color,
     val opencode: Color,
+    val kimi: Color,
     val ok: Color,
     val warn: Color,
     val danger: Color,
@@ -68,6 +69,7 @@ val DarkPalette = Palette(
     codex = Color(0xFF3FB5AC),         // Codex agent identity — calm teal that sits on the dark palette
     codexPressed = Color(0xFF339B93),  // Codex accent pressed/active (issue #204 — parity with accentPressed)
     opencode = Color(0xFF9B72CF),      // OpenCode agent identity — soft purple
+    kimi = Color(0xFF4D8DFF),          // Kimi Code agent identity — Moonshot blue, distinct from teal/purple
     ok = Color(0xFF4FB477),
     warn = Color(0xFFE0A93B),
     danger = Color(0xFFE5604D),
@@ -90,6 +92,7 @@ val LightPalette = Palette(
     codex = Color(0xFF1C8B82),
     codexPressed = Color(0xFF16706A),  // Codex accent pressed/active (issue #204)
     opencode = Color(0xFF7B52AB),      // OpenCode agent identity — deeper purple for light mode
+    kimi = Color(0xFF2E6FD6),          // Kimi Code agent identity — deeper Moonshot blue for light mode
     ok = Color(0xFF2E9E5B),
     warn = Color(0xFFB07D1C),
     danger = Color(0xFFC53D2B),
@@ -132,6 +135,7 @@ object Tok {
      *  mean "this is Codex" stay teal even when the global accent is terracotta. */
     val codex: Color get() = current.codex
     val opencode: Color get() = current.opencode
+    val kimi: Color get() = current.kimi
     val ok: Color get() = current.ok
     val warn: Color get() = current.warn
     val danger: Color get() = current.danger

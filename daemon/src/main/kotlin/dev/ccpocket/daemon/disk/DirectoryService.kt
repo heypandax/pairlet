@@ -25,6 +25,7 @@ class DirectoryService(
     private val projectsRoot: () -> Path = ProjectPaths::projectsRoot,
     private val codexCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() },
     private val opencodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() },
+    private val kimiCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.kimi.KimiTranscriptScanner.cwdsByNewest() },
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
@@ -64,6 +65,7 @@ class DirectoryService(
         // the daemon's OWN live conversations per cwd (exact turn state, any backend) — see SessionRegistry.liveByCwd
         liveByCwd: Map<String, List<ActiveSession>> = emptyMap(),
         includeOpencode: Boolean = true,
+        includeKimi: Boolean = true,
     ): List<DirectoryEntry> {
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
@@ -71,6 +73,7 @@ class DirectoryService(
         val claude = claudeDirectories(busyCwds, liveNorm)
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
+        val kimi = if (includeKimi) runCatching(kimiCwds).getOrDefault(emptyMap()) else emptyMap()
         // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
         // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
         // persisted filter without turning that preference into daemon-global state.
@@ -81,10 +84,14 @@ class DirectoryService(
         opencode.keys.forEach { cwd ->
             externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.OPENCODE)
         }
-        // merge both external sources; keys keep each source's raw spelling here — grouped canonically below
+        kimi.keys.forEach { cwd ->
+            externalAgentsByKey.getOrPut(ProjectPaths.canonicalKey(cwd)) { linkedSetOf() }.add(AgentKind.KIMI)
+        }
+        // merge every external source; keys keep each source's raw spelling here — grouped canonically below
         val allExternal = HashMap<String, Long>()
         codex.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         opencode.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
+        kimi.forEach { (cwd, mtime) -> allExternal.merge(cwd, mtime, ::maxOf) }
         if (allExternal.isEmpty()) return claude
         val known = claude.mapTo(HashSet()) { ProjectPaths.canonicalKey(it.path) }
         // spelling variants of one dir collapse into a group; the group's mtime is its max

@@ -1478,6 +1478,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                     "claude" -> (it.agent ?: AgentKind.CLAUDE) == AgentKind.CLAUDE
                     "codex" -> it.agent == AgentKind.CODEX
                     "opencode" -> it.agent == AgentKind.OPENCODE
+                    "kimi" -> it.agent == AgentKind.KIMI
                     else -> true
                 }
             }

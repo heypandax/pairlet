@@ -202,6 +202,7 @@ import dev.ccpocket.protocol.ActivatePreset
 import dev.ccpocket.protocol.DeletePreset
 import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchModels
+import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.FetchPresets
@@ -557,6 +558,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  agent in Settings must not erase the choice the user made for another backend. */
     private val defaultCodexModel = mutableStateOf(SecureStore.getString(K_DEFAULT_CODEX_MODEL)?.takeIf { it.isNotEmpty() })
     private val defaultOpenCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_OPENCODE_MODEL)?.takeIf { it.isNotEmpty() })
+    private val defaultKimiModel = mutableStateOf(SecureStore.getString(K_DEFAULT_KIMI_MODEL)?.takeIf { it.isNotEmpty() })
 
     fun defaultModelFor(agent: AgentKind): String? = when (agent) {
         // legacy persisted bare "opus" follows the Opus row to Opus 5. Official endpoint only: on a
@@ -564,6 +566,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         AgentKind.CLAUDE -> defaultModel.value.let { if (gatewayBaseUrl.value == null) migrateLegacyClaudeModel(it) else it }
         AgentKind.CODEX -> defaultCodexModel.value
         AgentKind.OPENCODE -> defaultOpenCodeModel.value
+        AgentKind.KIMI -> defaultKimiModel.value
     }
 
     /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
@@ -1583,6 +1586,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             AgentKind.CLAUDE -> defaultModel
             AgentKind.CODEX -> defaultCodexModel
             AgentKind.OPENCODE -> defaultOpenCodeModel
+            AgentKind.KIMI -> defaultKimiModel
         }
         if (v == state.value) return
         state.value = v
@@ -1601,6 +1605,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 AgentKind.CLAUDE -> K_DEFAULT_MODEL
                 AgentKind.CODEX -> K_DEFAULT_CODEX_MODEL
                 AgentKind.OPENCODE -> K_DEFAULT_OPENCODE_MODEL
+                AgentKind.KIMI -> K_DEFAULT_KIMI_MODEL
             },
             v ?: "",
         )
@@ -1802,7 +1807,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE), supportsApprovalV2 = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI), supportsApprovalV2 = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2062,6 +2067,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultModel.value = from.defaultModel.value
         defaultCodexModel.value = from.defaultCodexModel.value
         defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
+        defaultKimiModel.value = from.defaultKimiModel.value
         contextWindowOverride.value = from.contextWindowOverride.value
         contextWindowOverrides.clear(); contextWindowOverrides.putAll(from.contextWindowOverrides) // #169: per-model table travels with the rest of Settings
         defaultAgent.value = from.defaultAgent.value
@@ -5390,6 +5396,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_MODEL = "default_session_model"   // SecureStore: Claude model id for new sessions ("" = CLI default)
         const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
         const val K_DEFAULT_OPENCODE_MODEL = "default_session_model_opencode" // SecureStore: OpenCode provider/model id for new sessions
+        const val K_DEFAULT_KIMI_MODEL = "default_session_model_kimi" // SecureStore: Kimi model alias for new sessions (issue #206)
         private val LEGACY_EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max")
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)

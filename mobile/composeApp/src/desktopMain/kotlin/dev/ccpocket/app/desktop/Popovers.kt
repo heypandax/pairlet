@@ -421,6 +421,8 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             // daemon truth or nothing — no static catalog (see SessionSheets' OPTIONS note); the
             // empty state renders below and the custom field still takes a provider/model id
             AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).map { it to it }
+            // KIMI (issue #206): daemon-reported aliases only (from `kimi provider list --json`)
+            AgentKind.KIMI -> model.modelsForAgent(AgentKind.KIMI).map { it to it }
             // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
             // table) — the daemon's list for Claude is config-default + the same aliases anyway.
             // claudeRowPick: on a gateway the Opus row degrades to the bare alias (#167/#168).

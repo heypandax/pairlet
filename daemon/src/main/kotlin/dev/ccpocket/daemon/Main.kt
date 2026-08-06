@@ -89,10 +89,10 @@ fun daemonHostName(): String? {
  * boot with claude missing (and vice versa) — but with NEITHER resolvable the daemon has nothing to drive,
  * so refuse to start with an actionable message. Null = at least one agent found, start normally.
  */
-internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?): String? =
-    if (claudeExe == null && codexExe == null && opencodeExe == null) {
-        "none of claude, codex, or opencode was found — install Claude Code, the Codex CLI, or OpenCode, " +
-            "or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin."
+internal fun missingAgentsMessage(claudeExe: java.nio.file.Path?, codexExe: java.nio.file.Path?, opencodeExe: java.nio.file.Path?, kimiExe: java.nio.file.Path? = null): String? =
+    if (claudeExe == null && codexExe == null && opencodeExe == null && kimiExe == null) {
+        "none of claude, codex, opencode, or kimi was found — install Claude Code, the Codex CLI, OpenCode, " +
+            "or the Kimi Code CLI, or point the daemon at one with --claude-bin / --codex-bin / --opencode-bin / --kimi-bin."
     } else {
         null
     }
@@ -153,6 +153,7 @@ private class RunCmd : CliktCommand(name = "run") {
     private val claudeBin by option("--claude-bin", help = "claude executable (default: auto-detect the installed Claude Code)")
     private val codexBin by option("--codex-bin", help = "codex executable (default: auto-detect the installed Codex CLI)")
     private val opencodeBin by option("--opencode-bin", help = "opencode executable (default: auto-detect the installed OpenCode)")
+    private val kimiBin by option("--kimi-bin", help = "kimi executable (default: auto-detect the installed Kimi Code CLI)")
     private val relay by option("--relay", help = "relay wss base").default(DEFAULT_RELAY)
     private val local by option("--local", help = "run a LAN-only WebSocket server instead of dialing the relay").flag()
     private val directBind by option(
@@ -172,7 +173,8 @@ private class RunCmd : CliktCommand(name = "run") {
         val exe = runCatching { ClaudeLauncher.resolveExecutable(claudeBin) }.getOrNull()
         val codexExe = runCatching { CodexLauncher.resolveExecutable(codexBin) }.getOrNull()
         val opencodeExe = runCatching { dev.ccpocket.daemon.opencode.OpenCodeLauncher.resolveExecutable(opencodeBin) }.getOrNull()
-        missingAgentsMessage(exe, codexExe, opencodeExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
+        val kimiExe = runCatching { dev.ccpocket.daemon.kimi.KimiLauncher.resolveExecutable(kimiBin) }.getOrNull()
+        missingAgentsMessage(exe, codexExe, opencodeExe, kimiExe)?.let { throw com.github.ajalt.clikt.core.CliktError(it) }
         // credential isolation (issue #69, opt-in via `config --isolated-claude-auth on` or the env
         // toggle): the daemon's claude gets its own CLAUDE_CONFIG_DIR — its OAuth token refreshes can't
         // log out a terminal claude sharing the machine. History/settings stay shared (symlinks).
@@ -190,12 +192,14 @@ private class RunCmd : CliktCommand(name = "run") {
                 AgentKind.CLAUDE to AgentBackendFactory { ClaudeBackend(claudeBin, claudeHome, presetStore::activeEnv) }, // resolves the binary lazily on first launch
                 AgentKind.CODEX to AgentBackendFactory { CodexBackend(codexBin) }, // resolves the binary lazily on first launch
                 AgentKind.OPENCODE to AgentBackendFactory { dev.ccpocket.daemon.opencode.OpenCodeBackend(opencodeBin) }, // resolves the binary lazily on first launch
+                AgentKind.KIMI to AgentBackendFactory { dev.ccpocket.daemon.kimi.KimiBackend(kimiBin) }, // resolves the binary lazily on first launch
             ),
             prefs = prefs,
             claudeConfigDir = claudeHome,
             claudeBin = claudeBin,
             presetStore = presetStore,
             openCodeModels = dev.ccpocket.daemon.opencode.OpenCodeModelService(opencodeBin),
+            kimiModels = dev.ccpocket.daemon.kimi.KimiModelService(kimiBin),
             reviews = dev.ccpocket.daemon.review.ReviewService(),
             peerInboxFactory = { dev.ccpocket.daemon.review.PeerInboxService(it) },
         )
