@@ -3,6 +3,7 @@ package dev.ccpocket.daemon.session
 import dev.ccpocket.daemon.agent.AgentBackendFactory
 import dev.ccpocket.daemon.conversation.AskPushHook
 import dev.ccpocket.daemon.conversation.Conversation
+import dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX
 import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.daemon.conversation.ObserveSession
 import dev.ccpocket.daemon.conversation.OutboundSink
@@ -229,7 +230,7 @@ class SessionRegistry(
         if (convoIds.isEmpty()) return 0
         // a stub carrying ONLY the identity: every attach/detach path matches on sinkKey, never on the
         // lambda instance, so this removes the device's real sink without needing a handle to it
-        val probe = KeyedSink("dev:$deviceId", OutboundSink { })
+        val probe = KeyedSink("$DEVICE_SINK_KEY_PREFIX$deviceId", OutboundSink { })
         val orphaned = mutableListOf<ObserveSession>()
         var cut = 0
         mutex.withLock {
@@ -489,8 +490,17 @@ class SessionRegistry(
      *  - an unanswered permission ask / question (issue #55): blocked on the user, not idle — reaping would
      *    silently discard a card the phone is expected to answer (plan mode surfaces the question long after
      *    a premature `result`, past this idle window, while the phone is backgrounded).
+     *
+     * Occupancy is judged PER SESSION, not by global presence (issue #216). The caller used to gate this
+     * on "no phone connected at all", which never fired while a desktop App or phone held its permanent
+     * connection — a session the user had already tapped away from stayed warm (and hidden from the
+     * desktop `--resume` picker) indefinitely. Now a conversation is spared only while a REACHABLE client
+     * view is attached ([clientOccupied]): a `dev:` relay view counts while the relay peer is online
+     * ([relayPeerOnline]), a plain LAN view while any LAN socket lives, and a headless sink (scheduler
+     * fire) never counts. An idle session nobody is looking at is released — and unhidden — promptly,
+     * App online or not.
      */
-    suspend fun reapIdle(idleMs: Long): Int {
+    suspend fun reapIdle(idleMs: Long, relayPeerOnline: Boolean = false): Int {
         // first settle background jobs whose completion event never arrived — otherwise their forever-RUNNING
         // status keeps hasBackgroundWork() true and the session can never be reaped (and the phone's "N running"
         // count never clears). Snapshot outside the lock so the per-conversation emit doesn't hold the mutex.
@@ -502,10 +512,12 @@ class SessionRegistry(
         // detach a dead client's view, and a handoff session resumes from disk like any cold session.)
         val handoffProtected = handoffs?.activeSessionIds().orEmpty()
         val now = System.currentTimeMillis()
+        val lanClientPresent = lanConnected()
         val stale = mutex.withLock {
             val s = convos.filterValues {
                 val sid = it.sessionId ?: it.resumeAnchor
-                now - it.lastActivityMs > idleMs && !it.isBusy() && (sid == null || sid !in handoffProtected)
+                now - it.lastActivityMs > idleMs && !it.isBusy() && (sid == null || sid !in handoffProtected) &&
+                    !clientOccupied(it, relayPeerOnline, lanClientPresent)
             }
             convos.keys.removeAll(s.keys)
             s.values.toList()
@@ -518,6 +530,36 @@ class SessionRegistry(
             it.close(); noteSelfClosed(it)
         }
         return stale.size
+    }
+
+    /** Does a REACHABLE client view hold this conversation open? (the reaper's per-session occupancy
+     *  check, issue #216). Reachability is judged per sink, not per daemon:
+     *   - a `dev:` keyed sink is a relay device view — relay sinks are never detached when the peer
+     *     drops (the relay link just goes quiet), so a stale one must not pin the session forever;
+     *     it counts only while the relay peer is online.
+     *   - a plain (unkeyed) sink is a LAN socket view — LAN disconnects detach it via the
+     *     [scheduleClose] grace, so its mere presence implies a live client; gated on any LAN socket
+     *     being open at all, which also keeps offline-era unit fixtures (attached collector lambdas,
+     *     no real socket) reapable exactly like the pre-#216 offline reaper.
+     *   - a non-watching sink (the scheduler's headless fire) is a black hole, never an occupant —
+     *     a scheduled run that settled should surface in the desktop picker like any other leftover. */
+    private fun clientOccupied(c: Conversation, relayPeerOnline: Boolean, lanClientPresent: Boolean): Boolean =
+        c.attachedSinks().any { sink ->
+            val keyed = sink as? KeyedSink ?: return@any lanClientPresent
+            when {
+                !keyed.watching -> false
+                (keyed.key as? String)?.startsWith(DEVICE_SINK_KEY_PREFIX) == true -> relayPeerOnline
+                else -> lanClientPresent
+            }
+        }
+
+    /** Is [sessionId] one of THIS daemon's live conversations (by settled id or resume anchor)?
+     *  The periodic spawned-session sweep asks this before touching a journaled transcript: a live
+     *  conversation's claude may hold the file, and rewriting under it drops concurrent appends
+     *  (the d8fa0da class of regression). Queried per entry, not snapshotted — an open racing the
+     *  sweep must be seen. */
+    suspend fun isLiveSession(sessionId: String): Boolean = mutex.withLock {
+        convos.values.any { it.sessionId == sessionId || it.resumeAnchor == sessionId }
     }
 
     /** Conversations mid-work (turn in flight or background jobs) — these BLOCK an account switch:
@@ -773,7 +815,7 @@ class SessionRegistry(
      *  mode's premature `result` clears that flag long before the turn truly ends (issue #55): a "done"-looking
      *  session the user taps away from is often still researching and about to ask a question. Killing it here
      *  would abort the turn and drop the question; instead it survives (the idle reaper reclaims it once it
-     *  really goes idle and the phone stays away — the same spare set as reapIdle/scheduleClose). Returns true
+     *  really goes idle with no client view attached — the same spare set as reapIdle/scheduleClose). Returns true
      *  when the conversation was actually closed.
      *
      *  [force] = the user explicitly asked to STOP the session (an account-switch blocker row), not to
