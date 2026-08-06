@@ -28,6 +28,9 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
          的 ack 行 + SKILL.md 注入行 —— 后者顶层带 isMeta:true 与 sourceToolUseID（指回 Skill
          tool_use），文本以 "Base directory for this skill:" 开头。TranscriptReplay/TranscriptPatcher
          的过滤靠这个形状把 SKILL.md 全文挡在「用户气泡」外
+  entrypoint  -p 会话 transcript 逐行打精确拼写的 "entrypoint":"sdk-cli" 标记，且 picker 隐藏
+         集合仍是 ["sdk-cli","sdk-ts","sdk-py"]（issue #216）——unhide 闭环（TranscriptPatcher/
+         SpawnedSessions/空闲 reaper）的逐字节替换全押在这两点上，漂移=手机端会话静默重新隐身
 
 任一条漂移都会让 App 静默变坏（排队消失 / 提问卡失灵 / Task 卡片永远转圈 / 占用会话裸报错 /
 任务面板幻影 job / 无人值守任务只做半截 / SKILL.md 全文渲染成用户输入）。
@@ -39,7 +42,7 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
           保证被绕过（settingsources 验 --setting-sources "" 挡住共享目录 settings.json 的 allow 自动放行）
 
 用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|workflow|lock|fgtask|bgcontinue|
-      skill|scope|scope_acceptedits|settingsources|all]（默认 all）
+      skill|scope|scope_acceptedits|settingsources|entrypoint|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default / acceptEdits），会消耗少量用量。
 """
@@ -749,6 +752,49 @@ def scenario_settingsources() -> bool:
     return ok
 
 
+def scenario_entrypoint() -> bool:
+    print("── entrypoint：-p transcript 落盘打 sdk-cli 标记、picker 隐藏集合未漂移（issue #216 unhide 前提）──")
+    # daemon 的 unhide 闭环（TranscriptPatcher / SpawnedSessions / 空闲 reaper）做的是逐字节替换：
+    #   "entrypoint":"sdk-cli"  →  "entrypoint":"cli"
+    # 它 load-bearing 的两个上游事实：
+    #   ① CLI（≥2.1.90）给 -p 会话在 jsonl 记录上打上面这个精确拼写的标记（无空格、双引号）；
+    #   ② resume picker 的隐藏集合仍是 ["sdk-cli","sdk-ts","sdk-py"]（2.1.218 在 bundle 里实证），
+    #      且 "cli" 不在集合内 —— 替换后会话才真的现身。
+    # 任一漂移（标记改拼写/换字段/换值，或隐藏集合改名），unhide 就静默失效：手机端发起的会话
+    # 重新在桌面 `claude --resume` picker 里消失，daemon 侧不会有任何报错。
+    p = Probe(["--permission-mode", "bypassPermissions"])
+    sid = None
+    try:
+        p.send("Do not use any tools. Reply with exactly: ok")
+        ok = check("turn completed", p.wait_for("result"), "result arrived")
+        for j in p.raw:
+            if j.get("type") == "system" and j.get("subtype") == "init":
+                sid = j.get("session_id")
+        ok &= check("init carries session_id", bool(sid), f"{sid}")
+        try:
+            p.proc.stdin.close()  # EOF → 进程正常退出，把 transcript 刷盘
+            p.proc.wait(timeout=15)
+        except Exception:
+            pass
+    finally:
+        p.kill()
+    time.sleep(0.5)
+    import glob
+    matches = glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl")) if sid else []
+    ok &= check("transcript on disk", bool(matches), matches[0] if matches else "no ~/.claude/projects/*/<sid>.jsonl")
+    if matches:
+        text = open(matches[0], encoding="utf-8").read()
+        tag = '"entrypoint":"sdk-cli"'  # 与 TranscriptPatcher.SDK_TAG 逐字节一致
+        ok &= check("rows carry the exact sdk-cli tag (TranscriptPatcher 的替换目标)",
+                    tag in text, f"{text.count(tag)} row(s) tagged")
+    # picker 隐藏集合：三个 token 仍应出现在 CLI bundle 里（集合改名/移除 = 隐藏语义漂移，须重估闭环）
+    data = open(os.path.realpath(CLAUDE), "rb").read()
+    missing = [t.decode() for t in (b"sdk-cli", b"sdk-ts", b"sdk-py") if t not in data]
+    ok &= check("picker hidden-set tokens still in the CLI bundle", not missing,
+                "sdk-cli / sdk-ts / sdk-py all present" if not missing else f"missing: {missing}")
+    return ok
+
+
 def main():
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     version = subprocess.run([CLAUDE, "--version"], capture_output=True, text=True).stdout.strip()
@@ -758,7 +804,7 @@ def main():
         "task": scenario_task, "workflow": scenario_workflow, "lock": scenario_lock,
         "fgtask": scenario_fgtask, "bgcontinue": scenario_bgcontinue, "skill": scenario_skill,
         "scope": scenario_scope, "scope_acceptedits": scenario_scope_acceptedits,
-        "settingsources": scenario_settingsources,
+        "settingsources": scenario_settingsources, "entrypoint": scenario_entrypoint,
     }
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
