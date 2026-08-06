@@ -388,6 +388,9 @@
     <string name="dir_picker_empty">No subfolders</string>
     <string name="dir_picker_error">Can\'t read this folder</string>
     <string name="dir_picker_home">Home</string>
+    <string name="dir_picker_remote_title">Choose a folder on the remote computer</string>
+    <string name="dir_picker_choose_here">Use this folder</string>
+    <string name="dir_picker_remote_only">Remote computer — type the path here</string>
     <string name="ob_open">Need to install cc-pocket on your computer?</string>
     <string name="ob_title">Connect your computer</string>
     <string name="ob_sub">Install the cc-pocket daemon on the computer you want to drive.</string>

@@ -388,6 +388,9 @@
     <string name="dir_picker_empty">没有子目录</string>
     <string name="dir_picker_error">读不了这个目录</string>
     <string name="dir_picker_home">家目录</string>
+    <string name="dir_picker_remote_title">选择远程电脑上的目录</string>
+    <string name="dir_picker_choose_here">选择此目录</string>
+    <string name="dir_picker_remote_only">远程电脑 — 请在此手动输入路径</string>
     <string name="ob_open">还没在电脑上安装 cc-pocket？</string>
     <string name="ob_title">连接你的电脑</string>
     <string name="ob_sub">在你要驱动的电脑上安装 cc-pocket daemon。</string>

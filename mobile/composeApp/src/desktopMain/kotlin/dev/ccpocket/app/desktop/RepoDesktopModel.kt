@@ -116,6 +116,7 @@ class RepoDesktopModel(
     override var showAttention by mutableStateOf(false)
     override var showQuickActions by mutableStateOf(false)
     override var showHandoff by mutableStateOf(false)
+    override var showFolderPicker by mutableStateOf(false)
 
     // ── session handoff: straight repo passthrough (daemon truth) ──
     override val activeHandoff get() = repo.activeHandoff.value
@@ -855,6 +856,16 @@ class RepoDesktopModel(
     override val pathListing: dev.ccpocket.protocol.PathEntries? get() = repo.pathListing.value
     override val pathSep: Char get() = repo.workdir.value?.let { if (it.contains('\\')) '\\' else '/' } ?: '/'
     override fun browsePath(sub: String) = repo.browseFiles(sub)
+
+    // remote folder picker (issues #218/#214): the same anchored #152 browse the mobile DirectoryPickerSheet
+    // drives — arbitrary ("~" / fs-root) anchor, not the open session's cwd like browsePath above.
+    override val browseListing: dev.ccpocket.protocol.PathEntries? get() = repo.browseListing.value
+    override val browseRoots: List<String> get() = repo.browseRoots.value
+    override val browseDirectories: List<dev.ccpocket.protocol.DirectoryEntry> get() = repo.directories.toList()
+    override fun requestBrowse(anchor: String, subPath: String) {
+        repo.browseListing.value = null
+        repo.browseDirs(anchor, subPath)
+    }
 
     override val pendingImages: List<dev.ccpocket.app.data.PendingImage> get() = repo.pendingImages
     override fun attachImages(raw: List<ByteArray>) = repo.attachImages(raw)

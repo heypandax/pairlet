@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -33,6 +35,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.dir_picker_choose_here
+import dev.ccpocket.app.resources.dir_picker_remote_title
 import dev.ccpocket.app.resources.show_sidebar
 import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.protocol.AgentKind
@@ -119,6 +123,19 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                     defaultModelFor = { a -> model.defaultModelFor(a) },
                     onAgentPicked = { a -> model.fetchModels(a) },
                 ) { dir, agent, mode, native, pickedModel -> model.newSession(dir, agent, mode, native, pickedModel) }
+            }
+        }
+        if (model.showFolderPicker) {
+            // remote "Open Folder" (issues #218/#214): the daemon-machine directory browser — centered scrim,
+            // same language as the other modals. Only reached when the active daemon is another machine.
+            Overlay(onDismiss = { model.showFolderPicker = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                RemoteDirPickerCard(
+                    model,
+                    title = stringResource(Res.string.dir_picker_remote_title),
+                    confirmLabel = stringResource(Res.string.dir_picker_choose_here),
+                    onDismiss = { model.showFolderPicker = false },
+                    onPick = { path -> model.showFolderPicker = false; model.openFolderPath(path) },
+                )
             }
         }
         if (model.showQuickActions) {
@@ -239,7 +256,10 @@ private fun SidebarRevealStrip(onExpand: () -> Unit) {
     }
 }
 
-/** A dismiss-on-scrim overlay that anchors [content] at [alignment]; clicks on the content are swallowed. */
+/** A dismiss-on-scrim overlay that anchors [content] at [alignment]; clicks on the content are swallowed.
+ *  Content height is bounded to the window's visible area minus [padding] (issue #209): a modal/popover taller
+ *  than the window is clamped rather than spilling its bottom (the create button / About page) off-screen, so
+ *  its own inner scroll keeps that content reachable. A short/wrap-content overlay is unaffected. */
 @Composable
 private fun Overlay(
     onDismiss: () -> Unit,
@@ -250,7 +270,9 @@ private fun Overlay(
 ) {
     val base = Modifier.fillMaxSize()
     Box((if (scrim) base.background(Dk.backdrop.copy(alpha = 0.5f)) else base).noRippleClick(onDismiss)) {
-        Box(Modifier.align(alignment).padding(padding).noRippleClick {}) { content() }
+        BoxWithConstraints(Modifier.align(alignment).padding(padding)) {
+            Box(Modifier.heightIn(max = maxHeight).noRippleClick {}) { content() }
+        }
     }
 }
 

@@ -197,6 +197,7 @@ interface DesktopModel {
     var showSkills: Boolean // the installed skills/plugins browser (issue #132; sidebar row / palette verb)
     var showHandoff: Boolean // session-handoff draft modal (design session-handoff/ Frame 11)
     var showReviewCenter: Boolean // the ReviewRequest centre (REVIEW-REQUEST.md §12; sidebar row / ⌘⇧R)
+    var showFolderPicker: Boolean // remote "Open Folder" browser (issues #218/#214): the daemon-machine dir picker
 
     // ── session handoff (SESSION-HANDOFF.md) — defaults are the "no handoff" seed/preview state ──
     val activeHandoff: dev.ccpocket.protocol.SessionHandoff? get() = null
@@ -243,11 +244,11 @@ interface DesktopModel {
 
     /** Any dismissible overlay showing — drives "Esc closes whatever is open" without a per-flag list. */
     val anyOverlayOpen: Boolean
-        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || showReviewCenter || handoffInvite != null
+        get() = palette != null || showSettings || showAddComputer || showNewSession || showTray || showAttention || switcherOpen || showQuickActions || showModelPopover || showChanges || showSkills || showHandoff || showReviewCenter || showFolderPicker || handoffInvite != null
     /** Close every dismissible overlay (the permission modal is excluded — it needs an explicit decision). */
     fun dismissOverlays() {
         palette = null; showSettings = false; showAddComputer = false
-        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; showReviewCenter = false; dismissHandoffInvite()
+        showNewSession = false; showTray = false; showAttention = false; switcherOpen = false; showQuickActions = false; showModelPopover = false; showChanges = false; showSkills = false; showHandoff = false; showReviewCenter = false; showFolderPicker = false; dismissHandoffInvite()
     }
 
     // pinned sessions — the sidebar's top zone: ⌘1–9 jump straight to them, persisted across restarts
@@ -432,6 +433,21 @@ interface DesktopModel {
      * Default implementation is the seed path — models with no directory listing can't tell the two apart.
      */
     fun openFolderPath(path: String) { openNewSession(path) }
+
+    // ── remote directory browser (issues #218/#214) ──────────────────────────────────────────────────
+    // When the ACTIVE daemon is another machine, a local native chooser browses the WRONG filesystem — so
+    // the folder picks (⌘O / the bridge project list) drive the daemon-side #152 browse wire instead: the
+    // same ListPathEntries frame the @-completer uses, anchored at "~" (the daemon home) or a reported fs
+    // root. These reuse the pure helpers in ui/DirectoryPicker.kt. Defaults are inert for seed/preview.
+    /** Latest anchored folder-browse reply (match its (workdir, subPath) before use). */
+    val browseListing: dev.ccpocket.protocol.PathEntries? get() = null
+    /** The daemon machine's filesystem roots, latched from the "~" reply (owner-only; empty on old daemon/guest). */
+    val browseRoots: List<String> get() = emptyList()
+    /** The daemon's known project directories — feeds recents/home inference + the "already a project" badge. */
+    val browseDirectories: List<dev.ccpocket.protocol.DirectoryEntry> get() = emptyList()
+    /** Request the children under ([anchor] + [subPath]); the reply lands in [browseListing]. Resets the
+     *  held listing to null first so a reopened picker can't flash the previous level's stale rows. */
+    fun requestBrowse(anchor: String, subPath: String) {}
 
     // main pane: the open chat
     val hasChat: Boolean
