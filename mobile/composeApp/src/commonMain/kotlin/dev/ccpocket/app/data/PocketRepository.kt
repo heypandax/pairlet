@@ -1038,6 +1038,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val switchingSession = mutableStateOf(false)
     val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
+    /** The workdir of an in-flight BRAND-NEW OpenSession (resumeId == null), armed by [openSession] and
+     *  disarmed when its SessionLive answer lands (or the open fails / times out). A brand-new session has
+     *  no sessionId to recognize its announce by, so the #219 identity guard in the SessionLive handler
+     *  matches the answer on this workdir instead. Resume opens never need it — their announce carries the
+     *  resumed sessionId, which [sessionKey] already pins. */
+    private var pendingNewOpenWd: String? = null
     val autoFocusComposer = mutableStateOf(false)            // brand-new session: ChatScreen raises the keyboard once on landing (consumed there)
     val streaming = mutableStateOf(false)
     val observing = mutableStateOf(false) // viewing a session running outside the daemon (read-only tail)
@@ -2340,6 +2346,27 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     // delivery→turn watchdog handoff (PromptAck vs. a following turn frame) without a live daemon.
     internal fun receiveForTest(f: Frame) = handle(f)
 
+    /**
+     * Session-identity check for an incoming [SessionLive] (issue #219). The daemon deliberately keeps
+     * this device attached to every conversation it left running in the background (that fan-out is what
+     * feeds the machine-wide approval inbox), so announces from conversations OTHER than the open view
+     * arrive here routinely — a background turn starting, a relaunch, a Full-Control expiry. Those must
+     * never rebind the single active view. Accepted shapes:
+     *  - the open conversation's own re-announce (mode/model/effort switch, relaunch, init backfill);
+     *  - the SAME session coming back under a fresh convoId — a reconnect re-open, a SessionGone
+     *    recovery, a handoff spectator migration (§3.3), a registry hot→cold rebuild — recognized by
+     *    [sessionKey], which every open path pins to the target session before the daemon answers;
+     *  - the answer to an in-flight brand-new open (no sessionId exists yet), matched on the workdir
+     *    the open targeted ([pendingNewOpenWd]);
+     *  - a fully unbound client (no view, no open in flight): nothing to protect, keep today's behavior
+     *    (cold-start seams and a background announce while browsing both land here harmlessly).
+     */
+    private fun acceptsSessionLive(f: SessionLive): Boolean =
+        f.convoId == convoId.value ||
+            (f.sessionId != null && f.sessionId == sessionKey.value) ||
+            (pendingNewOpenWd != null && f.workdir == pendingNewOpenWd) ||
+            (!opening.value && convoId.value == null && sessionKey.value == null)
+
     // control-plane counterpart: Attached/PeerPresence/AuthError flow through handleControl, not handle.
     // Lets a test drive a (re)attach edge without a live transport — e.g. that Attached bumps connGen so
     // the Account pane's fetch re-keys on reconnect.
@@ -2488,7 +2515,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     updateCommand = f.updateCommand,
                 )
             }
-            is SessionLive -> {
+            // #219 identity guard: a SessionLive that fails [acceptsSessionLive] is a BACKGROUND
+            // conversation's announce (turn start / relaunch / mode expiry, fanned out because this
+            // device stays attached to conversations it left running). Letting it through re-pointed
+            // `convoId.value` — the very baseline every stream guard below compares against — so that
+            // conversation's AssistantChunk/ToolEvent frames then passed the guards and spliced another
+            // session's live turn into the open transcript. Not our view's session → no state touched.
+            is SessionLive -> if (acceptsSessionLive(f)) {
+                pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
                 convoId.value = f.convoId; workdir.value = f.workdir; observing.value = f.observing; currentSessionId = f.sessionId
                 f.sessionId?.let { sessionKey.value = it }
@@ -2730,6 +2764,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             } else {
                 // …and a failed switch must release the router, or the chat would hold an empty screen
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
+                pendingNewOpenWd = null // #219: the failed open's marker must not admit a later background announce
                 messages.add(ChatItem.Sys(f.message)) // UI prepends the localized "error:" prefix
                 // a dead claude process never sends TurnDone — clear the streaming state here
                 if (f.code == "process_exited" && (f.convoId == null || f.convoId == convoId.value)) {
@@ -4212,6 +4247,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         messages.clear(); convoId.value = null; replayEcho = false
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
+        // #219: a brand-new session's SessionLive has no sessionId to recognize it by — arm the workdir
+        // match instead. A resume open disarms any stale marker: its answer is pinned by sessionKey above.
+        pendingNewOpenWd = if (resumeId == null) wd else null
         composerEpoch.value++ // a REAL context switch — composers re-init from the target's draft (#29/#88); identity flips don't
         terminalEntries.clear(); terminalBusy.value = false // the quick-terminal scrollback is per-session
         changedFiles.clear(); changedFilesLoading.value = false; closeFileViewer() // changed-files view is per-session too
@@ -4282,6 +4320,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // session list rather than strand the user on a chat that will never fill
             switchingSession.value = false
             openTimedOut.value = true // surfaced as a slim banner instead of the old silent spinner reset (issue #41)
+            pendingNewOpenWd = null // #219: the open is dead — a later background announce must not claim it
         }
     }
 
