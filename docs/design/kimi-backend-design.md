@@ -1,7 +1,19 @@
 # Kimi Code CLI 第四后端设计方案（issue #206）
 
-> 状态：设计定稿，待 probe 回填。本文档自包含，交给实现 agent 按末尾「执行顺序清单」落地。
-> 调研时间：2026-08-06。外部事实基于 Kimi Code CLI 官方文档（wire 协议 1.10）与仓库现状（main tip 0404f219 附近）。
+> 状态：P1 已实现（2026-08-06），**核心选型经 probe 修正：`kimi --wire` 在实际发布版不存在，已改接 ACP**。详见 §9 probe 实测结果与下方「⚠ 选型修正」。
+> 调研时间：2026-08-06。外部事实原基于 Kimi Code CLI 官方文档（wire 协议 1.10），但装机实测（0.33.0）推翻了 wire 前提。
+
+## ⚠ 选型修正（2026-08-06 实测，最重要）
+
+装了 Kimi Code CLI **0.33.0**（`curl … install.sh`，176MB 单二进制，装到 `~/.kimi-code/bin/kimi`）后实测：
+
+- **`kimi --wire` 不存在**——`error: unknown option '--wire'`。本设计 §1 的整个 wire 选型前提在发布版里不成立。
+- 发布版真正的机器接口有两个：
+  1. **`kimi acp`** —— 完整的 **ACP（Agent Client Protocol v1）over stdio** server。`initialize` 握手实测返回：`loadSession/resume/fork/close/delete/list` 会话能力 + `session/request_permission` 审批 + promptCapabilities（image/embeddedContext）。**这是全保真接口，本实现改接它。**
+  2. `kimi -p --output-format stream-json` —— 一次性非交互（opencode 式），无交互审批通道。
+- **登录是设备码流程（`kimi login` / `kimi acp --login`），需真人在浏览器完成**——本次会话无法自动登录。故 session/new、prompt、审批、落盘等**运行期行为全部未实测**（auth wall）。`initialize` 握手是唯一跑通的活体验证。
+
+**落地决策**：daemon KIMI 后端按 **ACP v1** 实现（对应设计的「预案 A 完整审批链」——ACP 的 `session/request_permission` 天然映射 PermissionBridge）。事件映射从「wire 事件」改为「ACP `session/update`」，落盘扫描/回放按设计假设的 `~/.kimi-code/sessions` 布局**防御式**实现（未登录无法造会话，磁盘格式未证实，解析失败一律 fail-safe 空列表，不崩）。所有「wire」字样在实现里已换成 ACP 语义。
 
 ## 0. 目标与非目标
 
@@ -220,6 +232,23 @@ $KIMI_CODE_HOME  (默认 ~/.kimi-code)
 | V8 | `kimi provider catalog list` 输出形状；`config.toml` `default_model`；`--model` 与 `--wire` 组合 | 解析不出→ModelService 降级只报默认模型 |
 | V9 | `--yolo` 下 ApprovalRequest 归零；`set_plan_mode` 往返 | plan 不可用则 PLAN 档隐藏 |
 | V10 | `ToolCall.arguments` 完整 vs 需拼 `ToolCallPart` | 需拼则 Parser 加攒流 buffer |
+
+### probe 实测结果（2026-08-06，kimi 0.33.0，未登录）
+
+probe 脚本 `scripts/probe-kimi-wire.py` 假设 `kimi --wire`，实测该 flag 不存在，脚本首个 `initialize` 即因进程退出报错。以下为**手工用 ACP 接口**探测的结果：
+
+| # | 结果 | 实测 |
+|---|---|---|
+| V1 | **FAIL（wire）→ 改测 ACP PASS** | `kimi --wire` 报 `unknown option`。改测 `kimi acp` 的 ACP `initialize`：返回 `protocolVersion:1`、`agentInfo={Kimi Code CLI,0.33.0}`、`agentCapabilities.sessionCapabilities={list,resume,close,delete,fork}`、`authMethods=[login(terminal device-code)]`。握手完好。 |
+| V2 | **未测（auth 阻塞）** | 未登录无法造会话，`~/.kimi-code/sessions` 不存在，落盘布局/`session_index.jsonl` 字段形状**未证实**。Scanner/Replay 按设计假设防御式实现，fail-safe 空。 |
+| V3 | **未测（auth 阻塞）** | `session/prompt` 需已配置模型；`kimi -p … stream-json` 实测报 `No model configured`。turn 事件序未观察。 |
+| V4 | **未测（auth 阻塞）→ 走 ACP 审批** | ACP 提供 `session/request_permission`（server→client，options 带 `optionId`+`kind`∈allow_once/allow_always/reject_once/reject_always）。实现按此映射 PermissionBridge（预案 A）。活体审批未跑。 |
+| V5 | **N/A** | ACP 无 `steer`；轮中注入走再次 `session/prompt`（P2）。排队语义维持轮次边界。 |
+| V6 | **未测** | ACP `session/cancel`（notification）→ prompt 响应 `stopReason:cancelled`。已按此实现，未跑。 |
+| V7 | **部分（能力声明 PASS）** | ACP `session/load`（resume）+ `fork` 在 handshake 的 `sessionCapabilities` 里声明支持。实际 resume/replay 未跑（auth）。注意 ACP `session/load` 会用 `session/update` 重放历史——后端在 load 响应前**丢弃**这些（磁盘另做回放），已实现。 |
+| V8 | **PASS（形状已知）** | `kimi provider list --json` 返回 `{"providers":{},"models":{}}`（未配置时空）；`models` 的 key 即模型别名 = ModelService 数据源。`kimi provider catalog list` 返回公共 catalog（97+ providers）。已按 `provider list --json` 实现。 |
+| V9 | **未测** | ACP 权限模式走 session modes（P2）；`-y/--yolo`、`--auto`、`--plan` 是**顶层交互 flag，不作用于 `acp` 子命令**（acp 只接受 `--login`）。P1 审批恒走 request_permission。 |
+| V10 | **未测（auth 阻塞）** | ACP `tool_call`/`tool_call_update` 的 rawInput/content 形状未活体观察；解析器按 ACP spec 实现（tool_call 带完整 rawInput，无需攒流）。 |
 
 ### 人工补测项（脚本外）
 
