@@ -1,8 +1,15 @@
-What's new in 1.6.2
+What's new in 1.7.0
 
-Fixed
-• Reconnecting a daemon no longer prunes valid paired phones before the relay finishes replaying its device list, preventing clients from being silently disconnected after a restart
-• Removed daemons are now kept removed across reconnects instead of being restored by stale relay state
+Added
+• Full-auto mode can now expire after a chosen duration, falling back to ask-first instead of staying on forever
+• Kimi Code CLI backend (preview): open and drive Kimi sessions from your phone
+• New global accent color preference (CC Pocket / Codex)
+• Usage dashboard now counts OpenCode session tokens
 
 Improved
-• Phone and desktop apps can remove an already-paired daemon from their device list
+• Voice input lands in the composer for confirmation instead of sending immediately
+• Faster, more reliable downloads and self-updates in mainland China via a new mirror
+
+Fixed
+• Background session announcements no longer hijack the session view you are reading
+• Gateway server errors are attributed by evidence instead of suggesting /clear
