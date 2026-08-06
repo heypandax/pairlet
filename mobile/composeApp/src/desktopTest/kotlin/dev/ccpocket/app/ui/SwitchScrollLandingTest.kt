@@ -84,8 +84,10 @@ class SwitchScrollLandingTest {
         }
         waitForIdle()
 
-        // switch into another project's session
-        repo.messages.clear()
+        // switch into another project's session — through the real switch path, so the SessionLive
+        // identity guard (issue #219) recognizes c2's announce as the answer to THIS open
+        repo.openSession("/w/beta", resumeId = "s-c2")
+        waitForIdle()
         repo.receiveForTest(live("c2", "/w/beta"))
         repo.receiveForTest(history("c2", "beta"))
         waitForIdle()
@@ -134,8 +136,10 @@ class SwitchScrollLandingTest {
         assertTrue(tail > 0, "sanity: a 40-message transcript must overflow this viewport (was $tail)")
 
         // switch to ANOTHER PROJECT's session: openSession clears the transcript and nulls the conversation,
-        // the daemon answers with the new one, and its history streams in
-        repo.messages.clear()
+        // the daemon answers with the new one, and its history streams in (the real path also keeps the
+        // #219 identity guard satisfied — c2's announce answers this open)
+        repo.openSession("/w/beta", resumeId = "s-c2")
+        waitForIdle()
         repo.receiveForTest(live("c2", "/w/beta"))
         repo.receiveForTest(history("c2", "beta"))
         waitForIdle()
