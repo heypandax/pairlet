@@ -586,6 +586,8 @@
     <string name="question_answer">Answer</string>
     <string name="question_skip">Skip</string>
     <string name="question_skip_message">User skipped the questions</string>
+    <string name="opencode_question_header">OpenCode has a question</string>
+    <string name="opencode_question_readonly">Answering isn\'t supported in OpenCode sessions yet</string>
     <string name="questions_answered_one">Answered %1$d question</string>
     <string name="questions_answered_many">Answered %1$d questions</string>
     <string name="questions_withdrawn">Claude moved on — answers no longer needed</string>

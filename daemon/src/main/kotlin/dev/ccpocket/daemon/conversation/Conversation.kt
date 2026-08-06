@@ -1253,6 +1253,11 @@ class Conversation(
                             // content — this is what the phone turns into an openable "open file" chip and it also
                             // reads far better in the transcript (read-doc-inline handoff, Component 2).
                             ev.name in FILE_PATH_TOOLS -> ToolMetadata.of(ev.name, ev.input).preview
+                            // OpenCode's question tool (issue #210): send the parsed questions JSON in
+                            // FULL — the client renders a read-only question card from it, so the 280-char
+                            // cap (which would truncate the JSON unparseable) must not apply. An old client
+                            // just shows this JSON string in a tool row, no worse than the raw JSON today.
+                            dev.ccpocket.protocol.isOpenCodeQuestionTool(ev.name) -> ev.input?.toString() ?: "question"
                             else -> ev.input?.toString()?.take(280)
                         }
                         if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))

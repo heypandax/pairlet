@@ -586,6 +586,8 @@
     <string name="question_answer">回答</string>
     <string name="question_skip">跳过</string>
     <string name="question_skip_message">User skipped the questions</string>
+    <string name="opencode_question_header">OpenCode 有问题想确认</string>
+    <string name="opencode_question_readonly">OpenCode 会话暂不支持作答</string>
     <string name="questions_answered_one">回答了 %1$d 个问题</string>
     <string name="questions_answered_many">回答了 %1$d 个问题</string>
     <string name="questions_withdrawn">Claude 已继续，无需再回答</string>
