@@ -449,14 +449,24 @@ data object AuthLogout : ToDaemon
 data class SetPushPrefs(val enabled: Boolean? = null) : ToDaemon
 
 /**
- * client -> daemon: set (or, with [noAutoDeny] null, just query) whether the owner's OWN approval asks
- * wait for a manual decision instead of auto-denying after the usual window (issue #201). Reply is one
- * [ApprovalPrefs]. A daemon that predates this drops the frame — no reply arrives and the client hides
+ * client -> daemon: set (or, with every field null, just query) the owner's approval preferences. Reply is
+ * one [ApprovalPrefs]. A daemon that predates this drops the frame — no reply arrives and the client hides
  * the setting, which is why the reply (not an optimistic local write) is the source of truth.
+ *
+ * [noAutoDeny] (issue #201): whether the owner's OWN approval asks wait for a manual decision instead of
+ *   auto-denying after the usual window.
+ * [fullControlExpiryMs] (issue #220): how long the owner's manually-entered Full Control lasts before it
+ *   auto-reverts to the default ask-driven mode. 0 = never expires (the new default — a manual Full Control
+ *   is a deliberate authorization, so it persists until the user leaves it or the session ends). A positive
+ *   value re-arms the old safety net at the chosen duration; the revert surfaces a visible in-session notice
+ *   (never a silent badge flip). Tail-appended and optional so a pre-#220 client simply never sets it.
  */
 @Serializable
 @SerialName("pocket/approval.prefs.set")
-data class SetApprovalPrefs(val noAutoDeny: Boolean? = null) : ToDaemon
+data class SetApprovalPrefs(
+    val noAutoDeny: Boolean? = null,
+    val fullControlExpiryMs: Long? = null,
+) : ToDaemon
 
 // ── API presets (issue #113): named env overrides for third-party API users ──
 // Every pocket/presets.* request is answered by one [PresetsState]. A daemon that predates these
@@ -665,12 +675,17 @@ const val RUNNER_RESTART = "restart"
 @SerialName("pocket/push.prefs")
 data class PushPrefs(val enabled: Boolean) : ToPhone
 
-/** daemon -> client: the current "wait for my decision" preference — the single reply to every
- *  [SetApprovalPrefs] (issue #201). Its ARRIVAL is the client's capability gate: a daemon that predates
- *  #201 never sends one, so the setting stays hidden rather than silently doing nothing. */
+/** daemon -> client: the current approval preferences — the single reply to every [SetApprovalPrefs]
+ *  (issue #201). Its ARRIVAL is the client's capability gate: a daemon that predates #201 never sends one,
+ *  so the setting stays hidden rather than silently doing nothing.
+ *  [fullControlExpiryMs] (issue #220): the owner's Full Control expiry duration in ms; 0 = never expires
+ *  (the default). Tail-appended with a 0 default so a pre-#220 client decodes the frame and just ignores it. */
 @Serializable
 @SerialName("pocket/approval.prefs")
-data class ApprovalPrefs(val noAutoDeny: Boolean) : ToPhone
+data class ApprovalPrefs(
+    val noAutoDeny: Boolean,
+    val fullControlExpiryMs: Long = 0L,
+) : ToPhone
 
 /**
  * daemon -> phone: the CLI's auth state — the single reply to every pocket/auth.* request and pushed

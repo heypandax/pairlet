@@ -1133,6 +1133,26 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun approvalPrefs_fullControlExpiry_roundtrips_and_defaults_for_old_peers() {
+        // issue #220 trailing optionals. New→new: the chosen duration survives both directions.
+        val set = Envelope(id = "fce1", ts = 0, body = SetApprovalPrefs(fullControlExpiryMs = 3_600_000L))
+        val setJson = PocketJson.encodeToString(set)
+        assertTrue("\"fullControlExpiryMs\":3600000" in setJson, setJson)
+        assertEquals(set, PocketJson.decodeFromString<Envelope>(setJson))
+
+        val state = Envelope(id = "fce2", ts = 0, body = ApprovalPrefs(noAutoDeny = false, fullControlExpiryMs = 1_800_000L))
+        assertEquals(state, PocketJson.decodeFromString<Envelope>(PocketJson.encodeToString(state)))
+
+        // OLD client → new daemon: SetApprovalPrefs with no expiry key ⇒ null (leave unchanged).
+        val oldSet = PocketJson.decodeFromString<SetApprovalPrefs>("""{"noAutoDeny":true}""")
+        assertEquals(null, oldSet.fullControlExpiryMs)
+
+        // OLD daemon → new client: ApprovalPrefs with no expiry key ⇒ 0L (= never expires, the sane default).
+        val oldState = PocketJson.decodeFromString<ApprovalPrefs>("""{"noAutoDeny":true}""")
+        assertEquals(0L, oldState.fullControlExpiryMs)
+    }
+
+    @Test
     fun permissionAsk_noAutoDeny_roundtrips_and_defaults_off_for_old_daemons() {
         // issue #201 trailing optional. New→new: the flag survives.
         val ask = PermissionAsk("c1", "a1", "Bash", "git status", timeoutSec = 86_400, noAutoDeny = true)
