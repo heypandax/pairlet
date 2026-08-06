@@ -30,3 +30,8 @@ fun OutboundSink.isWatching(): Boolean = (this as? KeyedSink)?.watching ?: true
 
 /** Fan-out identity of a sink: a [KeyedSink]'s key, else the sink instance itself. */
 fun sinkKey(sink: OutboundSink): Any = (sink as? KeyedSink)?.key ?: sink
+
+/** Key prefix of a per-DEVICE relay view sink (`dev:<deviceId>`). One string, three consumers: the relay
+ *  mints every device sink under it, handoff detach matches on it, and the idle reaper reads it as "this
+ *  view rides the relay" for the per-session occupancy check (issue #216). */
+const val DEVICE_SINK_KEY_PREFIX = "dev:"

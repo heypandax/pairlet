@@ -266,20 +266,23 @@ class RelayClient(
     }
 
     /**
-     * While no phone is attached, reclaim conversations idle longer than [IDLE_REAP_MS]. Reaping stops the
-     * claude process and unhides its (possibly forked) transcript, so a session the phone is done with
+     * Reclaim conversations idle longer than [IDLE_REAP_MS] that no client OCCUPIES. Reaping stops the
+     * claude process and unhides its (possibly forked) transcript, so a session the user is done with
      * surfaces in the desktop `claude --resume` picker promptly instead of staying hidden behind a warm
-     * process. Gated on `!peerOnline` AND no live LAN socket: an actively-attached phone — via relay or
-     * LAN — is never reaped, so its live session stays warm and its id stable (only sessions whose phone
-     * has already left are handed back).
+     * process.
+     *
+     * Occupancy is judged per session, not by global presence (issue #216): the old `!peerOnline && no
+     * LAN socket` gate never fired while a desktop App or phone held its permanent connection, so a
+     * session the user had already tapped away from stayed warm — and invisible to the picker — for days.
+     * [SessionRegistry.reapIdle] now spares only conversations with a reachable attached view (a relay
+     * `dev:` view while the peer is online, a LAN view while a socket lives) plus the usual busy /
+     * pending-ask / handoff shields; everything else is released on the same 90s clock as before.
      */
     private suspend fun reaperLoop() {
         while (true) {
             delay(REAP_SCAN_MS)
-            if (!peerOnline && !core.registry.lanConnected()) {
-                val n = core.registry.reapIdle(IDLE_REAP_MS)
-                if (n > 0) log.info("reaped $n idle session(s) — transcripts unhidden for desktop resume")
-            }
+            val n = core.registry.reapIdle(IDLE_REAP_MS, relayPeerOnline = peerOnline)
+            if (n > 0) log.info("reaped $n unoccupied idle session(s) — transcripts unhidden for desktop resume")
         }
     }
 
@@ -463,14 +466,14 @@ class RelayClient(
         PocketJson.encodeToString(Envelope(ctrlId.getAndIncrement().toString(), 0L, to = Route.RELAY, body = frame))
 
     private companion object {
-        // Once the phone detaches, hand an idle (no background work) session back to the desktop quickly:
-        // stop + unhide so it surfaces in `claude --resume`. Short enough to feel prompt, long enough to
-        // ride out brief app-backgrounding / network blips — a reaped session re-opened later resumes in
-        // place on the same id (see Conversation.open), so too-short here mostly costs process churn.
-        const val IDLE_REAP_MS = 90 * 1000L       // 90s idle (phone offline) -> reclaim + unhide
+        // Once the last client view detaches, hand an idle (no background work) session back to the desktop
+        // quickly: stop + unhide so it surfaces in `claude --resume`. Short enough to feel prompt, long
+        // enough to ride out brief app-backgrounding / network blips — a reaped session re-opened later
+        // resumes in place on the same id (see Conversation.open), so too-short here mostly costs churn.
+        const val IDLE_REAP_MS = 90 * 1000L       // 90s idle with no occupying client view -> reclaim + unhide
         const val GUEST_EXPIRY_SCAN_MS = 30 * 1000L // how often to sweep for expired folder shares (issue #115)
         const val REVOKE_NOTICE_GRACE_MS = 250L   // head start for the guest's ShareEnded notice before RevokeDevice cuts its socket
-        const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence while the phone is offline
+        const val REAP_SCAN_MS = 20 * 1000L       // reaper wake cadence
         const val HEARTBEAT_INTERVAL_MS = 20_000L // app-level Ping cadence (relay echoes Pong)
         const val HEARTBEAT_DEAD_MS = 45_000L     // no Pong within this of attach/the last one -> reconnect
         const val HANDSHAKE_TIMEOUT_MS = 15_000L  // pre-attach (connect→auth→attached) cap, else assume a wedged link

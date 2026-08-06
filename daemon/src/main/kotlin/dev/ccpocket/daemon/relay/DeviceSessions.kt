@@ -417,7 +417,7 @@ class DeviceSessions(
         // §18.2 P2-3: V2 approval frames only reach devices whose ClientCaps declared the capability.
         val capsForDevice = deviceCaps.computeIfAbsent(deviceId) { RequestRouter.ClientCapsHolder() }
         val sink = dev.ccpocket.daemon.conversation.KeyedSink(
-            "dev:$deviceId",
+            "${dev.ccpocket.daemon.conversation.DEVICE_SINK_KEY_PREFIX}$deviceId",
             OutboundSink { frame ->
                 if (!RequestRouter.allowedForCaps(frame, capsForDevice)) return@OutboundSink
                 sealAndSend(deviceId, frame)

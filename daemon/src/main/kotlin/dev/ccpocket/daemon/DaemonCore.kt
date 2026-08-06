@@ -26,6 +26,7 @@ import dev.ccpocket.protocol.SendPrompt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** The transport-agnostic core: registry + services + router. Shared by the local server and the relay client.
@@ -88,8 +89,17 @@ class DaemonCore(
         // router writes the same pair whenever a client flips it.
         dev.ccpocket.daemon.agent.ApprovalTimeout.noAutoDeny = prefs.askNoAutoDeny
         // unhide transcripts a crashed previous instance stranded hidden (issue #70) — off the
-        // constructor path (file IO over up to 200 journal entries must not delay startup)
-        scope.launch(Dispatchers.IO) { runCatching { SpawnedSessions.sweepAtBoot() } }
+        // constructor path (file IO over up to 200 journal entries must not delay startup). Then keep
+        // sweeping periodically (issue #216 ②/④): an always-on daemon never reboots, so boot-only
+        // convergence left crash/orphan leftovers — and sibling spawners' drop-in journals — hidden
+        // for days. Live sessions are excluded per entry via the registry (their claudes hold the
+        // files), and the sweep's own mtime/process guards cover external writers.
+        scope.launch(Dispatchers.IO) {
+            while (true) {
+                runCatching { SpawnedSessions.sweep(held = registry::isLiveSession) }
+                delay(SPAWNED_SWEEP_PERIOD_MS)
+            }
+        }
         // periodic handoff expiry sweep + HandoffUpdated fan-out — on the core scope like the schedule
         // pump below, so BOTH transports (relay client + local server) get it for free
         scope.launch { handoffs.sweepLoop() }
@@ -212,4 +222,11 @@ class DaemonCore(
     var collaboratorControl: dev.ccpocket.daemon.handoff.CollaboratorControl? = null
 
     suspend fun shutdown() = registry.closeAll()
+
+    private companion object {
+        /** Cadence of the periodic spawned-session sweep (issue #216 ②). Convergence for crash/orphan
+         *  leftovers only — the common paths (process end, idle reap) unhide in real time, so this just
+         *  bounds how long a stranded transcript can stay hidden without a daemon restart. */
+        const val SPAWNED_SWEEP_PERIOD_MS = 5 * 60_000L
+    }
 }
