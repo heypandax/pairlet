@@ -3006,8 +3006,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         ChatRole.USER -> ChatItem.User(h.text)
-        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
-        ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
+        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
+        // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
+        // an upstream gateway/5xx signal stops blaming context (issue #208).
+        ChatRole.ASSISTANT -> if (h.error) {
+            ChatItem.Sys(
+                "API request failed — the agent wrote a placeholder, not a real reply. " +
+                    dev.ccpocket.protocol.SyntheticAttribution.attribution(h.text) +
+                    "\n\nplaceholder reply: ${h.text}",
+            )
+        } else {
+            ChatItem.Assistant(h.text)
+        }
         // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
         // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77);
         // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
