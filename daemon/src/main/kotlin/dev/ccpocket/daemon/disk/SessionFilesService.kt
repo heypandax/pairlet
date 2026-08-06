@@ -406,6 +406,7 @@ object SessionFilesService {
             AgentKind.CLAUDE -> claudeScan(file, ::touch, ::record)
             AgentKind.CODEX -> codexScan(file, ::touch, ::record)
             AgentKind.OPENCODE -> { /* OpenCode uses SQLite, not file scanning */ }
+            AgentKind.KIMI -> { /* KIMI Changes preview is P1 no-op (like OPENCODE); ACP transcript scan is P2 */ }
         }
         return seen
     }
@@ -419,6 +420,7 @@ object SessionFilesService {
             AgentKind.CLAUDE -> ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl")
             AgentKind.CODEX -> CodexPaths.findSession(sessionId)
             AgentKind.OPENCODE -> null // OpenCode sessions are in SQLite, not individual files
+            AgentKind.KIMI -> null // KIMI file-preview is P1 no-op (transcript format unverified pre-auth)
         }
         return file?.takeIf { it.exists() }
     }

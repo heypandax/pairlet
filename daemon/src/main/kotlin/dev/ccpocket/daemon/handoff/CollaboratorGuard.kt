@@ -125,8 +125,10 @@ class CollaboratorGuard(
         val h = liveGrantFor(resume, now) ?: return notGranted()
         // OpenCode runs --auto (no enforceable approval channel) — the same fail-closed rule as
         // guests/bridges. TODO: lift when opencode gains an approval protocol.
-        if (h.agent == AgentKind.OPENCODE) {
-            return Verdict.Deny("handoff_agent_unsupported", "OpenCode sessions can't be handed off over a collaborator link yet")
+        // KIMI (issue #206): P1 fail-closed like OpenCode — its ACP approval chain isn't battle-tested for
+        // the collaborator REVIEW ceiling yet. P2 re-evaluates once the approval face is proven.
+        if (h.agent == AgentKind.OPENCODE || h.agent == AgentKind.KIMI) {
+            return Verdict.Deny("handoff_agent_unsupported", "${h.agent} sessions can't be handed off over a collaborator link yet")
         }
         val scope = listOfNotNull(PathScope.canonical(h.workdir)) +
             h.allowedRoots.mapNotNull { PathScope.canonical(it) }

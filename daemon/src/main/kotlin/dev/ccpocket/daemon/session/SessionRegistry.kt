@@ -255,6 +255,7 @@ class SessionRegistry(
         origin: String? = null,
         pathScope: List<String>? = null,
         peerSupportsOpencode: Boolean = true,
+        peerSupportsKimi: Boolean = true,
         bridgeAllowedCommands: List<String> = emptyList(),
         // issue #91 OWNER BYPASS: this session is the bridge owner's OWN dedicated session → its whole
         // PermissionBridge auto-allows. Passed ONLY by trusted in-process code (the built-in engine).
@@ -316,9 +317,11 @@ class SessionRegistry(
                 // that reports itself open while every push vanishes. Refuse with something readable
                 // instead — and refuse HERE, so any future path that hands such a client an opencode
                 // session id is covered too.
-                if (attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) {
-                    log.info("open ${resume.take(8)}… → refused: opencode session, peer never declared support")
-                    sink.emit(PocketError("agent_unavailable", "update the app to open OpenCode sessions"))
+                if ((attach.kind == AgentKind.OPENCODE && !peerSupportsOpencode) ||
+                    (attach.kind == AgentKind.KIMI && !peerSupportsKimi)
+                ) {
+                    log.info("open ${resume.take(8)}… → refused: ${attach.kind} session, peer never declared support")
+                    sink.emit(PocketError("agent_unavailable", "update the app to open ${attach.kind} sessions"))
                     return ""
                 }
                 log.info("open ${resume.take(8)}… → reattach ${attach.convoId.take(8)}…")

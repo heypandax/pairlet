@@ -34,6 +34,7 @@ import dev.ccpocket.protocol.ApprovalGrantMutationResult
 import dev.ccpocket.protocol.FetchApprovalHistory
 import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
 import dev.ccpocket.protocol.ScheduleState
 import dev.ccpocket.protocol.ClientCaps
@@ -156,6 +157,7 @@ class RequestRouter(
     private val presets: PresetService,
     private val scheduler: SchedulerService,
     private val openCodeModels: OpenCodeModelService = OpenCodeModelService(),
+    private val kimiModels: dev.ccpocket.daemon.kimi.KimiModelService = dev.ccpocket.daemon.kimi.KimiModelService(),
     private val codexModels: CodexModelService = CodexModelService(),
     private val claudeModels: ClaudeModelService = ClaudeModelService(),
     // the daemon-wide pending-approval ledger (approval design M1): the single verdict routing point;
@@ -186,10 +188,22 @@ class RequestRouter(
     class ClientCapsHolder {
         @Volatile var supportsOpencode: Boolean = false
 
+        /** issue #206: the client decodes AgentKind.KIMI — same gate as [supportsOpencode]. KIMI was added
+         *  after the baseline vocabulary, so its rows must not reach a peer that never declared it. */
+        @Volatile var supportsKimi: Boolean = false
+
         /** §18.2 P2-3: the client decodes the approval-V2 frame types. The INGRESS sinks consult this to
          *  drop [AuthorizedActionRecorded]/[PermissionRiskUpdated] for undeclared peers — old clients
          *  would drop the unknown types anyway, but gating keeps the wire quiet and the contract real. */
         @Volatile var supportsApprovalV2: Boolean = false
+
+        /** Whether this peer can decode [agent]. CLAUDE/CODEX are the baseline vocabulary every shipped
+         *  client understands; OPENCODE/KIMI are post-baseline additions each guarded by its own cap. */
+        fun allows(agent: AgentKind): Boolean = when (agent) {
+            AgentKind.OPENCODE -> supportsOpencode
+            AgentKind.KIMI -> supportsKimi
+            AgentKind.CLAUDE, AgentKind.CODEX -> true
+        }
     }
 
     companion object {
@@ -238,10 +252,9 @@ class RequestRouter(
          * So: when nothing survives the filter, the row must look exactly like a row with no live session.
          */
         internal fun filterDirs(entries: List<DirectoryEntry>, caps: ClientCapsHolder?): List<DirectoryEntry> =
-            if (caps?.supportsOpencode == true) entries
-            else entries.map { e ->
-                if (e.activeSessions.none { it.agent == AgentKind.OPENCODE }) return@map e
-                val kept = e.activeSessions.filter { it.agent != AgentKind.OPENCODE }
+            entries.map { e ->
+                if (e.activeSessions.all { capsAllow(caps, it.agent) }) return@map e
+                val kept = e.activeSessions.filter { capsAllow(caps, it.agent) }
                 val first = kept.firstOrNull()
                 e.copy(
                     activeSessions = kept,
@@ -253,6 +266,13 @@ class RequestRouter(
                     gitBranch = first?.gitBranch,
                 )
             }
+
+        /** Whether a peer with [caps] can decode [agent]. Null caps (legacy ingress / bridges) = undeclared,
+         *  so only the baseline CLAUDE/CODEX vocabulary is allowed. Post-baseline agents (OPENCODE issue #184,
+         *  KIMI issue #206) each need their own declared capability. Single choke point for every list/dir
+         *  filter below so a new gated agent is added in ONE place ([ClientCapsHolder.allows]). */
+        internal fun capsAllow(caps: ClientCapsHolder?, agent: AgentKind?): Boolean =
+            agent == null || agent == AgentKind.CLAUDE || agent == AgentKind.CODEX || caps?.allows(agent) == true
     }
 
     /** [origin] names the restricted credential this frame arrived from (issue #91 bridge / #115 guest) —
@@ -284,12 +304,13 @@ class RequestRouter(
             // corrected by the client's next fetch.
             is ClientCaps -> {
                 caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
+                caps?.supportsKimi = AGENT_WIRE_KIMI in frame.supportsAgents // issue #206: gates KIMI rows
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
             }
 
             is ListDirectories ->
                 if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
-                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true), caps)))
+                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true), caps)))
 
             // Owner control-plane pull: push is alert-only, so every foreground client can reconstruct the
             // complete queue even if APNs/FCM was delayed or lost. Restricted credentials must never learn
@@ -424,8 +445,13 @@ class RequestRouter(
                     // consulted. Until opencode exposes an enforceable approval channel, a RESTRICTED origin
                     // (guest #115 / bridge #91) must not be able to open one — it would be unsandboxed
                     // full-auto under a credential whose whole design is scoped, per-call consent.
-                    (guestScope != null || origin != null) && frame.agent == AgentKind.OPENCODE ->
-                        sink.emit(PocketError("share_forbidden", "OpenCode sessions are not available over shared/bridge access (no enforceable approval channel)"))
+                    // KIMI (issue #206): P1 fail-closed alongside OpenCode. Its ACP approval channel COULD
+                    // route a guest's path scope through PermissionBridge, but that path is unverified (probe
+                    // blocked on device-code auth), so a restricted credential must not open one yet. P2
+                    // re-evaluates once the ACP approval face is proven end-to-end.
+                    (guestScope != null || origin != null) &&
+                        (frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI) ->
+                        sink.emit(PocketError("share_forbidden", "${frame.agent} sessions are not available over shared/bridge access yet"))
                     guestScope != null && !PathScope.contains(guestScope.roots, wd.toString()) ->
                         sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
                     else -> {
@@ -443,6 +469,7 @@ class RequestRouter(
                             handoffAccess = collabScope?.access,
                             // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
                             peerSupportsOpencode = caps?.supportsOpencode == true,
+                            peerSupportsKimi = caps?.supportsKimi == true,
                             bridgeAllowedCommands = bridgeAllowedCommands,
                             ownerBypass = ownerBypass, // trusted in-process open flag ⇒ owner's own session
                         )
@@ -618,6 +645,7 @@ class RequestRouter(
             is FetchModels -> scope.launch(Dispatchers.IO) {
                 sink.emit(when (frame.agent) {
                     AgentKind.OPENCODE -> openCodeModels.fetch()
+                    AgentKind.KIMI -> kimiModels.fetch()
                     AgentKind.CODEX -> codexModels.fetch()
                     AgentKind.CLAUDE -> claudeModels.fetch(frame.workdir)
                 })
@@ -1047,8 +1075,8 @@ class RequestRouter(
         // means even an old app gets the tidied list. One store load per listing, then O(1) per row.
         val archived = SessionArchive.archivedIds(wd, archiveFile)
         if (archived.isNotEmpty()) items = items.filter { it.sessionId !in archived }
-        // wire-compat (ClientCaps): an undeclared client would drop this WHOLE frame on one opencode row
-        if (caps?.supportsOpencode != true) items = items.filter { it.agent != AgentKind.OPENCODE }
+        // wire-compat (ClientCaps): an undeclared client would drop this WHOLE frame on one opencode/kimi row
+        items = items.filter { capsAllow(caps, it.agent) }
         val groups = if (guestScope != null) null else SessionGroups.groupsFor(wd)
         // renameSupported (issue #158) / archiveSupported (issue #202): owner-only — a guest's frame is
         // capability-denied anyway, so its client must not show the entry
@@ -1073,7 +1101,7 @@ class RequestRouter(
                 .filter { it.sessionId in entry.sessions }
                 .map { (if (it.sessionId in busy) it.copy(busy = true) else it) to (entry.sessions[it.sessionId] ?: 0L) }
         }.sortedByDescending { it.second }.map { it.first }
-        if (caps?.supportsOpencode != true) rows = rows.filter { it.agent != AgentKind.OPENCODE }
+        rows = rows.filter { capsAllow(caps, it.agent) }
         // Bound the FRAME, not just the row count. firstPrompt is untruncated and can be huge (a skill
         // injection has produced ~800KB single messages here), and unlike a per-project Sessions frame this
         // one aggregates the whole machine — blowing the relay's 4MB cap would drop the socket, and the
@@ -1091,8 +1119,8 @@ class RequestRouter(
 
 
     private fun filterSchedule(state: ScheduleState, caps: ClientCapsHolder?): ScheduleState =
-        if (caps?.supportsOpencode == true || state.items.none { it.agent == AgentKind.OPENCODE }) state
-        else state.copy(items = state.items.filter { it.agent != AgentKind.OPENCODE })
+        if (state.items.all { capsAllow(caps, it.agent) }) state
+        else state.copy(items = state.items.filter { capsAllow(caps, it.agent) })
 
     /**
      * The project list a GUEST sees (issue #115): ONLY the shared root(s) — each stamped with the origin
@@ -1103,7 +1131,7 @@ class RequestRouter(
      * rows exactly like the owner path (issue #184 mechanism ②).
      */
     private suspend fun scopedDirectories(scope: GuestScope, caps: ClientCapsHolder?): List<DirectoryEntry> {
-        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true)
+        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true)
         val underScope = all
             .filter { e -> PathScope.contains(scope.roots, e.path) }
             .map { it.stampShare(scope) }
