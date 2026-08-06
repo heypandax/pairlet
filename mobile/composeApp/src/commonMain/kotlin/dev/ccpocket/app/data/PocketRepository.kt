@@ -1234,11 +1234,16 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val livePartial = mutableStateOf("")                     // native dictation: volatile tail (muted)
     val micPermissionSheet = mutableStateOf(false)           // S6
     val voiceNotice = mutableStateOf<StringResource?>(null)  // transient "didn't catch any speech"
+    // A finished transcript waiting for the composer to pick up (issue #221): recognition can be wrong, so
+    // the result lands in the input box for the user to review/edit and send EXPLICITLY — it never auto-sends.
+    // The UI (App.kt) appends it after the current draft, drops the caret at the end and takes focus, then
+    // clears this back to null.
+    val pendingVoiceText = mutableStateOf<String?>(null)
     private val recorder by lazy { VoiceRecorder() }
     private var usingNative = false
     private var preferRemote = false                         // sticky after a native-engine failure
     private var keptAudio: RecordedAudio? = null             // retained for S5 retry (re-send, not re-record)
-    private var captureId: String? = null
+    internal var captureId: String? = null // internal: tests drive onTranscript's capture-match gate
     private var voiceTicker: Job? = null
     private var voiceTimeout: Job? = null
     private var levelsJob: Job? = null
@@ -4756,15 +4761,19 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     fun dismissMicSheet() { micPermissionSheet.value = false }
 
-    /** ✓ = confirm AND send (user decision): the transcript goes straight out as the prompt. */
+    /** ✓ = capture confirmed: the transcript LANDS IN THE COMPOSER for the user to review/edit before
+     *  sending (issue #221). Recognition results can be wrong, and auto-sending them wasted a model turn
+     *  and could fire a bad instruction at the agent — so the result no longer sends itself; the user
+     *  sends explicitly. Blank = "no speech". Any staged images stay staged and ride the eventual send. */
     private fun deliverTranscript(text: String) {
-        if (text.isBlank()) {
+        val t = text.trim()
+        if (t.isBlank()) {
             showNotice(Res.string.voice_no_speech)
             clearVoice()
             return
         }
         clearVoice()
-        sendPrompt(text.trim()) // picks up any staged images too
+        pendingVoiceText.value = t // App.kt appends it to the composer and takes focus; the user sends
     }
 
     private fun startNativeVoice() {

@@ -1786,6 +1786,27 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             keyboard?.show()
         }
     }
+    // Voice result review (issue #221): a finished transcript no longer auto-sends — it lands in the
+    // composer for the user to confirm/fix first. Append it AFTER any existing draft (one space between
+    // when the draft doesn't already end on whitespace), route through ComposerState.setText so the caret
+    // lands at the end and a live IME composition is respected (#93/#118), then focus + raise the keyboard
+    // for immediate edits. Consume the slot so the same phrase spoken twice still re-fires.
+    val pendingVoice = repo.pendingVoiceText.value
+    LaunchedEffect(pendingVoice) {
+        if (pendingVoice != null) {
+            repo.pendingVoiceText.value = null
+            val existing = composer.text
+            composer.setText(
+                when {
+                    existing.isEmpty() -> pendingVoice
+                    existing.last().isWhitespace() -> existing + pendingVoice
+                    else -> "$existing $pendingVoice"
+                },
+            )
+            runCatching { composerFocus.requestFocus() }
+            keyboard?.show()
+        }
+    }
     // Page in older history when the reader is genuinely parked at the top of the loaded window — NOT
     // when the loader row merely composes. Every transcript lands via clear()+addAll(), which clamps the
     // list to index 0, so composition fired on each history frame; each page prepended rows and clamped
