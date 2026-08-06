@@ -47,16 +47,19 @@ import dev.ccpocket.protocol.AgentKind
 fun agentColor(agent: AgentKind): Color = when (agent) {
     AgentKind.CODEX -> Tok.codex
     AgentKind.OPENCODE -> Tok.opencode
+    AgentKind.KIMI -> Tok.kimi
     else -> Tok.accent
 }
 fun agentName(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex"
     AgentKind.OPENCODE -> "OpenCode"
+    AgentKind.KIMI -> "Kimi"
     else -> "Claude"
 }
 fun agentTagline(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex · OpenAI"
     AgentKind.OPENCODE -> "OpenCode · Open Source"
+    AgentKind.KIMI -> "Kimi Code · Moonshot"
     else -> "Claude Code · Anthropic"
 }
 
@@ -90,6 +93,15 @@ fun AgentGlyph(agent: AgentKind, color: Color = agentColor(agent), size: Int = 1
                 color = innerColor, topLeft = p(5f, 10f), size = Size(10f * s, 7f * s),
                 cornerRadius = CornerRadius(1f * s, 1f * s)
             )
+        } else if (agent == AgentKind.KIMI) {
+            val w = 1.6f * s
+            // crescent moon (Moonshot): an outer disc arc with an inner bite arc, both open on the right
+            val box = Offset(3f * s, 2f * s)
+            val d = Size(15f * s, 15f * s)
+            drawArc(color, startAngle = 40f, sweepAngle = 280f, useCenter = false, topLeft = box, size = d, style = Stroke(width = w, cap = StrokeCap.Round))
+            val ibox = Offset(7f * s, 3.5f * s)
+            val id = Size(12f * s, 12f * s)
+            drawArc(color, startAngle = 60f, sweepAngle = 240f, useCenter = false, topLeft = ibox, size = id, style = Stroke(width = w, cap = StrokeCap.Round))
         } else {
             val w = 1.8f * s
             // chevron ">"

@@ -107,7 +107,7 @@ fun modelLabelForAgent(agent: AgentKind?, model: String?): String {
     if (m.isEmpty()) return ""
     return when (agent ?: AgentKind.CLAUDE) {
         AgentKind.CLAUDE -> modelAlias(m)
-        AgentKind.CODEX, AgentKind.OPENCODE -> m
+        AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI -> m
     }
 }
 
@@ -505,6 +505,8 @@ data class ModelChoice(val name: String, val id: String, val pick: String, val c
 internal fun modelChoicesFor(agent: AgentKind, daemonModels: List<String>?, gatewayUrl: String?): List<ModelChoice> = when (agent) {
     AgentKind.CODEX -> (daemonModels?.takeIf { it.isNotEmpty() } ?: CODEX_MODEL_OPTIONS).map { ModelChoice(it, it, it, "", false) }
     AgentKind.OPENCODE -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
+    // KIMI (issue #206): daemon-fed aliases from `kimi provider list --json` (FetchModels channel)
+    AgentKind.KIMI -> (daemonModels ?: emptyList()).map { ModelChoice(it, it, it, "", false) }
     // window pill derives from the protocol table, so registering a new alias THERE is the only edit
     AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { (name, alias) ->
         val pick = claudeRowPick(alias, gatewayUrl)

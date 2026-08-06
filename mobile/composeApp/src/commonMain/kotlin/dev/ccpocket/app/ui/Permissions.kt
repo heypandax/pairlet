@@ -247,6 +247,7 @@ fun StartSessionModeSheet(
                     AgentOption(AgentKind.CLAUDE, chosenAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { chosenAgent = AgentKind.CLAUDE }
                     AgentOption(AgentKind.CODEX, chosenAgent == AgentKind.CODEX, Modifier.weight(1f)) { chosenAgent = AgentKind.CODEX }
                     AgentOption(AgentKind.OPENCODE, chosenAgent == AgentKind.OPENCODE, Modifier.weight(1f)) { chosenAgent = AgentKind.OPENCODE }
+                    AgentOption(AgentKind.KIMI, chosenAgent == AgentKind.KIMI, Modifier.weight(1f)) { chosenAgent = AgentKind.KIMI }
                 }
                 NewSessionModelSection(
                     choices = modelsFor(chosenAgent),
@@ -272,6 +273,18 @@ fun StartSessionModeSheet(
                         stringResource(Res.string.opencode_mode_start), Modifier.fillMaxWidth().padding(top = 10.dp),
                         bg = Tok.warn, fg = Tok.base,
                     ) { onPick(PermissionMode.BYPASS_PERMISSIONS, AgentKind.OPENCODE, null, chosenModel) }
+                } else if (chosenAgent == AgentKind.KIMI) {
+                    // KIMI (issue #206) runs the ACP approval chain (plan A): the same DEFAULT/PLAN/BYPASS
+                    // ladder Claude shows, minus Claude's native AUTO mode. Approvals ride session/request_permission.
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // hide ACCEPT_EDITS (no kimi equivalent; the design maps it to DEFAULT)
+                        MODES.filter { it.key != PermissionMode.ACCEPT_EDITS }.forEach { m ->
+                            ModeRow(m, selected = m.key == selected, enabled = true) {
+                                if (m.key == PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
+                                else onPick(m.key, AgentKind.KIMI, null, chosenModel)
+                            }
+                        }
+                    }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         CODEX_PRESETS.forEach { p ->

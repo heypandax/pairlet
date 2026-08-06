@@ -294,6 +294,8 @@ private fun GeneralPane(model: DesktopModel) {
                 // OpenCode's provider/model catalog is installation-specific, so only daemon-reported ids
                 // are valid choices. The selected value leads in case a later catalog no longer lists it.
                 AgentKind.OPENCODE -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
+                // KIMI (issue #206): daemon-reported aliases (from `kimi provider list --json`)
+                AgentKind.KIMI -> (listOfNotNull(defaultModel) + discovered).distinct().map { it to it }
             }
             options.forEach { (label, id) ->
                 PrefRow(label, id, selected = defaultModel == id) { model.setDefaultModelFor(defaultAgent, id) }
