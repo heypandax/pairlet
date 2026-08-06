@@ -92,6 +92,47 @@ class OpenCodeTranscriptScannerTest {
         }
     }
 
+    // ---- #217 usage: assistant-message token spend read straight from the DB ----
+
+    @Test
+    fun usage_turns_reads_assistant_tokens_model_and_completion_time() {
+        openFixtureDb().use { conn ->
+            conn.putSession("s", "Session", timeUpdated = 5_000)
+            // assistant message: OpenCode's tokens shape + providerID/modelID + time.completed (epoch ms)
+            conn.putAssistantMessage(
+                sessionId = "s", messageId = "a1", timeCreated = 4_000,
+                data = """{"role":"assistant","providerID":"zhipuai","modelID":"glm-4.6",
+                    "tokens":{"input":100,"output":40,"reasoning":5,"cache":{"read":60,"write":10}},
+                    "time":{"created":3900,"completed":4200}}""".trimIndent(),
+            )
+            // a user message must be ignored (no tokens)
+            conn.putUserMessage("s", "u1", "hi", 3_000)
+            val turns = OpenCodeTranscriptScanner.usageTurnsConn(conn, sinceEpochMs = 0)
+            val t = turns.single()
+            assertEquals("a1", t.id)
+            assertEquals("zhipuai/glm-4.6", t.model)
+            assertEquals(100L, t.input)
+            assertEquals(40L, t.output)
+            assertEquals(60L, t.cacheRead)
+            assertEquals(4200L, t.whenEpochMs, "prefers time.completed over the row's time_created")
+        }
+    }
+
+    @Test
+    fun usage_turns_falls_back_to_session_model_and_row_time() {
+        openFixtureDb().use { conn ->
+            conn.putSession("s", "Session", timeUpdated = 5_000, model = "opencode/deepseek-v4")
+            conn.putAssistantMessage(
+                sessionId = "s", messageId = "a1", timeCreated = 4_000,
+                // no model fields on the message, no time.completed → session model + row time_created
+                data = """{"role":"assistant","tokens":{"input":10,"output":10,"cache":{"read":0}}}""",
+            )
+            val t = OpenCodeTranscriptScanner.usageTurnsConn(conn, sinceEpochMs = 0).single()
+            assertEquals("opencode/deepseek-v4", t.model)
+            assertEquals(4_000L, t.whenEpochMs)
+        }
+    }
+
     private fun openFixtureDb(): Connection {
         val dir = createTempDirectory("opencode-scan-test")
         val db = dir.resolve("opencode.db")
@@ -114,11 +155,19 @@ class OpenCodeTranscriptScannerTest {
         dir: String = "/w",
         timeUpdated: Long = 1_000,
         parentId: String? = null,
+        model: String? = null,
     ) {
-        prepareStatement("INSERT INTO session (id, parent_id, title, directory, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?)").use { ps ->
+        prepareStatement("INSERT INTO session (id, parent_id, title, directory, model, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)").use { ps ->
             ps.setString(1, id); ps.setString(2, parentId); ps.setString(3, title)
-            ps.setString(4, dir); ps.setLong(5, timeUpdated); ps.setLong(6, timeUpdated)
+            ps.setString(4, dir); ps.setString(5, model); ps.setLong(6, timeUpdated); ps.setLong(7, timeUpdated)
             ps.executeUpdate()
+        }
+    }
+
+    private fun Connection.putAssistantMessage(sessionId: String, messageId: String, data: String, timeCreated: Long) {
+        prepareStatement("INSERT INTO message (id, session_id, data, time_created) VALUES (?,?,?,?)").use {
+            it.setString(1, messageId); it.setString(2, sessionId)
+            it.setString(3, data); it.setLong(4, timeCreated); it.executeUpdate()
         }
     }
 
