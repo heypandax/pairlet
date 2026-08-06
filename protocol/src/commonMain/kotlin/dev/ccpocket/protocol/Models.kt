@@ -44,11 +44,17 @@ enum class AgentKind {
     @SerialName("claude") CLAUDE,
     @SerialName("codex") CODEX,
     @SerialName("opencode") OPENCODE,
+    @SerialName("kimi") KIMI,
 }
 
 /** OPENCODE's wire name, shared by [ClientCaps.supportsAgents] declarations on both ends — the
  *  daemon must not emit this enum value to a peer that never declared it (see ClientCaps). */
 const val AGENT_WIRE_OPENCODE = "opencode"
+
+/** KIMI's wire name (issue #206), same contract as [AGENT_WIRE_OPENCODE]: KIMI was added AFTER the
+ *  baseline vocabulary, so the daemon must not emit `agent:"kimi"` to a peer whose [ClientCaps.supportsAgents]
+ *  never listed it (an already-shipped client hard-fails the whole Envelope on the unknown enum). */
+const val AGENT_WIRE_KIMI = "kimi"
 
 /** Codex model ids the app exposes as first-class presets. */
 val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex")
@@ -84,6 +90,10 @@ fun isModelCompatibleWithAgent(agent: AgentKind, model: String?): Boolean {
     return when (agent) {
         AgentKind.OPENCODE -> isOpenCodeModelId(m)
         AgentKind.CODEX -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
+        // KIMI (issue #206): pass any non-empty id but reject the Claude alias family — a stale persisted
+        // claude default (opus/sonnet/…) is meaningless to kimi and would launch it against a bad --model.
+        // V8 can tighten this once the real `kimi provider catalog list` id shape is known.
+        AgentKind.KIMI -> m.lowercase() !in CLAUDE_MODEL_ALIAS_IDS
         AgentKind.CLAUDE -> true // gateway users run arbitrary ids, slashed OpenRouter-style included
     }
 }

@@ -666,6 +666,24 @@ class SerializationRoundTripTest {
     }
 
     @Test
+    fun kimi_agent_kind_and_caps_pin_wire_names() {
+        // issue #206: KIMI's @SerialName is the wire contract both ends agree on. A rename would silently
+        // desync daemon and app, so pin it.
+        val list = ModelsList(agent = AgentKind.KIMI, models = listOf("kimi-k2"))
+        val listJson = PocketJson.encodeToString(list)
+        assertTrue("\"agent\":\"kimi\"" in listJson, listJson)
+        assertEquals(list, PocketJson.decodeFromString<ModelsList>(listJson))
+
+        assertEquals("kimi", AGENT_WIRE_KIMI)
+        val caps = ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI))
+        assertEquals(caps, PocketJson.decodeFromString<ClientCaps>(PocketJson.encodeToString(caps)))
+
+        // a KIMI session row round-trips whole (the app declares supportsAgents=[opencode,kimi])
+        val row = SessionSummary("s1", "t", "p", 1, "/w", 1, agent = AgentKind.KIMI)
+        assertEquals(row, PocketJson.decodeFromString<SessionSummary>(PocketJson.encodeToString(row)))
+    }
+
+    @Test
     fun unknown_agent_kind_value_degrades_to_default_instead_of_failing_the_frame() {
         // THE wire hazard of adding an AgentKind constant: a peer built before it receives
         // `"agent":"<new>"` inside frames it already understands. coerceInputValues + the per-field
