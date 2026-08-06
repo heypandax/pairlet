@@ -349,6 +349,11 @@
     <string name="appearance_light">浅色</string>
     <string name="appearance_dark">深色</string>
     <string name="appearance_hint">选择应用配色。跟随系统会随设备的浅色 / 深色设置切换。</string>
+    <!-- ── 强调色（issue #204）────────────────────────────────────── -->
+    <string name="settings_accent">强调色</string>
+    <string name="settings_accent_sub">全局强调色，用于按钮、选中态与高亮。</string>
+    <string name="accent_pocket">CC Pocket</string>
+    <string name="accent_codex">Codex</string>
     <!-- ── 应用锁 / 安全（issue #109）─────────────────────────────── -->
     <string name="security_section">安全</string>
     <string name="app_lock_require">需要 %1$s</string>

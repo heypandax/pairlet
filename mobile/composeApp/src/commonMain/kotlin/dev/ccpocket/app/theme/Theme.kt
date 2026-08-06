@@ -23,6 +23,16 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK;
     }
 }
 
+/** Global accent source (issue #204). POCKET keeps the terracotta brand accent (default — existing users see
+ *  no change); CODEX repaints every `Tok.accent` slot with the project's Codex teal for a consistent
+ *  Codex-first skin. Only the accent hue moves — success/warning/danger semantics stay put.
+ *  Absent/garbage → POCKET so nobody's install silently recolors. */
+enum class AccentTheme { POCKET, CODEX;
+    companion object {
+        fun from(name: String?): AccentTheme = entries.firstOrNull { it.name == name } ?: POCKET
+    }
+}
+
 /** A full semantic color set — one per theme. Reads flow through [Tok], which points at the active one. */
 data class Palette(
     val base: Color,
@@ -35,6 +45,7 @@ data class Palette(
     val accent: Color,
     val accentPressed: Color,
     val codex: Color,
+    val codexPressed: Color,
     val opencode: Color,
     val ok: Color,
     val warn: Color,
@@ -55,6 +66,7 @@ val DarkPalette = Palette(
     accent = Color(0xFFD97757),
     accentPressed = Color(0xFFC4633F), // primary pressed/active (desktop hover-press)
     codex = Color(0xFF3FB5AC),         // Codex agent identity — calm teal that sits on the dark palette
+    codexPressed = Color(0xFF339B93),  // Codex accent pressed/active (issue #204 — parity with accentPressed)
     opencode = Color(0xFF9B72CF),      // OpenCode agent identity — soft purple
     ok = Color(0xFF4FB477),
     warn = Color(0xFFE0A93B),
@@ -76,6 +88,7 @@ val LightPalette = Palette(
     accent = Color(0xFFC15F3C),
     accentPressed = Color(0xFFA94E30),
     codex = Color(0xFF1C8B82),
+    codexPressed = Color(0xFF16706A),  // Codex accent pressed/active (issue #204)
     opencode = Color(0xFF7B52AB),      // OpenCode agent identity — deeper purple for light mode
     ok = Color(0xFF2E9E5B),
     warn = Color(0xFFB07D1C),
@@ -94,6 +107,12 @@ object Tok {
     var current by mutableStateOf(DarkPalette)
         internal set
 
+    /** Which hue backs the global accent slots (issue #204). [PocketTheme] points this at the persisted
+     *  choice; POCKET (default) reads the terracotta accent, CODEX rewrites accent/accentPressed to the
+     *  Codex teal — every `Tok.accent` reader recomposes on switch, so no call site changes. */
+    var accentTheme by mutableStateOf(AccentTheme.POCKET)
+        internal set
+
     val base: Color get() = current.base
     val surface: Color get() = current.surface
     val raised: Color get() = current.raised
@@ -101,8 +120,16 @@ object Tok {
     val tx: Color get() = current.tx
     val tx2: Color get() = current.tx2
     val muted: Color get() = current.muted
-    val accent: Color get() = current.accent
-    val accentPressed: Color get() = current.accentPressed
+    val accent: Color get() = when (accentTheme) {
+        AccentTheme.POCKET -> current.accent
+        AccentTheme.CODEX -> current.codex
+    }
+    val accentPressed: Color get() = when (accentTheme) {
+        AccentTheme.POCKET -> current.accentPressed
+        AccentTheme.CODEX -> current.codexPressed
+    }
+    /** The literal Codex identity hue — always teal regardless of [accentTheme], so agent tags/badges that
+     *  mean "this is Codex" stay teal even when the global accent is terracotta. */
     val codex: Color get() = current.codex
     val opencode: Color get() = current.opencode
     val ok: Color get() = current.ok
@@ -127,26 +154,30 @@ fun ThemeMode.resolvesToDark(systemDark: Boolean): Boolean = when (this) {
  *  persisted [ThemeMode] — a live system light/dark flip re-themes, LIGHT/DARK force it. Delegates to the
  *  boolean overload, still the default for the ~dozen test/preview `PocketTheme { }` callers. */
 @Composable
-fun PocketTheme(mode: ThemeMode, fontScale: Float = 1f, content: @Composable () -> Unit) {
+fun PocketTheme(mode: ThemeMode, accent: AccentTheme = AccentTheme.POCKET, fontScale: Float = 1f, content: @Composable () -> Unit) {
     val dark = mode.resolvesToDark(systemDark = isSystemInDarkTheme())
     // issue #117: align the OS status/navigation-bar FOREGROUND (icon/text) color with the resolved theme so
     // the bars stay legible in light mode too — Android tints them, iOS/desktop no-op. On the mode overload
     // only, so the real app roots drive it while the boolean overload used by tests/previews stays inert.
     SystemBarAppearance(darkTheme = dark)
-    PocketTheme(dark = dark, fontScale = fontScale, content = content)
+    PocketTheme(dark = dark, accent = accent, fontScale = fontScale, content = content)
 }
 
 @Composable
-fun PocketTheme(dark: Boolean = true, fontScale: Float = 1f, content: @Composable () -> Unit) {
+fun PocketTheme(dark: Boolean = true, accent: AccentTheme = AccentTheme.POCKET, fontScale: Float = 1f, content: @Composable () -> Unit) {
     val palette = if (dark) DarkPalette else LightPalette
     // Point the global tokens at the active palette BEFORE children compose, so their first frame reads
     // the right colors (no dark flash for a light-mode launch). The write is idempotent — DarkPalette /
     // LightPalette are stable singletons, so an unchanged theme is a structural no-op and never loops.
     Tok.current = palette
+    // accent source (issue #204): set before children compose so the first frame is the right hue; POCKET
+    // (default) is a structural no-op, so existing installs never recolor. Tok.accent reads this below.
+    Tok.accentTheme = accent
     // one override list over whichever baseline — the unset M3 fields keep each factory's light/dark
-    // defaults (identical to spelling both schemes out), so a token add/rename stays in a single place
+    // defaults (identical to spelling both schemes out), so a token add/rename stays in a single place.
+    // primary rides Tok.accent so M3 components (buttons/sliders) follow the accent source too.
     val scheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
-        primary = palette.accent, onPrimary = Color.White,
+        primary = Tok.accent, onPrimary = Color.White,
         background = palette.base, onBackground = palette.tx,
         surface = palette.surface, onSurface = palette.tx,
         surfaceVariant = palette.raised, onSurfaceVariant = palette.tx2,

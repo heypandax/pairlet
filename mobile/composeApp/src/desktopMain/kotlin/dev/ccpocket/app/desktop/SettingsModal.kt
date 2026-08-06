@@ -267,6 +267,9 @@ private fun GeneralPane(model: DesktopModel) {
         Group(stringResource(Res.string.settings_appearance), stringResource(Res.string.settings_appearance_sub)) {
             AppearanceRow(model)
         }
+        Group(stringResource(Res.string.settings_accent), stringResource(Res.string.settings_accent_sub)) {
+            AccentRow(model)
+        }
         Group(stringResource(Res.string.settings_default_agent), stringResource(Res.string.settings_default_agent_sub)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
@@ -424,6 +427,37 @@ private fun AppearanceRow(model: DesktopModel) {
                 Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
                     .background(if (sel) Tok.accent else Color.Transparent)
                     .clickable { model.themeMode = mode }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+// Global accent source (issue #204) — CC Pocket terracotta (default) vs Codex teal. Same segmented-control
+// shape as AppearanceRow, but each option's selected swatch previews its own hue so the pick is legible even
+// while the rest of the shell is still on the old accent.
+@Composable
+private fun AccentRow(model: DesktopModel) {
+    val options = listOf(
+        Triple(dev.ccpocket.app.theme.AccentTheme.POCKET, stringResource(Res.string.accent_pocket), Tok.current.accent),
+        Triple(dev.ccpocket.app.theme.AccentTheme.CODEX, stringResource(Res.string.accent_codex), Tok.codex),
+    )
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (theme, label, swatch) ->
+            val sel = model.accentTheme == theme
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .background(if (sel) swatch else Color.Transparent)
+                    .clickable { model.accentTheme = theme }.padding(vertical = 8.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(

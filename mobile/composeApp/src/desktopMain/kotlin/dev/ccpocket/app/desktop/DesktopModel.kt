@@ -689,6 +689,9 @@ interface DesktopModel {
     // appearance (issue #63): force light/dark or follow the OS. The window root reads this into PocketTheme;
     // RepoDesktopModel persists it through the shared repo, seed/preview models just hold it in memory.
     var themeMode: ThemeMode
+    // global accent source (issue #204): POCKET terracotta or Codex teal. Same persistence path as themeMode;
+    // the window root passes it to PocketTheme(accent = …) so every Tok.accent slot follows.
+    var accentTheme: dev.ccpocket.app.theme.AccentTheme
 
     // phone-push switch (pocket/push.prefs.*): daemon truth; null = daemon predates it (toggle hidden)
     val phonePush: Boolean? get() = null

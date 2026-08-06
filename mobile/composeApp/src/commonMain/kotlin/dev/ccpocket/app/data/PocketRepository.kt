@@ -23,6 +23,7 @@ import dev.ccpocket.app.pairing.parseIncomingLink
 import dev.ccpocket.app.push.PushTokens
 import dev.ccpocket.app.lock.AppLockController
 import dev.ccpocket.app.lock.createBiometrics
+import dev.ccpocket.app.theme.AccentTheme
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.push.PushToken
 import dev.ccpocket.app.secure.SecureStore
@@ -632,6 +633,15 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (mode == themeMode.value) return
         themeMode.value = mode
         SecureStore.putString(K_THEME_MODE, mode.name)
+    }
+
+    /** Global accent source (issue #204): POCKET terracotta (default) or Codex teal. Persisted; passed to
+     *  PocketTheme(accent = …) at the app root, which points Tok.accent at the chosen hue. */
+    val accentTheme = mutableStateOf(AccentTheme.from(SecureStore.getString(K_ACCENT_THEME)))
+    fun setAccentTheme(theme: AccentTheme) {
+        if (theme == accentTheme.value) return
+        accentTheme.value = theme
+        SecureStore.putString(K_ACCENT_THEME, theme.name)
     }
 
     // Voice engine choice: route captures to the computer's whisper instead of on-device dictation —
@@ -2053,6 +2063,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         treeView.value = from.treeView.value
         fontScale.value = from.fontScale.value
         themeMode.value = from.themeMode.value
+        accentTheme.value = from.accentTheme.value
         voiceWhisper.value = from.voiceWhisper.value
         replace(pinnedPaths, from.pinnedPaths.toList())
         // #165: NOT copied from the outgoing primary — the working set is per-computer, and this promote is
@@ -5370,6 +5381,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_SESSION_PARAMS = "session_params"          // SecureStore: TSV sid\tmode\tmodel\teffort\tagent per line (last 100 sessions)
         const val K_FONT_SCALE = "chat_font_scale"            // SecureStore: chat text scale factor (Float string, default 1.0)
         const val K_THEME_MODE = "appearance_theme_mode"      // SecureStore: ThemeMode name (SYSTEM/LIGHT/DARK; issue #63)
+        const val K_ACCENT_THEME = "appearance_accent_theme"  // SecureStore: AccentTheme name (POCKET/CODEX; issue #204)
         const val K_VOICE_ENGINE = "voice_engine"             // SecureStore: "whisper" = transcribe on the computer; "" = native dictation when available
         const val K_SHARE_ENDED_PREFIX = "share_ended:"        // SecureStore: "share_ended:<accountId>" → "reason\townerLabel" — the guest's ShareEnded notice (#115 follow-up)
         const val FONT_SCALE_MIN = 0.85f                       // smallest chat text scale (Settings slider lower bound)

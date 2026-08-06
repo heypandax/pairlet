@@ -982,6 +982,9 @@ class RepoDesktopModel(
     override var themeMode: ThemeMode
         get() = repo.themeMode.value
         set(v) { repo.setThemeMode(v) }
+    override var accentTheme: dev.ccpocket.app.theme.AccentTheme
+        get() = repo.accentTheme.value
+        set(v) { repo.setAccentTheme(v) }
     // desktop-only pref (the daemon/mobile never open local terminals) — persisted beside the pins
     private var terminalAppState by mutableStateOf(TerminalApp.fromId(store.getString(K_TERMINAL_APP)))
     override var terminalApp: TerminalApp

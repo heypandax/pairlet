@@ -273,7 +273,7 @@ fun App(scope: CoroutineScope) {
     }
     // appearance (issue #63): PocketTheme resolves the persisted mode against the OS, so a SYSTEM pick tracks a
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
-    PocketTheme(mode = repo.themeMode.value, fontScale = repo.fontScale.value) {
+    PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value, fontScale = repo.fontScale.value) {
       Box(Modifier.fillMaxSize()) {
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
             Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
