@@ -701,6 +701,11 @@ interface DesktopModel {
     fun setApprovalNoAutoDeny(enabled: Boolean) {}
     fun refreshApprovalPrefs() {}
 
+    // Full Control expiry (pocket/approval.prefs.*, issue #220): daemon truth, 0 = never expires (default).
+    // Rides the same capability gate as [approvalNoAutoDeny] — shown only once an ApprovalPrefs reply arrives.
+    val approvalFullControlExpiryMs: Long? get() = null
+    fun setFullControlExpiryMs(ms: Long) {}
+
     // read-only OBSERVE view (the session is owned by a terminal/VS Code on the computer): the composer
     // must yield — a prompt sent into an observe convo is silently unroutable on the daemon (issue #45 ②)
     val observing: Boolean get() = false

@@ -2433,7 +2433,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 }
             }
             is PushPrefs -> pushPrefs.value = f.enabled
-            is ApprovalPrefs -> approvalPrefs.value = f.noAutoDeny
+            is ApprovalPrefs -> {
+                approvalPrefs.value = f.noAutoDeny
+                approvalFullControlExpiryMs.value = f.fullControlExpiryMs // #220 (0 = never expires)
+            }
             // the daemon told us where it lives on the LAN — persist per binding; the next connect (this
             // repo OR a rebuilt fleet satellite reading the same store) dials it before the relay. An
             // address that already answered with the WRONG daemon key stays blacklisted — the daemon
@@ -3103,9 +3106,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  a switch that would silently do nothing. */
     val approvalPrefs = mutableStateOf<Boolean?>(null)
 
+    /** Issue #220: the owner's Full Control expiry duration in ms; 0 = never expires (the default). Daemon
+     *  truth via [ApprovalPrefs] — null until first fetched, and PERMANENTLY null against a pre-#220 daemon
+     *  (which decodes the frame but the field simply defaults 0 there); the UI reads [approvalPrefs] for its
+     *  capability gate, so this rides alongside it. */
+    val approvalFullControlExpiryMs = mutableStateOf<Long?>(null)
+
     fun fetchApprovalPrefs() = scope.launch { runCatching { send(SetApprovalPrefs()) } }
 
-    fun setAskNoAutoDeny(enabled: Boolean) = scope.launch { runCatching { send(SetApprovalPrefs(enabled)) } }
+    fun setAskNoAutoDeny(enabled: Boolean) = scope.launch { runCatching { send(SetApprovalPrefs(noAutoDeny = enabled)) } }
+
+    /** Issue #220: set how long a manually-entered Full Control lasts (ms; 0 = never expires). */
+    fun setFullControlExpiryMs(ms: Long) = scope.launch { runCatching { send(SetApprovalPrefs(fullControlExpiryMs = ms.coerceAtLeast(0L))) } }
 
     /** Switch account: the daemon logs the CLI out (when needed) and starts `claude auth login` —
      *  the browser opens on the daemon host; [authState] turns loginPending with the OAuth URL.

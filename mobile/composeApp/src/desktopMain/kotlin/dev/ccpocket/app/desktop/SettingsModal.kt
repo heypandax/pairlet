@@ -391,6 +391,19 @@ private fun GeneralPane(model: DesktopModel) {
             Group(stringResource(Res.string.approvals_section), stringResource(Res.string.approval_no_auto_deny_sub)) {
                 ToggleRow(stringResource(Res.string.approval_no_auto_deny), on) { model.setApprovalNoAutoDeny(!on) }
             }
+            // #220: Full Control存续时长 — rides the same daemon-truth gate as the toggle above
+            val neverLabel = stringResource(Res.string.full_control_expiry_never)
+            val expiry = model.approvalFullControlExpiryMs ?: 0L
+            val selected = dev.ccpocket.app.ui.FULL_CONTROL_EXPIRY_OPTS.minByOrNull { kotlin.math.abs(it - expiry) } ?: 0L
+            Group(stringResource(Res.string.full_control_expiry), stringResource(Res.string.full_control_expiry_sub)) {
+                dev.ccpocket.app.ui.FULL_CONTROL_EXPIRY_OPTS.forEach { ms ->
+                    PrefRow(
+                        dev.ccpocket.app.ui.fullControlExpiryLabel(ms, neverLabel),
+                        if (ms <= 0L) "" else "--expiry",
+                        selected = ms == selected,
+                    ) { model.setFullControlExpiryMs(ms) }
+                }
+            }
         }
     }
 }

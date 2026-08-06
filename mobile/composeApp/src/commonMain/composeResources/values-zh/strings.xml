@@ -318,6 +318,9 @@
     <string name="approvals_section">审批</string>
     <string name="approval_no_auto_deny">等待我手动处理</string>
     <string name="approval_no_auto_deny_sub">权限确认不再超时自动拒绝：最长等待 7 天、每天提醒一次，等待期间会话保持存活。来自 bridge 或共享文件夹的请求仍保留原超时。</string>
+    <string name="full_control_expiry">全自动存续时长</string>
+    <string name="full_control_expiry_sub">手动把会话切入全自动（Full Control）后，多久自动切回「每步询问」。默认永不过期——手动切入是明确的授权决定。若选择时长，到期回落时会在会话内给出提示。</string>
+    <string name="full_control_expiry_never">永久</string>
 
     <!-- ── 新会话默认模式 ────────────────────────────────────────── -->
     <string name="default_mode_section">新会话默认模式</string>

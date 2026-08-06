@@ -1012,6 +1012,8 @@ class RepoDesktopModel(
     override val approvalNoAutoDeny: Boolean? get() = repo.approvalPrefs.value
     override fun setApprovalNoAutoDeny(enabled: Boolean) { repo.setAskNoAutoDeny(enabled) }
     override fun refreshApprovalPrefs() { repo.fetchApprovalPrefs() }
+    override val approvalFullControlExpiryMs: Long? get() = repo.approvalFullControlExpiryMs.value
+    override fun setFullControlExpiryMs(ms: Long) { repo.setFullControlExpiryMs(ms) }
 
     // ── session archive (issue #202): daemon truth, so nothing is cached in a second client store ──
     override val archivedSessions: List<DkSession>
