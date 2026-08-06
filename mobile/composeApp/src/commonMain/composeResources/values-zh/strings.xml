@@ -607,7 +607,11 @@
     <string name="share_tier_collaborate_desc">此处的编辑自动应用；命令仍会询问</string>
     <string name="share_tier_autonomous">自主</string>
     <string name="share_tier_autonomous_desc">最少询问——命令仍会询问</string>
+    <string name="share_tier_review_help">最谨慎：每次编辑和命令都要等对方批准。</string>
+    <string name="share_tier_collaborate_help">此文件夹内的编辑自动应用；命令、联网等仍会询问。</string>
+    <string name="share_tier_autonomous_help">打断最少——但命令始终不会静默执行，仍会询问。</string>
     <string name="share_expires_label">有效期</string>
+    <string name="share_expiry_help">邀请与访问权限到期后自动失效，可随时手动撤销。</string>
     <string name="share_boundary_get">对方可以</string>
     <string name="share_boundary_get_agents">在此文件夹运行 agent</string>
     <string name="share_boundary_get_files">读取和编辑这里的文件</string>
