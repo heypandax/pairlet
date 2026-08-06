@@ -747,6 +747,7 @@
 
     <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
     <string name="group_new">新建分组</string>
+    <string name="group_current_dir">正在打开</string>
     <string name="group_ungrouped">未分组</string>
     <string name="group_move_to">移动到分组</string>
     <string name="group_move_out">移出分组</string>

@@ -747,6 +747,7 @@
 
     <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
     <string name="group_new">New group</string>
+    <string name="group_current_dir">Open now</string>
     <string name="group_ungrouped">Ungrouped</string>
     <string name="group_move_to">Move to group</string>
     <string name="group_move_out">Remove from group</string>
