@@ -56,4 +56,13 @@ object ApprovalTimeout {
 
     /** How many times a no-auto-deny ask renews before it finally times out — 6 renewals ⇒ a 7-day floor. */
     const val NO_AUTO_DENY_MAX_RENEWALS = 6
+
+    // ── issue #220: Full Control expiry duration ──────────────────────────────────────────────────────
+    // Runtime mirror of DaemonPrefs.fullControlExpiryMs (persisted, synced at boot and on every
+    // SetApprovalPrefs), read by each Conversation when it (re)arms its Full Control expiry clock. 0 = never
+    // expires — the owner's manually-entered Full Control persists until they leave it or the session ends.
+    // A positive value re-arms the old safety net at the chosen duration, with a perceptible revert. Read at
+    // arm time (a mode switch), so flipping it takes effect on the next switch without relaunching anything.
+    @Volatile
+    var fullControlExpiryMs: Long = 0L
 }

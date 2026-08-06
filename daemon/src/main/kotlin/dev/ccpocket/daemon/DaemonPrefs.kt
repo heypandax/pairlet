@@ -18,6 +18,7 @@ class DaemonPrefs private constructor(private val path: File) {
         val pushEnabled: Boolean = true,
         val isolatedClaudeAuth: Boolean = false,
         val askNoAutoDeny: Boolean = false,
+        val fullControlExpiryMs: Long = 0L,
     )
 
     @Volatile
@@ -43,6 +44,14 @@ class DaemonPrefs private constructor(private val path: File) {
     var askNoAutoDeny: Boolean = false
         private set
 
+    /** Issue #220: how long the owner's manually-entered Full Control lasts before auto-reverting to the
+     *  default ask-driven mode. 0 = never expires (the default — a manual Full Control is a deliberate
+     *  authorization). Persisted here (not client-side) because the daemon is what runs the expiry clock;
+     *  mirrored into ApprovalTimeout.fullControlExpiryMs, which each Conversation's arm-expiry read consults. */
+    @Volatile
+    var fullControlExpiryMs: Long = 0L
+        private set
+
     fun setIsolatedClaudeAuth(v: Boolean) {
         isolatedClaudeAuth = v
         persist()
@@ -53,10 +62,15 @@ class DaemonPrefs private constructor(private val path: File) {
         persist()
     }
 
+    fun setFullControlExpiryMs(v: Long) {
+        fullControlExpiryMs = v.coerceAtLeast(0L)
+        persist()
+    }
+
     private fun persist() {
         runCatching {
             path.parentFile?.mkdirs()
-            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny)))
+            path.writeText(JSON.encodeToString(Stored(pushEnabled, isolatedClaudeAuth, askNoAutoDeny, fullControlExpiryMs)))
         }
     }
 
@@ -71,6 +85,7 @@ class DaemonPrefs private constructor(private val path: File) {
                 pushEnabled = s.pushEnabled
                 isolatedClaudeAuth = s.isolatedClaudeAuth
                 askNoAutoDeny = s.askNoAutoDeny
+                fullControlExpiryMs = s.fullControlExpiryMs
             }
         }
     }
