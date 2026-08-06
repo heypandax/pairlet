@@ -212,6 +212,8 @@ open class SeedDesktopModel : DesktopModel {
     override val terminalPanel = TerminalPanelController()
     override var menuBarEnabled by mutableStateOf(true)
     override var themeMode by mutableStateOf(ThemeMode.DARK)
+    override var accentTheme by mutableStateOf(dev.ccpocket.app.theme.AccentTheme.POCKET)
+    override var chatAlignment by mutableStateOf(ChatStreamAlignment.LEFT)
     private var phonePushState by mutableStateOf(true)
     override val phonePush: Boolean? get() = phonePushState
     override fun setPhonePush(enabled: Boolean) { phonePushState = enabled }

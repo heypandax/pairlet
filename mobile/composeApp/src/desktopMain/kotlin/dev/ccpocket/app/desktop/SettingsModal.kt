@@ -82,6 +82,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -268,6 +269,12 @@ private fun GeneralPane(model: DesktopModel) {
         Group(stringResource(Res.string.settings_appearance), stringResource(Res.string.settings_appearance_sub)) {
             AppearanceRow(model)
         }
+        Group(stringResource(Res.string.settings_accent), stringResource(Res.string.settings_accent_sub)) {
+            AccentRow(model)
+        }
+        Group(stringResource(Res.string.settings_chat_align), stringResource(Res.string.settings_chat_align_sub)) {
+            ChatAlignRow(model)
+        }
         Group(stringResource(Res.string.settings_default_agent), stringResource(Res.string.settings_default_agent_sub)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 AgentCardRow(AgentKind.CLAUDE, model.defaultAgent == AgentKind.CLAUDE, Modifier.weight(1f)) { model.defaultAgent = AgentKind.CLAUDE }
@@ -436,6 +443,67 @@ private fun AppearanceRow(model: DesktopModel) {
     }
 }
 
+// Global accent source (issue #204) — CC Pocket terracotta (default) vs Codex teal. Same segmented-control
+// shape as AppearanceRow, but each option's selected swatch previews its own hue so the pick is legible even
+// while the rest of the shell is still on the old accent.
+@Composable
+private fun AccentRow(model: DesktopModel) {
+    val options = listOf(
+        Triple(dev.ccpocket.app.theme.AccentTheme.POCKET, stringResource(Res.string.accent_pocket), Tok.current.accent),
+        Triple(dev.ccpocket.app.theme.AccentTheme.CODEX, stringResource(Res.string.accent_codex), Tok.codex),
+    )
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (theme, label, swatch) ->
+            val sel = model.accentTheme == theme
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .background(if (sel) swatch else Color.Transparent)
+                    .clickable { model.accentTheme = theme }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+// Chat-stream alignment (issue #213) — all-left document flow (default) vs left/right bubbles. Same segmented
+// control as AppearanceRow; only affects how the conversation renders, so it lives in the Appearance section.
+@Composable
+private fun ChatAlignRow(model: DesktopModel) {
+    val options = listOf(
+        ChatStreamAlignment.LEFT to stringResource(Res.string.chat_align_left),
+        ChatStreamAlignment.BUBBLES to stringResource(Res.string.chat_align_bubbles),
+    )
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        options.forEach { (align, label) ->
+            val sel = model.chatAlignment == align
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                    .background(if (sel) Tok.accent else Color.Transparent)
+                    .clickable { model.chatAlignment = align }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontFamily = Dk.ui, fontSize = 12.5.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ToggleRow(label: String, on: Boolean, onClick: () -> Unit) {
     Row(
@@ -480,7 +548,9 @@ private fun TerminalRow(t: TerminalApp, selected: Boolean, onClick: () -> Unit) 
 private fun AgentCardRow(agent: AgentKind, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = agentColor(agent)
     Row(
-        modifier.clip(RoundedCornerShape(11.dp))
+        // testTag (issue #204): the accent picker now also carries a "Codex" label, so tests target the
+        // agent card by tag instead of the newly-ambiguous "Codex" text
+        modifier.testTag("agent-card-${agent.name}").clip(RoundedCornerShape(11.dp))
             .background(if (selected) c.agentTintFill() else Tok.surface)
             .border(1.5.dp, if (selected) c else Tok.hair, RoundedCornerShape(11.dp))
             .clickable(onClick = onClick).padding(13.dp),

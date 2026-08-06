@@ -993,11 +993,19 @@ class RepoDesktopModel(
     override var themeMode: ThemeMode
         get() = repo.themeMode.value
         set(v) { repo.setThemeMode(v) }
+    override var accentTheme: dev.ccpocket.app.theme.AccentTheme
+        get() = repo.accentTheme.value
+        set(v) { repo.setAccentTheme(v) }
     // desktop-only pref (the daemon/mobile never open local terminals) — persisted beside the pins
     private var terminalAppState by mutableStateOf(TerminalApp.fromId(store.getString(K_TERMINAL_APP)))
     override var terminalApp: TerminalApp
         get() = terminalAppState
         set(v) { terminalAppState = v; store.putString(K_TERMINAL_APP, v.id) }
+    // chat-stream alignment (issue #213): desktop-only, persisted beside the pins like terminalApp
+    private var chatAlignmentState by mutableStateOf(ChatStreamAlignment.from(store.getString(K_CHAT_ALIGN)))
+    override var chatAlignment: ChatStreamAlignment
+        get() = chatAlignmentState
+        set(v) { chatAlignmentState = v; store.putString(K_CHAT_ALIGN, v.name) }
     // embedded terminal (issue #153): default-open pref + dock height, persisted like terminalApp.
     // Absent key = embedded — the new default holds for existing users too (the issue's call).
     private var terminalEmbedState by mutableStateOf(store.getString(K_TERMINAL_EMBED) != "0")
@@ -1130,6 +1138,7 @@ class RepoDesktopModel(
         const val K_VISITS = "desktop_recent_visits" // RECENT visit keys (issue #102) — account + path, order = recency
         const val K_GROUP_COLLAPSED = "desktop_group_collapsed" // per project+group collapse memory (issue #119)
         const val K_TERMINAL_APP = "desktop_terminal_app"
+        const val K_CHAT_ALIGN = "desktop_chat_alignment" // ChatStreamAlignment name (LEFT/BUBBLES; issue #213)
         const val K_TERMINAL_EMBED = "desktop_terminal_embed" // "1"/absent = embedded default, "0" = external (#153)
         const val K_TERMINAL_HEIGHT = "desktop_terminal_height" // dock height as a ChatPane fraction (#153)
         const val K_MENUBAR = "desktop_menubar_enabled" // menu-bar presence opt-out (issue #151); absent = on

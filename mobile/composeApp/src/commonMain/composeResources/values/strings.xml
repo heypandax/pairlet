@@ -349,6 +349,16 @@
     <string name="appearance_light">Light</string>
     <string name="appearance_dark">Dark</string>
     <string name="appearance_hint">Choose the app\'s color theme. System follows your device\'s light/dark setting.</string>
+    <!-- ── Accent color (issue #204) ──────────────────────────────── -->
+    <string name="settings_accent">Accent color</string>
+    <string name="settings_accent_sub">Global accent used for buttons, selections and highlights.</string>
+    <string name="accent_pocket">CC Pocket</string>
+    <string name="accent_codex">Codex</string>
+    <!-- ── Chat stream alignment (issue #213) ─────────────────────── -->
+    <string name="settings_chat_align">Message layout</string>
+    <string name="settings_chat_align_sub">How your messages and replies align in the chat stream.</string>
+    <string name="chat_align_left">All left</string>
+    <string name="chat_align_bubbles">Left / right bubbles</string>
     <!-- ── App Lock / security (issue #109) ───────────────────────── -->
     <string name="security_section">SECURITY</string>
     <string name="app_lock_require">Require %1$s</string>
