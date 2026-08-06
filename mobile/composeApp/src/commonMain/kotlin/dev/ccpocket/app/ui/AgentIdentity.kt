@@ -54,6 +54,13 @@ fun agentName(agent: AgentKind): String = when (agent) {
     AgentKind.OPENCODE -> "OpenCode"
     else -> "Claude"
 }
+/** A 2-letter code for the compact list-row badge (#211) — keeps the agent legible where the full
+ *  name-pill ("OpenCode") crowded the session title out. Color still carries the identity. */
+fun agentAbbrev(agent: AgentKind): String = when (agent) {
+    AgentKind.CODEX -> "CX"
+    AgentKind.OPENCODE -> "OC"
+    else -> "CC"
+}
 fun agentTagline(agent: AgentKind): String = when (agent) {
     AgentKind.CODEX -> "Codex · OpenAI"
     AgentKind.OPENCODE -> "OpenCode · Open Source"
@@ -123,12 +130,30 @@ fun AgentTag(agent: AgentKind, small: Boolean = true) {
     }
 }
 
-/** Header / list-row badge: the DEFAULT Claude stays unmarked; every other agent (Codex, OpenCode, …) shows its tag, with a leading [gap]. */
+/**
+ * The compact list-row badge (#211): just the agent's 2-letter code in its tint, no name. In dense
+ * sidebar rows the full "OpenCode" name-pill crowded the session title to unreadable; the code + color
+ * still say which backend drives the row, while the full [AgentTag] stays in headers / session info.
+ */
 @Composable
-fun AgentBadge(agent: AgentKind?, gap: Dp = 6.dp) {
+fun AgentTagCompact(agent: AgentKind) {
+    val c = agentColor(agent)
+    Text(
+        agentAbbrev(agent), color = c, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+        style = TightCenter, maxLines = 1,
+        modifier = Modifier
+            .background(c.agentTintFill(), RoundedCornerShape(5.dp))
+            .border(1.dp, c.agentTintBorder(), RoundedCornerShape(5.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+    )
+}
+
+/** Header / list-row badge: the DEFAULT Claude stays unmarked; every other agent (Codex, OpenCode, …) shows its tag, with a leading [gap]. Pass [compact] in dense rows to swap the name-pill for the 2-letter code (#211). */
+@Composable
+fun AgentBadge(agent: AgentKind?, gap: Dp = 6.dp, compact: Boolean = false) {
     if (agent != null && agent != AgentKind.CLAUDE) {
         Spacer(Modifier.width(gap))
-        AgentTag(agent)
+        if (compact) AgentTagCompact(agent) else AgentTag(agent)
     }
 }
 

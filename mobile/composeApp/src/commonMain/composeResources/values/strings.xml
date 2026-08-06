@@ -607,7 +607,11 @@
     <string name="share_tier_collaborate_desc">Edits here apply; shell still asks</string>
     <string name="share_tier_autonomous">Autonomous</string>
     <string name="share_tier_autonomous_desc">Fewest prompts — shell still asks</string>
+    <string name="share_tier_review_help">Most cautious: every edit and command waits for their approval.</string>
+    <string name="share_tier_collaborate_help">Edits inside this folder apply automatically; shell and network still ask.</string>
+    <string name="share_tier_autonomous_help">Fewest interruptions — but shell is never silent and still asks.</string>
     <string name="share_expires_label">Expires</string>
+    <string name="share_expiry_help">The invite and access expire after this. You can revoke anytime.</string>
     <string name="share_boundary_get">They get</string>
     <string name="share_boundary_get_agents">Run agents in this folder</string>
     <string name="share_boundary_get_files">Read and edit files here</string>
@@ -747,6 +751,7 @@
 
     <!-- session groups (issue #119) — shared by desktop (P2) and mobile (P3) -->
     <string name="group_new">New group</string>
+    <string name="group_current_dir">Open now</string>
     <string name="group_ungrouped">Ungrouped</string>
     <string name="group_move_to">Move to group</string>
     <string name="group_move_out">Remove from group</string>

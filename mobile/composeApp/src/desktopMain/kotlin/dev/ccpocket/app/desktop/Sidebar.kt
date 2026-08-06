@@ -101,6 +101,7 @@ import dev.ccpocket.app.resources.archive_session
 import dev.ccpocket.app.resources.rv_title
 import dev.ccpocket.app.resources.sidebar_archived
 import dev.ccpocket.app.resources.dir_pinned
+import dev.ccpocket.app.resources.group_current_dir
 import dev.ccpocket.app.resources.group_delete
 import dev.ccpocket.app.resources.group_delete_confirm
 import dev.ccpocket.app.resources.group_move_out
@@ -356,7 +357,7 @@ private fun PinRow(
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 72.dp),
             )
         }
-        AgentBadge(p.agent)
+        AgentBadge(p.agent, compact = true)
         if (pending > 0) AttentionBadge(pending)
         if (hovered || dragging) {
             Icon(
@@ -545,6 +546,7 @@ private fun RecentZone(model: DesktopModel, modifier: Modifier = Modifier) {
                 item(key = "h:${g.path}") {
                     GroupHeader(
                         g, closed,
+                        current = g.current,
                         refreshing = g.path == spinningPath,
                         pinned = model.isProjectPinned(g.path),
                         onRefresh = { refreshTarget = g.path; model.refresh(g) },
@@ -641,6 +643,7 @@ private fun recentRowIndex(
 private fun GroupHeader(
     g: DkSessionGroup,
     closed: Boolean,
+    current: Boolean,
     refreshing: Boolean,
     pinned: Boolean,
     onRefresh: () -> Unit,
@@ -656,10 +659,24 @@ private fun GroupHeader(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Icon(Icons.Outlined.Folder, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-        Text(
-            g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-        )
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                g.name, color = Tok.tx2, fontFamily = Dk.mono, fontSize = 11.5.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+            )
+            // #211: the currently-listed dir is always present (it re-enters as the synthetic live group
+            // even after "clear"), which read as "the last row won't clear". This quiet chip names it as
+            // the open directory instead — a distinct affordance, not a leftover RECENT entry.
+            if (current) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stringResource(Res.string.group_current_dir), color = Tok.accent, fontFamily = Dk.ui,
+                    fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Tok.accent.copy(alpha = 0.12f))
+                        .border(1.dp, Tok.accent.copy(alpha = 0.32f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
         NewSessionHere(onNewSession)
         if (hovered) Icon(
             if (pinned) PinSlashIcon else PinIcon,
@@ -1027,7 +1044,7 @@ private fun SessionRowBody(model: DesktopModel, s: DkSession, selected: Boolean,
                     }
                 }
             }
-            AgentBadge(s.agent)
+            AgentBadge(s.agent, compact = true)
             if (s.pending > 0) {
                 Row(
                     Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent).clickable(onClick = onClick)

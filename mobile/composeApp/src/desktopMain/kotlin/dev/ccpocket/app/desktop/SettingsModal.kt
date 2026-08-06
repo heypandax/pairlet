@@ -58,6 +58,7 @@ import dev.ccpocket.app.ui.share.countdown
 import dev.ccpocket.app.ui.share.expiryOptionLabel
 import dev.ccpocket.app.ui.share.groupShares
 import dev.ccpocket.app.ui.share.shareStatus
+import dev.ccpocket.app.ui.share.tierHelp
 import dev.ccpocket.app.ui.share.tierLabel
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
@@ -1511,21 +1512,44 @@ private fun ShareCreateForm(model: DesktopModel) {
             if (path.isEmpty()) Text("/Users/me/project", color = Tok.muted, fontFamily = Dk.mono, fontSize = 12.sp)
             BasicTextField(path, { path = it }, singleLine = true, textStyle = TextStyle(color = Tok.tx, fontFamily = Dk.mono, fontSize = 12.sp), cursorBrush = SolidColor(Tok.accent), modifier = Modifier.fillMaxWidth())
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(14.dp))
+        ShareFormLabel(stringResource(Res.string.share_access_level))
+        Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SHARE_TIERS.forEach { t -> SegPill(tierLabel(t), tier == t) { tier = t } }
         }
-        Spacer(Modifier.height(8.dp))
+        // #212: a one-line, mode-accurate explanation of the selected tier so a security choice isn't blind
+        Text(
+            tierHelp(tier), color = Tok.tx2, fontFamily = Dk.ui, fontSize = 11.5.sp, lineHeight = 16.sp,
+            modifier = Modifier.padding(top = 7.dp),
+        )
+        Spacer(Modifier.height(14.dp))
+        ShareFormLabel(stringResource(Res.string.share_expires_label))
+        Spacer(Modifier.height(7.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ShareExpiryOption.entries.forEach { o -> SegPill(expiryOptionLabel(o), expiry == o) { expiry = o } }
         }
-        Spacer(Modifier.height(12.dp))
+        Text(
+            stringResource(Res.string.share_expiry_help), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(top = 7.dp),
+        )
+        Spacer(Modifier.height(14.dp))
         Text(
             stringResource(Res.string.share_create), color = if (path.isBlank()) Tok.muted else Tok.base, fontFamily = Dk.ui, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(if (path.isBlank()) Tok.surface else Tok.accent)
                 .then(if (path.isBlank()) Modifier else Modifier.clickable { model.createShare(path.trim(), tier, expiry.seconds) }).padding(vertical = 10.dp),
         )
     }
+}
+
+/** The small caps section label inside the desktop share composer ("ACCESS LEVEL" / "EXPIRES") — matches
+ *  the muted, letter-spaced heading language used elsewhere in Settings (#212). */
+@Composable
+private fun ShareFormLabel(text: String) {
+    Text(
+        text.uppercase(), color = Tok.muted, fontFamily = Dk.ui, fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+    )
 }
 
 @Composable
