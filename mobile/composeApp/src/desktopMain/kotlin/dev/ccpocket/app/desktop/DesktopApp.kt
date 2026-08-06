@@ -33,6 +33,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.dir_picker_choose_here
+import dev.ccpocket.app.resources.dir_picker_remote_title
 import dev.ccpocket.app.resources.show_sidebar
 import dev.ccpocket.app.resources.your_computer
 import dev.ccpocket.protocol.AgentKind
@@ -119,6 +121,19 @@ fun DesktopApp(model: DesktopModel, onActivateWindow: () -> Unit = {}) {
                     defaultModelFor = { a -> model.defaultModelFor(a) },
                     onAgentPicked = { a -> model.fetchModels(a) },
                 ) { dir, agent, mode, native, pickedModel -> model.newSession(dir, agent, mode, native, pickedModel) }
+            }
+        }
+        if (model.showFolderPicker) {
+            // remote "Open Folder" (issues #218/#214): the daemon-machine directory browser — centered scrim,
+            // same language as the other modals. Only reached when the active daemon is another machine.
+            Overlay(onDismiss = { model.showFolderPicker = false }, alignment = Alignment.Center, padding = PaddingValues(0.dp), scrim = true) {
+                RemoteDirPickerCard(
+                    model,
+                    title = stringResource(Res.string.dir_picker_remote_title),
+                    confirmLabel = stringResource(Res.string.dir_picker_choose_here),
+                    onDismiss = { model.showFolderPicker = false },
+                    onPick = { path -> model.showFolderPicker = false; model.openFolderPath(path) },
+                )
             }
         }
         if (model.showQuickActions) {

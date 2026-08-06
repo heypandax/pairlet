@@ -54,12 +54,13 @@ private fun pickDirectoryMac(owner: Frame?): String? {
  *
  * The dialog runs on [Dispatchers.IO] because it blocks: on the Compose UI thread it would freeze the
  * whole window until the user dismisses it (the same reason `ChatPane` launches [pickAttachments] that
- * way). A remote active machine never opens a panel at all — a local chooser can only browse local disk,
- * so it degrades to the typed-path popover, which works against any daemon.
+ * way). A remote active machine never opens a LOCAL panel — a local chooser can only browse local disk —
+ * so it opens the daemon-side remote folder browser instead (issues #218/#214), which lists the machine
+ * the session will actually run on rather than degrading to a bare ⌘N (the old "two entries, one effect").
  */
 fun openFolderAction(scope: CoroutineScope, model: DesktopModel) {
     if (!model.activeIsThisMachine) {
-        model.openNewSession("~/")
+        model.showFolderPicker = true
         return
     }
     scope.launch {
