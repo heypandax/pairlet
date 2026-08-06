@@ -64,8 +64,8 @@ echo "── 2/3 签名（$VERSION）──"
   -inFile "$UNSIGNED" \
   -outFile "$SIGNED"
 
-# ---- 3/3 校验 ----
-echo "── 3/3 校验签名 ──"
+# ---- 3/4 校验 HAP ----
+echo "── 3/4 校验 HAP 签名 ──"
 VERIFY_DIR=$(mktemp -d /tmp/hap-verify.XXXXXX)
 trap 'rm -rf "$VERIFY_DIR"' EXIT
 "$JAVA" -jar "$SIGN_TOOL" verify-app \
@@ -73,4 +73,32 @@ trap 'rm -rf "$VERIFY_DIR"' EXIT
   -outCertChain "$VERIFY_DIR/cert.cer" \
   -outProfile "$VERIFY_DIR/profile.p7b"
 
-echo "==> 发布签名包：$SIGNED ($(du -h "$SIGNED" | cut -f1))"
+# ---- 4/4 AGC 上传包（App Pack）----
+# 顺序铁律：先 assembleApp 出 unsigned .app，再对整包 sign-app；签名落在 .app 层，
+# 解包验内层 HAP 会失败属预期。绝不可先签 HAP 再 app_packing_tool 打包——它重压缩必破签。
+echo "── 4/4 打包并签名 App Pack（AGC 上传用）──"
+export DEVECO_SDK_HOME="$DEVECO/sdk"
+( cd harmony && ./tools/hvigor/bin/hvigorw assembleApp --mode project -p product=default --no-daemon >/dev/null )
+UNSIGNED_APP="$ROOT/harmony/build/outputs/default/harmony-default-unsigned.app"
+[ -f "$UNSIGNED_APP" ] || { echo "assembleApp 无产物：$UNSIGNED_APP"; exit 1; }
+SIGNED_APP="$OUT_DIR/cc-pocket-harmony-${VERSION}-signed.app"
+"$JAVA" -jar "$SIGN_TOOL" sign-app \
+  -mode localSign \
+  -keystoreFile "$P12" \
+  -keystorePwd "$Harmony_Keystore_Password" \
+  -keyAlias "$Harmony_Key_Alias" \
+  -keyPwd "$KEY_PWD" \
+  -appCertFile "$CER" \
+  -profileFile "$P7B" \
+  -profileSigned 1 \
+  -signAlg SHA256withECDSA \
+  -signCode 1 \
+  -inFile "$UNSIGNED_APP" \
+  -outFile "$SIGNED_APP"
+"$JAVA" -jar "$SIGN_TOOL" verify-app \
+  -inFile "$SIGNED_APP" \
+  -outCertChain "$VERIFY_DIR/app-cert.cer" \
+  -outProfile "$VERIFY_DIR/app-profile.p7b"
+
+echo "==> 调试/装机 HAP：$SIGNED ($(du -h "$SIGNED" | cut -f1))"
+echo "==> AGC 上传包：   $SIGNED_APP ($(du -h "$SIGNED_APP" | cut -f1))"
