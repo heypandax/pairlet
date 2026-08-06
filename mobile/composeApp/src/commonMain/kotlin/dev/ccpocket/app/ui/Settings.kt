@@ -81,6 +81,16 @@ import org.jetbrains.compose.resources.stringResource
 // a Codex launch never inherits it (see PocketRepository.openSession), so Codex needs no row here.
 private val MODEL_DEFAULT_OPTS: List<String?> = listOf(null) + CLAUDE_MODEL_OPTIONS.map { it.second }
 
+// #220: Full Control expiry presets (ms). 0 = never expires (the default); the rest re-arm the old
+// safety net at a chosen duration. Kept as raw ms so the wire value is language-neutral.
+val FULL_CONTROL_EXPIRY_OPTS: List<Long> = listOf(0L, 30 * 60_000L, 60 * 60_000L, 4 * 60 * 60_000L)
+
+fun fullControlExpiryLabel(ms: Long, neverLabel: String): String = when {
+    ms <= 0L -> neverLabel
+    ms % (60 * 60_000L) == 0L -> "${ms / (60 * 60_000L)}h"
+    else -> "${ms / 60_000L}m"
+}
+
 // context-window override presets for the usage statusline's denominator (issue #60): null = follow the
 // model-derived / daemon-reported window. Covers the two standard windows a custom model id might really have.
 private val CONTEXT_WINDOW_OPTS: List<Long?> = listOf(null, DEFAULT_CONTEXT_WINDOW, LARGE_CONTEXT_WINDOW)
@@ -269,6 +279,18 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
                         onChange = { repo.setAskNoAutoDeny(it) },
                     )
                 }
+                // #220: Full Control存续时长 — default 0 (never expires). A pre-#220 daemon reports 0 and
+                // honoring the change is harmless there (it just ignores the field), so it rides the same
+                // capability gate as the toggle above.
+                val neverLabel = stringResource(Res.string.full_control_expiry_never)
+                val expiry = repo.approvalFullControlExpiryMs.value ?: 0L
+                SectionLabel(stringResource(Res.string.full_control_expiry))
+                SegmentedRow(
+                    FULL_CONTROL_EXPIRY_OPTS,
+                    FULL_CONTROL_EXPIRY_OPTS.minByOrNull { kotlin.math.abs(it - expiry) } ?: 0L,
+                    label = { fullControlExpiryLabel(it, neverLabel) },
+                ) { repo.setFullControlExpiryMs(it) }
+                Text(stringResource(Res.string.full_control_expiry_sub), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
             }
 
             // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere

@@ -89,6 +89,8 @@ class DaemonCore(
         // here (not lazily in ApprovalTimeout) so the object never has to know about DaemonPrefs — the
         // router writes the same pair whenever a client flips it.
         dev.ccpocket.daemon.agent.ApprovalTimeout.noAutoDeny = prefs.askNoAutoDeny
+        // issue #220: same mirror for the persisted Full Control expiry duration (0 = never expires)
+        dev.ccpocket.daemon.agent.ApprovalTimeout.fullControlExpiryMs = prefs.fullControlExpiryMs
         // unhide transcripts a crashed previous instance stranded hidden (issue #70) — off the
         // constructor path (file IO over up to 200 journal entries must not delay startup). Then keep
         // sweeping periodically (issue #216 ②/④): an always-on daemon never reboots, so boot-only

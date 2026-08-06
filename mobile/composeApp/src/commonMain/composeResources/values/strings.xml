@@ -318,6 +318,9 @@
     <string name="approvals_section">APPROVALS</string>
     <string name="approval_no_auto_deny">Wait for my decision</string>
     <string name="approval_no_auto_deny_sub">Permission asks stop auto-denying: they wait up to 7 days, reminding you daily, and the session stays running while it waits. Requests from a bridge or a shared folder keep their usual timeout.</string>
+    <string name="full_control_expiry">Full Control expiry</string>
+    <string name="full_control_expiry_sub">When you switch a session into Full Control, how long it lasts before reverting to per-step asks. Default never expires — a manual switch is a deliberate decision. If you pick a duration, the revert shows a notice in the chat.</string>
+    <string name="full_control_expiry_never">Never</string>
 
     <!-- ── new-session default mode ──────────────────────────────── -->
     <string name="default_mode_section">NEW SESSION DEFAULT</string>

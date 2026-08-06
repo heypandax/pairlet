@@ -124,6 +124,10 @@ class Conversation(
         dev.ccpocket.daemon.approval.ApprovalGrantStore(),
     /** M3 deterministic risk radar (advisory badges only). Null in tests keeps pre-M3 behavior. */
     private val riskEngine: dev.ccpocket.daemon.approval.ApprovalRiskEngine? = null,
+    /** Issue #220: how long a manually-entered Full Control lasts before auto-reverting, in ms; 0 = never
+     *  expires (the default). Read at each arm (a mode switch or open), so a preference flip bites the next
+     *  switch. Defaults to the runtime mirror; a knob only so tests can arm a short clock without waiting. */
+    private val fullControlExpiryMs: () -> Long = { dev.ccpocket.daemon.agent.ApprovalTimeout.fullControlExpiryMs },
 ) {
     // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
     // One task per top-level user prompt: rotated when a prompt STARTS a new turn (mid-turn queued
@@ -845,31 +849,42 @@ class Conversation(
         // approval design M2: a mode switch changes the ground the user granted under — every standing
         // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
         grants.endSession(convoId)
-        armFullControlExpiry() // M5: Full Control never runs open-ended
+        armFullControlExpiry() // #220: arms only if the owner opted into an expiry; else Full Control persists
         recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
     }
 
-    // ── M5 (approval design §17.5): Full Control auto-expires — min(session close, 1h) — back to the
-    // default ask-driven mode. Renewing it is an explicit re-confirmation, never automatic. ──
+    // ── issue #220: the owner's manually-entered Full Control is a deliberate authorization — by default it
+    // PERSISTS (until the owner leaves it or the session closes), no implicit 1h ceiling. The former M5
+    // (approval design §17.5) auto-expiry is now OPT-IN: when the owner sets a positive expiry duration
+    // ([fullControlExpiryMs]), the clock re-arms at that duration and the revert-to-default surfaces a
+    // VISIBLE in-session notice — never a silent badge flip. The M5 SOURCE ceiling is unaffected: a
+    // restricted origin never reaches BYPASS in the first place (see switchMode's early return), so this
+    // clock only ever governs the owner's own档位 存续. ──
     private var fullControlExpiry: Job? = null
 
     private fun armFullControlExpiry() {
         fullControlExpiry?.cancel()
         if (mode != PermissionMode.BYPASS_PERMISSIONS) return
+        val ttl = fullControlExpiryMs()
+        if (ttl <= 0L) return // #220: no expiry configured — the owner's Full Control runs open-ended
         fullControlExpiry = scope.launch {
-            delay(FULL_CONTROL_TTL_MS)
+            delay(ttl)
             if (mode != PermissionMode.BYPASS_PERMISSIONS) return@launch // already left it
-            log.info("$convoId Full Control expired after ${FULL_CONTROL_TTL_MS / 60_000}min — back to default mode")
+            log.info("$convoId Full Control expired after ${ttl / 60_000}min — back to default mode")
             mode = PermissionMode.DEFAULT
             permissionMode = null
             grants.endSession(convoId) // the ground changed again — nothing standing survives
             recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
+            // #220: make the fallback PERCEPTIBLE — a system line in the transcript, not just a badge flip,
+            // so the owner is never surprised that "the mode changed itself" (design intent of the notice)
+            sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FULL_CONTROL_EXPIRED_NOTICE)))
             sink.emit(live(sessionId)) // every attached client's mode badge corrects itself
         }
     }
 
     init {
-        // a session OPENED in Full Control (OpenSession.mode = bypass) starts its expiry clock immediately
+        // a session OPENED in Full Control (OpenSession.mode = bypass) arms its expiry clock immediately —
+        // a no-op when no expiry is configured (#220)
         armFullControlExpiry()
     }
 
@@ -2020,8 +2035,10 @@ class Conversation(
     companion object {
         val CONSERVATIVE_EFFORT_LEVELS = setOf("low", "medium", "high", "xhigh")
 
-        /** M5 (approval design §17.5): Full Control auto-expires after min(session close, this). */
-        const val FULL_CONTROL_TTL_MS = 60 * 60 * 1000L
+        /** Issue #220: the visible in-session line the owner sees when an OPT-IN Full Control expiry
+         *  reverts the session to the default ask-driven mode — so the change is never silent. */
+        const val FULL_CONTROL_EXPIRED_NOTICE =
+            "⏱️ 全自动（Full Control）已到期，已自动切回默认「每步询问」模式。可在设置里调整存续时长，或再次切入全自动。"
 
         // claude's session-lock refusal on stderr: "Error: Session <id> is currently running as a
         // background agent (<kind>). … add --fork-session to branch off a copy." The kind varies

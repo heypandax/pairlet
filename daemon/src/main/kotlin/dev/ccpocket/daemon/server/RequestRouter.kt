@@ -635,7 +635,14 @@ class RequestRouter(
                     prefs.setAskNoAutoDeny(it)
                     ApprovalTimeout.noAutoDeny = it
                 }
-                sink.emit(ApprovalPrefs(prefs.askNoAutoDeny))
+                // issue #220: same owner-only plane, same persist-and-mirror shape — the next mode switch
+                // arms (or, at 0, never arms) the Full Control clock from this. Existing live Full Control
+                // sessions are not re-clocked mid-flight: the change bites the owner's NEXT switch.
+                frame.fullControlExpiryMs?.let {
+                    prefs.setFullControlExpiryMs(it)
+                    ApprovalTimeout.fullControlExpiryMs = prefs.fullControlExpiryMs
+                }
+                sink.emit(ApprovalPrefs(prefs.askNoAutoDeny, prefs.fullControlExpiryMs))
             }
 
             // agent model listing: inspect the Mac daemon's local agent config/cache.
