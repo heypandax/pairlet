@@ -351,6 +351,7 @@ fun ChatPane(model: DesktopModel, modifier: Modifier = Modifier, focused: Boolea
                                 if (i == historySeamAt) EarlierMessagesSeam(model.historyPrependGen, monoFamily = Dk.mono)
                                 MessageRow(
                                     m, isLast = i == model.messages.lastIndex, undelivered = model.sendUndelivered,
+                                    bubbles = model.chatAlignment == ChatStreamAlignment.BUBBLES,
                                     workflowRun = (m as? ChatItem.Tool)?.let(model::workflowRunFor),
                                     onOpenWorkflow = model::openWorkflowPanel,
                                     onOpenVideo = { model.openWorkspaceFile(it.path) },
@@ -711,11 +712,31 @@ private fun ChatSubHeader(model: DesktopModel, onTerminalMenu: () -> Unit = {}) 
     }
 }
 
+// chat-stream alignment (issue #213): in LEFT (default) this is a pass-through, so the user turn renders
+// exactly as before (byte-for-byte, no wrapper). In BUBBLES it hugs the content to the right inside a raised
+// bubble — only presentation moves; the inner Column (label, attachments, text, delivery state) is untouched.
+@Composable
+private fun UserTurn(bubbles: Boolean, content: @Composable () -> Unit) {
+    if (!bubbles) {
+        content()
+        return
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Box(
+            Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(14.dp))
+                .background(Tok.raised).padding(horizontal = 14.dp, vertical = 11.dp),
+        ) { content() }
+    }
+}
+
 @Composable
 private fun MessageRow(
     item: ChatItem,
     isLast: Boolean = false,
     undelivered: Boolean = false,
+    // chat-stream alignment (issue #213): true = user turns render as a right-hugging bubble; false (default)
+    // keeps the all-left document flow byte-for-byte
+    bubbles: Boolean = false,
     // Workflow run bound to a Workflow tool card (issue #106); clicking docks the right panel
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
     onOpenWorkflow: (String) -> Unit = {},
@@ -724,7 +745,8 @@ private fun MessageRow(
 ) {
     when (item) {
         is ChatItem.User -> CopyableBlock(item.text) {
-            Column {
+            UserTurn(bubbles) {
+                Column {
                 Text(stringResource(Res.string.chat_you), color = Tok.muted, fontFamily = Dk.ui, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.5.sp)
                 Spacer(Modifier.height(7.dp))
                 // sent attachments (issue #85): the compressed JPEG bytes ride ChatItem.User.images from
@@ -772,6 +794,7 @@ private fun MessageRow(
                     if (slow) Text(stringResource(Res.string.msg_sending), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
                 } else if (item.delivered && isLast) {
                     Text(stringResource(Res.string.msg_delivered_short), color = Tok.muted, fontFamily = Dk.mono, fontSize = 10.5.sp, modifier = Modifier.padding(top = 5.dp))
+                }
                 }
             }
         }

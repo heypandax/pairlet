@@ -26,6 +26,16 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.PermissionAsk
 import dev.ccpocket.protocol.PermissionMode
 
+/** Chat-stream alignment preference (issue #213, desktop-only). LEFT = the current document flow (every turn
+ *  left-aligned, unchanged — the default so existing users see no difference). BUBBLES = classic chat layout:
+ *  user turns hug the right in a bubble, assistant turns stay left. Only alignment/bubble presentation moves;
+ *  the row's information structure and components are untouched. Absent/garbage → LEFT. */
+enum class ChatStreamAlignment { LEFT, BUBBLES;
+    companion object {
+        fun from(name: String?): ChatStreamAlignment = entries.firstOrNull { it.name == name } ?: LEFT
+    }
+}
+
 // ── view types (carry the ids/paths the actions need) ───────────────────────────────────────────
 
 enum class DkOs { MAC, LINUX, WIN }
@@ -692,6 +702,9 @@ interface DesktopModel {
     // global accent source (issue #204): POCKET terracotta or Codex teal. Same persistence path as themeMode;
     // the window root passes it to PocketTheme(accent = …) so every Tok.accent slot follows.
     var accentTheme: dev.ccpocket.app.theme.AccentTheme
+    // chat-stream alignment (issue #213, desktop-only): all-left document flow (default) or left/right bubbles.
+    // ChatPane reads this per message; persisted desktop-locally like terminalApp, seed models hold it in memory.
+    var chatAlignment: ChatStreamAlignment
 
     // phone-push switch (pocket/push.prefs.*): daemon truth; null = daemon predates it (toggle hidden)
     val phonePush: Boolean? get() = null

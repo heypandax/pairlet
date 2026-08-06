@@ -354,6 +354,11 @@
     <string name="settings_accent_sub">全局强调色，用于按钮、选中态与高亮。</string>
     <string name="accent_pocket">CC Pocket</string>
     <string name="accent_codex">Codex</string>
+    <!-- ── 会话流对齐（issue #213）────────────────────────────────── -->
+    <string name="settings_chat_align">消息布局</string>
+    <string name="settings_chat_align_sub">会话流中你的消息与回复的对齐方式。</string>
+    <string name="chat_align_left">全部左对齐</string>
+    <string name="chat_align_bubbles">左右气泡</string>
     <!-- ── 应用锁 / 安全（issue #109）─────────────────────────────── -->
     <string name="security_section">安全</string>
     <string name="app_lock_require">需要 %1$s</string>

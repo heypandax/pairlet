@@ -607,7 +607,9 @@ class DesktopUiTest {
         setContent { PocketTheme { SettingsModal(model) {} } }
 
         assertPresent("Fable")
-        onAllNodes(hasText("Codex")).onFirst().performClick()
+        // by tag, not hasText("Codex"): the Appearance ▸ Accent color picker now also carries a "Codex"
+        // option (issue #204), so the bare text is ambiguous — target the agent card explicitly
+        onNodeWithTag("agent-card-CODEX").performScrollTo().performClick()
         waitForIdle()
         assertPresent("GPT 5.1 Codex")
         assertTrue(!present("Fable"), "Codex must not show Claude model choices")
