@@ -139,6 +139,7 @@ fun BridgesPane(model: DesktopModel) {
 
         when {
             creating -> NewBridgeForm(
+                model = model,
                 onCancel = { creating = false },
                 onCreate = { name, dirs, tier, allowedCommands, runner ->
                     model.createBridge(name, dirs, tier, maxSessions = null, runner = runner, allowedCommands = allowedCommands)
@@ -224,6 +225,7 @@ private fun BridgeRow(b: BridgeInfo, model: DesktopModel) {
         if (editing) {
             Spacer(Modifier.height(10.dp))
             EditRunnerForm(
+                model = model,
                 envKeys = b.runner?.envKeys.orEmpty(),
                 workdirs = b.workdirs,
                 allowedCommands = b.allowedCommands,
