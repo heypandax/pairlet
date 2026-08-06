@@ -89,16 +89,19 @@ git**（`harmony/release/` 已 gitignore）。无 DevEco 环境的协作者可�
 
 启用步骤（一次性，AGC 控制台操作为主）：
 
-1. **AGC 建应用**：AppGallery Connect → 我的项目 → 添加应用，包名 `dev.ccpocket.app`
+1. **AGC 建应用**：AppGallery Connect → 我的项目 → 添加应用，包名 `com.ccpocket.app`
    （与 `AppScope/app.json5` 的 bundleName 一致）。用 DevEco 自动化签名跑过一次的话，
    AGC 里通常已有这个项目记录，直接复用。
-2. **开通 Push Kit**：项目 → 增长 → 推送服务 → 开通。
-3. **（建议）申请自分类权益**：推送服务 → 配置 → 自分类权益，申请 IM 类目。
-   不申请也能推，但会落入资讯营销通道（限量、可能折叠）。
+2. **开通 Push Kit**：项目 → 增长 → 推送服务（新版控制台进入即默认开通，
+   「配置」页签可见「关闭推送服务」即为已开）。
+3. **（建议）申请自分类权益**：推送服务 → 配置 → 自分类权益 → 申请，按消息类型勾选
+   （本项目已按「工作事项提醒」类目提交，2026-08-06，审核约 5 个工作日）。
+   不申请时每设备每日仅 2 条限量通道。
 4. **拿三个值**（项目设置 → 常规）：`Client ID`、`Client Secret`、`项目 ID`（Project ID，
    Push Kit v3 端点 `POST /v3/{projectId}/messages:send` 的路径参数）。
-5. **App 端**：把 Client ID 填进 `entry/src/main/module.json5` 的
-   `metadata.client_id`（替换 `REPLACE_WITH_AGC_CLIENT_ID`），重新打包装机。
+5. **App 端**：把**应用级** Client ID（项目设置 → 常规 → 应用 → OAuth 2.0客户端ID，
+   与项目级的不是同一个）填进 `entry/src/main/module.json5` 的
+   `metadata.client_id`（已填 `6917612935973583734`），重新打包装机。
    首次启动会弹通知授权。
 6. **relay 端**：主机环境变量加三行后重启 relay：
    `CCPOCKET_HUAWEI_PROJECT_ID` / `CCPOCKET_HUAWEI_CLIENT_ID` / `CCPOCKET_HUAWEI_CLIENT_SECRET`。

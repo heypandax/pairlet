@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "dev.ccpocket.app",
+    "bundleName": "com.ccpocket.app",
     "vendor": "ccpocket",
     "versionCode": 1,
     "versionName": "0.1.0",

@@ -113,6 +113,12 @@ export struct PairingView {
           });
         })
 
+      Text('先看看演示 · 无需电脑')
+        .fontSize(14)
+        .fontColor(Tok.accent)
+        .padding(8)
+        .onClick(() => this.repo.enterDemo())
+
       if (this.error.length > 0) {
         Text(this.error)
           .fontSize(13)
