@@ -24,6 +24,15 @@ import java.time.Duration
 object ReleaseClient {
     const val DEFAULT_REPO = "heypandax/cc-pocket"
 
+    /**
+     * Release mirror on the relay box (deploy/mirror-sync.sh) — tried before GitHub, because GitHub's
+     * CDN crawls from mainland China. Its `latest.json` carries the release's COMPLETE asset map
+     * (mirrored artifacts point at the mirror, everything else keeps its GitHub URL), so a [Release]
+     * from either source is interchangeable — including for assets the mirror doesn't host (desktop
+     * dmg/msi). Env `CC_POCKET_MIRROR=off` disables it; any other value overrides the base URL.
+     */
+    const val DEFAULT_MIRROR = "https://pocket.ark-nexus.cc/dl"
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val http: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
@@ -33,8 +42,41 @@ object ReleaseClient {
     /** A release: its version (no `v` prefix) and every asset's name → browser_download_url. */
     data class Release(val version: String, val assetUrls: Map<String, String>)
 
-    /** The newest published release, or null when GitHub is unreachable / returns nothing usable. */
-    fun latest(repo: String = DEFAULT_REPO): Release? = try {
+    /** The newest published release — mirror first (our repo only), GitHub as fallback and authority.
+     *  Null when both are unreachable / return nothing usable. */
+    fun latest(repo: String = DEFAULT_REPO): Release? =
+        (if (repo == DEFAULT_REPO) mirrorLatest() else null) ?: githubLatest(repo)
+
+    private fun mirrorLatest(): Release? = try {
+        val base = when (val m = System.getenv("CC_POCKET_MIRROR")?.trim()) {
+            null, "" -> DEFAULT_MIRROR
+            "off", "0", "false" -> return null
+            else -> m.trimEnd('/')
+        }
+        val req = HttpRequest.newBuilder(URI("$base/latest.json"))
+            .header("User-Agent", "cc-pocket")
+            .timeout(Duration.ofSeconds(5)) // a dead mirror may only ever cost 5s before GitHub takes over
+            .build()
+        val res = http.send(req, HttpResponse.BodyHandlers.ofString())
+        if (res.statusCode() != 200) null else parseManifest(res.body())
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Parse the mirror's `latest.json` (`{"version":"1.6.2","assets":{"<name>":"<url>",…}}`).
+     *  Null on any shape mismatch, so a broken/foreign body degrades to the GitHub path. */
+    internal fun parseManifest(body: String): Release? = try {
+        val obj = json.parseToJsonElement(body) as? JsonObject
+        val version = (obj?.get("version") as? JsonPrimitive)?.contentOrNull?.removePrefix("v")
+        val assets = (obj?.get("assets") as? JsonObject)?.mapNotNull { (name, url) ->
+            ((url as? JsonPrimitive)?.contentOrNull)?.let { name to it }
+        }?.toMap()
+        if (version.isNullOrBlank() || assets.isNullOrEmpty()) null else Release(version, assets)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun githubLatest(repo: String): Release? = try {
         val req = HttpRequest.newBuilder(URI("https://api.github.com/repos/$repo/releases/latest"))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "cc-pocket")

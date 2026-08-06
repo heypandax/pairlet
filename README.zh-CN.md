@@ -60,6 +60,8 @@ flowchart LR
 
 两部分：**App**（见上方[获取](#获取)）和跑 agent 那台电脑上的 **daemon**——中继已经托管好，不用自己搭。
 
+> **国内网络？** GitHub 直连很慢，安装脚本和安装包已镜像到中继服务器，直接用：`curl -fsSL https://pocket.ark-nexus.cc/dl/install.sh | bash`（Windows：`irm https://pocket.ark-nexus.cc/dl/install.ps1 | iex`）——同一个脚本、同样带校验，镜像不可用时自动回落 GitHub。daemon 的日常自更新也走镜像。
+
 ### macOS（Apple Silicon 与 Intel——均已签名、公证）
 
 ```bash

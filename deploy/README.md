@@ -49,6 +49,14 @@ WebSocket endpoints (proxied automatically): `/v1/daemon`, `/v1/device`. REST: `
   `ProtectHome`, runs as `ccpocket`, only `/var/lib/cc-pocket-relay` writable, `JAVA_TOOL_OPTIONS=-Xmx256m`).
 - `Caddyfile` — one site, `reverse_proxy 127.0.0.1:9000`; Caddy auto-provisions Let's Encrypt
   and auto-upgrades WebSocket.
+- `mirror-sync.sh` + `cc-pocket-mirror-sync.{service,timer}` — the mainland-China release mirror:
+  a 30-min systemd timer on the relay box pulls the latest GitHub release's daemon assets into
+  `/var/www/cc-pocket-dl` (checksum-verified against the release SHA256SUMS before anything goes
+  live), Caddy serves it at `https://pocket.ark-nexus.cc/dl/`. Clients (install scripts + the
+  shared `ReleaseClient`) read `dl/latest.json` first and fall back to GitHub. Provision /
+  re-provision with `bash scripts/provision-relay-mirror.sh`; after cutting a release you can kick
+  an immediate sync with `systemctl start cc-pocket-mirror-sync.service` instead of waiting for
+  the timer.
 
 ## SSH (non-interactive)
 

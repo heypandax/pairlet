@@ -1,0 +1,10 @@
+[Unit]
+Description=cc-pocket release mirror sync every 30 min
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

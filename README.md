@@ -60,6 +60,8 @@ If you route Claude Code through an LLM gateway or API relay (`ANTHROPIC_BASE_UR
 
 Two pieces: the **app** ([Get it](#get-it) above) and the **daemon** on the computer that runs the agent — the relay is hosted for you.
 
+> **Mainland China?** GitHub downloads crawl there, so the installer and release artifacts are mirrored on our relay. Use `curl -fsSL https://pocket.ark-nexus.cc/dl/install.sh | bash` (Windows: `irm https://pocket.ark-nexus.cc/dl/install.ps1 | iex`) — same script, checksum-verified, and it falls back to GitHub automatically. The daemon's self-update uses the mirror too.
+
 ### macOS (Apple Silicon & Intel — signed, notarized)
 
 ```bash

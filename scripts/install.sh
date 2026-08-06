@@ -11,8 +11,14 @@
 # SYMLINK — so upgrades are just "flip the link + restart", which is exactly what the daemon's own
 # `cc-pocket-daemon update` (and its daily update check) does from then on.
 #
+# Mainland-China note: the same script is mirrored (with the release artifacts) on our relay box,
+# so the whole install works at direct-link speed there:
+#
+#   curl -fsSL https://pocket.ark-nexus.cc/dl/install.sh | bash
+#
 # Re-run to upgrade. Env overrides: CC_POCKET_VERSION=vX.Y.Z (default latest), CC_POCKET_ROOT,
-# CC_POCKET_BIN, CC_POCKET_NO_SERVICE=1 (install files only — used by CI/tests).
+# CC_POCKET_BIN, CC_POCKET_NO_SERVICE=1 (install files only — used by CI/tests),
+# CC_POCKET_MIRROR=off (GitHub only) or an alternate mirror base URL.
 set -euo pipefail
 
 REPO="heypandax/cc-pocket"
@@ -20,6 +26,10 @@ BIN="cc-pocket-daemon"
 ROOT="${CC_POCKET_ROOT:-$HOME/.local/share/cc-pocket}"
 BINDIR="${CC_POCKET_BIN:-$HOME/.local/bin}"
 VERSION="${CC_POCKET_VERSION:-latest}"
+# Tried before GitHub for both the version lookup and the artifact download — kept in sync by the
+# relay box (deploy/mirror-sync.sh), verified against the release SHA256SUMS before it serves
+# anything. Every mirror step falls back to GitHub, so a dead mirror only costs a few seconds.
+MIRROR="${CC_POCKET_MIRROR:-https://pocket.ark-nexus.cc/dl}"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarning:\033[0m %s\n' "$*" >&2; }
@@ -42,22 +52,44 @@ shasum_cmd=""
 if command -v sha256sum >/dev/null 2>&1; then shasum_cmd="sha256sum"
 elif command -v shasum   >/dev/null 2>&1; then shasum_cmd="shasum -a 256"; fi
 
-# --- resolve version (GitHub redirects /releases/latest -> /releases/tag/vX.Y.Z; no API quota used) ---
+# --- resolve version: mirror manifest first, then the GitHub /releases/latest redirect (no API quota) ---
 if [ "$VERSION" = "latest" ]; then
-  say "resolving latest release"
-  VERSION="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed -E 's#.*/tag/##')"
-  [ -n "$VERSION" ] || err "could not resolve the latest version (set CC_POCKET_VERSION=vX.Y.Z to pin one)"
+  if [ "$MIRROR" != "off" ]; then
+    say "resolving latest release (mirror)"
+    # `|| true`: under `set -euo pipefail` a dead mirror would otherwise kill the script INSIDE
+    # the command substitution — before the GitHub fallback this branch exists for
+    v="$(curl -fsSL --max-time 5 "$MIRROR/latest.json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"v\{0,1\}\([0-9][^"]*\)".*/\1/p' || true)"
+    [ -n "$v" ] && VERSION="v$v" || warn "mirror unreachable — resolving via GitHub"
+  fi
+  if [ "$VERSION" = "latest" ]; then
+    say "resolving latest release"
+    VERSION="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed -E 's#.*/tag/##' || true)"
+  fi
+  { [ -n "$VERSION" ] && [ "$VERSION" != "latest" ]; } || err "could not resolve the latest version (set CC_POCKET_VERSION=vX.Y.Z to pin one)"
 fi
 ver="${VERSION#v}"   # asset names drop the leading v
 asset="${BIN}-${ver}-${plat}-${arch}.tar.gz"
-base="https://github.com/$REPO/releases/download/${VERSION}"
+gh_base="https://github.com/$REPO/releases/download/${VERSION}"
 
-# --- download + verify ---
+# --- download + verify (mirror first; GitHub is always the fallback AND the authority) ---
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-say "downloading $asset"
-curl -fSL --progress-bar "$base/$asset" -o "$tmp/$asset" \
-  || err "download failed: $base/$asset — if the URL 404s, release $VERSION predates ${plat}/${arch} builds; retry when the next release is out, or build from source: ./gradlew :daemon:packageDaemon"
-if [ -n "$shasum_cmd" ] && curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; then
+base=""
+if [ "$MIRROR" != "off" ]; then
+  say "downloading $asset (mirror)"
+  if curl -fSL --progress-bar "$MIRROR/${VERSION}/$asset" -o "$tmp/$asset"; then
+    base="$MIRROR/${VERSION}"
+  else
+    warn "mirror download failed — falling back to GitHub"
+  fi
+fi
+if [ -z "$base" ]; then
+  say "downloading $asset (GitHub)"
+  curl -fSL --progress-bar "$gh_base/$asset" -o "$tmp/$asset" \
+    || err "download failed: $gh_base/$asset — if the URL 404s, release $VERSION predates ${plat}/${arch} builds; retry when the next release is out, or build from source: ./gradlew :daemon:packageDaemon"
+  base="$gh_base"
+fi
+if [ -n "$shasum_cmd" ] && { curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null \
+    || curl -fsSL "$gh_base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null; }; then
   expected="$(awk -v a="$asset" '$2==a || $2=="*"a {print tolower($1)}' "$tmp/SHA256SUMS" | head -1)"
   if [ -n "$expected" ]; then
     actual="$($shasum_cmd "$tmp/$asset" | awk '{print tolower($1)}')"
