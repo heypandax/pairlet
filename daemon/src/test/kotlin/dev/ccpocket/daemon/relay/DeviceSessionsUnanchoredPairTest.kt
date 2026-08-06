@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.relay
 
 import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.bridge.BridgeRegistry
+import dev.ccpocket.daemon.bridge.BridgeSpec
 import dev.ccpocket.daemon.identity.Identity
 import dev.ccpocket.daemon.identity.PairedDevices
 import dev.ccpocket.protocol.DaemonInfo
@@ -47,12 +48,13 @@ class DeviceSessionsUnanchoredPairTest {
     private class Harness(dir: File) {
         val store = File(dir, "devices.json")
         val identity = Identity.loadOrCreate(File(dir, "identity.json"))
+        val bridges = BridgeRegistry(File(dir, "bridges.json"))
         val outbound = Channel<Pair<String, ByteArray>>(Channel.UNLIMITED)
         val sessions = DeviceSessions(
             core = DaemonCore(emptyMap()),
             identity = identity,
             store = store,
-            bridges = BridgeRegistry(File(dir, "bridges.json")),
+            bridges = bridges,
         ) { deviceId, payload -> outbound.trySend(deviceId to payload) }
 
         fun allowListed(): Set<String> = PairedDevices.load(store).keys
@@ -111,6 +113,36 @@ class DeviceSessionsUnanchoredPairTest {
 
         // the provisional hold is dropped on refusal: reconnecting is now an unknown device outright
         assertEquals(null, handshake(h, "devV", keys, null), "the refused key must not survive as a handshake peer")
+    }
+
+    /**
+     * The issue #207 race shape: two overlapping mints both passed the pre-mint `intentPending()` check,
+     * so ticket-a carries the recorded restricted intent while ticket-b sits on top of the LIFO PSK stack
+     * with no intent of its own (its `recordIntent` was refused). The announce for the colleague who
+     * redeemed ticket-a then pops ticket-b — an armed, non-headless-looking ticket that CANNOT be this
+     * pairing's, because a pairing with an unredeemed restricted intent outstanding is never an ordinary
+     * interactive one. Anchoring it would write the colleague's key into devices.json as a full owner.
+     */
+    @Test
+    fun an_announce_with_a_restricted_intent_outstanding_never_reaches_the_owner_allow_list() = runBlocking {
+        val h = Harness(dir)
+        val keys = E2ECrypto.generateKeyPair()
+
+        h.sessions.onMintedTicket("ticket-a", headless = true)
+        assertTrue(h.bridges.recordIntent("ticket-a", BridgeSpec("frank", emptyList()), ttlMs = 240_000))
+        h.sessions.onMintedTicket("ticket-b", headless = true) // the overlapped mint: armed, intentless
+
+        h.sessions.onDevicePaired("devEve", b64.encodeToString(keys.publicRaw))
+        assertFalse("devEve" in h.allowListed(), "a mis-armed announce must not be allow-listed as an owner")
+        assertEquals(emptySet(), h.allowListed(), "…and nothing may be persisted for it at all")
+
+        // even a handshake under the armed (but intentless) ticket stays fail-closed: no DaemonInfo,
+        // its first frame finds no intent to finalize and no allow-list row — refused, never promoted
+        val eve = handshake(h, "devEve", keys, "ticket-b")!!
+        assertTrue(h.outbound.tryReceive().isFailure, "a provisional candidate learns nothing — not even DaemonInfo")
+        send(h, "devEve", eve, SendPrompt("ghost-1", "hi"))
+        assertTrue(h.outbound.tryReceive().isFailure, "no owner frame may route for a mis-armed device")
+        assertEquals(emptySet(), h.allowListed(), "and the refusal must not have promoted it either")
     }
 
     @Test

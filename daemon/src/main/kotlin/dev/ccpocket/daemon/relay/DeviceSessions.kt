@@ -145,8 +145,13 @@ class DeviceSessions(
                 // only the byte value the responder handshake needs.
                 val armed = synchronized(psks) { psks.removeLastOrNull() }?.takeIf { it.isNotEmpty() }
                 pskFor[deviceId] = armed ?: ByteArray(0)
-                unanchored = armed == null
                 provisionalBridge = armed != null && bridges.looksHeadless(armed)
+                // issue #207: an armed ticket that is NOT itself a pending restricted intent, while such
+                // an intent IS outstanding, means overlapping mints mis-armed the LIFO stack — the mint
+                // serialization refuses every interactive mint for as long as an intent pends, so this
+                // announce cannot be an ordinary interactive pairing. Anchoring it would write what is
+                // really a restricted credential's key into the full-power allow-list; park it instead.
+                unanchored = armed == null || (!provisionalBridge && bridges.intentPending())
                 if (unanchored || provisionalBridge) bridges.holdProvisional(deviceId, pub)
                 else devicePubs[deviceId] = pub
             }
@@ -155,7 +160,7 @@ class DeviceSessions(
         if (!known) {
             if (!provisionalBridge && !unanchored) persist() // nothing provisional ever touches devices.json
             val how = when {
-                unanchored -> ", unanchored — no ticket armed here, its first frame is refused"
+                unanchored -> ", unanchored — no anchoring ticket armed here (or a restricted intent pends, #207), its first frame is refused"
                 provisionalBridge -> ", provisional bridge"
                 else -> ""
             }
