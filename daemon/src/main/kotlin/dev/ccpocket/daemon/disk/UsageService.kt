@@ -34,11 +34,15 @@ object UsageService {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val zone: ZoneId = ZoneId.systemDefault()
 
-    /** [projectsRoot]/[codexFiles] default to the real on-disk roots; tests inject temp ones. */
+    /** [projectsRoot]/[codexFiles] default to the real on-disk roots; tests inject temp ones.
+     *  [openCodeTurns] reads assistant token spend from the OpenCode DB since a cutoff (issue #217) —
+     *  a function seam so tests can feed a fixture without a real db. */
     fun aggregate(
         days: Int,
         projectsRoot: Path = ProjectPaths.projectsRoot(),
         codexFiles: List<Path> = runCatching { dev.ccpocket.daemon.codex.CodexPaths.sessionFiles() }.getOrDefault(emptyList()),
+        openCodeTurns: (sinceEpochMs: Long) -> List<dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn> =
+            { since -> runCatching { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.usageTurns(since) }.getOrDefault(emptyList()) },
     ): Usage {
         val span = days.coerceIn(1, 90)
         val today = LocalDate.now(zone)
@@ -52,6 +56,10 @@ object UsageService {
         val perDay = HashMap<LocalDate, Long>()
         val perHour = LongArray(24) // today's tokens by local hour — only surfaced for the Today range
         val perModel = HashMap<String, Long>()
+        // issue #217: which backend contributed each model key, so the by-model bars get the right
+        // AgentKind badge instead of re-guessing from the model string (an OpenCode "openai/gpt-…"
+        // must NOT fall into the codex/gpt heuristic). Recorded at accumulation, read at classify.
+        val modelAgent = HashMap<String, AgentKind>()
         var tokensToday = 0L
         var requestsToday = 0L
         var inputToday = 0L
@@ -91,7 +99,9 @@ object UsageService {
                             val total = input + usage.long("output_tokens") + usage.long("cache_creation_input_tokens") + cacheRead
                             if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
                             perDay[date] = (perDay[date] ?: 0) + total
-                            perModel[msg.str("model") ?: "unknown"] = (perModel[msg.str("model") ?: "unknown"] ?: 0) + total
+                            val model = msg.str("model") ?: "unknown"
+                            perModel[model] = (perModel[model] ?: 0) + total
+                            modelAgent[model] = AgentKind.CLAUDE
                             requestsWindow++
                             inputWindow += input
                             cacheReadWindow += cacheRead
@@ -143,6 +153,7 @@ object UsageService {
                     if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
                     perDay[date] = (perDay[date] ?: 0) + total
                     perModel[model] = (perModel[model] ?: 0) + total
+                    modelAgent[model] = AgentKind.CODEX
                     requestsWindow++
                     val cachedWin = last.long("cached_input_tokens")
                     inputWindow += (last.long("input_tokens") - cachedWin).coerceAtLeast(0)
@@ -159,6 +170,34 @@ object UsageService {
             }
         }
 
+        // ── OpenCode turns: per-turn token spend from its SQLite store (issue #217). Same day/model
+        // bucketing as the other two backends; OpenCode's tokens already split cache-read out of input
+        // (like Claude), so the shared cache-hit formula stays correct. OpenCode stamps cost per model
+        // in its own tables, but we don't price here — token counts only, per the issue's scope.
+        val prevStartEpochMs = prevStart.atStartOfDay(zone).toInstant().toEpochMilli()
+        for (turn in openCodeTurns(prevStartEpochMs)) {
+            val total = turn.input + turn.output + turn.cacheRead
+            if (total <= 0L) continue
+            if (turn.id.isNotBlank() && !seen.add("oc:${turn.id}")) continue
+            val when_ = Instant.ofEpochMilli(turn.whenEpochMs).atZone(zone)
+            val date = when_.toLocalDate()
+            if (date.isBefore(prevStart)) continue
+            if (date.isBefore(start)) { prevWindowTokens += total; continue } // prev-window turn: baseline only
+            perDay[date] = (perDay[date] ?: 0) + total
+            perModel[turn.model] = (perModel[turn.model] ?: 0) + total
+            modelAgent[turn.model] = AgentKind.OPENCODE
+            requestsWindow++
+            inputWindow += turn.input
+            cacheReadWindow += turn.cacheRead
+            if (date == today) {
+                perHour[when_.hour] += total
+                tokensToday += total
+                requestsToday++
+                inputToday += turn.input
+                cacheReadToday += turn.cacheRead
+            }
+        }
+
         val trend = (0 until span).map { i ->
             val d = start.plusDays(i.toLong())
             UsageDay(d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH), perDay[d] ?: 0, date = d.toString())
@@ -168,8 +207,12 @@ object UsageService {
         val hours = if (span == 1) (0..23).map { UsageDay(label = "%02d:00".format(it), tokens = perHour[it]) } else null
         // drop zero-token models so a `<synthetic> 0` placeholder turn never shows a bar
         val models = perModel.entries.filter { it.value > 0 }.sortedByDescending { it.value }.take(6).map {
-            val codex = "codex" in it.key.lowercase() || "gpt" in it.key.lowercase()
-            UsageModel(it.key, it.value, if (codex) AgentKind.CODEX else AgentKind.CLAUDE)
+            // prefer the backend recorded at accumulation (issue #217); fall back to the legacy
+            // string heuristic only for a key no loop tagged (defensive — shouldn't happen).
+            val agent = modelAgent[it.key] ?: run {
+                if ("codex" in it.key.lowercase() || "gpt" in it.key.lowercase()) AgentKind.CODEX else AgentKind.CLAUDE
+            }
+            UsageModel(it.key, it.value, agent)
         }
         val cacheHit = (inputToday + cacheReadToday).takeIf { it > 0 }?.let { ((cacheReadToday * 100) / it).toInt() }
         // window cache-hit: the exact today formula over the window accumulators (cacheRead / (input + cacheRead))

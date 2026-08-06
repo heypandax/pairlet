@@ -2596,6 +2596,8 @@ private fun MessageItem(
         // the quiet residue of a question exchange: an expandable answered row / a muted withdrawn note
         is ChatItem.QuestionsAnswered -> QuestionsAnsweredRow(m.items)
         is ChatItem.QuestionsWithdrawn -> QuestionsWithdrawnRow()
+        // OpenCode asked a question — read-only card (no answer channel yet, issue #210)
+        is ChatItem.OpenCodeQuestion -> OpenCodeQuestionCard(m.questions)
         // a live turn's end: quiet ✓ line so "finished" stays visible in the transcript
         is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Text(

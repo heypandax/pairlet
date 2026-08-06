@@ -345,6 +345,11 @@ class Conversation(
     @Volatile
     private var sawSyntheticThisTurn = false
 
+    // issue #208: the placeholder's own text is the evidence for WHY the turn failed (upstream gateway
+    // 5xx vs. blown context) — keep the last one so the TurnDone error can attribute it correctly.
+    @Volatile
+    private var lastSyntheticText: String? = null
+
     // ■ was pressed for the in-flight turn: its result may report is_error, which must NOT render as a
     // red failure row — the user cancelled it themselves. Cleared when the result lands.
     @Volatile
@@ -1248,6 +1253,11 @@ class Conversation(
                             // content — this is what the phone turns into an openable "open file" chip and it also
                             // reads far better in the transcript (read-doc-inline handoff, Component 2).
                             ev.name in FILE_PATH_TOOLS -> ToolMetadata.of(ev.name, ev.input).preview
+                            // OpenCode's question tool (issue #210): send the parsed questions JSON in
+                            // FULL — the client renders a read-only question card from it, so the 280-char
+                            // cap (which would truncate the JSON unparseable) must not apply. An old client
+                            // just shows this JSON string in a tool row, no worse than the raw JSON today.
+                            dev.ccpocket.protocol.isOpenCodeQuestionTool(ev.name) -> ev.input?.toString() ?: "question"
                             else -> ev.input?.toString()?.take(280)
                         }
                         if (subagent && ev.id != null) rememberSubagent(ev.id, ev.name, ev.input.boolField("run_in_background"))
@@ -1301,6 +1311,7 @@ class Conversation(
                     is AgentEvent.SyntheticReply -> {
                         executing = true
                         sawSyntheticThisTurn = true
+                        lastSyntheticText = ev.text // issue #208: retain for error attribution
                     }
                     is AgentEvent.TurnResult -> {
                         turnCompleted = true
@@ -1321,6 +1332,8 @@ class Conversation(
                         settleSubagents(includeBackground = false)
                         val synthetic = sawSyntheticThisTurn
                         sawSyntheticThisTurn = false
+                        val syntheticText = lastSyntheticText
+                        lastSyntheticText = null
                         val interrupted = interruptRequested
                         interruptRequested = false
                         // plan mode's `result` is routinely PREMATURE (issue #55): the CLI continues
@@ -1352,10 +1365,11 @@ class Conversation(
                         // below, degraded the session behind it).
                         val error = when {
                             interrupted -> null // ended because the user asked, not because anything failed
+                            // issue #208: attribute by evidence — a placeholder carrying an upstream
+                            // gateway/5xx signal is an API-link failure, not a blown context window.
                             synthetic ->
                                 "API request failed — the agent wrote a placeholder, not a real reply. " +
-                                    "If this keeps happening the session has likely outgrown its context window: " +
-                                    "start a new session or send /clear."
+                                    dev.ccpocket.protocol.SyntheticAttribution.attribution(syntheticText)
                             ev.isError -> ev.finalText?.takeIf { it.isNotBlank() }?.take(300) ?: "turn failed"
                             else -> null
                         }
@@ -1825,6 +1839,7 @@ class Conversation(
         backfilledModel = null
         failedTurnStreak = 0 // a fresh session starts healthy — the degraded warning belongs to the old transcript
         sawSyntheticThisTurn = false
+        lastSyntheticText = null
         // fresh window — the live(null) below (and the init backfill announce) must not carry the wiped
         // session's occupancy, which re-seeded the phone's "Context NN%" statusline post-clear (issue #149)
         resumeContextUsed = null
@@ -1903,6 +1918,7 @@ class Conversation(
         backfilledModel = null
         failedTurnStreak = 0 // fresh session in a new cwd — degraded state died with the old transcript
         sawSyntheticThisTurn = false
+        lastSyntheticText = null
         launchProcess(
             AgentSpec(
                 workdir, resumeId = null, model = null, mode = mode, effort = effort,

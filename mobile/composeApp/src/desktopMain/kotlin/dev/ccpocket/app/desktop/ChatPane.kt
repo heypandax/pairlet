@@ -835,6 +835,8 @@ private fun MessageRow(
         is ChatItem.QuestionsWithdrawn -> Text(
             stringResource(Res.string.questions_withdrawn), color = Tok.muted, fontFamily = Dk.ui, fontSize = 12.sp,
         )
+        // OpenCode asked a question — read-only card (no answer channel yet, issue #210)
+        is ChatItem.OpenCodeQuestion -> dev.ccpocket.app.ui.OpenCodeQuestionCard(item.questions)
         // a live turn's end: quiet ✓ divider so "finished" stays visible after the caret stops blinking
         is ChatItem.TurnEnded -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
             Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))

@@ -857,6 +857,13 @@ fun isSubagentTool(tool: String): Boolean = tool == "Task" || tool == "Agent"
  *  Shared daemon+clients so the card dispatch and the tracker can't drift. */
 fun isWorkflowTool(tool: String): Boolean = tool == "Workflow"
 
+/** OpenCode's `question` ask-the-user tool (mapped name is the capitalized raw name). OpenCode runs
+ *  fully automatic with no interaction protocol, so phase 1 (issue #210) surfaces it as a READ-ONLY
+ *  question card instead of a raw JSON tool row — the daemon sends the parsed questions untruncated in
+ *  the tool preview, the client renders the card. Shared so the daemon preview and the client card
+ *  key on the exact same tool name. */
+fun isOpenCodeQuestionTool(tool: String): Boolean = tool == "Question"
+
 /** A permission prompt the phone must resolve. askId == Anthropic request_id. */
 @Serializable
 @SerialName("pocket/ask")

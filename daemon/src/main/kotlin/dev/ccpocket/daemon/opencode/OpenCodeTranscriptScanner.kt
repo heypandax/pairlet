@@ -5,9 +5,11 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionSummary
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.sql.Connection
 
 /**
@@ -166,6 +168,79 @@ object OpenCodeTranscriptScanner {
             }
         }.getOrDefault(emptyMap())
     }
+
+    /** One assistant turn's token spend, pulled from the OpenCode DB for usage aggregation (issue #217).
+     *  [whenEpochMs] is the turn's local wall-clock moment; [model] is "provider/model" (or the session
+     *  fallback); tokens follow OpenCode's own split (cache read is separate from input). */
+    data class UsageTurn(
+        val id: String,
+        val whenEpochMs: Long,
+        val model: String,
+        val input: Long,
+        val output: Long,
+        val cacheRead: Long,
+    )
+
+    /**
+     * Every assistant turn (all sessions, INCLUDING task sub-agent runs — their tokens are real spend)
+     * whose completion time is at or after [sinceEpochMs], for [UsageService] to bucket by day/model
+     * (issue #217). Tokens live on the assistant MESSAGE's serialized `data` (`tokens.input/output`,
+     * `tokens.cache.read`) — the same shape [OpenCodeStreamParser] reads live from step_finish. Model
+     * is taken from the message's own `providerID`/`modelID`, falling back to the session's model.
+     * Read-only + busy-tolerant like every other scan; any failure degrades to an empty list.
+     */
+    fun usageTurns(sinceEpochMs: Long, conn: Connection? = OpenCodePaths.connectReadOnly()): List<UsageTurn> {
+        return runCatching {
+            val c = conn ?: return emptyList()
+            c.use { usageTurnsConn(it, sinceEpochMs) }
+        }.getOrElse { emptyList() }
+    }
+
+    internal fun usageTurnsConn(conn: Connection, sinceEpochMs: Long): List<UsageTurn> {
+        val out = mutableListOf<UsageTurn>()
+        val stmt = conn.prepareStatement(
+            "SELECT m.id AS mid, m.data AS data, m.time_created AS tc, s.model AS session_model " +
+            "FROM message m JOIN session s ON s.id = m.session_id " +
+            "WHERE s.time_archived IS NULL AND m.time_created >= ? LIMIT 50000"
+        )
+        stmt.setLong(1, sinceEpochMs)
+        stmt.executeQuery().use { rs ->
+            while (rs.next()) {
+                val data = rs.getString("data") ?: continue
+                val obj = runCatching { json.parseToJsonElement(data) }.getOrNull() as? JsonObject ?: continue
+                if (obj["role"]?.jsonPrimitive?.contentOrNull != "assistant") continue
+                val tokens = obj["tokens"]?.jsonObject ?: continue
+                val input = tokens.longAt("input")
+                val output = tokens.longAt("output")
+                val cacheRead = (tokens["cache"] as? JsonObject)?.longAt("read") ?: 0L
+                if (input + output + cacheRead <= 0L) continue
+                // prefer the turn's own completion time; fall back to the row's created column
+                val completed = (obj["time"] as? JsonObject)?.longAt("completed")
+                val whenMs = completed?.takeIf { it > 0L } ?: rs.getLong("tc")
+                if (whenMs < sinceEpochMs) continue
+                val model = assistantModel(obj) ?: parseModel(rs.getString("session_model")) ?: "opencode"
+                out.add(UsageTurn(rs.getString("mid") ?: "", whenMs, model, input, output, cacheRead))
+            }
+        }
+        return out
+    }
+
+    /** "provider/model" from an assistant message's own model fields, or null when unqualified. */
+    private fun assistantModel(msg: JsonObject): String? {
+        val provider = msg["providerID"]?.jsonPrimitive?.contentOrNull
+            ?: msg["provider"]?.jsonPrimitive?.contentOrNull
+        val id = msg["modelID"]?.jsonPrimitive?.contentOrNull
+            ?: msg["model"]?.jsonPrimitive?.contentOrNull
+        return when {
+            id.isNullOrBlank() -> null
+            "/" in id -> id
+            provider.isNullOrBlank() -> id
+            else -> "$provider/$id"
+        }
+    }
+
+    private fun JsonObject.longAt(key: String): Long =
+        (this[key] as? JsonPrimitive)?.let { it.longOrNull ?: it.contentOrNull?.toLongOrNull() } ?: 0L
 
     internal fun parseModel(raw: String?): String? {
         val text = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null

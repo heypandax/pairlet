@@ -185,4 +185,53 @@ class UsageServiceTest {
             assertEquals(2L, u.requestsWindow, "requests still count even when cost is unknown")
         }
     }
+
+    // issue #217: OpenCode turns feed the same aggregation, and their model gets the OPENCODE badge
+    // (not the codex/gpt string heuristic — an OpenCode "openai/…" model must stay OPENCODE).
+    @Test
+    fun opencode_turns_count_and_classify_as_opencode() {
+        withProjects { root ->
+            val zone = ZoneId.systemDefault()
+            val today = LocalDate.now(zone)
+            fun ms(hour: Int) = today.atTime(hour, 0).atZone(zone).toInstant().toEpochMilli()
+            val turns = listOf(
+                dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn(
+                    id = "oc1", whenEpochMs = ms(4), model = "zhipuai/glm-4.6",
+                    input = 100, output = 40, cacheRead = 60,
+                ),
+                // an OpenCode session on an openai model — must NOT be mis-badged CODEX
+                dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn(
+                    id = "oc2", whenEpochMs = ms(4), model = "openai/gpt-5.1",
+                    input = 10, output = 10, cacheRead = 0,
+                ),
+            )
+            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList(), openCodeTurns = { turns })
+
+            assertEquals(220L, u.tokensToday, "100+40+60 + 10+10")
+            assertEquals(2L, u.requestsToday)
+            val glm = u.models.single { it.model == "zhipuai/glm-4.6" }
+            assertEquals(200L, glm.tokens)
+            assertEquals(AgentKind.OPENCODE, glm.agent)
+            val gpt = u.models.single { it.model == "openai/gpt-5.1" }
+            assertEquals(AgentKind.OPENCODE, gpt.agent, "OpenCode's model stays OPENCODE, not CODEX")
+            // cache-read splits out of input just like the other backends
+            assertEquals(220L, u.hours!![4].tokens)
+        }
+    }
+
+    // dedup by message id: the same OpenCode turn seen twice contributes once.
+    @Test
+    fun opencode_turns_dedup_by_message_id() {
+        withProjects { root ->
+            val zone = ZoneId.systemDefault()
+            val ms = LocalDate.now(zone).atTime(5, 0).atZone(zone).toInstant().toEpochMilli()
+            val one = dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.UsageTurn(
+                id = "dup", whenEpochMs = ms, model = "anthropic/claude-sonnet-4-5",
+                input = 50, output = 50, cacheRead = 0,
+            )
+            val u = UsageService.aggregate(1, projectsRoot = root, codexFiles = emptyList(), openCodeTurns = { listOf(one, one) })
+            assertEquals(100L, u.tokensToday, "duplicate id counted once")
+            assertEquals(1L, u.requestsToday)
+        }
+    }
 }

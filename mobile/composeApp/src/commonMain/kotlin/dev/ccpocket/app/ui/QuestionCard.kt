@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.protocol.AskQuestion
 import dev.ccpocket.protocol.PermissionAsk
 import org.jetbrains.compose.resources.stringResource
 
@@ -225,6 +226,61 @@ fun QuestionCard(
             }
         }
     }
+    }
+}
+
+/**
+ * The READ-ONLY OpenCode question card (issue #210, phase 1). Same terracotta visual language as the
+ * interactive [QuestionCard] — accent badge, option rows — but nothing is clickable and a muted footer
+ * spells out that answering isn't wired up for OpenCode yet. It sits inline in the transcript (natural
+ * height, no docking/height cap), replacing the raw JSON tool row the question used to show as.
+ */
+@Composable
+fun OpenCodeQuestionCard(questions: List<AskQuestion>) {
+    if (questions.isEmpty()) return
+    val shape = RoundedCornerShape(14.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Tok.raised).border(1.dp, Tok.hair, shape)
+            .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 13.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            QBadge(26.dp)
+            Text(stringResource(Res.string.opencode_question_header), color = Tok.tx2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        }
+        questions.forEachIndexed { i, q ->
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                q.header?.takeIf { it.isNotBlank() }?.let {
+                    Text(it.uppercase(), color = Tok.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+                }
+                Text(q.question, color = Tok.tx, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, lineHeight = 21.sp)
+                q.options.forEach { opt -> ReadOnlyOptionRow(opt.label, opt.description, q.multiSelect) }
+            }
+            if (i < questions.lastIndex) Spacer(Modifier.height(2.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(4.dp).clip(CircleShape).background(Tok.muted))
+            Text(stringResource(Res.string.opencode_question_readonly), color = Tok.muted, fontSize = 12.sp)
+        }
+    }
+}
+
+/** An option row with no selection state and no click target — the read-only twin of [OptionRow]. */
+@Composable
+private fun ReadOnlyOptionRow(label: String, description: String?, multi: Boolean) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(shape).background(Tok.base)
+            .border(1.dp, Tok.hair, shape).padding(horizontal = 12.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
+    ) {
+        Box(Modifier.padding(top = 1.dp).size(18.dp).clip(if (multi) RoundedCornerShape(5.dp) else CircleShape).border(1.5.dp, Tok.hair, if (multi) RoundedCornerShape(5.dp) else CircleShape))
+        Column(Modifier.weight(1f)) {
+            Text(label, color = Tok.tx2, fontSize = 14.sp, fontWeight = FontWeight.Medium, lineHeight = 19.sp)
+            if (!description.isNullOrBlank()) {
+                Text(description, color = Tok.muted, fontSize = 12.5.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+        }
     }
 }
 

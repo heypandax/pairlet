@@ -125,6 +125,12 @@ object OpenCodeStreamParser {
                 input["task"]?.jsonPrimitive?.contentOrNull?.let { put("task", it) }
                 input["context"]?.jsonPrimitive?.contentOrNull?.let { put("context", it) }
             }
+            // issue #210: the `question` tool's input is `{questions:[{question,header,multiple,options:
+            // [{label,description}]}]}`. Pass the array through verbatim (NOT the else branch, which
+            // PascalCases the top key) so the client can parse it into a read-only question card.
+            "question" -> buildJsonObject {
+                input["questions"]?.let { put("questions", it) }
+            }
             else -> {
                 // Unknown tool — pass through raw input with first-letter-uppercased keys
                 // for consistency with the ToolMetadata layer

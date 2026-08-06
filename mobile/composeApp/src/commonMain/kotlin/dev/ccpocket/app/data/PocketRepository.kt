@@ -363,6 +363,12 @@ sealed interface ChatItem {
     /** Claude withdrew its questions (control_cancel) — muted one-liner where the card used to be. */
     data object QuestionsWithdrawn : ChatItem
 
+    /** OpenCode's `question` tool surfaced as a READ-ONLY question card (issue #210, phase 1): the
+     *  parsed questions + options, rendered like the AskUserQuestion card but non-interactive with a
+     *  "作答暂不支持" note. OpenCode runs fully automatic — there is no answer channel yet, so this
+     *  replaces the raw JSON tool row without pretending it can be answered. */
+    data class OpenCodeQuestion(val questions: List<dev.ccpocket.protocol.AskQuestion>) : ChatItem
+
     /** A live turn finished here — muted "✓ done · 42s" divider so turn boundaries stay visible after
      *  the streaming caret stops. Appended on TurnDone only, never present in replayed history. */
     data class TurnEnded(val seconds: Int? = null) : ChatItem
@@ -3000,18 +3006,33 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                     messages[i] = card.copy(childCount = card.childCount + 1, lastChild = f.tool)
                 } else messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: ""))
             }
-            else -> messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
+            // OpenCode's question tool renders as a read-only question card, not a raw JSON row (issue
+            // #210); a parse miss (old truncated preview / malformed) falls back to the plain tool card.
+            else -> OpenCodeQuestionParse.parse(f.tool, f.inputPreview)
+                ?.let { messages.add(ChatItem.OpenCodeQuestion(it)) }
+                ?: messages.add(ChatItem.Tool(f.tool, f.inputPreview ?: "", taskId = f.toolUseId))
         }
     }
 
     private fun historyItem(h: HistoryMessage): ChatItem = when (h.role) {
         ChatRole.USER -> ChatItem.User(h.text)
-        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65)
-        ChatRole.ASSISTANT -> if (h.error) ChatItem.Sys("API request failed — placeholder reply: ${h.text}") else ChatItem.Assistant(h.text)
+        // a synthetic API-failure placeholder replays as the error it was, not as a normal reply (issue #65).
+        // Attribution follows the placeholder text so the replay reads the same as the daemon live prompt:
+        // an upstream gateway/5xx signal stops blaming context (issue #208).
+        ChatRole.ASSISTANT -> if (h.error) {
+            ChatItem.Sys(
+                "API request failed — the agent wrote a placeholder, not a real reply. " +
+                    dev.ccpocket.protocol.SyntheticAttribution.attribution(h.text) +
+                    "\n\nplaceholder reply: ${h.text}",
+            )
+        } else {
+            ChatItem.Assistant(h.text)
+        }
         // an answered AskUserQuestion replays as the same compact answered row the live path leaves, not a
         // raw-JSON tool card (issue #110); ok/output keep a sub-agent card's outcome + report (issue #77);
         // workflowRunId binds a Workflow card to its separately-pushed run (issue #106)
         ChatRole.TOOL -> h.answers?.let { a -> ChatItem.QuestionsAnswered(a.map { it.question to it.answer }) }
+            ?: OpenCodeQuestionParse.parse(h.tool ?: "", h.text)?.let { ChatItem.OpenCodeQuestion(it) }
             ?: ChatItem.Tool(h.tool ?: "tool", h.text, ok = h.ok, output = h.output, workflowRunId = h.workflowRunId)
     }
 
