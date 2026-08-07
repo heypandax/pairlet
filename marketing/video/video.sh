@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# video.sh — 宣传视频管线统一入口（薄转发；全部逻辑在 marketing/video/render.py）
+# video.sh — 宣传视频管线统一入口（薄转发；全部逻辑在同目录 render.py）
 set -euo pipefail
-cd "$(dirname "$0")/marketing/video"
+cd "$(dirname "$0")"
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
