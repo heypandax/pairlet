@@ -28,3 +28,13 @@ internal fun contentBlockText(el: JsonElement?): String? = when (el) {
     is JsonArray -> el.mapNotNull { contentBlockText(it) }.joinToString("").takeIf { it.isNotEmpty() }
     else -> null
 }
+
+/** Text of an ACP ToolCallContent array — `[{type:"content", content:{type:"text", text:…}}, …]` (the
+ *  one-wrapper-deeper shape `tool_call`/`tool_call_update` actually carry, probe 0.34.0). Bare ContentBlock
+ *  arrays/elements fall back to [contentBlockText]. */
+internal fun toolCallContentText(el: JsonElement?): String? = when (el) {
+    is JsonArray -> el.mapNotNull { item ->
+        ((item as? JsonObject)?.obj("content"))?.let { contentBlockText(it) } ?: contentBlockText(item)
+    }.joinToString("").takeIf { it.isNotEmpty() }
+    else -> contentBlockText(el)
+}

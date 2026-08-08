@@ -1,27 +1,36 @@
 package dev.ccpocket.daemon.kimi
 
-import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.disk.ReplayBudget
 import dev.ccpocket.daemon.disk.ReplaySlice
 import dev.ccpocket.daemon.disk.ReplaySlicer
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.HistoryMessage
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import java.nio.file.Path
 import kotlin.io.path.bufferedReader
 import kotlin.io.path.exists
 
 /**
- * Flattens a Kimi session transcript into [HistoryMessage]s for replaying a resumed chat (issue #206). Runs
- * each line through the SAME [KimiAcpParser] the live backend uses so replay and live can't drift. Mirrors
- * the Claude/Codex/OpenCode replays: user + assistant text + tool cards, with a tool call's later
- * [AgentEvent.ToolResult] merged onto its card (outcome + output).
+ * Flattens a Kimi session transcript into [HistoryMessage]s for replaying a resumed chat (issue #206).
+ * Mirrors the Claude/Codex/OpenCode replays: user + assistant text + tool cards, with a tool call's later
+ * result merged onto its card (outcome + output).
  *
- * ⚠ DISK FORMAT UNVERIFIED (probe blocked on device-code auth, 2026-08-06): no kimi session could be created
- * without login, so the exact on-disk transcript path/shape is unconfirmed. This parses the design's assumed
- * `agents/main/wire.jsonl` defensively — every line failing to parse as an ACP `session/update` simply yields
- * no row (fail-safe to empty), never a crash. Re-verify post-auth (design V2/V7) and adjust if the format
- * differs. Defensive line-length guard (#81 + kimi request-trace lines) caps each line before parse.
+ * DISK FORMAT (probe-verified on 0.34.0, 2026-08-08): `agents/main/wire.jsonl` is the CLI's INTERNAL wire
+ * log — NOT ACP `session/update` notifications as the pre-auth design assumed (that assumption produced
+ * zero replay rows in the field). The chat-bearing line types are:
+ *  - `{"type":"turn.prompt", input:[{type:"text",text:…}]}`        → user row (real prompts only;
+ *    `context.append_message` also carries role:user but folds in `<system-reminder>` wrappers — skipped)
+ *  - `{"type":"context.append_loop_event", event:{type:"content.part", part:{type:"text"|"think", …}}}`
+ *      → assistant text rows (`think` parts are thinking, not chat rows)
+ *  - `… event:{type:"tool.call", toolCallId, name, args}`          → tool card (full input in `args`)
+ *  - `… event:{type:"tool.result", toolCallId, result:{output, isError?}}` → merged onto the card
+ * Everything else (metadata, llm.request, usage.record, step.*, turn.ended, interaction.*) is skipped.
+ * Defensive line-length guard (#81 + kimi request-trace lines) caps each line before parse; unparseable
+ * lines simply yield no row (fail-safe to empty), never a crash.
  */
 object KimiTranscriptReplay {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -60,7 +69,7 @@ object KimiTranscriptReplay {
     private fun parse(file: Path): Pair<List<ReplaySlicer.Row>, Long> {
         if (!file.exists()) return emptyList<ReplaySlicer.Row>() to 0L
         val out = ArrayList<ReplaySlicer.Row>()
-        val toolRowIndex = HashMap<String, Int>() // tool_call_id → index in `out`, to merge its ToolResult
+        val toolRowIndex = HashMap<String, Int>() // toolCallId → index in `out`, to merge its tool.result
         var lineNo = 0L
         runCatching {
             file.bufferedReader().useLines { lines ->
@@ -69,38 +78,55 @@ object KimiTranscriptReplay {
                     val line = raw.trim()
                     if (line.isEmpty()) continue
                     val clipped = if (line.length > MAX_LINE_CHARS) line.take(MAX_LINE_CHARS) else line
-                    for (ev in KimiAcpParser.parseLine(clipped)) {
-                        when (ev) {
-                            is AgentEvent.UserReplay ->
-                                ev.text?.takeIf { it.isNotBlank() }?.let {
-                                    out += ReplaySlicer.Row(HistoryMessage(ChatRole.USER, it), lineNo)
-                                }
-                            is AgentEvent.AssistantText ->
-                                ev.text.takeIf { it.isNotBlank() }?.let {
-                                    out += ReplaySlicer.Row(HistoryMessage(ChatRole.ASSISTANT, it), lineNo)
-                                }
-                            is AgentEvent.AssistantToolUse -> {
-                                val preview = ev.input?.toString()?.take(MAX_TOOL_TEXT) ?: ""
-                                out += ReplaySlicer.Row(
-                                    HistoryMessage(ChatRole.TOOL, preview, tool = ev.name), lineNo,
-                                )
-                                ev.id?.let { toolRowIndex[it] = out.size - 1 }
+                    val root = runCatching { json.parseToJsonElement(clipped) }.getOrNull() as? JsonObject
+                        ?: continue // unparseable — no row, never a crash
+                    when (root.str("type")) {
+                        // a real user prompt entering a turn (context.append_message also logs role:user
+                        // lines, but those fold in <system-reminder> wrappers — turn.prompt stays clean)
+                        "turn.prompt" ->
+                            contentBlockText(root["input"])?.takeIf { it.isNotBlank() }?.let {
+                                out += ReplaySlicer.Row(HistoryMessage(ChatRole.USER, it), lineNo)
                             }
-                            is AgentEvent.ToolResult -> {
-                                val idx = ev.toolUseId?.let { toolRowIndex[it] }
-                                if (idx != null) {
-                                    val prev = out[idx]
-                                    out[idx] = prev.copy(
-                                        msg = prev.msg.copy(
-                                            ok = !ev.isError,
-                                            output = ev.content?.take(MAX_TOOL_OUTPUT),
-                                        ),
-                                        patchLine = lineNo, // #147: a late result mutates an earlier row
+                        "context.append_loop_event" -> {
+                            val ev = root.obj("event") ?: continue
+                            when (ev.str("type")) {
+                                "content.part" -> {
+                                    val part = ev.obj("part") ?: continue
+                                    // text parts are assistant replies; think parts are thinking (not chat rows)
+                                    if (part.str("type") == "text") {
+                                        part.str("text")?.takeIf { it.isNotBlank() }?.let {
+                                            out += ReplaySlicer.Row(HistoryMessage(ChatRole.ASSISTANT, it), lineNo)
+                                        }
+                                    }
+                                }
+                                "tool.call" -> {
+                                    val preview = ev.obj("args")?.toString()?.take(MAX_TOOL_TEXT) ?: ""
+                                    out += ReplaySlicer.Row(
+                                        HistoryMessage(ChatRole.TOOL, preview, tool = ev.str("name") ?: "tool"), lineNo,
                                     )
+                                    ev.str("toolCallId")?.let { toolRowIndex[it] = out.size - 1 }
                                 }
+                                "tool.result" -> {
+                                    val idx = ev.str("toolCallId")?.let { toolRowIndex[it] }
+                                    if (idx != null) {
+                                        val result = ev.obj("result")
+                                        val output = (result?.get("output") as? JsonPrimitive)?.contentOrNull
+                                            ?: result?.toString()
+                                        val isError = (result?.get("isError") as? JsonPrimitive)?.booleanOrNull == true
+                                        val prev = out[idx]
+                                        out[idx] = prev.copy(
+                                            msg = prev.msg.copy(
+                                                ok = !isError,
+                                                output = output?.take(MAX_TOOL_OUTPUT),
+                                            ),
+                                            patchLine = lineNo, // #147: a late result mutates an earlier row
+                                        )
+                                    }
+                                }
+                                else -> {} // step.begin/end, llm.request, usage.record, … — not a chat row
                             }
-                            else -> {} // thinking / usage / ignored / unparseable — not a chat row
                         }
+                        else -> {} // metadata, profile.bind, interaction.*, turn.ended, …
                     }
                 }
             }

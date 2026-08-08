@@ -5,6 +5,7 @@ import dev.ccpocket.daemon.agent.AgentEvent
 import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.disk.ReplaySlice
+import dev.ccpocket.daemon.opencode.ToolNameMapper
 import dev.ccpocket.daemon.util.logger
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.HistoryMessage
@@ -74,6 +75,20 @@ class KimiBackend(
     // askId → (JSON-RPC request id, permission options) — options carry the optionIds we answer with
     private val pendingApprovals = ConcurrentHashMap<String, PendingApproval>()
 
+    // MID-TURN PROMPT QUEUE (probe 0.34.0): ACP rejects a second session/prompt while a turn runs
+    // (-32600 turn.agent_busy "another turn is already in progress") — unlike the Claude CLI, which queues
+    // stdin messages itself. Conversation hands every prompt straight to us (its ledger proves delivery by
+    // the eventual consumption), so the queue lives HERE: at most one session/prompt in flight, the rest
+    // FIFO, flushed when the in-flight prompt settles (any stopReason, incl. cancelled/error).
+    private val promptQueue = ArrayDeque<Prompt>() // guarded by [bootstrap]
+
+    // toolCallId → accumulated tool state. ACP `tool_call` carries NO rawInput (probe 0.34.0): the input
+    // JSON streams as cumulative text in in_progress `tool_call_update`s; the output arrives as `rawOutput`
+    // on the settled update. The START event is therefore emitted only once the input parses complete —
+    // an earlier emission produced the phone's empty Bash/Read cards.
+    private class ToolAccum(val name: String, val title: String?, var inputText: String, var started: Boolean)
+    private val toolCalls = ConcurrentHashMap<String, ToolAccum>()
+
     private data class Prompt(val text: String, val images: List<ImageData>)
     private data class PendingApproval(val rpcId: JsonElement, val options: JsonArray)
 
@@ -92,8 +107,8 @@ class KimiBackend(
         // reset per-process protocol state (runs on every (re)launch)
         sessionId = null
         suppressReplayUpdates = false
-        bootstrap.withLock { pendingPrompt = null }
-        promptIds.clear(); pendingApprovals.clear()
+        bootstrap.withLock { pendingPrompt = null; promptQueue.clear() }
+        promptIds.clear(); pendingApprovals.clear(); toolCalls.clear()
         // kick off the ACP handshake — session open happens when the initialize response lands
         initializeId = rpcRequest("initialize", buildJsonObject {
             put("protocolVersion", 1)
@@ -128,7 +143,10 @@ class KimiBackend(
         return when (id) {
             initializeId -> { openSession(); emptyList() }
             sessionOpenId -> onSessionOpened(result)
-            in promptIds -> { promptIds.remove(id); onPromptDone(result) }
+            in promptIds -> {
+                promptIds.remove(id)
+                onPromptDone(result).also { flushQueuedPrompt() } // settle → next queued prompt goes out
+            }
             else -> emptyList()
         }
     }
@@ -139,6 +157,7 @@ class KimiBackend(
         // an auth wall (no model / not logged in) surfaces here on session open or the first prompt
         if (id == sessionOpenId || (id != null && id in promptIds)) {
             promptIds.remove(id)
+            flushQueuedPrompt() // a failed prompt must not stall the FIFO behind it
             return listOf(
                 AgentEvent.AssistantText("⚠️ $msg"),
                 AgentEvent.TurnResult(finalText = null, usage = null, isError = true),
@@ -196,10 +215,64 @@ class KimiBackend(
         return when (method) {
             "session/update" -> {
                 if (suppressReplayUpdates) return emptyList() // historical replay from session/load — drop
-                params.obj("update")?.let { KimiAcpParser.translate(it) } ?: emptyList()
+                val update = params.obj("update") ?: return emptyList()
+                // tool_call / tool_call_update are handled HERE (stateful input accumulation); every other
+                // update kind stays with the stateless parser.
+                when (update.str("sessionUpdate")) {
+                    "tool_call" -> onToolCall(update)
+                    "tool_call_update" -> onToolCallUpdate(update)
+                    else -> KimiAcpParser.translate(update)
+                }
             }
             else -> emptyList()
         }
+    }
+
+    /** `tool_call`: card opens pending with NO input (probe 0.34.0) — record it, emit nothing yet. */
+    private fun onToolCall(update: JsonObject): List<AgentEvent> {
+        val id = update.str("toolCallId") ?: return emptyList()
+        val title = update.str("title")
+        val name = ToolNameMapper.map(update.str("kind") ?: title ?: "tool")
+        toolCalls[id] = ToolAccum(name, title, inputText = "", started = false)
+        return emptyList()
+    }
+
+    /** `tool_call_update`: the input JSON streams in as CUMULATIVE text while in_progress; the output lands
+     *  as `rawOutput` (a plain string) on the settled update. Emit the START once the accumulated input
+     *  parses as complete JSON (≈ execution begin), and the result on settle. */
+    private fun onToolCallUpdate(update: JsonObject): List<AgentEvent> {
+        val id = update.str("toolCallId") ?: return emptyList()
+        val accum = toolCalls.getOrPut(id) {
+            ToolAccum(ToolNameMapper.map(update.str("title") ?: "tool"), update.str("title"), "", false)
+        }
+        val status = update.str("status")
+        val settled = status == "completed" || status == "failed"
+        val out = ArrayList<AgentEvent>(2)
+        if (!settled) {
+            // in_progress: content text is the CUMULATIVE input JSON being built — latest is fullest.
+            // (on the settled update the same slot carries the OUTPUT — never fold it into the input)
+            toolCallContentText(update["content"])?.let { accum.inputText = it }
+        }
+        if (!accum.started) {
+            val input = runCatching { json.parseToJsonElement(accum.inputText) as? JsonObject }.getOrNull()
+            if (input != null || settled) {
+                accum.started = true
+                out += AgentEvent.AssistantToolUse(
+                    id, accum.name,
+                    input ?: buildJsonObject { accum.title?.let { put("description", it) } },
+                )
+            }
+        }
+        if (settled) {
+            toolCalls.remove(id)
+            // output: rawOutput is a plain STRING (probe 0.34.0), else the settled content text
+            out += AgentEvent.ToolResult(
+                id,
+                update.str("rawOutput") ?: toolCallContentText(update["content"]),
+                isError = status == "failed",
+            )
+        }
+        return out
     }
 
     // ---- inbound: server→client requests (approvals + fs/terminal we decline) ----
@@ -214,8 +287,10 @@ class KimiBackend(
                 val name = dev.ccpocket.daemon.opencode.ToolNameMapper.map(
                     toolCall?.str("kind") ?: toolCall?.str("title") ?: "tool",
                 )
+                // probe 0.34.0: no rawInput here either — the human sentence in the content text is the
+                // only command carrier ("Requesting approval to Running: echo …"); surface it as the card body
                 val input = toolCall?.obj("rawInput") ?: buildJsonObject {
-                    toolCall?.str("title")?.let { put("description", it) }
+                    put("description", toolCallContentText(toolCall?.get("content")) ?: toolCall?.str("title") ?: "tool")
                 }
                 listOf(AgentEvent.ControlRequest(askId, name, input))
             }
@@ -232,9 +307,23 @@ class KimiBackend(
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
         val ready = bootstrap.withLock {
-            if (sessionId == null) { pendingPrompt = Prompt(text, images); false } else true
+            when {
+                sessionId == null -> { pendingPrompt = Prompt(text, images); false }
+                // a turn is in flight — ACP has no mid-turn stdin queue (-32600 turn.agent_busy, probe
+                // 0.34.0), so FIFO it HERE and flush when the in-flight prompt settles
+                promptIds.isNotEmpty() -> { promptQueue.addLast(Prompt(text, images)); false }
+                else -> true
+            }
         }
         if (ready) writePrompt(text)
+    }
+
+    /** The in-flight prompt just settled (any stopReason / error) — send the oldest queued prompt, if any. */
+    private suspend fun flushQueuedPrompt() {
+        val next = bootstrap.withLock {
+            if (sessionId != null && promptIds.isEmpty()) promptQueue.removeFirstOrNull() else null
+        }
+        next?.let { writePrompt(it.text) }
     }
 
     private suspend fun writePrompt(text: String) {

@@ -49,30 +49,9 @@ class KimiAcpParserTest {
     }
 
     @Test
-    fun `tool_call maps kind execute to Bash and carries rawInput`() {
-        val u = """{"update":{"sessionUpdate":"tool_call","toolCallId":"t1","kind":"execute","title":"Run echo","rawInput":{"command":"echo hi"}}}"""
-        val ev = KimiAcpParser.parseLine(u).single() as? AgentEvent.AssistantToolUse
-        assertNotNull(ev)
-        assertEquals("t1", ev.id)
-        assertEquals("Bash", ev.name) // execute → Bash via ToolNameMapper
-        assertEquals("echo hi", ev.input?.get("command").toString().trim('"'))
-    }
-
-    @Test
-    fun `tool_call_update completed becomes a tool result`() {
-        val u = """{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed","content":[{"type":"text","text":"hi"}]}}"""
-        val ev = KimiAcpParser.parseLine(u).single() as? AgentEvent.ToolResult
-        assertNotNull(ev)
-        assertEquals("t1", ev.toolUseId)
-        assertTrue(!ev.isError)
-    }
-
-    @Test
-    fun `tool_call_update failed marks error`() {
-        val u = """{"update":{"sessionUpdate":"tool_call_update","toolCallId":"t9","status":"failed"}}"""
-        val ev = KimiAcpParser.parseLine(u).single() as? AgentEvent.ToolResult
-        assertNotNull(ev)
-        assertTrue(ev.isError)
+    fun `tool updates are Ignored here — the stateful backend owns them (probe 0_34_0)`() {
+        val u = """{"update":{"sessionUpdate":"tool_call","toolCallId":"t1","kind":"execute","title":"Bash"}}"""
+        assertIs<AgentEvent.Ignored>(KimiAcpParser.parseLine(u).single())
     }
 
     @Test
