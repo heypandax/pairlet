@@ -63,6 +63,35 @@ class KimiBackendTest {
         assertEquals(2, w.count { "\"session/prompt\"" in it }, "an error must not stall the FIFO")
     }
 
+    // kimi's live stream has NO user_message_chunk (probe 0.34.0) — the backend synthesizes the consumption
+    // receipt at prompt settle so Conversation's ledger settles (otherwise every relaunch re-RUNS all past
+    // prompts and task grants never end at the turn boundary).
+    @Test
+    fun `prompt settle synthesizes the UserReplay receipt before the TurnResult`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.sendPrompt("first", emptyList())
+        b.sendPrompt("second", emptyList())
+        val events = b.parse("""{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}""")
+        val replay = events.indexOfFirst { it is AgentEvent.UserReplay }
+        val result = events.indexOfFirst { it is AgentEvent.TurnResult }
+        assertTrue(replay in 0 until result, "UserReplay must settle the ledger before TurnResult checks it")
+        assertEquals("first", (events[replay] as AgentEvent.UserReplay).text)
+        // the flushed queued prompt settles with ITS OWN text
+        val next = b.parse("""{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}""")
+        assertEquals("second", (next.first { it is AgentEvent.UserReplay } as AgentEvent.UserReplay).text)
+    }
+
+    @Test
+    fun `an errored prompt still settles its receipt — no relaunch redelivery loop`() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.sendPrompt("first", emptyList())
+        val events = b.parse("""{"jsonrpc":"2.0","id":3,"error":{"code":-32001,"message":"auth required"}}""")
+        assertEquals("first", (events.first { it is AgentEvent.UserReplay } as AgentEvent.UserReplay).text)
+        assertTrue(events.any { it is AgentEvent.TurnResult && it.isError })
+    }
+
     @Test
     fun `tool start waits for the streamed input and result carries rawOutput`() = runBlocking {
         val w = mutableListOf<String>()
