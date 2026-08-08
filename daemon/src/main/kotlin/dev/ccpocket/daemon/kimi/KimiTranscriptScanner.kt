@@ -18,10 +18,9 @@ import kotlin.io.path.readText
  * Each index entry carries the session's `workDir`; we match it to the requested workdir with
  * [ProjectPaths.canonicalKey] (the same realpath-normalizing key the cross-backend project merge uses), then
  * read each session's `state.json` for title / lastPrompt / timestamps.
- *
- * ⚠ DISK FORMAT UNVERIFIED (probe blocked on device-code auth, 2026-08-06): no session could be created
- * without login, so the index/state field spellings are the design's assumption. Everything degrades to an
- * empty list on mismatch (never throws). Re-verify post-auth (design V2).
+ * The index spelling is probe-verified on 0.34.0 (2026-08-08): entries carry `sessionId` / `sessionDir` /
+ * `workDir` verbatim. state.json title/lastPrompt spellings remain assumption-based — everything degrades
+ * to an empty list on mismatch (never throws).
  */
 object KimiTranscriptScanner {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -83,13 +82,14 @@ object KimiTranscriptScanner {
         )
     }
 
-    /** Bounded count of user turns in the transcript (approximate messageCount; App tolerates 0). */
+    /** Bounded count of user turns in the transcript (approximate messageCount; App tolerates 0).
+     *  wire.jsonl is the internal wire format (probe 0.34.0): real prompts are `turn.prompt` lines. */
     private fun countChatRows(wire: Path): Int {
         var n = 0
         wire.bufferedReader().useLines { lines ->
             for (raw in lines) {
                 if (n > 5000) break
-                if ("\"user_message_chunk\"" in raw) n++
+                if ("\"turn.prompt\"" in raw) n++
             }
         }
         return n

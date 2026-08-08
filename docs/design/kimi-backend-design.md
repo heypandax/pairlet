@@ -250,6 +250,20 @@ probe 脚本 `scripts/probe-kimi-wire.py` 假设 `kimi --wire`，实测该 flag 
 | V9 | **未测** | ACP 权限模式走 session modes（P2）；`-y/--yolo`、`--auto`、`--plan` 是**顶层交互 flag，不作用于 `acp` 子命令**（acp 只接受 `--login`）。P1 审批恒走 request_permission。 |
 | V10 | **未测（auth 阻塞）** | ACP `tool_call`/`tool_call_update` 的 rawInput/content 形状未活体观察；解析器按 ACP spec 实现（tool_call 带完整 rawInput，无需攒流）。 |
 
+### probe 实测结果（2026-08-08，kimi 0.34.0，**已登录**，脚本 `scripts/probe-kimi-acp.py`）
+
+首次登录态全链路探测，**推翻了两个设计假设**（均已修复并落测试）：
+
+| # | 结果 | 实测 |
+|---|---|---|
+| V2 | **PASS（形状证实，假设部分推翻）** | `session_index.jsonl` 逐行 `{sessionId, sessionDir, workDir}`（与设计一致）；`workDir` 存原始路径（实测出现 `d:/`、`D:/`、`D:\` 三种拼写，`canonicalKey` realpath 归一后匹配正常）。**`wire.jsonl` 不是 ACP**——是 CLI 内部 wire 格式：`turn.prompt` / `context.append_message` / `context.append_loop_event{content.part, tool.call, tool.result}` / `llm.request` / `usage.record` / `turn.ended`。按 ACP 解析的旧 Replay 产出 0 行（线上症状：attach 活会话看不到任何历史）。已重写 `KimiTranscriptReplay` 按 wire 格式解析：`turn.prompt`→user 行、`content.part{type:text}`→assistant 行（think 不入聊天行）、`tool.call{name,args}`→工具卡、`tool.result{output,isError}`→合并到卡。`countChatRows` 改数 `turn.prompt`。 |
+| V3 | **PASS（ACP 事件序）** | 一轮内 `session/update` 序：`agent_thought_chunk`×N + `agent_message_chunk`×N + `tool_call`→`tool_call_update`×N（in_progress 流式）→ settled；轮末 prompt 响应 `{stopReason}`。另有 `session_info_update`（标题）、`usage_update{used,size}`（**占用线数据源，P2 接入**）、`available_commands_update`。无 `user_message_chunk`（消费回执缺席，ledger 靠轮边界 settle）。 |
+| V5 | **实测改判** | 轮中再次 `session/prompt` 返回 `-32600 "another turn is already in progress"（turn.agent_busy）`——**ACP 无轮中注入**。已在 `KimiBackend` 内做 in-flight 门闩＋FIFO 排队（prompt 响应落地后按序 flush），手机端不再出现 turn failed。 |
+| V6 | **PASS** | `session/cancel`（notification）实测生效：进行中的写文件长轮次被中断，prompt 响应 `stopReason:"cancelled"`；wire.jsonl 落 `turn.cancel{reason:user_cancelled}` + `turn.ended{reason:cancelled}`。被取消轮中排队的消息由 CLI 以 `<system-reminder>` 包裹折叠进 context（replay 已避开）。 |
+| V10 | **FAIL（spec 假设推翻）→ 已修** | `tool_call` **不带 `rawInput`**（只有 title/kind/pending 状态）；输入 JSON 以**累积文本**形式随 in_progress `tool_call_update` 的 `content[].content.text` 流式到来；输出在 settled 更新的 `rawOutput`（**字符串原语**，非对象）。旧解析三处全错（线上症状：Bash/Read 工具卡空白）。已改 `KimiBackend` 有状态累积：输入解析完整才发 START，settled 发 ToolResult。审批卡：`session/request_permission` 的 `toolCall` 同样无 rawInput，命令藏在 content 文本（"Requesting approval to Running: …"），已接入 description。 |
+| V-win | **PASS** | `irm …/install.ps1 | iex` → `%USERPROFILE%\.kimi-code\bin\kimi.exe`（0.34.0），Git Bash 下 ACP 拉起正常，daemon 无需特殊处理。 |
+| V-auth | **PASS（反向）** | 已登录下 `session/new` 正常返回 `sessionId` + `configOptions`（model/thinking/mode 选项——P2 可用它做会话内模型/模式切换，无需 relaunch）。`initialize` 响应带 `authMethods=[login]` 与 `agentCapabilities.auth.logout`。 |
+
 ### 人工补测项（脚本外）
 
 - V-win：Windows 真机——install.ps1 安装路径、可执行后缀（`.exe`？）、Git Bash 依赖对 daemon 子进程拉起的影响、`%USERPROFILE%\.kimi-code` 路径。
