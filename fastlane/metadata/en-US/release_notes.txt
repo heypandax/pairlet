@@ -1,15 +1,15 @@
-What's new in 1.7.0
+What's new in 1.7.5
 
-Added
-• Full-auto mode can now expire after a chosen duration, falling back to ask-first instead of staying on forever
-• Kimi Code CLI backend (preview): open and drive Kimi sessions from your phone
-• New global accent color preference (CC Pocket / Codex)
-• Usage dashboard now counts OpenCode session tokens
+Redesigned
+• Mobile UI 2.0 rebuilds Computers, Projects, Sessions, Chat, Approvals, Reviews, and Settings around clearer hierarchy and truthful status
+• Chat now uses full-width conversation entries, grouped context, persistent running/queue/upload notes, and 48 pt interaction targets
+• Quick Actions groups session settings, tools, and context; Handoff is an ordinary peer action without promotional treatment
 
 Improved
-• Voice input lands in the composer for confirmation instead of sending immediately
-• Faster, more reliable downloads and self-updates in mainland China via a new mirror
+• Long session titles, paths, and tool commands wrap without horizontal clipping, while critical controls remain reachable at 200% text
+• Desktop session running indicators stay fresh as background work starts and stops
 
 Fixed
-• Background session announcements no longer hijack the session view you are reading
-• Gateway server errors are attributed by evidence instead of suggesting /clear
+• Kimi ACP conversations preserve replay, tool cards, mid-turn queued messages, approvals, and prompt settlement more reliably
+• Session info and the composer remain pinned instead of making the entire Chat screen scroll
+• Tool payloads keep their compact two-line preview and expand in full on tap
