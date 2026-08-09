@@ -12,18 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,139 +28,262 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.allow
+import dev.ccpocket.app.resources.ap_waiting_title
+import dev.ccpocket.app.resources.deny
+import dev.ccpocket.app.resources.fl_ask_danger
+import dev.ccpocket.app.resources.fl_attention_title
+import dev.ccpocket.app.resources.fl_clear_body
+import dev.ccpocket.app.resources.fl_clear_title
+import dev.ccpocket.app.resources.fl_details
+import dev.ccpocket.app.resources.fl_details_hide
+import dev.ccpocket.app.resources.fl_none_waiting
+import dev.ccpocket.app.resources.fl_sec_approval
+import dev.ccpocket.app.resources.fl_sec_finished
+import dev.ccpocket.app.resources.permission_fallback
+import dev.ccpocket.app.resources.fl_unlinked_body
+import dev.ccpocket.app.resources.fl_unlinked_title
+import dev.ccpocket.app.resources.st_complete
+import dev.ccpocket.app.resources.st_failure
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.ui.FirstHopHeader
+import dev.ccpocket.app.ui.FirstHopSectionLabel
+import dev.ccpocket.app.ui.session.Hairline
+import dev.ccpocket.app.ui.session.StateMark
+import dev.ccpocket.app.ui.session.StateMarkGlyph
 import dev.ccpocket.app.ui.tilde
+import dev.ccpocket.protocol.PermissionAsk
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
 
 /**
- * Attention inbox — the unified triage queue for ALL machines ("Fleet Mobile" board ③): glance, decide,
- * move on. Soonest timeout first; thumb-sized Deny/Allow inline; "Recently finished" below. On today's
- * single connection the queue holds the active machine's pending ask (the demo carries the full fleet).
+ * Attention inbox — the unified triage queue for ALL machines (Supporting Surfaces UI 2.0 · Master v1):
+ * glance, open, decide. Soonest timeout first; "Recently finished" stays visually secondary below.
+ *
+ * The one rule that shapes the row: a decision is only offered once its details are on screen. Allow and Deny
+ * live inside the expanded detail region, so a consequential answer can never be given to a truncated command.
  */
 @Composable
 fun AttentionInboxScreen(repo: PocketRepository, onBack: () -> Unit) {
     val entries = repo.fleetAttention().sortedBy { it.seconds }
     val finished = repo.fleetFinished()
+    val links = dev.ccpocket.app.data.FleetRuntime.forPrimary(repo)?.repos() ?: listOf(repo)
     LaunchedEffect(Unit) {
-        (dev.ccpocket.app.data.FleetRuntime.forPrimary(repo)?.repos() ?: listOf(repo)).forEach { it.refreshPendingApprovals() }
+        links.forEach { it.refreshPendingApprovals() }
     }
+    // an empty queue only means "nothing is waiting" when we are actually TALKING to a computer. With no
+    // link the queue is unknown, and "All clear" would be the one claim this surface must never make.
+    val linked = repo.demoMode.value || links.any { it.connected.value }
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        Row(
-            Modifier.fillMaxWidth().background(Tok.surface).padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onBack) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-            Text("Needs you", color = Tok.tx, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        }
-        FleetStripText(repo.fleetStrip(), Modifier.background(Tok.surface).fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-
-        if (entries.isEmpty()) {
+        FirstHopHeader(
+            title = stringResource(Res.string.fl_attention_title),
+            summary = when {
+                entries.isNotEmpty() -> waitingApprovalText(entries.size)
+                linked -> stringResource(Res.string.fl_none_waiting)
+                else -> null
+            },
+            onBack = onBack,
+        )
+        if (entries.isEmpty() && !linked) {
+            NotLinked(Modifier.weight(1f))
+        } else if (entries.isEmpty() && finished.isEmpty()) {
             AllClear(Modifier.weight(1f))
         } else {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                FleetSectionLabel("Needs approval")
-                entries.forEach { e ->
-                    ApprovalCard(
-                        e,
-                        onDeny = { repo.resolveAttention(e, allow = false) },
-                        onAllow = { repo.resolveAttention(e, allow = true) },
-                    )
+            Column(
+                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
+            ) {
+                if (entries.isNotEmpty()) {
+                    FirstHopSectionLabel(stringResource(Res.string.fl_sec_approval))
+                    entries.forEach { e ->
+                        RequestRow(
+                            e,
+                            ask = repo.attentionAsk(e),
+                            onDeny = { repo.resolveAttention(e, allow = false) },
+                            onAllow = { repo.resolveAttention(e, allow = true) },
+                        )
+                    }
                 }
                 if (finished.isNotEmpty()) {
-                    FleetSectionLabel("Recently finished")
+                    FirstHopSectionLabel(stringResource(Res.string.fl_sec_finished))
                     finished.forEach { FinishedRow(it) }
+                    Hairline()
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(28.dp))
             }
         }
     }
 }
 
+/**
+ * One waiting request.
+ *
+ * Collapsed it identifies the work: computer, verb, tool, its own context and the head of the payload.
+ * Expanded it shows the payload in FULL — the command, the diff, the flagged risk — and only then offers the
+ * two decisions. [ask] is the live ask behind the row when a link still holds it; without one the row falls
+ * back to the entry's own real preview rather than claiming details it cannot read.
+ */
 @Composable
-private fun ApprovalCard(e: AttentionEntry, onDeny: () -> Unit, onAllow: () -> Unit) {
+private fun RequestRow(e: AttentionEntry, ask: PermissionAsk?, onDeny: () -> Unit, onAllow: () -> Unit) {
     // each row runs its own clock from the budget it arrived with (the sheet's 30s convention);
-    // hitting zero renders it spent — the daemon's auto-deny is the actual decision of record
+    // hitting zero renders it spent — the daemon's auto-deny is the actual decision of record.
+    // A `noAutoDeny` ask has no deadline at all: the daemon renews it, so drawing a ring counting toward
+    // an expiry that will never happen would be the surface inventing the one fact it must not.
+    val waiting = ask?.noAutoDeny == true
     var seconds by remember(e.askId) { mutableStateOf(e.seconds) }
-    LaunchedEffect(e.askId) { while (seconds > 0) { delay(1000); seconds -= 1 } }
-    Column(
-        Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(12.dp))
-            .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
-            .padding(horizontal = 13.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            MachineChip(e.machineName, e.os, fontSize = 11.5.sp, glyph = 13.dp, modifier = Modifier.weight(1f, fill = false))
-            Spacer(Modifier.weight(1f))
-            MiniCountdownRing(seconds, e.seconds.coerceAtLeast(30))
-        }
-        Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Outlined.Shield, null, tint = Tok.accent, modifier = Modifier.size(15.dp))
-            Text("${e.title} · ${e.tool}", color = Tok.tx, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        val context = listOfNotNull(
-            e.workdir?.let(::tilde),
-            e.sessionId?.take(8)?.let { "$it…" },
-            e.origin?.let { "via $it" },
-        ).joinToString(" · ")
-        if (context.isNotEmpty()) {
+    var expanded by remember(e.askId) { mutableStateOf(false) }
+    LaunchedEffect(e.askId, waiting) { while (!waiting && seconds > 0) { delay(1000); seconds -= 1 } }
+    val title = e.title.ifBlank { stringResource(Res.string.permission_fallback) }
+    val context = listOfNotNull(
+        e.workdir?.let(::tilde),
+        e.sessionId?.take(8)?.let { "$it…" },
+        e.origin,
+    ).joinToString(" · ")
+    val payload = ask?.diff ?: ask?.inputPreview ?: e.preview
+    Column(Modifier.fillMaxWidth()) {
+        Hairline()
+        Column(
+            Modifier.fillMaxWidth().heightIn(min = 76.dp)
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = stringResource(if (expanded) Res.string.fl_details_hide else Res.string.fl_details),
+                ) { expanded = !expanded }
+                .padding(vertical = Metric.gap),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+                MachineChip(e.machineName, e.os, fontSize = 12.sp, glyph = 14.dp, modifier = Modifier.weight(1f, fill = false))
+                Spacer(Modifier.weight(1f))
+                if (waiting) Text(stringResource(Res.string.ap_waiting_title), color = Tok.tx2, style = TypeRole.caption)
+                else MiniCountdownRing(seconds, e.seconds.coerceAtLeast(30))
+            }
             Text(
-                context,
-                color = Tok.muted,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 5.dp),
+                "$title · ${e.tool}", color = Tok.tx, style = TypeRole.rowTitle,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Metric.gapS),
+            )
+            if (context.isNotEmpty()) Text(
+                context, color = Tok.muted, style = TypeRole.captionMono,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
+            )
+            if (!expanded) Text(
+                payload, color = Tok.tx2, style = TypeRole.bodyMono,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Metric.gapS),
+            )
+            Text(
+                stringResource(if (expanded) Res.string.fl_details_hide else Res.string.fl_details),
+                color = Tok.accent, style = TypeRole.body, modifier = Modifier.padding(top = Metric.gapS),
             )
         }
-        Text(
-            e.preview, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(8.dp))
-                .background(Tok.base).border(1.dp, Tok.hair, RoundedCornerShape(8.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-        )
-        Row(Modifier.padding(top = 11.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-            Box(
-                Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(10.dp))
-                    .border(1.dp, Tok.danger.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                    .clickable(onClick = onDeny),
-                contentAlignment = Alignment.Center,
-            ) { Text("Deny", color = Tok.danger, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-            Box(
-                Modifier.weight(1.25f).height(44.dp).clip(RoundedCornerShape(10.dp)).background(Tok.accent)
-                    .clickable(onClick = onAllow),
-                contentAlignment = Alignment.Center,
-            ) { Text("Allow", color = Tok.base, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+        if (expanded) {
+            AskDetail(ask, payload, Modifier.padding(bottom = Metric.gap))
+            Row(Modifier.fillMaxWidth().padding(bottom = Metric.gapL), horizontalArrangement = Arrangement.spacedBy(Metric.gap)) {
+                DecisionButton(stringResource(Res.string.deny), Tok.danger, filled = false, modifier = Modifier.weight(1f), onClick = onDeny)
+                DecisionButton(stringResource(Res.string.allow), Tok.accent, filled = true, modifier = Modifier.weight(1.25f), onClick = onAllow)
+            }
         }
     }
 }
 
+/**
+ * The full request, unclipped.
+ *
+ * The payload WRAPS rather than ellipsizing: a half-shown command is exactly the thing a decision must never
+ * be made against. A daemon-flagged danger is stated in words above it, with the daemon's own note.
+ */
+@Composable
+private fun AskDetail(ask: PermissionAsk?, payload: String, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(Metric.radiusS)
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+        if (ask?.danger == true) {
+            Text(
+                listOfNotNull(stringResource(Res.string.fl_ask_danger), ask.dangerNote).joinToString(" · "),
+                color = Tok.warn, style = TypeRole.body,
+            )
+        }
+        Text(
+            payload, color = Tok.tx, style = TypeRole.bodyMono,
+            modifier = Modifier.fillMaxWidth().clip(shape).background(Tok.surface)
+                .border(Metric.hairline, Tok.hair, shape).padding(Metric.gap),
+        )
+    }
+}
+
+/** A decision target: a real 48 dp floor, its verb written, and never two filled tiles in one row. */
+@Composable
+private fun DecisionButton(
+    label: String,
+    tint: androidx.compose.ui.graphics.Color,
+    filled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(Metric.radiusS)
+    Box(
+        modifier.heightIn(min = Metric.touch).clip(shape)
+            .then(if (filled) Modifier.background(tint) else Modifier.border(Metric.hairline, tint.copy(alpha = 0.45f), shape))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Metric.gap, vertical = Metric.gapS),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = if (filled) Tok.base else tint, style = TypeRole.action) }
+}
+
+/** History, deliberately quieter than the queue above it: what finished, where, and whether it worked. */
 @Composable
 private fun FinishedRow(f: FinishedEntry) {
     Column(Modifier.fillMaxWidth()) {
+        Hairline()
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp),
+            Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = Metric.gapS),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
         ) {
-            MachineChip(f.machineName, f.os, status = MachineStatus.OFFLINE, fontSize = 11.sp, glyph = 12.dp)
-            Text(f.title, color = Tok.tx2, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Icon(
-                if (f.ok) Icons.Rounded.Check else Icons.Rounded.Close, null,
-                tint = if (f.ok) Tok.ok else Tok.danger, modifier = Modifier.size(13.dp),
-            )
-            Text(f.timeAgo, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+            Column(Modifier.weight(1f)) {
+                Text(f.title, color = Tok.tx2, style = TypeRole.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    listOf(
+                        stringResource(if (f.ok) Res.string.st_complete else Res.string.st_failure),
+                        f.machineName,
+                        relativeMinutes(f.minutesAgo),
+                    ).joinToString(" · "),
+                    color = if (f.ok) Tok.muted else Tok.danger, style = TypeRole.captionMono,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp),
+                )
+            }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+    }
+}
+
+/**
+ * No link, so no queue.
+ *
+ * Deliberately NOT the all-clear check: an approval could be blocking a computer right now and this app
+ * would have no way to know. Saying "all clear" here is how someone closes the phone on a request that then
+ * expires unanswered.
+ */
+@Composable
+private fun NotLinked(modifier: Modifier = Modifier) {
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = 40.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        StateMarkGlyph(StateMark.RING, Tok.muted, 12.dp)
+        Spacer(Modifier.height(Metric.gapL))
+        Text(stringResource(Res.string.fl_unlinked_title), color = Tok.tx, style = TypeRole.title)
+        Spacer(Modifier.height(Metric.gapS))
+        Text(
+            stringResource(Res.string.fl_unlinked_body), color = Tok.tx2, style = TypeRole.preview,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+        Spacer(Modifier.height(56.dp))
     }
 }
 
@@ -173,7 +291,7 @@ private fun FinishedRow(f: FinishedEntry) {
 @Composable
 private fun AllClear(modifier: Modifier = Modifier) {
     Column(
-        modifier.fillMaxWidth().padding(horizontal = 44.dp),
+        modifier.fillMaxWidth().padding(horizontal = 40.dp),
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Canvas(Modifier.size(46.dp)) {
@@ -184,15 +302,15 @@ private fun AllClear(modifier: Modifier = Modifier) {
                 lineTo(size.width * 0.45f, size.height * 0.64f)
                 lineTo(size.width * 0.70f, size.height * 0.36f)
             }
-            drawPath(p, Tok.ok, style = Stroke(sw, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawPath(p, Tok.ok, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
-        Spacer(Modifier.height(16.dp))
-        Text("All clear — nothing needs you", color = Tok.tx2, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(Metric.gapL))
+        Text(stringResource(Res.string.fl_clear_title), color = Tok.tx, style = TypeRole.title)
+        Spacer(Modifier.height(Metric.gapS))
         Text(
-            "Approvals from any machine will queue here the moment they arrive.",
-            color = Tok.muted, fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center,
+            stringResource(Res.string.fl_clear_body), color = Tok.tx2, style = TypeRole.preview,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
-        Spacer(Modifier.height(60.dp))
+        Spacer(Modifier.height(56.dp))
     }
 }

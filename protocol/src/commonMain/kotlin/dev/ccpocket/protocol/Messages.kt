@@ -913,9 +913,10 @@ data class PermissionAsk(
     val taskId: String? = null,
     // The grant scopes the daemon will honor for THIS ask, in recommendation order — tolerant wire strings
     // ("once" / "task" / "session"), NOT an enum, so a future scope degrades to ignored instead of a
-    // frame drop. Null/empty ⇒ pre-M2 daemon: the client renders the legacy buttons and rides `remember`.
-    // Non-null is ALSO the client's implicit capability gate for [ApprovalAttentionHeartbeat] — a daemon
-    // that offers scopes understands heartbeats; one that doesn't would answer "unsupported".
+    // frame drop. Null ⇒ pre-M2 daemon: the client renders the legacy buttons and rides `remember`.
+    // A non-null list, INCLUDING empty, is also the client's implicit capability gate for
+    // [ApprovalAttentionHeartbeat] — a daemon that sends this field understands heartbeats even when it
+    // offers no standing scope; one that omits it would answer "unsupported".
     val grantOptions: List<String>? = null,
     // This ask does NOT auto-deny (issue #201): instead of timing out, the daemon RENEWS its window —
     // a daily reminder, bounded by a 7-day hard floor — so someone away from the computer is never

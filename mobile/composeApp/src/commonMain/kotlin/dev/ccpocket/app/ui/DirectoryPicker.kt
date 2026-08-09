@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -42,11 +42,25 @@ import dev.ccpocket.app.resources.dir_picker_empty
 import dev.ccpocket.app.resources.dir_picker_error
 import dev.ccpocket.app.resources.dir_picker_home
 import dev.ccpocket.app.resources.dir_picker_recents
-import dev.ccpocket.app.resources.dir_picker_sub
 import dev.ccpocket.app.resources.dir_picker_title
 import dev.ccpocket.app.resources.dir_picker_type_path
+import dev.ccpocket.app.resources.dir_picker_dirs_only
+import dev.ccpocket.app.resources.dir_picker_go_up
+import dev.ccpocket.app.resources.dir_picker_loading
+import dev.ccpocket.app.resources.dir_picker_on_computer
+import dev.ccpocket.app.resources.dir_picker_options
+import dev.ccpocket.app.resources.dir_picker_selected
 import dev.ccpocket.app.resources.dir_picker_use_here
+import dev.ccpocket.app.resources.conn_retry
+import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.ui.entry.EntryLabel
+import dev.ccpocket.app.ui.entry.EntryPrimaryButton
+import dev.ccpocket.app.ui.entry.EntryRouteRow
+import dev.ccpocket.app.ui.entry.EntrySecondaryButton
+import dev.ccpocket.app.ui.session.PathWithCopy
 import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.PathEntries
 import dev.ccpocket.protocol.PathEntry
@@ -202,43 +216,41 @@ internal fun DirectoryPickerSheet(
     // app on an old daemon degrades cleanly.
     val roots = if (isGuestDirView(dirs)) emptyList() else repo.browseRoots.value
 
+    // one start per sheet: a repeated tap (or a dismiss racing the effect) has nothing left to fire
+    var started by remember { mutableStateOf(false) }
+    val workdir = browseWorkdirOf(anchor, subPath)
+
     PocketSheet(onDismiss = onDismiss) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 4.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    stringResource(Res.string.dir_picker_title), color = Tok.tx, fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
-                )
-                // escape hatch to the manual sheet: off-home paths (other drives, /opt) stay reachable
-                Text(
-                    stringResource(Res.string.dir_picker_type_path), color = Tok.accent, fontSize = 12.5.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onTypePath).padding(6.dp),
-                )
+        // three zones: the header names whose filesystem this is, the decision region names what is
+        // selected, and ONLY the middle list swaps between loading / unreadable / empty / rows
+        Column(Modifier.fillMaxHeight(PICKER_SHEET_HEIGHT_FRACTION)) {
+            Column(Modifier.padding(horizontal = Metric.gutter).padding(bottom = Metric.gapS)) {
+                Text(stringResource(Res.string.dir_picker_title), color = Tok.tx, style = TypeRole.title)
+                // a directory list without a computer name is the fastest way to start work on the wrong one
+                repo.paired.value?.displayName()?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        stringResource(Res.string.dir_picker_on_computer, it), color = Tok.tx2,
+                        style = TypeRole.preview, modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
-            Text(
-                stringResource(Res.string.dir_picker_sub), color = Tok.muted, fontSize = 12.5.sp,
-                lineHeight = 17.sp, modifier = Modifier.padding(top = 2.dp),
+
+            // breadcrumb over the anchored browse; segment taps jump levels, ‹ goes one up, and (with #176
+            // roots) the root segment opens the switcher. Carries its own horizontal padding.
+            PickerBreadcrumb(
+                crumbs, roots, anchor,
+                // ‹ climbs one level; at a non-home root's top it returns to home instead of dead-ending — a
+                // switcher-independent way back (matters when a new app talks to an old daemon that sends no roots)
+                onUp = {
+                    if (subPath.isEmpty() && anchor != PocketRepository.BROWSE_HOME) anchor = PocketRepository.BROWSE_HOME
+                    else subPath = browseParentOf(subPath)
+                },
+                onSegment = { i -> subPath = if (i == 0) "" else crumbs.drop(1).take(i).joinToString(SEP.toString()) },
+                onSwitchRoot = { chosen -> anchor = chosen; subPath = "" },
             )
-        }
+            dev.ccpocket.app.ui.session.Hairline()
 
-        // breadcrumb over the anchored browse; segment taps jump levels, ‹ goes one up, and (with #176
-        // roots) the root segment opens the switcher. Sits OUTSIDE the 18dp block: it carries its own
-        // horizontal padding.
-        PickerBreadcrumb(
-            crumbs, roots, anchor,
-            // ‹ climbs one level; at a non-home root's top it returns to home instead of dead-ending — a
-            // switcher-independent way back (matters when a new app talks to an old daemon that sends no roots)
-            onUp = {
-                if (subPath.isEmpty() && anchor != PocketRepository.BROWSE_HOME) anchor = PocketRepository.BROWSE_HOME
-                else subPath = browseParentOf(subPath)
-            },
-            onSegment = { i -> subPath = if (i == 0) "" else crumbs.drop(1).take(i).joinToString(SEP.toString()) },
-            onSwitchRoot = { chosen -> anchor = chosen; subPath = "" },
-        )
-
-        Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 16.dp)) {
-            // tall enough that the BROWSE rows stay reachable below a full 5-row RECENTS block
-            LazyColumn(Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 400.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = Metric.gutter)) {
                 // recents pin at the home root; each carries its own anchor so an off-home one (#176)
                 // switches the drive as well as the level on tap
                 if (anchor == PocketRepository.BROWSE_HOME && subPath.isEmpty() && recents.isNotEmpty()) {
@@ -249,17 +261,38 @@ internal fun DirectoryPickerSheet(
                     item { PickerLabel(stringResource(Res.string.dir_picker_browse)) }
                 }
                 when {
+                    // unreadable is recoverable: the daemon may simply have been busy, and the level above
+                    // is always readable — a dead end here would strand the browse with no way back
                     failed -> item {
-                        Text(
-                            stringResource(Res.string.dir_picker_error), color = Tok.warn, fontSize = 12.5.sp,
-                            modifier = Modifier.padding(vertical = 14.dp),
-                        )
+                        Column(Modifier.padding(vertical = Metric.gap)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+                                Box(Modifier.size(8.dp).background(Tok.warn))
+                                Text(stringResource(Res.string.dir_picker_error), color = Tok.tx, style = TypeRole.action)
+                            }
+                            Row(Modifier.padding(top = Metric.gap), horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+                                EntrySecondaryButton(stringResource(Res.string.conn_retry), Modifier.weight(1f)) {
+                                    repo.browseListing.value = null; repo.browseDirs(anchor, subPath)
+                                }
+                                EntrySecondaryButton(stringResource(Res.string.dir_picker_go_up), Modifier.weight(1f)) {
+                                    if (subPath.isEmpty() && anchor != PocketRepository.BROWSE_HOME) anchor = PocketRepository.BROWSE_HOME
+                                    else subPath = browseParentOf(subPath)
+                                }
+                            }
+                        }
                     }
-                    rows == null -> items(3) { SkeletonRow() }
+                    rows == null -> {
+                        item {
+                            Text(
+                                stringResource(Res.string.dir_picker_loading), color = Tok.muted,
+                                style = TypeRole.caption, modifier = Modifier.padding(vertical = Metric.gapS),
+                            )
+                        }
+                        items(3) { SkeletonRow() }
+                    }
                     rows.isEmpty() -> item {
                         Text(
-                            stringResource(Res.string.dir_picker_empty), color = Tok.muted, fontSize = 12.5.sp,
-                            modifier = Modifier.padding(vertical = 14.dp),
+                            stringResource(Res.string.dir_picker_empty), color = Tok.tx2,
+                            style = TypeRole.preview, modifier = Modifier.padding(vertical = 14.dp),
                         )
                     }
                     else -> items(rows, key = { "d:" + it.name }) { e ->
@@ -267,28 +300,48 @@ internal fun DirectoryPickerSheet(
                         BrowseDirRow(name = e.name, isProject = browseProjectAt(dirs, homeAbs, anchor, child) != null) { subPath = child }
                     }
                 }
+                item {
+                    Text(
+                        stringResource(Res.string.dir_picker_dirs_only), color = Tok.muted,
+                        style = TypeRole.caption, modifier = Modifier.padding(top = Metric.gap, bottom = Metric.gapS),
+                    )
+                }
+                // escape hatch to the manual sheet: off-home paths (other drives, /opt), older daemons and
+                // guest constraints all still land somewhere
+                item { EntryRouteRow(stringResource(Res.string.dir_picker_type_path), onClick = onTypePath) }
             }
 
-            // ── bottom bar: the current directory + the same two actions as the manual path sheet ──
-            TailPathText(browseWorkdirOf(anchor, subPath), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp))
-            Row(
-                Modifier.fillMaxWidth().padding(top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                SessionDefaultsChip(
-                    repo.defaultAgent.value, repo.defaultMode.value,
-                    Modifier.height(52.dp),
-                ) { onOptions(browseWorkdirOf(anchor, subPath)) }
-                SheetButton(
-                    stringResource(Res.string.dir_picker_use_here),
-                    Modifier.weight(1f),
-                    bg = Tok.accent, fg = Tok.base,
-                ) { onStart(browseWorkdirOf(anchor, subPath)) }
+            // ── the decision region: pinned, so it never scrolls away from the list it decides on ──
+            dev.ccpocket.app.ui.session.Hairline()
+            Column(Modifier.padding(horizontal = Metric.gutter).padding(top = Metric.gapS)) {
+                EntryLabel(stringResource(Res.string.dir_picker_selected))
+                // the FULL path beside its own copy target — the end of a path is the part that identifies it
+                PathWithCopy(workdir, Modifier.padding(top = 2.dp), color = Tok.tx, maxLines = Int.MAX_VALUE)
+                Row(
+                    Modifier.fillMaxWidth().padding(top = Metric.gapS),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Metric.gap),
+                ) {
+                    Box(Modifier.weight(1f)) {
+                        EntryPrimaryButton(
+                            stringResource(Res.string.dir_picker_use_here),
+                            caption = agentName(repo.defaultAgent.value) + " · " +
+                                stringResource(sessionDefaultsLabel(repo.defaultAgent.value, repo.defaultMode.value)),
+                            enabled = !started,
+                        ) { if (!started) { started = true; onStart(workdir) } }
+                    }
+                    // opens configuration on this directory and starts NOTHING
+                    EntrySecondaryButton(stringResource(Res.string.dir_picker_options), Modifier.width(112.dp)) {
+                        onOptions(workdir)
+                    }
+                }
             }
         }
     }
 }
+
+/** How much of the screen the bounded picker may occupy — pinned zones + a scrolling middle. */
+private const val PICKER_SHEET_HEIGHT_FRACTION = 0.86f
 
 @Composable
 private fun PickerLabel(text: String) = Text(

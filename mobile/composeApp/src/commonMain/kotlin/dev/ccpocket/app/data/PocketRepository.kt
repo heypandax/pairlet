@@ -927,8 +927,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * the daemon deadline. */
     val askRisk = mutableStateMapOf<ApprovalKey, PermissionRiskUpdated>()
 
-    /** The current card's advisory risk, if any (M3). */
-    fun riskFor(ask: PermissionAsk): String? = askRisk[ApprovalKey(ask.convoId, ask.askId)]?.risk
+    /** The current card's advisory risk LEVEL, if any (M3) — the desktop card's badge input. */
+    fun riskFor(ask: PermissionAsk): String? = riskDetailFor(ask)?.risk
+
+    /** The current card's FULL risk event (M3): level plus reason, reason codes and assessed time. The
+     *  Secure Approval sheet renders the evidence, not just the badge — a level with no reason is a verdict
+     *  the user can't check. */
+    fun riskDetailFor(ask: PermissionAsk): PermissionRiskUpdated? = askRisk[ApprovalKey(ask.convoId, ask.askId)]
 
     /** issue #100: is THIS exact ask the one the daemon reported TIMED_OUT? Composite-matched (P1-3). */
     fun askTimedOut(ask: PermissionAsk): Boolean = timedOutAskId.value == ApprovalKey(ask.convoId, ask.askId)

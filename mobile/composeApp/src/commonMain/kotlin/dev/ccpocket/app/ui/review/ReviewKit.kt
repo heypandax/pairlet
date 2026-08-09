@@ -43,6 +43,11 @@ import dev.ccpocket.app.resources.rv_status_in_progress
 import dev.ccpocket.app.resources.rv_status_queued
 import dev.ccpocket.app.resources.rv_status_responded
 import dev.ccpocket.app.resources.rv_status_unknown
+import dev.ccpocket.app.resources.rv_summary_clear
+import dev.ccpocket.app.resources.rv_summary_sent_many
+import dev.ccpocket.app.resources.rv_summary_sent_one
+import dev.ccpocket.app.resources.rv_summary_waiting_many
+import dev.ccpocket.app.resources.rv_summary_waiting_one
 import dev.ccpocket.app.resources.rv_untrusted_body
 import dev.ccpocket.app.resources.rv_untrusted_title
 import dev.ccpocket.app.resources.rv_verdict_approve
@@ -71,6 +76,45 @@ import org.jetbrains.compose.resources.stringResource
 //     read is locked daemon-side (§8), and the UI has to say so.
 //   - nothing here fetches, opens or executes anything from peer material.
 // ===========================================================================
+
+/**
+ * Whether the Center may state a count at all.
+ *
+ * Loading, unsupported, offline and error are not "zero" — they are "we don't know", and a header that
+ * carried the last ready state's pending count through one of them would be asserting daemon truth the
+ * daemon never sent (Supporting Surfaces UI 2.0 · README "Non-ready states do not reuse ready-state counts").
+ */
+fun ReviewCenterState.summaryReady(): Boolean = !loading && !unsupported && !offline && error == null
+
+/**
+ * The Center's one factual line — or null whenever [summaryReady] is false, so the header simply drops it.
+ *
+ * [pending] is the repository's own count of requests waiting on this human; the sent tally is the honest
+ * size of the outbound list, never a delivery claim about any of them.
+ */
+@Composable
+fun reviewSummaryText(state: ReviewCenterState, pending: Int): String? {
+    if (!state.summaryReady()) return null
+    val parts = buildList {
+        add(
+            if (pending > 0) {
+                stringResource(
+                    if (pending == 1) Res.string.rv_summary_waiting_one else Res.string.rv_summary_waiting_many,
+                    pending,
+                )
+            } else {
+                stringResource(Res.string.rv_summary_clear)
+            },
+        )
+        if (state.sent.isNotEmpty()) add(
+            stringResource(
+                if (state.sent.size == 1) Res.string.rv_summary_sent_one else Res.string.rv_summary_sent_many,
+                state.sent.size,
+            ),
+        )
+    }
+    return parts.joinToString(" · ")
+}
 
 fun reviewStatusRes(s: ReviewStatus): StringResource = when (s) {
     ReviewStatus.QUEUED -> Res.string.rv_status_queued

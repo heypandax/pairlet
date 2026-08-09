@@ -39,10 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.Tok
-import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionGroup
 import dev.ccpocket.protocol.SessionSummary
 import org.jetbrains.compose.resources.stringResource
@@ -75,38 +73,9 @@ internal fun sessionSections(sessions: List<SessionSummary>, groups: List<Sessio
     return if (ungrouped.isEmpty()) sections else sections + SessionSection(null, ungrouped)
 }
 
-/** A single session row — shared by the flat list and every group section. [onLongPress] (set only in the
- *  grouped view) opens the move-to-group menu; the tap always resumes/opens the session. */
-@Composable
-internal fun SessionRow(repo: PocketRepository, dir: String, s: SessionSummary, onLongPress: (() -> Unit)?) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-            .combinedClickable(
-                onClick = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
-                onLongClick = onLongPress,
-            ).padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(s.title, color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            AgentBadge(s.agent, gap = 8.dp) // shows only for Codex (so resume opens the right backend)
-            if (s.live || s.busy) { // running, or idle with background work still going
-                Spacer(Modifier.width(8.dp))
-                PulseDot(Tok.ok)
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(Res.string.running), color = Tok.ok, fontSize = 11.sp)
-            }
-        }
-        if (s.firstPrompt.isNotBlank()) Text(
-            s.firstPrompt, color = Tok.tx2, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-        Text(
-            "💬 ${s.messageCount} · ⑂ ${s.gitBranch ?: "-"} · ${relativeTime(s.lastModified)}",
-            color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-            modifier = Modifier.padding(top = 3.dp),
-        )
-    }
-}
+// The session row itself now lives in `ui/session/SessionsSurface.kt` (Mobile UI 2.0): it renders a
+// SessionRowUi the pure state mapper decided on, so the emoji metadata + ad-hoc "running" chip this file
+// used to own are gone. Group folding, headers and the move/archive sheets below are unchanged.
 
 /** A collapsible group header: chevron + name + count. Tap toggles [collapsed]; the ⋯ (and a long-press
  *  when [onManage] is set) opens rename/delete. The ungrouped bucket passes [onManage] == null (nothing to

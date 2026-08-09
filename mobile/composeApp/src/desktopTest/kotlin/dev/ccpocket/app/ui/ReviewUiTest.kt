@@ -27,6 +27,9 @@ import dev.ccpocket.app.resources.rv_prepare_copy
 import dev.ccpocket.app.resources.rv_preview_title
 import dev.ccpocket.app.resources.rv_request_required
 import dev.ccpocket.app.resources.rv_send
+import dev.ccpocket.app.resources.rv_status_delivered
+import dev.ccpocket.app.resources.rv_status_in_progress
+import dev.ccpocket.app.resources.rv_status_queued
 import dev.ccpocket.app.resources.rv_tab_sent
 import dev.ccpocket.app.resources.rv_unsupported
 import dev.ccpocket.app.resources.rv_untrusted_title
@@ -40,6 +43,7 @@ import dev.ccpocket.app.ui.review.ReviewTab
 import dev.ccpocket.app.ui.review.artifactProblem
 import dev.ccpocket.app.ui.review.artifactUrl
 import dev.ccpocket.app.ui.review.requestProblem
+import dev.ccpocket.app.ui.review.summaryReady
 import dev.ccpocket.protocol.ArtifactKind
 import dev.ccpocket.protocol.ArtifactRef
 import dev.ccpocket.protocol.CollaboratorDirection
@@ -293,6 +297,30 @@ class ReviewUiTest {
         assertEquals("dev-aiko", to, "the picked contact, not the pre-selected first one")
         assertEquals(ask, brief?.request)
         assertEquals(url, artifacts.singleOrNull()?.url)
+    }
+
+    // ── the header summary: a count is a claim, so only a READY state may make one ────────────────
+
+    /** Every non-ready state refuses the summary — it must not inherit the last ready state's numbers. */
+    @Test
+    fun onlyAReadyCenterMayStateACount() {
+        val ready = ReviewCenterState(received = listOf(inbox(req("a"))), sent = listOf(req("b")))
+        assertTrue(ready.summaryReady())
+        assertFalse(ready.copy(loading = true).summaryReady(), "a first pull has no counts yet")
+        assertFalse(ready.copy(offline = true).summaryReady(), "with no link there is nothing to count")
+        assertFalse(ready.copy(unsupported = true).summaryReady(), "an old daemon never sent a list")
+        assertFalse(ready.copy(error = "boom").summaryReady(), "a failed pull is not an empty inbox")
+    }
+
+    /** Queued is a protocol status, never a promotion — and never derived from how long it has sat. */
+    @Test
+    fun queuedStaysQueued() = runComposeUiTest {
+        setContent(
+            center(ReviewCenterState(sent = listOf(req("a", ReviewStatus.QUEUED))), tab = ReviewTab.SENT),
+        )
+        assertPresent(str(Res.string.rv_status_queued))
+        assertFalse(present(str(Res.string.rv_status_delivered)), "queued must never read as delivered")
+        assertFalse(present(str(Res.string.rv_status_in_progress)))
     }
 
     // ── pure mapping: the grammar the daemon enforces, mirrored for fast feedback ──────────────────

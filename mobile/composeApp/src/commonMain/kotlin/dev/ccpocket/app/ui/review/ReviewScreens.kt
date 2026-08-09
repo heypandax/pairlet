@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package dev.ccpocket.app.ui.review
 
 import androidx.compose.foundation.background
@@ -7,10 +9,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +29,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -84,7 +91,9 @@ import dev.ccpocket.app.resources.rv_to
 import dev.ccpocket.app.resources.rv_unsupported
 import dev.ccpocket.app.resources.rv_verdict
 import dev.ccpocket.app.resources.rv_verification
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.ui.handoff.FingerprintBlock
 import dev.ccpocket.app.ui.share.ShareOutlineButton
 import dev.ccpocket.app.ui.share.SharePrimaryButton
@@ -143,7 +152,9 @@ fun ReviewCenterScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize().background(Tok.base)) {
-        ReviewTabs(tab, pendingCount, onTab)
+        // the Inbox badge is a count, and a count is a claim: a state that never received a list must not
+        // keep wearing the last one's number while the pane underneath says "offline"
+        ReviewTabs(tab, if (state.summaryReady()) pendingCount else 0, onTab)
         ReviewDivider()
         state.error?.let { ReviewErrorRow(it) }
         Box(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
@@ -163,28 +174,48 @@ fun ReviewCenterScreen(
     }
 }
 
+/**
+ * The three destinations, as chips that WRAP rather than shrink.
+ *
+ * A [FlowRow] instead of three equal thirds: at 200% type "评审联系人" cannot be squeezed into a third of a
+ * 402 pt screen without ellipsis, and a clipped destination label is a destination nobody can find. Wrapping
+ * to a second line costs one row of height and keeps every label whole.
+ */
 @Composable
 private fun ReviewTabs(tab: ReviewTab, pending: Int, onTab: (ReviewTab) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    FlowRow(
+        Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).padding(top = Metric.gapS, bottom = Metric.gap),
+        horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
+        verticalArrangement = Arrangement.spacedBy(Metric.gapS),
+    ) {
         TabChip(stringResource(Res.string.rv_tab_inbox), tab == ReviewTab.INBOX, pending) { onTab(ReviewTab.INBOX) }
         TabChip(stringResource(Res.string.rv_tab_sent), tab == ReviewTab.SENT, 0) { onTab(ReviewTab.SENT) }
         TabChip(stringResource(Res.string.rv_tab_contacts), tab == ReviewTab.CONTACTS, 0) { onTab(ReviewTab.CONTACTS) }
     }
 }
 
+/** One destination chip: a 44 pt floor, a hairline when unselected, a fill and heavier ink when selected —
+ *  and `selected` in the semantics, so the state is spoken and not merely drawn. */
 @Composable
 private fun TabChip(text: String, selected: Boolean, badge: Int, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(Metric.radiusS)
     Row(
-        Modifier.clip(RoundedCornerShape(9.dp)).background(if (selected) Tok.raised else Tok.base)
-            .clickable(onClick = onClick).padding(horizontal = 11.dp, vertical = 7.dp),
+        Modifier.heightIn(min = 44.dp).clip(shape)
+            .then(if (selected) Modifier.background(Tok.raised) else Modifier.border(Metric.hairline, Tok.hair, shape))
+            .clickable(role = Role.Tab, onClick = onClick)
+            .semantics { this.selected = selected }
+            .padding(horizontal = Metric.gap, vertical = Metric.gapS),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
     ) {
-        Text(text, color = if (selected) Tok.tx else Tok.tx2, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text(
+            text, color = if (selected) Tok.tx else Tok.tx2, style = TypeRole.action,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
         if (badge > 0) {
             Text(
-                "$badge", color = Tok.base, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent).padding(horizontal = 5.dp, vertical = 1.dp),
+                "$badge", color = Tok.base, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent).padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
     }

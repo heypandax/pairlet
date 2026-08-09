@@ -25,7 +25,6 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
@@ -43,10 +42,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -69,6 +71,7 @@ import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.theme.ThemeMode
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.voice.NativeDictation
+import dev.ccpocket.app.ui.session.Hairline
 import dev.ccpocket.app.ui.share.JoinFolderScreen
 import dev.ccpocket.app.ui.share.SharedFoldersScreen
 import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
@@ -100,15 +103,30 @@ private val CONTEXT_WINDOW_OPTS: List<Long?> = listOf(null, DEFAULT_CONTEXT_WIND
 private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4f)
 
 /**
- * Settings as a full screen (not a sheet): per-session preferences — notifications, the new-session default
- * mode + reasoning effort, About, and Exit. Paired computers are managed on the disconnected picker
- * (ConnectScreen), reached via Exit — not here. [onBack] returns to the screen that opened it.
+ * Settings as a full screen (not a sheet).
+ *
+ * Mobile UI 2.0 replaces the single long scroll with a first-hop LANDING plus five focused category pages
+ * (Supporting Surfaces UI 2.0 · Master v1). Every control and every repository binding is the one that was
+ * here before — only where it lives moved. Token usage and scheduled tasks stay one tap from the landing
+ * because they are destinations, not settings.
+ *
+ * Navigation is one local [SettingsCategory] beside the existing full-screen flags. Back pops a category to
+ * the landing and only then leaves Settings, so a drill-down is never skipped over. [onBack] returns to the
+ * screen that opened Settings.
  */
 @Composable
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // Capability rows come from the installed CLI/model cache. A recomposition after the reply replaces
     // the loading/empty state; no global max/ultra list is guessed in the client.
     LaunchedEffect(repo.defaultAgent.value) { repo.fetchModels(repo.defaultAgent.value) }
+    // Approvals (issue #201). Daemon truth: the Security page shows the preference only once an
+    // ApprovalPrefs reply proves this daemon can honor it. Asked HERE rather than on that page, so the
+    // answer has already arrived by the time it is opened.
+    LaunchedEffect(Unit) { repo.fetchApprovalPrefs() }
+
+    // the one local route. Full-screen children below keep their own flags and return to whatever this
+    // holds, so backing out of Usage lands on the page that opened it rather than on the landing.
+    var category by remember { mutableStateOf<SettingsCategory?>(null) }
     var showHelp by remember { mutableStateOf(false) }
     if (showHelp) {
         HelpCenterScreen(HelpEntryPoint.SETTINGS, onBack = { showHelp = false })
@@ -143,376 +161,432 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // forget they have, and this one's whole value is that a colleague's ask does not go unseen.
     var showReviews by remember { mutableStateOf(false) }
     if (showReviews) { dev.ccpocket.app.ui.review.ReviewCenterRoute(repo) { showReviews = false }; return }
-    // back closes Settings — register a handler so it doesn't fall through to the app-level navigation
-    dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
+    // back pops a category to the landing first, and only then leaves Settings — so it never falls
+    // through to the app-level navigation while a drill-down is open
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { if (category != null) category = null else onBack() }
+
+    val page = category
     Column(Modifier.fillMaxSize().background(Tok.base)) {
-        Row(
-            Modifier.fillMaxWidth().background(Tok.surface).padding(horizontal = 6.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton({ onBack() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-            Text(stringResource(Res.string.settings_title), color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        }
+        FirstHopHeader(
+            title = stringResource(page?.let(::settingsCategoryTitleRes) ?: Res.string.settings_title),
+            // one factual line, and only on the landing: which computer these settings are talking to.
+            // Nothing derived, nothing secret — the paired binding's own display name or nothing at all.
+            summary = if (page != null) null else {
+                repo.paired.value?.displayName()?.takeIf { it.isNotBlank() }
+                    ?.let { stringResource(Res.string.settings_connected_to, it) }
+            },
+            onBack = { if (page != null) category = null else onBack() },
+        )
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 20.dp),
+            Modifier.weight(1f).verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 28.dp),
         ) {
-
-            // Keep daemon management reachable while connected as well as from the disconnected picker.
-            // Removing only changes this app's local credential; it does not delete the daemon or its
-            // sessions. A fresh pairing can be performed from the same list afterwards.
-            SectionLabel(stringResource(Res.string.settings_paired_computers))
-            DeviceList(
-                repo = repo,
-                onSwitch = { target -> onBack(); repo.switchDaemon(target) },
-                onAdd = { onBack(); repo.beginAddDevice() },
-            )
-            Spacer(Modifier.height(12.dp))
-
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .clickable { showUsage = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(Res.string.settings_usage), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text("›", color = Tok.muted, fontSize = 16.sp)
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .clickable { showSchedules = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(Res.string.schedule_tasks_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                Text("›", color = Tok.muted, fontSize = 16.sp)
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel(stringResource(Res.string.settings_help_section))
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
-            ) {
-                ManualLinkRow(
-                    title = stringResource(Res.string.support_open),
-                    sub = stringResource(Res.string.support_sub),
-                ) { showHelp = true }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                ManualLinkRow(
-                    title = stringResource(Res.string.settings_manual_title),
-                    sub = stringResource(Res.string.settings_manual_sub),
-                ) { openWebUrl(USER_MANUAL_URL) }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                ManualLinkRow(
-                    title = stringResource(Res.string.settings_troubleshooting),
-                    sub = stringResource(Res.string.settings_troubleshooting_sub),
-                ) { openWebUrl(USER_MANUAL_TROUBLESHOOTING_URL) }
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel(stringResource(Res.string.settings_sharing_section))
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                Row(
-                    Modifier.fillMaxWidth().clickable { showShares = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(Res.string.settings_shared_folders), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    Text("›", color = Tok.muted, fontSize = 16.sp)
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                Row(
-                    Modifier.fillMaxWidth().clickable { showJoin = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(Res.string.join_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    Text("›", color = Tok.muted, fontSize = 16.sp)
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                Row(
-                    Modifier.fillMaxWidth().clickable { showCollaborators = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(Res.string.co_screen_title), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    Text("›", color = Tok.muted, fontSize = 16.sp)
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                Row(
-                    Modifier.fillMaxWidth().clickable { showReviews = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(Res.string.rv_settings_row), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    if (repo.reviewPendingCount > 0) {
-                        Text("${repo.reviewPendingCount}", color = Tok.accent, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text("›", color = Tok.muted, fontSize = 16.sp)
-                }
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                Row(
-                    Modifier.fillMaxWidth().clickable { showBridges = true }.padding(horizontal = 14.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(Res.string.settings_bridges), color = Tok.tx, fontSize = 14.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    Text("›", color = Tok.muted, fontSize = 16.sp)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            SectionLabel(stringResource(Res.string.notifications_section))
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                ToggleRow(
-                    label = stringResource(Res.string.notify_on_complete),
-                    sub = stringResource(Res.string.notify_on_complete_sub),
-                    checked = repo.notificationsOn.value,
-                    onChange = { repo.setNotificationsEnabled(it) },
+            when (page) {
+                null -> SettingsLanding(
+                    repo,
+                    onCategory = { category = it },
+                    onUsage = { showUsage = true },
+                    onSchedules = { showSchedules = true },
                 )
-            }
 
-            // Approvals (issue #201). Daemon truth: the section appears only once an ApprovalPrefs reply
-            // proves this daemon can honor the preference — against an older one the frame is dropped, and
-            // showing a switch that silently does nothing would be worse than showing none.
-            LaunchedEffect(Unit) { repo.fetchApprovalPrefs() }
-            repo.approvalPrefs.value?.let { noAutoDeny ->
-                SectionLabel(stringResource(Res.string.approvals_section))
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                    ToggleRow(
-                        label = stringResource(Res.string.approval_no_auto_deny),
-                        sub = stringResource(Res.string.approval_no_auto_deny_sub),
-                        checked = noAutoDeny,
-                        onChange = { repo.setAskNoAutoDeny(it) },
-                    )
-                }
-                // #220: Full Control存续时长 — default 0 (never expires). A pre-#220 daemon reports 0 and
-                // honoring the change is harmless there (it just ignores the field), so it rides the same
-                // capability gate as the toggle above.
-                val neverLabel = stringResource(Res.string.full_control_expiry_never)
-                val expiry = repo.approvalFullControlExpiryMs.value ?: 0L
-                SectionLabel(stringResource(Res.string.full_control_expiry))
-                SegmentedRow(
-                    FULL_CONTROL_EXPIRY_OPTS,
-                    FULL_CONTROL_EXPIRY_OPTS.minByOrNull { kotlin.math.abs(it - expiry) } ?: 0L,
-                    label = { fullControlExpiryLabel(it, neverLabel) },
-                ) { repo.setFullControlExpiryMs(it) }
-                Text(stringResource(Res.string.full_control_expiry_sub), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
-            }
-
-            // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere
-            // whisper is already the only voice path and the toggle would be a no-op.
-            if (NativeDictation.available) {
-                SectionLabel(stringResource(Res.string.voice_section))
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                    ToggleRow(
-                        label = stringResource(Res.string.voice_use_whisper),
-                        sub = stringResource(Res.string.voice_use_whisper_sub),
-                        checked = repo.voiceWhisper.value,
-                        onChange = { repo.setVoiceWhisper(it) },
-                    )
-                }
-            }
-
-            SectionLabel(stringResource(Res.string.default_mode_section))
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                val modeOptions = MODES + if (
-                    repo.defaultAgent.value == AgentKind.CLAUDE &&
-                    repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
-                ) listOf(AUTO_MODE) else emptyList()
-                modeOptions.forEachIndexed { i, m ->
-                    if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                    val sel = repo.defaultMode.value == m.key && repo.defaultPermissionMode.value == m.nativeMode
-                    Row(
-                        Modifier.fillMaxWidth().clickable {
-                            if (m.nativeMode == CLAUDE_PERMISSION_MODE_AUTO) repo.setDefaultAutoMode()
-                            else repo.setDefaultMode(m.key)
-                        }.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("●", color = m.color, fontSize = 9.sp, modifier = Modifier.padding(end = 10.dp))
-                        Text(stringResource(m.label), color = if (sel) Tok.accent else Tok.tx, fontSize = 14.sp, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
-                        if (sel) Text("✓", color = Tok.accent, fontSize = 13.5.sp)
-                    }
-                }
-            }
-
-            // Security (issue #109): access controls sit right under the permission mode, kept contiguous.
-            SecurityGroup(repo.appLock)
-
-            SectionLabel(stringResource(Res.string.default_model_section))
-            val modelDefaultLabel = stringResource(Res.string.value_default)
-            // selected via defaultModelFor so a legacy stored "opus" still highlights the (migrated) Opus
-            // segment; labels collapse the full Opus 5 id to its short alias so the segments stay compact
-            SegmentedRow(MODEL_DEFAULT_OPTS, repo.defaultModelFor(AgentKind.CLAUDE), label = { it?.let(::modelAlias) ?: modelDefaultLabel }) { repo.setDefaultModel(it) }
-            Text(stringResource(Res.string.default_model_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
-
-            SectionLabel(stringResource(Res.string.default_effort_section))
-            val effortDefaultLabel = stringResource(Res.string.value_default)
-            val defaultAgent = repo.defaultAgent.value
-            val effortOptions = (listOf<String?>(null) + repo.effortOptions(defaultAgent, repo.defaultModelFor(defaultAgent)))
-                .let { opts -> if (repo.defaultEffort.value != null && repo.defaultEffort.value !in opts) opts + repo.defaultEffort.value else opts }
-                .distinct()
-            SegmentedRow(effortOptions, repo.defaultEffort.value, label = { it ?: effortDefaultLabel }) { repo.setDefaultEffort(it) }
-            if (defaultAgent == AgentKind.CODEX && repo.serviceTierOptions(defaultAgent, repo.defaultModelFor(defaultAgent)).any { it.id == "priority" }) {
-                Column(
-                    Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp))
-                        .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
-                ) {
-                    ToggleRow(
-                        label = stringResource(Res.string.fast_mode),
-                        sub = stringResource(Res.string.fast_mode_detail),
-                        checked = repo.defaultServiceTier.value == "priority",
-                        onChange = { repo.setDefaultServiceTier(if (it) "priority" else null) },
-                    )
-                }
-            }
-
-            SectionLabel(stringResource(Res.string.context_window_section))
-            val ctxDefaultLabel = stringResource(Res.string.value_default)
-            // #171: this control governs the CATCH-ALL only — models holding their own window ignore it. A silent
-            // no-op here IS the bug we're replacing (tap 200K, nothing moves, the setting reads broken), so once
-            // the user actually touches it we name the models it won't reach instead of staying quiet.
-            var catchAllEdited by remember { mutableStateOf(false) }
-            SegmentedRow(
-                CONTEXT_WINDOW_OPTS, repo.contextWindowOverride.value,
-                label = { opt -> when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" } },
-            ) { catchAllEdited = true; repo.setContextWindowOverride(it) }
-            ContextWindowCustomRow(repo) { catchAllEdited = true }
-            val shadowing = repo.contextWindowOverrides.keys.sorted()
-            if (catchAllEdited && shadowing.isNotEmpty()) CatchAllShadowedNote(shadowing)
-            else Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
-
-            PerModelWindows(repo)
-
-            SectionLabel(stringResource(Res.string.af_show_from))
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val afOpts = listOf(
-                    Triple("both", stringResource(Res.string.af_both), null as androidx.compose.ui.graphics.Color?),
-                    Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
-                    Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
-                    Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
+                SettingsCategory.GENERAL -> GeneralPage(repo)
+                SettingsCategory.AGENT -> AgentDefaultsPage(repo)
+                SettingsCategory.CONNECTIONS -> ConnectionsPage(
+                    repo,
+                    // switching and pairing both tear this screen down, so they leave Settings first
+                    onSwitch = { target -> onBack(); repo.switchDaemon(target) },
+                    onAdd = { onBack(); repo.beginAddDevice() },
+                    onShares = { showShares = true },
+                    onJoin = { showJoin = true },
+                    onCollaborators = { showCollaborators = true },
+                    onReviews = { showReviews = true },
+                    onBridges = { showBridges = true },
                 )
-                afOpts.forEach { (key, label, dot) ->
-                    val sel = repo.agentFilter.value == key
-                    // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).
-                    // Labels dropped their "only/仅 " prefix so all four read in full at the default size; the
-                    // colored dot already carries the "which agent" meaning. Ellipsis is the large-font fallback.
-                    Box(
-                        Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
-                            .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                            .clickable { repo.setAgentFilter(key) }.padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            dot?.let {
-                                // dot inverts to Tok.base on the accent thumb so the Claude dot (itself accent) stays visible
-                                Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (sel) Tok.base else it))
-                                Spacer(Modifier.width(5.dp))
-                            }
-                            Text(
-                                label, color = if (sel) Tok.base else Tok.tx2, fontSize = 12.sp,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                }
-            }
-            Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 
-            SectionLabel(stringResource(Res.string.appearance_section))
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
-            ) {
-                // System / Light / Dark segmented control — same shape as the text-size one below (#63)
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
-                        .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    val modes = listOf(
-                        ThemeMode.SYSTEM to stringResource(Res.string.appearance_system),
-                        ThemeMode.LIGHT to stringResource(Res.string.appearance_light),
-                        ThemeMode.DARK to stringResource(Res.string.appearance_dark),
-                    )
-                    modes.forEach { (mode, label) ->
-                        val sel = repo.themeMode.value == mode
-                        Box(
-                            Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
-                                .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                                .clickable { repo.setThemeMode(mode) }.padding(vertical = 9.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                label, color = if (sel) Tok.base else Tok.tx2, fontSize = 13.sp,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
-                            )
-                        }
-                    }
-                }
-                Text(
-                    stringResource(Res.string.appearance_hint), color = Tok.muted, fontSize = 12.sp,
-                    lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp),
+                SettingsCategory.SECURITY -> SecurityPage(repo)
+                SettingsCategory.SUPPORT -> SupportPage(
+                    repo,
+                    onHelp = { showHelp = true },
+                    // Exit -> disconnect to the computer picker (ConnectScreen), where paired computers
+                    // are managed
+                    onExit = { onBack(); repo.disconnect() },
                 )
-            }
-
-            SectionLabel(stringResource(Res.string.text_size_section))
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(14.dp),
-            ) {
-                // "A"-gradient segmented control: each segment shows "A" at a representative size; selected fills accent
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.base)
-                        .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    FONT_SCALE_STEPS.forEachIndexed { i, s ->
-                        val sel = repo.fontScale.value in (s - 0.04f)..(s + 0.04f)
-                        Box(
-                            Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
-                                .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                                .clickable { repo.setFontScale(s) }.padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "A", color = if (sel) Tok.base else Tok.tx2,
-                                fontSize = (11f + i * 2.5f).sp,
-                                fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
-                            )
-                        }
-                    }
-                }
-                // live preview at the chosen scale
-                Box(
-                    Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(8.dp)).background(Tok.base)
-                        .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(12.dp),
-                ) {
-                    Text(stringResource(Res.string.text_size_sample), color = Tok.tx, fontSize = 14.sp * repo.fontScale.value)
-                }
-            }
-
-            VersionsGroup(repo.versionStatus.value)
-
-            SectionLabel(stringResource(Res.string.about_section))
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
-                AboutRow(stringResource(Res.string.about_license), "MIT")
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
-                AboutRow(
-                    stringResource(Res.string.about_connection),
-                    repo.paired.value?.displayName() ?: "direct LAN",
-                )
-            }
-
-            // Exit -> disconnect to the computer picker (ConnectScreen), where paired computers are managed.
-            Row(
-                Modifier.fillMaxWidth().padding(top = 16.dp).clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
-                    .clickable { onBack(); repo.disconnect() }.padding(vertical = 14.dp),
-                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(Res.string.exit), color = Tok.danger, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
             }
         }
+    }
+}
+
+/** The landing: the two utility destinations, then the five categories. Nothing here is itself a control. */
+@Composable
+private fun SettingsLanding(
+    repo: PocketRepository,
+    onCategory: (SettingsCategory) -> Unit,
+    onUsage: () -> Unit,
+    onSchedules: () -> Unit,
+) {
+    Hairline()
+    FirstHopRow(stringResource(Res.string.settings_usage), onClick = onUsage)
+    Hairline()
+    FirstHopRow(stringResource(Res.string.schedule_tasks_title), onClick = onSchedules)
+    Hairline()
+    Spacer(Modifier.height(20.dp))
+    SettingsCategory.entries.forEachIndexed { index, c ->
+        if (index > 0) Hairline()
+        FirstHopRow(
+            title = stringResource(settingsCategoryTitleRes(c)),
+            subtitle = stringResource(settingsCategorySubRes(c)),
+            onClick = { onCategory(c) },
+        ) {
+            // "a colleague is waiting on you" must not be two taps deep
+            if (c == SettingsCategory.CONNECTIONS && repo.reviewPendingCount > 0) PendingCountMark(repo.reviewPendingCount)
+        }
+    }
+    Hairline()
+}
+
+/** A count that says what it counts: a bare accent "2" is not something a screen reader can convey. */
+@Composable
+private fun PendingCountMark(count: Int) {
+    val label = stringResource(
+        if (count == 1) Res.string.rv_summary_waiting_one else Res.string.rv_summary_waiting_many, count,
+    )
+    Text(
+        "$count", color = Tok.base, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+        modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(Tok.accent)
+            .semantics { contentDescription = label }
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+// ══ General ════════════════════════════════════════════════════════════════════════════════════════
+
+/** Appearance, text size, notifications and — where a native engine exists to choose against — voice. */
+@Composable
+private fun GeneralPage(repo: PocketRepository) {
+    SectionLabel(stringResource(Res.string.appearance_section))
+    // System / Light / Dark segmented control — same shape as the text-size one below (#63)
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val modes = listOf(
+            ThemeMode.SYSTEM to stringResource(Res.string.appearance_system),
+            ThemeMode.LIGHT to stringResource(Res.string.appearance_light),
+            ThemeMode.DARK to stringResource(Res.string.appearance_dark),
+        )
+        modes.forEach { (mode, label) ->
+            val sel = repo.themeMode.value == mode
+            Box(
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(7.dp))
+                    .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                    .semantics { selected = sel }
+                    .clickable { repo.setThemeMode(mode) }.padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label, color = if (sel) Tok.base else Tok.tx2, fontSize = 13.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+    Text(
+        stringResource(Res.string.appearance_hint), color = Tok.muted, fontSize = 12.sp,
+        lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp),
+    )
+
+    SectionLabel(stringResource(Res.string.text_size_section))
+    // "A"-gradient segmented control: each segment shows "A" at a representative size; selected fills accent
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FONT_SCALE_STEPS.forEachIndexed { i, s ->
+            val sel = repo.fontScale.value in (s - 0.04f)..(s + 0.04f)
+            Box(
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(7.dp))
+                    .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                    .semantics { selected = sel }
+                    .clickable { repo.setFontScale(s) }.padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "A", color = if (sel) Tok.base else Tok.tx2,
+                    fontSize = (11f + i * 2.5f).sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+    // live preview at the chosen scale
+    Box(
+        Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(8.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(8.dp)).padding(12.dp),
+    ) {
+        Text(stringResource(Res.string.text_size_sample), color = Tok.tx, fontSize = 14.sp * repo.fontScale.value)
+    }
+
+    SectionLabel(stringResource(Res.string.notifications_section))
+    ToggleRow(
+        label = stringResource(Res.string.notify_on_complete),
+        sub = stringResource(Res.string.notify_on_complete_sub),
+        checked = repo.notificationsOn.value,
+        onChange = { repo.setNotificationsEnabled(it) },
+    )
+
+    // Only shown where a native dictation engine exists to choose against (iOS) — elsewhere
+    // whisper is already the only voice path and the toggle would be a no-op.
+    if (NativeDictation.available) {
+        SectionLabel(stringResource(Res.string.voice_section))
+        ToggleRow(
+            label = stringResource(Res.string.voice_use_whisper),
+            sub = stringResource(Res.string.voice_use_whisper_sub),
+            checked = repo.voiceWhisper.value,
+            onChange = { repo.setVoiceWhisper(it) },
+        )
+    }
+}
+
+// ══ Agent & session defaults ═══════════════════════════════════════════════════════════════════════
+
+/** What a NEW session starts with, plus the two windows that decide how its usage is measured. */
+@Composable
+private fun AgentDefaultsPage(repo: PocketRepository) {
+    SectionLabel(stringResource(Res.string.default_mode_section))
+    Column(Modifier.fillMaxWidth()) {
+        val modeOptions = MODES + if (
+            repo.defaultAgent.value == AgentKind.CLAUDE &&
+            repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
+        ) listOf(AUTO_MODE) else emptyList()
+        modeOptions.forEach { m ->
+            Hairline()
+            val sel = repo.defaultMode.value == m.key && repo.defaultPermissionMode.value == m.nativeMode
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .semantics { selected = sel }
+                    .clickable {
+                        if (m.nativeMode == CLAUDE_PERMISSION_MODE_AUTO) repo.setDefaultAutoMode()
+                        else repo.setDefaultMode(m.key)
+                    }.padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("●", color = m.color, fontSize = 9.sp, modifier = Modifier.padding(end = 10.dp))
+                Text(
+                    stringResource(m.label), color = if (sel) Tok.accent else Tok.tx, fontSize = 14.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f),
+                )
+                if (sel) Text("✓", color = Tok.accent, fontSize = 13.5.sp)
+            }
+        }
+        Hairline()
+    }
+
+    SectionLabel(stringResource(Res.string.default_model_section))
+    val modelDefaultLabel = stringResource(Res.string.value_default)
+    // selected via defaultModelFor so a legacy stored "opus" still highlights the (migrated) Opus
+    // segment; labels collapse the full Opus 5 id to its short alias so the segments stay compact
+    SegmentedRow(MODEL_DEFAULT_OPTS, repo.defaultModelFor(AgentKind.CLAUDE), label = { it?.let(::modelAlias) ?: modelDefaultLabel }) { repo.setDefaultModel(it) }
+    Text(stringResource(Res.string.default_model_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+
+    SectionLabel(stringResource(Res.string.default_effort_section))
+    val effortDefaultLabel = stringResource(Res.string.value_default)
+    val defaultAgent = repo.defaultAgent.value
+    val effortOptions = (listOf<String?>(null) + repo.effortOptions(defaultAgent, repo.defaultModelFor(defaultAgent)))
+        .let { opts -> if (repo.defaultEffort.value != null && repo.defaultEffort.value !in opts) opts + repo.defaultEffort.value else opts }
+        .distinct()
+    SegmentedRow(effortOptions, repo.defaultEffort.value, label = { it ?: effortDefaultLabel }) { repo.setDefaultEffort(it) }
+    if (defaultAgent == AgentKind.CODEX && repo.serviceTierOptions(defaultAgent, repo.defaultModelFor(defaultAgent)).any { it.id == "priority" }) {
+        Spacer(Modifier.height(10.dp))
+        ToggleRow(
+            label = stringResource(Res.string.fast_mode),
+            sub = stringResource(Res.string.fast_mode_detail),
+            checked = repo.defaultServiceTier.value == "priority",
+            onChange = { repo.setDefaultServiceTier(if (it) "priority" else null) },
+        )
+    }
+
+    SectionLabel(stringResource(Res.string.context_window_section))
+    val ctxDefaultLabel = stringResource(Res.string.value_default)
+    // #171: this control governs the CATCH-ALL only — models holding their own window ignore it. A silent
+    // no-op here IS the bug we're replacing (tap 200K, nothing moves, the setting reads broken), so once
+    // the user actually touches it we name the models it won't reach instead of staying quiet.
+    var catchAllEdited by remember { mutableStateOf(false) }
+    SegmentedRow(
+        CONTEXT_WINDOW_OPTS, repo.contextWindowOverride.value,
+        label = { opt -> when (opt) { null -> ctxDefaultLabel; LARGE_CONTEXT_WINDOW -> "1M"; else -> "${opt / 1000}K" } },
+    ) { catchAllEdited = true; repo.setContextWindowOverride(it) }
+    ContextWindowCustomRow(repo) { catchAllEdited = true }
+    val shadowing = repo.contextWindowOverrides.keys.sorted()
+    if (catchAllEdited && shadowing.isNotEmpty()) CatchAllShadowedNote(shadowing)
+    else Text(stringResource(Res.string.context_window_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+
+    PerModelWindows(repo)
+
+    SectionLabel(stringResource(Res.string.af_show_from))
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val afOpts = listOf(
+            Triple("both", stringResource(Res.string.af_both), null as Color?),
+            Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
+            Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
+            Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
+        )
+        afOpts.forEach { (key, label, dot) ->
+            val sel = repo.agentFilter.value == key
+            // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).
+            // Labels dropped their "only/仅 " prefix so all four read in full at the default size; the
+            // colored dot already carries the "which agent" meaning. Ellipsis is the large-font fallback.
+            Box(
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(7.dp))
+                    .then(if (sel) Modifier.background(Tok.accent) else Modifier)
+                    .semantics { selected = sel }
+                    .clickable { repo.setAgentFilter(key) }.padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    dot?.let {
+                        // dot inverts to Tok.base on the accent thumb so the Claude dot (itself accent) stays visible
+                        Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(if (sel) Tok.base else it))
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(
+                        label, color = if (sel) Tok.base else Tok.tx2, fontSize = 12.sp,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+    Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+}
+
+// ══ Connections & collaboration ════════════════════════════════════════════════════════════════════
+
+/**
+ * The paired computers and every way this app links to another human's machine.
+ *
+ * Each route keeps its existing full-screen implementation — this page only links to them. Removing a
+ * computer changes only this app's local credential; it does not delete the daemon or its sessions.
+ */
+@Composable
+private fun ConnectionsPage(
+    repo: PocketRepository,
+    onSwitch: (dev.ccpocket.app.pairing.PairedDaemon) -> Unit,
+    onAdd: () -> Unit,
+    onShares: () -> Unit,
+    onJoin: () -> Unit,
+    onCollaborators: () -> Unit,
+    onReviews: () -> Unit,
+    onBridges: () -> Unit,
+) {
+    SectionLabel(stringResource(Res.string.settings_paired_computers))
+    DeviceList(repo = repo, onSwitch = onSwitch, onAdd = onAdd)
+
+    SectionLabel(stringResource(Res.string.settings_sharing_section))
+    Hairline()
+    FirstHopRow(stringResource(Res.string.settings_shared_folders), onClick = onShares)
+    Hairline()
+    FirstHopRow(stringResource(Res.string.join_title), onClick = onJoin)
+    Hairline()
+    FirstHopRow(stringResource(Res.string.co_screen_title), onClick = onCollaborators)
+    Hairline()
+    FirstHopRow(stringResource(Res.string.rv_settings_row), onClick = onReviews) {
+        if (repo.reviewPendingCount > 0) PendingCountMark(repo.reviewPendingCount)
+    }
+    Hairline()
+    FirstHopRow(stringResource(Res.string.settings_bridges), onClick = onBridges)
+    Hairline()
+}
+
+// ══ Security & approvals ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * How much this phone answers on its own, and what guards the app itself.
+ *
+ * The approval half appears only once an `ApprovalPrefs` reply proves the daemon can honor it (issue #201) —
+ * against an older daemon the frame is dropped, and a switch that silently does nothing would be worse than
+ * no switch at all.
+ */
+@Composable
+private fun SecurityPage(repo: PocketRepository) {
+    repo.approvalPrefs.value?.let { noAutoDeny ->
+        SectionLabel(stringResource(Res.string.approvals_section))
+        ToggleRow(
+            label = stringResource(Res.string.approval_no_auto_deny),
+            sub = stringResource(Res.string.approval_no_auto_deny_sub),
+            checked = noAutoDeny,
+            onChange = { repo.setAskNoAutoDeny(it) },
+        )
+        // #220: Full Control存续时长 — default 0 (never expires). A pre-#220 daemon reports 0 and
+        // honoring the change is harmless there (it just ignores the field), so it rides the same
+        // capability gate as the toggle above.
+        val neverLabel = stringResource(Res.string.full_control_expiry_never)
+        val expiry = repo.approvalFullControlExpiryMs.value ?: 0L
+        SectionLabel(stringResource(Res.string.full_control_expiry))
+        SegmentedRow(
+            FULL_CONTROL_EXPIRY_OPTS,
+            FULL_CONTROL_EXPIRY_OPTS.minByOrNull { kotlin.math.abs(it - expiry) } ?: 0L,
+            label = { fullControlExpiryLabel(it, neverLabel) },
+        ) { repo.setFullControlExpiryMs(it) }
+        Text(stringResource(Res.string.full_control_expiry_sub), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+    }
+
+    // Security (issue #109): the app's own access controls.
+    SecurityGroup(repo.appLock)
+}
+
+// ══ Support & about ════════════════════════════════════════════════════════════════════════════════
+
+/** Where to get help, what both sides are running, and the way out. */
+@Composable
+private fun SupportPage(repo: PocketRepository, onHelp: () -> Unit, onExit: () -> Unit) {
+    SectionLabel(stringResource(Res.string.settings_help_section))
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)),
+    ) {
+        ManualLinkRow(
+            title = stringResource(Res.string.support_open),
+            sub = stringResource(Res.string.support_sub),
+            onClick = onHelp,
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        ManualLinkRow(
+            title = stringResource(Res.string.settings_manual_title),
+            sub = stringResource(Res.string.settings_manual_sub),
+        ) { openWebUrl(USER_MANUAL_URL) }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        ManualLinkRow(
+            title = stringResource(Res.string.settings_troubleshooting),
+            sub = stringResource(Res.string.settings_troubleshooting_sub),
+        ) { openWebUrl(USER_MANUAL_TROUBLESHOOTING_URL) }
+    }
+
+    VersionsGroup(repo.versionStatus.value)
+
+    SectionLabel(stringResource(Res.string.about_section))
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))) {
+        AboutRow(stringResource(Res.string.about_license), "MIT")
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Tok.hair))
+        AboutRow(
+            stringResource(Res.string.about_connection),
+            repo.paired.value?.displayName() ?: stringResource(Res.string.about_direct_lan),
+        )
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp))
+            .background(Tok.surface).border(1.dp, Tok.hair, RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClick = onExit).padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(stringResource(Res.string.exit), color = Tok.danger, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -557,12 +631,18 @@ private fun VersionsGroup(status: VersionStatus) {
                         status.updateCommand, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp,
                         maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
-                    Text(
-                        stringResource(Res.string.path_copy), color = Tok.accent, fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable { clipboard.setText(AnnotatedString(status.updateCommand)) }
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
-                    )
+                    // a real 44 dp target: this is the one control that makes the update guidance usable
+                    Box(
+                        Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
+                            .clickable(role = Role.Button) { clipboard.setText(AnnotatedString(status.updateCommand)) }
+                            .padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(Res.string.path_copy), color = Tok.accent, fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
             }
         }
@@ -885,8 +965,13 @@ private fun PerModelRow(id: String, tokens: Long, live: Boolean, onDelete: () ->
     }
 }
 
-/** Horizontal segmented control: a surface track with equal-width segments; the selected one fills
- *  with accent (thumb), the rest stay flush with the track. Shared by the model/effort/window pickers. */
+/**
+ * Horizontal segmented control: a surface track with equal-width segments; the selected one fills with accent
+ * (thumb), the rest stay flush with the track. Shared by the model/effort/window/expiry pickers.
+ *
+ * A 44 dp FLOOR and no `maxLines`: at 200% type a segment grows taller and its label wraps whole rather than
+ * being cut mid-glyph. A picker you cannot read is a picker you cannot use.
+ */
 @Composable
 private fun <T> SegmentedRow(options: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
     Row(
@@ -897,34 +982,46 @@ private fun <T> SegmentedRow(options: List<T>, selected: T, label: (T) -> String
         options.forEach { opt ->
             val sel = selected == opt
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(7.dp))
+                Modifier.weight(1f).heightIn(min = 44.dp).clip(RoundedCornerShape(7.dp))
                     .then(if (sel) Modifier.background(Tok.accent) else Modifier)
-                    .clickable { onPick(opt) }.padding(vertical = 9.dp),
+                    .semantics { this.selected = sel }
+                    .clickable { onPick(opt) }.padding(horizontal = 2.dp, vertical = 9.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     label(opt),
                     color = if (sel) Tok.base else Tok.tx2,
                     fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    textAlign = TextAlign.Center,
                 )
             }
         }
     }
 }
 
-/** A settings row with a title + subtitle on the left and a Switch on the right. */
+/**
+ * A settings row with a title + subtitle on the left and a Switch on the right.
+ *
+ * Flush with the page gutter and hairline-bounded rather than card-wrapped (Supporting Surfaces UI 2.0:
+ * "prefer flat row groups; reserve filled containers for status/warning blocks"). A 48 dp FLOOR, never a
+ * height — the explanatory line is allowed to grow instead of being cropped at large type.
+ */
 @Composable
 private fun ToggleRow(label: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(label, color = Tok.tx, fontSize = 14.sp)
-            Text(sub, color = Tok.muted, fontSize = 11.5.sp)
+    Column(Modifier.fillMaxWidth()) {
+        Hairline()
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(label, color = Tok.tx, fontSize = 14.sp)
+                Text(sub, color = Tok.muted, fontSize = 11.5.sp, lineHeight = 16.sp)
+            }
+            Switch(checked = checked, onCheckedChange = onChange)
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Hairline()
     }
 }
 

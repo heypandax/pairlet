@@ -1,5 +1,6 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
@@ -270,44 +271,52 @@ class HandoffUiStateTest {
     }
 
     // ── §2.2: a Bash approval during a REVIEW handoff loses "Always allow" and says it's recorded ──
+    // (now asserted on the Mobile UI 2.0 SecureApprovalSheet — same rule, new component)
 
-    @Test
-    fun permissionSheet_bashUnderReviewHandoffIsPerCommandAndRecorded() = runComposeUiTest {
+    /** Render the Secure Approval sheet for [ask] with the review-handoff flag the route would pass. */
+    @OptIn(ExperimentalTestApi::class)
+    private fun ComposeUiTest.approvalSheet(ask: dev.ccpocket.protocol.PermissionAsk, handoffReview: Boolean) {
         // the card runs a live auto-deny countdown; let it tick and the sheet flips to its terminal
         // state mid-assertion — freeze the clock so we are looking at the DECISION card
         mainClock.autoAdvance = false
+        setContent {
+            PocketTheme {
+                dev.ccpocket.app.ui.approval.SecureApprovalSheet(
+                    dev.ccpocket.app.ui.approval.approvalUi(ask, workdir = "/w", handoffReview = handoffReview),
+                    onDeny = {}, onAllowOnce = {},
+                )
+            }
+        }
+    }
+
+    @Test
+    fun approvalSheet_bashUnderReviewHandoffIsPerCommandAndRecorded() = runComposeUiTest {
         val ask = dev.ccpocket.protocol.PermissionAsk(
             askId = "a1", convoId = "c1", tool = "Bash", title = "Run command",
             inputPreview = "rm -rf build", rule = "Bash(rm:*)",
         )
-        setContent { PocketTheme { PermissionSheet(ask, "/w", handoffReview = true, onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {}) } }
+        approvalSheet(ask, handoffReview = true)
         assertTrue(present(str(Res.string.ho_bash_recorded)))
         assertFalse(present(str(Res.string.always_allow)), "a remembered shell rule would undo \"confirmed one by one\"")
     }
 
     @Test
-    fun permissionSheet_bashOutsideAHandoffKeepsAlwaysAllow() = runComposeUiTest {
-        // the card runs a live auto-deny countdown; let it tick and the sheet flips to its terminal
-        // state mid-assertion — freeze the clock so we are looking at the DECISION card
-        mainClock.autoAdvance = false
+    fun approvalSheet_bashOutsideAHandoffKeepsAlwaysAllow() = runComposeUiTest {
         val ask = dev.ccpocket.protocol.PermissionAsk(
             askId = "a1", convoId = "c1", tool = "Bash", title = "Run command",
             inputPreview = "ls", rule = "Bash(ls:*)",
         )
-        setContent { PocketTheme { PermissionSheet(ask, "/w", onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {}) } }
+        approvalSheet(ask, handoffReview = false)
         assertTrue(present(str(Res.string.always_allow)), "the ordinary approval card is untouched")
         assertFalse(present(str(Res.string.ho_bash_recorded)))
     }
 
     @Test
-    fun permissionSheet_nonShellToolsUnderAHandoffKeepAlwaysAllow() = runComposeUiTest {
-        // the card runs a live auto-deny countdown; let it tick and the sheet flips to its terminal
-        // state mid-assertion — freeze the clock so we are looking at the DECISION card
-        mainClock.autoAdvance = false
+    fun approvalSheet_nonShellToolsUnderAHandoffKeepAlwaysAllow() = runComposeUiTest {
         val ask = dev.ccpocket.protocol.PermissionAsk(
             askId = "a1", convoId = "c1", tool = "WebFetch", title = "Fetch", inputPreview = "https://x", rule = "WebFetch",
         )
-        setContent { PocketTheme { PermissionSheet(ask, "/w", handoffReview = true, onDeny = {}, onOnce = {}, onAlways = {}, onDismiss = {}) } }
+        approvalSheet(ask, handoffReview = true)
         assertTrue(present(str(Res.string.always_allow)), "only the command runner loses the standing rule")
     }
 

@@ -15,18 +15,62 @@ import dev.ccpocket.protocol.PermissionAsk
  * carries real per-machine status/activity/projects; without a coordinator (tests, previews) the surfaces
  * degrade to single-repo behavior with honest "not connected" placeholders. Demo mode feeds the four-machine
  * design scenario so the whole triage flow is showable end-to-end.
+ *
+ * Everything here is DATA, never a sentence (Supporting Surfaces UI 2.0). The model used to concatenate
+ * English fragments — "reconnecting…", "idle", "active now" — which no translation could reach; the words are
+ * now chosen at the call site from resources, and only values the daemon actually owns (names, paths, tools,
+ * previews) stay literal.
  */
 enum class MachineOs { MAC, LINUX, WIN }
 
 enum class MachineStatus { ONLINE, RECONNECTING, OFFLINE }
+
+/**
+ * What a machine is doing right now.
+ *
+ * [Unknown] is the honest case for a machine that is not online: we know its link state, not its work. It is
+ * NOT a fourth status — [MachineStatus] still has exactly three.
+ */
+sealed interface MachineActivity {
+    /** Nothing is known about this machine's work (it isn't online). The status line carries the news. */
+    data object Unknown : MachineActivity
+
+    /** Paired, but this app holds no live link for it — the row still switches to it. */
+    data object NotConnected : MachineActivity
+
+    /** Online with nothing running. */
+    data object Idle : MachineActivity
+
+    /** [count] approvals held here; [tool] and [preview] are the daemon's own tokens, rendered verbatim. */
+    data class WaitingApproval(val count: Int, val tool: String, val preview: String) : MachineActivity
+
+    /** The conversation this machine is on. [title] may be blank — the renderer then says "session". */
+    data class InSession(val title: String, val path: String?) : MachineActivity
+
+    /** [count] project folders open or busy on this machine. Folders, NOT sessions: one folder can host
+     *  several live sessions, and the repository supplies no per-machine session total. */
+    data class Active(val count: Int, val path: String?) : MachineActivity
+}
+
+/**
+ * When the machine was last known to be there.
+ *
+ * A live link only ever knows [ActiveNow]; [Ago] exists because the demo scenario carries one, and is stated
+ * in whole minutes so the words come from the shared `time_*` resources rather than a baked English string.
+ */
+sealed interface MachineLastSeen {
+    data object Unknown : MachineLastSeen
+    data object ActiveNow : MachineLastSeen
+    data class Ago(val minutes: Int) : MachineLastSeen
+}
 
 data class FleetMachine(
     val accountId: String,
     val name: String,
     val os: MachineOs,
     val status: MachineStatus,
-    val activity: String,   // the mono ActivityLine ("▶ 2 running · ~/proj/…" / "not connected · tap to switch")
-    val lastSeen: String,   // "active now" / "2m ago" / "" when the activity line already says it
+    val activity: MachineActivity,
+    val lastSeen: MachineLastSeen,
     val pending: Int,       // approvals waiting on this machine (AttentionBadge)
     val current: Boolean,   // the binding the app is talking to right now
 )
@@ -52,8 +96,11 @@ data class FinishedEntry(
     val os: MachineOs,
     val title: String,
     val ok: Boolean,
-    val timeAgo: String,
+    val minutesAgo: Int,
 )
+
+/** The counts behind the fleet summary line. Pure, so the sentence is assembled from resources. */
+data class FleetSummary(val machines: Int, val online: Int, val waiting: Int)
 
 /** Paired bindings don't carry an OS (the QR has only account identity), so read it off the user's own naming. */
 fun osFromName(name: String): MachineOs {
@@ -77,16 +124,19 @@ private fun liveMachine(repo: PocketRepository, binding: dev.ccpocket.app.pairin
     val ask = waiting.firstOrNull()?.ask
     val open = repo.directories.count { it.open || it.busy }
     val activity = when {
-        status == MachineStatus.RECONNECTING -> "reconnecting…"
-        status == MachineStatus.OFFLINE -> "offline"
-        ask != null -> "⏸ ${waiting.size} waiting approval · ${ask.tool}: ${ask.inputPreview.take(28)}"
-        current && repo.convoId.value != null -> "▶ ${repo.chatTitle.value ?: "session"} · ${repo.workdir.value?.let(::tilde) ?: ""}"
-        open > 0 -> "▶ $open active · ${repo.directories.firstOrNull { it.open || it.busy }?.path?.let(::tilde) ?: ""}"
-        else -> "idle"
+        // a machine we are not talking to reports its LINK, not its work — inventing an activity for it
+        // would be the one place this surface shows something no daemon said
+        status != MachineStatus.ONLINE -> MachineActivity.Unknown
+        ask != null -> MachineActivity.WaitingApproval(waiting.size, ask.tool, ask.inputPreview.take(28))
+        current && repo.convoId.value != null ->
+            MachineActivity.InSession(repo.chatTitle.value.orEmpty(), repo.workdir.value?.let(::tilde))
+        open > 0 -> MachineActivity.Active(open, repo.directories.firstOrNull { it.open || it.busy }?.path?.let(::tilde))
+        else -> MachineActivity.Idle
     }
     return FleetMachine(
         accountId = binding.accountId, name = name, os = osFromName(name), status = status,
-        activity = activity, lastSeen = if (status == MachineStatus.ONLINE) "active now" else "",
+        activity = activity,
+        lastSeen = if (status == MachineStatus.ONLINE) MachineLastSeen.ActiveNow else MachineLastSeen.Unknown,
         pending = waiting.size, current = current,
     )
 }
@@ -104,8 +154,9 @@ fun PocketRepository.fleetMachines(): List<FleetMachine> {
             // no live link for this binding (no coordinator installed, or its satellite is being rebuilt):
             // status is genuinely unknown — say so instead of inventing one
             FleetMachine(
-                accountId = d.accountId, name = d.displayName(), os = osFromName(d.displayName()), status = MachineStatus.OFFLINE,
-                activity = "not connected · tap to switch", lastSeen = "", pending = 0, current = false,
+                accountId = d.accountId, name = d.displayName(), os = osFromName(d.displayName()),
+                status = MachineStatus.OFFLINE, activity = MachineActivity.NotConnected,
+                lastSeen = MachineLastSeen.Unknown, pending = 0, current = false,
             )
         }
     }
@@ -126,7 +177,7 @@ fun PocketRepository.fleetAttention(): List<AttentionEntry> {
             val ask = row.ask
             AttentionEntry(
                 askId = ask.askId, accountId = d.accountId, machineName = name, os = osFromName(name),
-                tool = ask.tool, title = ask.title.ifBlank { "Needs permission" }, preview = ask.diff ?: ask.inputPreview,
+                tool = ask.tool, title = ask.title, preview = ask.diff ?: ask.inputPreview,
                 seconds = row.expiresAt?.let { ((it - now + 999) / 1000).toInt().coerceAtLeast(0) }
                     ?: ask.timeoutSec ?: 30,
                 current = repo === this,
@@ -142,13 +193,14 @@ fun PocketRepository.fleetAttention(): List<AttentionEntry> {
 fun PocketRepository.fleetFinished(): List<FinishedEntry> =
     if (demoMode.value) DemoFleet.finished else emptyList()
 
-/** "4 machines · 3 online · 2 waiting approval" — the FleetStrip line, shared by every fleet surface. */
-fun PocketRepository.fleetStrip(): String {
+/** "4 computers · 3 online · 2 approvals waiting" as COUNTS — the words are chosen by the renderer. */
+fun PocketRepository.fleetSummary(): FleetSummary {
     val machines = fleetMachines()
-    val online = machines.count { it.status == MachineStatus.ONLINE }
-    val waiting = fleetAttention().size
-    val head = "${machines.size} machine${if (machines.size == 1) "" else "s"} · $online online"
-    return if (waiting > 0) "$head · $waiting waiting approval" else head
+    return FleetSummary(
+        machines = machines.size,
+        online = machines.count { it.status == MachineStatus.ONLINE },
+        waiting = fleetAttention().size,
+    )
 }
 
 /** Cross-machine pulls only: what the Chat banner shows (never the ask already on screen for this machine). */
@@ -163,18 +215,30 @@ object DemoFleet {
     private val resolved = mutableStateListOf<String>()
 
     private val allMachines = listOf(
-        FleetMachine("demo-mbp", "Lidapeng-MacBook", MachineOs.MAC, MachineStatus.ONLINE, "▶ 2 running · ~/proj/app/cc-pocket", "active now", 0, current = true),
-        FleetMachine("demo-studio", "mac-studio", MachineOs.MAC, MachineStatus.ONLINE, "⏸ 1 waiting approval · Bash: ./gradlew clean", "2m ago", 1, current = false),
-        FleetMachine("demo-devbox", "devbox-linux", MachineOs.LINUX, MachineStatus.ONLINE, "▶ pytest -x · running 12m", "just now", 1, current = false),
-        FleetMachine("demo-win", "win-desktop", MachineOs.WIN, MachineStatus.OFFLINE, "offline · 2d ago", "", 0, current = false),
+        FleetMachine(
+            "demo-mbp", "Lidapeng-MacBook", MachineOs.MAC, MachineStatus.ONLINE,
+            MachineActivity.Active(2, "~/proj/app/cc-pocket"), MachineLastSeen.ActiveNow, 0, current = true,
+        ),
+        FleetMachine(
+            "demo-studio", "mac-studio", MachineOs.MAC, MachineStatus.ONLINE,
+            MachineActivity.WaitingApproval(1, "Bash", "./gradlew clean"), MachineLastSeen.Ago(2), 1, current = false,
+        ),
+        FleetMachine(
+            "demo-devbox", "devbox-linux", MachineOs.LINUX, MachineStatus.ONLINE,
+            MachineActivity.InSession("pytest -x", "~/src/relay"), MachineLastSeen.ActiveNow, 1, current = false,
+        ),
+        FleetMachine(
+            "demo-win", "win-desktop", MachineOs.WIN, MachineStatus.OFFLINE,
+            MachineActivity.Unknown, MachineLastSeen.Ago(2 * 24 * 60), 0, current = false,
+        ),
     )
     private val allAttention = listOf(
         AttentionEntry("demo-ask-1", "demo-studio", "mac-studio", MachineOs.MAC, "Bash", "Run command", "rm -rf ./build && ./gradlew clean", 23, current = false),
         AttentionEntry("demo-ask-2", "demo-devbox", "devbox-linux", MachineOs.LINUX, "Write", "Edit file", "~/src/relay/src/main/kotlin/Relay.kt  +42 −7", 41, current = false),
     )
     val finished = listOf(
-        FinishedEntry("Lidapeng-MacBook", MachineOs.MAC, "Refactor auth module", ok = true, timeAgo = "4m ago"),
-        FinishedEntry("devbox-linux", MachineOs.LINUX, "Fix stream parser test", ok = false, timeAgo = "12m ago"),
+        FinishedEntry("Lidapeng-MacBook", MachineOs.MAC, "Refactor auth module", ok = true, minutesAgo = 4),
+        FinishedEntry("devbox-linux", MachineOs.LINUX, "Fix stream parser test", ok = false, minutesAgo = 12),
     )
 
     fun attention(): List<AttentionEntry> = allAttention.filterNot { it.askId in resolved }
@@ -183,7 +247,7 @@ object DemoFleet {
         val pending = attention().count { it.accountId == m.accountId }
         if (pending != m.pending) m.copy(
             pending = pending,
-            activity = if (pending == 0 && m.activity.startsWith("⏸")) "idle · approval handled" else m.activity,
+            activity = if (pending == 0 && m.activity is MachineActivity.WaitingApproval) MachineActivity.Idle else m.activity,
         ) else m
     }
 

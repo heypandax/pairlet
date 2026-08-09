@@ -3,21 +3,14 @@
     <!-- ── 连接 / 配对 ───────────────────────────────────────────── -->
     <string name="connect">连接</string>
     <string name="paste_pair_link">粘贴 ccpocket://pair 链接</string>
-    <string name="hide_advanced">收起高级选项</string>
-    <string name="advanced_direct_lan">高级 · 局域网直连</string>
     <string name="daemon_ws_url">daemon WebSocket 地址</string>
     <string name="connect_direct">直连</string>
     <string name="pairing_title">连接你的电脑</string>
     <string name="pairing_subtitle">将这台手机与电脑上的 cc-pocket 守护进程配对。</string>
     <string name="scanning">扫描中…</string>
-    <string name="tap_to_scan">点按扫描二维码</string>
-    <string name="or_enter_code">或输入配对码</string>
     <string name="run_code_prefix">在电脑上运行</string>
     <string name="run_code_suffix">获取配对码。</string>
-    <string name="hide">收起</string>
-    <string name="cant_scan_paste_link">无法扫码？粘贴链接</string>
     <string name="pair_from_link">通过链接配对</string>
-    <string name="demo_cta">体验 Demo · 无需电脑</string>
     <string name="demo_banner">演示模式 · 示例数据</string>
     <!-- preview/recording mode (marketing/preview) -->
     <string name="preview_connecting">正在连接你的电脑…</string>
@@ -43,8 +36,6 @@
     <!-- ── 连接状态 UX（整页状态 + 空态）─────────────────────────── -->
     <string name="conn_retry">重试</string>
     <string name="conn_repair">重新配对</string>
-    <string name="conn_relay_unreachable_title">无法连接到服务器</string>
-    <string name="conn_relay_unreachable_body">暂时连不上 CC Pocket 的中继服务器。请检查手机网络后重试。</string>
     <string name="conn_computer_offline_title">你的电脑已离线</string>
     <string name="conn_computer_offline_body">CC Pocket 找不到你的电脑。请确认电脑已唤醒，且 cc-pocket 正在运行。</string>
     <string name="conn_computer_offline_hint">电脑恢复后会自动重新连接。</string>
@@ -61,8 +52,6 @@
     <string name="context_critical_caption">上下文即将写满——最早的几轮会开始被丢弃</string>
     <string name="open_session_timeout">会话没有打开——电脑未响应</string>
     <string name="turn_done_marker">已完成</string>
-    <string name="conn_pairing_invalid_title">配对已失效</string>
-    <string name="conn_pairing_invalid_body">这台手机已不再与你的电脑配对。请重新配对以恢复连接。</string>
     <string name="dir_empty_title">还没有项目</string>
     <string name="dir_empty_body">在电脑上用 cc-pocket 命令行打开一个文件夹，然后下拉刷新。</string>
     <string name="dir_refresh">刷新</string>
@@ -70,7 +59,7 @@
 
     <!-- ── 目录浏览 ──────────────────────────────────────────────── -->
     <string name="exit">退出</string>
-    <string name="filter_hint">筛选…</string>
+    <string name="filter_hint">筛选项目</string>
     <string name="history_badge">历史</string>
     <string name="dir_open_sessions">进行中的会话</string>
     <string name="dir_projects">项目</string>
@@ -94,6 +83,36 @@
     <string name="switcher_empty">还没有其它会话</string>
     <string name="switcher_open">切换会话</string>
     <string name="new_session_cta">＋ 新建会话</string>
+
+    <!-- ── Mobile UI 2.0 · 会话/对话状态语法 ──────────────────────── -->
+    <!-- 每个 SurfaceState 一条；形状 + 文字承载状态，颜色只做确认 -->
+    <string name="st_answer">需要回答</string>
+    <string name="st_failure">已失败</string>
+    <string name="st_running">运行中</string>
+    <string name="st_new_result">有新结果</string>
+    <string name="st_complete">已完成</string>
+    <string name="st_act_review">查看</string>
+    <string name="st_act_answer">回答</string>
+    <string name="st_also_running">仍在运行</string>
+
+    <!-- ── Mobile UI 2.0 · 会话列表 ───────────────────────────────── -->
+    <string name="ses_active">进行中</string>
+    <string name="ses_recent">最近</string>
+    <string name="ses_conn_online">在线</string>
+    <string name="ses_conn_connecting">连接中…</string>
+    <string name="ses_conn_offline">离线</string>
+    <string name="ses_messages">%1$d 条</string>
+    <string name="ses_empty_title">这个项目还没有会话</string>
+    <string name="ses_empty_sub">用下方的按钮新建一个。</string>
+    <string name="ses_projects">全部项目</string>
+
+    <!-- ── Mobile UI 2.0 · 对话页上下文 ───────────────────────────── -->
+    <string name="chat_context">上下文</string>
+    <string name="chat_context_expand">展开完整上下文</string>
+    <string name="chat_context_collapse">收起完整上下文</string>
+    <string name="chat_session_info">会话信息</string>
+    <string name="chat_src_tool">工具</string>
+    <string name="chat_tool_failed">失败</string>
 
     <!-- ── 相对时间（会话卡片）──────────────────────────────────── -->
     <string name="time_just_now">刚刚</string>
@@ -168,7 +187,6 @@
     <string name="cancel">取消</string>
     <string name="bypass_cta">⚠ 启用全自动</string>
     <string name="new_session_title">新建会话</string>
-    <string name="new_session_subtitle">以哪种模式开始？</string>
     <string name="note_change_anytime">之后随时可以点击徽章更改。</string>
     <string name="rules_remembered_header">本会话已记住</string>
     <string name="clear_all">全部清除</string>
@@ -211,6 +229,22 @@
     <string name="risk_medium">中风险</string>
     <string name="risk_high">发现风险</string>
     <string name="risk_unknown">无法可靠评估</string>
+
+    <!-- ── Mobile UI 2.0 · 安全审批弹层 ─────────────────────────── -->
+    <string name="ap_required">需要你批准</string>
+    <string name="ap_queue">第 %1$d / %2$d 项</string>
+    <string name="ap_fail_closed">超时未响应将自动拒绝。</string>
+    <string name="ap_authority_wait_title">电脑端请求仍有效</string>
+    <string name="ap_authority_wait_sub">本地计时已结束。在电脑续期或撤回前，你仍可做出决定。</string>
+    <string name="ap_waiting_title">等待你处理</string>
+    <string name="ap_waiting_sub">不显示响应倒计时。请求会保持待处理，直到你决定或电脑撤回。</string>
+    <string name="ap_kind">工具请求</string>
+    <string name="ap_project">项目</string>
+    <string name="ap_assessed">评估于 %1$s</string>
+    <string name="ap_more_options">更多选项</string>
+    <string name="ap_more_options_sub">可用：会话级授权</string>
+    <string name="ap_recorded_title">逐条确认</string>
+    <string name="ap_legacy_note">旧版权限模式 · 仅支持单次允许或永久规则。</string>
 
     <!-- ── 语音输入 ──────────────────────────────────────────────── -->
     <string name="cancel_recording">取消录音</string>
@@ -387,18 +421,15 @@
     <string name="app_lock_sub_fallback">尝试次数过多</string>
     <string name="app_lock_status_lockedout">%1$s 已锁定</string>
     <string name="app_lock_sub_lockedout">输入设备密码以重新启用。</string>
-    <string name="new_path_open">在文件夹中新建会话</string>
-    <string name="new_path_open_row">打开其他目录（输入路径）…</string>
     <string name="new_path_title">在文件夹中新建会话</string>
     <string name="new_path_sub">输入电脑上某个文件夹的绝对路径，无需已有历史记录。（如需全新文件夹，可先用聊天里的终端创建。）</string>
     <string name="new_path_start">开始会话</string>
-    <string name="dir_picker_title">打开项目目录</string>
-    <string name="dir_picker_sub">浏览电脑的家目录，在任意已有目录里开新会话——无需已有历史记录。</string>
-    <string name="dir_picker_type_path">输入路径…</string>
+    <string name="dir_picker_title">选择一个目录</string>
+    <string name="dir_picker_type_path">手动输入路径</string>
     <string name="dir_picker_recents">最近</string>
     <string name="dir_picker_browse">浏览</string>
-    <string name="dir_picker_use_here">在此目录开会话</string>
-    <string name="dir_picker_empty">没有子目录</string>
+    <string name="dir_picker_use_here">就用这里</string>
+    <string name="dir_picker_empty">这里没有子目录。你仍然可以直接在这个目录里开会话。</string>
     <string name="dir_picker_error">读不了这个目录</string>
     <string name="dir_picker_home">家目录</string>
     <string name="dir_picker_remote_title">选择远程电脑上的目录</string>
@@ -1496,4 +1527,174 @@
     <string name="rv_settings_row">评审</string>
     <string name="notify_approval_title">需要你的批准</string>
     <string name="notify_approval_body">Agent 正在等待你的决定</string>
+
+    <!-- ══ Entry Flow UI 2.0 ═══════════════════════════════════════════════════ -->
+
+    <!-- ── 配对电脑（验证码优先；这里永远不会请求摄像头） ──── -->
+    <string name="pair_title">配对电脑</string>
+    <string name="pair_sub">在你想控制的电脑上运行配对命令，它会显示一个 6 位验证码。</string>
+    <string name="pair_add_title">添加电脑</string>
+    <string name="pair_code_label">配对码</string>
+    <string name="pair_cta">配对电脑</string>
+    <string name="pair_helper_incomplete">点一下输入框，填入电脑上显示的验证码。</string>
+    <string name="pair_helper_complete">验证码只在电脑还显示着它的时候有效。</string>
+    <string name="pair_route_scan">扫描二维码</string>
+    <string name="pair_route_paste">粘贴配对链接</string>
+    <string name="pair_route_lan">局域网直连地址</string>
+    <string name="pair_lan_note">填了直连地址不代表电脑在线，它只是会比中转优先尝试。</string>
+    <string name="pair_on_computer">在电脑上</string>
+    <string name="pair_copied">已复制</string>
+    <string name="pair_demo">先看看演示</string>
+
+    <!-- ── 显式进入的扫码页（唯一会开摄像头的界面） ────────────────── -->
+    <string name="scan_title">扫描二维码</string>
+    <string name="scan_unavailable_title">摄像头不可用</string>
+    <string name="scan_unavailable_body">cc-pocket 无法在这台设备上使用摄像头。配对本来就不需要它。</string>
+    <string name="scan_open_settings">打开系统设置</string>
+    <string name="scan_without_camera">不用摄像头也能配对</string>
+    <string name="scan_without_camera_body">扫码只是其中一条路，不是唯一一条。下面两种方式都能独立完成配对。</string>
+    <string name="scan_use_code">改用 6 位验证码</string>
+    <string name="scan_kept_none">还没输入内容——验证码输入框在等你。</string>
+    <string name="scan_kept_one">你输入的那一位还在。</string>
+    <string name="scan_kept_many">你输入的 %1$d 位都还在。</string>
+
+    <!-- ── 选择 / 恢复电脑 ──────────────────────────────────────── -->
+    <string name="computers_title">电脑</string>
+    <string name="computers_section">已配对的电脑</string>
+    <string name="computers_active_binding">当前绑定</string>
+    <string name="computers_helper">点一台电脑即可连接。重命名和移除在行内菜单里。</string>
+    <string name="computers_add">添加电脑</string>
+    <string name="computers_more">电脑操作</string>
+    <string name="computers_role_owner">机主</string>
+    <string name="computers_role_guest">访客</string>
+    <string name="computers_account">账号 %1$s · %2$s</string>
+
+    <!-- ── 电脑群 / 待处理（Supporting Surfaces UI 2.0） ────────────────────── -->
+    <string name="fl_summary_computers_one">%1$d 台电脑</string>
+    <string name="fl_summary_computers_many">%1$d 台电脑</string>
+    <string name="fl_summary_online">%1$d 台在线</string>
+    <string name="fl_waiting_one">%1$d 条审批等你处理</string>
+    <string name="fl_waiting_many">%1$d 条审批等你处理</string>
+    <string name="fl_status_online">在线</string>
+    <string name="fl_status_reconnecting">重连中</string>
+    <string name="fl_status_offline">离线</string>
+    <string name="fl_current">当前</string>
+    <string name="fl_idle">空闲</string>
+    <string name="fl_not_connected">未连接——点一下切过去</string>
+    <string name="fl_active_one">%1$d 个项目在跑</string>
+    <string name="fl_active_many">%1$d 个项目在跑</string>
+    <string name="fl_pair_new">配对一台新电脑</string>
+    <string name="fl_empty_title">还没有配对任何电脑</string>
+    <string name="fl_empty_body">配上一台，就能在这里看它在跑什么，也能直接处理它的审批。</string>
+    <string name="fl_pending_a11y_one">这台电脑上有 %1$d 条审批在等</string>
+    <string name="fl_pending_a11y_many">这台电脑上有 %1$d 条审批在等</string>
+    <string name="fl_attention_title">等你处理</string>
+    <string name="fl_none_waiting">现在没有需要你处理的</string>
+    <string name="fl_unlinked_title">还没连上电脑</string>
+    <string name="fl_unlinked_body">没有连接就列不出审批。这会儿可能正有请求卡在某台电脑上。</string>
+    <string name="fl_sec_approval">待审批</string>
+    <string name="fl_sec_finished">最近完成</string>
+    <string name="fl_clear_title">都处理完了</string>
+    <string name="fl_clear_body">任何一台电脑上的审批一到，都会排到这里。</string>
+    <string name="fl_details">查看详情</string>
+    <string name="fl_details_hide">收起详情</string>
+    <string name="fl_ask_danger">被标记为破坏性操作</string>
+    <string name="fl_switch_computer">切换电脑</string>
+    <string name="fl_manage_computers">管理电脑</string>
+    <string name="fl_tool_needs_approval">%1$s 需要审批</string>
+
+    <!-- ── 评审中心概览（只在数据就绪时出现，失败态绝不沿用） ── -->
+    <string name="rv_summary_waiting_one">%1$d 条评审等你处理</string>
+    <string name="rv_summary_waiting_many">%1$d 条评审等你处理</string>
+    <string name="rv_summary_sent_one">已发出 %1$d 条</string>
+    <string name="rv_summary_sent_many">已发出 %1$d 条</string>
+    <string name="rv_summary_clear">现在没有需要你评审的</string>
+
+    <!-- ── 设置分类（Supporting Surfaces UI 2.0） ──────────────────── -->
+    <string name="settings_cat_general">通用</string>
+    <string name="settings_cat_general_sub">外观、字号、通知、语音输入</string>
+    <string name="settings_cat_agent">Agent 与会话默认项</string>
+    <string name="settings_cat_agent_sub">权限模式、模型、思考强度、上下文窗口、Agent 筛选</string>
+    <string name="settings_cat_connections">连接与协作</string>
+    <string name="settings_cat_connections_sub">电脑、共享文件夹、协作者、评审、机器人桥</string>
+    <string name="settings_cat_security">安全与审批</string>
+    <string name="settings_cat_security_sub">审批行为、Full Control 存续时长、应用锁</string>
+    <string name="settings_cat_support">帮助与关于</string>
+    <string name="settings_cat_support_sub">帮助、手册、故障排查、版本、关于</string>
+    <string name="settings_connected_to">已连接 %1$s</string>
+    <string name="about_direct_lan">局域网直连</string>
+    <string name="rv_invite_qr_a11y">评审邀请二维码</string>
+
+    <!-- ── 六种连接状态：六句话，六组动作 ─────────── -->
+    <string name="conn_relay_title">连不上中转</string>
+    <string name="conn_relay_body">cc-pocket 没能连上中转服务器。这说明不了电脑本身有没有问题。</string>
+    <string name="conn_offline_title">电脑离线</string>
+    <string name="conn_offline_body">中转回应了，但那台电脑上的 daemon 没在跑。去启动 cc-pocket，或者把电脑唤醒后重试。</string>
+    <string name="conn_invalid_title">配对已失效</string>
+    <string name="conn_invalid_body">这台电脑拒绝了已保存的凭据，重试也没有用。</string>
+    <string name="conn_connecting_wait">正在等目录列表。列表没到之前，不会声称已就绪。</string>
+
+    <!-- ── 项目 ─────────────────────────────────────────────────────────── -->
+    <string name="proj_machine_line">%1$s · %2$s</string>
+    <string name="proj_state_reconnecting">重连中</string>
+    <string name="proj_open_computers">电脑</string>
+    <string name="proj_more">更多选项</string>
+    <string name="proj_review">评审</string>
+    <string name="proj_review_n">评审 %1$d</string>
+    <string name="proj_help">帮助</string>
+    <string name="proj_settings">设置</string>
+    <string name="proj_view_tree">树形</string>
+    <string name="proj_view_flat">平铺</string>
+    <string name="proj_open_any">打开任意文件夹…</string>
+    <string name="proj_no_match_title">没有项目匹配“%1$s”</string>
+    <string name="proj_no_match_body">筛选只匹配这台电脑报上来的名称和路径，这里没有匹配到。</string>
+    <string name="proj_clear_filter">清除筛选</string>
+
+    <!-- ── 目录选择器 ─────────────────────────────────────────────────── -->
+    <string name="dir_picker_on_computer">在 %1$s 上</string>
+    <string name="dir_picker_selected">已选目录</string>
+    <string name="dir_picker_options">更多选项</string>
+    <string name="dir_picker_loading">正在读取这个文件夹…</string>
+    <string name="dir_picker_go_up">返回上一级</string>
+    <string name="dir_picker_dirs_only">只列目录。文件永远不会出现在这里——会话打不开一个文件。</string>
+
+    <!-- ── 配置会话（工作目录 → Agent → 模型 → 模式 → 唯一的开始） ────── -->
+    <string name="cfg_model_reported">模型 · 这台电脑报上来的</string>
+    <string name="cfg_model_follow">跟随这台电脑的默认设置</string>
+    <string name="cfg_model_none">这台电脑没有报模型列表</string>
+    <string name="cfg_permission">权限</string>
+    <string name="cfg_start">开始会话</string>
+    <string name="cfg_start_caption">%1$s · %2$s · %3$s</string>
+    <string name="cfg_mode_automatic">全自动</string>
+    <string name="cfg_mode_default">默认</string>
+    <string name="cfg_mode_default_body">凡是要改文件或跑命令，都会先问你。</string>
+    <string name="cfg_mode_accept">自动改文件</string>
+    <string name="cfg_mode_accept_body">改文件不再问；跑命令之前仍然会问。</string>
+    <string name="cfg_mode_plan">计划</string>
+    <string name="cfg_mode_plan_body">只读、只提方案。在你退出计划模式之前什么都不改。</string>
+    <string name="cfg_mode_full">完全放权</string>
+    <string name="cfg_mode_full_body">从不询问。开始之前需要你确认一次。</string>
+    <string name="cfg_mode_auto">自动判断</string>
+    <string name="cfg_mode_auto_body">Claude 自己判断每一步，需要你批准时才会问。</string>
+    <string name="cfg_claude_note">只有这台电脑声明支持时，「自动判断」才会出现在这里。</string>
+    <string name="cfg_codex_cautious_body">每一步都先问，而且写不出工作目录。</string>
+    <string name="cfg_codex_balanced_body">在工作目录里自己干，超出范围的先问你。</string>
+    <string name="cfg_codex_autonomous_body">不再询问，但仍被限制在工作目录内。</string>
+    <string name="cfg_codex_full_body">没有沙箱，也没有审批。开始之前需要确认。</string>
+    <string name="cfg_codex_note">审批 × 沙箱的组合来自 CODEX_PRESETS</string>
+    <string name="cfg_kimi_note">Kimi 没有对应「自动改文件」的档位。</string>
+    <string name="cfg_opencode_title">全自动运行</string>
+    <string name="cfg_opencode_body">OpenCode 不支持审批。它会在这个目录里直接读写文件、执行命令，中途不会停，cc-pocket 也无法为了要权限打断它。</string>
+    <string name="cfg_opencode_body2">这里没有模式可选。想被询问，就换一个 Agent。</string>
+    <string name="cfg_opencode_note">审批请求、审批队列和安全审批面板，在 OpenCode 会话里都不起作用。</string>
+
+    <!-- ── 完全放权确认（沿用原有的安全步骤，只换了样式） ─────── -->
+    <string name="cfm_title">要以完全放权开始吗？</string>
+    <string name="cfm_body">整个会话里，%1$s 都会直接读写文件、执行命令，不再向你要授权。</string>
+    <string name="cfm_workdir">工作目录</string>
+    <string name="cfm_reach">波及范围</string>
+    <string name="cfm_reach_body">%1$s 上从这个目录能触达的一切，包括命令能碰到的目录之外的文件。</string>
+    <string name="cfm_reach_body_local">从这个目录能触达的一切，包括命令能碰到的目录之外的文件。</string>
+    <string name="cfm_note">这个会话里不会再问你第二次。想换回来，就用别的模式重开一个会话。</string>
+    <string name="cfm_cta">以完全放权开始</string>
 </resources>

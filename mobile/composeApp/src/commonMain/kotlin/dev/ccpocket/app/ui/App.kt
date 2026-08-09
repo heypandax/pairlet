@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
@@ -52,8 +54,11 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.PushPin
@@ -63,7 +68,6 @@ import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Share
-import androidx.compose.material.icons.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -81,7 +85,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -109,15 +112,20 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.expand
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import dev.ccpocket.app.epochMillis
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -125,6 +133,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -132,7 +141,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import dev.ccpocket.app.APP_VERSION
 import dev.ccpocket.app.SupportContext
-import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
@@ -140,11 +148,36 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.pairing.displayName
+import dev.ccpocket.app.ui.chat.ChatHeader
+import dev.ccpocket.app.ui.chat.ChatStateBlock
+import dev.ccpocket.app.ui.chat.ContextLine
+import dev.ccpocket.app.ui.chat.ToolTurnBand
+import dev.ccpocket.app.ui.chat.TurnSourceLabel
+import dev.ccpocket.app.ui.chat.chatStateUi
+import dev.ccpocket.app.ui.fleet.attentionAsk
 import dev.ccpocket.app.ui.fleet.crossMachineAttention
 import dev.ccpocket.app.ui.fleet.ApprovalQueueFab
 import dev.ccpocket.app.ui.fleet.fleetAttention
 import dev.ccpocket.app.ui.fleet.fleetMachines
 import dev.ccpocket.app.ui.fleet.MachineStatus
+import dev.ccpocket.app.ui.entry.ComputersSurface
+import dev.ccpocket.app.ui.entry.EntrySecondaryButton
+import dev.ccpocket.app.ui.entry.connRecovery
+import dev.ccpocket.app.ui.session.ConnBadge
+import dev.ccpocket.app.ui.session.Hairline
+import dev.ccpocket.app.ui.session.NewSessionDock
+import dev.ccpocket.app.ui.session.SessionAttention
+import dev.ccpocket.app.ui.session.SessionListRow
+import dev.ccpocket.app.ui.session.SessionRowUi
+import dev.ccpocket.app.ui.session.SessionSectionLabel
+import dev.ccpocket.app.ui.session.SessionsContextHeader
+import dev.ccpocket.app.ui.session.SessionsEmptyState
+import dev.ccpocket.app.ui.session.StateMark
+import dev.ccpocket.app.ui.session.StateMarkGlyph
+import dev.ccpocket.app.ui.session.SurfaceState
+import dev.ccpocket.app.ui.session.stateColor
+import dev.ccpocket.app.ui.session.sessionRows
+import dev.ccpocket.app.ui.session.splitSessions
 import dev.ccpocket.app.resources.*
 import dev.ccpocket.app.ui.handoff.ConnectColleagueFlow
 import dev.ccpocket.app.ui.handoff.HandoffAcceptScreen
@@ -176,8 +209,12 @@ import dev.ccpocket.app.ui.share.SharedPill
 import dev.ccpocket.app.ui.share.expiryLeft
 import dev.ccpocket.app.ui.share.expiryLeftText
 import dev.ccpocket.app.theme.LocalFontScale
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.PocketTheme
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.TypeRole
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.Role
 import dev.ccpocket.app.voice.openAppSettings
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.SessionGroup
@@ -275,8 +312,15 @@ fun App(scope: CoroutineScope) {
     // live system flip while the app is foregrounded and LIGHT/DARK force it.
     PocketTheme(mode = repo.themeMode.value, accent = repo.accentTheme.value, fontScale = repo.fontScale.value) {
       Box(Modifier.fillMaxSize()) {
+        val approvalAsk = repo.pendingAsk.value?.takeIf { !it.isQuestion }
         Surface(Modifier.fillMaxSize(), color = Tok.base) {
-            Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()) {
+            // Secure Approval is pointer-modal by itself. Clearing the covered tree here also makes it
+            // modal to TalkBack/VoiceOver: focus cannot traverse into chat/navigation under the scrim.
+            val coveredContent = if (approvalAsk != null) Modifier.clearAndSetSemantics { } else Modifier
+            Column(
+                Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.systemBars).imePadding()
+                    .then(coveredContent),
+            ) {
                 // pushes content down instead of overlaying the header; steady while retrying (no flicker)
                 // preview/recording mode hides the demo banner for a clean marketing capture
                 if (repo.demoMode.value && !dev.ccpocket.app.isPreviewMode()) StatusBanner(Tok.accent, stringResource(Res.string.demo_banner))
@@ -294,7 +338,11 @@ fun App(scope: CoroutineScope) {
                             if (repo.addingDevice.value || repo.pairedList.isEmpty()) PairingScreen(repo) else ConnectScreen(repo)
                         repo.demoConnecting.value -> DemoConnectScreen { repo.finishDemoConnect() } // PREVIEW opener
                         else -> Box(Modifier.fillMaxSize()) {
-                            ConnectionGate(repo) {
+                            ConnectionGate(
+                                repo,
+                                onOpenComputers = { fleetOpen = true },
+                                onOpenReviews = { reviewsOpen = true },
+                            ) {
                                 when {
                                     // switchingSession keeps the chat mounted across a chat→chat switch:
                                     // openSession nulls convoId while it waits for the daemon, and without
@@ -320,13 +368,13 @@ fun App(scope: CoroutineScope) {
             }
             // a permission decision never needs typing — drop the keyboard so the sheet isn't cramped
             val rootFocus = LocalFocusManager.current
-            LaunchedEffect(repo.pendingAsk.value?.askId) {
+            LaunchedEffect(repo.pendingAsk.value?.convoId, repo.pendingAsk.value?.askId) {
                 if (repo.pendingAsk.value != null) rootFocus.clearFocus()
             }
             // AskUserQuestion (ask.questions != null) renders as the docked QuestionCard inside
             // ChatScreen instead — questions are conversation, not a safety gate, and the user
             // should be able to scroll the chat for context while answering.
-            repo.pendingAsk.value?.takeIf { !it.isQuestion }?.let { ask ->
+            approvalAsk?.let { ask ->
                 // M2 AttentionLease: while THIS card is on screen AND the app is foregrounded, a 30s
                 // heartbeat pauses the daemon's no-response budget (grant-aware asks only). Backgrounding
                 // releases the lease explicitly, so an Android process idling behind the launcher can't
@@ -334,7 +382,7 @@ fun App(scope: CoroutineScope) {
                 // under the Compose test clock an unconditional infinite delay-loop would keep the virtual
                 // frame clock busy forever (desktopTest hang, 08-02).
                 if (ask.grantOptions != null) {
-                    LaunchedEffect(ask.askId, appForeground) {
+                    LaunchedEffect(ask.convoId, ask.askId, appForeground) {
                         if (!appForeground) {
                             repo.sendAskHeartbeat(visible = false)
                             return@LaunchedEffect
@@ -345,24 +393,31 @@ fun App(scope: CoroutineScope) {
                         }
                     }
                 }
-                PermissionSheet(
-                    ask, repo.workdir.value,
-                    timedOutSignal = repo.askTimedOut(ask), // issue #100: daemon said this ask timed out (composite-matched, P1-3)
+                // route adapter: the repository is read HERE and collapsed into one immutable value, so the
+                // Secure Approval renderer stays a pure function of what the daemon actually said
+                val approvalUi = dev.ccpocket.app.ui.approval.approvalUi(
+                    ask = ask,
+                    workdir = repo.workdir.value,
+                    risk = repo.riskDetailFor(ask), // M3: the FULL event (level + reason + codes + assessed)
+                    queueProgress = repo.askQueueProgress.value, // "n of m" while a burst is queued (design M1)
                     // §2.2/§4.3: during a REVIEW handoff a shell command is the one way a "read-only"
                     // review can still touch files — so it's confirmed each time (no standing rule) and
                     // the card says it leaves a record
                     handoffReview = repo.activeHandoff.value?.let {
                         it.status == HandoffStatus.IN_PROGRESS && repo.isHandoffRecipient(it)
                     } == true,
-                    queuePosition = repo.askQueueProgress.value, // "n / m" while a burst is queued (design M1)
-                    risk = repo.riskFor(ask), // M3 advisory badge, updated in place
-                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
-                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
+                    timedOutSignal = repo.askTimedOut(ask), // issue #100 (composite-matched, P1-3)
+                )
+                dev.ccpocket.app.ui.approval.SecureApprovalSheet(
+                    approvalUi,
                     onDeny = { repo.resolve(Decision.DENY) },
-                    onOnce = { repo.resolve(Decision.ALLOW) },
-                    // "Always allow" (legacy card) / "本会话内总是允许" (V2 ⋯More): remember for old
-                    // daemons + the M2 session scope for new ones — same effect either way
-                    onAlways = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
+                    onAllowOnce = { repo.resolve(Decision.ALLOW) },
+                    onAllowTask = { repo.resolve(Decision.ALLOW, grantScope = "task") },
+                    // legacy "Always allow" and the V2 session scope are the same effect: remember for old
+                    // daemons, the M2 session grant for new ones
+                    onAllowSession = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
+                    onAlwaysAllow = { repo.resolve(Decision.ALLOW, remember = true, grantScope = "session") },
+                    onRetrySafer = { constraints -> repo.resolve(Decision.DENY, retrySafer = true, constraints = constraints) },
                     onDismiss = { repo.dismissAsk() },
                 )
             }
@@ -502,7 +557,15 @@ private fun DemoConnectScreen(onDone: () -> Unit) {
  * failure persists. Reconnecting/Ready just show the content (the slim banner rides above it).
  */
 @Composable
-private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Unit) {
+private fun ConnectionGate(
+    repo: PocketRepository,
+    // the skeleton wears the real Projects header, so it needs the same two routes the list has. Passed
+    // through rather than invented here: these are the app root's existing overlays, not new destinations.
+    onOpenComputers: () -> Unit = {},
+    onOpenReviews: () -> Unit = {},
+    content: @Composable () -> Unit,
+) {
+    val recovery = connRecovery(repo.phase.value)
     when (repo.phase.value) {
         ConnPhase.PairingInvalid -> {
             val ended = repo.shareEnded.value
@@ -521,105 +584,347 @@ private fun ConnectionGate(repo: PocketRepository, content: @Composable () -> Un
                     onRemove = { repo.unpairActive() },
                     onAskNew = { repo.unpairActive() }, // drops the dead binding → lands on Connect to paste a fresh invite
                 )
-                else -> CenteredState(
-                    Tok.danger,
-                    stringResource(Res.string.conn_pairing_invalid_title),
-                    stringResource(Res.string.conn_pairing_invalid_body),
-                    stringResource(Res.string.conn_repair), { repo.unpairActive() },
-                )
+                else -> RecoverySurface(repo, recovery)
             }
         }
-        ConnPhase.RelayUnreachable -> CenteredState(
-            Tok.warn,
-            stringResource(Res.string.conn_relay_unreachable_title),
-            stringResource(Res.string.conn_relay_unreachable_body),
-            stringResource(Res.string.conn_retry), { repo.retryConnection() }, onExit = { repo.disconnect() },
-        )
+        ConnPhase.RelayUnreachable -> RecoverySurface(repo, recovery)
         ConnPhase.ComputerOffline ->
-            if (repo.convoId.value != null) { StatusBanner(Tok.warn, stringResource(Res.string.conn_computer_offline_banner)); content() } // mid-chat: keep history
-            else CenteredState(
-                Tok.warn,
-                stringResource(Res.string.conn_computer_offline_title),
-                stringResource(Res.string.conn_computer_offline_body),
-                stringResource(Res.string.conn_retry), { repo.retryConnection() }, onExit = { repo.disconnect() },
-                hint = stringResource(Res.string.conn_computer_offline_hint),
-            )
+            // mid-chat: keep the history readable under a slim banner instead of a takeover
+            if (repo.convoId.value != null) { StatusBanner(Tok.warn, stringResource(Res.string.conn_computer_offline_banner)); content() }
+            else RecoverySurface(repo, recovery)
         ConnPhase.Connecting ->
-            if (repo.directoriesLoaded.value || repo.convoId.value != null) content() else DirectorySkeleton(repo)
+            if (repo.directoriesLoaded.value || repo.convoId.value != null) content()
+            else DirectorySkeleton(repo, onOpenComputers, onOpenReviews)
         ConnPhase.Reconnecting, ConnPhase.Ready -> content()
     }
 }
 
-/** A centered dot + title + body + primary action (+ optional hint / exit). Shared by the gate states. */
+/** A failing phase lands on Computers: its own recovery region, with the paired list flat underneath —
+ *  so switching machines reads as an ordinary choice rather than a second alarm (Entry Flow frames 09-11). */
 @Composable
-private fun CenteredState(
-    dot: Color, title: String, body: String, primary: String, onPrimary: () -> Unit,
-    onExit: (() -> Unit)? = null, hint: String? = null,
+private fun RecoverySurface(repo: PocketRepository, recovery: dev.ccpocket.app.ui.entry.ConnRecoveryUi) {
+    ComputersSurface(
+        repo, recovery = recovery,
+        onSwitch = { repo.switchDaemon(it) },
+        onAdd = { repo.beginAddDevice() },
+    )
+}
+
+/**
+ * The Projects header (Entry Flow UI 2.0 · Master **v2** — the confirmed header amendment).
+ *
+ * Two rows, and BOTH of them are two-sided, so the top-right of the 402 pt release frame carries page-level
+ * actions instead of the empty band the first pass left there:
+ *
+ * ```
+ *   Projects                                          [🖵] [⋯]
+ *   ● alex-macbook · online                       ◆ Review 2
+ * ```
+ *
+ * Row 1 is the screen's name plus exactly two 48 dp controls: the computer doorway (an outlined display,
+ * not a plus — it SWITCHES machines rather than creating anything) carrying the fleet's real waiting count,
+ * and the overflow carrying the version-update dot. Row 2 keeps the state MARK beside the state WORD, so
+ * the connection is legible in greyscale, and puts the review queue within one tap.
+ *
+ * Help and Settings moved into the overflow: they are doorways to specialist surfaces, and as a leading
+ * text band they competed with the machine state and the work below it.
+ *
+ * ONE implementation, shared by [DirectoryScreen] and its connecting skeleton, so the skeleton → list swap
+ * can never shift the geometry. [body] is the rest of the screen — the header owns the column so the
+ * overflow can be an ordinary in-tree overlay above it, the same grammar [PocketSheet] already uses.
+ */
+@Composable
+private fun ProjectsHeader(
+    title: String,
+    phase: ConnPhase,
+    machine: String?,
+    reviewCount: Int,
+    fleetWaiting: Int,
+    updateAvailable: Boolean,
+    onOpenComputers: () -> Unit,
+    onReviews: () -> Unit,
+    onHelp: () -> Unit,
+    onSettings: () -> Unit,
+    body: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        PulseDot(dot, size = 10.dp)
-        Spacer(Modifier.height(16.dp))
-        Text(title, color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
-        Spacer(Modifier.height(8.dp))
-        Text(body, color = Tok.tx2, fontSize = 14.sp, textAlign = TextAlign.Center, lineHeight = 20.sp)
-        if (hint != null) {
-            Spacer(Modifier.height(6.dp))
-            Text(hint, color = Tok.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+    val recovery = connRecovery(phase)
+    val state = stringResource(
+        when (phase) {
+            ConnPhase.Ready -> Res.string.ses_conn_online
+            ConnPhase.Connecting -> Res.string.ses_conn_connecting
+            ConnPhase.Reconnecting -> Res.string.proj_state_reconnecting
+            else -> Res.string.ses_conn_offline
+        },
+    )
+    var menuOpen by remember { mutableStateOf(false) }
+    var titleRowPx by remember { mutableStateOf(0) }
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).padding(top = Metric.gapS)) {
+                // ── row 1: the screen's name, and the two page-level controls it leaves room for ──
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = Metric.touch).onSizeChanged { titleRowPx = it.height },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        title, color = Tok.tx, style = TypeRole.screenTitle,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    HeaderIconAction(
+                        Icons.Outlined.Computer, stringResource(Res.string.proj_open_computers),
+                        onClick = onOpenComputers,
+                    ) {
+                        // the fleet's real waiting count rides its own doorway: one number, one target
+                        if (fleetWaiting > 0) dev.ccpocket.app.ui.fleet.AttentionBadge(
+                            fleetWaiting, Modifier.align(Alignment.TopEnd).padding(top = 4.dp),
+                        )
+                    }
+                    HeaderIconAction(
+                        Icons.Rounded.MoreHoriz, stringResource(Res.string.proj_more),
+                        expanded = menuOpen, onClick = { menuOpen = !menuOpen },
+                    ) {
+                        // issue #200: the version nudge rides the entry to Settings, where the update
+                        // instructions live. A DOT, not the review diamond — "there is an update" and
+                        // "somebody is waiting" are different facts; the menu row below spells this one out.
+                        if (updateAvailable) Box(
+                            Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp)
+                                .size(8.dp).clip(CircleShape).background(Tok.accent),
+                        )
+                    }
+                }
+                // ── row 2: the written machine state, and the review queue on the trailing edge ──
+                ReflowRow(
+                    Modifier.fillMaxWidth().padding(bottom = Metric.gapXs),
+                    gap = Metric.gapS,
+                    leading = {
+                        Row(verticalAlignment = Alignment.Top) {
+                            // the mark rides the FIRST line of the sentence: centred against a wrapped
+                            // block it drifts into the gutter between lines and stops reading as its mark
+                            Box(
+                                Modifier.height(with(LocalDensity.current) { TypeRole.preview.lineHeight.toDp() }),
+                                contentAlignment = Alignment.Center,
+                            ) { StateMarkGlyph(recovery.mark, stateColor(recovery.tone)) }
+                            Spacer(Modifier.width(Metric.gapS))
+                            Text(
+                                machine?.takeIf { it.isNotBlank() }
+                                    ?.let { stringResource(Res.string.proj_machine_line, it, state) } ?: state,
+                                color = Tok.tx2, style = TypeRole.preview,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    },
+                ) { ReviewAction(reviewCount, onReviews) }
+            }
+            body()
         }
-        Spacer(Modifier.height(24.dp))
-        Button(onPrimary, Modifier.fillMaxWidth()) { Text(primary) }
-        if (onExit != null) {
-            Spacer(Modifier.height(8.dp))
-            TextButton(onExit) { Text(stringResource(Res.string.exit), color = Tok.muted, fontSize = 12.sp) }
+        if (menuOpen) ProjectsOverflowMenu(
+            below = Metric.gapS + with(LocalDensity.current) { titleRowPx.toDp() },
+            updateAvailable = updateAvailable,
+            onHelp = { menuOpen = false; onHelp() },
+            onSettings = { menuOpen = false; onSettings() },
+            onDismiss = { menuOpen = false },
+        )
+    }
+}
+
+/** A 48 dp page-level control in the header: an icon, its localized name, and room for one real mark. */
+@Composable
+private fun HeaderIconAction(
+    icon: ImageVector,
+    label: String,
+    expanded: Boolean? = null,
+    onClick: () -> Unit,
+    badge: @Composable BoxScope.() -> Unit = {},
+) {
+    Box(
+        Modifier.size(Metric.touch).clip(RoundedCornerShape(Metric.radiusS))
+            .clickable(role = Role.Button, onClick = onClick)
+            // a disclosure announces whether it is already open, so a screen reader is never told to
+            // "activate" a menu that is on screen in front of it
+            .semantics { if (expanded == true) collapse { onClick(); true } else if (expanded == false) expand { onClick(); true } },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = Tok.tx2, modifier = Modifier.size(21.dp))
+        badge()
+    }
+}
+
+/**
+ * The review queue, on row 2's trailing edge. The DIAMOND says somebody is waiting and the count is
+ * written rather than merely tinted — but a zero is never printed: "Review 0" reads as a broken badge.
+ */
+@Composable
+private fun ReviewAction(count: Int, onClick: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = Metric.touch).widthIn(min = Metric.touch)
+            .clip(RoundedCornerShape(Metric.radiusS))
+            .clickable(role = Role.Button, onClick = onClick)
+            // the ink lands on the same optical line as the icon controls above it, which sit 13 dp inside
+            // their own 48 dp boxes — a target wider than its label must not ragged-edge the gutter
+            .padding(start = Metric.gapS, end = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+    ) {
+        if (count > 0) {
+            StateMarkGlyph(StateMark.DIAMOND, Tok.warn, size = 7.dp)
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(
+            if (count > 0) stringResource(Res.string.proj_review_n, count) else stringResource(Res.string.proj_review),
+            color = Tok.tx2, style = TypeRole.body,
+        )
+    }
+}
+
+/**
+ * The overflow: Help and Settings, one tap under the title row.
+ *
+ * A low container — hairline and raised fill, no glass and no card stack — with 48 dp rows that grow with
+ * their labels. Opening it decides nothing: an outside tap anywhere, a second tap on the trigger, system
+ * back, or choosing a row all close it.
+ */
+@Composable
+private fun ProjectsOverflowMenu(
+    below: Dp,
+    updateAvailable: Boolean,
+    onHelp: () -> Unit,
+    onSettings: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() }
+    val shape = RoundedCornerShape(Metric.radius)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { onDismiss() } })
+        Column(
+            Modifier.align(Alignment.TopEnd).padding(top = below, end = Metric.gap)
+                .widthIn(min = 196.dp, max = 280.dp)
+                .clip(shape).background(Tok.raised).border(Metric.hairline, Tok.hair, shape),
+        ) {
+            OverflowMenuRow(stringResource(Res.string.proj_help), onClick = onHelp)
+            Hairline()
+            // the version nudge is repeated here in WORDS — the dot on the trigger only points at it
+            OverflowMenuRow(
+                stringResource(Res.string.proj_settings),
+                note = stringResource(Res.string.update_available).takeIf { updateAvailable },
+                onClick = onSettings,
+            )
         }
     }
 }
 
-/** The Projects top bar (title + status dot + monospace machine line, then [actions]) — ONE implementation
- *  shared by [DirectoryScreen] and its connect/switch skeleton, so the skeleton→list swap can never drift. */
 @Composable
-private fun ProjectsTopBar(
-    title: String,
-    dotColor: Color,
-    machine: String?,
-    machineLineModifier: Modifier = Modifier,
-    machineTrailing: @Composable RowScope.() -> Unit = {},
-    actions: @Composable RowScope.() -> Unit = {},
+private fun OverflowMenuRow(label: String, note: String? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = Metric.touch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = Metric.gapL, vertical = Metric.gapS),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
+        if (note != null) {
+            Spacer(Modifier.width(Metric.gapS))
+            Box(Modifier.size(7.dp).clip(CircleShape).background(Tok.accent))
+            Spacer(Modifier.width(6.dp))
+            Text(note, color = Tok.tx2, style = TypeRole.caption)
+        }
+    }
+}
+
+/**
+ * A two-sided row that REFLOWS instead of shrinking.
+ *
+ * At the release frame the state sentence and the review queue share one line. The moment the sentence can
+ * no longer sit on ONE line beside the action — 200% Dynamic Type, a long localization, a long machine
+ * name, a narrow window — they stop competing for it: the leading block takes the whole row and the action
+ * drops beneath it, still trailing. The trailing action is always measured first and keeps its own width,
+ * so neither side is ever clipped to make the other fit. Requires a bounded width.
+ */
+@Composable
+private fun ReflowRow(
+    modifier: Modifier = Modifier,
+    gap: Dp,
+    leading: @Composable () -> Unit,
+    trailing: @Composable () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().background(Tok.surface).padding(start = 16.dp, end = 6.dp, top = 14.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, color = Tok.tx, fontSize = 21.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp).then(machineLineModifier)) {
-                PulseDot(dotColor, size = 6.dp)
-                Spacer(Modifier.width(6.dp))
-                machine?.let {
-                    Text(it, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                machineTrailing()
+    Layout({ leading(); trailing() }, modifier) { measurables, constraints ->
+        val gapPx = gap.roundToPx()
+        val width = constraints.maxWidth
+        val trail = measurables[1].measure(Constraints(maxWidth = width))
+        val beside = width - trail.width - gapPx
+        val stacked = beside <= 0 || measurables[0].maxIntrinsicWidth(constraints.maxHeight) > beside
+        val lead = measurables[0].measure(Constraints(maxWidth = if (stacked) width else beside))
+        val height = if (stacked) lead.height + trail.height else maxOf(lead.height, trail.height)
+        layout(width, height) {
+            if (stacked) {
+                lead.place(0, 0)
+                trail.place(width - trail.width, lead.height)
+            } else {
+                lead.place(0, (height - lead.height) / 2)
+                trail.place(width - trail.width, (height - trail.height) / 2)
             }
         }
-        actions()
     }
 }
 
-/** Connect/switch placeholder: the REAL Projects header (amber dot while the link comes up) over
- *  shimmering rows — so landing on a machine only swaps skeleton→list and amber→green, instead of
- *  flashing a differently-shaped "Choose a directory" screen first. */
+/** The single canonical "open any folder" entry — the one doorway to the picker, in the content hierarchy. */
 @Composable
-private fun DirectorySkeleton(repo: PocketRepository) {
+private fun OpenAnyFolderRow(onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Hairline()
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                .clickable(role = Role.Button, onClick = onClick)
+                .padding(horizontal = Metric.gutter, vertical = Metric.gap),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Folder, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(Metric.gap))
+            Text(stringResource(Res.string.proj_open_any), color = Tok.tx, style = TypeRole.body, modifier = Modifier.weight(1f))
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
+        }
+        Hairline()
+    }
+}
+
+/** Connect/switch placeholder: the REAL Projects header over shimmering rows — so landing on a machine
+ *  only swaps skeleton→list, instead of flashing a differently-shaped screen first. It claims nothing:
+ *  the sentence below the bars says exactly what is still missing. The header's controls are REAL here
+ *  too — waiting for a directory list is no reason to lose the way back to the computers or to Help. */
+@Composable
+internal fun DirectorySkeleton( // internal: EntryFlowUiTest pins its header against the Ready list's
+    repo: PocketRepository,
+    onOpenComputers: () -> Unit = {},
+    onOpenReviews: () -> Unit = {},
+) {
+    var showHelp by remember { mutableStateOf(false) }
+    if (showHelp) { HelpCenterScreen(HelpEntryPoint.PROJECTS, onBack = { showHelp = false }); return }
+    var showSettings by remember { mutableStateOf(false) }
+    if (showSettings) { SettingsScreen(repo, onBack = { showSettings = false }); return }
     val shimmer by rememberInfiniteTransition().animateFloat(
         initialValue = 0.25f, targetValue = 0.6f,
         animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
     )
-    Column(Modifier.fillMaxSize()) {
-        ProjectsTopBar(stringResource(Res.string.dir_projects), Tok.warn, repo.paired.value?.displayName())
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            repeat(5) {
+    ProjectsHeader(
+        title = stringResource(Res.string.dir_projects),
+        phase = repo.phase.value,
+        machine = repo.paired.value?.displayName(),
+        // this machine has told us NOTHING yet: the labels without counts, rather than a stale number
+        reviewCount = 0,
+        fleetWaiting = 0,
+        updateAvailable = repo.versionStatus.value.anyBehind, // a local fact — true with or without a link
+        onOpenComputers = onOpenComputers,
+        onReviews = onOpenReviews,
+        onHelp = { showHelp = true },
+        onSettings = { showSettings = true },
+    ) {
+        Column(Modifier.fillMaxSize().padding(Metric.gutter), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(4) {
                 Box(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).graphicsLayer { alpha = shimmer }.background(Tok.surface))
             }
+            Text(
+                stringResource(Res.string.conn_connecting_wait), color = Tok.tx2, style = TypeRole.caption,
+                modifier = Modifier.padding(top = Metric.gapS),
+            )
         }
     }
 }
@@ -639,38 +944,43 @@ private fun EmptyDirectories(onRefresh: () -> Unit) {
     }
 }
 
-/** Disconnected, with at least one bound computer: the device picker. Tap one to connect, or add another. */
+/**
+ * No project matched the filter. Not an illustration: it names the query, says what was actually searched,
+ * and offers the only two things that can help — clear the filter, or take the one open-folder doorway.
+ */
 @Composable
-private fun ConnectScreen(repo: PocketRepository) {
-    var url by remember { mutableStateOf(defaultDaemonUrl()) }
-    var advanced by remember { mutableStateOf(false) }
+private fun NoMatches(query: String, onClear: () -> Unit, onOpenFolder: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = Metric.gutter).padding(top = 32.dp),
     ) {
-        Text("CC Pocket", color = Tok.tx, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Text(stringResource(Res.string.choose_computer), color = Tok.tx2, fontSize = 14.sp)
-        Spacer(Modifier.height(20.dp))
-        DeviceList(repo, onSwitch = { repo.switchDaemon(it) }, onAdd = { repo.beginAddDevice() })
-        Spacer(Modifier.height(10.dp))
-        Text(repo.status.value.resolve(), color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-        Spacer(Modifier.height(16.dp))
-        TextButton({ advanced = !advanced }) {
-            Text(stringResource(if (advanced) Res.string.hide_advanced else Res.string.advanced_direct_lan), color = Tok.muted, fontSize = 12.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+            StateMarkGlyph(StateMark.RING, Tok.muted)
+            Text(
+                stringResource(Res.string.proj_no_match_title, query), color = Tok.tx, style = TypeRole.rowTitle,
+                modifier = Modifier.weight(1f),
+            )
         }
-        if (advanced) {
-            OutlinedTextField(url, { url = it }, label = { Text(stringResource(Res.string.daemon_ws_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect_direct)) }
-        }
+        Text(
+            stringResource(Res.string.proj_no_match_body), color = Tok.tx2, style = TypeRole.preview,
+            modifier = Modifier.padding(top = Metric.gapS),
+        )
+        EntrySecondaryButton(stringResource(Res.string.proj_clear_filter), Modifier.padding(top = Metric.gapL), onClick = onClear)
+        EntrySecondaryButton(stringResource(Res.string.proj_open_any), Modifier.padding(top = Metric.gap), onClick = onOpenFolder)
     }
 }
 
+/** Disconnected, with at least one bound computer: the device picker. Tap one to connect, or add another. */
+@Composable
+private fun ConnectScreen(repo: PocketRepository) = ComputersSurface(
+    repo,
+    onSwitch = { repo.switchDaemon(it) },
+    onAdd = { repo.beginAddDevice() },
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DirectoryScreen(
+internal fun DirectoryScreen( // internal: the Entry Flow hierarchy is asserted by EntryFlowUiTest (demo mode)
     repo: PocketRepository,
     onOpenFleet: () -> Unit = {},
     onOpenInbox: () -> Unit = {},
@@ -746,60 +1056,41 @@ private fun DirectoryScreen(
     val approvalClearance = if (approvalCount > 0) 72.dp else 0.dp
 
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()) {
-        // ── top bar: "Projects" + connection sub-line · view toggle · settings ──
-        ProjectsTopBar(
-            headerTitle,
-            if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn,
-            repo.paired.value?.displayName(),
-            // the machine line is the doorway into the fleet: tap → Your computers (live overview)
-            machineLineModifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onOpenFleet).padding(vertical = 2.dp),
-            machineTrailing = {
-                val waiting = repo.fleetAttention().size
-                if (repo.pairedList.size > 1 || waiting > 0) {
-                    Spacer(Modifier.width(6.dp))
-                    Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(13.dp))
-                }
-                if (waiting > 0) {
-                    Spacer(Modifier.width(4.dp))
-                    dev.ccpocket.app.ui.fleet.AttentionBadge(waiting)
-                }
-            },
-        ) {
-            IconButton(openFolderEntry, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Rounded.Add, stringResource(Res.string.new_path_open), tint = Tok.tx2, modifier = Modifier.size(22.dp))
-            }
-            ViewToggle(tree) { repo.setTreeView(!tree) }
-            Spacer(Modifier.width(4.dp))
-            // the Review Center's header entry (REVIEW-REQUEST.md §12). A DOT rather than a count: at
-            // 36dp a number is unreadable, and the only thing this affordance has to say is "somebody is
-            // waiting" — the Center itself shows who and how many.
-            IconButton(onOpenReviews, modifier = Modifier.size(36.dp)) {
-                Box(contentAlignment = Alignment.TopEnd) {
-                    Icon(Icons.Outlined.RateReview, stringResource(Res.string.rv_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
-                    dev.ccpocket.app.ui.review.ReviewPendingDot(repo.reviewPendingCount)
-                }
-            }
-            IconButton({ showHelp = true }, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
-            }
-            SettingsIconButton(repo, size = 36.dp) { showSettings = true }
-        }
-        OutlinedTextField(
-            query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        // discoverable entry to open ANY folder — the project list only shows folders that already have
-        // history, and the top-bar "+" reads as "new", so this spells out how to reach a fresh folder
-        // (#32); both now land in the #152 browser (guests keep the manual sheet)
+    // ── the header (Master v2): title + Computers/overflow, then the machine state + Review ──
+    // The machine line is no longer its own tap target: the Computers control beside the title is THE
+    // fleet doorway now, and it carries the same real waiting count the old chevron did.
+    ProjectsHeader(
+        title = headerTitle,
+        phase = repo.phase.value,
+        machine = repo.paired.value?.displayName(),
+        reviewCount = repo.reviewPendingCount, // the Review Center (REVIEW-REQUEST.md §12)
+        fleetWaiting = approvalCount,
+        updateAvailable = repo.versionStatus.value.anyBehind,
+        onOpenComputers = onOpenFleet,
+        onReviews = onOpenReviews,
+        onHelp = { showHelp = true },
+        onSettings = { showSettings = true },
+    ) {
+        // ── the search row: filter beside the view mode ──
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = openFolderEntry).padding(horizontal = 16.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().padding(horizontal = Metric.gutter).padding(top = Metric.gapS, bottom = Metric.gapS),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Add, null, tint = Tok.accent, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(Res.string.new_path_open_row), color = Tok.tx2, fontSize = 13.sp)
+            OutlinedTextField(
+                query, { query = it }, placeholder = { Text(stringResource(Res.string.filter_hint)) }, singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(Metric.gap))
+            ViewToggle(tree) { repo.setTreeView(!tree) }
         }
+        // THE open-folder entry. Exactly one, in the content hierarchy — the old top-bar "+" duplicated it
+        // at equal weight, which left two controls competing to mean the same thing (#32/#152 route intact:
+        // owners land in the browser, guests keep the manual path sheet).
+        OpenAnyFolderRow(openFolderEntry)
+        // NOTE: the "was ready and dropped → keep the list under a slim warning" banner is NOT repeated
+        // here. The root already renders exactly one Reconnecting strip above every content screen, and a
+        // second copy on Projects would be the same sentence twice. Computer offline never reaches this
+        // list outside Chat — ConnectionGate routes it to the recovery surface instead.
         // ── breadcrumb (tree, drilled below root) ──
         if (treeMode && base != root) {
             // labels + real drill targets anchored at root — a reconstruction from display labels broke
@@ -816,13 +1107,9 @@ private fun DirectoryScreen(
                 repo.directories.isEmpty() && repo.directoriesLoaded.value && query.isBlank() ->
                     EmptyDirectories { repo.refreshDirectories() }
                 visibleDirs.isEmpty() && repo.directoriesLoaded.value ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
-                    }
+                    NoMatches(query, onClear = { query = "" }, onOpenFolder = openFolderEntry)
                 !treeMode && flatRows.isEmpty() && repo.directoriesLoaded.value ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(stringResource(Res.string.dir_no_matches), color = Tok.muted, fontSize = 13.sp)
-                    }
+                    NoMatches(query, onClear = { query = "" }, onOpenFolder = openFolderEntry)
                 treeMode -> LazyColumn(
                     Modifier.fillMaxSize().padding(horizontal = 16.dp),
                     state = listState,
@@ -921,6 +1208,7 @@ private fun DirectoryScreen(
                 selected = repo.defaultMode.value,
                 selectedNativeMode = repo.defaultPermissionMode.value,
                 agent = repo.defaultAgent.value,
+                computer = repo.paired.value?.displayName(),
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
@@ -1282,7 +1570,7 @@ private fun FolderRow(
                 Spacer(Modifier.width(8.dp))
             }
         }
-        Icon(Icons.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, tint = Tok.muted, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -1450,28 +1738,46 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
     val collapsed = remember(dir) { mutableStateMapOf<String, Boolean>() }
     val approvalCount = repo.fleetAttention().size
     val approvalsRefreshing = repo.fleetMachines().any { it.pending > 0 && it.status != MachineStatus.ONLINE }
+    // Mobile UI 2.0: the state a row may claim is decided once, by the pure mapper, from real facts only —
+    // a fleet attention row's own sessionId/workdir plus its real ask's isQuestion. Sessions and Chat read
+    // the same ladder, which is what keeps them from naming one session two different things in one frame.
+    val attention = repo.fleetAttention().map { e ->
+        SessionAttention(e.sessionId, e.workdir, isQuestion = repo.attentionAsk(e)?.isQuestion == true)
+    }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.backToDirectories() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(Res.string.sessions_title), color = Tok.tx, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: honest dot (green only when Ready) + workdir
-                        PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
-                        Spacer(Modifier.width(5.dp))
-                        TailPathText(dir)
-                    }
+            // quiet utility row: everything stays reachable at 48dp, nothing competes with the title below
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton({ repo.backToDirectories() }, modifier = Modifier.size(Metric.touch)) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack, stringResource(Res.string.ses_projects),
+                        tint = Tok.tx2, modifier = Modifier.size(20.dp),
+                    )
                 }
+                Spacer(Modifier.weight(1f))
                 if (repo.archiveSupported.value) {
-                    IconButton({ showArchived = true }, modifier = Modifier.size(40.dp)) {
+                    IconButton({ showArchived = true }, modifier = Modifier.size(Metric.touch)) {
                         Icon(Icons.Outlined.Inventory2, stringResource(Res.string.archive_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                     }
                 }
-                IconButton({ showHelp = true }, modifier = Modifier.size(40.dp)) {
+                IconButton({ showHelp = true }, modifier = Modifier.size(Metric.touch)) {
                     Icon(Icons.AutoMirrored.Outlined.HelpOutline, stringResource(Res.string.support_title), tint = Tok.tx2, modifier = Modifier.size(20.dp))
                 }
-                SettingsIconButton(repo, size = 40.dp) { showSettings = true }
+                SettingsIconButton(repo, size = Metric.touch) { showSettings = true }
             }
+            SessionsContextHeader(
+                machine = repo.paired.value?.displayName(),
+                conn = when (repo.phase.value) {
+                    ConnPhase.Ready -> ConnBadge.ONLINE
+                    ConnPhase.Connecting, ConnPhase.Reconnecting -> ConnBadge.CONNECTING
+                    else -> ConnBadge.OFFLINE
+                },
+                workdir = dir,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             val af = repo.agentFilter.value
             val filtered = repo.sessions.filter {
                 when (af) {
@@ -1482,47 +1788,50 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                     else -> true
                 }
             }
+            val split = splitSessions(sessionRows(filtered, attention))
+            // #202: the row menu is no longer gated on the project having groups — archive is available
+            // regardless, so a project with no groups still long-presses.
+            val grouped = repo.sessionGroups.isNotEmpty()
+            val hasRowMenu = grouped || repo.archiveSupported.value
+            Box(Modifier.weight(1f)) {
             PullToRefreshBox(isRefreshing = repo.sessionsRefreshing.value, onRefresh = { repo.refreshSessions() }, modifier = Modifier.fillMaxSize()) {
             LazyColumn(
-                Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 16.dp, bottom = if (approvalCount > 0) 88.dp else 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier.fillMaxSize().padding(horizontal = Metric.gutter),
+                contentPadding = PaddingValues(top = Metric.gapL, bottom = if (approvalCount > 0) 88.dp else Metric.gapL),
             ) {
-                if (af != "both") item { AgentFilterChip(af) { repo.setAgentFilter("both") } }
-                item {
-                    // one tap starts right away with the persisted defaults (openSession's own fallbacks);
-                    // the trailing chip shows those defaults and opens the full agent+mode picker instead
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.accent.copy(alpha = 0.16f))
-                            .clickable(enabled = !starting) { repo.openSession(dir) }.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(stringResource(Res.string.new_session_cta), color = Tok.accent, fontWeight = FontWeight.SemiBold)
-                                if (starting) {
-                                    Spacer(Modifier.width(8.dp))
-                                    CircularProgressIndicator(Modifier.size(12.dp), color = Tok.accent, strokeWidth = 1.5.dp)
-                                }
-                            }
-                            Text(
-                                stringResource(Res.string.start_agent_in, agentName(repo.defaultAgent.value), tilde(dir)),
-                                color = Tok.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(top = 2.dp),
+                if (af != "both") item { Box(Modifier.padding(bottom = Metric.gap)) { AgentFilterChip(af) { repo.setAgentFilter("both") } } }
+                if (filtered.isEmpty()) item { SessionsEmptyState() }
+                // ── Active: everything that is not finished, flat. Group HEADERS are deliberately absent
+                // here (a session that needs a decision is not filed away first), but each row keeps its
+                // group membership — the long-press move/archive sheet is unchanged.
+                if (split.active.isNotEmpty()) {
+                    item(key = "hdr:active") { SessionSectionLabel(stringResource(Res.string.ses_active), Modifier.padding(bottom = 10.dp)) }
+                    items(split.active, key = { "act:" + it.session.sessionId }) { row ->
+                        Column {
+                            Hairline()
+                            SessionListRow(
+                                row,
+                                onOpen = { repo.openSession(dir, row.session.sessionId, title = row.session.title, agent = row.session.agent ?: AgentKind.CLAUDE) },
+                                onLongPress = if (hasRowMenu) ({ moveTarget = row.session }) else null,
                             )
                         }
-                        Spacer(Modifier.width(10.dp))
-                        SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
                     }
                 }
-                // issue #119: when the project has groups, render each group as a collapsible section with an
-                // "Ungrouped" bucket at the end. The "+ New group" affordance shows whenever the daemon is
-                // group-aware (groupsSupported) — including zero groups yet, so the FIRST group is creatable —
-                // but hides on an older daemon / guest connection that omits groups entirely, keeping the list
-                // exactly as flat as before (sessionSections then returns one header-less section).
-                val grouped = repo.sessionGroups.isNotEmpty()
+                // ── Recent: the organisation half. Groups keep their headers here, including empty ones,
+                // so a freshly created group stays visible and manageable (issue #119).
+                if (split.recent.isNotEmpty() || repo.groupsSupported.value) {
+                    item(key = "hdr:recent") {
+                        SessionSectionLabel(
+                            stringResource(Res.string.ses_recent),
+                            Modifier.padding(top = if (split.active.isEmpty()) 0.dp else 22.dp, bottom = 10.dp),
+                        )
+                    }
+                }
+                // The "+ New group" affordance shows whenever the daemon is group-aware (groupsSupported) —
+                // including zero groups yet, so the FIRST group is creatable — but hides on an older daemon /
+                // guest connection that omits groups entirely (sessionSections then returns one flat section).
                 if (repo.groupsSupported.value) item { NewGroupRow { showNewGroup = true } }
-                for (section in sessionSections(filtered, repo.sessionGroups)) {
+                for (section in sessionSections(split.recent.map { it.session }, repo.sessionGroups)) {
                     val g = section.group
                     val key = g?.id ?: UNGROUPED_KEY
                     val isCollapsed = collapsed[key] == true
@@ -1530,6 +1839,9 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                         item(key = "grp:$key") {
                             GroupHeader(
                                 name = g?.name ?: stringResource(Res.string.group_ungrouped),
+                                // rows filed HERE, not the group's whole membership: this header is a
+                                // collapse control, so its number has to match what folding it hides —
+                                // a member currently in Active is listed above, under its own state
                                 count = section.sessions.size,
                                 collapsed = isCollapsed,
                                 onToggle = { collapsed[key] = !isCollapsed },
@@ -1539,22 +1851,35 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                     }
                     if (!isCollapsed) {
                         items(section.sessions, key = { it.sessionId }) { s ->
-                            // #202: the row menu is no longer gated on the project having groups — archive
-                            // is available regardless, so a project with no groups still long-presses.
-                            val hasRowMenu = grouped || repo.archiveSupported.value
-                            SessionRow(repo, dir, s, onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null)
+                            Column {
+                                Hairline()
+                                SessionListRow(
+                                    SessionRowUi(s, SurfaceState.COMPLETE), // by construction: this half IS the settled one
+                                    onOpen = { repo.openSession(dir, s.sessionId, title = s.title, agent = s.agent ?: AgentKind.CLAUDE) },
+                                    onLongPress = if (hasRowMenu) ({ moveTarget = s }) else null,
+                                )
+                            }
                         }
                     }
                 }
             }
             }
+            ApprovalQueueFab(
+                count = approvalCount,
+                refreshing = approvalsRefreshing,
+                onClick = onOpenInbox,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+            )
+            // #202: the archive receipt. The row it refers to has already vanished from this list, so the
+            // toast is the only thing that says where it went — and its action is the reverse verb, not Undo.
+            ArchiveToastBar(repo, Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp))
+            }
+            // one tap starts right away with the persisted defaults (openSession's own fallbacks); the
+            // trailing chip shows those defaults and opens the full agent+mode picker instead
+            NewSessionDock(starting = starting, onStart = { repo.openSession(dir) }) {
+                SessionDefaultsChip(repo.defaultAgent.value, repo.defaultMode.value, enabled = !starting) { pickMode = true }
+            }
         }
-        ApprovalQueueFab(
-            count = approvalCount,
-            refreshing = approvalsRefreshing,
-            onClick = onOpenInbox,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
-        )
         if (pickMode) {
             LaunchedEffect(Unit) { repo.fetchModels(AgentKind.CLAUDE) }
             StartSessionModeSheet(
@@ -1562,6 +1887,7 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 selected = repo.defaultMode.value,
                 selectedNativeMode = repo.defaultPermissionMode.value,
                 agent = repo.defaultAgent.value,
+                computer = repo.paired.value?.displayName(),
                 autoAvailable = repo.supportsPermissionMode(dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO),
                 modelsFor = { a -> repo.newSessionModelChoices(a) },
                 defaultModelFor = { a -> repo.defaultModelFor(a) },
@@ -1574,12 +1900,6 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 onDismiss = { pickMode = false },
             )
         }
-        // #202: the archive receipt. The row it refers to has already vanished from this list, so the toast
-        // is the only thing that says where it went — and its action is the reverse verb, not an Undo.
-        ArchiveToastBar(
-            repo,
-            Modifier.align(Alignment.BottomCenter).padding(bottom = if (approvalCount > 0) 88.dp else 12.dp),
-        )
         // issue #119 group management — the daemon re-pushes the Sessions frame after every mutation, so the
         // list/headers refresh themselves (no optimistic edit here).
         if (showNewGroup) NewGroupDialog(onConfirm = { repo.createGroup(it) }, onDismiss = { showNewGroup = false })
@@ -1639,6 +1959,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     var showSessions by remember { mutableStateOf(false) } // stack chip → cross-project session switcher (issue #165)
     var showModeSheet by remember { mutableStateOf(false) }
     var showSessionInfo by remember { mutableStateOf(false) }
+    // header context disclosure (Mobile UI 2.0): collapsed by default so the stream keeps the viewport;
+    // per conversation, so switching sessions never lands you inside the previous one's expanded context
+    var contextExpanded by remember(repo.convoId.value) { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
     var showModelSheet by remember { mutableStateOf(false) } // composer model chip → the picker, one tap (issue #157)
     var showBgJobs by remember { mutableStateOf(false) }
@@ -1836,56 +2159,43 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
     LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) focus.clearFocus() } // scrolling dismisses the keyboard
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().background(Tok.surface).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() }) { Text("←", color = Tok.tx2, fontSize = 18.sp) }
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showSessionInfo = true }.padding(vertical = 2.dp)) {
-                    // session title leads (design); the generic "Chat" only before the first prompt names it
-                    Text(
-                        repo.chatTitle.value ?: stringResource(Res.string.chat_title),
-                        color = Tok.tx, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) { // connection bar: honest dot (green only when Ready) + machine · folder · model
-                        PulseDot(if (repo.phase.value == ConnPhase.Ready) Tok.ok else Tok.warn)
-                        Spacer(Modifier.width(5.dp))
-                        // ONE style for every segment — the machine name used to force lineHeight=11 while
-                        // the path/model kept the font's default, so the three never shared a baseline
-                        val metaStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
-                        // which computer this conversation lives on — its own tap target: switch machines
-                        // without leaving the chat (the surrounding column still opens session info)
-                        repo.paired.value?.let { d ->
-                            Text(
-                                d.displayName(), color = Tok.tx2, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    // bound the machine name so it yields the line to the project folder (#179)
-                                    .widthIn(max = 88.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .clickable { showSwitcher = true }
-                                    .padding(horizontal = 2.dp),
-                            )
-                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                        }
-                        // just the project FOLDER: the full path routinely ate the whole line on a phone,
-                        // and it's one tap away in the session-info sheet (this row opens it)
-                        Text(
-                            folderName(repo.workdir.value), color = Tok.tx2, style = metaStyle,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
-                        )
-                        // the effective model: the real alias once known, else an "account default"
-                        // placeholder — never a blank gap. A pre-first-turn session (lazy start #61) whose
-                        // model the daemon couldn't eager-resolve shows the placeholder until the first turn's
-                        // init names the CLI/account default (issue #96)
-                        val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value).ifBlank { stringResource(Res.string.value_model_default) }
-                        Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                        Text(modelLabel, color = Tok.muted, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 88.dp))
-                        AgentBadge(repo.sessionAgent.value) // non-Claude agents get their tag; Claude stays quiet
-                        // external trigger source (issue #91): a bridge-opened session says so — the owner
-                        // should know an IM bot, not a person, is driving this conversation
-                        repo.sessionOrigin.value?.let { origin ->
-                            Text("·", color = Tok.muted, style = metaStyle, modifier = Modifier.padding(horizontal = 3.dp))
-                            Text("via $origin", color = Tok.warn, style = metaStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
-                }
+            // ── header (Mobile UI 2.0 · Core frame 02) ──────────────────────────────────────────────
+            // The title leads and may wrap; everything that used to be crammed onto one mono line is now a
+            // collapsible context region. Only facts the daemon actually supplied appear — no branch (it is
+            // per-session truth, not a project fact), no timestamp, no duration.
+            val machineName = repo.paired.value?.displayName()
+            val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value)
+            val switchLabel = stringResource(Res.string.switcher_open)
+            val contextLines = buildList {
+                add(ContextLine(agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE)))
+                add(
+                    ContextLine(
+                        stringResource(
+                            if (repo.permissionMode.value == dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
+                            else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
+                        ),
+                    ),
+                )
+                // which computer this conversation lives on — still its own control: switch machines
+                // without leaving the chat
+                machineName?.let { add(ContextLine(it, onClick = { showSwitcher = true }, clickLabel = switchLabel)) }
+                repo.workdir.value?.let { add(ContextLine(folderName(it))) }
+                // the effective model, only once it is known. A pre-first-turn session (lazy start #61)
+                // simply has no model line until the first turn's init names it (issue #96).
+                modelLabel.takeIf { it.isNotBlank() }?.let { add(ContextLine(it)) }
+                // external trigger source (issue #91): a bridge-opened session says so — the owner should
+                // know an IM bot, not a person, is driving this conversation
+                repo.sessionOrigin.value?.let { add(ContextLine("via $it")) }
+            }
+            ChatHeader(
+                title = repo.chatTitle.value ?: stringResource(Res.string.chat_title),
+                summary = contextLines,
+                workdir = repo.workdir.value,
+                expanded = contextExpanded,
+                onToggleContext = { contextExpanded = !contextExpanded },
+                onBack = { repo.saveDraft(repo.workdir.value, composer.text); repo.backToBrowse() },
+                onSessionInfo = { showSessionInfo = true },
+            ) {
                 if (!repo.observing.value) {
                     // handoff status chip (design 3b/7/9): WAITING mute · IN PROGRESS pulse · RETURNED green.
                     // On a device that ISN'T the initiator, tapping a WAITING chip opens the accept preview.
@@ -1897,26 +2207,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             },
                         ) { HandoffStatusChip(st) }
                     }
-                    // execution state gets its own persistent header chip (issue #52): re-entering a mid-turn
-                    // session showed nothing alive — the connection dot only says "linked", not "working",
-                    // and the composer stays enabled (queueing), which read as "disconnected".
-                    if (repo.streaming.value) Row(
-                        Modifier.padding(end = 6.dp).clip(RoundedCornerShape(10.dp)).background(Tok.raised)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        PulseDot(Tok.accent)
-                        Text(stringResource(Res.string.chat_running), color = Tok.accent, fontSize = 11.sp)
-                    }
-                    // mode switching moved into the ⋯ quick-actions sheet — the persistent badge was one
-                    // more thing crowding the header for a setting touched a few times per session
+                    // the streaming chip is gone from here: execution state (issue #52) is now the pinned
+                    // state block below, which states it in words instead of as one more header badge
                     Box(
-                        Modifier.size(32.dp).clip(CircleShape).clickable { showQuickActions = true },
+                        Modifier.size(Metric.touch).clip(CircleShape).clickable { showQuickActions = true },
                         contentAlignment = Alignment.Center,
                     ) { Text("⋯", color = Tok.tx2, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
             }
+            // ── the one pinned state, chosen by the shared ladder from real facts only ────────────────
+            // Approval/Answer lead; a streaming turn under them is demoted to a qualifying line. The block
+            // is actionless by design — Secure Approval (modal) and QuestionCard own their decisions.
+            chatStateUi(repo.pendingAsk.value, repo.sessionDegraded.value, repo.streaming.value)
+                ?.let { ChatStateBlock(it) }
             // Role ribbon (design Frames 6/7): terracotta only when THIS device is the acting recipient;
             // the spectating initiator gets the neutral strip. The trailing readout is elapsed-in-control.
             if (hoStatus == HandoffStatus.IN_PROGRESS && activeHandoff != null) {
@@ -2000,6 +2303,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             MessageItem(
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
+                                agent = repo.sessionAgent.value,
                                 onOpenWorkflow = repo::openWorkflow,
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
@@ -2059,14 +2363,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                     modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp).padding(top = 8.dp),
                 )
             }
-            // session health (issue #65): a degraded session (recent turns all API failures) gets a
-            // persistent strip right above the composer — warn BEFORE the next prompt goes in, not
-            // after it fails. The context half of this strip is gone: the accessory-row gauge now
-            // carries ≥80% inline, so only the critical step still earns a line (see the caption
-            // inside the composer below).
-            if (repo.sessionDegraded.value) {
-                StatusBanner(Tok.danger, stringResource(Res.string.session_degraded_banner))
-            }
+            // session health (issue #65) no longer gets its own strip here: `sessionDegraded` is the
+            // Failure rung of the shared state ladder, so the pinned block above states it once, in the
+            // same grammar as every other state, and stays on screen for the whole session — the warning
+            // still precedes the next prompt without the same fact being drawn twice.
             // RETURNED result card (design Frame 9): docks above the composer until the initiator
             // acknowledges — "Mark reviewed" is the only transition to COMPLETED.
             val hoResult = activeHandoff?.result
@@ -2538,43 +2838,47 @@ private fun MessageItem(
     m: ChatItem,
     // Workflow run bound to a Workflow tool card (issue #106) — null with an old daemon or for other tools
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
+    // which backend is speaking — the Agent turn is labeled with its real name, never a generic "Assistant"
+    agent: AgentKind? = null,
     onOpenWorkflow: (String) -> Unit = {},
     onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
     onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
     onTightenAutoRun: (ChatItem.AutoRun) -> Unit = {},
 ) {
     when (m) {
-        // accent-rail user turn (design: User Turn Styles.html, direction B) — the terracotta
-        // rail + warm tint mark "what I said" as a quote; no label, assistant flow untouched
-        is ChatItem.User -> Row(
-            Modifier.fillMaxWidth().height(IntrinsicSize.Min)
-                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 10.dp, bottomEnd = 10.dp, bottomStart = 4.dp))
-                .background(Tok.accent.copy(alpha = 0.05f)),
-        ) {
-            Box(Modifier.fillMaxHeight().width(2.dp).clip(RoundedCornerShape(2.dp)).background(Tok.accent.copy(alpha = 0.6f)))
-            Column(
-                Modifier.weight(1f).padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 9.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
-                // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
-                // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
-                m.files.forEach { f ->
-                    if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
-                }
-                if (m.text.isNotBlank()) {
-                    // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
-                    // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
-                    val shown = renderClip(m.text)
-                    SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
-                    if (shown.length < m.text.length) TruncatedNote(m.text.length)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
+        // Mobile UI 2.0: a quiet uppercase source label above each ordinary turn is all the structure the
+        // stream needs to tell User / Agent / Tool apart — no permanent timeline rail, no card stack.
+        is ChatItem.User -> Column(Modifier.fillMaxWidth()) {
+            TurnSourceLabel(stringResource(Res.string.chat_you), alignEnd = true)
+            Row(Modifier.fillMaxWidth().padding(top = 7.dp), horizontalArrangement = Arrangement.End) {
+                Column(
+                    Modifier.widthIn(max = 300.dp) // a contained bubble, not the full column: "what I said"
+                        .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomEnd = 4.dp, bottomStart = 14.dp))
+                        .background(Tok.raised).padding(horizontal = 15.dp, vertical = 11.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                    // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
+                    // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
+                    m.files.forEach { f ->
+                        if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
+                    }
+                    if (m.text.isNotBlank()) {
+                        // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
+                        // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
+                        val shown = renderClip(m.text)
+                        SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                        if (shown.length < m.text.length) TruncatedNote(m.text.length)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
+                        }
                     }
                 }
             }
         }
+        // the agent flows in the base surface: no container at all, so long prose reads as prose
         is ChatItem.Assistant -> Column {
+            TurnSourceLabel(agentName(agent ?: AgentKind.CLAUDE), Modifier.padding(bottom = 7.dp))
             SelectionContainer { MarkdownText(m.text, Tok.tx) } // drag-select any span to copy
             if (m.text.isNotBlank()) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 CopyChip(m.text) // one-tap copy of the whole turn
@@ -2594,21 +2898,25 @@ private fun MessageItem(
             // tools and only when the preview truly reads as a path (Bash/other previews stay plain text).
             val opener = LocalPathOpener.current
             val openablePath = m.tool in TOOL_FILE_PATH_TOOLS && opener != null && looksLikePath(m.preview)
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Tok.raised)
-                    .clickable { expanded = !expanded }.padding(8.dp),
-            ) {
-                Text(if (isPlan) "⚙ Plan" else "⚙ ${m.tool}", color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                if (m.preview.isNotBlank()) {
-                    if (openablePath) OpenablePathChip(m.preview, Modifier.padding(top = 6.dp)) { opener!!.open(m.preview) }
-                    else if (isPlan && expanded) Box(Modifier.padding(top = 4.dp)) { MarkdownText(m.preview, Tok.tx2) } // plan rendered as markdown
-                    else Text(
-                        m.preview, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 12.sp,
-                        maxLines = if (expanded) Int.MAX_VALUE else 1,
-                        overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
+            Column {
+                TurnSourceLabel(stringResource(Res.string.chat_src_tool), Modifier.padding(bottom = 7.dp))
+                ToolTurnBand(
+                    // the real tool token, verbatim — "Plan" is the one rename, because that is what
+                    // ExitPlanMode's payload actually is
+                    tool = if (isPlan) "Plan" else m.tool,
+                    preview = m.preview,
+                    // ONLY a real outcome. `ok == null` means running or unknown, and neither is a result
+                    // worth claiming — the row simply carries no status rather than inventing one.
+                    status = m.ok,
+                    expanded = expanded,
+                    onToggle = { expanded = !expanded },
+                    previewSlot = when {
+                        m.preview.isBlank() -> null
+                        openablePath -> ({ OpenablePathChip(m.preview) { opener!!.open(m.preview) } })
+                        isPlan && expanded -> ({ MarkdownText(m.preview, Tok.tx2) }) // plan rendered as markdown
+                        else -> null
+                    },
+                )
             }
         }
         is ChatItem.Sys -> Text(stringResource(Res.string.error_prefix, m.text), color = Tok.danger, fontSize = 12.sp)

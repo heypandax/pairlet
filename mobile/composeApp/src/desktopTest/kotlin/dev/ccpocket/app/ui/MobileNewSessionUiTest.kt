@@ -19,7 +19,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.present
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.new_session_cta
-import dev.ccpocket.app.resources.new_session_subtitle
+import dev.ccpocket.app.resources.cfg_start
 import dev.ccpocket.app.resources.help_ask_support
 import dev.ccpocket.app.resources.support_title
 import dev.ccpocket.app.theme.PocketTheme
@@ -61,10 +61,12 @@ class MobileNewSessionUiTest {
     fun oneTapStartsSessionWithDefaults() = runComposeUiTest {
         val repo = composeSessionsScreen()
         val cta = runBlocking { getString(Res.string.new_session_cta) }
-        val pickerSubtitle = runBlocking { getString(Res.string.new_session_subtitle) }
+        // the configuration surface is identified by its ONE start control (Entry Flow UI 2.0) — the old
+        // "Start in which mode?" subtitle is gone now that a mode row selects instead of committing
+        val configureStart = runBlocking { getString(Res.string.cfg_start) }
         onAllNodes(hasText(cta)).onFirst().performClick()
         waitForIdle()
-        assertTrue(!present(pickerSubtitle), "one-tap start must not open the mode picker")
+        assertTrue(!present(configureStart), "one-tap start must not open the mode picker")
         assertNotNull(repo.convoId.value, "one tap must open the conversation")
         assertEquals(dir, repo.workdir.value)
         assertEquals(repo.defaultMode.value, repo.mode.value) // started under the persisted default mode
@@ -122,10 +124,10 @@ class MobileNewSessionUiTest {
         val repo = composeSessionsScreen()
         // the chip is labeled with the default mode (or Codex preset) — resolve the same resource the UI uses
         val chipLabel = runBlocking { getString(sessionDefaultsLabel(repo.defaultAgent.value, repo.defaultMode.value)) }
-        val pickerSubtitle = runBlocking { getString(Res.string.new_session_subtitle) }
+        val configureStart = runBlocking { getString(Res.string.cfg_start) }
         onAllNodes(hasText(chipLabel)).onFirst().performClick()
         waitForIdle()
-        assertTrue(present(pickerSubtitle), "the defaults chip must open the full picker")
+        assertTrue(present(configureStart), "the defaults chip must open the full picker")
         assertNull(repo.convoId.value, "opening the picker must not start a session yet")
     }
 

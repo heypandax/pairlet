@@ -9,9 +9,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,15 +21,13 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,35 +37,78 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.defaultDaemonUrl
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
+import dev.ccpocket.app.theme.TypeRole
+import dev.ccpocket.app.ui.entry.CopyableCommand
+import dev.ccpocket.app.ui.entry.EntryLabel
+import dev.ccpocket.app.ui.entry.EntryNote
+import dev.ccpocket.app.ui.entry.EntryPrimaryButton
+import dev.ccpocket.app.ui.entry.EntryQuietAction
+import dev.ccpocket.app.ui.entry.EntryRouteRow
+import dev.ccpocket.app.ui.entry.EntrySecondaryButton
+import dev.ccpocket.app.ui.entry.EntryTitle
+import dev.ccpocket.app.ui.session.Hairline
+import dev.ccpocket.app.voice.openAppSettings
 import org.jetbrains.compose.resources.stringResource
 import qrscanner.CameraLens
 import qrscanner.QrScanner
 
-/** "Connect your computer" — pair by 6-digit code (or scan/paste a link). Matches the design mock. */
+/** The desktop command that mints a pairing code — quoted verbatim, never paraphrased. */
+private const val PAIR_COMMAND = "cc-pocket-daemon pair"
+
+/**
+ * "Pair a computer" — the first surface of the entry flow (Entry Flow UI 2.0 · Master frame 01).
+ *
+ * CODE-FIRST AND CAMERA-FREE BY DEFAULT. A camera is a permission request and a live picture of the user's
+ * room; neither belongs in the hierarchy of a screen whose job is "type six digits". Scanning is an explicit
+ * route ([PairScanRoute]) and is the only place [QrScanner] mounts, so nothing on launch asks for a
+ * permission the flow does not need — and pairing stays completable if that permission is never granted.
+ *
+ * Every previously reachable route survives at a lower weight, below one hairline, in expected order: scan,
+ * paste-link, direct LAN — then the desktop command, the install guide and Demo. Pairing validation, URI
+ * parsing and every repository effect are untouched.
+ */
 @Composable
 fun PairingScreen(repo: PocketRepository) {
     var showOnboarding by remember { mutableStateOf(false) }
-    if (showOnboarding) { OnboardingScreen(onBack = { showOnboarding = false }, onPairNow = { showOnboarding = false }); return }
+    // The six digits and the paste disclosure are hoisted ABOVE the scan route on purpose: walking into the
+    // scanner and back must not silently erase what was already typed (acceptance path 02).
     var code by remember { mutableStateOf("") }
+    var scanning by remember { mutableStateOf(false) }
     var showPaste by remember { mutableStateOf(false) }
+
+    if (showOnboarding) { OnboardingScreen(onBack = { showOnboarding = false }, onPairNow = { showOnboarding = false }); return }
+    if (scanning) {
+        PairScanRoute(
+            digitsEntered = code.length,
+            onBack = { scanning = false },
+            onScanned = { scanning = false; repo.handlePairUrl(it) },
+            onUseCode = { scanning = false },
+            onPasteLink = { scanning = false; showPaste = true },
+        )
+        return
+    }
+
     var link by remember { mutableStateOf("") }
-    var advanced by remember { mutableStateOf(false) }
+    var showLan by remember { mutableStateOf(false) }
     var url by remember { mutableStateOf(defaultDaemonUrl()) }
     val complete = code.length == 6
     // "Add a computer" entered from an existing binding — let the user back out to the device picker.
@@ -78,115 +116,208 @@ fun PairingScreen(repo: PocketRepository) {
     if (adding) dev.ccpocket.app.SystemBackHandler(enabled = true) { repo.cancelAddDevice() }
 
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
     ) {
-        if (adding) {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                TextButton({ repo.cancelAddDevice() }) { Text("‹ " + stringResource(Res.string.cancel), color = Tok.muted, fontSize = 13.sp) }
-            }
+        // added from an existing binding: a real way back, and the current computer stays connected
+        if (adding) Row(
+            Modifier.fillMaxWidth().padding(top = Metric.gapXs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(Res.string.pair_add_title), color = Tok.tx2, style = TypeRole.action,
+                modifier = Modifier.weight(1f),
+            )
+            EntryQuietAction(stringResource(Res.string.cancel), color = Tok.accent) { repo.cancelAddDevice() }
         }
-        Spacer(Modifier.height(if (adding) 8.dp else 48.dp))
-        Text(stringResource(Res.string.pairing_title), color = Tok.tx, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(7.dp))
-        Text(
-            stringResource(Res.string.pairing_subtitle),
-            color = Tok.tx2, fontSize = 14.sp, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 300.dp),
-        )
+        Spacer(Modifier.height(if (adding) Metric.gapS else 40.dp))
+        EntryTitle(stringResource(Res.string.pair_title), stringResource(Res.string.pair_sub))
+
         // A pure RECIPIENT (SESSION-HANDOFF.md §10: "接收方要求 cc-pocket App；不要求 daemon") has
         // collaborator links but no owner binding, so this pairing screen is their whole app — it would
         // otherwise read as "you haven't started yet" while their contact link is live and offers are
         // already routed here. One line, stated once; the offer overlay above still does the real work.
         val collabLinks = remember { dev.ccpocket.app.pairing.Pairing.collaboratorLinks() }
         if (!adding && collabLinks.isNotEmpty()) {
-            Spacer(Modifier.height(18.dp))
+            val shape = RoundedCornerShape(Metric.radius)
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+                Modifier.padding(top = 18.dp).fillMaxWidth().clip(shape)
+                    .background(Tok.warn.copy(alpha = 0.08f)).border(Metric.hairline, Tok.warn.copy(alpha = 0.38f), shape)
+                    .padding(Metric.gapL),
             ) {
-                Text(stringResource(Res.string.co_pairing_linked), color = Tok.tx, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+                    Box(Modifier.size(8.dp).rotate(45f).background(Tok.warn)) // attention, not danger
+                    Text(stringResource(Res.string.co_pairing_linked), color = Tok.tx, style = TypeRole.action)
+                }
                 Text(
                     stringResource(Res.string.co_pairing_linked_sub, collabLinks.joinToString("、") { it.displayName() }),
-                    color = Tok.tx2, fontSize = 12.5.sp, lineHeight = 18.sp, modifier = Modifier.padding(top = 4.dp),
+                    color = Tok.tx2, style = TypeRole.caption, modifier = Modifier.padding(top = Metric.gapXs),
                 )
             }
         }
 
+        // ── the hierarchy: six digits, then the one canonical action ──
+        EntryLabel(stringResource(Res.string.pair_code_label), Modifier.padding(top = 26.dp, bottom = Metric.gap))
+        CodeInput(code) { v -> code = v }
+        EntryPrimaryButton(
+            stringResource(Res.string.pair_cta),
+            Modifier.padding(top = Metric.gapL),
+            enabled = complete,
+        ) { repo.pairWithCode(code) }
+        EntryNote(
+            stringResource(if (complete) Res.string.pair_helper_complete else Res.string.pair_helper_incomplete),
+            Modifier.padding(top = Metric.gapS),
+        )
+        Text(
+            repo.status.value.resolve(), color = Tok.muted, style = TypeRole.captionMono,
+            modifier = Modifier.padding(top = Metric.gapS),
+        )
+
+        // ── alternatives: peers below one hairline, in the order they are actually reached for ──
         Spacer(Modifier.height(22.dp))
-
-        Viewfinder { repo.handlePairUrl(it) }
-
-        Spacer(Modifier.height(22.dp))
-        Divider(stringResource(Res.string.or_enter_code))
-        Spacer(Modifier.height(18.dp))
-
-        CodeInput(code) { v -> code = v; if (v.length == 6) repo.pairWithCode(v) }
-
-        Spacer(Modifier.height(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(Res.string.run_code_prefix) + " ", color = Tok.tx2, fontSize = 13.sp)
-            Text(
-                "cc-pocket-daemon pair", color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp,
-                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Tok.surface)
-                    .border(1.dp, Tok.hair, RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 2.dp),
-            )
-            Text(" " + stringResource(Res.string.run_code_suffix), color = Tok.tx2, fontSize = 13.sp)
-        }
-
-        TextButton({ showOnboarding = true }) { Text(stringResource(Res.string.ob_open), color = Tok.muted, fontSize = 12.sp) }
-        TextButton({ showPaste = !showPaste }) { Text(stringResource(if (showPaste) Res.string.hide else Res.string.cant_scan_paste_link), color = Tok.muted, fontSize = 12.sp) }
+        EntryRouteRow(stringResource(Res.string.pair_route_scan)) { scanning = true }
+        EntryRouteRow(stringResource(Res.string.pair_route_paste), expanded = showPaste) { showPaste = !showPaste }
         if (showPaste) {
-            Spacer(Modifier.height(14.dp))
-            OutlinedTextField(link, { link = it }, placeholder = { Text(stringResource(Res.string.paste_pair_link)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.pair(link) }, Modifier.fillMaxWidth(), enabled = link.isNotBlank()) { Text(stringResource(Res.string.pair_from_link)) }
+            OutlinedTextField(
+                link, { link = it }, placeholder = { Text(stringResource(Res.string.paste_pair_link)) },
+                singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = Metric.gapS),
+            )
+            EntrySecondaryButton(
+                stringResource(Res.string.pair_from_link), Modifier.padding(bottom = Metric.gap),
+                enabled = link.isNotBlank(),
+            ) { repo.pair(link) }
         }
-
-        Spacer(Modifier.height(10.dp))
-        Text(repo.status.value.resolve(), color = Tok.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
-
-        Spacer(Modifier.height(20.dp))
-        Button({ if (complete) repo.pairWithCode(code) }, Modifier.fillMaxWidth(), enabled = complete) { Text(stringResource(Res.string.connect)) }
-        Spacer(Modifier.height(6.dp))
-        TextButton({ advanced = !advanced }) { Text(stringResource(if (advanced) Res.string.hide_advanced else Res.string.advanced_direct_lan), color = Tok.muted, fontSize = 12.sp) }
-        if (advanced) {
-            OutlinedTextField(url, { url = it }, placeholder = { Text(stringResource(Res.string.daemon_ws_url)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton({ repo.startDirect(url) }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.connect_direct)) }
+        EntryRouteRow(stringResource(Res.string.pair_route_lan), expanded = showLan) { showLan = !showLan }
+        if (showLan) {
+            OutlinedTextField(
+                url, { url = it }, placeholder = { Text(stringResource(Res.string.daemon_ws_url)) },
+                singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = Metric.gapS),
+            )
+            EntrySecondaryButton(stringResource(Res.string.connect_direct)) { repo.startDirect(url) }
+            EntryNote(stringResource(Res.string.pair_lan_note), Modifier.padding(top = Metric.gapS, bottom = Metric.gap))
         }
+        Hairline()
 
-        Spacer(Modifier.height(20.dp))
+        // ── technical help: the exact command, copyable ──
+        EntryLabel(stringResource(Res.string.pair_on_computer), Modifier.padding(top = 22.dp, bottom = Metric.gapS))
+        CopyableCommand(PAIR_COMMAND)
+        EntryQuietAction(stringResource(Res.string.ob_open), Modifier.padding(top = Metric.gapXs)) { showOnboarding = true }
+
         // No computer? Explore the whole app with sample data — no pairing or account needed.
-        OutlinedButton({ repo.enterDemo() }, Modifier.fillMaxWidth()) { Text(stringResource(Res.string.demo_cta)) }
-        Spacer(Modifier.height(24.dp))
+        Hairline(Modifier.padding(top = Metric.gap))
+        EntryQuietAction(stringResource(Res.string.pair_demo), Modifier.padding(top = Metric.gapXs)) { repo.enterDemo() }
+        Spacer(Modifier.height(28.dp))
     }
 }
 
+/**
+ * The explicit scan route (Master frame 07) — the ONLY place the camera is requested.
+ *
+ * It has a real back path, and an unusable camera is not a dead end: the failure is explained in words and
+ * both the code and paste routes are repeated HERE rather than linked away, so the user never has to
+ * reconstruct where they came from. [digitsEntered] lets the screen state, in words, that what was already
+ * typed survived the detour.
+ */
 @Composable
-private fun Viewfinder(onScanned: (String) -> Unit) {
-    var scanning by remember { mutableStateOf(true) } // auto-start the camera on the pairing screen
+internal fun PairScanRoute(
+    digitsEntered: Int,
+    onBack: () -> Unit,
+    onScanned: (String) -> Unit,
+    onUseCode: () -> Unit,
+    onPasteLink: () -> Unit,
+) {
+    dev.ccpocket.app.SystemBackHandler(enabled = true) { onBack() }
+    // qr-kit reports "no camera on this device" and "permission refused" through the same channel, and the
+    // platforms word them differently — so this is ONE honest state ("we can't use the camera") rather than
+    // a guess between two, with the platform's own message shown underneath when it gave one.
+    var failure by remember { mutableStateOf<String?>(null) }
     var handled by remember { mutableStateOf(false) }
-    val anim = rememberInfiniteTransition()
-    val scanY by anim.animateFloat(6f, 196f, infiniteRepeatable(tween(1300, easing = LinearEasing), RepeatMode.Reverse))
-    Box(
-        Modifier.size(226.dp).clip(RoundedCornerShape(16.dp))
-            .background(Brush.radialGradient(listOf(Color(0xFF15171A), Color(0xFF0B0C0D))))
-            .border(1.dp, Tok.hair, RoundedCornerShape(16.dp))
-            .clickable { if (!scanning) { handled = false; scanning = true } },
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Metric.gutter),
     ) {
-        if (scanning) {
-            QrScanner(
-                modifier = Modifier.fillMaxSize(),
-                flashlightOn = false,
-                cameraLens = CameraLens.Back,
-                openImagePicker = false,
-                onCompletion = { v -> if (!handled) { handled = true; scanning = false; onScanned(v) } },
-                imagePickerHandler = {},
-                onFailure = {},
-                overlayColor = Color.Transparent,      // suppress qr-kit's own dimming; we draw the frame
-                overlayBorderColor = Color.Transparent,
-            )
+        Row(Modifier.fillMaxWidth().padding(top = Metric.gapXs), verticalAlignment = Alignment.CenterVertically) {
+            EntryQuietAction("‹ " + stringResource(Res.string.close), color = Tok.accent) { onBack() }
         }
+        EntryTitle(stringResource(Res.string.scan_title), null, Modifier.padding(top = Metric.gapS))
+
+        Box(Modifier.padding(top = 20.dp).align(Alignment.CenterHorizontally)) {
+            if (failure == null) {
+                Viewfinder(
+                    onScanned = { v -> if (!handled) { handled = true; onScanned(v) } },
+                    onFailure = { failure = it.ifBlank { " " } },
+                )
+            } else {
+                CameraUnavailable(failure)
+            }
+        }
+
+        // The camera-free routes are always present — before the camera fails, not only after.
+        EntryLabel(stringResource(Res.string.scan_without_camera), Modifier.padding(top = 24.dp, bottom = Metric.gapS))
+        EntryNote(stringResource(Res.string.scan_without_camera_body), Modifier.padding(bottom = Metric.gap))
+        EntryPrimaryButton(stringResource(Res.string.scan_use_code)) { onUseCode() }
+        EntryNote(
+            when (digitsEntered) {
+                0 -> stringResource(Res.string.scan_kept_none)
+                1 -> stringResource(Res.string.scan_kept_one)
+                else -> stringResource(Res.string.scan_kept_many, digitsEntered)
+            },
+            Modifier.padding(top = Metric.gapS),
+        )
+        EntryRouteRow(stringResource(Res.string.pair_route_paste), Modifier.padding(top = Metric.gap)) { onPasteLink() }
+
+        EntryLabel(stringResource(Res.string.pair_on_computer), Modifier.padding(top = 22.dp, bottom = Metric.gapS))
+        CopyableCommand(PAIR_COMMAND)
+        Spacer(Modifier.height(28.dp))
+    }
+}
+
+/** The empty viewfinder that says WHY it is empty — same geometry as the live one, so nothing jumps. */
+@Composable
+private fun CameraUnavailable(detail: String?) {
+    Column(
+        Modifier.size(width = 260.dp, height = 240.dp).clip(RoundedCornerShape(16.dp))
+            .background(Tok.warn.copy(alpha = 0.07f))
+            .border(Metric.hairline, Tok.warn.copy(alpha = 0.38f), RoundedCornerShape(16.dp))
+            .padding(Metric.gapL),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Metric.gapS)) {
+            Box(Modifier.size(8.dp).rotate(45f).background(Tok.warn)) // attention, not danger
+            Text(stringResource(Res.string.scan_unavailable_title), color = Tok.tx, style = TypeRole.rowTitle)
+        }
+        Text(
+            stringResource(Res.string.scan_unavailable_body), color = Tok.tx2, style = TypeRole.preview,
+            modifier = Modifier.padding(top = Metric.gapS),
+        )
+        detail?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = Tok.muted, style = TypeRole.captionMono, modifier = Modifier.padding(top = Metric.gapS))
+        }
+        EntrySecondaryButton(
+            stringResource(Res.string.scan_open_settings), Modifier.padding(top = Metric.gap),
+        ) { openAppSettings() }
+    }
+}
+
+/** The camera frame. Mounted ONLY inside [PairScanRoute] — composing it is what starts the camera. */
+@Composable
+private fun Viewfinder(onScanned: (String) -> Unit, onFailure: (String) -> Unit) {
+    val anim = rememberInfiniteTransition()
+    val scanY by anim.animateFloat(6f, 210f, infiniteRepeatable(tween(1300, easing = LinearEasing), RepeatMode.Reverse))
+    Box(
+        Modifier.size(width = 260.dp, height = 240.dp).clip(RoundedCornerShape(16.dp))
+            .background(Brush.radialGradient(listOf(Color(0xFF15171A), Color(0xFF0B0C0D))))
+            .border(Metric.hairline, Tok.hair, RoundedCornerShape(16.dp)),
+    ) {
+        QrScanner(
+            modifier = Modifier.fillMaxSize(),
+            flashlightOn = false,
+            cameraLens = CameraLens.Back,
+            openImagePicker = false,
+            onCompletion = onScanned,
+            imagePickerHandler = {},
+            onFailure = onFailure,
+            overlayColor = Color.Transparent,      // suppress qr-kit's own dimming; we draw the frame
+            overlayBorderColor = Color.Transparent,
+        )
         Canvas(Modifier.fillMaxSize().padding(2.dp)) {
             val len = 30.dp.toPx(); val th = 3.dp.toPx(); val w = size.width; val h = size.height
             fun l(a: Offset, b: Offset) = drawLine(Tok.accent, a, b, th, StrokeCap.Round)
@@ -195,31 +326,27 @@ private fun Viewfinder(onScanned: (String) -> Unit) {
             l(Offset(0f, h), Offset(len, h)); l(Offset(0f, h), Offset(0f, h - len))             // BL
             l(Offset(w, h), Offset(w - len, h)); l(Offset(w, h), Offset(w, h - len))            // BR
         }
-        if (scanning) {
-            Box(
-                Modifier.fillMaxWidth().padding(horizontal = 14.dp).offset(y = scanY.dp).height(2.dp)
-                    .background(Brush.horizontalGradient(listOf(Color.Transparent, Tok.accent, Color.Transparent))),
-            )
-        }
+        Box(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp).offset(y = scanY.dp).height(2.dp)
+                .background(Brush.horizontalGradient(listOf(Color.Transparent, Tok.accent, Color.Transparent))),
+        )
         Text(
-            stringResource(if (scanning) Res.string.scanning else Res.string.tap_to_scan),
+            stringResource(Res.string.scanning),
             color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 10.5.sp,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
         )
     }
 }
 
-@Composable
-private fun Divider(label: String) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
-        Text(label, color = Tok.muted, fontSize = 12.5.sp)
-        Box(Modifier.weight(1f).height(1.dp).background(Tok.hair))
-    }
-}
-
+/**
+ * The six-digit field.
+ *
+ * Deliberately does NOT auto-submit on the sixth digit: `Pair computer` is the canonical action, and a field
+ * that fires by itself leaves the primary button reading as decoration (and re-fires on every correction).
+ */
 @Composable
 private fun CodeInput(code: String, onCode: (String) -> Unit) {
+    val label = stringResource(Res.string.pair_code_label)
     Box(Modifier.fillMaxWidth()) {
         // visible boxes
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -227,8 +354,12 @@ private fun CodeInput(code: String, onCode: (String) -> Unit) {
                 val ch = code.getOrNull(i)
                 val active = i == code.length.coerceAtMost(5)
                 Box(
-                    Modifier.weight(1f).height(58.dp).clip(RoundedCornerShape(12.dp)).background(Tok.surface)
-                        .border(if (active) 1.5.dp else 1.dp, if (active) Tok.accent else Tok.hair, RoundedCornerShape(12.dp)),
+                    Modifier.weight(1f).height(58.dp).clip(RoundedCornerShape(Metric.gap)).background(Tok.surface)
+                        .border(
+                            if (active) 1.5.dp else Metric.hairline,
+                            if (active) Tok.accent else Tok.hair,
+                            RoundedCornerShape(Metric.gap),
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     when {
@@ -239,11 +370,12 @@ private fun CodeInput(code: String, onCode: (String) -> Unit) {
                 }
             }
         }
-        // transparent input on top, capturing taps + the numeric keyboard
+        // transparent input on top, capturing taps + the numeric keyboard. It carries the field's name, so
+        // the invisible target is announced by a screen reader instead of being a silent rectangle.
         BasicTextField(
             value = code,
             onValueChange = { onCode(it.filter(Char::isDigit).take(6)) },
-            modifier = Modifier.fillMaxWidth().height(58.dp).alpha(0f),
+            modifier = Modifier.fillMaxWidth().height(58.dp).alpha(0f).semantics { contentDescription = label },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             cursorBrush = SolidColor(Color.Transparent),
         )

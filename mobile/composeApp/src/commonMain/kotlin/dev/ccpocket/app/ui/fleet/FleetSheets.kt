@@ -36,11 +36,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.resources.Res
+import dev.ccpocket.app.resources.fl_manage_computers
+import dev.ccpocket.app.resources.fl_switch_computer
+import dev.ccpocket.app.resources.fl_tool_needs_approval
+import dev.ccpocket.app.resources.st_act_review
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.ui.PocketSheet
 import dev.ccpocket.app.ui.fmtMmSs
 import dev.ccpocket.app.ui.tilde
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Machine switcher — opened by tapping the machine name in the chat connection bar ("Fleet Mobile" board ④).
@@ -53,13 +59,14 @@ fun MachineSwitcherSheet(repo: PocketRepository, onDismiss: () -> Unit, onManage
     PocketSheet(onDismiss = onDismiss) {
         Column(Modifier.padding(bottom = 16.dp)) {
             Text(
-                "Switch computer", color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold,
+                stringResource(Res.string.fl_switch_computer), color = Tok.tx, fontSize = 19.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
             )
             machines.forEach { m ->
+                val activity = machineActivityText(m.activity)
                 val where = when {
-                    m.current -> repo.chatTitle.value ?: repo.workdir.value?.let(::tilde) ?: m.activity
-                    else -> m.activity
+                    m.current -> repo.chatTitle.value ?: repo.workdir.value?.let(::tilde) ?: activity
+                    else -> activity
                 }
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp).heightIn(min = 52.dp)
@@ -74,8 +81,11 @@ fun MachineSwitcherSheet(repo: PocketRepository, onDismiss: () -> Unit, onManage
                 ) {
                     Column(Modifier.weight(1f)) {
                         MachineChip(m.name, m.os, m.status, fontSize = 13.sp, glyph = 14.dp)
+                        // the machine's own status when there is nothing to say about its work — never a
+                        // blank line standing in for a fact we don't have
                         Text(
-                            where, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            where ?: machineStatusLabel(m.status),
+                            color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
                         )
                     }
@@ -85,7 +95,7 @@ fun MachineSwitcherSheet(repo: PocketRepository, onDismiss: () -> Unit, onManage
             }
             Box(Modifier.fillMaxWidth().padding(top = 8.dp).height(1.dp).background(Tok.hair))
             Text(
-                "Manage computers", color = Tok.muted, fontSize = 12.5.sp,
+                stringResource(Res.string.fl_manage_computers), color = Tok.muted, fontSize = 12.5.sp,
                 modifier = Modifier.clickable { onDismiss(); onManage() }.padding(horizontal = 18.dp, vertical = 12.dp),
             )
         }
@@ -114,11 +124,14 @@ fun CrossMachineBanner(entries: List<AttentionEntry>, onReview: () -> Unit, modi
         if (entries.size == 1) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                 Text(soonest.machineName, color = Tok.tx, fontFamily = FontFamily.Monospace, fontSize = 11.sp, maxLines = 1)
-                Text(" · ${soonest.tool} needs approval", color = Tok.tx, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    " · " + stringResource(Res.string.fl_tool_needs_approval, soonest.tool),
+                    color = Tok.tx, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
             }
         } else {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                Text("${entries.size} approvals waiting", color = Tok.tx, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(waitingApprovalText(entries.size), color = Tok.tx, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(
                     " · " + entries.joinToString(", ") { it.machineName },
                     color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
@@ -131,7 +144,7 @@ fun CrossMachineBanner(entries: List<AttentionEntry>, onReview: () -> Unit, modi
             color = Tok.warn, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
         )
         Text(
-            "Review", color = Tok.base, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            stringResource(Res.string.st_act_review), color = Tok.base, fontSize = 12.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Tok.accent)
                 .clickable(onClick = onReview).padding(horizontal = 12.dp, vertical = 5.dp),
         )

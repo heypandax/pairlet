@@ -125,9 +125,10 @@ private fun DeviceRow(d: PairedDaemon, active: Boolean, onTap: () -> Unit, onRen
 /** The account-id caption shown under a device name (mono, truncated). */
 private fun PairedDaemon.accountCaption() = "${accountId.take(16)}…"
 
-/** Give a computer a local nickname (blank clears it back to the account id). */
+/** Give a computer a local nickname (blank clears it back to the account id).
+ *  (internal: the Entry Flow computers surface hosts the same dialog from its own row menu.) */
 @Composable
-private fun RenameDeviceDialog(d: PairedDaemon, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun RenameDeviceDialog(d: PairedDaemon, onSave: (String) -> Unit, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(d.label ?: "") }
     DeviceDialog(
         title = stringResource(Res.string.rename_device_title),
@@ -143,9 +144,10 @@ private fun RenameDeviceDialog(d: PairedDaemon, onSave: (String) -> Unit, onDism
     }
 }
 
-/** Confirm removing a binding — it requires re-pairing afterwards, so guard it. */
+/** Confirm removing a binding — it requires re-pairing afterwards, so guard it.
+ *  (internal: shared with the Entry Flow computers surface.) */
 @Composable
-private fun RemoveDeviceDialog(d: PairedDaemon, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+internal fun RemoveDeviceDialog(d: PairedDaemon, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     DeviceDialog(
         title = stringResource(Res.string.remove_device_title),
         confirmLabel = stringResource(Res.string.device_remove), confirmColor = Tok.danger,

@@ -41,8 +41,9 @@ fun ReviewCenterFlow(
      *  desktop overlay dismisses via its own ✕/scrim instead). */
     onExit: (() -> Unit)? = null,
     /** Rendered above the content by the host (a mobile top bar, or the desktop overlay's header).
-     *  [onBack] is always non-null when [onExit] is: at the root it exits, otherwise it pops. */
-    header: (@Composable (onBack: (() -> Unit)?) -> Unit)? = null,
+     *  [onBack] is always non-null when [onExit] is: at the root it exits, otherwise it pops. [atRoot]
+     *  lets a host give the Center's own landing a first-hop title without repeating it on every sub-page. */
+    header: (@Composable (onBack: (() -> Unit)?, atRoot: Boolean) -> Unit)? = null,
 ) {
     // One pull on entry. Everything after that is daemon truth arriving on its own schedule; the
     // Center never polls, because the daemon is the thing that is always running (§3.3).
@@ -190,7 +191,7 @@ fun ReviewCenterFlow(
     Box(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             // at the root the chevron only exists when the host has somewhere to go back TO
-            header?.invoke(if (atRoot && onExit == null) null else ::back)
+            header?.invoke(if (atRoot && onExit == null) null else ::back, atRoot)
             inner()
         }
     }

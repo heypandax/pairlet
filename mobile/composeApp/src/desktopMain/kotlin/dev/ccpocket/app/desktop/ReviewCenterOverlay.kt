@@ -79,7 +79,7 @@ fun ReviewCenterOverlay(model: DesktopModel, onDismiss: () -> Unit) {
                 repo = repo,
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 // no onExit: leaving is the overlay's ✕ / scrim / Esc, which the shell already owns
-                header = { onBack ->
+                header = { onBack, _ ->
                     if (onBack != null) {
                         Text(
                             "‹", color = Tok.tx2, fontSize = 20.sp,
