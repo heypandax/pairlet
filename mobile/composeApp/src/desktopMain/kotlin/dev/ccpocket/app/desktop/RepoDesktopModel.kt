@@ -26,6 +26,7 @@ import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.modelLabelForAgent
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.app.ui.trimTrailingSep
+import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.Decision
 import dev.ccpocket.protocol.DirectoryEntry
@@ -372,6 +373,39 @@ class RepoDesktopModel(
 
     private fun openSummary() = repo.sessions.firstOrNull { it.cwd == repo.workdir.value && it.title == repo.chatTitle.value }
 
+    /**
+     * Daemon truth for "which sessions are alive RIGHT NOW", keyed by session id, taken from every project
+     * row's [DirectoryEntry.activeSessions] instead of one directory's session listing — the only source
+     * here that is both cross-project and re-pullable (see the desktop shell's directory poll in Main).
+     *
+     * Null = this daemon's answer carries no information, so callers must infer NOTHING from an absent id:
+     *  - the list hasn't been pulled yet (fresh link, just-switched machine) — nothing to say either way;
+     *  - the daemon predates the array (< v1.3.1) and reports a live session through the pre-array scalars
+     *    alone. Reading its empty list as "nothing is running" would put out every dot on the sidebar.
+     * Detected structurally, not by version: [dev.ccpocket.protocol.DaemonInfo.daemonVersion] only started
+     * shipping in v1.6.0 — far LATER than activeSessions — so a version gate would also blank the dots on
+     * every daemon in between, which do report the truth. Same fallback shape DirList/SessionWorkingSet use.
+     */
+    private fun daemonLiveSessions(): Map<String, ActiveSession>? {
+        val dirs = repo.directories
+        if (dirs.isEmpty()) return null
+        val live = dirs.flatMap { it.activeSessions }.associateBy { it.sessionId }
+        if (live.isEmpty() && dirs.any { it.open || it.activeSessionId != null }) return null
+        return live
+    }
+
+    /** This row's dot re-decided from [live] (daemon truth). The OPEN chat keeps the live push instead —
+     *  [PocketRepository.streaming] sees a turn start that the last project-list pull can't know about yet;
+     *  its background work still comes from the daemon, the one side that tracks it. Absent from [live]
+     *  means NOT running: that is the whole point of the override, and why the caller passes null (not an
+     *  empty map) whenever the daemon can't answer. Idempotent, so a row may pass through twice (the RECENT
+     *  groups re-apply it over rows this list already corrected). */
+    private fun DkSession.runningFromDaemon(live: Map<String, ActiveSession>, openId: String?, streaming: Boolean): DkSession {
+        val s = live[sessionId]
+        val fresh = if (sessionId == openId) streaming || s?.busy == true else s != null && (s.executing || s.busy)
+        return if (fresh == running) this else copy(running = fresh)
+    }
+
     // derived so the many per-row readers (pin rows, RECENT rows, runningVisible) share one mapping
     // per snapshot instead of re-mapping the whole repo list on every read
     private val sessionsDerived = derivedStateOf {
@@ -381,7 +415,9 @@ class RepoDesktopModel(
             DkSession(
                 sessionId = it.sessionId, cwd = it.cwd, title = it.title, agent = it.agent ?: AgentKind.CLAUDE,
                 // the open chat's row uses the LIVE streaming state — the listed `live` is a snapshot
-                // from listing time and kept a finished turn's dot pulsing until a manual refresh
+                // from listing time and kept a finished turn's dot pulsing until a manual refresh.
+                // Superseded below wherever the daemon can answer; this stays the fallback for the ones
+                // that can't (see [daemonLiveSessions]).
                 running = if (it.sessionId == openId) repo.streaming.value || it.busy else it.live || it.busy,
                 pending = if (askWd != null && it.cwd == askWd && it.title == repo.chatTitle.value) 1 else 0,
                 model = it.model,
@@ -392,7 +428,19 @@ class RepoDesktopModel(
         // return it — synthesize its row at the top of its group until a later listing has it (#42)
         // openChatUnlisted() already returns null once the listing contains the session, so no re-check here
         val synth = openChatUnlisted()
-        if (synth != null) listOf(synth) + listed else listed
+        val rows = if (synth != null) listOf(synth) + listed else listed
+        // The dot follows the daemon HERE too, not only in the RECENT groups: [liveSession] resolves out of
+        // this list before it ever looks at a group, so the CURRENT project's pinned rows (the sidebar's pin
+        // zone, runningVisible) were still reading the listing-time `live` while every other project's pin
+        // had already been corrected group-side.
+        //
+        // The synthesized row survives this by construction, and it MUST: a brand-new session hasn't
+        // persisted its first turn, so it is in no listing and usually in no activeSessions either —
+        // "absent ⇒ not running" would put out the dot on the one session that is certainly alive. It is
+        // the open chat by definition ([openChatUnlisted] only ever returns repo.sessionKey under a live
+        // convoId), so it takes the openId branch, which never consults the index for the verdict.
+        val live = daemonLiveSessions() ?: return@derivedStateOf rows
+        rows.map { it.runningFromDaemon(live, openId, repo.streaming.value) }
     }
     override val sessions: List<DkSession> get() = sessionsDerived.value
 
@@ -564,16 +612,27 @@ class RepoDesktopModel(
         // guest share provenance (issue #115): visits carry only account+path, so the "Shared" pill's
         // owner/expiry re-derive from the directory list (the daemon stamps a guest's shared roots there)
         val sharedDirs = repo.directories.filter { it.sharedBy != null }.associateBy { normCwd(it.path) }
+        // ── the running dot ──────────────────────────────────────────────────────────────────────
+        // This layer stays even though [sessionsDerived] now corrects its own rows: only the CURRENT group
+        // reads that list. Every other group renders [Visit.snapshot] — rows frozen the moment the user left
+        // that project (refillRecent sweeps once per account per run, and no global ListSessions ever
+        // re-lists the others), which nothing upstream will ever touch again. Re-applying over the current
+        // group's already-corrected rows is a no-op ([runningFromDaemon] is idempotent).
+        val live = daemonLiveSessions()
+        val openId = repo.sessionKey.value.takeIf { repo.convoId.value != null }
+        val streaming = repo.streaming.value
         keys.map { v ->
             val norm = normCwd(v.path)
             val current = normLive != null && norm == normLive
-            val rows = (if (current) sessions else v.snapshot)
+            var rows = if (current) sessions else v.snapshot
+            if (live != null) rows = rows.map { it.runningFromDaemon(live, openId, streaming) }
+            if (hidden.isNotEmpty()) rows = rows.filterNot { it.sessionId in hidden }
             val share = sharedDirs[norm]
             DkSessionGroup(
                 path = v.path,
                 name = folderName(v.path),
                 current = current,
-                sessions = if (hidden.isEmpty()) rows else rows.filterNot { it.sessionId in hidden },
+                sessions = rows,
                 sharedBy = share?.sharedBy,
                 shareExpiresAt = share?.shareExpiresAt,
             )
@@ -588,6 +647,17 @@ class RepoDesktopModel(
         repo.refreshDirectoriesSilently() // manual refresh means "sync the sidebar" — projects/running state rides along
         if (g != null && !g.current) snapshotCurrent() // keep the outgoing live group's rows before repointing
         repo.refreshSessions(g?.path) // null → the current dir; no-op when nothing is listed yet
+    }
+
+    /** Re-pull ONLY the daemon's project list — the desktop shell's low-frequency poll while its window is
+     *  on screen (see `shouldPollDirectories` in Main), which is what keeps [daemonLiveSessions] honest.
+     *  Deliberately not [refresh]: no navGen bump and no session re-listing, so a background tick can never
+     *  repoint the list under the user or cancel an in-flight RECENT refill the way a ⌘R is meant to.
+     *  Silent on anything but a Ready link — writing into a dead transport only feeds the reconnect ladder
+     *  from outside its backoff, and a reconnect re-syncs the list itself. */
+    fun syncDirectories() {
+        if (repo.phase.value != ConnPhase.Ready) return
+        repo.refreshDirectoriesSilently()
     }
 
     /** RECENT's header clear (issue #102): forget every visited project. Pins and hidden entries are

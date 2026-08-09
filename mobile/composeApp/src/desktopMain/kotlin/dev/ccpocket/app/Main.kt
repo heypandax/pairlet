@@ -57,11 +57,24 @@ import java.awt.Toolkit
 
 private const val K_WIN_BOUNDS = "desktop_window_bounds" // "x,y,w,h[,zoomed]" — restored on the next launch
 
+/** How often the shell re-pulls the daemon's project list while its window is on screen. Slow on purpose:
+ *  it exists to keep the sidebar's live dots from freezing, not to animate them — a "running" state that
+ *  settles within a few seconds reads as live, and the pull is a whole-machine directory scan on the host. */
+private const val DIRECTORY_POLL_MS = 15_000L
+
 /** Issue #189: close-to-tray is safe only when Windows can actually keep a reachable tray icon alive.
  *  Disabling the menu-bar setting or running without SystemTray support preserves the old exit behavior,
  *  so a hidden window can never strand an un-exitable process. */
 internal fun shouldCloseMainWindowToTray(isWindows: Boolean, menuBarEnabled: Boolean, trayReady: Boolean): Boolean =
     isWindows && menuBarEnabled && trayReady
+
+/** The sidebar's live dots read the daemon's project list, and that list is PULL-only: until now the only
+ *  pulls were foregrounding and ⌘R, so a desktop window simply left open showed dots frozen at whatever the
+ *  last pull said. Poll it — but only while the sidebar can actually be SEEN. A window hidden to the tray
+ *  (#189 keeps it composed on purpose) or minimized has no dots to keep honest, and polling for nobody would
+ *  just keep waking the link. */
+internal fun shouldPollDirectories(windowVisible: Boolean, minimized: Boolean): Boolean =
+    windowVisible && !minimized
 
 /**
  * Desktop entry point — the two-pane "mission control": one host driving Claude Code / Codex on another.
@@ -334,6 +347,18 @@ fun main() = application {
         }
         LaunchedEffect(windowFocused) {
             if (windowFocused && unseenDone > 0) { unseenDone = 0; DesktopNotify.badge(0) }
+        }
+        // Keep the daemon's project list — and with it the sidebar's live dots — from going stale while the
+        // window just sits there. KEYED on the predicate rather than wrapped in an `if`, so coming back
+        // (un-minimize, tray → Open) restarts the loop and its leading sync pulls at once instead of waiting
+        // out a tick; going away cancels it outright, leaving nothing ticking behind a hidden window.
+        val pollDirectories = shouldPollDirectories(mainWindowVisible, windowState.isMinimized)
+        LaunchedEffect(pollDirectories) {
+            if (!pollDirectories) return@LaunchedEffect
+            while (true) {
+                model.syncDirectories()
+                delay(DIRECTORY_POLL_MS)
+            }
         }
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(720, 480)
