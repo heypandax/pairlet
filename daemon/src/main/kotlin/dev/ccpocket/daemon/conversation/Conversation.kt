@@ -128,6 +128,11 @@ class Conversation(
      *  expires (the default). Read at each arm (a mode switch or open), so a preference flip bites the next
      *  switch. Defaults to the runtime mirror; a knob only so tests can arm a short clock without waiting. */
     private val fullControlExpiryMs: () -> Long = { dev.ccpocket.daemon.agent.ApprovalTimeout.fullControlExpiryMs },
+    /** The workdir string the phone OPENED with — may be a raw "~"-relative path (issue #219: the phone's
+     *  identity guard matches SessionLive.workdir against the workdir IT sent, which is "~/x" from the
+     *  home anchor, never the daemon's canonicalized absolute form). Announced in SessionLive verbatim so
+     *  the guard matches; null → fall back to the canonical [workdir] (pre-#219 behaviour). */
+    private val announcedWorkdir: String? = null,
 ) {
     // ── approval design M2 §5.4: the task boundary a TASK grant binds to ──────────────────────────
     // One task per top-level user prompt: rotated when a prompt STARTS a new turn (mid-turn queued
@@ -513,7 +518,7 @@ class Conversation(
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
         SessionLive(
-            convoId, workdir.toString(), sid, mode = mode, executing = executing, model = displayModel(), effort = effort,
+            convoId, announcedWorkdir ?: workdir.toString(), sid, mode = mode, executing = executing, model = displayModel(), effort = effort,
             // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
             // (issue #20) instead of sniffing the id itself. Phones that predate the field simply ignore it.
             contextWindow = claudeWindow(),

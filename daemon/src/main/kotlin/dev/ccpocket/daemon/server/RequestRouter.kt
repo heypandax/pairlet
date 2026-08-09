@@ -471,6 +471,7 @@ class RequestRouter(
                             peerSupportsOpencode = caps?.supportsOpencode == true,
                             peerSupportsKimi = caps?.supportsKimi == true,
                             bridgeAllowedCommands = bridgeAllowedCommands,
+                            announcedWorkdir = frame.workdir, // #219: announce the RAW workdir the phone opened (may be "~/x")
                             ownerBypass = ownerBypass, // trusted in-process open flag ⇒ owner's own session
                         )
                         if (convoId.isNotEmpty()) onOpened(convoId) // "" = backend unavailable (PocketError already sent)
