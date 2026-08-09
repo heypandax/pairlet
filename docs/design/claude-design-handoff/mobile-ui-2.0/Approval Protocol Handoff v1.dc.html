@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html { background: #EDEBE6; }
+  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+  a { color: #B4522F; text-decoration: none; }
+  a:hover { color: #8E3F23; }
+  @keyframes ccpulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+</style>
+</helmet>
+
+<div style="position:fixed;inset:0;z-index:-1;background:{{ boardBg }}"></div>
+
+<div style="width:2762px;margin:0 auto;padding:64px 60px 96px;font-family:'Public Sans',system-ui,sans-serif;color:#1B1A18">
+
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding-bottom:22px;border-bottom:1px solid #C9C5BD">
+    <div style="max-width:900px">
+      <div style="font:500 11px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">cc-pocket · direction a · approval correction</div>
+      <h1 style="margin:14px 0 10px;font:600 40px/1.05 'Public Sans',sans-serif;letter-spacing:-.02em">Approval Protocol Handoff v1</h1>
+      <p style="margin:0;font:400 15.5px/1.55 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">The approval sheet redrawn against the real V1 protocol. Consequence summary, the Effects row and the Recommended block are gone — the daemon does not send them, so the client cannot show them. The sheet now leads with the request title and tool, renders the literal payload, and treats permission duration as a decision rather than as a stated fact. Sessions and Chat are untouched; this file supersedes only the approval portions of A Master Core v1 and A Master Proofs v1.</p>
+    </div>
+    <div style="display:flex;gap:28px;font:500 11px/1.5 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#8A857C;flex:none">
+      <div>
+        <div style="color:#1B1A18">5 frames</div>
+        <div>402 × 874 · 1:1</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">iPhone 17</div>
+        <div>portrait · minimum</div>
+      </div>
+      <div>
+        <div style="color:#1B1A18">no new tokens</div>
+        <div>direction a locked</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:52px;align-items:flex-start;padding-top:46px">
+
+    <!-- ═══════════ PRESENTATION CONTRACT ═══════════ -->
+    <div style="width:372px;flex:none">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">Contract · SecureApprovalSheet</div>
+
+      <div style="border-top:1px solid #C9C5BD;padding-top:16px">
+        <div style="font:600 19px/1.25 'Public Sans',sans-serif;letter-spacing:-.015em">Anatomy of a non-dismissible sheet</div>
+        <p style="margin:8px 0 0;font:400 13px/1.65 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">All five frames use this presentation, not the generic PocketSheet. Nothing about it is decorative: every part of the contract exists to stop a security decision resolving without the user.</p>
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:14px;align-items:stretch">
+        <div style="width:186px;flex:none;height:392px;border-radius:14px;background:#0B0B0C;padding:8px;display:flex;flex-direction:column;position:relative;overflow:hidden">
+          <div style="height:34px;border-radius:8px 8px 0 0;background:#111113;display:flex;align-items:center;justify-content:center;font:500 9.5px/1 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#6E6E76">scrim · taps swallowed</div>
+          <div style="flex:1;margin-top:8px;border-radius:12px 12px 8px 8px;border:1px solid rgba(255,255,255,.18);background:#141417;display:flex;flex-direction:column;overflow:hidden">
+            <div style="flex:none;padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#F0C079">pinned header</div>
+              <div style="font:400 10px/1.5 'JetBrains Mono',monospace;color:#8C8D95;margin-top:6px">state · queue<br />timer or waiting</div>
+            </div>
+            <div style="flex:1;min-height:0;padding:11px 12px;position:relative">
+              <div style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4B5BC">scroll body</div>
+              <div style="font:400 10px/1.6 'JetBrains Mono',monospace;color:#8C8D95;margin-top:6px">title · tool<br />risk<br />payload<br />project</div>
+              <span style="position:absolute;top:12px;bottom:12px;right:6px;width:3px;border-radius:2px;background:rgba(255,255,255,.10)"><span style="display:block;width:3px;height:38%;margin-top:26%;border-radius:2px;background:rgba(255,255,255,.32)"></span></span>
+              <div style="position:absolute;left:0;right:0;bottom:0;height:24px;background:linear-gradient(to bottom,rgba(20,20,23,0),#141417)"></div>
+            </div>
+            <div style="flex:none;padding:11px 12px 12px;border-top:1px solid rgba(255,255,255,.14);background:#17171B">
+              <div style="font:600 10px/1 'JetBrains Mono',monospace;letter-spacing:.1em;text-transform:uppercase;color:#B4B5BC">pinned decisions</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px">
+                <span style="height:20px;border-radius:5px;border:1px solid rgba(255,255,255,.28)"></span>
+                <span style="height:20px;border-radius:5px;background:#E2795A"></span>
+                <span style="height:20px;border-radius:5px;border:1px solid rgba(255,255,255,.28)"></span>
+                <span style="height:20px;border-radius:5px;border:1px solid rgba(255,255,255,.28)"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:space-between;padding:2px 0">
+          <div style="font:400 11.5px/1.5 'JetBrains Mono',monospace;color:#54504A">
+            <span style="color:#A3311F">✕</span> grabber<br />
+            <span style="color:#A3311F">✕</span> swipe&#8209;down
+          </div>
+          <div style="font:400 11.5px/1.5 'JetBrains Mono',monospace;color:#54504A">
+            <span style="color:#A3311F">✕</span> scrim tap<br />
+            <span style="color:#A3311F">✕</span> system back
+          </div>
+          <div style="font:400 11.5px/1.5 'JetBrains Mono',monospace;color:#54504A">
+            <span style="color:#1F7A4D">✓</span> explicit decision<br />
+            <span style="color:#1F7A4D">✓</span> daemon timeout<br />
+            <span style="color:#1F7A4D">✓</span> withdrawal
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:22px;border-top:1px solid #C9C5BD">
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Three zones, always</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Header and decision bar are pinned; only the body scrolls. A long command, an expanded diff or 200% type grows the body alone, so the actions cannot leave the screen.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">No silent resolution</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">System back keeps the sheet open and returns nothing to the daemon. Scrim taps are consumed. There is no grabber and the drag gesture is disabled, so the sheet cannot be flung away mid-decision.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #DAD6CE">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Exits</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">An explicit decision resolves the request and closes the sheet. <span style="font:400 12px/1 'JetBrains Mono',monospace">AskWithdrawn(TIMED_OUT)</span> turns it into TimeoutTerminal, which the user may then dismiss. An ordinary withdrawal or a session close removes the sheet immediately and advances the queue. System back, scrim taps and swipe resolve nothing at any point, and the client never resolves a request on its own clock.</p>
+        </div>
+        <div style="padding:12px 0;border-bottom:1px solid #C9C5BD">
+          <div style="font:600 13px/1.4 'Public Sans',sans-serif">Terminal state · TimeoutTerminal</div>
+          <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Only the timed-out withdrawal produces it. Decisions are replaced by the daemon's outcome and a single Dismiss, and this is the one state in which the sheet may be dismissed. Other withdrawals leave nothing behind to dismiss.</p>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;background:#E4E1DA;border-radius:11px;padding:14px 16px">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Removed in this pass</div>
+        <div style="font:400 12.5px/1.9 'JetBrains Mono',monospace;color:#54504A;margin-top:9px">consequenceSummary heading<br />Effects row<br />Recommended block<br />Permission · This task only</div>
+        <p style="margin:10px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The first three are not in the V1 payload. The fourth was a fact about a decision the user had not made yet; scope now lives in the action labels.</p>
+      </div>
+    </div>
+
+    <!-- ═══════════ 01 · M2 ORDINARY · DARK ═══════════ -->
+    <div style="width:402px;flex:none">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">01 · M2 ordinary · dark · 402×874</div>
+      <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+
+        <div style="position:absolute;inset:0;opacity:.28;display:flex;flex-direction:column">
+          <div style="height:48px;display:flex;align-items:center;padding:0 24px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+          <div style="padding:4px 24px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="font:600 19px/1.25 system-ui,-apple-system,sans-serif">Refactor auth module</div>
+            <div style="font:400 13.5px/1.45 system-ui,-apple-system,sans-serif;color:#B4B5BC;margin-top:5px">Claude · default permission</div>
+            <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95">cc-pocket · feat/auth-refactor</div>
+          </div>
+          <div style="padding:20px 24px;font:400 16px/1.55 system-ui,-apple-system,sans-serif;color:#E6E6E9">The parser now emits exactly one event when a frame is split across chunks.</div>
+        </div>
+        <div style="position:absolute;inset:0;background:rgba(5,5,6,.76)"></div>
+
+        <div style="margin-top:62px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+
+          <div style="flex:none;padding:16px 22px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;background:#E9B45C;transform:rotate(45deg);flex:none"></span>
+              <span style="font:600 15px/1.2 system-ui,-apple-system,sans-serif;color:#F0C079;flex:1">Approval required</span>
+              <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#B4B5BC">1 of 3</span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-top:10px">
+              <span style="font:600 15px/1 'JetBrains Mono',monospace;color:#F0C079">18s</span>
+              <span style="font:400 13px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:1;text-wrap:pretty">automatically denied when time runs out</span>
+            </div>
+            <div style="height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-top:10px"><div style="width:60%;height:3px;background:#E9B45C;border-radius:2px"></div></div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:18px 22px 0;position:relative">
+            <div style="font:600 21px/1.32 system-ui,-apple-system,sans-serif;letter-spacing:-.015em;color:#F3F3F4;text-wrap:pretty">Upload coverage to Codecov</div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+              <span style="font:500 14.5px/1 system-ui,-apple-system,sans-serif;color:#E6E6E9">Run command</span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#6E6E76"></span>
+              <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">Bash</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:14px">
+              <span style="display:flex;align-items:center;gap:7px;font:600 12px/1 system-ui,-apple-system,sans-serif;letter-spacing:.05em;text-transform:uppercase;color:#F0C079;background:rgba(233,180,92,.12);border:1px solid rgba(233,180,92,.36);padding:7px 10px;border-radius:7px"><span style="width:7px;height:7px;background:#E9B45C;transform:rotate(45deg)"></span>Medium risk</span>
+              <span style="font:400 13.5px/1.3 system-ui,-apple-system,sans-serif;color:#B4B5BC">external upload</span>
+            </div>
+            <div style="font:400 11.5px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:8px;letter-spacing:-.01em">assessed 9:41:02 · net.egress.upload</div>
+
+            <div style="margin-top:16px;background:#08080A;border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:13px 14px;font:400 13px/1.6 'JetBrains Mono',monospace;color:#E0E0E5;letter-spacing:-.02em;word-break:break-word">./gradlew test &amp;&amp; bash scripts/upload-coverage.sh</div>
+
+            <div style="margin-top:16px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="font:400 14.5px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:none">Project</span>
+                <span style="font:400 12.5px/1.35 'JetBrains Mono',monospace;color:#F3F3F4;letter-spacing:-.02em;text-align:right;word-break:break-all">~/proj/app/cc-pocket</span>
+              </div>
+            </div>
+            <div style="height:26px"></div>
+            <div style="position:absolute;left:0;right:0;bottom:0;height:30px;background:linear-gradient(to bottom,rgba(20,20,23,0),#141417)"></div>
+          </div>
+
+          <div style="flex:none;background:#141417;border-top:1px solid rgba(255,255,255,.14);padding:12px 22px 0">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Deny</div>
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Allow once</div>
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Retry safer</div>
+              <div style="height:60px;border-radius:13px;background:#E2795A;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0 8px">
+                <span style="font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#160C07;letter-spacing:-.01em">Allow for task</span>
+                <span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:rgba(22,12,7,.66);letter-spacing:-.01em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Bash(./gradlew test:*)</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;min-height:48px;margin-top:6px">
+              <span style="flex:1;min-width:0">
+                <span style="display:block;font:500 14.5px/1.3 system-ui,-apple-system,sans-serif;color:#B4B5BC">More options</span>
+                <span style="display:block;font:400 11.5px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:3px">session scope available</span>
+              </span>
+              <span style="width:44px;height:48px;display:flex;align-items:center;justify-content:flex-end;font:400 17px/1 system-ui,-apple-system,sans-serif;color:#8C8D95;flex:none">›</span>
+            </div>
+            <div style="height:24px;display:flex;justify-content:center;align-items:center"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Corrects</div>
+        Everything on this screen has a source: title, tool, rule and inputPreview from the ask; workdir from session context; queue from repository state; risk, reason and assessedAt from the async update. The invented consequence sentence and the Effects row are gone.<br /><br />
+        Permission is no longer stated as a fact. The four labels are the scopes — Allow once and Allow for task differ only in how long the grant lives, and the rule under the task action names exactly what would be remembered.<br /><br />
+        Four equal tiles, one accent. Task scope carries the accent only because grantOptions offered it; the geometry does not change when it is absent.<br /><br />
+        Session grant exists but is not on the main card. It sits behind More options, one deliberate step away, so the broadest grant is never the fastest tap.
+      </div>
+      </sc-if>
+    </div>
+
+    <!-- ═══════════ 02 · M2 DANGER · DARK ═══════════ -->
+    <div style="width:402px;flex:none">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">02 · M2 danger · dark · 402×874</div>
+      <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+
+        <div style="position:absolute;inset:0;opacity:.28;display:flex;flex-direction:column">
+          <div style="height:48px;display:flex;align-items:center;padding:0 24px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+          <div style="padding:4px 24px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="font:600 19px/1.25 system-ui,-apple-system,sans-serif">Refactor auth module</div>
+            <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px">cc-pocket · feat/auth-refactor</div>
+          </div>
+        </div>
+        <div style="position:absolute;inset:0;background:rgba(5,5,6,.76)"></div>
+
+        <div style="margin-top:48px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(233,116,98,.34)">
+
+          <div style="flex:none;padding:16px 22px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;background:#E97462;flex:none"></span>
+              <span style="font:600 15px/1.2 system-ui,-apple-system,sans-serif;color:#EE9080;flex:1">Approval required</span>
+              <span style="font:500 12.5px/1 'JetBrains Mono',monospace;color:#B4B5BC">2 of 3</span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-top:10px">
+              <span style="font:600 15px/1 'JetBrains Mono',monospace;color:#EE9080">24s</span>
+              <span style="font:400 13px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:1;text-wrap:pretty">automatically denied when time runs out</span>
+            </div>
+            <div style="height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-top:10px"><div style="width:80%;height:3px;background:#E97462;border-radius:2px"></div></div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:18px 22px 0;position:relative">
+            <div style="font:600 21px/1.32 system-ui,-apple-system,sans-serif;letter-spacing:-.015em;color:#F3F3F4;text-wrap:pretty">Reset the working tree</div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+              <span style="font:500 14.5px/1 system-ui,-apple-system,sans-serif;color:#E6E6E9">Run command</span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#6E6E76"></span>
+              <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">Bash</span>
+            </div>
+
+            <div style="margin-top:14px;border:1px solid rgba(233,116,98,.42);background:rgba(233,116,98,.10);border-radius:11px;padding:13px 14px">
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="display:flex;align-items:center;gap:7px;font:600 12px/1 system-ui,-apple-system,sans-serif;letter-spacing:.05em;text-transform:uppercase;color:#F0A093"><span style="width:7px;height:7px;background:#E97462"></span>High risk</span>
+                <span style="width:3px;height:3px;border-radius:50%;background:#6E6E76"></span>
+                <span style="font:500 13.5px/1.3 system-ui,-apple-system,sans-serif;color:#F3F3F4">deletes files</span>
+              </div>
+              <div style="font:400 13.5px/1.5 system-ui,-apple-system,sans-serif;color:#E0D6D3;margin-top:9px;text-wrap:pretty">Removes the build directory and every untracked file in the working tree, including anything not yet committed.</div>
+              <div style="font:400 11.5px/1.4 'JetBrains Mono',monospace;color:#A79792;margin-top:9px;letter-spacing:-.01em">assessed 9:41:26 · fs.delete.recursive</div>
+            </div>
+
+            <div style="margin-top:16px;background:#08080A;border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:13px 14px;font:400 13px/1.6 'JetBrains Mono',monospace;color:#E0E0E5;letter-spacing:-.02em;word-break:break-word">rm -rf build/ &amp;&amp; git clean -fdx</div>
+
+            <div style="margin-top:16px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="font:400 14.5px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:none">Project</span>
+                <span style="font:400 12.5px/1.35 'JetBrains Mono',monospace;color:#F3F3F4;letter-spacing:-.02em;text-align:right;word-break:break-all">~/proj/app/cc-pocket</span>
+              </div>
+            </div>
+            <div style="height:26px"></div>
+            <div style="position:absolute;left:0;right:0;bottom:0;height:30px;background:linear-gradient(to bottom,rgba(20,20,23,0),#141417)"></div>
+          </div>
+
+          <div style="flex:none;background:#141417;border-top:1px solid rgba(255,255,255,.14);padding:12px 22px 0">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="height:60px;border-radius:13px;border:1.5px solid #E97462;background:rgba(233,116,98,.10);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Deny</div>
+              <div style="height:60px;border-radius:13px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#160C07">Allow once</div>
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Retry safer</div>
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0 8px">
+                <span style="font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#B4B5BC;letter-spacing:-.01em">Allow for task</span>
+                <span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Bash(git clean:*)</span>
+              </div>
+            </div>
+            <div style="height:14px"></div>
+            <div style="height:24px;display:flex;justify-content:center;align-items:center"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Corrects</div>
+        No “Recommended: Deny” block, because the daemon supplies no recommendation. Policy is expressed by emphasis instead: least privilege takes the accent, so Allow once is the easiest grant to reach and the widest grant is the hardest.<br /><br />
+        This emphasis is triggered by <span style="font:500 12.5px/1 'JetBrains Mono',monospace">PermissionAsk.danger</span> alone. A high risk value arriving from PermissionRiskUpdated changes how the assessment presents — it never moves the accent or alters the action set, because an async signal must not silently rewrite the decision the user is looking at.<br /><br />
+        Allow for task is demoted, not removed. It keeps the same tile, the same height, the same hit area and the same boundary — only its ink drops to secondary. The user can still choose it; the layout just stops arguing for it.<br /><br />
+        Danger reads before the command. Risk level, the supplied reason and dangerNote sit in one bounded block above the payload, so the sentence that explains the deletion cannot be scrolled past.<br /><br />
+        Deny keeps a danger boundary rather than a fill. Two filled controls side by side would make the pair read as a choice between two equally endorsed paths.
+      </div>
+      </sc-if>
+    </div>
+
+    <!-- ═══════════ 03 · LEGACY · LIGHT ═══════════ -->
+    <div style="width:402px;flex:none">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">03 · legacy pre-M2 · light · 402×874</div>
+      <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#FCFBFA;color:#17161A;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.35)">
+
+        <div style="position:absolute;inset:0;opacity:.4;display:flex;flex-direction:column">
+          <div style="height:48px;display:flex;align-items:center;padding:0 24px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+          <div style="padding:4px 24px 12px;border-bottom:1px solid rgba(20,18,16,.16)">
+            <div style="font:600 19px/1.25 system-ui,-apple-system,sans-serif">Fix flaky socket test</div>
+            <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#6B6970;margin-top:5px">cc-pocket · fix/socket-test</div>
+          </div>
+        </div>
+        <div style="position:absolute;inset:0;background:rgba(60,55,48,.35)"></div>
+
+        <div style="margin-top:auto;position:relative;background:#FFFFFF;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(20,18,16,.16);display:flex;flex-direction:column">
+
+          <div style="flex:none;padding:16px 22px 12px;border-bottom:1px solid rgba(20,18,16,.16)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;background:#8A5A08;transform:rotate(45deg);flex:none"></span>
+              <span style="font:600 15px/1.2 system-ui,-apple-system,sans-serif;color:#7A4F07;flex:1">Approval required</span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-top:10px">
+              <span style="font:600 15px/1 'JetBrains Mono',monospace;color:#7A4F07">30s</span>
+              <span style="font:400 13px/1.35 system-ui,-apple-system,sans-serif;color:#4B4A50;flex:1;text-wrap:pretty">automatically denied when time runs out</span>
+            </div>
+            <div style="height:3px;background:rgba(20,18,16,.14);border-radius:2px;margin-top:10px"><div style="width:100%;height:3px;background:#8A5A08;border-radius:2px"></div></div>
+          </div>
+
+          <div style="padding:18px 22px 0">
+            <div style="font:600 21px/1.32 system-ui,-apple-system,sans-serif;letter-spacing:-.015em;color:#17161A;text-wrap:pretty">Run the protocol test suite</div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+              <span style="font:500 14.5px/1 system-ui,-apple-system,sans-serif;color:#2A2830">Run command</span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#8B8990"></span>
+              <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#4B4A50">Bash</span>
+            </div>
+
+            <div style="margin-top:16px;background:#F4F2EF;border:1px solid rgba(20,18,16,.16);border-radius:10px;padding:13px 14px;font:400 13px/1.6 'JetBrains Mono',monospace;color:#17161A;letter-spacing:-.02em;word-break:break-word">./gradlew :protocol:test --rerun-tasks</div>
+
+            <div style="margin-top:16px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-top:1px solid rgba(20,18,16,.16);border-bottom:1px solid rgba(20,18,16,.16)">
+                <span style="font:400 14.5px/1.35 system-ui,-apple-system,sans-serif;color:#4B4A50;flex:none">Project</span>
+                <span style="font:400 12.5px/1.35 'JetBrains Mono',monospace;color:#17161A;letter-spacing:-.02em;text-align:right;word-break:break-all">~/proj/app/cc-pocket</span>
+              </div>
+            </div>
+
+            <div style="margin-top:16px;font:400 13px/1.55 system-ui,-apple-system,sans-serif;color:#6B6970;text-wrap:pretty">Legacy permission model. This peer sends no grant options, no risk assessment and no queue position, and no timeout — the client applies its 30&#8239;second fallback.</div>
+          </div>
+
+          <div style="padding:18px 22px 0;border-top:1px solid rgba(20,18,16,.16);margin-top:18px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(20,18,16,.32);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#17161A">Deny</div>
+              <div style="height:60px;border-radius:13px;background:#A9482A;display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#FFF9F6">Allow once</div>
+              <div style="grid-column:1 / -1;height:60px;border-radius:13px;border:1px solid rgba(20,18,16,.32);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px">
+                <span style="font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#17161A">Always allow</span>
+                <span style="font:500 10.5px/1 'JetBrains Mono',monospace;color:#6B6970;letter-spacing:-.01em">Bash(./gradlew:*)</span>
+              </div>
+            </div>
+            <div style="height:24px;display:flex;justify-content:center;align-items:center;margin-top:12px"><span style="width:132px;height:5px;border-radius:3px;background:#17161A;opacity:.3"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Corrects</div>
+        The earlier legacy frame claimed the request waits until the user decides. It does not: with timeoutSec absent the client falls back to 30&#8239;seconds and auto-denies, so the timer and the fail-closed sentence are shown.<br /><br />
+        grantOptions is null, so the M2 grid does not apply. The legacy triple renders instead, and Always allow — the only persistent grant this protocol has — carries the rule it would write.<br /><br />
+        Allow once still takes the accent. A peer that cannot describe risk is not a reason to make the broadest grant the easiest one.<br /><br />
+        The compatibility note states what is missing and what the client did about it. It is neutral body text, never a badge, and it makes no claim about whether the command is safe.
+      </div>
+      </sc-if>
+    </div>
+
+    <!-- ═══════════ 04 · ONE-OFF / REVIEW SHELL · DARK ═══════════ -->
+    <div style="width:402px;flex:none">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">04 · one-off · review shell · dark · 402×874</div>
+      <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+
+        <div style="position:absolute;inset:0;opacity:.28;display:flex;flex-direction:column">
+          <div style="height:48px;display:flex;align-items:center;padding:0 24px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+          <div style="padding:4px 24px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="font:600 19px/1.25 system-ui,-apple-system,sans-serif">Prepare 1.6 release</div>
+            <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px">cc-pocket · main</div>
+          </div>
+        </div>
+        <div style="position:absolute;inset:0;background:rgba(5,5,6,.76)"></div>
+
+        <div style="margin-top:56px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+
+          <div style="flex:none;padding:16px 22px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;background:#E9B45C;transform:rotate(45deg);flex:none"></span>
+              <span style="font:600 15px/1.2 system-ui,-apple-system,sans-serif;color:#F0C079;flex:1">Approval required</span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-top:10px">
+              <span style="font:600 15px/1 'JetBrains Mono',monospace;color:#F0C079">45s</span>
+              <span style="font:400 13px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:1;text-wrap:pretty">automatically denied when time runs out</span>
+            </div>
+            <div style="height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-top:10px"><div style="width:88%;height:3px;background:#E9B45C;border-radius:2px"></div></div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:18px 22px 0;position:relative">
+            <div style="font:600 21px/1.32 system-ui,-apple-system,sans-serif;letter-spacing:-.015em;color:#F3F3F4;text-wrap:pretty">Rotate deploy keys on build-01</div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+              <span style="font:500 14.5px/1 system-ui,-apple-system,sans-serif;color:#E6E6E9">Run command</span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#6E6E76"></span>
+              <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">Bash</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:14px">
+              <span style="display:flex;align-items:center;gap:7px;font:600 12px/1 system-ui,-apple-system,sans-serif;letter-spacing:.05em;text-transform:uppercase;color:#F0C079;background:rgba(233,180,92,.12);border:1px solid rgba(233,180,92,.36);padding:7px 10px;border-radius:7px"><span style="width:7px;height:7px;background:#E9B45C;transform:rotate(45deg)"></span>Medium risk</span>
+              <span style="font:400 13.5px/1.3 system-ui,-apple-system,sans-serif;color:#B4B5BC">remote host</span>
+            </div>
+
+            <div style="margin-top:16px;background:#08080A;border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:13px 14px;font:400 13px/1.7 'JetBrains Mono',monospace;color:#E0E0E5;letter-spacing:-.02em;word-break:break-all">ssh deploy@build-01 \<br />&nbsp;&nbsp;'cd /srv/cc-pocket &amp;&amp; \<br />&nbsp;&nbsp;&nbsp;./scripts/rotate-keys.sh --confirm'</div>
+
+            <div style="margin-top:16px;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14);padding:13px 0;display:flex;align-items:flex-start;gap:10px">
+              <span style="width:8px;height:8px;border-radius:50%;border:1.5px solid #8C8D95;margin-top:5px;flex:none"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font:500 14.5px/1.3 system-ui,-apple-system,sans-serif;color:#F3F3F4">Confirmed individually</div>
+                <div style="font:400 13px/1.5 system-ui,-apple-system,sans-serif;color:#B4B5BC;margin-top:4px;text-wrap:pretty">This command is never remembered. Every run is confirmed on its own and the decision is written to the session record.</div>
+              </div>
+            </div>
+
+            <div style="margin-top:2px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="font:400 14.5px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:none">Project</span>
+                <span style="font:400 12.5px/1.35 'JetBrains Mono',monospace;color:#F3F3F4;letter-spacing:-.02em;text-align:right;word-break:break-all">~/proj/app/cc-pocket</span>
+              </div>
+            </div>
+            <div style="height:26px"></div>
+            <div style="position:absolute;left:0;right:0;bottom:0;height:30px;background:linear-gradient(to bottom,rgba(20,20,23,0),#141417)"></div>
+            <span style="position:absolute;top:8px;bottom:34px;right:5px;width:3px;border-radius:2px;background:rgba(255,255,255,.10)"><span style="display:block;width:3px;height:56%;border-radius:2px;background:rgba(255,255,255,.32)"></span></span>
+          </div>
+
+          <div style="flex:none;background:#141417;border-top:1px solid rgba(255,255,255,.14);padding:12px 22px 0">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Deny</div>
+              <div style="height:60px;border-radius:13px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#160C07">Allow once</div>
+            </div>
+            <div style="height:14px"></div>
+            <div style="height:24px;display:flex;justify-content:center;align-items:center"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Proves</div>
+        neverRemember removes three actions, not just their labels. No task grant, no session grant, no Always allow and no Retry safer — the pair that remains is exactly what the request permits.<br /><br />
+        Two decisions keep the same tile height and the same 13pt radius as the four-up grid, so a one-off request does not read as a different component.<br /><br />
+        The review note is a real property of the request, so it sits in the body as a hairline band rather than beside the buttons where it could be mistaken for advice.<br /><br />
+        The body still scrolls under a pinned header and a pinned decision bar — shown here mid-scroll with the multi-line command and the record note both in view.
+      </div>
+      </sc-if>
+    </div>
+
+    <!-- ═══════════ 05 · NO AUTO-DENY · DARK ═══════════ -->
+    <div style="width:402px;flex:none">
+      <div style="font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#8A857C;padding-bottom:12px">05 · noAutoDeny · dark · 402×874</div>
+      <div style="width:402px;height:874px;border-radius:18px;overflow:hidden;display:flex;flex-direction:column;position:relative;background:#0B0B0C;color:#F3F3F4;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.5)">
+
+        <div style="position:absolute;inset:0;opacity:.28;display:flex;flex-direction:column">
+          <div style="height:48px;display:flex;align-items:center;padding:0 24px;font:600 14px/1 'JetBrains Mono',monospace">9:41</div>
+          <div style="padding:4px 24px 12px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="font:600 19px/1.25 system-ui,-apple-system,sans-serif">Prepare 1.6 release</div>
+            <div style="font:400 12.5px/1.45 'JetBrains Mono',monospace;color:#8C8D95;margin-top:5px">cc-pocket · main</div>
+          </div>
+        </div>
+        <div style="position:absolute;inset:0;background:rgba(5,5,6,.76)"></div>
+
+        <div style="margin-top:56px;position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:#141417;border-radius:22px 22px 18px 18px;border-top:1px solid rgba(255,255,255,.16)">
+
+          <div style="flex:none;padding:16px 22px 13px;border-bottom:1px solid rgba(255,255,255,.14)">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="width:8px;height:8px;background:#E9B45C;transform:rotate(45deg);flex:none"></span>
+              <span style="font:600 15px/1.2 system-ui,-apple-system,sans-serif;color:#F0C079;flex:1">Approval required</span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:9px;margin-top:10px">
+              <span style="font:400 17px/1 'JetBrains Mono',monospace;color:#B4B5BC">∞</span>
+              <span style="font:600 14.5px/1.2 system-ui,-apple-system,sans-serif;color:#E6E6E9">Waiting for you</span>
+            </div>
+            <div style="font:400 13px/1.4 system-ui,-apple-system,sans-serif;color:#B4B5BC;margin-top:7px;text-wrap:pretty">No response countdown. The daemon keeps this request active until you decide or it withdraws it.</div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow:hidden;padding:18px 22px 0;position:relative">
+            <div style="font:600 21px/1.32 system-ui,-apple-system,sans-serif;letter-spacing:-.015em;color:#F3F3F4;text-wrap:pretty">Rewrite the release script</div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:11px">
+              <span style="font:500 14.5px/1 system-ui,-apple-system,sans-serif;color:#E6E6E9">Edit file</span>
+              <span style="width:3px;height:3px;border-radius:50%;background:#6E6E76"></span>
+              <span style="font:400 13px/1 'JetBrains Mono',monospace;color:#B4B5BC">Edit</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:9px;margin-top:14px">
+              <span style="display:flex;align-items:center;gap:7px;font:600 12px/1 system-ui,-apple-system,sans-serif;letter-spacing:.05em;text-transform:uppercase;color:#F0C079;background:rgba(233,180,92,.12);border:1px solid rgba(233,180,92,.36);padding:7px 10px;border-radius:7px"><span style="width:7px;height:7px;background:#E9B45C;transform:rotate(45deg)"></span>Medium risk</span>
+              <span style="font:400 13.5px/1.3 system-ui,-apple-system,sans-serif;color:#B4B5BC">modifies release tooling</span>
+            </div>
+            <div style="font:400 11.5px/1.4 'JetBrains Mono',monospace;color:#8C8D95;margin-top:8px;letter-spacing:-.01em">assessed 9:41:44 · repo.tooling.write</div>
+
+            <div style="margin-top:16px;font:400 12px/1 'JetBrains Mono',monospace;color:#8C8D95;letter-spacing:-.01em;word-break:break-all">scripts/release.sh</div>
+            <div style="margin-top:8px;background:#08080A;border:1px solid rgba(255,255,255,.14);border-radius:10px;overflow:hidden;font:400 12.5px/1.75 'JetBrains Mono',monospace;letter-spacing:-.02em">
+              <div style="padding:5px 12px;color:#8C8D95;background:rgba(255,255,255,.04)">@@ -18,7 +18,9 @@</div>
+              <div style="padding:0 12px;color:#B4B5BC">&nbsp;&nbsp;set -euo pipefail</div>
+              <div style="padding:0 12px;background:rgba(233,116,98,.12);color:#E9BDB4">−&nbsp;VERSION=$(cat VERSION)</div>
+              <div style="padding:0 12px;background:rgba(92,181,130,.12);color:#A9D6BB">+&nbsp;VERSION=$(git describe --tags)</div>
+              <div style="padding:0 12px;background:rgba(92,181,130,.12);color:#A9D6BB">+&nbsp;git tag -s "v$VERSION" -m "release"</div>
+              <div style="padding:0 12px 6px;color:#B4B5BC">&nbsp;&nbsp;./gradlew publish</div>
+            </div>
+
+            <div style="margin-top:16px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:12px 0;border-top:1px solid rgba(255,255,255,.14);border-bottom:1px solid rgba(255,255,255,.14)">
+                <span style="font:400 14.5px/1.35 system-ui,-apple-system,sans-serif;color:#B4B5BC;flex:none">Project</span>
+                <span style="font:400 12.5px/1.35 'JetBrains Mono',monospace;color:#F3F3F4;letter-spacing:-.02em;text-align:right;word-break:break-all">~/proj/app/cc-pocket</span>
+              </div>
+            </div>
+            <div style="height:26px"></div>
+            <div style="position:absolute;left:0;right:0;bottom:0;height:30px;background:linear-gradient(to bottom,rgba(20,20,23,0),#141417)"></div>
+          </div>
+
+          <div style="flex:none;background:#141417;border-top:1px solid rgba(255,255,255,.14);padding:12px 22px 0">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Deny</div>
+              <div style="height:60px;border-radius:13px;background:#E2795A;display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#160C07">Allow once</div>
+              <div style="grid-column:1 / -1;height:60px;border-radius:13px;border:1px solid rgba(255,255,255,.28);display:flex;align-items:center;justify-content:center;font:600 16.5px/1 system-ui,-apple-system,sans-serif;color:#F3F3F4">Retry safer</div>
+            </div>
+            <div style="height:14px"></div>
+            <div style="height:24px;display:flex;justify-content:center;align-items:center"><span style="width:132px;height:5px;border-radius:3px;background:#F3F3F4;opacity:.28"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top:18px;border-top:1px solid #C9C5BD;padding-top:14px;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C;margin-bottom:9px">Proves</div>
+        noAutoDeny is a header modifier, not a variant. It removes the countdown, the bar and the fail-closed sentence, and states what is true instead: there is no response countdown and the daemon keeps the request active. Renewal is bounded by the daemon's own hard floor, so the client shows no timer and promises no infinite lifetime — ∞ is the established waiting-state symbol, not a guarantee.<br /><br />
+        The risk block stays exactly as it is in the timed frames. No timer must never read as no danger, so the assessment keeps its position, its weight and its colour.<br /><br />
+        The decision set still comes from the family, not from the modifier. grantOptions is non-null and offers only once, so DecisionV2 builds Deny, Allow once and Retry safer. Retry safer takes the full width rather than leaving an empty cell, and no disabled tile is drawn for a scope the daemon did not offer.<br /><br />
+        No queue counter, because the repository reported no queue. The header keeps its state line and drops the number rather than falling back to 1 of 1.
+      </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- ═══════════════ A · VARIANT SELECTOR ═══════════════ -->
+  <sc-if value="{{ showMatrices }}" hint-placeholder-val="{{ true }}">
+  <div style="padding-top:60px;margin-top:60px;border-top:1px solid #C9C5BD">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">A</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Selection pipeline</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Four stages, composed. The variants are not mutually exclusive rows.</span>
+    </div>
+
+    <div style="display:flex;align-items:stretch;gap:12px;padding-bottom:26px">
+      <div style="flex:1;border:1px solid #C9C5BD;border-radius:11px;padding:13px 15px;background:#E9E6E0">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">A · route</div>
+        <div style="font:600 14px/1.35 'Public Sans',sans-serif;margin-top:8px">Is this a sheet at all?</div>
+        <div style="font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;margin-top:5px;text-wrap:pretty">Questions leave the pipeline here.</div>
+      </div>
+      <div style="display:flex;align-items:center;font:400 18px/1 'JetBrains Mono',monospace;color:#A9A399;flex:none">→</div>
+      <div style="flex:1;border:1px solid #C9C5BD;border-radius:11px;padding:13px 15px;background:#E9E6E0">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">B · terminal event</div>
+        <div style="font:600 14px/1.35 'Public Sans',sans-serif;margin-top:8px">Has it already ended?</div>
+        <div style="font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;margin-top:5px;text-wrap:pretty">Only a timed-out withdrawal leaves something on screen.</div>
+      </div>
+      <div style="display:flex;align-items:center;font:400 18px/1 'JetBrains Mono',monospace;color:#A9A399;flex:none">→</div>
+      <div style="flex:1;border:1px solid #C9C5BD;border-radius:11px;padding:13px 15px;background:#E9E6E0">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">C · decision family</div>
+        <div style="font:600 14px/1.35 'Public Sans',sans-serif;margin-top:8px">Which action set?</div>
+        <div style="font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;margin-top:5px;text-wrap:pretty">Exactly one family. This is the only exclusive choice in the pipeline.</div>
+      </div>
+      <div style="display:flex;align-items:center;font:400 18px/1 'JetBrains Mono',monospace;color:#A9A399;flex:none">→</div>
+      <div style="flex:1;border:1px solid #C9C5BD;border-radius:11px;padding:13px 15px;background:#E9E6E0">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">D · modifiers</div>
+        <div style="font:600 14px/1.35 'Public Sans',sans-serif;margin-top:8px">What else is true?</div>
+        <div style="font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;margin-top:5px;text-wrap:pretty">Independent. Any number apply at once to the family chosen in C.</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:240px 1fr 1fr 300px;border-top:1px solid #C9C5BD;font:400 13.5px/1.55 'Public Sans',sans-serif">
+      <div style="padding:12px 0;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Stage</div>
+      <div style="padding:12px 24px;border-left:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Condition</div>
+      <div style="padding:12px 24px;border-left:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Result</div>
+      <div style="padding:12px 0 12px 24px;border-left:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Notes</div>
+
+      <div style="padding:14px 0;border-top:1px solid #C9C5BD"><span style="display:block;font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">A · route</span><span style="display:block;font:500 13px/1.5 'JetBrains Mono',monospace;margin-top:7px">questions</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">questions</span> is non-empty.</div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">In-chat QuestionCard. No SecureApprovalSheet is created.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Outside this handoff. An ask that carries questions is a question, not a permission decision, and never reaches stages B–D.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #C9C5BD"><span style="display:block;font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">B · terminal event</span><span style="display:block;font:500 13px/1.5 'JetBrains Mono',monospace;margin-top:7px">TIMED_OUT</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">AskWithdrawn(TIMED_OUT)</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">TimeoutTerminal. Read-only outcome, decisions replaced by Dismiss.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">The outcome is the daemon's, not the client's. This is the only state the user may dismiss.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">WITHDRAWN · session close</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Ordinary withdrawal, or the session ends.</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Sheet is removed immediately and the queue advances.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Nothing dismissible is left behind. Not every withdrawal becomes a terminal state — only TIMED_OUT does.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #C9C5BD"><span style="display:block;font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">C · decision family</span><span style="display:block;font:500 13px/1.5 'JetBrains Mono',monospace;margin-top:7px">DecisionOneOff</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">neverRemember === true</span> or the handoff review shell.</div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Deny · Allow once</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Takes precedence over grantOptions even when scopes are offered. The review shell adds the record note in the body. Frame 04.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">DecisionV2</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">grantOptions != null</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Deny · Allow once · Retry safer · one tile per offered grant.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Built from the flags, not from a fixed set. Session scope moves under More options. Frames 01, 02, 05.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">DecisionLegacy</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">grantOptions == null</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Deny · Allow once · Always allow</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Accent on Allow once. 30s fallback timer. Compatibility note in the body. Frame 03.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #C9C5BD"><span style="display:block;font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">D · modifiers</span><span style="display:block;font:500 13px/1.5 'JetBrains Mono',monospace;margin-top:7px">noAutoDeny</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">noAutoDeny === true</span></div>
+      <div style="padding:14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Header only: the countdown is replaced by the waiting state.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Not a decision variant. The action set still comes from stage C, so it combines with ordinary, danger and one-off alike. Frame 05.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">danger</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A"><span style="font:400 12.5px/1 'JetBrains Mono',monospace">PermissionAsk.danger === true</span> — and only this flag.</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Emphasis only: accent moves to Allow once, broader grants demote, Deny takes a danger boundary.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">The action set is unchanged. A high async risk value does not trigger this — it changes only how RiskAssessment presents. Frame 02.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;font:500 13px/1.5 'JetBrains Mono',monospace">queue · risk</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Repository queue state, and PermissionRiskUpdated, when each really exists.</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Header counter; RiskAssessment block in the body.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Independent of each other and of every other stage. Risk can arrive after the sheet opens and never rewrites the decisions.</div>
+    </div>
+
+    <p style="margin:16px 0 0;font:400 13px/1.7 'Public Sans',sans-serif;color:#6E695F;max-width:1100px;text-wrap:pretty">Stage C is the only exclusive choice; stage D composes on top of whatever C produced. Availability is derived only from capability flags — an action the daemon did not offer is not rendered, never rendered disabled, and no cell is reserved for it. Two offered grants fill a 2×2 grid; one offered grant produces a 2 + 1 grid at the same tile size.</p>
+  </div>
+
+  <!-- ═══════════════ B · FIELD SOURCES ═══════════════ -->
+  <div style="padding-top:56px;margin-top:56px;border-top:1px solid #C9C5BD">
+    <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+      <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">B</span>
+      <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Field sources</h2>
+      <span style="font:400 13.5px/1 'Public Sans',sans-serif;color:#7C776F">Every string on the sheet, and where it comes from.</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:240px 320px 1fr 1fr;border-top:1px solid #C9C5BD;font:400 13.5px/1.55 'Public Sans',sans-serif">
+      <div style="padding:12px 0;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Displayed field</div>
+      <div style="padding:12px 24px;border-left:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Source</div>
+      <div style="padding:12px 24px;border-left:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Renders when</div>
+      <div style="padding:12px 0 12px 24px;border-left:1px solid #DAD6CE;font:500 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8A857C">Missing behaviour</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Title</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.title</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Always. It is the first line of the body.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Kind and tool line is promoted to the heading. The client never writes a title from the command.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Kind · tool</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.tool</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Always. Kind is a fixed client label per tool; the tool name is verbatim.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Not possible — tool is required.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Payload</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.inputPreview<br />PermissionAsk.diff</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Verbatim, in mono, wrapping on characters. diff renders as a diff; otherwise the literal preview.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Block omitted. No paraphrase, no truncation with an ellipsis, no “see desktop”.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Risk · reason</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionRiskUpdated.risk<br />.reason · .reasonCodes · .assessedAt</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Badge on risk. Reason only when the event carries one. Codes and assessedAt render as one quiet mono line.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">No badge at all. Absence is never drawn as low risk, and never as a neutral or green mark.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Danger note</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.danger<br />PermissionAsk.dangerNote</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">danger true. The note renders inside the risk block, above the payload.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Block omitted; danger without a note still applies the danger emphasis to the decisions.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Rule sublabel</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.rule</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">On persistent grants only — Allow for task, Always allow. It is what would be written.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Action keeps its label with no sublabel. Tile height is unchanged.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Project</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">session.workdir</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Session context supplies a working directory.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Row omitted. Never substituted with the repository name or a guessed path.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Queue n of m</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">repository queue state</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Position and total are both known and the total is greater than one.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Counter dropped, state label kept. No “1 of 1”.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Timer</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.timeoutSec<br />PermissionAsk.noAutoDeny</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">noAutoDeny false. Number, bar and the fail-closed sentence render together.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">timeoutSec missing on a legacy peer falls back to 30s and still auto-denies. noAutoDeny true shows the waiting state instead.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace">Questions</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:400 12.5px/1.6 'JetBrains Mono',monospace;color:#54504A">PermissionAsk.questions</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">Never on this sheet. When non-empty the ask routes to the in-chat QuestionCard.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">SecureApprovalSheet is not created. Questions are answered in Chat, not approved here.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace;color:#A3311F">consequenceSummary</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:500 12.5px/1.6 'JetBrains Mono',monospace;color:#A3311F">not in V1</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#A3311F">Never. Do not render.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">The sheet leads with title and tool. The client does not summarise a command in prose.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;font:500 13px/1.5 'JetBrains Mono',monospace;color:#A3311F">effects</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;font:500 12.5px/1.6 'JetBrains Mono',monospace;color:#A3311F">not in V1</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#A3311F">Never. Do not render.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE;color:#54504A">The literal payload is the effects list. No derived bullets.</div>
+
+      <div style="padding:14px 0;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;font:500 13px/1.5 'JetBrains Mono',monospace;color:#A3311F">recommendation · reason</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;border-left:1px solid #DAD6CE;font:500 12.5px/1.6 'JetBrains Mono',monospace;color:#A3311F">not in V1</div>
+      <div style="padding:14px 24px;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#A3311F">Never. Do not render.</div>
+      <div style="padding:14px 0 14px 24px;border-top:1px solid #DAD6CE;border-bottom:1px solid #C9C5BD;border-left:1px solid #DAD6CE;color:#54504A">Policy is carried by which action holds the accent. No sentence claims a recommended choice.</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ C + D ═══════════════ -->
+  <div style="padding-top:56px;margin-top:56px;border-top:1px solid #C9C5BD;display:grid;grid-template-columns:1.35fr 1fr;gap:56px">
+    <div>
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">C</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Component mapping</h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid #C9C5BD;border-bottom:1px solid #C9C5BD">
+        <div style="padding:18px 24px 22px 0">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">SecureApprovalSheet</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Owns the presentation contract: no grabber, no drag, swallowed scrim, intercepted back, three pinned-scroll-pinned zones and safe-area insets. Never the generic PocketSheet.</p>
+        </div>
+        <div style="padding:18px 24px 22px;border-left:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">ApprovalHeader</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">State mark and label, optional queue counter, and either the countdown with its fail-closed sentence or the waiting state. Pinned.</p>
+        </div>
+        <div style="padding:18px 0 22px 24px;border-left:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">ApprovalPayload</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">One of command, diff or plan, chosen by which field arrived. Mono, verbatim, character wrapping. No summarising layer above it.</p>
+        </div>
+
+        <div style="padding:18px 24px 22px 0;border-top:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">RiskAssessment</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Badge, optional reason, optional codes and assessedAt. Subscribes to PermissionRiskUpdated and can appear after the sheet opens; it never reserves space before it does.</p>
+        </div>
+        <div style="padding:18px 24px 22px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">ProjectRow</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Hairline row carrying workdir from session context. Omitted when the session has none.</p>
+        </div>
+        <div style="padding:18px 0 22px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">DecisionV2</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Grid built from grantOptions plus Deny and Retry safer. Owns emphasis: widest offered grant on ordinary, Allow once when <span style="font:400 12px/1 'JetBrains Mono',monospace">danger</span> is set. Hosts the More options row when session scope exists.</p>
+          <div style="margin-top:11px;border-top:1px solid #DAD6CE;padding-top:9px">
+            <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#A9482A">Implementation delta</div>
+            <p style="margin:6px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">The current client gates V2 on grantOptions containing <span style="font:400 12px/1 'JetBrains Mono',monospace">task</span>. This handoff changes the gate to <span style="font:400 12px/1 'JetBrains Mono',monospace">grantOptions != null</span>, so a grant-aware peer offering only <span style="font:400 12px/1 'JetBrains Mono',monospace">once</span> no longer falls back to legacy and no longer offers an Always allow the peer never authorised. Rendered actions must match the offered flags exactly.</p>
+          </div>
+        </div>
+
+        <div style="padding:18px 24px 22px 0;border-top:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">DecisionLegacy</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Deny, Allow once, Always allow. Same tile metrics as DecisionV2 so the two never read as different components.</p>
+        </div>
+        <div style="padding:18px 24px 22px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">DecisionOneOff</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Deny and Allow once only. Selected by neverRemember or the review shell, and it ignores any offered grants.</p>
+        </div>
+        <div style="padding:18px 0 22px 24px;border-top:1px solid #DAD6CE;border-left:1px solid #DAD6CE">
+          <div style="font:600 13px/1.5 'JetBrains Mono',monospace;color:#1B1A18">TimeoutTerminal</div>
+          <p style="margin:8px 0 0;font:400 12.5px/1.6 'Public Sans',sans-serif;color:#6E695F;text-wrap:pretty">Replaces the decision bar only after <span style="font:400 12px/1 'JetBrains Mono',monospace">AskWithdrawn(TIMED_OUT)</span>. Read-only body, single Dismiss, and the only state in which the sheet may be closed without a decision. An ordinary withdrawal or a session close removes the sheet outright and produces no TimeoutTerminal.</p>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div style="display:flex;align-items:baseline;gap:14px;padding-bottom:20px">
+        <span style="font:600 12px/1 'JetBrains Mono',monospace;color:#fff;background:#1B1A18;padding:7px 9px;border-radius:5px">D</span>
+        <h2 style="margin:0;font:600 24px/1.1 'Public Sans',sans-serif;letter-spacing:-.015em">Acceptance checklist</h2>
+      </div>
+      <div style="border-top:1px solid #C9C5BD;font:400 13.5px/1.55 'Public Sans',sans-serif;color:#3A3730">
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Every frame is correct at 402×874 with no clipping and no horizontal scroll.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Taller devices expand the scroll body only; header and decision bar keep their heights.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Safe areas respected top and bottom; the decision bar clears the home indicator.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>No keyboard can appear over the sheet; the sheet has no text input.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>No consequence sentence, no effects list, no recommendation — in any variant, any locale.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>No permission-duration fact is shown before a decision is made.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Legacy fixture with no timeoutSec shows 30s and auto-denies at zero.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Back, swipe-down and scrim tap resolve nothing; only a decision, an authoritative timeout or a withdrawal ends the sheet.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Action set matches capability flags exactly: nothing offered is hidden, nothing unoffered is drawn.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Body text ≥ 4.5:1 dark and light. Every decision tile carries the shared Direction A boundary — 28% ink dark, 32% light — and demotion never weakens it.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #DAD6CE"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>All decision tiles share one height and one hit area, including demoted and sublabelled tiles.</span></div>
+        <div style="display:flex;gap:14px;padding:11px 0;border-bottom:1px solid #C9C5BD"><span style="width:15px;height:15px;border:1.4px solid #8A857C;border-radius:3px;flex:none;margin-top:2px"></span><span>Dynamic Type is tested as its own pass; 360dp is not a release gate for V1.</span></div>
+      </div>
+
+      <div style="margin-top:22px;background:#E4E1DA;border-radius:11px;padding:16px 18px">
+        <div style="font:600 10.5px/1 'JetBrains Mono',monospace;letter-spacing:.15em;text-transform:uppercase;color:#8A857C">Scope of this handoff</div>
+        <p style="margin:9px 0 0;font:400 13px/1.65 'Public Sans',sans-serif;color:#54504A;text-wrap:pretty">Approval only. The Sessions and Chat direction in A Master Core v1 and A Master Proofs v1 stays locked, including the approval entry points on those screens. Where those files disagree with this one about the approval sheet, this file wins.</p>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;boardBg&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#EDEBE6&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#EDEBE6&quot;,&quot;#E3E0DA&quot;,&quot;#F7F5F1&quot;,&quot;#17171A&quot;],&quot;section&quot;:&quot;Board&quot;},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Board&quot;},&quot;showMatrices&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Board&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      boardBg: this.props.boardBg ?? '#EDEBE6',
+      showNotes: this.props.showNotes ?? true,
+      showMatrices: this.props.showMatrices ?? true
+    };
+  }
+}
+</script>
+</body>
+</html>
