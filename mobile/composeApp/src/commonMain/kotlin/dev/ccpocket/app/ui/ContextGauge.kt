@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.context_critical_caption
 import dev.ccpocket.app.resources.qa_context_gauge
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
 
@@ -101,9 +103,10 @@ fun ContextGauge(
     val a11y = stringResource(Res.string.qa_context_gauge)
     BoxWithConstraints(
         modifier
-            // the capsule stays the design's 30dp, but the touch slot fills the 44dp row — an ambient
-            // readout should not also be a small tap target
-            .height(44.dp)
+            // the capsule stays the design's 30dp, but the touch slot is the [Metric.touch] minimum in
+            // BOTH axes — an ambient readout should not also be a small tap target, and at its calm width
+            // the bare 30dp capsule is narrower than a thumb (Chat Master v2: 48pt targets under 30pt chips)
+            .sizeIn(minWidth = Metric.touch, minHeight = Metric.touch)
             .clip(RoundedCornerShape(999.dp))
             .clickable(onClick = onOpenInfo)
             .semantics { contentDescription = a11y },

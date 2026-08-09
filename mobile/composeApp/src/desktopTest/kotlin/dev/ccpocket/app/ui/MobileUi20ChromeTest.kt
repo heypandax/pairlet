@@ -11,9 +11,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SkikoComposeUiTest
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
@@ -35,7 +40,9 @@ import dev.ccpocket.app.resources.chat_you
 import dev.ccpocket.app.resources.copy_path
 import dev.ccpocket.app.resources.deny
 import dev.ccpocket.app.resources.done
+import dev.ccpocket.app.resources.fl_switch_computer
 import dev.ccpocket.app.resources.message_queued_hint
+import dev.ccpocket.app.resources.mode_auto_short
 import dev.ccpocket.app.resources.new_session_cta
 import dev.ccpocket.app.resources.ses_active
 import dev.ccpocket.app.resources.ses_conn_connecting
@@ -49,9 +56,11 @@ import dev.ccpocket.app.resources.st_also_running
 import dev.ccpocket.app.resources.st_answer
 import dev.ccpocket.app.resources.st_complete
 import dev.ccpocket.app.resources.st_running
+import dev.ccpocket.app.resources.switcher_open
 import dev.ccpocket.app.resources.time_just_now
 import dev.ccpocket.app.str
 import dev.ccpocket.app.theme.PocketTheme
+import dev.ccpocket.app.ui.chat.CONTEXT_SEP
 import dev.ccpocket.app.ui.chat.ChatHeader
 import dev.ccpocket.app.ui.chat.ChatStateBlock
 import dev.ccpocket.app.ui.chat.ContextLine
@@ -61,6 +70,7 @@ import dev.ccpocket.app.ui.session.SessionListRow
 import dev.ccpocket.app.ui.session.SessionRowUi
 import dev.ccpocket.app.ui.session.SurfaceState
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.HistoryMessage
@@ -91,6 +101,7 @@ import kotlin.test.assertTrue
 class MobileUi20ChromeTest {
 
     private val dir = "/Users/alex/code/cc-pocket"
+    private val deepDir = "/Users/alex/Desktop/Project/app/cc-pocket"
     private val convo = "c-ui20"
 
     private fun account() = PairedDaemon(
@@ -115,6 +126,22 @@ class MobileUi20ChromeTest {
         convoId = convo, workdir = dir, sessionId = "s1", mode = PermissionMode.DEFAULT,
         executing = executing, model = "claude-sonnet-4-5", agent = AgentKind.CLAUDE,
     )
+
+    /**
+     * The Chat context an ordinary production session really carries (the Pandaa-iPhone report): a Claude
+     * session in Auto mode on a named machine, with a known model, out of a DEEP project path. The shallow
+     * [dir] fixture is not enough here — the header used to overflow on exactly this much truth.
+     */
+    private fun ordinarySession(workdir: String = deepDir) = SessionLive(
+        convoId = convo, workdir = workdir, sessionId = "s1", mode = PermissionMode.DEFAULT,
+        executing = false, model = "claude-fable-5", agent = AgentKind.CLAUDE,
+        permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
+    )
+
+    /** The two compact rows those facts must collapse into, and the one line they read as when hidden. */
+    private val identityRow get() = "Claude$CONTEXT_SEP${str(Res.string.mode_auto_short)}${CONTEXT_SEP}fable"
+    private val placeRow = "alex-macbook${CONTEXT_SEP}cc-pocket"
+    private val collapsedRow get() = "$identityRow$CONTEXT_SEP$placeRow"
 
     /**
      * Compose [content] against a paired repository in a real 402 × 874 pt scene at [fontScale].
@@ -144,6 +171,19 @@ class MobileUi20ChromeTest {
     /** Icon-only affordances carry their label as a content description, not as text. */
     private fun SkikoComposeUiTest.described(label: String): Boolean =
         onAllNodes(hasContentDescription(label)).fetchSemanticsNodes().isNotEmpty()
+
+    /**
+     * Whether a node is WHOLLY on screen: its clipped bounds match its unclipped ones, so no ancestor's
+     * scroller is hiding part of it. `assertIsDisplayed` is not enough — a row peeking out of an
+     * overflowing region by a few pt is "displayed" and still unreadable, unreachable and unclickable.
+     */
+    private fun SkikoComposeUiTest.fullyVisible(matcher: SemanticsMatcher): Boolean {
+        val node = onAllNodes(matcher).onFirst()
+        val shown = node.getBoundsInRoot()
+        val whole = node.getUnclippedBoundsInRoot()
+        return kotlin.math.abs((shown.top - whole.top).value) < 0.5f &&
+            kotlin.math.abs((shown.bottom - whole.bottom).value) < 0.5f
+    }
 
     /** Nothing may spill past the 402 pt viewport — the "no horizontal scroll" half of the responsive gate. */
     private fun SkikoComposeUiTest.assertWithinViewport(text: String) {
@@ -314,6 +354,84 @@ class MobileUi20ChromeTest {
         waitForIdle()
         assertFalse(present(str(Res.string.chat_session_info)), "collapsing gives the region back to the stream")
         assertTrue(present("Claude · default · alex-macbook"), "…and restores the summary")
+    }
+
+    @Test
+    fun anOrdinarySessionsWholeContextFitsTheExpandedRegionWithoutASecondScroll() = baseline(
+        seed = {
+            receiveForTest(ordinarySession())
+            receiveForTest(ConvoHistory(convo, listOf(HistoryMessage(ChatRole.USER, "add a unit test for the stream parser"))))
+        },
+        content = { ChatScreen(it) },
+    ) {
+        // collapsed: one dot-separated statement of every fact that exists, and only those
+        assertTrue(present(collapsedRow), "collapsed, the summary states the real facts on one line")
+        onAllNodes(hasText(collapsedRow)).onFirst().performClick()
+        waitForIdle()
+
+        // expanded: the same facts as two compact rows, the full path, and the action — in ONE frame
+        assertTrue(present(identityRow), "agent, permission mode and model share the identity row")
+        assertTrue(present(placeRow), "machine and project folder share the location row")
+        assertTrue(fullyVisible(hasText("~/Desktop/Project/app/cc-pocket")), "the FULL workdir is wholly on screen")
+        assertTrue(described(str(Res.string.copy_path)), "…beside its own copy affordance")
+        assertTrue(
+            fullyVisible(hasText(str(Res.string.chat_session_info))),
+            "Session info is reachable in the same frame — the region must not clip it below the fold",
+        )
+    }
+
+    @Test
+    fun theExpandedContextNamesTheProjectFolderOnceNotAsItsOwnRowToo() = baseline(
+        seed = { receiveForTest(ordinarySession()) },
+        content = { ChatScreen(it) },
+    ) {
+        onAllNodes(hasText(collapsedRow)).onFirst().performClick()
+        waitForIdle()
+        assertTrue(present(placeRow), "the folder rides the location row…")
+        assertTrue(present("~/Desktop/Project/app/cc-pocket"), "…and the full path still spells it out")
+        assertEquals(
+            0,
+            onAllNodes(hasText("cc-pocket")).fetchSemanticsNodes().size,
+            "so a third, bare folder row would only spend a line saying it a third time",
+        )
+    }
+
+    @Test
+    fun theGroupedLocationRowIsStillTheMachineSwitcher() = baseline(
+        seed = { receiveForTest(ordinarySession()) },
+        content = { ChatScreen(it) },
+    ) {
+        onAllNodes(hasText(collapsedRow)).onFirst().performClick()
+        waitForIdle()
+        val row = onAllNodes(hasText(placeRow)).onFirst()
+        row.assertHasClickAction()
+        assertEquals(
+            str(Res.string.switcher_open),
+            row.fetchSemanticsNode().config.getOrNull(SemanticsActions.OnClick)?.label,
+            "grouping the folder into the row must not cost the machine its accessibility label",
+        )
+        row.performClick()
+        waitForIdle()
+        assertTrue(present(str(Res.string.fl_switch_computer), substring = true), "…and it still opens the switcher")
+    }
+
+    @Test
+    fun onlyTheFactsAndPathScrollAtTwoHundredPercentTypeSessionInfoStaysPinned() = baseline(
+        fontScale = 2f,
+        // double type AND a path deep enough to wrap several times: the body genuinely cannot fit
+        seed = { receiveForTest(ordinarySession("/Users/alex/Desktop/Project/app/cc-pocket-android-client/app/src/main/kotlin")) },
+        content = { ChatScreen(it) },
+    ) {
+        onAllNodes(hasText(identityRow, substring = true)).onFirst().performClick()
+        waitForIdle()
+        val path = "~/Desktop/Project/app/cc-pocket-android-client/app/src/main/kotlin"
+        assertTrue(present(path), "the path is still rendered whole, never shrunk or truncated")
+        assertFalse(fullyVisible(hasText(path)), "the facts+path body is what overflows, so it is what scrolls")
+        assertTrue(
+            fullyVisible(hasText(str(Res.string.chat_session_info))),
+            "…while Session info rides below that overflow, whole and reachable",
+        )
+        assertWithinViewport(str(Res.string.chat_session_info))
     }
 
     @Test

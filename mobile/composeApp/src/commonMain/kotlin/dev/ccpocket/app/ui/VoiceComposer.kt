@@ -41,6 +41,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -50,6 +52,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import org.jetbrains.compose.resources.stringResource
 
@@ -91,7 +94,15 @@ fun ComposerField(
     }
 }
 
-/** 44dp round action button: filled terracotta (send/done) or hairline outline (mic). */
+/**
+ * 44dp round action button: filled terracotta (send/done) or hairline outline (mic).
+ *
+ * The circle keeps its 44dp look; the button ITSELF is the design's [Metric.touch] minimum (Chat Master
+ * v2: "44–48 pt controls, with 48 pt accessibility targets even when the visible chip is smaller"). The
+ * extra ring is transparent, so nothing about the drawn control changes — only what a thumb, and the
+ * semantics tree, can actually hit. [contentDescription] names it there too: the stop square carries no
+ * icon of its own, so before this it reached assistive tech as an unnamed button.
+ */
 @Composable
 fun RoundActionButton(
     onClick: () -> Unit,
@@ -102,17 +113,42 @@ fun RoundActionButton(
     content: @Composable () -> Unit,
 ) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape)
-            .background(if (filled) Tok.accent else Tok.base)
-            .let { if (filled) it else it.border(1.dp, Tok.hair, CircleShape) }
+        Modifier.size(Metric.touch).clip(CircleShape)
             .let {
                 if (onLongClick != null) {
                     it.combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
                 } else it.clickable(enabled = enabled, onClick = onClick)
             }
-            .graphicsLayer { alpha = if (enabled) 1f else 0.5f },
+            .then(contentDescription?.let { cd -> Modifier.semantics { this.contentDescription = cd } } ?: Modifier),
         contentAlignment = Alignment.Center,
-    ) { content() }
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape)
+                .background(if (filled) Tok.accent else Tok.base)
+                .let { if (filled) it else it.border(1.dp, Tok.hair, CircleShape) }
+                .graphicsLayer { alpha = if (enabled) 1f else 0.5f },
+            contentAlignment = Alignment.Center,
+        ) { content() }
+    }
+}
+
+/**
+ * The composer's one-line explanation of why the action slot reads the way it does (design
+ * `ChatComposerV2`, the `showNote` row): a quiet dot plus written cause, above the field.
+ *
+ * It is a NOTE, not a placeholder. "Send will queue" used to ride the field's placeholder, which meant the
+ * explanation vanished at exactly the moment it became true — the first character you typed mid-turn.
+ */
+@Composable
+fun ComposerNote(text: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(Modifier.padding(top = 5.dp).size(5.dp).clip(CircleShape).background(Tok.muted))
+        Spacer(Modifier.width(7.dp))
+        Text(text, color = Tok.tx2, fontSize = 12.5.sp, lineHeight = 17.sp)
+    }
 }
 
 /**
@@ -135,7 +171,7 @@ fun RecordingBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(9.dp),
     ) {
-        IconButton(onClick = onCancel, modifier = Modifier.size(44.dp)) {
+        IconButton(onClick = onCancel, modifier = Modifier.size(Metric.touch)) {
             Icon(XSmallIcon, stringResource(Res.string.cancel_recording), tint = Tok.muted, modifier = Modifier.size(18.dp))
         }
         val pillShape = RoundedCornerShape(12.dp)
@@ -158,7 +194,8 @@ fun RecordingBar(
         }
         val doneLabel = stringResource(Res.string.done)
         RoundActionButton(onClick = onDone, filled = true, contentDescription = doneLabel) {
-            Icon(CheckIcon, doneLabel, tint = Tok.base, modifier = Modifier.size(20.dp))
+            // the button names itself now — a second description here would be announced twice
+            Icon(CheckIcon, null, tint = Tok.base, modifier = Modifier.size(20.dp))
         }
     }
 }

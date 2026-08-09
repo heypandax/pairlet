@@ -110,6 +110,9 @@
     <string name="chat_context">上下文</string>
     <string name="chat_context_expand">展开完整上下文</string>
     <string name="chat_context_collapse">收起完整上下文</string>
+    <!-- 披露控件的「状态」，与动作标签一起播报（Chat Master v2 无障碍） -->
+    <string name="chat_context_expanded">已展开</string>
+    <string name="chat_context_collapsed">已收起</string>
     <string name="chat_session_info">会话信息</string>
     <string name="chat_src_tool">工具</string>
     <string name="chat_tool_failed">失败</string>
@@ -136,7 +139,6 @@
     <string name="observing_notice">👁 观察中 · 正在终端里运行</string>
     <string name="continue_here">在这里继续</string>
     <string name="add_message_hint">补充说明…</string>
-    <string name="message_claude_hint">给 Claude 发消息…</string>
     <string name="send">发送</string>
     <string name="dictate">语音输入</string>
     <string name="attach_image">添加图片</string>
@@ -589,6 +591,10 @@
     <string name="qa_clear_hint">再次点击确认</string>
     <string name="qa_compact">压缩上下文</string>
     <string name="qa_simplify">简化</string>
+    <!-- 快捷操作列表的分组标题（design chat-quick-actions-ui-2.0） -->
+    <string name="qa_group_settings">会话设置</string>
+    <string name="qa_group_tools">会话工具</string>
+    <string name="qa_group_context">上下文</string>
 
     <!-- ── 后台任务 ──────────────────────────────────────────────── -->
     <string name="bg_running">后台运行 %1$d 个</string>
@@ -1221,7 +1227,6 @@
 
     <!-- session handoff (design session-handoff/) -->
     <string name="ho_menu_row">交给同事接力</string>
-    <string name="ho_new_badge">NEW</string>
     <string name="ho_sheet_title">交接此会话</string>
     <string name="ho_role">角色</string>
     <string name="ho_role_hint">Continue 后续提供</string>

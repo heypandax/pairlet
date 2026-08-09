@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="{{ vars }}">
+<div style="display:flex;gap:22px;align-items:flex-start;font-family:'Public Sans',system-ui,sans-serif">
+
+<div style="width:402px;height:874px;border-radius:18px;overflow:hidden;position:relative;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.42);flex:none;display:flex;flex-direction:column">
+
+  <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none">
+    <span style="font-family:'JetBrains Mono',monospace;font-weight:600;font-size:14px;line-height:1">9:41</span>
+    <span style="display:flex;gap:5px;align-items:center"><span style="width:15px;height:9px;border:1.3px solid var(--ink);border-radius:2px;opacity:.65"></span><span style="width:22px;height:10px;border:1.3px solid var(--ink);border-radius:3px;opacity:.65"></span></span>
+  </div>
+
+  <div style="flex:none;display:flex;align-items:flex-start;gap:6px;padding:0 20px 8px">
+    <span role="button" tabIndex="0" aria-label="{{ t.back }}" style="width:var(--tgt);height:var(--tgt);margin-left:-13px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+      <span aria-hidden="true" style="width:10px;height:10px;border-left:1.7px solid var(--ink2);border-bottom:1.7px solid var(--ink2);transform:rotate(45deg);margin-left:3px;display:block"></span>
+    </span>
+    <span style="flex:1;min-width:0;font-weight:600;font-size:var(--t-title);line-height:1.25;letter-spacing:-.01em;color:var(--ink);padding-top:calc((var(--tgt) - var(--t-title) * 1.25) / 2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;text-wrap:pretty">{{ title }}</span>
+    <span role="button" tabIndex="0" aria-label="{{ t.quickActions }}" onClick="{{ openSheet }}" onKeyDown="{{ keyOpenSheet }}" style="width:var(--tgt);height:var(--tgt);margin-right:-12px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:500;font-size:var(--t-dots);line-height:1;color:var(--ink3)">⋯</span>
+  </div>
+
+  <sc-if value="{{ ctxCollapsed }}" hint-placeholder-val="{{ true }}">
+    <div role="button" tabIndex="0" aria-expanded="false" aria-label="{{ ctxAria }}" onClick="{{ toggleCtx }}" onKeyDown="{{ keyToggleCtx }}" style="flex:none;min-height:var(--tgt);display:flex;align-items:center;gap:10px;padding:6px 20px 10px;cursor:pointer;border-bottom:1px solid var(--line)">
+      <span style="flex:1;min-width:0;font-size:var(--t-cap);line-height:1.45;color:var(--ink4);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-wrap:pretty">{{ ctxSummary }}</span>
+      <span aria-hidden="true" style="width:9px;height:9px;margin-right:3px;border-right:1.6px solid var(--ink5);border-bottom:1.6px solid var(--ink5);transform:rotate(45deg) translate(-2px,-2px);flex:none;display:block"></span>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ ctxOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none;max-height:var(--ctxmax);display:flex;flex-direction:column;border-bottom:1px solid var(--line);background:var(--surf)">
+      <div role="button" tabIndex="0" aria-expanded="true" aria-label="{{ ctxAria }}" onClick="{{ toggleCtx }}" onKeyDown="{{ keyToggleCtx }}" style="flex:none;min-height:var(--tgt);display:flex;align-items:center;gap:10px;padding:0 20px;cursor:pointer">
+        <span style="flex:1;font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.14em;text-transform:uppercase;color:var(--ink4)">{{ t.context }}</span>
+        <span aria-hidden="true" style="width:9px;height:9px;border-left:1.6px solid var(--ink5);border-top:1.6px solid var(--ink5);transform:rotate(45deg) translate(2px,2px);flex:none;display:block"></span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto;padding:0 20px">
+        <div style="min-height:var(--tgt);display:flex;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
+          <span style="font-size:var(--t-body);line-height:1.45;color:var(--ink2);text-wrap:pretty">{{ identity }}</span>
+        </div>
+        <div role="button" tabIndex="0" aria-label="{{ machineAria }}" onClick="{{ switchMachine }}" onKeyDown="{{ keySwitchMachine }}" style="min-height:var(--tgt);display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--line);cursor:pointer">
+          <span style="flex:1;min-width:0;font-size:var(--t-body);line-height:1.45;color:var(--ink2);text-wrap:pretty">{{ location }}</span>
+          <span aria-hidden="true" style="width:8px;height:8px;margin-right:3px;border-right:1.6px solid var(--ink5);border-top:1.6px solid var(--ink5);transform:rotate(45deg);flex:none;display:block"></span>
+        </div>
+        <sc-if value="{{ hasOrigin }}" hint-placeholder-val="{{ false }}">
+          <div style="min-height:var(--tgt);display:flex;align-items:center;padding:6px 0;border-top:1px solid var(--line)">
+            <span style="font-size:var(--t-body);line-height:1.45;color:var(--ink3);text-wrap:pretty">{{ origin }}</span>
+          </div>
+        </sc-if>
+        <div role="button" tabIndex="0" aria-label="{{ pathAria }}" onClick="{{ copyPath }}" onKeyDown="{{ keyCopyPath }}" style="min-height:var(--tgt);display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--line);cursor:pointer">
+          <span style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.5;color:var(--ink3);word-break:break-all">{{ path }}</span>
+          <span style="font-weight:600;font-size:var(--t-cap);line-height:1.5;color:var(--acc);flex:none">{{ copyLabel }}</span>
+        </div>
+        <div style="height:6px"></div>
+      </div>
+      <div style="flex:none;border-top:1px solid var(--line2)">
+        <div role="button" tabIndex="0" aria-label="{{ t.sessionInfo }}" onClick="{{ openInfo }}" onKeyDown="{{ keyOpenInfo }}" style="min-height:var(--tgt);display:flex;align-items:center;gap:10px;padding:0 20px;cursor:pointer">
+          <span style="flex:1;font-weight:500;font-size:var(--t-body);line-height:1.4;color:var(--ink2)">{{ t.sessionInfo }}</span>
+          <span aria-hidden="true" style="width:8px;height:8px;margin-right:3px;border-right:1.6px solid var(--ink5);border-top:1.6px solid var(--ink5);transform:rotate(45deg);flex:none;display:block"></span>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasState }}" hint-placeholder-val="{{ false }}">
+    <div role="status" aria-label="{{ stateAria }}" style="flex:none;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--stateBg);display:flex;gap:11px;align-items:flex-start">
+      <span aria-hidden="true" style="width:10px;height:10px;border-radius:{{ markRadius }};background:var(--stateInk);margin-top:5px;flex:none;display:block"></span>
+      <span style="flex:1;min-width:0">
+        <span style="display:block;font-weight:600;font-size:var(--t-body);line-height:1.3;color:var(--stateInk)">{{ stateLabel }}</span>
+        <sc-if value="{{ hasAsk }}" hint-placeholder-val="{{ false }}">
+          <span style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-top:5px;font-size:var(--t-cap);line-height:1.5;color:var(--ink2);text-wrap:pretty">{{ askTitle }}</span>
+        </sc-if>
+        <sc-if value="{{ alsoRunning }}" hint-placeholder-val="{{ false }}">
+          <span style="display:block;margin-top:6px;font-size:var(--t-cap);line-height:1.4;color:var(--ink4)">{{ t.alsoRunning }}</span>
+        </sc-if>
+      </span>
+    </div>
+  </sc-if>
+
+  <div onScroll="{{ onScroll }}" style="flex:1;min-height:0;overflow:auto;padding:14px 20px 4px;position:relative">
+    <sc-for list="{{ turns }}" as="turn" hint-placeholder-count="5">
+      <div style="padding-bottom:20px">
+        <sc-if value="{{ turn.isTool }}" hint-placeholder-val="{{ false }}">
+          <div style="border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px 0">
+            <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.13em;color:var(--ink5)">{{ turn.label }}</div>
+            <div style="margin-top:7px;font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.55;color:var(--ink3);word-break:break-word;white-space:pre-wrap">{{ turn.body }}</div>
+            <sc-if value="{{ turn.hasStatus }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:6px;font-size:var(--t-cap);line-height:1.4;color:var(--ink4)">{{ turn.status }}</div>
+            </sc-if>
+          </div>
+        </sc-if>
+        <sc-if value="{{ turn.isUser }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.13em;color:var(--ink5);text-align:right">{{ turn.label }}</div>
+            <div style="margin-top:7px;font-size:var(--t-body);line-height:1.5;color:var(--ink2);text-wrap:pretty">{{ turn.body }}</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ turn.isAgent }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.13em;color:var(--ink5)">{{ turn.label }}</div>
+            <div style="margin-top:7px;font-size:var(--t-body);line-height:1.55;color:var(--ink2);text-wrap:pretty">{{ turn.body }}</div>
+            <sc-if value="{{ turn.streaming }}" hint-placeholder-val="{{ false }}">
+              <span aria-hidden="true" style="display:inline-block;width:8px;height:15px;background:var(--ink4);vertical-align:-2px;margin-left:2px"></span>
+            </sc-if>
+          </div>
+        </sc-if>
+      </div>
+    </sc-for>
+    <div style="height:4px"></div>
+  </div>
+
+  <sc-if value="{{ awayFromTail }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none;display:flex;justify-content:center;padding:0 20px;margin-bottom:-2px">
+      <span role="button" tabIndex="0" aria-label="{{ t.jump }}" onClick="{{ jump }}" onKeyDown="{{ keyJump }}" style="min-height:36px;padding:0 14px;border-radius:11px;background:var(--sheet);border:1px solid var(--line2);display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;font-size:var(--t-cap);line-height:1;color:var(--ink2)">
+        <span aria-hidden="true" style="width:8px;height:8px;border-right:1.6px solid var(--ink3);border-bottom:1.6px solid var(--ink3);transform:rotate(45deg) translate(-1px,-1px);display:block"></span>
+        {{ t.jump }}
+      </span>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasQuestion }}" hint-placeholder-val="{{ false }}">
+    <div role="group" aria-label="{{ t.answerRequired }}" style="flex:none;margin:8px 20px 0;border:1px solid var(--line2);border-radius:14px;padding:14px 15px;background:var(--surf)">
+      <div style="font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.13em;text-transform:uppercase;color:var(--ink4)">{{ t.question }}</div>
+      <div style="margin-top:9px;font-weight:600;font-size:var(--t-body);line-height:1.4;color:var(--ink);text-wrap:pretty">{{ questionTitle }}</div>
+      <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ questionOptions }}" as="o" hint-placeholder-count="2">
+          <span role="button" tabIndex="0" aria-label="{{ o.label }}" style="min-height:var(--tgt);border-radius:11px;border:1px solid var(--line2);display:flex;align-items:center;padding:0 14px;cursor:pointer;font-weight:500;font-size:var(--t-body);line-height:1.35;color:var(--ink2);text-wrap:pretty">{{ o.label }}</span>
+        </sc-for>
+      </div>
+      <div style="margin-top:11px;font-size:var(--t-cap);line-height:1.45;color:var(--ink4);text-wrap:pretty">{{ t.questionNote }}</div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+    <div role="status" style="flex:none;padding:10px 20px 0;font-size:var(--t-cap);line-height:1.45;color:var(--ink3);text-wrap:pretty">{{ toast }}</div>
+  </sc-if>
+
+  <sc-if value="{{ showComposer }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none;margin-top:8px">
+      <dc-import name="ChatComposerV2" locale="{{ locale }}" theme="{{ theme }}" big="{{ big }}" variant="{{ composerVariant }}" agent="{{ agent }}" model="{{ model }}" draft="{{ draft }}" stack="{{ stack }}" ctx-label="{{ ctxLabel }}" ctx-pct="{{ ctxPctVal }}" hint-size="402px,150px"></dc-import>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ composerHidden }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:none;border-top:1px solid var(--line);padding:12px 20px 0;font-size:var(--t-cap);line-height:1.45;color:var(--ink4);text-wrap:pretty">{{ composerHiddenNote }}</div>
+    <div style="flex:none;height:26px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:8px"><span style="width:132px;height:5px;border-radius:3px;background:var(--ink);opacity:.26"></span></div>
+  </sc-if>
+
+  <sc-if value="{{ infoOpen }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-label="{{ t.sessionInfo }}" style="position:absolute;inset:0;z-index:8;background:var(--bg);display:flex;flex-direction:column">
+      <div style="height:44px;flex:none"></div>
+      <div style="flex:none;display:flex;align-items:center;gap:4px;padding:0 20px;margin-left:-13px">
+        <span role="button" tabIndex="0" aria-label="{{ t.back }}" onClick="{{ closeInfo }}" onKeyDown="{{ keyCloseInfo }}" style="min-height:var(--tgt);display:flex;align-items:center;gap:6px;padding:0 13px;cursor:pointer;color:var(--acc);flex:none">
+          <span aria-hidden="true" style="width:9px;height:9px;border-left:1.7px solid var(--acc);border-bottom:1.7px solid var(--acc);transform:rotate(45deg);display:block"></span>
+          <span style="font-weight:600;font-size:var(--t-body);line-height:1.2">{{ t.back }}</span>
+        </span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto;padding:8px 20px 0">
+        <div style="font-weight:600;font-size:var(--t-title);line-height:1.2;letter-spacing:-.02em">{{ t.sessionInfo }}</div>
+        <div style="margin-top:16px;border-top:1px solid var(--line)">
+          <sc-for list="{{ infoRows }}" as="r" hint-placeholder-count="5">
+            <div style="min-height:var(--tgt);display:flex;align-items:flex-start;gap:14px;padding:11px 0;border-bottom:1px solid var(--line)">
+              <span style="width:34%;flex:none;font-size:var(--t-cap);line-height:1.5;color:var(--ink4)">{{ r.k }}</span>
+              <span style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.5;color:var(--ink2);word-break:break-all">{{ r.v }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:14px;font-size:var(--t-cap);line-height:1.5;color:var(--ink4);text-wrap:pretty">{{ t.infoNote }}</div>
+        <div style="height:30px"></div>
+      </div>
+      <div style="height:26px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:var(--ink);opacity:.26"></span></div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;justify-content:flex-end">
+      <div aria-hidden="true" onClick="{{ closeSheet }}" style="position:absolute;inset:0;background:var(--scrim);cursor:pointer"></div>
+      <div role="dialog" aria-label="{{ t.quickActions }}" style="position:relative;background:var(--sheet);border-radius:20px 20px 0 0;max-height:660px;display:flex;flex-direction:column;overflow:hidden;border-top:1px solid var(--line)">
+        <div style="height:22px;display:flex;align-items:center;justify-content:center;flex:none"><span style="width:38px;height:4px;border-radius:2px;background:var(--ink5);opacity:.6"></span></div>
+        <div style="flex:1;min-height:0;overflow:auto;padding:2px 20px 0">
+          <sc-for list="{{ qaGroups }}" as="g" hint-placeholder-count="3">
+            <div style="padding-top:16px">
+              <div style="font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.13em;text-transform:uppercase;color:var(--ink4)">{{ g.label }}</div>
+              <div style="margin-top:10px;border-top:1px solid var(--line)">
+                <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
+                  <div role="button" tabIndex="0" aria-label="{{ r.aria }}" onClick="{{ closeSheet }}" style="min-height:52px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:9px 0;cursor:pointer">
+                    <span style="flex:1;min-width:0;font-weight:500;font-size:var(--t-body);line-height:1.3;color:var(--ink2);text-wrap:pretty">{{ r.label }}</span>
+                    <sc-if value="{{ r.mono }}" hint-placeholder-val="{{ false }}"><span style="font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.4;color:var(--ink4)">{{ r.value }}</span></sc-if>
+                    <sc-if value="{{ r.plainValue }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-cap);line-height:1.4;color:var(--ink4)">{{ r.value }}</span></sc-if>
+                    <sc-if value="{{ r.chev }}" hint-placeholder-val="{{ true }}"><span aria-hidden="true" style="width:8px;height:8px;margin-right:3px;border-right:1.5px solid var(--ink5);border-top:1.5px solid var(--ink5);transform:rotate(45deg);flex:none;display:block"></span></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+          <div style="margin-top:26px;padding-top:16px;border-top:1px solid var(--line2)">
+            <div role="button" tabIndex="0" aria-label="{{ t.clear }}" onClick="{{ closeSheet }}" style="min-height:52px;display:flex;align-items:center;padding:9px 0;cursor:pointer;font-weight:500;font-size:var(--t-body);line-height:1.3;color:var(--badInk)">{{ t.clear }}</div>
+          </div>
+          <div style="height:26px"></div>
+        </div>
+        <div style="height:24px;display:flex;justify-content:center;align-items:flex-start;flex:none"><span style="width:132px;height:5px;border-radius:3px;background:var(--ink);opacity:.26"></span></div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+<sc-if value="{{ showControls }}" hint-placeholder-val="{{ false }}">
+<div style="width:252px;flex:none;padding-top:2px;color:#1B1A18">
+  <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:10.5px;line-height:1;letter-spacing:.16em;text-transform:uppercase;color:#8A857C">Prototype controls · host chrome, not product UI</div>
+  <sc-for list="{{ controlGroups }}" as="cg" hint-placeholder-count="3">
+    <div style="margin-top:15px;border-top:1px solid #C9C5BD;padding-top:11px">
+      <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:10.5px;line-height:1;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">{{ cg.label }}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+        <sc-for list="{{ cg.chips }}" as="c" hint-placeholder-count="4">
+          <span role="button" tabIndex="0" onClick="{{ c.set }}" style="min-height:32px;padding:0 10px;border-radius:8px;border:1px solid #C9C5BD;background:{{ c.bg }};display:flex;align-items:center;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:11.5px;line-height:1;color:{{ c.ink }};cursor:pointer">{{ c.label }}</span>
+        </sc-for>
+      </div>
+    </div>
+  </sc-for>
+  <div style="margin-top:15px;border-top:1px solid #C9C5BD;padding-top:11px">
+    <div style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:10.5px;line-height:1;letter-spacing:.13em;text-transform:uppercase;color:#8A857C">Log</div>
+    <div style="margin-top:9px">
+      <sc-for list="{{ logLines }}" as="l" hint-placeholder-count="3">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;line-height:1.6;color:#54504A;word-break:break-all">{{ l.text }}</div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:700,&quot;height&quot;:900},&quot;locale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;zh&quot;,&quot;options&quot;:[&quot;en&quot;,&quot;zh&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dark&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;big&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;fixture&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;idle&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;running&quot;,&quot;approval&quot;,&quot;answer&quot;,&quot;failure&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;ctxOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;longContent&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;sheetOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;infoOpen&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;queued&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;composerVariant&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;draft&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;stack&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;number&quot;},&quot;ctxLabel&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;ctxPct&quot;:{&quot;editor&quot;:null,&quot;default&quot;:34,&quot;tsType&quot;:&quot;number&quot;},&quot;controls&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  THEMES = {
+    dark: { '--bg': '#0B0B0C', '--surf': '#141417', '--sheet': '#17171B', '--ink': '#F3F3F4', '--ink2': '#E6E6E9', '--ink3': '#B4B5BC', '--ink4': '#8C8D95', '--ink5': '#6E6E76', '--line': 'rgba(255,255,255,.14)', '--line2': 'rgba(255,255,255,.26)', '--acc': '#E2795A', '--badInk': '#F0A08F', '--scrim': 'rgba(0,0,0,.55)' },
+    light: { '--bg': '#FCFBFA', '--surf': '#F4F2EF', '--sheet': '#FFFFFF', '--ink': '#17161A', '--ink2': '#17161A', '--ink3': '#4B4A50', '--ink4': '#6B6970', '--ink5': '#8E8C92', '--line': 'rgba(20,18,16,.16)', '--line2': 'rgba(20,18,16,.26)', '--acc': '#A9482A', '--badInk': '#A3311F', '--scrim': 'rgba(20,18,16,.42)' }
+  };
+  STATE_INK = {
+    dark: { approval: ['#E2795A', 'rgba(226,121,90,.12)'], answer: ['#D8A657', 'rgba(216,166,87,.12)'], failure: ['#E97462', 'rgba(233,116,98,.12)'], running: ['#B4B5BC', 'rgba(255,255,255,.05)'] },
+    light: { approval: ['#A9482A', 'rgba(169,72,42,.09)'], answer: ['#7A5A12', 'rgba(122,90,18,.09)'], failure: ['#A3311F', 'rgba(163,49,31,.09)'], running: ['#4B4A50', 'rgba(20,18,16,.05)'] }
+  };
+  SCALE = {
+    normal: { '--t-title': '18px', '--t-body': '15px', '--t-cap': '13px', '--t-mono': '12.5px', '--t-lbl': '10.5px', '--t-dots': '21px', '--tgt': '48px', '--ctxmax': '330px' },
+    big: { '--t-title': '26px', '--t-body': '22px', '--t-cap': '18.5px', '--t-mono': '18px', '--t-lbl': '15px', '--t-dots': '30px', '--tgt': '58px', '--ctxmax': '400px' }
+  };
+  STR = {
+    en: {
+      back: 'Back', quickActions: 'Quick actions', context: 'Context', contextShow: 'Show session context', contextHide: 'Hide session context',
+      sessionInfo: 'Session info', copy: 'Copy', copied: 'Copied', jump: 'Jump to latest',
+      approval: 'Approval required', answer: 'Answer required', failure: 'Failed', running: 'Running', alsoRunning: 'Also running',
+      question: 'Question', answerRequired: 'Answer required',
+      questionNote: 'The composer is hidden while this question owns the keyboard.',
+            clear: 'Clear conversation', mode: 'Ask every time',
+      gSettings: 'Session settings', gTools: 'Session tools', gContext: 'Context',
+      qa: ['Switch model', 'Effort', 'Mode', 'Open terminal', 'Changed files', 'Hand off to a colleague', 'Help & support', 'Compact context', 'Simplify'],
+      effortValue: 'Default',
+      machineSwitch: 'Switch computer, MacBook-Pro, cc-pocket',
+      pathCopy: 'Copy full working path',
+      infoNote: 'Session info is the existing surface; nothing here is generated for this design.',
+      via: 'via ',
+      toastMachine: 'Machine switcher opened (existing surface, unchanged).',
+      toastCopy: 'Full path copied.',
+      infoK: ['Session', 'Agent', 'Mode', 'Model', 'Computer', 'Working path']
+    },
+    zh: {
+      back: '返回', quickActions: '快捷操作', context: '上下文', contextShow: '展开会话上下文', contextHide: '收起会话上下文',
+      sessionInfo: '会话信息', copy: '复制', copied: '已复制', jump: '回到最新',
+      approval: '需要批准', answer: '需要回答', failure: '已失败', running: '运行中', alsoRunning: '同时在运行',
+      question: '提问', answerRequired: '需要回答',
+      questionNote: '该提问占用键盘时，输入栏暂时隐藏。',
+            clear: '清空对话', mode: '每次询问',
+      gSettings: '会话设置', gTools: '会话工具', gContext: '上下文',
+      qa: ['切换模型', '思考深度', '模式', '打开终端', '变更文件', '交给同事接力', '帮助与支持', '压缩上下文', '简化'],
+      effortValue: '默认',
+      machineSwitch: '切换电脑，MacBook-Pro，cc-pocket',
+      pathCopy: '复制完整工作路径',
+      infoNote: '会话信息为现有页面，此处未新增任何字段。',
+      via: '来自 ',
+      toastMachine: '已打开电脑切换页（现有页面，未改动）。',
+      toastCopy: '已复制完整路径。',
+      infoK: ['会话', '智能体', '模式', '模型', '电脑', '工作路径']
+    }
+  };
+
+  constructor(props) {
+    super(props);
+    this.state = {
+      locale: props.locale === 'zh' ? 'zh' : 'en',
+      theme: props.theme === 'light' ? 'light' : 'dark',
+      big: !!props.big,
+      fixture: props.fixture || 'idle',
+      ctxOpen: !!props.ctxOpen,
+      longContent: !!props.longContent,
+      infoOpen: !!props.infoOpen,
+      sheetOpen: !!props.sheetOpen,
+      away: false, copied: false, toast: '', log: []
+    };
+  }
+  note(x) { this.setState(s => ({ log: [x].concat(s.log).slice(0, 4) })); }
+
+  renderVals() {
+    const s = this.state, t = this.STR[s.locale], f = s.fixture;
+    const key = fn => e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } };
+    const agent = 'Claude', model = 'fable';
+    const title = s.longContent
+      ? (s.locale === 'zh' ? '审查中继重连处理逻辑，并整理守护进程在网络恢复后的重放顺序与去重策略' : 'Review relay reconnect handling and the daemon replay ordering it depends on after a network drop')
+      : (s.locale === 'zh' ? '审查中继重连处理' : 'Review relay reconnect handling');
+    const path = s.longContent ? '~/Desktop/Project/app/cc-pocket/mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app/ui' : '~/Desktop/Project/app/cc-pocket';
+    const stateOf = { approval: t.approval, answer: t.answer, failure: t.failure, running: t.running };
+    const pal = this.STATE_INK[s.theme][f] || this.STATE_INK[s.theme].running;
+    const hasState = !!stateOf[f];
+    const ask = s.locale === 'zh' ? '在 mobile/ 下运行 ./gradlew :composeApp:assembleDebug' : 'Run ./gradlew :composeApp:assembleDebug in mobile/';
+
+    const cmd = s.longContent
+      ? 'rg -n --hidden --glob "!build" "relayReconnect|replayOrdering|SessionResumed" mobile/composeApp/src/commonMain/kotlin/dev/ccpocket/app'
+      : 'rg -n "relayReconnect" mobile/composeApp/src';
+    const L = s.locale === 'zh';
+    const turns = [
+      { isUser: true, label: 'YOU', body: L ? '看一下断线重连之后消息重放的顺序对不对。' : 'Check whether message replay stays ordered after a reconnect.' },
+      { isAgent: true, label: agent.toUpperCase(), body: L ? '我先找到重连路径，再看重放时的去重逻辑。' : 'I will find the reconnect path first, then read the dedupe logic around replay.' },
+      { isTool: true, label: 'TOOL · bash', body: cmd, hasStatus: true, status: L ? '找到 12 处匹配' : '12 matches' },
+      { isAgent: true, label: agent.toUpperCase(), body: L ? '重连本身是有序的：重放按 seq 递增消费，去重键是 (sessionId, seq)。' : 'Reconnect itself is ordered: replay consumes by ascending seq and dedupes on (sessionId, seq).' }
+    ];
+    if (f === 'running' || f === 'approval') turns.push({ isAgent: true, label: agent.toUpperCase(), body: L ? '正在检查网络恢复后的第一个批次' : 'Checking the first batch after the network returns', streaming: true });
+    if (f === 'answer') turns.push({ isAgent: true, label: agent.toUpperCase(), body: L ? '有一处需要你决定。' : 'One point needs your decision.' });
+
+    const composerVariant = this.props.composerVariant || (
+      f === 'running' ? (this.props.queued ? 'queued' : 'streaming') :
+      f === 'approval' ? 'queued' :
+      f === 'failure' ? 'gated' : (this.props.draft ? 'text' : 'idle'));
+    const draft = this.props.draft || ((composerVariant === 'queued' || composerVariant === 'gated' || composerVariant === 'text') ? (L ? '顺便看看重放批次上限' : 'Also check the replay batch cap') : '');
+
+    const chip = (label, on, fn) => ({ label: label, bg: on ? '#1B1A18' : 'transparent', ink: on ? '#FCFBFA' : '#54504A', set: fn });
+    const setF = v => () => { this.setState({ fixture: v, toast: '' }); this.note('fixture → ' + v); };
+
+    const qaRow = (label, opts) => Object.assign({ label: label, aria: label, value: '', mono: false, plainValue: false, chev: true }, opts || {});
+
+    return {
+      vars: Object.assign({}, this.THEMES[s.theme], this.SCALE[s.big ? 'big' : 'normal'], { '--stateInk': pal[0], '--stateBg': pal[1] }),
+      t: t, locale: s.locale, theme: s.theme, big: s.big, agent: agent, model: model,
+      showControls: !!this.props.controls,
+      title: title,
+      ctxCollapsed: !s.ctxOpen, ctxOpen: s.ctxOpen,
+      ctxAria: s.ctxOpen ? t.contextHide : t.contextShow,
+      ctxSummary: [agent, t.mode, model, 'MacBook-Pro', 'cc-pocket'].join(' · '),
+      identity: [agent, t.mode, model].join(' · '),
+      location: ['MacBook-Pro', 'cc-pocket'].join(' · '),
+      machineAria: t.machineSwitch,
+      hasOrigin: s.longContent, origin: t.via + 'cc-pocket daemon',
+      path: path, pathAria: t.pathCopy,
+      copyLabel: s.copied ? t.copied : t.copy,
+      toggleCtx: () => this.setState({ ctxOpen: !s.ctxOpen, copied: false }),
+      keyToggleCtx: key(() => this.setState({ ctxOpen: !s.ctxOpen, copied: false })),
+      switchMachine: () => { this.setState({ toast: t.toastMachine }); this.note('machine switcher · passthrough'); },
+      keySwitchMachine: key(() => this.setState({ toast: t.toastMachine })),
+      copyPath: () => { this.setState({ copied: true, toast: t.toastCopy }); this.note('path copied'); },
+      keyCopyPath: key(() => this.setState({ copied: true, toast: t.toastCopy })),
+      openInfo: () => this.setState({ infoOpen: true }), keyOpenInfo: key(() => this.setState({ infoOpen: true })),
+      closeInfo: () => this.setState({ infoOpen: false }), keyCloseInfo: key(() => this.setState({ infoOpen: false })),
+      infoOpen: s.infoOpen,
+      infoRows: t.infoK.map((k, i) => ({ k: k, v: [title, agent, t.mode, model, 'MacBook-Pro', path][i] })),
+      hasState: hasState, stateLabel: stateOf[f] || '', stateAria: stateOf[f] || '',
+      markRadius: f === 'failure' ? '2px' : '50%',
+      hasAsk: f === 'approval',
+      askTitle: ask,
+      alsoRunning: f === 'approval',
+      turns: turns,
+      onScroll: e => { const el = e.currentTarget; const away = el.scrollHeight - el.scrollTop - el.clientHeight > 60; if (away !== this.state.away) this.setState({ away: away }); },
+      awayFromTail: s.away,
+      jump: () => this.setState({ away: false }), keyJump: key(() => this.setState({ away: false })),
+      hasQuestion: f === 'answer',
+      questionTitle: L ? '重放去重键要包含 attempt 吗？' : 'Should the replay dedupe key include attempt?',
+      questionOptions: [{ label: L ? '包含 attempt' : 'Include attempt' }, { label: L ? '保持 (sessionId, seq)' : 'Keep (sessionId, seq)' }],
+      showComposer: f !== 'answer', composerHidden: f === 'answer', composerHiddenNote: t.questionNote,
+      composerVariant: composerVariant, draft: draft,
+      stack: this.props.stack == null ? null : this.props.stack,
+      ctxLabel: this.props.ctxLabel == null ? null : this.props.ctxLabel,
+      ctxPctVal: this.props.ctxPct == null ? 34 : this.props.ctxPct,
+      hasToast: !!s.toast, toast: s.toast,
+      sheetOpen: s.sheetOpen,
+      openSheet: () => this.setState({ sheetOpen: true }), keyOpenSheet: key(() => this.setState({ sheetOpen: true })),
+      closeSheet: () => this.setState({ sheetOpen: false }),
+      qaGroups: [
+        { label: t.gSettings, rows: [qaRow(t.qa[0], { value: model, mono: true }), qaRow(t.qa[1], { value: t.effortValue, plainValue: true }), qaRow(t.qa[2], { value: t.mode, plainValue: true })] },
+        { label: t.gTools, rows: [qaRow(t.qa[3]), qaRow(t.qa[4]), qaRow(t.qa[5]), qaRow(t.qa[6])] },
+        { label: t.gContext, rows: [qaRow(t.qa[7], { chev: false }), qaRow(t.qa[8], { chev: false })] }
+      ],
+      controlGroups: [
+        { label: 'Lead state fixture', chips: [
+          chip('idle', f === 'idle', setF('idle')), chip('running', f === 'running', setF('running')),
+          chip('approval', f === 'approval', setF('approval')), chip('answer', f === 'answer', setF('answer')),
+          chip('failure', f === 'failure', setF('failure'))] },
+        { label: 'Surfaces', chips: [
+          chip(s.ctxOpen ? 'context open' : 'context collapsed', s.ctxOpen, () => this.setState({ ctxOpen: !s.ctxOpen })),
+          chip('quick actions', s.sheetOpen, () => this.setState({ sheetOpen: !s.sheetOpen })),
+          chip('session info', s.infoOpen, () => this.setState({ infoOpen: !s.infoOpen })),
+          chip(s.longContent ? 'long content' : 'ordinary content', s.longContent, () => this.setState({ longContent: !s.longContent }))] },
+        { label: 'Locale · theme · type', chips: [
+          chip(s.locale === 'en' ? 'EN' : '中文', true, () => this.setState({ locale: s.locale === 'en' ? 'zh' : 'en' })),
+          chip(s.theme, true, () => this.setState({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+          chip(s.big ? 'text 200%' : 'text 100%', s.big, () => this.setState({ big: !s.big }))] }
+      ],
+      logLines: s.log.map(x => ({ text: '· ' + x }))
+    };
+  }
+}
+</script>
+</body>
+</html>
+

@@ -8,7 +8,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,11 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.SubdirectoryArrowRight
@@ -46,10 +51,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -58,6 +65,7 @@ import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.epochMillis
 import dev.ccpocket.app.ui.handoff.toHistoryItem
 import dev.ccpocket.app.resources.*
+import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.contextWindowFor
@@ -327,47 +335,75 @@ fun QuickActionsSheet(
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
             when (sub) {
-                QaSub.MAIN -> {
-                    Text(stringResource(Res.string.quick_actions_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        ActionRow(stringResource(Res.string.qa_model), value = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_default) }, chevron = true) { sub = QaSub.MODEL }
-                        if (repo.effortOptions().isNotEmpty()) {
-                            ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
-                        }
-                        if (repo.serviceTierOptions().any { it.id == "priority" }) {
-                            ActionRow(
-                                stringResource(Res.string.fast_mode),
-                                value = stringResource(if (repo.serviceTier.value == "priority") Res.string.value_on else Res.string.value_off),
-                            ) { repo.switchServiceTier(if (repo.serviceTier.value == "priority") null else "priority") }
-                        }
-                        // the permission-mode switch lives here now (was a persistent header badge — one
-                        // more thing crowding the top bar for a setting touched a few times per session)
-                        ActionRow(
-                            stringResource(Res.string.label_mode),
-                            value = stringResource(
-                                if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
-                                else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
-                            ),
-                            chevron = true,
-                        ) { onMode(); onDismiss() }
-                        ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
-                        // "Hand off to a colleague" — the one accent-glyph row in the menu (design Frame 1);
-                        // the NEW badge is temporary (2 releases)
-                        if (onHandoff != null) ActionRow(
-                            stringResource(Res.string.ho_menu_row),
-                            value = stringResource(Res.string.ho_new_badge),
-                            accent = true,
-                        ) { onHandoff(); onDismiss() }
-                        ActionRow(stringResource(Res.string.qa_files)) { onFiles(); onDismiss() }
-                        ActionRow(stringResource(Res.string.support_title)) { onHelp(); onDismiss() }
-                        ActionRow(stringResource(Res.string.qa_compact)) { repo.sendPrompt("/compact"); onDismiss() }
-                        if (repo.hasSimplify()) ActionRow(stringResource(Res.string.qa_simplify)) { repo.sendPrompt("/simplify"); onDismiss() }
-                        ActionRow(
-                            stringResource(Res.string.qa_clear),
-                            value = if (clearArmed) stringResource(Res.string.qa_clear_hint) else null,
-                            danger = true,
+                // One low-container list, grouped by intent (design chat-quick-actions-ui-2.0): written group
+                // labels over hairline-separated rows, a single vertical reading path, no per-row card.
+                QaSub.MAIN -> BoxWithConstraints {
+                    // The sheet is bottom-anchored and wraps its content, so an unbounded list grows straight
+                    // off the top of the screen: the last rows go unreachable AND the scrim disappears — and
+                    // the scrim is the only way out on iOS (no system Back). Cap the page against the height
+                    // the sheet actually has and scroll inside it. weight()/the cap only bind under a bounded
+                    // host — with infinite incoming height they'd measure at zero (QuestionCard #150).
+                    val bounded = constraints.hasBoundedHeight
+                    Column(if (bounded) Modifier.heightIn(max = maxHeight * 0.86f) else Modifier) {
+                        Text(stringResource(Res.string.quick_actions_title), color = Tok.tx, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Column(
+                            (if (bounded) Modifier.weight(1f, fill = false) else Modifier)
+                                .verticalScroll(rememberScrollState()),
                         ) {
-                            if (clearArmed) { repo.clearConversation(); onDismiss() } else clearArmed = true
+                            QaGroup(stringResource(Res.string.qa_group_settings)) {
+                                ActionRow(
+                                    stringResource(Res.string.qa_model),
+                                    // the daemon's own model id, shown verbatim — hence mono
+                                    value = modelChipLabel(repo.model.value).ifBlank { stringResource(Res.string.value_default) },
+                                    mono = true, chevron = true,
+                                ) { sub = QaSub.MODEL }
+                                if (repo.effortOptions().isNotEmpty()) {
+                                    ActionRow(stringResource(Res.string.label_effort), value = repo.effort.value ?: stringResource(Res.string.value_default), chevron = true) { sub = QaSub.EFFORT }
+                                }
+                                if (repo.serviceTierOptions().any { it.id == "priority" }) {
+                                    ActionRow(
+                                        stringResource(Res.string.fast_mode),
+                                        value = stringResource(if (repo.serviceTier.value == "priority") Res.string.value_on else Res.string.value_off),
+                                    ) { repo.switchServiceTier(if (repo.serviceTier.value == "priority") null else "priority") }
+                                }
+                                // the permission-mode switch lives here now (was a persistent header badge — one
+                                // more thing crowding the top bar for a setting touched a few times per session)
+                                ActionRow(
+                                    stringResource(Res.string.label_mode),
+                                    value = stringResource(
+                                        if (repo.permissionMode.value == CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
+                                        else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
+                                    ),
+                                    chevron = true,
+                                ) { onMode(); onDismiss() }
+                            }
+                            QaGroup(stringResource(Res.string.qa_group_tools)) {
+                                ActionRow(stringResource(Res.string.terminal_open)) { onTerminal(); onDismiss() }
+                                ActionRow(stringResource(Res.string.qa_files)) { onFiles(); onDismiss() }
+                                // "Hand off to a colleague" is an ordinary peer of Terminal / Changed files:
+                                // available is not recommended, and conditional is not new (no badge, no accent,
+                                // no glyph). Only the capability gate is its own — null means no row at all.
+                                if (onHandoff != null) ActionRow(stringResource(Res.string.ho_menu_row)) { onHandoff(); onDismiss() }
+                                ActionRow(stringResource(Res.string.support_title)) { onHelp(); onDismiss() }
+                            }
+                            QaGroup(stringResource(Res.string.qa_group_context)) {
+                                ActionRow(stringResource(Res.string.qa_compact)) { repo.sendPrompt("/compact"); onDismiss() }
+                                if (repo.hasSimplify()) ActionRow(stringResource(Res.string.qa_simplify)) { repo.sendPrompt("/simplify"); onDismiss() }
+                            }
+                            // destructive, set apart by a wider gap and its own rule — never a filled primary.
+                            // Two taps in the SAME row: the armed hint rides the row's value, so the state is
+                            // written (and read out) rather than carried by the danger color alone.
+                            Column(Modifier.padding(top = 26.dp)) {
+                                Hairline()
+                                Spacer(Modifier.height(16.dp))
+                                ActionRow(
+                                    stringResource(Res.string.qa_clear),
+                                    value = if (clearArmed) stringResource(Res.string.qa_clear_hint) else null,
+                                    danger = true, divider = false,
+                                ) {
+                                    if (clearArmed) { repo.clearConversation(); onDismiss() } else clearArmed = true
+                                }
+                            }
                         }
                     }
                 }
@@ -390,28 +426,38 @@ fun QuickActionsSheet(
  * on the NEXT turn anyway. Never accent-filled: send stays the loudest control. Shared by both
  * shells; [labelMax] defaults to the original 82dp cap (desktop's single-row composer) — the
  * mobile accessory row relaxes it to 120dp now that the chip has its own lane (mobile-composer.jsx).
+ *
+ * The pill stays 30dp tall; the TARGET around it is the [Metric.touch] minimum (Chat Master v2: 48pt
+ * targets even where the visible chip is 30). `sizeIn` rather than `size`, so a host that pins the chip's
+ * box — desktop's 34dp composer slot — measures exactly as it did before.
  */
 @Composable
 internal fun ModelChip(label: String, open: Boolean, enabled: Boolean, contentDescription: String, labelMax: Dp = 82.dp, onClick: () -> Unit) {
     val chev by animateFloatAsState(if (open) 180f else 0f, label = "chipChevron")
     val cd = contentDescription
-    Row(
-        Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
-            .border(1.dp, if (open) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
+    Box(
+        Modifier.sizeIn(minWidth = Metric.touch, minHeight = Metric.touch)
+            .clip(RoundedCornerShape(999.dp))
             .clickable(enabled = enabled, onClick = onClick)
-            .alpha(if (enabled) 1f else 0.42f)
-            .padding(start = 10.dp, end = 8.dp)
             .semantics { this.contentDescription = cd },
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            // TightCenter: mono ascent/descent are asymmetric, so a raw Text rides high inside the
-            // pill even under CenterVertically — same trim the agent tags and mode chips use
-            label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = labelMax),
-        )
-        Spacer(Modifier.width(5.dp))
-        ChevronUpGlyph(Tok.muted, Modifier.size(12.dp).rotate(chev))
+        Row(
+            Modifier.height(30.dp).clip(RoundedCornerShape(999.dp)).background(Tok.raised)
+                .border(1.dp, if (open) Tok.accent else Tok.hair, RoundedCornerShape(999.dp))
+                .alpha(if (enabled) 1f else 0.42f)
+                .padding(start = 10.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                // TightCenter: mono ascent/descent are asymmetric, so a raw Text rides high inside the
+                // pill even under CenterVertically — same trim the agent tags and mode chips use
+                label, color = Tok.tx2, fontFamily = FontFamily.Monospace, fontSize = 11.sp, style = TightCenter,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = labelMax),
+            )
+            Spacer(Modifier.width(5.dp))
+            ChevronUpGlyph(Tok.muted, Modifier.size(12.dp).rotate(chev))
+        }
     }
 }
 
@@ -440,30 +486,59 @@ fun ModelSheet(repo: PocketRepository, onDismiss: () -> Unit) {
     }
 }
 
+/** One written group of the quick-actions list: an uppercase label over hairline-separated [rows]. */
 @Composable
-private fun ActionRow(label: String, value: String? = null, danger: Boolean = false, chevron: Boolean = false, accent: Boolean = false, onClick: () -> Unit) {
+private fun QaGroup(label: String, rows: @Composable ColumnScope.() -> Unit) {
+    SectionLabel(label, Modifier.padding(top = 16.dp))
+    Column(Modifier.padding(top = 10.dp)) {
+        Hairline() // the group's own top rule; each row closes itself with a bottom one
+        rows()
+    }
+}
+
+/**
+ * One quick-actions row: a named action, an optional right-aligned [value], an optional [chevron], and the
+ * hairline that separates it from the next one ([divider] off for the last row of a group).
+ *
+ * Everything merges into ONE named target — the chevron is dropped from semantics, so a row reads as its
+ * action plus its current value and never as a bare glyph. [mono] is for literals the daemon reports (model
+ * ids); [danger] is written in the danger color AND in words by its caller, never color alone.
+ */
+@Composable
+private fun ActionRow(
+    label: String,
+    value: String? = null,
+    danger: Boolean = false,
+    chevron: Boolean = false,
+    mono: Boolean = false,
+    divider: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val described = value?.let { "$label, $it" } ?: label
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (accent) Tok.accent.copy(alpha = 0.10f) else Tok.surface)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 14.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) { contentDescription = described }
+            .heightIn(min = 52.dp).padding(vertical = 9.dp), // ≥48dp target, and it GROWS with the type
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (accent) {
-            dev.ccpocket.app.ui.handoff.HandoffRelayGlyph(Tok.accent)
-            Spacer(Modifier.width(11.dp))
-        }
         Text(
-            label, color = when { danger -> Tok.danger; accent -> Tok.accent; else -> Tok.tx },
-            fontSize = 14.5.sp, fontWeight = if (accent) FontWeight.SemiBold else FontWeight.Medium, modifier = Modifier.weight(1f),
+            label, color = if (danger) Tok.danger else Tok.tx,
+            fontSize = 15.5.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
         )
         value?.let {
-            if (accent) Text(
-                it, color = Tok.accent, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.8.sp,
-                modifier = Modifier.clip(RoundedCornerShape(4.dp)).border(1.dp, Tok.accent.copy(alpha = 0.4f), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 3.dp),
+            Spacer(Modifier.width(12.dp))
+            Text(
+                it, color = if (danger) Tok.danger else Tok.muted,
+                fontFamily = if (mono) FontFamily.Monospace else FontFamily.Default,
+                fontSize = if (mono) 12.5.sp else 13.5.sp, lineHeight = 18.sp,
+                fontWeight = if (danger) FontWeight.SemiBold else FontWeight.Normal,
+                textAlign = TextAlign.End,
             )
-            else Text(it, color = Tok.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1)
         }
-        if (chevron) Text(" ›", color = Tok.muted, fontSize = 16.sp)
+        // supplementary: the row is already named and the group already says where it goes
+        if (chevron) Text("›", color = Tok.muted, fontSize = 17.sp, modifier = Modifier.padding(start = 8.dp).clearAndSetSemantics { })
     }
+    if (divider) Hairline()
 }
 
 @Composable

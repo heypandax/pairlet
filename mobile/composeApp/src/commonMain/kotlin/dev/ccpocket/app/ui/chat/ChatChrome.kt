@@ -29,6 +29,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,7 +38,9 @@ import androidx.compose.ui.unit.sp
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.chat_context
 import dev.ccpocket.app.resources.chat_context_collapse
+import dev.ccpocket.app.resources.chat_context_collapsed
 import dev.ccpocket.app.resources.chat_context_expand
+import dev.ccpocket.app.resources.chat_context_expanded
 import dev.ccpocket.app.resources.chat_session_info
 import dev.ccpocket.app.resources.chat_tool_failed
 import dev.ccpocket.app.resources.done
@@ -61,17 +65,34 @@ import org.jetbrains.compose.resources.stringResource
  */
 
 /** One context fact. [onClick] keeps a line that used to BE a control (the machine name → machine
- *  switcher) a control, now that the surrounding row toggles the disclosure instead of navigating. */
+ *  switcher) a control, now that the surrounding row toggles the disclosure instead of navigating.
+ *  A line may carry SEVERAL facts joined by [CONTEXT_SEP] — see the grouping note on [ChatHeader]. */
 data class ContextLine(val text: String, val onClick: (() -> Unit)? = null, val clickLabel: String? = null)
+
+/** The one separator between context facts, collapsed and expanded alike. */
+const val CONTEXT_SEP = " · "
+
+/**
+ * The scrolling half of the expanded context.
+ *
+ * The whole expanded region still costs ~200pt; [Metric.touch] of it now belongs to the pinned Session
+ * info row below the scroller, so the facts+path body keeps the rest.
+ */
+private val ContextBodyMax = 200.dp - Metric.touch
 
 /**
  * Title + context, with the verbose half behind a disclosure.
  *
  * Collapsed, the summary is one wrapping line of whatever is really known. Expanded, a bounded
- * internally-scrolling region shows the same facts one per line plus the FULL workdir beside its own copy
- * target — so the header never permanently owns the viewport (Proofs: collapsing returns ~210pt to the
- * stream at 200% type). Toggling only toggles; it never navigates. Session info lives at the foot of the
- * expanded region and the quick actions stay in [trailing], so both remain explicitly reachable.
+ * internally-scrolling region shows those same facts plus the FULL workdir beside its own copy target — so
+ * the header never permanently owns the viewport (Proofs: collapsing returns ~210pt to the stream at 200%
+ * type). Toggling only toggles; it never navigates.
+ *
+ * Two rules keep the region honest on a standard iPhone. [summary] arrives already GROUPED — the short
+ * facts share a line instead of each owning one — because one fact per line plus the path plus the action
+ * overflowed the bound with an ordinary session's facts. And Session info is pinned BELOW the scroller,
+ * never inside it: an action that scrolls out of a region whose scrollbar nobody can see is an action
+ * nobody can find. The quick actions stay in [trailing]; both remain explicitly reachable.
  */
 @Composable
 fun ChatHeader(
@@ -102,9 +123,14 @@ fun ChatHeader(
         }
         if (summary.isNotEmpty() || !workdir.isNullOrBlank()) {
             val toggleLabel = stringResource(if (expanded) Res.string.chat_context_collapse else Res.string.chat_context_expand)
+            // the action says what a tap DOES; the state says where the disclosure is now. A reader who
+            // arrives on the row mid-session cannot infer the second from the first, and the drawn chevron
+            // carries nothing to a screen reader — so the state is spoken, not only drawn.
+            val toggleState = stringResource(if (expanded) Res.string.chat_context_expanded else Res.string.chat_context_collapsed)
             Row(
                 Modifier.fillMaxWidth().heightIn(min = Metric.touch)
                     .clickable(role = Role.Button, onClickLabel = toggleLabel, onClick = onToggleContext)
+                    .semantics { stateDescription = toggleState }
                     .padding(start = Metric.gutter, end = Metric.gapS),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -116,7 +142,7 @@ fun ChatHeader(
                     )
                 } else {
                     Text(
-                        summary.joinToString(" · ") { it.text }, color = Tok.tx2, style = TypeRole.body,
+                        summary.joinToString(CONTEXT_SEP) { it.text }, color = Tok.tx2, style = TypeRole.body,
                         maxLines = 2, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f).padding(vertical = Metric.gapS),
                     )
@@ -131,9 +157,10 @@ fun ChatHeader(
                 }
             }
             if (expanded) {
-                // bounded + internally scrolling: an expanded context must never push the stream away
+                // bounded + internally scrolling: an expanded context must never push the stream away.
+                // Only the facts and the path live in here — see [ContextBodyMax] for the budget split.
                 Column(
-                    Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState())
+                    Modifier.fillMaxWidth().heightIn(max = ContextBodyMax).verticalScroll(rememberScrollState())
                         .padding(start = Metric.gutter, end = Metric.gapS, bottom = Metric.gapS),
                 ) {
                     summary.forEach { line ->
@@ -158,15 +185,18 @@ fun ChatHeader(
                             maxLines = Int.MAX_VALUE,
                         )
                     }
-                    onSessionInfo?.let { open ->
-                        Text(
-                            stringResource(Res.string.chat_session_info), color = Tok.accent, style = TypeRole.body,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.heightIn(min = Metric.touch)
-                                .clickable(role = Role.Button, onClick = open)
-                                .wrapContentHeight(Alignment.CenterVertically),
-                        )
-                    }
+                }
+                // pinned foot, OUTSIDE the scroller: however tall the facts above grow — 200% type, a long
+                // path, an external origin — the way into the full session record stays on screen
+                onSessionInfo?.let { open ->
+                    Text(
+                        stringResource(Res.string.chat_session_info), color = Tok.accent, style = TypeRole.body,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(start = Metric.gutter, bottom = Metric.gapS)
+                            .heightIn(min = Metric.touch)
+                            .clickable(role = Role.Button, onClick = open)
+                            .wrapContentHeight(Alignment.CenterVertically),
+                    )
                 }
             }
         }
@@ -290,13 +320,17 @@ fun ToolTurnBand(
                 if (status != null) ToolStatus(status)
             }
             if (previewSlot != null) previewSlot()
-            else if (preview.isNotBlank()) Text(
-                preview, color = Tok.tx2, style = TypeRole.bodyMono,
-                // collapsed still shows a WHOLE first line, and expanding reveals the rest — the literal
-                // string is never replaced by a summary of it
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = if (expanded) TextOverflow.Clip else TextOverflow.Ellipsis,
-            )
+            else if (preview.isNotBlank()) {
+                // Preserve the transcript's compact scan rhythm: a production tool band owns an expand
+                // toggle, so its literal payload wraps within a two-line preview and opens in full on tap.
+                // A standalone band with no toggle must never hide unreachable content.
+                val showFullPayload = expanded || onToggle == null
+                Text(
+                    preview, color = Tok.tx2, style = TypeRole.bodyMono,
+                    maxLines = if (showFullPayload) Int.MAX_VALUE else 2,
+                    overflow = if (showFullPayload) TextOverflow.Clip else TextOverflow.Ellipsis,
+                )
+            }
         }
         Hairline()
     }

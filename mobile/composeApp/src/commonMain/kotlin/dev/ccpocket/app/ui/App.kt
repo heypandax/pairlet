@@ -120,6 +120,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.collapse
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -144,12 +145,14 @@ import dev.ccpocket.app.SupportContext
 import dev.ccpocket.app.supportPlatformLabel
 import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.ConnPhase
+import dev.ccpocket.app.data.FileUpState
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.data.StatusMsg
 import dev.ccpocket.app.data.VoiceState
 import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.ui.chat.ChatHeader
 import dev.ccpocket.app.ui.chat.ChatStateBlock
+import dev.ccpocket.app.ui.chat.CONTEXT_SEP
 import dev.ccpocket.app.ui.chat.ContextLine
 import dev.ccpocket.app.ui.chat.ToolTurnBand
 import dev.ccpocket.app.ui.chat.TurnSourceLabel
@@ -2166,23 +2169,38 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
             val machineName = repo.paired.value?.displayName()
             val modelLabel = modelLabelForAgent(repo.sessionAgent.value, repo.model.value)
             val switchLabel = stringResource(Res.string.switcher_open)
+            val modeLabel = stringResource(
+                if (repo.permissionMode.value == dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
+                else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
+            )
+            // Grouped, not one fact per line. Listed vertically, an ordinary session's five short facts
+            // plus the path plus the action outgrew the expanded region's bound on a standard iPhone, and
+            // Session info ended up below the fold. Two rows of the SAME facts fit with room to spare.
             val contextLines = buildList {
-                add(ContextLine(agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE)))
+                // what is answering, under which rules, as which model. The model joins only once it is
+                // known — a pre-first-turn session (lazy start #61) has none until init names it (#96).
                 add(
                     ContextLine(
-                        stringResource(
-                            if (repo.permissionMode.value == dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO) AUTO_MODE.short
-                            else MODE_BY[repo.mode.value]?.short ?: MODES[0].short,
-                        ),
+                        listOfNotNull(
+                            agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE),
+                            modeLabel,
+                            modelLabel.takeIf { it.isNotBlank() },
+                        ).joinToString(CONTEXT_SEP),
                     ),
                 )
-                // which computer this conversation lives on — still its own control: switch machines
-                // without leaving the chat
-                machineName?.let { add(ContextLine(it, onClick = { showSwitcher = true }, clickLabel = switchLabel)) }
-                repo.workdir.value?.let { add(ContextLine(folderName(it))) }
-                // the effective model, only once it is known. A pre-first-turn session (lazy start #61)
-                // simply has no model line until the first turn's init names it (issue #96).
-                modelLabel.takeIf { it.isNotBlank() }?.let { add(ContextLine(it)) }
+                // where this conversation lives: computer, then project folder. Still one control — switch
+                // machines without leaving the chat — and only when a machine is really known; an unpaired
+                // view gets the folder as plain text rather than a switcher that switches nothing.
+                val place = listOfNotNull(machineName, repo.workdir.value?.let(::folderName)?.takeIf { it.isNotBlank() })
+                if (place.isNotEmpty()) {
+                    add(
+                        if (machineName != null) {
+                            ContextLine(place.joinToString(CONTEXT_SEP), onClick = { showSwitcher = true }, clickLabel = switchLabel)
+                        } else {
+                            ContextLine(place.joinToString(CONTEXT_SEP))
+                        },
+                    )
+                }
                 // external trigger source (issue #91): a bridge-opened session says so — the owner should
                 // know an IM bot, not a person, is driving this conversation
                 repo.sessionOrigin.value?.let { add(ContextLine("via $it")) }
@@ -2515,32 +2533,53 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             ) {
                                 ContextCriticalCaption()
                             }
+                            // why the action slot reads the way it does, as a NOTE rather than a placeholder
+                            // (Chat Master v2). Mid-turn the field stays enabled because sends queue into the
+                            // running turn, and saying so is what keeps an editable composer under a "running"
+                            // session from reading as disconnected (issue #52) — but as a placeholder that
+                            // sentence vanished on the first character typed, which is exactly when it starts
+                            // being true. Uploading leads: send waits on the landing, queueing comes after.
+                            when {
+                                uploadsBusy -> ComposerNote(
+                                    stringResource(
+                                        Res.string.composer_uploading,
+                                        repo.pendingFiles.count { it.state == FileUpState.Uploading || it.state == FileUpState.Queued },
+                                        repo.pendingFiles.size,
+                                    ),
+                                )
+                                repo.streaming.value -> ComposerNote(stringResource(Res.string.message_queued_hint))
+                            }
                             ComposerField(
                                 composer,
-                                // mid-turn the field stays enabled (sends queue into the running turn) — say so,
-                                // or an editable composer under a "running" session reads as disconnected (issue #52)
-                                placeholder = stringResource(
-                                    when {
-                                        repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> Res.string.add_message_hint
-                                        repo.streaming.value -> Res.string.message_queued_hint
-                                        else -> Res.string.message_claude_hint
-                                    },
-                                ),
+                                // the placeholder names the REAL backend of this session — a Codex/OpenCode/Kimi
+                                // conversation invited you to "Message Claude…" for as long as it was hardcoded
+                                placeholder = if (repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty()) {
+                                    stringResource(Res.string.add_message_hint)
+                                } else {
+                                    stringResource(Res.string.message_agent_hint, agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE))
+                                },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 focusRequester = composerFocus,
                             )
                             Row(
-                                // start 8 / end 10: the 44dp targets carry their own inner padding, so the
-                                // glyphs sit optically on the field's 16dp edge (design values)
-                                Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp, top = 6.dp).heightIn(min = 44.dp),
+                                // start 6 / end 8: every slot in this row is now the 48dp accessibility
+                                // minimum around a 44dp circle / 30dp pill, so the extra 2dp of transparent
+                                // ring replaces 2dp of row padding and the glyphs stay optically on the
+                                // field's 16dp edge (design values, Chat Master v2 targets)
+                                Modifier.fillMaxWidth().padding(start = 6.dp, end = 8.dp, top = 6.dp).heightIn(min = Metric.touch),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 val attachInteraction = remember { MutableInteractionSource() }
                                 val attachPressed by attachInteraction.collectIsPressedAsState()
                                 // "+" now opens the attach sheet (Photo · File) and rotates into "×" while
                                 // it's up (issue #90, design: file-attach.jsx); the image flow is one tap
-                                // deeper but unchanged.
-                                IconButton(onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction, modifier = Modifier.size(44.dp)) {
+                                // deeper but unchanged. The glyph is drawn, so the button has to carry the
+                                // name itself — icon-only actions get an accessible name (Chat Master v2).
+                                val attachLabel = stringResource(Res.string.attach_menu)
+                                IconButton(
+                                    onClick = { attachSheet = !attachSheet }, interactionSource = attachInteraction,
+                                    modifier = Modifier.size(Metric.touch).semantics { contentDescription = attachLabel },
+                                ) {
                                     AttachPlusGlyph(
                                         open = attachSheet,
                                         tint = if (attachSheet || repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() || attachPressed) Tok.accent else Tok.tx2,
@@ -2575,8 +2614,8 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 ContextGauge(
                                     repo.contextUsed.value,
                                     repo.contextWindow.value,
-                                    // the action slot Row can't see: one 44dp button, plus the ■ and its gap mid-turn
-                                    reserveEnd = if (stopShowing) 96.dp else 44.dp,
+                                    // the action slot Row can't see: one 48dp target, plus the ■ and its gap mid-turn
+                                    reserveEnd = if (stopShowing) Metric.touch * 2 + 8.dp else Metric.touch,
                                 ) { showSessionInfo = true }
                                 Spacer(Modifier.weight(1f))
                                 // while a turn runs the ■ stays put; typed text adds Send NEXT TO it instead of
@@ -2591,12 +2630,16 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                     // uploads still moving → send WAITS (spinner ring around a muted arrow,
                                     // design: file-attach.jsx) — landing must finish before the @-refs exist
                                     uploadsBusy -> {
-                                        Box(
-                                            Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            SpinnerRing(30.dp, 2.dp)
-                                            Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+                                        // same 48dp slot as the live actions so the row doesn't shift when the
+                                        // upload lands; the circle inside stays the design's 44dp
+                                        Box(Modifier.size(Metric.touch), contentAlignment = Alignment.Center) {
+                                            Box(
+                                                Modifier.size(44.dp).clip(CircleShape).background(Tok.base).border(1.dp, Tok.hair, CircleShape),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                SpinnerRing(30.dp, 2.dp)
+                                                Icon(SendArrowIcon, null, tint = Tok.muted, modifier = Modifier.size(16.dp))
+                                            }
                                         }
                                     }
                                     // text/image/file staged -> SEND, even mid-turn (claude queues it; see above)
@@ -2614,7 +2657,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                             // long-press → schedule this message for later (issue #137). Text-only:
                                             // images/files can't ride a schedule (nothing is uploaded at fire time).
                                             onLongClick = { if (composer.text.isNotBlank()) showScheduleSheet = true },
-                                        ) { Icon(SendArrowIcon, sendLabel, tint = Tok.base, modifier = Modifier.size(18.dp)) }
+                                        ) { Icon(SendArrowIcon, null, tint = Tok.base, modifier = Modifier.size(18.dp)) } // the button names itself
                                     }
                                     // generating with an empty composer -> the slot is Stop (interrupts the turn, session stays)
                                     repo.streaming.value -> StopButton { repo.cancelTurn() }
@@ -2623,7 +2666,7 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                         RoundActionButton(
                                             onClick = { if (failed != null) repo.retryVoice() else repo.startVoice() },
                                             filled = false, contentDescription = dictateLabel,
-                                        ) { Icon(MicIcon, dictateLabel, tint = if (failed != null) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp)) }
+                                        ) { Icon(MicIcon, null, tint = if (failed != null) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp)) }
                                     }
                                 }
                             }
@@ -2848,30 +2891,30 @@ private fun MessageItem(
     when (m) {
         // Mobile UI 2.0: a quiet uppercase source label above each ordinary turn is all the structure the
         // stream needs to tell User / Agent / Tool apart — no permanent timeline rail, no card stack.
+        // Chat Master v2: the user turn is a full-width LIST entry, not a bubble. The trailing source
+        // label is what says "you"; the container that used to say it cost a 300dp cap, so a pasted log or
+        // a long prompt reflowed into a narrow ribbon while the agent's reply beside it read at full
+        // measure — two grammars for the same conversation. Everything the turn carries is unchanged.
         is ChatItem.User -> Column(Modifier.fillMaxWidth()) {
             TurnSourceLabel(stringResource(Res.string.chat_you), alignEnd = true)
-            Row(Modifier.fillMaxWidth().padding(top = 7.dp), horizontalArrangement = Arrangement.End) {
-                Column(
-                    Modifier.widthIn(max = 300.dp) // a contained bubble, not the full column: "what I said"
-                        .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomEnd = 4.dp, bottomStart = 14.dp))
-                        .background(Tok.raised).padding(horizontal = 15.dp, vertical = 11.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
-                    // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
-                    // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
-                    m.files.forEach { f ->
-                        if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
-                    }
-                    if (m.text.isNotBlank()) {
-                        // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
-                        // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
-                        val shown = renderClip(m.text)
-                        SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
-                        if (shown.length < m.text.length) TruncatedNote(m.text.length)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
-                        }
+            Column(
+                Modifier.fillMaxWidth().padding(top = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (m.images.isNotEmpty()) SentImages(m.images) { i -> onOpenImages(m.images, i) }
+                // uploaded files (issue #90): chip per file with its @inbox landing path. Videos (issue
+                // #98) render as a 16:9 card that opens the player; both share the "in workspace" grammar.
+                m.files.forEach { f ->
+                    if (isVideoAttachment(f.mediaType, f.name)) SentVideoCard(f) { onOpenVideo(f) } else SentFileChip(f)
+                }
+                if (m.text.isNotBlank()) {
+                    // renderClip: this row is a single Text paragraph — an ~800 KB replayed prompt
+                    // (skill injection) OOM'd iOS on open; render a prefix, copy keeps the whole thing
+                    val shown = renderClip(m.text)
+                    SelectionContainer { Text(shown, color = Tok.tx, fontSize = 14.sp * LocalFontScale.current) } // drag-select to copy (no native toolbar on iOS)
+                    if (shown.length < m.text.length) TruncatedNote(m.text.length)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        CopyChip(m.text) // one-tap copy — the reliable path on iOS where select-to-copy has no menu (issue #5)
                     }
                 }
             }

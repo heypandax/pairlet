@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="{{ vars }}">
+<div style="background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;border-top:1px solid var(--line);padding:12px 20px 0">
+
+  <sc-if value="{{ showNote }}" hint-placeholder-val="{{ false }}">
+    <div role="status" style="display:flex;gap:8px;align-items:flex-start;padding:0 0 10px">
+      <span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:var(--noteDot);margin-top:6px;flex:none"></span>
+      <span style="font-size:var(--t-cap);line-height:1.5;color:var(--ink3);text-wrap:pretty">{{ note }}</span>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ showField }}" hint-placeholder-val="{{ true }}">
+    <div role="textbox" aria-multiline="true" aria-label="{{ fieldAria }}" tabIndex="0" style="width:100%;min-height:var(--field);border-radius:14px;background:var(--surf);border:1px solid var(--line);padding:12px 14px;display:flex;align-items:flex-start">
+      <sc-if value="{{ hasDraft }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size:var(--t-body);line-height:1.45;color:var(--ink2);text-wrap:pretty">{{ draft }}</span>
+      </sc-if>
+      <sc-if value="{{ noDraft }}" hint-placeholder-val="{{ true }}">
+        <span style="font-size:var(--t-body);line-height:1.45;color:var(--ink5)">{{ placeholder }}</span>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ showVoice }}" hint-placeholder-val="{{ false }}">
+    <div role="status" style="width:100%;min-height:var(--field);border-radius:14px;background:var(--surf);border:1px solid var(--voiceLine);padding:12px 14px;display:flex;align-items:center;gap:10px">
+      <span aria-hidden="true" style="width:9px;height:9px;border-radius:50%;background:var(--bad);flex:none"></span>
+      <span style="flex:1;min-width:0;font-size:var(--t-body);line-height:1.4;color:var(--ink2);text-wrap:pretty">{{ voiceLabel }}</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:var(--t-cap);line-height:1;color:var(--ink4)">{{ voiceTime }}</span>
+    </div>
+  </sc-if>
+
+  <div style="display:flex;align-items:center;gap:8px;min-height:var(--tgt);margin-top:4px;flex-wrap:wrap">
+   <div style="display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;overflow:hidden">
+    <span role="button" tabIndex="0" aria-label="{{ t.attach }}" style="width:var(--tgt);height:var(--tgt);margin-left:-9px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:300;font-size:var(--t-plus);line-height:1;color:var(--ink3)">+</span>
+
+    <span role="button" tabIndex="0" aria-label="{{ modelAria }}" style="min-height:var(--chip);padding:0 11px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;flex:0 1 auto;min-width:48px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:var(--t-chip);line-height:1;color:var(--ink3);max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ model }}</span>
+
+    <sc-if value="{{ hasStack }}" hint-placeholder-val="{{ false }}">
+      <span role="button" tabIndex="0" aria-label="{{ stackAria }}" style="min-height:var(--chip);padding:0 11px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;flex:0 0 auto;cursor:pointer;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:var(--t-chip);line-height:1;color:var(--ink3);white-space:nowrap">{{ stackLabel }}</span>
+    </sc-if>
+
+    <sc-if value="{{ hasCtx }}" hint-placeholder-val="{{ false }}">
+      <span role="button" tabIndex="0" aria-label="{{ ctxAria }}" style="min-height:var(--chip);padding:0 11px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;gap:7px;flex:0 0 auto;cursor:pointer;white-space:nowrap">
+        <span aria-hidden="true" style="width:26px;height:4px;border-radius:2px;background:var(--line2);position:relative;overflow:hidden;display:block;flex:none"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ ctxPct }};background:var(--ink4);display:block"></span></span>
+        <span style="font-family:'JetBrains Mono',monospace;font-weight:500;font-size:var(--t-chip);line-height:1;color:var(--ink3)">{{ ctxLabel }}</span>
+      </span>
+    </sc-if>
+   </div>
+
+   <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto;margin-left:auto">
+
+    <sc-if value="{{ actStop }}" hint-placeholder-val="{{ false }}">
+      <span role="button" tabIndex="0" aria-label="{{ t.stop }}" style="min-width:var(--tgt);height:var(--tgt);padding:0 14px;border-radius:12px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--ink2)">{{ t.stop }}</span>
+    </sc-if>
+
+    <sc-if value="{{ actSend }}" hint-placeholder-val="{{ false }}">
+      <span role="button" tabIndex="0" aria-label="{{ sendAria }}" style="min-width:var(--tgt);height:var(--tgt);padding:0 16px;border-radius:12px;background:var(--acc);display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--onAcc)">{{ t.send }}</span>
+    </sc-if>
+
+    <sc-if value="{{ actMutedSend }}" hint-placeholder-val="{{ false }}">
+      <span role="button" tabIndex="0" aria-disabled="true" aria-label="{{ sendAria }}" style="min-width:var(--tgt);height:var(--tgt);padding:0 16px;border-radius:12px;background:var(--surf);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:8px;flex:none;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--ink4)">
+        <span aria-hidden="true" style="width:22px;height:4px;border-radius:2px;background:var(--line2);position:relative;overflow:hidden;display:block"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ upPct }};background:var(--ink4);display:block"></span></span>
+        {{ t.send }}
+      </span>
+    </sc-if>
+
+    <sc-if value="{{ actMic }}" hint-placeholder-val="{{ true }}">
+      <span role="button" tabIndex="0" aria-label="{{ t.voice }}" style="width:var(--tgt);height:var(--tgt);margin-right:-6px;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer">
+        <span aria-hidden="true" style="width:12px;height:19px;border-radius:6px;border:1.6px solid var(--ink3);display:block"></span>
+      </span>
+    </sc-if>
+
+    <sc-if value="{{ actVoiceStop }}" hint-placeholder-val="{{ false }}">
+      <span role="button" tabIndex="0" aria-label="{{ t.voiceStop }}" style="min-width:var(--tgt);height:var(--tgt);padding:0 14px;border-radius:12px;background:var(--acc);display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--onAcc)">{{ t.done }}</span>
+    </sc-if>
+   </div>
+  </div>
+
+  <div style="height:var(--homepad);display:flex;justify-content:center;align-items:flex-end;padding-bottom:8px"><span style="width:132px;height:5px;border-radius:3px;background:var(--ink);opacity:.26"></span></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:402,&quot;height&quot;:180},&quot;locale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;en&quot;,&quot;options&quot;:[&quot;en&quot;,&quot;zh&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dark&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;big&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;idle&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;text&quot;,&quot;streaming&quot;,&quot;queued&quot;,&quot;upload&quot;,&quot;voice&quot;,&quot;gated&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;agent&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Claude&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;model&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;fable&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;draft&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;stack&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;number&quot;},&quot;ctxLabel&quot;:{&quot;editor&quot;:null,&quot;default&quot;:null,&quot;tsType&quot;:&quot;string&quot;},&quot;ctxPct&quot;:{&quot;editor&quot;:null,&quot;default&quot;:34,&quot;tsType&quot;:&quot;number&quot;},&quot;uploadPct&quot;:{&quot;editor&quot;:null,&quot;default&quot;:62,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  THEMES = {
+    dark: { '--bg': '#0B0B0C', '--surf': '#141417', '--ink': '#F3F3F4', '--ink2': '#E6E6E9', '--ink3': '#B4B5BC', '--ink4': '#8C8D95', '--ink5': '#6E6E76', '--line': 'rgba(255,255,255,.14)', '--line2': 'rgba(255,255,255,.26)', '--acc': '#E2795A', '--onAcc': '#1A0E09', '--bad': '#E97462', '--noteDot': '#8C8D95', '--voiceLine': 'rgba(233,116,98,.5)' },
+    light: { '--bg': '#FCFBFA', '--surf': '#F4F2EF', '--ink': '#17161A', '--ink2': '#17161A', '--ink3': '#4B4A50', '--ink4': '#6B6970', '--ink5': '#8E8C92', '--line': 'rgba(20,18,16,.16)', '--line2': 'rgba(20,18,16,.26)', '--acc': '#A9482A', '--onAcc': '#FFFFFF', '--bad': '#A3311F', '--noteDot': '#6B6970', '--voiceLine': 'rgba(163,49,31,.45)' }
+  };
+  SCALE = {
+    normal: { '--t-body': '15px', '--t-cap': '13px', '--t-chip': '11.5px', '--t-plus': '26px', '--tgt': '48px', '--chip': '30px', '--field': '46px', '--homepad': '26px' },
+    big: { '--t-body': '22px', '--t-cap': '18.5px', '--t-chip': '16px', '--t-plus': '34px', '--tgt': '58px', '--chip': '42px', '--field': '66px', '--homepad': '26px' }
+  };
+  STR = {
+    en: { attach: 'Add attachment', send: 'Send', stop: 'Stop', voice: 'Record voice message', voiceStop: 'Finish recording', done: 'Done', ph: 'Message ', queued: 'Send queues behind the running turn.', upload: 'Waiting for the attachment to finish uploading.', rec: 'Recording', model: 'Model, ', stack: 'Session stack, ', ctx: 'Context used, ', sendQ: 'Send, queues behind the running turn', sendU: 'Send, waiting for upload', field: 'Message field' },
+    zh: { attach: '添加附件', send: '发送', stop: '停止', voice: '录制语音', voiceStop: '结束录音', done: '完成', ph: '给 ', phTail: ' 发消息…', queued: '消息将在当前回合结束后发送。', upload: '附件上传完成后才会发送。', rec: '录音中', model: '模型，', stack: '会话栈，', ctx: '已用上下文，', sendQ: '发送，将在当前回合后排队', sendU: '发送，等待上传完成', field: '消息输入框' }
+  };
+  renderVals() {
+    const p = this.props, loc = p.locale === 'zh' ? 'zh' : 'en', t = this.STR[loc];
+    const v = p.variant || 'idle', agent = p.agent || 'Claude', model = p.model || 'fable';
+    const draft = p.draft || '';
+    const ctxPct = p.ctxPct == null ? 34 : p.ctxPct;
+    return {
+      vars: Object.assign({}, this.THEMES[p.theme === 'light' ? 'light' : 'dark'], this.SCALE[p.big ? 'big' : 'normal']),
+      t: t,
+      showField: v !== 'voice', showVoice: v === 'voice',
+      hasDraft: !!draft, noDraft: !draft, draft: draft,
+      placeholder: loc === 'zh' ? t.ph + agent + t.phTail : t.ph + agent + '…',
+      fieldAria: t.field, voiceLabel: t.rec, voiceTime: '0:07',
+      model: model, modelAria: t.model + model,
+      hasStack: p.stack != null, stackLabel: '⌥ ' + p.stack, stackAria: t.stack + p.stack,
+      hasCtx: p.ctxLabel != null, ctxLabel: p.ctxLabel, ctxPct: ctxPct + '%', ctxAria: t.ctx + p.ctxLabel,
+      actStop: v === 'streaming' || v === 'queued',
+      actSend: v === 'text' || v === 'queued' || v === 'gated',
+      actMutedSend: v === 'upload',
+      actMic: v === 'idle',
+      actVoiceStop: v === 'voice',
+      sendAria: v === 'queued' ? t.sendQ : (v === 'upload' ? t.sendU : t.send),
+      upPct: (p.uploadPct == null ? 62 : p.uploadPct) + '%',
+      showNote: v === 'queued' || v === 'upload',
+      note: v === 'queued' ? t.queued : t.upload
+    };
+  }
+}
+</script>
+</body>
+</html>
+
