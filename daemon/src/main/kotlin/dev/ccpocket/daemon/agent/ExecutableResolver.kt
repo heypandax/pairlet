@@ -7,26 +7,48 @@ import kotlin.io.path.isExecutable
 import kotlin.io.path.isRegularFile
 
 /**
- * Resolves a CLI's real executable — shared by ClaudeLauncher and CodexLauncher. NEVER goes through a
- * shell: a PATH entry may be a shell function / shim that prints to stdout and corrupts the JSON stream,
- * so we resolve to a real file and prefer native binaries over `#!`-script shims. Search order: an
- * explicit path, then `$envBin`, then PATH + well-known [fallbackDirs] (login services / GUI launchers
- * often start with a sanitized PATH).
+ * Resolves a CLI's real executable — shared by the agent launchers. Resolution never invokes a shell: a
+ * PATH entry may be a shell function / shim that prints to stdout and corrupts the JSON stream, so we
+ * resolve to a real file and prefer native binaries over shims (`#!` scripts on Unix, `.cmd`/`.bat` on
+ * Windows). Search order: an explicit path, then `$envBin`, then PATH + well-known [fallbackDirs] (login
+ * services / GUI launchers often start with a sanitized PATH).
  */
 object ExecutableResolver {
     fun resolve(explicit: String?, envBin: String?, exeNames: List<String>, fallbackDirs: List<String>, notFound: String): Path {
         explicit?.let { return Path.of(it).toRealPath() }
+        // A configured binary ($CC_POCKET_*_BIN) is AUTHORITATIVE, exactly like the --*-bin flag it mirrors:
+        // it is how a machine with a broken or ambiguous PATH pins the ONE CLI that works there, so it is
+        // never ranked against — and never demoted below — whatever else happens to be installed. Only a
+        // value that isn't a runnable file falls through to the search below.
+        envBin?.let { bin -> Path.of(bin).takeIf { it.isRunnableFile() }?.let { return it.toRealPath() } }
         val candidates = LinkedHashSet<Path>()
-        envBin?.let { candidates.add(Path.of(it)) }
         val dirs = buildList {
             System.getenv("PATH")?.split(File.pathSeparator)?.forEach { if (it.isNotBlank()) add(it) }
             addAll(fallbackDirs)
         }
         dirs.forEach { dir -> exeNames.forEach { name -> candidates.add(Path.of(dir, name)) } }
-        val valid = candidates.filter { runCatching { it.isRegularFile() && it.isExecutable() }.getOrDefault(false) }
-        // native binaries (sort key 0) before script shims (1)
-        return valid.sortedBy { if (looksLikeScript(it)) 1 else 0 }.firstOrNull()?.toRealPath() ?: error(notFound)
+        val valid = candidates.filter { it.isRunnableFile() }
+        // native binaries (sort key 0) before shims (1) — ACROSS directories, not just within one. The name
+        // order alone (claude.exe before claude.cmd) only breaks ties inside a single dir, so an npm
+        // `claude.cmd` sitting in an earlier PATH entry used to beat `%USERPROFILE%\.local\bin\claude.exe`.
+        // That matters beyond tidiness: a batch shim can only be started through cmd.exe, which re-parses
+        // the command line and eats argv quoting (see ClaudeLauncher.processBuilder).
+        return valid.sortedBy { if (isShim(it)) 1 else 0 }.firstOrNull()?.toRealPath() ?: error(notFound)
     }
+
+    /**
+     * True for a Windows batch shim (`.cmd` / `.bat`) — the shape npm installs. Windows cannot start one
+     * directly: CreateProcess spawns cmd.exe for it (explicitly by us, implicitly by the OS otherwise), and
+     * that re-parse mangles arguments carrying quotes, newlines or `&<>|^`. Callers use this both to wrap
+     * the launch and to refuse launches whose argv can't survive the trip.
+     */
+    fun isBatchShim(exe: String): Boolean =
+        exe.lowercase().let { it.endsWith(".cmd") || it.endsWith(".bat") }
+
+    private fun isShim(p: Path): Boolean = isBatchShim(p.toString()) || looksLikeScript(p)
+
+    private fun Path.isRunnableFile(): Boolean =
+        runCatching { isRegularFile() && isExecutable() }.getOrDefault(false)
 
     private fun looksLikeScript(p: Path): Boolean = runCatching {
         p.inputStream().use { it.readNBytes(2).contentEquals(byteArrayOf('#'.code.toByte(), '!'.code.toByte())) }

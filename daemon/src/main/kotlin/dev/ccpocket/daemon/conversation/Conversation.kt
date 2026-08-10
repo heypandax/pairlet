@@ -990,7 +990,7 @@ class Conversation(
 
     // Restricted-credential conversations (GUEST folder-share #115, BRIDGE #91) launch their agent
     // clean-room: no MCP servers (can't act through the owner's authenticated integrations) and — the part
-    // that bit for real — `--setting-sources ""`, because the owner's own ~/.claude settings carry
+    // that bit for real — `--setting-sources=` (empty), because the owner's own ~/.claude settings carry
     // permissions.allow rules accumulated for their PERSONAL convenience (a bare "Edit" was live on the
     // machine this shipped from), and the CLI honours those BEFORE the daemon's --permission-prompt-tool
     // ever hears about the call. A stranger in an IM chat inheriting the owner's "don't ask me again"

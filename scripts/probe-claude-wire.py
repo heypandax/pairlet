@@ -41,8 +41,14 @@ lock 为 07-10 增，workflow/fgtask/bgcontinue 为 07-11 增、在 2.1.206 上�
           deny。某 mode 下 CLI 越界自动放行（无 control_request 就吐内容/落盘）= #115「碰不到你其他文件夹」
           保证被绕过（settingsources 验 --setting-sources "" 挡住共享目录 settings.json 的 allow 自动放行）
 
+  cleanroom  clean-room 的「零 MCP server」：--strict-mcp-config 不带任何 --mcp-config 时，owner 的 user 级
+          server 和共享目录自己的 .mcp.json 都不得加载。原来靠内联的 `--mcp-config '{"mcpServers":{}}'` 显式
+          给空集合，但那行 JSON 的引号在 Windows 的 claude.cmd shim 上活不下来（cmd.exe 重解析吃掉引号 →
+          被当成路径 → 起不来），所以改成只给 strict。等价性一漂移＝guest/bridge 静默拿回 owner 已认证的
+          MCP 集成（#115 最大的洞），且不会有任何报错
+
 用法：python3 scripts/probe-claude-wire.py [steer|queue|ask|ask_plan|task|workflow|lock|fgtask|bgcontinue|
-      skill|scope|scope_acceptedits|settingsources|entrypoint|all]（默认 all）
+      skill|scope|scope_acceptedits|settingsources|cleanroom|entrypoint|all]（默认 all）
       CLAUDE_BIN=/path/to/claude 可覆盖二进制。失败退出码非 0。
 探针在 /tmp/ccprobe 下起真实 claude 进程（bypassPermissions / default / acceptEdits），会消耗少量用量。
 """
@@ -629,7 +635,7 @@ def scenario_scope(mode: str = "default") -> bool:
         pass
     # mirror the REAL guest launch (ClaudeLauncher clean-room) so tool availability matches production and
     # the owner's private settings/hooks don't color the result
-    clean = ["--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}']
+    clean = ["--strict-mcp-config", "--setting-sources="]
     p = Probe(["--permission-mode", mode, *clean], cwd=shared)
     try:
         p.send(
@@ -752,6 +758,51 @@ def scenario_settingsources() -> bool:
     return ok
 
 
+def scenario_cleanroom() -> bool:
+    print("── cleanroom：--strict-mcp-config（不带 --mcp-config）必须让会话零 MCP server（#115 最大的洞）──")
+    # clean-room 原来用 `--mcp-config '{"mcpServers":{}}'` 显式给一个空集合。这行 JSON 在 Windows 上活不下来：
+    # npm 装的 claude.cmd 只能经 cmd.exe 起，命令行被重新解析、引号被吃掉，claude 收到 {mcpServers:{}}，
+    # 当成相对路径 → "MCP config file not found: D:\...\{mcpServers:{}}"，飞书群会话在 Windows 上根本起不来。
+    # 现在改成「只给 --strict-mcp-config、一个 config 都不给」——语义等价且全是无引号单 token。
+    # 但这条等价是 CLI 行为，不是我们能在单测里证的：一旦漂移（strict 不再意味着空集合），guest / bridge
+    # 会话就会静默拿回 owner 已认证的 MCP 集成 —— #115 里最大的那个洞，且没有任何报错。所以钉在这里。
+    base = os.path.join(WORKDIR, "cleanroom")
+    shutil.rmtree(base, ignore_errors=True)
+    os.makedirs(os.path.join(base, ".claude"))
+    # 植入一个「共享目录自己的」.mcp.json —— guest 可写、常被提交进仓库，正是要挡的那类
+    with open(os.path.join(base, ".mcp.json"), "w") as fh:
+        json.dump({"mcpServers": {"probe-planted": {"command": "cat", "args": []}}}, fh)
+    with open(os.path.join(base, ".claude", "settings.json"), "w") as fh:
+        json.dump({"enableAllProjectMcpServers": True, "enabledMcpjsonServers": ["probe-planted"]}, fh)
+
+    def servers(extra):
+        """会话 init 行报告的 mcp_servers 名单（None = 没等到 init）。"""
+        p = Probe([*extra, "--permission-mode", "default"], cwd=base)
+        try:
+            p.send("Reply with exactly CR_DONE.")  # init 只在开始处理第一轮时才吐
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                init = [j for j in p.raw if j.get("type") == "system" and j.get("subtype") == "init"]
+                if init:
+                    return [m.get("name") for m in init[0].get("mcp_servers", [])]
+                time.sleep(0.3)
+            return None
+        finally:
+            p.kill()
+
+    loaded = servers([])  # 对照组：不加 flag 时植入的 server 确实会被加载（否则本场景什么也没证）
+    # Isolate the contract under test: settings sources remain enabled here, so a zero-server result must
+    # come from --strict-mcp-config itself rather than from suppressing the project setting that enables it.
+    clean = servers(["--strict-mcp-config"])
+
+    ok = True
+    ok &= check("对照：不加 flag 时共享目录的 .mcp.json server 会加载（信号有效）",
+                bool(loaded) and "probe-planted" in loaded, str(loaded))
+    ok &= check("--strict-mcp-config（无 --mcp-config）→ 会话零 MCP server",
+                clean == [], f"mcp_servers={clean}（要求 []）")
+    return ok
+
+
 def scenario_entrypoint() -> bool:
     print("── entrypoint：-p transcript 落盘打 sdk-cli 标记、picker 隐藏集合未漂移（issue #216 unhide 前提）──")
     # daemon 的 unhide 闭环（TranscriptPatcher / SpawnedSessions / 空闲 reaper）做的是逐字节替换：
@@ -804,7 +855,8 @@ def main():
         "task": scenario_task, "workflow": scenario_workflow, "lock": scenario_lock,
         "fgtask": scenario_fgtask, "bgcontinue": scenario_bgcontinue, "skill": scenario_skill,
         "scope": scenario_scope, "scope_acceptedits": scenario_scope_acceptedits,
-        "settingsources": scenario_settingsources, "entrypoint": scenario_entrypoint,
+        "settingsources": scenario_settingsources, "cleanroom": scenario_cleanroom,
+        "entrypoint": scenario_entrypoint,
     }
     run = scenarios.values() if which == "all" else [scenarios[which]]
     results = [fn() for fn in run]
