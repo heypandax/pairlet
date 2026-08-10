@@ -334,6 +334,7 @@ fun App(scope: CoroutineScope) {
                 }
                 PermissionSheet(
                     ask, repo.workdir.value,
+                    agent = repo.sessionAgent.value ?: AgentKind.CLAUDE,
                     timedOutSignal = repo.askTimedOut(ask), // issue #100: daemon said this ask timed out (composite-matched, P1-3)
                     // §2.2/§4.3: during a REVIEW handoff a shell command is the one way a "read-only"
                     // review can still touch files — so it's confirmed each time (no standing rule) and
@@ -1110,13 +1111,31 @@ private fun SharedProjectCell(repo: PocketRepository, e: DirectoryEntry, onLongP
 }
 
 /** Long-press a project → pin it to the top, or unpin it, or share it. Small sheet, mirrors the app's other actions. */
+internal fun projectActionAgents(e: DirectoryEntry): List<AgentKind> {
+    val active = e.activeSessions.map { it.agent }.distinct()
+    return (if (active.isNotEmpty()) active else e.sessionAgents)
+        .distinct()
+        .sortedBy { it.ordinal }
+}
+
 @Composable
 private fun ProjectActionsSheet(repo: PocketRepository, e: DirectoryEntry, onShare: () -> Unit, onDismiss: () -> Unit) {
     val pinned = repo.isPinned(e.path)
+    val agents = remember(e.activeSessions, e.sessionAgents) { projectActionAgents(e) }
     PocketSheet(onDismiss) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 14.dp, top = 4.dp)) {
             Text(e.name.ifBlank { e.path }, color = Tok.tx, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             TailPathText(e.path, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+            if (agents.isNotEmpty()) {
+                Row(
+                    Modifier.padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(stringResource(Res.string.label_agent), color = Tok.muted, fontSize = 12.sp)
+                    agents.forEach { AgentTag(it) }
+                }
+            }
             Row(
                 Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Tok.surface)
                     .clickable { repo.togglePin(e.path); onDismiss() }.padding(horizontal = 14.dp, vertical = 14.dp),
@@ -2166,17 +2185,19 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                             ) {
                                 ContextCriticalCaption()
                             }
+                            val composerPlaceholder = when {
+                                repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> stringResource(Res.string.add_message_hint)
+                                repo.streaming.value -> stringResource(Res.string.message_queued_hint)
+                                else -> stringResource(
+                                    Res.string.message_agent_hint,
+                                    agentName(repo.sessionAgent.value ?: AgentKind.CLAUDE),
+                                )
+                            }
                             ComposerField(
                                 composer,
                                 // mid-turn the field stays enabled (sends queue into the running turn) — say so,
                                 // or an editable composer under a "running" session reads as disconnected (issue #52)
-                                placeholder = stringResource(
-                                    when {
-                                        repo.pendingImages.isNotEmpty() || repo.pendingFiles.isNotEmpty() -> Res.string.add_message_hint
-                                        repo.streaming.value -> Res.string.message_queued_hint
-                                        else -> Res.string.message_claude_hint
-                                    },
-                                ),
+                                placeholder = composerPlaceholder,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 focusRequester = composerFocus,
                             )

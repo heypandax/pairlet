@@ -601,12 +601,12 @@ class DesktopUiTest {
         assertPresent("Fable")
         onAllNodes(hasText("Codex")).onFirst().performClick()
         waitForIdle()
-        assertPresent("GPT 5.1 Codex")
+        assertPresent("gpt-5.6-sol")
         assertTrue(!present("Fable"), "Codex must not show Claude model choices")
-        onAllNodes(hasText("GPT 5.1 Codex")).onFirst().performScrollTo().performClick()
+        onAllNodes(hasText("gpt-5.6-sol")).onFirst().performScrollTo().performClick()
         waitForIdle()
 
-        assertEquals("gpt-5.1-codex", model.defaultModelFor(AgentKind.CODEX))
+        assertEquals("gpt-5.6-sol", model.defaultModelFor(AgentKind.CODEX))
         assertEquals("opus", model.defaultModelFor(AgentKind.CLAUDE), "each agent keeps its own default")
     }
 

@@ -106,18 +106,22 @@ struct iOSApp: App {
 
     init() {
         // Firebase stays in Swift (the only place that imports it); the shared Kotlin Telemetry
-        // calls back through the sink registered below — mirroring cc-dashboard's single seam.
-        FirebaseApp.configure()
-        Analytics.setAnalyticsCollectionEnabled(true) // plist ships IS_ANALYTICS_ENABLED=false; opt in here
-        MainViewControllerKt.setTelemetrySink(
-            onEvent: { event, params in
-                Analytics.logEvent(event, parameters: params)
-            },
-            onError: { message, phase in
-                let info: [String: Any] = [NSLocalizedDescriptionKey: message, "phase": phase ?? ""]
-                Crashlytics.crashlytics().record(error: NSError(domain: "ccpocket", code: 0, userInfo: info))
-            }
-        )
+        // calls back through the sink registered below — mirroring cc-dashboard's single seam. A clean
+        // clone intentionally ships a placeholder plist for local builds; Firebase Installations aborts
+        // the process when that placeholder API key is passed to configure, so telemetry must degrade to
+        // its existing no-op sink until a real Firebase configuration is supplied.
+        if Self.configureFirebaseIfUsable() {
+            Analytics.setAnalyticsCollectionEnabled(true) // plist ships IS_ANALYTICS_ENABLED=false; opt in here
+            MainViewControllerKt.setTelemetrySink(
+                onEvent: { event, params in
+                    Analytics.logEvent(event, parameters: params)
+                },
+                onError: { message, phase in
+                    let info: [String: Any] = [NSLocalizedDescriptionKey: message, "phase": phase ?? ""]
+                    Crashlytics.crashlytics().record(error: NSError(domain: "ccpocket", code: 0, userInfo: info))
+                }
+            )
+        }
         // Push registration lives in Swift (UIKit symbols aren't uniform across Kotlin/Native targets).
         // Kotlin's PushController calls this when registration starts (after pairing), so the prompt
         // follows pairing rather than firing at cold launch.
@@ -127,6 +131,26 @@ struct iOSApp: App {
                 DispatchQueue.main.async { UIApplication.shared.registerForRemoteNotifications() }
             }
         }
+    }
+
+    private static func configureFirebaseIfUsable() -> Bool {
+        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+              let options = FirebaseOptions(contentsOfFile: path),
+              let apiKey = options.apiKey,
+              apiKey.count == 39,
+              apiKey.hasPrefix("A"),
+              apiKey.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")).contains($0)
+              }),
+              let projectID = options.projectID,
+              !projectID.isEmpty,
+              !options.googleAppID.isEmpty
+        else {
+            return false
+        }
+
+        FirebaseApp.configure(options: options)
+        return true
     }
 
     var body: some Scene {

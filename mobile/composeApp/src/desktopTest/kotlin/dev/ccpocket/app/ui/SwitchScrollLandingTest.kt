@@ -138,7 +138,10 @@ class SwitchScrollLandingTest {
         repo.messages.clear()
         repo.receiveForTest(live("c2", "/w/beta"))
         repo.receiveForTest(history("c2", "beta"))
-        waitForIdle()
+        // The landing is performed by a LaunchedEffect. Under the full 500+ test suite the Skiko scene
+        // can report idle just before that coroutine gets its frame; wait for the user-visible condition
+        // rather than treating one scheduler-idle edge as completion.
+        waitUntil(timeoutMillis = 3_000) { listState.firstVisibleItemIndex >= tail }
 
         assertTrue(
             listState.firstVisibleItemIndex >= tail,

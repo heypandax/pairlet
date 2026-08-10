@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,9 +54,12 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +87,8 @@ data class ModeInfo(
 
 // same hue as the semantic info token — a getter so it tracks the light/dark palette (#63)
 private val Indigo get() = Tok.info
+
+internal const val POCKET_SHEET_DRAG_HANDLE_TAG = "pocket-sheet-drag-handle"
 
 /** Trims a single line's leading and centers the glyph in it — fixes text riding high when vertically centered. */
 internal val TightCenter = TextStyle(
@@ -111,12 +118,15 @@ fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
     // keyboard + the sheet's imePadding fight over the bottom inset and (on iOS) wedge the layout, so a
     // nested confirm popup can't lay out and the keyboard won't dismiss — the "stuck sheet" symptom.
     val focus = LocalFocusManager.current
+    val dismissThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
+    var dragY by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) { focus.clearFocus() }
     dev.ccpocket.app.SystemBackHandler(enabled = true) { onDismiss() } // Android back = scrim tap
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x94000000)).pointerInput(Unit) { detectTapGestures { onDismiss() } })
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .graphicsLayer { translationY = dragY }
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(Tok.raised)
                 .pointerInput(Unit) { detectTapGestures { } } // swallow taps so they don't dismiss via the scrim
@@ -124,7 +134,28 @@ fun PocketSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Un
                 .imePadding() // sheets render outside the app's ime-padded Box — never hide behind the keyboard
                 .padding(bottom = 10.dp),
         ) {
-            Box(Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp).size(width = 38.dp, height = 5.dp).clip(CircleShape).background(Tok.hair))
+            // The visible 38×5 handle sits inside a full-width 36dp gesture target. Keeping the drag
+            // detector on this header (rather than the whole sheet) avoids fighting nested model-list
+            // scrolling. The sheet follows the finger downward; an intentional 64dp pull dismisses,
+            // while a short/accidental pull snaps back.
+            Box(
+                Modifier.fillMaxWidth().height(36.dp)
+                    .testTag(POCKET_SHEET_DRAG_HANDLE_TAG)
+                    .pointerInput(onDismiss, dismissThresholdPx) {
+                        detectVerticalDragGestures(
+                            onVerticalDrag = { _, delta -> dragY = (dragY + delta).coerceAtLeast(0f) },
+                            onDragEnd = {
+                                val dismiss = dragY >= dismissThresholdPx
+                                dragY = 0f
+                                if (dismiss) onDismiss()
+                            },
+                            onDragCancel = { dragY = 0f },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(width = 38.dp, height = 5.dp).clip(CircleShape).background(Tok.hair))
+            }
             content()
         }
     }
@@ -161,14 +192,28 @@ fun ModeSheet(
                         Text(stringResource(Res.string.mode_switching), color = Tok.tx2, fontSize = 12.5.sp)
                     }
                 }
-                Column(
-                    Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    (MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
-                        ModeRow(m, selected = current == m.key && nativeMode == m.nativeMode, enabled = !switching) {
-                            if (m.key == PermissionMode.BYPASS_PERMISSIONS && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
-                            else onSelect(m.key, m.nativeMode)
+                if (agent == AgentKind.CODEX) {
+                    Column(
+                        Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CODEX_PRESETS.forEach { p ->
+                            PresetRow(p, selected = current == p.mode) {
+                                if (p.danger && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
+                                else onSelect(p.mode, null)
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        Modifier.padding(top = 8.dp).alpha(if (switching) 0.55f else 1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        (MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(AUTO_MODE) else emptyList()).forEach { m ->
+                            ModeRow(m, selected = current == m.key && nativeMode == m.nativeMode, enabled = !switching) {
+                                if (m.key == PermissionMode.BYPASS_PERMISSIONS && current != PermissionMode.BYPASS_PERMISSIONS) confirmBypass = true
+                                else onSelect(m.key, m.nativeMode)
+                            }
                         }
                     }
                 }
@@ -580,6 +625,8 @@ fun isShellTool(tool: String): Boolean = tool.lowercase() in setOf(
 @Composable
 fun PermissionSheet(
     ask: PermissionAsk, workdir: String?, timedOutSignal: Boolean = false,
+    /** Backend that produced this ask. PermissionAsk stays provider-neutral; the active session is truth. */
+    agent: AgentKind = AgentKind.CLAUDE,
     /** True while a REVIEW handoff is in progress on this device (implementation review §2.2/§4.3):
      *  shell is the ONE way a "read-only" review can still change files, so it is confirmed one command
      *  at a time — "Always allow" is withdrawn for it — and the recipient is told it leaves a record. */
@@ -620,7 +667,7 @@ fun PermissionSheet(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.weight(1f).alpha(if (timedOut) 0.5f else 1f)) { PermBody(ask, workdir, risk) }
+                Box(Modifier.weight(1f).alpha(if (timedOut) 0.5f else 1f)) { PermBody(ask, workdir, agent, risk) }
                 if (!timedOut) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         // #201: the ring means "this expires"; when it doesn't, say so instead of drawing one.
@@ -834,11 +881,15 @@ fun RiskBadge(risk: String) {
 }
 
 @Composable
-private fun PermBody(ask: PermissionAsk, workdir: String?, risk: String? = null) {
+private fun PermBody(ask: PermissionAsk, workdir: String?, agent: AgentKind, risk: String? = null) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             Icon(Icons.Outlined.Shield, null, tint = if (ask.danger) Tok.danger else Tok.warn, modifier = Modifier.size(16.dp))
-            Text(stringResource(Res.string.needs_permission), color = Tok.tx2, fontSize = 13.sp)
+            Text(
+                stringResource(Res.string.agent_needs_permission, agentName(agent)),
+                color = Tok.tx2,
+                fontSize = 13.sp,
+            )
             risk?.let { RiskBadge(it) } // M3 advisory: HIGH="发现风险" vs UNKNOWN="无法可靠评估" stay distinct
         }
         Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.Bottom) {

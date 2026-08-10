@@ -4,7 +4,9 @@ import dev.ccpocket.app.data.ChatItem
 import dev.ccpocket.app.data.DemoData
 import dev.ccpocket.app.data.PocketRepository
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -22,58 +24,66 @@ import kotlin.test.assertTrue
  * session's persisted draft is cleared up front so the composer deterministically starts blank
  * even when the dev-machine store carries one from an earlier run.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class RepoDesktopModelStopTurnTest {
 
-    private fun demoModel(): Pair<PocketRepository, RepoDesktopModel> {
-        val scope = CoroutineScope(Dispatchers.Unconfined)
+    private fun demoModel(scope: CoroutineScope): Pair<PocketRepository, RepoDesktopModel> {
         val repo = PocketRepository(scope)
         repo.enterDemo()
         repo.clearDraft(DemoData.LIVE_SESSION_ID) // the draft key a demo open lands on (SessionLive echoes this id)
         val model = RepoDesktopModel(repo, scope, store = FakeDesktopStore())
-        repo.openSession(DemoData.LIVE_DIR) // demo loops SessionLive back synchronously — convoId is live
+        repo.openSession(DemoData.LIVE_DIR) // demo loops SessionLive back once the test scheduler is drained
         return repo to model
     }
 
     @Test
-    fun stopInsideWindowRefillsTheComposer() {
-        val (repo, m) = demoModel()
+    fun stopInsideWindowRefillsTheComposer() = runTest {
+        val (repo, m) = demoModel(backgroundScope)
+        runCurrent() // settle openSession + the model's null -> session draft-key collector
         m.stopRefillElapsedMsForTest = { 0 }
         assertTrue(repo.sendPrompt("fix the login bug"))
         // The stop-refill unit owns its transcript input. Demo streaming is intentionally async and
         // other desktop tests can advance it, so do not rely on its delayed echo retaining this row.
         repo.messages.add(ChatItem.User("fix the login bug"))
         m.stopTurn()
+        runCurrent()
         assertEquals("fix the login bug", m.composer)
     }
 
     @Test
-    fun stopPastWindowLeavesTheComposerAlone() {
-        val (repo, m) = demoModel()
+    fun stopPastWindowLeavesTheComposerAlone() = runTest {
+        val (repo, m) = demoModel(backgroundScope)
+        runCurrent()
         m.stopRefillWindowMs = 50
         assertTrue(repo.sendPrompt("fix the login bug"))
         m.stopRefillElapsedMsForTest = { 50 } // exactly at the exclusive boundary; no wall-clock sleep
         m.stopTurn()
+        runCurrent()
         assertEquals("", m.composer)
     }
 
     @Test
-    fun stopNeverClobbersATypedDraft() {
-        val (repo, m) = demoModel()
+    fun stopNeverClobbersATypedDraft() = runTest {
+        val (repo, m) = demoModel(backgroundScope)
+        runCurrent()
         m.stopRefillElapsedMsForTest = { 0 } // exercise the refill branch; the non-blank draft must still win
         assertTrue(repo.sendPrompt("fix the login bug"))
         repo.messages.add(ChatItem.User("fix the login bug"))
         m.composer = "actually, try the signup flow"
         m.stopTurn()
+        runCurrent()
         assertEquals("actually, try the signup flow", m.composer)
     }
 
     @Test
-    fun stopOnAnAttachedTurnRefillsNothing() {
-        val (repo, m) = demoModel()
+    fun stopOnAnAttachedTurnRefillsNothing() = runTest {
+        val (repo, m) = demoModel(backgroundScope)
+        runCurrent()
         // a running turn this app never sent: the prompt arrived via transcript replay, not sendPrompt
         repo.messages.add(ChatItem.User("prompt typed on the phone"))
         repo.streaming.value = true
         m.stopTurn()
+        runCurrent()
         assertEquals("", m.composer)
     }
 }

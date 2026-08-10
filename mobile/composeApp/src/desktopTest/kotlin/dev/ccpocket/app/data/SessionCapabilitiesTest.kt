@@ -158,4 +158,58 @@ class SessionCapabilitiesTest {
             scope.cancel()
         }
     }
+
+    @Test
+    fun session_live_authoritative_title_repairs_a_titleless_open() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val repo = repo(scope, mutableListOf())
+        try {
+            // Push/deep-link opens know only workdir + session id, so the header starts on its generic fallback.
+            repo.openSession("/tmp/project", "codex-session", title = null, agent = AgentKind.CODEX)
+            assertNull(repo.chatTitle.value)
+
+            repo.receiveForTest(
+                SessionLive(
+                    "c1",
+                    "/tmp/project",
+                    "codex-session",
+                    agent = AgentKind.CODEX,
+                    title = "codex 会话 cc pocket",
+                ),
+            )
+
+            assertEquals("codex 会话 cc pocket", repo.chatTitle.value)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun explicit_codex_row_overrides_stale_claude_session_cache() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val sent = mutableListOf<Frame>()
+        val repo = repo(scope, sent)
+        try {
+            // Simulate the bad value persisted by an older build after mis-opening this Codex id.
+            repo.receiveForTest(
+                SessionLive(
+                    "old-convo",
+                    "/tmp/project",
+                    "codex-session-agent-precedence",
+                    agent = AgentKind.CLAUDE,
+                ),
+            )
+            sent.clear()
+
+            repo.openSession(
+                "/tmp/project",
+                "codex-session-agent-precedence",
+                agent = AgentKind.CODEX,
+            )
+
+            assertEquals(AgentKind.CODEX, sent.filterIsInstance<OpenSession>().single().agent)
+        } finally {
+            scope.cancel()
+        }
+    }
 }

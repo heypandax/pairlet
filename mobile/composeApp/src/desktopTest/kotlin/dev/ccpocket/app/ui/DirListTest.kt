@@ -104,4 +104,18 @@ class DirListTest {
         assertEquals(false, filtered.executing)
         assertEquals(true, filtered.busy)
     }
+
+    @Test
+    fun project_action_sheet_prefers_live_agents_and_falls_back_to_history_agents() {
+        val liveCodex = d("/p/live").copy(
+            sessionAgents = listOf(AgentKind.CLAUDE, AgentKind.CODEX),
+            activeSessions = listOf(ActiveSession("codex-live", agent = AgentKind.CODEX)),
+        )
+        assertEquals(listOf(AgentKind.CODEX), projectActionAgents(liveCodex))
+
+        val historical = d("/p/history").copy(
+            sessionAgents = listOf(AgentKind.CODEX, AgentKind.CLAUDE, AgentKind.CODEX),
+        )
+        assertEquals(listOf(AgentKind.CLAUDE, AgentKind.CODEX), projectActionAgents(historical))
+    }
 }
