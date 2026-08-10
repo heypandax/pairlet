@@ -268,6 +268,9 @@ class SessionRegistry(
         // issue #201: a HEADLESS fire (the scheduler) has no client attached, so its asks must keep the
         // bounded window even when the owner turned on "wait for my decision" — see Conversation's noAutoDeny.
         headless: Boolean = false,
+        // issue #219: the workdir the phone OPENED with (raw "~"-relative allowed) — announced verbatim in
+        // SessionLive so the phone's identity guard matches it; null → the daemon's canonical workdir.
+        announcedWorkdir: String? = null,
     ): String {
         val resume = open.resumeId
         // §3.3 INITIATOR AUTO-SPECTATE: the clients streaming from a conversation the handoff rebuild is
@@ -411,6 +414,7 @@ class SessionRegistry(
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
             pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
             handoffAccess = handoffAccess, headless = headless,
+            announcedWorkdir = announcedWorkdir,
             approvals = approvals, grants = grants, riskEngine = riskEngine,
         )
         mutex.withLock { convos[convoId] = c }
