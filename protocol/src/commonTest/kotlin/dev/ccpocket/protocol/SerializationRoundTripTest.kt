@@ -69,12 +69,15 @@ class SerializationRoundTripTest {
             "c1",
             "/x",
             "sid",
+            title = "Authoritative session title",
             mode = PermissionMode.DEFAULT,
             effort = "max",
             permissionMode = CLAUDE_PERMISSION_MODE_AUTO,
             serviceTier = "priority",
         )
-        assertEquals(live, PocketJson.decodeFromString<SessionLive>(PocketJson.encodeToString(live)))
+        val liveJson = PocketJson.encodeToString(live)
+        assertTrue("\"title\":\"Authoritative session title\"" in liveJson, liveJson)
+        assertEquals(live, PocketJson.decodeFromString<SessionLive>(liveJson))
 
         // Frames sent before #183 omit both native fields and continue to decode to null.
         val legacy = """{"workdir":"/x","mode":"default","effort":"high"}"""

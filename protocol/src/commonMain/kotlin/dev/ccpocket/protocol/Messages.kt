@@ -817,6 +817,8 @@ data class SessionLive(
     val permissionMode: String? = null,
     /** Backend-native service tier (Codex `"priority"` = Fast); null means account/default tier. */
     val serviceTier: String? = null,
+    /** Daemon-authoritative display title. Additive so older peers ignore it and older daemons decode as null. */
+    val title: String? = null,
 ) : ToPhone
 
 /** A streamed assistant content piece. seq is monotonic per convo for ordering. */

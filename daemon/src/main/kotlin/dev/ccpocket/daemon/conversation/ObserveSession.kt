@@ -1,5 +1,7 @@
 package dev.ccpocket.daemon.conversation
 
+import dev.ccpocket.daemon.codex.CodexTranscriptReplay
+import dev.ccpocket.daemon.codex.CodexTranscriptScanner
 import dev.ccpocket.daemon.disk.TranscriptReplay
 import dev.ccpocket.daemon.disk.TranscriptScanner
 import dev.ccpocket.protocol.AgentKind
@@ -29,6 +31,7 @@ class ObserveSession(
     private val file: Path,
     private val sink: OutboundSink,
     parentScope: CoroutineScope,
+    private val agent: AgentKind = AgentKind.CLAUDE,
     /** The observing client's transcript cursor from its OpenSession (issue #147). NON-NULL also
      *  DECLARES the client understands delta frames (a new client sends 0 when it holds no transcript
      *  yet) — an old client omits the field and keeps today's full-window tick behavior: feeding a
@@ -50,7 +53,10 @@ class ObserveSession(
                     if (mtime != lastMtime) {
                         lastMtime = mtime
                         emitLive() // model/window/occupancy move as the observed terminal writes turns
-                        val slice = TranscriptReplay.slice(file, sinceSeq = sentCursor)
+                        val slice = when (agent) {
+                            AgentKind.CODEX -> CodexTranscriptReplay.slice(file, sinceSeq = sentCursor)
+                            else -> TranscriptReplay.slice(file, sinceSeq = sentCursor)
+                        }
                         // an empty DELTA = the client is already caught up (noise-only appends) — nothing
                         // to send. An empty FULL still goes out: that's today's "file gone/empty" wipe.
                         if (slice.messages.isNotEmpty() || !slice.delta) {
@@ -74,7 +80,10 @@ class ObserveSession(
 
     /** Older-history page for an observed session (issue #147) — same shape as Conversation's. */
     suspend fun fetchHistoryPage(beforeSeq: Long, limit: Int, to: OutboundSink) {
-        val slice = TranscriptReplay.page(file, beforeSeq, limit.coerceIn(1, 200))
+        val slice = when (agent) {
+            AgentKind.CODEX -> CodexTranscriptReplay.page(file, beforeSeq, limit.coerceIn(1, 200))
+            else -> TranscriptReplay.page(file, beforeSeq, limit.coerceIn(1, 200))
+        }
         to.emit(dev.ccpocket.protocol.ConvoHistoryPage(convoId, slice.messages, firstSeq = slice.firstSeq, hasMore = slice.hasMore))
     }
 
@@ -82,13 +91,23 @@ class ObserveSession(
      *  model, its usage as occupancy, and the window derived the same way live sessions derive it —
      *  including the observed-usage upgrade for beta-gated 1M models (occupancy > 200k proves 1M). */
     private suspend fun emitLive() {
-        val model = runCatching { TranscriptScanner.lastModel(file) }.getOrNull()
-        val used = runCatching { TranscriptScanner.lastContextTokens(file) }.getOrNull()
-        val window = dev.ccpocket.protocol.provenWindow(model?.let(::contextWindowFor), used)
+        val codex = if (agent == AgentKind.CODEX) runCatching { CodexTranscriptScanner.runtimeState(file) }.getOrNull() else null
+        val title = when (agent) {
+            AgentKind.CODEX -> CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
+                ?: runCatching { CodexTranscriptScanner.summarize(file, workdir)?.title }.getOrNull()
+            AgentKind.CLAUDE -> runCatching { TranscriptScanner.summarize(file)?.title }.getOrNull()
+            AgentKind.OPENCODE -> null // OpenCode sessions are never opened through ObserveSession.
+        }
+        val model = codex?.model
+            ?: if (agent == AgentKind.CLAUDE) runCatching { TranscriptScanner.lastModel(file) }.getOrNull() else null
+        val used = codex?.contextUsed
+            ?: if (agent == AgentKind.CLAUDE) runCatching { TranscriptScanner.lastContextTokens(file) }.getOrNull() else null
+        val declaredWindow = codex?.contextWindow ?: model?.let(::contextWindowFor)
+        val window = dev.ccpocket.protocol.provenWindow(declaredWindow, used)
         sink.emit(
             SessionLive(
                 convoId, workdir, sessionId, observing = true,
-                model = model, contextWindow = window, contextUsed = used, agent = AgentKind.CLAUDE,
+                model = model, contextWindow = window, contextUsed = used, agent = agent, title = title,
             ),
         )
     }

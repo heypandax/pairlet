@@ -49,6 +49,7 @@ class CodexBackend(
     @Volatile private var resolvedExe: Path? = null // codex binary, resolved lazily on first launch
     @Volatile private var workdir: String = ""
     @Volatile private var resumeId: String? = null
+    @Volatile private var forkSession: Boolean = false
     @Volatile private var mode: PermissionMode = PermissionMode.DEFAULT
     @Volatile private var model: String? = null
     @Volatile private var effort: String? = null
@@ -57,6 +58,8 @@ class CodexBackend(
     @Volatile private var threadId: String? = null
     @Volatile private var currentTurnId: String? = null
     private var pendingPrompt: Prompt? = null // buffered first turn (guarded by [bootstrap])
+    private var pendingCompact = false // /compact may arrive while thread resume/fork is still handshaking
+    private var pendingReview: String? = null // empty marker = uncommitted-changes review
 
     // JSON-RPC id correlation: which of our outstanding requests this id belongs to
     @Volatile private var initializeId: Long = -1
@@ -64,6 +67,7 @@ class CodexBackend(
 
     // a turn's running state, reset on turn/completed
     @Volatile private var lastAgentText: String? = null
+    @Volatile private var lastErrorText: String? = null
     @Volatile private var lastUsage = Usage()
     @Volatile private var usageSeen = false // no tokenUsage event yet → TurnResult must say "no usage", not zeros
     private val deltaSeen = ConcurrentHashMap.newKeySet<String>() // agentMessage itemIds that streamed deltas → don't re-emit final
@@ -85,14 +89,15 @@ class CodexBackend(
         this.io = io
         this.workdir = spec.workdir.toString()
         this.resumeId = spec.resumeId
+        this.forkSession = spec.forkSession
         this.mode = spec.mode
         this.model = spec.model
         this.effort = normalizeEffort(spec.model, spec.effort)
         this.serviceTier = normalizeServiceTier(spec.model, spec.serviceTier)
         // reset per-process protocol state (this runs on every (re)launch)
         threadId = null; currentTurnId = null
-        bootstrap.withLock { pendingPrompt = null }
-        lastAgentText = null; lastUsage = Usage(); usageSeen = false
+        bootstrap.withLock { pendingPrompt = null; pendingCompact = false; pendingReview = null }
+        lastAgentText = null; lastErrorText = null; lastUsage = Usage(); usageSeen = false
         deltaSeen.clear(); fileChangePaths.clear(); fileChangeDiffs.clear(); pendingApprovals.clear()
         // kick off the handshake — initialized + thread open happen when the response lands (see handleResponse)
         initializeId = rpcRequest("initialize", buildJsonObject {
@@ -136,8 +141,11 @@ class CodexBackend(
     private suspend fun openThread() {
         val rid = resumeId
         threadOpenId = if (rid != null) {
-            rpcRequest("thread/resume", buildJsonObject {
+            rpcRequest(if (forkSession) "thread/fork" else "thread/resume", buildJsonObject {
                 put("threadId", rid)
+                // thread/fork and thread/resume accept the same relevant overrides in the v2 app-server
+                // protocol (Codex 0.147). Native fork is the Codex mirror of Claude --fork-session: a
+                // phone take-over never creates a second writer on the desktop's live rollout.
                 codexModel()?.let { put("model", it) }
                 serviceTier?.let { put("serviceTier", it) }
             })
@@ -155,11 +163,17 @@ class CodexBackend(
     private suspend fun onThreadReady(result: JsonObject?): List<AgentEvent> {
         val thread = result?.obj("thread") ?: return emptyList()
         val tid = thread.str("id") ?: return emptyList()
+        result.str("model")?.let { model = it }
         val flush = bootstrap.withLock {
             threadId = tid
-            pendingPrompt.also { pendingPrompt = null }
+            val prompt = pendingPrompt.also { pendingPrompt = null }
+            val compact = pendingCompact.also { pendingCompact = false }
+            val review = pendingReview.also { pendingReview = null }
+            Triple(prompt, compact, review)
         }
-        flush?.let { writeTurnStart(it.text, it.images) }
+        flush.first?.let { writeTurnStart(it.text, it.images) }
+        if (flush.second) requestCompact(tid)
+        flush.third?.let { requestReview(tid, it) }
         return listOf(AgentEvent.SessionInit(sessionId = tid, cwd = workdir, model = result.str("model")))
     }
 
@@ -192,8 +206,11 @@ class CodexBackend(
             "turn/completed" -> onTurnCompleted(params.obj("turn"))
             "error" -> {
                 val msg = params.obj("error")?.str("message") ?: "codex error"
-                // turn/completed (status=failed) still follows and clears `executing`; surface the text now
-                listOf(AgentEvent.AssistantText("⚠️ $msg"))
+                // The v2 protocol guarantees turn.error on a failed completion, but keep this notification
+                // as a fallback for older app-server builds. Emitting it immediately duplicated the error and
+                // left Conversation to synthesize the unhelpful literal "turn failed" afterwards.
+                lastErrorText = msg
+                emptyList()
             }
             else -> emptyList() // unknown notification type — tolerate (codex adds these over time)
         }
@@ -248,14 +265,16 @@ class CodexBackend(
 
     private fun onTurnCompleted(turn: JsonObject?): List<AgentEvent> {
         val status = turn?.str("status")
+        val failure = turn?.obj("error")?.str("message") ?: lastErrorText
         val u = lastUsage
         val ev = AgentEvent.TurnResult(
-            finalText = lastAgentText,
+            finalText = lastAgentText ?: failure,
             // a turn that never saw a tokenUsage event reports "unknown" (null), not an empty window
             usage = if (usageSeen) TokenUsage(u.input, u.output, null, u.cached) else null,
             isError = status == "failed",
         )
         lastAgentText = null
+        lastErrorText = null
         currentTurnId = null
         deltaSeen.clear()
         fileChangePaths.clear(); fileChangeDiffs.clear() // approvals for this turn are resolved by now — don't accumulate
@@ -316,10 +335,28 @@ class CodexBackend(
     // ---- outbound (called by Conversation) ----
 
     override suspend fun sendPrompt(text: String, images: List<ImageData>) {
+        val promptText = codexPrompt(text)
         val ready = bootstrap.withLock {
-            if (threadId == null) { pendingPrompt = Prompt(text, images); false } else true
+            if (threadId == null) { pendingPrompt = Prompt(promptText, images); false } else true
         }
-        if (ready) writeTurnStart(text, images)
+        if (ready) {
+            val activeTurn = currentTurnId
+            if (activeTurn != null) writeTurnSteer(promptText, images, activeTurn)
+            else writeTurnStart(promptText, images)
+        }
+    }
+
+    /** `/simplify` is a Claude built-in skill, not an app-server method. Keep CC Pocket's action useful
+     * for Codex by expanding it into an explicit, stable task instead of sending an unknown slash token. */
+    private fun codexPrompt(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.substringBefore(' ').substringBefore('\n') != "/simplify") return text
+        val extra = trimmed.removePrefix("/simplify").trim()
+        return buildString {
+            append("Review the current uncommitted changes and simplify the implementation without changing behavior. ")
+            append("Prioritize reuse, clarity, and removing unnecessary complexity; run relevant validation after editing.")
+            if (extra.isNotEmpty()) append(" Additional instructions: ").append(extra)
+        }
     }
 
     private suspend fun writeTurnStart(text: String, images: List<ImageData>) {
@@ -339,10 +376,59 @@ class CodexBackend(
         })
     }
 
+    /** Append input to the turn Codex is already running. Starting a second turn on the same thread is
+     * rejected by app-server as an active-writer conflict; turn/steer is its native in-flight input API. */
+    private suspend fun writeTurnSteer(text: String, images: List<ImageData>, turnId: String) {
+        val tid = threadId ?: return
+        rpcRequest("turn/steer", buildJsonObject {
+            put("threadId", tid)
+            putJsonArray("input") {
+                addJsonObject { put("type", "text"); put("text", text) }
+                // images: Codex takes image{url}/localImage{path}, not base64 inline — deferred (Tier C)
+            }
+            put("expectedTurnId", turnId)
+        })
+    }
+
     override suspend fun interrupt() {
         val tid = threadId ?: return
         val turn = currentTurnId ?: return
         rpcRequest("turn/interrupt", buildJsonObject { put("threadId", tid); put("turnId", turn) })
+    }
+
+    override suspend fun compact(): Boolean {
+        val tid = bootstrap.withLock {
+            threadId.also { if (it == null) pendingCompact = true }
+        }
+        if (tid != null) requestCompact(tid)
+        return true
+    }
+
+    private suspend fun requestCompact(tid: String) {
+        rpcRequest("thread/compact/start", buildJsonObject { put("threadId", tid) })
+    }
+
+    override suspend fun review(instructions: String?): Boolean {
+        val review = instructions?.trim().orEmpty()
+        val tid = bootstrap.withLock {
+            threadId.also { if (it == null) pendingReview = review }
+        }
+        if (tid != null) requestReview(tid, review)
+        return true
+    }
+
+    private suspend fun requestReview(tid: String, instructions: String) {
+        rpcRequest("review/start", buildJsonObject {
+            put("threadId", tid)
+            put("delivery", "inline")
+            putJsonObject("target") {
+                if (instructions.isBlank()) put("type", "uncommittedChanges")
+                else {
+                    put("type", "custom")
+                    put("instructions", instructions)
+                }
+            }
+        })
     }
 
     override suspend fun respondPermission(
@@ -407,9 +493,15 @@ class CodexBackend(
         CodexPaths.findSession(sessionId)?.let { CodexTranscriptReplay.page(it, beforeSeq, limit) }
             ?: dev.ccpocket.daemon.disk.ReplaySlice.EMPTY
 
-    // Codex usage is live-only (thread/tokenUsage/updated) — the rollout carries no per-turn usage
-    // record to read back, so there's nothing to seed the statusline with on resume.
-    override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    override fun resumeContextTokens(workdir: String, sessionId: String): Long? =
+        CodexPaths.findSession(sessionId)?.let { CodexTranscriptScanner.runtimeState(it).contextUsed }
+
+    override fun resumeModel(workdir: String, sessionId: String): String? =
+        CodexPaths.findSession(sessionId)?.let { CodexTranscriptScanner.runtimeState(it).model }
+
+    override fun resumeTitle(workdir: String, sessionId: String): String? =
+        CodexTranscriptScanner.threadNames()[sessionId]?.takeIf { it.isNotBlank() }
+            ?: CodexPaths.findSession(sessionId)?.let { CodexTranscriptScanner.summarize(it, workdir)?.title }
 
     // issue #96: read the configured default (top-level `model` in $CODEX_HOME/config.toml) so a brand-new
     // Codex session's header shows the real model before the first turn instead of a blank segment.

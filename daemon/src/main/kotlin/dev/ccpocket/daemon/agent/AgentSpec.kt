@@ -19,8 +19,9 @@ data class AgentSpec(
     val permissionMode: String? = null,
     /** Backend-native service tier (Codex `priority` = Fast); null follows the CLI/account default. */
     val serviceTier: String? = null,
-    // Claude only: fork the resumed session into a fresh id (--fork-session) instead of appending to the
-    // original transcript. Set when the phone takes over / cold-resumes a session another writer may hold.
+    // Fork the resumed session into a fresh id instead of appending to the original transcript. Set when
+    // the phone takes over a session another writer may hold: Claude maps this to --fork-session; Codex
+    // maps it to the app-server's native thread/fork request.
     val forkSession: Boolean = false,
     // GUEST folder-share clean-room (issue #115): launch the agent WITHOUT the owner's private, machine-wide
     // context, so a scoped collaborator can't siphon it through the agent (the issue's "context & capability

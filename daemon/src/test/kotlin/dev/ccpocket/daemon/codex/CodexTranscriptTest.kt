@@ -16,6 +16,8 @@ class CodexTranscriptTest {
     private val rollout = """
         {"timestamp":"t0","type":"session_meta","payload":{"id":"thr-xyz","cwd":"/repo","cli_version":"0.124.0"}}
         {"timestamp":"t1","type":"event_msg","payload":{"type":"task_started","turn_id":"u1"}}
+        {"timestamp":"t1a","type":"turn_context","payload":{"turn_id":"u1","model":"gpt-5.6-sol","effort":"high"}}
+        {"timestamp":"t1b","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":32123},"model_context_window":258400}}}
         {"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions> ..."}]}}
         {"timestamp":"t3","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context> ..."}]}}
         {"timestamp":"t4","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"build the thing"}]}}
@@ -35,6 +37,15 @@ class CodexTranscriptTest {
         assertEquals(1, s.messageCount)
         assertEquals(AgentKind.CODEX, s.agent)
         assertEquals("0.124.0", s.version)
+        assertEquals("gpt-5.6-sol", s.model)
+    }
+
+    @Test
+    fun runtime_state_uses_codex_model_and_context_metadata() {
+        val state = CodexTranscriptScanner.runtimeState(tempRollout())
+        assertEquals("gpt-5.6-sol", state.model)
+        assertEquals(258_400L, state.contextWindow)
+        assertEquals(32_123L, state.contextUsed)
     }
 
     @Test

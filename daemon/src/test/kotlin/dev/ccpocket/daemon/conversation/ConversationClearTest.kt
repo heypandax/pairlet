@@ -50,7 +50,16 @@ class ConversationClearTest {
         override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = true
         override suspend fun onProcessEnded(sessionId: String?) {}
         override fun transcriptDir(workdir: String): Path = Path.of(workdir)
-        override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
+        override fun listSessions(workdir: String): List<SessionSummary> = listOf(
+            SessionSummary(
+                sessionId = "resumed-sid",
+                title = "Transcript title",
+                firstPrompt = "first prompt",
+                messageCount = 1,
+                cwd = workdir,
+                lastModified = 1L,
+            ),
+        )
         override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = 80_000L
     }
@@ -91,6 +100,34 @@ class ConversationClearTest {
             } finally {
                 convo.close()
                 scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun resumed_session_announces_the_transcript_title() {
+        if (win()) return
+        runBlocking {
+            val dir = Files.createTempDirectory("ccp-title")
+            val frames = ArrayList<Frame>()
+            val scope = CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+            val convo = Conversation(
+                convoId = "cTitle", initialWorkdir = dir, initialMode = PermissionMode.DEFAULT,
+                initialSink = { f -> synchronized(frames) { frames.add(f) } },
+                parentScope = scope, backend = ResumedBackend(),
+            )
+            try {
+                convo.open(resumeId = "resumed-sid", model = null)
+                withTimeout(10_000) {
+                    while (synchronized(frames) { frames.none { it is SessionLive } }) delay(20)
+                }
+
+                val live = synchronized(frames) { frames.filterIsInstance<SessionLive>().first() }
+                assertEquals("Transcript title", live.title)
+            } finally {
+                convo.close()
+                scope.cancel()
+                dir.toFile().deleteRecursively()
             }
         }
     }

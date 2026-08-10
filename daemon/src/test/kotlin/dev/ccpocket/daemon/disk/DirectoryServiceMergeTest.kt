@@ -2,6 +2,7 @@ package dev.ccpocket.daemon.disk
 
 import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.SessionSummary
 import java.nio.file.Files
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeText
@@ -42,8 +43,18 @@ class DirectoryServiceMergeTest {
         dir.resolve("s1.jsonl").writeText("""{"cwd":"$cwd"}""" + "\n")
     }
 
-    private fun service(codex: Map<String, Long> = emptyMap(), opencode: Map<String, Long> = emptyMap()) =
-        DirectoryService(projectsRoot = { projects }, codexCwds = { codex }, opencodeCwds = { opencode })
+    private fun service(
+        codex: Map<String, Long> = emptyMap(),
+        opencode: Map<String, Long> = emptyMap(),
+        liveCodex: Set<String> = emptySet(),
+        activeCodexSessions: (Set<String>) -> Map<String, SessionSummary> = { emptyMap() },
+    ) = DirectoryService(
+        projectsRoot = { projects },
+        codexCwds = { codex },
+        opencodeCwds = { opencode },
+        liveCodexCwds = { liveCodex },
+        activeCodexSessions = activeCodexSessions,
+    )
 
     @Test
     fun variant_spellings_across_backends_merge_into_one_row() {
@@ -105,5 +116,91 @@ class DirectoryServiceMergeTest {
         val row = rows.single()
         assertTrue(row.open, "the live conversation must enrich the variant-spelled row")
         assertEquals("sid-1", row.activeSessionId)
+    }
+
+    @Test
+    fun external_codex_process_promotes_its_newest_rollout_to_an_active_session() {
+        val summary = SessionSummary(
+            sessionId = "codex-live",
+            title = "External Codex",
+            firstPrompt = "work",
+            messageCount = 2,
+            cwd = work.toString(),
+            lastModified = future,
+            live = true,
+            agent = AgentKind.CODEX,
+        )
+        val row = service(
+            codex = mapOf(work.toString() to future),
+            // The process probe may report a realpath/symlink spelling different from the rollout.
+            liveCodex = setOf(link.toString()),
+            activeCodexSessions = { cwds -> cwds.associateWith { summary } },
+        ).listDirectories(null).single()
+
+        assertTrue(row.open, "an external Codex CLI should put the project in the active section")
+        assertEquals("codex-live", row.activeSessionId)
+        assertEquals("External Codex", row.activeSessionTitle)
+        assertEquals(listOf(AgentKind.CODEX), row.activeSessions.map { it.agent })
+        assertTrue(row.executing, "fresh rollout activity should carry the running state")
+    }
+
+    @Test
+    fun every_external_codex_project_is_reported_not_only_the_newest_one() {
+        val other = Files.createTempDirectory("ccp-codex-other")
+        try {
+            val summaries = mapOf(
+                ProjectPaths.canonicalKey(work.toString()) to SessionSummary(
+                    "codex-a", "A", "work A", 1, work.toString(), future, agent = AgentKind.CODEX,
+                ),
+                ProjectPaths.canonicalKey(other.toString()) to SessionSummary(
+                    "codex-b", "B", "work B", 1, other.toString(), future - 1, agent = AgentKind.CODEX,
+                ),
+            )
+            val rows = service(
+                codex = mapOf(work.toString() to future, other.toString() to future - 1),
+                liveCodex = setOf(work.toString(), other.toString()),
+                activeCodexSessions = { cwds ->
+                    cwds.mapNotNull { cwd ->
+                        summaries[ProjectPaths.canonicalKey(cwd)]?.let { cwd to it }
+                    }.toMap()
+                },
+            ).listDirectories(null)
+
+            assertEquals(setOf("codex-a", "codex-b"), rows.mapNotNull { it.activeSessionId }.toSet())
+            assertTrue(rows.all { it.open })
+        } finally {
+            other.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun daemon_live_state_wins_when_external_codex_probe_finds_the_same_session() {
+        val exact = ActiveSession("same", executing = false, busy = true, agent = AgentKind.CODEX)
+        val heuristic = SessionSummary(
+            sessionId = "same",
+            title = "heuristic",
+            firstPrompt = "work",
+            messageCount = 1,
+            cwd = work.toString(),
+            lastModified = future,
+            live = true,
+            agent = AgentKind.CODEX,
+        )
+        val row = service(
+            codex = mapOf(work.toString() to future),
+            // No external Terminal/Codex Desktop process: the daemon-owned Codex conversation alone
+            // must still trigger a transcript lookup so its project-card title is not null.
+            liveCodex = emptySet(),
+            activeCodexSessions = { cwds -> cwds.associateWith { heuristic } },
+        ).listDirectories(null, liveByCwd = mapOf(work.toString() to listOf(exact))).single()
+
+        assertEquals(1, row.activeSessions.size, "the same session must not appear twice")
+        assertTrue(row.activeSessions.single().busy, "authoritative daemon state must beat the heuristic")
+        assertTrue(!row.activeSessions.single().executing)
+        assertEquals(
+            "heuristic",
+            row.activeSessions.single().title,
+            "authoritative live state must retain the transcript title instead of replacing it with null",
+        )
     }
 }

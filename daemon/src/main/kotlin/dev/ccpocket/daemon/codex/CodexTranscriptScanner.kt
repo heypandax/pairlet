@@ -20,11 +20,92 @@ object CodexTranscriptScanner {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     const val LIVE_WINDOW_MS = 20_000L
 
+    /** Last runtime settings persisted by Codex in a rollout. These are the source of truth when the
+     * desktop owns a session and cc-pocket is only observing it. */
+    data class RuntimeState(
+        val model: String? = null,
+        val contextWindow: Long? = null,
+        val contextUsed: Long? = null,
+    )
+
     /** All Codex sessions whose recorded cwd is [workdir], newest-first. */
     fun scan(workdir: String): List<SessionSummary> {
         val titles = threadNames() // one index read per listing, shared across every rollout summarized below
         return CodexPaths.sessionFiles().mapNotNull { runCatching { summarize(it, workdir, titles) }.getOrNull() }
             .sortedByDescending { it.lastModified }
+    }
+
+    /**
+     * The newest resumable Codex session for each externally-live cwd. Unlike [scan], this is called by
+     * the 10-second project-list refresh, so it walks the rollout tree ONCE and stops reading each matching
+     * file after the first real user prompt (messageCount is intentionally only a lower bound here). A
+     * full session list still uses [scan]; the active row only needs id/title/mtime/agent.
+     *
+     * Returned keys preserve the caller's cwd spelling; matching itself uses [ProjectPaths.canonicalKey].
+     */
+    fun activeSummaries(
+        workdirs: Set<String>,
+        files: List<Path> = CodexPaths.sessionFiles(),
+    ): Map<String, SessionSummary> {
+        if (workdirs.isEmpty()) return emptyMap()
+        val requested = workdirs.associateBy(ProjectPaths::canonicalKey)
+        val remaining = requested.keys.toMutableSet()
+        val out = LinkedHashMap<String, SessionSummary>()
+        val titles = threadNames()
+        for (file in files) {
+            if (remaining.isEmpty()) break
+            val hit = runCatching { summarizeActive(file, remaining, titles) }.getOrNull() ?: continue
+            val requestedCwd = requested[hit.first] ?: continue
+            out[requestedCwd] = hit.second
+            remaining.remove(hit.first)
+        }
+        return out
+    }
+
+    /** Canonical cwd key + lightweight summary, or null when this rollout is not a requested live cwd. */
+    private fun summarizeActive(
+        file: Path,
+        wantedKeys: Set<String>,
+        titles: Map<String, String>,
+    ): Pair<String, SessionSummary>? {
+        var id: String? = null
+        var cwd: String? = null
+        var version: String? = null
+        var firstPrompt: String? = null
+        file.bufferedReader().use { r ->
+            val meta = metaPayload(r) ?: return null
+            id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
+            val recorded = cwd ?: return null
+            val key = ProjectPaths.canonicalKey(recorded)
+            if (key !in wantedKeys) return null
+            var line = r.readLine()
+            while (line != null && firstPrompt == null) {
+                val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject
+                val p = obj?.takeIf { it.str("type") == "response_item" }?.obj("payload")
+                if (p != null && p.str("type") == "message" && p.str("role") == "user") {
+                    codexMessageText(p)?.takeIf { !isSyntheticUserText(it) }?.let { firstPrompt = it }
+                }
+                line = r.readLine()
+            }
+            if (firstPrompt == null) return null
+        }
+        val sid = id ?: return null
+        val recorded = cwd ?: return null
+        val fp = firstPrompt ?: return null
+        val mtime = file.getLastModifiedTime().toMillis()
+        return ProjectPaths.canonicalKey(recorded) to SessionSummary(
+            sessionId = sid,
+            title = titles[sid]?.takeIf { it.isNotBlank() }
+                ?: fp.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(60)
+                ?: sid,
+            firstPrompt = fp,
+            messageCount = 1,
+            cwd = recorded,
+            lastModified = mtime,
+            version = version,
+            live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
+            agent = AgentKind.CODEX,
+        )
     }
 
     // Codex's session_index.jsonl (id → thread title) — memoized by the index's mtime so a directory list
@@ -79,6 +160,38 @@ object CodexTranscriptScanner {
 
     private fun readCwd(file: Path): String? = file.bufferedReader().use { metaPayload(it)?.str("cwd") }
 
+    /** Read the newest Codex model and token metadata from a rollout. Model settings are written in
+     * `turn_context`; token counts are `event_msg/token_count`. Older rollouts simply return null fields. */
+    fun runtimeState(file: Path): RuntimeState {
+        var state = RuntimeState()
+        file.bufferedReader().useLines { lines ->
+            for (raw in lines) {
+                val obj = runCatching { json.parseToJsonElement(raw.trim()) }.getOrNull() as? JsonObject ?: continue
+                state = mergeRuntimeState(state, obj)
+            }
+        }
+        return state
+    }
+
+    private fun mergeRuntimeState(current: RuntimeState, obj: JsonObject): RuntimeState {
+        val payload = obj.obj("payload") ?: return current
+        val model = when (obj.str("type")) {
+            "turn_context" -> payload.str("model")
+                ?: payload.obj("collaboration_mode")?.obj("settings")?.str("model")
+            "world_state" -> payload.obj("state")?.str("model")
+            "event_msg" -> payload.obj("thread_settings")?.str("model")
+            else -> null
+        }
+        val info = payload.obj("info")
+        val window = payload.long("model_context_window") ?: info?.long("model_context_window")
+        val used = info?.obj("last_token_usage")?.long("total_tokens")
+        return RuntimeState(
+            model = model ?: current.model,
+            contextWindow = window ?: current.contextWindow,
+            contextUsed = used ?: current.contextUsed,
+        )
+    }
+
     /** The rollout's first-line `session_meta` payload (id/cwd/cli_version live here), or null. Advances
      *  [r] past that line so [summarize] can keep scanning turns from the same reader. */
     private fun metaPayload(r: java.io.BufferedReader): JsonObject? {
@@ -95,6 +208,7 @@ object CodexTranscriptScanner {
         var version: String? = null
         var firstPrompt: String? = null
         var userCount = 0
+        var runtime = RuntimeState()
         file.bufferedReader().use { r ->
             val meta = metaPayload(r) ?: return null
             id = meta.str("id"); cwd = meta.str("cwd"); version = meta.str("cli_version")
@@ -107,6 +221,7 @@ object CodexTranscriptScanner {
             var line = r.readLine()
             while (line != null) {
                 val obj = runCatching { json.parseToJsonElement(line.trim()) }.getOrNull() as? JsonObject
+                if (obj != null) runtime = mergeRuntimeState(runtime, obj)
                 val p = obj?.takeIf { it.str("type") == "response_item" }?.obj("payload")
                 if (p != null && p.str("type") == "message" && p.str("role") == "user") {
                     val t = codexMessageText(p)
@@ -138,6 +253,7 @@ object CodexTranscriptScanner {
             version = version,
             live = System.currentTimeMillis() - mtime < LIVE_WINDOW_MS,
             agent = AgentKind.CODEX,
+            model = runtime.model,
         )
     }
 

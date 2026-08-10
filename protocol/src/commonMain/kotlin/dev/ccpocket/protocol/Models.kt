@@ -50,8 +50,9 @@ enum class AgentKind {
  *  daemon must not emit this enum value to a peer that never declared it (see ClientCaps). */
 const val AGENT_WIRE_OPENCODE = "opencode"
 
-/** Codex model ids the app exposes as first-class presets. */
-val CODEX_MODEL_IDS = listOf("gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex")
+/** Last-resort Codex presets when the daemon cannot read Codex's own model cache. The normal picker is
+ * populated dynamically; these current family ids only prevent an empty picker on a fresh/offline install. */
+val CODEX_MODEL_IDS = listOf("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
 
 /** Claude alias set — the ONE id family that is meaningless to the other backends. */
 val CLAUDE_MODEL_ALIAS_IDS = setOf("fable", "opus", "sonnet", "haiku")

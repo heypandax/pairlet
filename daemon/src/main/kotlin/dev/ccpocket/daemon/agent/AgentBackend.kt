@@ -41,6 +41,13 @@ interface AgentBackend {
     /** Encode + write an interrupt for the in-flight turn; no-op if the process isn't ready. */
     suspend fun interrupt()
 
+    /** Compact the backend's native conversation context. True means the request was accepted (it may
+     * complete asynchronously); false means this backend has no native compaction API. */
+    suspend fun compact(): Boolean = false
+
+    /** Start the backend's native code-review flow. Null/blank means review all uncommitted changes. */
+    suspend fun review(instructions: String? = null): Boolean = false
+
     /** Ask the LIVE agent process to rename its session (issue #158) — Claude: a `rename_session`
      *  control_request; the CLI appends its own `custom-title` record and acks, so the daemon never
      *  writes a transcript its child holds. True = the agent acknowledged (record on disk). Default
@@ -119,6 +126,12 @@ interface AgentBackend {
      *  model + context window before the first new turn's init lands. Null when unknown / not on disk (default;
      *  e.g. Codex). Claude reads it from the transcript. */
     fun resumeModel(workdir: String, sessionId: String): String? = null
+
+    /** Human-facing title persisted by the backend. Used to make SessionLive self-contained for entry
+     *  points (push/deep link) that know only workdir + session id. Backends may override with a cheaper
+     *  direct lookup; the default keeps OpenCode and third-party implementations correct. */
+    fun resumeTitle(workdir: String, sessionId: String): String? =
+        listSessions(workdir).firstOrNull { it.sessionId == sessionId }?.title
 
     /** The model this backend WOULD use for a session started with NO explicit `--model` — read from config so
      *  a brand-new session's header shows the real model BEFORE the first turn (issue #96; lazy start #61 spawns

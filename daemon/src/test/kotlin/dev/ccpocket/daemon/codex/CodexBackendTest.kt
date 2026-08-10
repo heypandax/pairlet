@@ -44,6 +44,25 @@ class CodexBackendTest {
     }
 
     @Test
+    fun take_over_uses_native_thread_fork_instead_of_a_second_writer_on_resume() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(
+            AgentIo(writeLine = { w += it }, emit = {}),
+            AgentSpec(Path.of("/repo"), resumeId = "thr-desktop", forkSession = true),
+        )
+        b.parse(initResponse(1))
+
+        val open = w.last { "thread/" in it }
+        assertTrue("\"method\":\"thread/fork\"" in open, open)
+        assertTrue("\"threadId\":\"thr-desktop\"" in open, open)
+        assertFalse("thread/resume" in open, open)
+
+        val ev = b.parse(threadStartResponse(2, "thr-phone"))
+        assertEquals("thr-phone", assertIs<AgentEvent.SessionInit>(ev.single()).sessionId)
+    }
+
+    @Test
     fun first_prompt_buffers_until_thread_ready_then_turn_start() = runBlocking {
         val w = mutableListOf<String>()
         val b = CodexBackend(null)
@@ -63,6 +82,23 @@ class CodexBackendTest {
     }
 
     @Test
+    fun prompt_sent_during_an_active_turn_uses_native_turn_steer() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        b.parse(
+            """{"method":"turn/started","params":{"threadId":"thr-1","turn":{"id":"turn-live","status":"inProgress"}}}""",
+        )
+
+        b.sendPrompt("continue with the next batch", emptyList())
+
+        val request = w.last()
+        assertTrue("\"method\":\"turn/steer\"" in request, request)
+        assertTrue("\"threadId\":\"thr-1\"" in request, request)
+        assertTrue("\"expectedTurnId\":\"turn-live\"" in request, request)
+        assertTrue("continue with the next batch" in request, request)
+    }
+
+    @Test
     fun agent_message_delta_streams_as_text() = runBlocking {
         val w = mutableListOf<String>()
         val b = ready(w)
@@ -77,6 +113,58 @@ class CodexBackendTest {
         b.parse("""{"method":"item/agentMessage/delta","params":{"itemId":"i1","delta":"Hi"}}""")
         val ev = b.parse("""{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"i1","text":"Hi there"}}}""")
         assertTrue(ev.isEmpty(), "final must not re-emit once deltas streamed the message") // text was already streamed
+    }
+
+    @Test
+    fun compact_uses_native_app_server_rpc_when_thread_is_ready() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+
+        assertTrue(b.compact())
+
+        val request = w.last()
+        assertTrue("\"method\":\"thread/compact/start\"" in request, request)
+        assertTrue("\"threadId\":\"thr-1\"" in request, request)
+    }
+
+    @Test
+    fun compact_queued_during_handshake_runs_once_after_thread_opens() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = CodexBackend(null)
+        b.attach(AgentIo({ w += it }, {}), AgentSpec(Path.of("/repo"), resumeId = "thr-old"))
+
+        assertTrue(b.compact())
+        assertTrue(w.none { "thread/compact/start" in it })
+        b.parse(initResponse(1))
+        b.parse(threadStartResponse(2, "thr-1"))
+
+        assertEquals(1, w.count { "thread/compact/start" in it })
+    }
+
+    @Test
+    fun review_uses_native_app_server_target() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+
+        assertTrue(b.review())
+
+        val request = w.last()
+        assertTrue("\"method\":\"review/start\"" in request, request)
+        assertTrue("\"type\":\"uncommittedChanges\"" in request, request)
+        assertTrue("\"delivery\":\"inline\"" in request, request)
+    }
+
+    @Test
+    fun simplify_expands_to_a_codex_task_not_an_unknown_slash_command() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+
+        b.sendPrompt("/simplify keep the public API", emptyList())
+
+        val turn = w.last { "turn/start" in it }
+        assertFalse("/simplify" in turn, turn)
+        assertTrue("simplify the implementation" in turn, turn)
+        assertTrue("keep the public API" in turn, turn)
     }
 
     @Test
@@ -158,6 +246,19 @@ class CodexBackendTest {
         val tr = ev.single()
         assertIs<AgentEvent.TurnResult>(tr)
         assertEquals(null, tr.usage) // zeros would read as "empty window" on the phone's statusline
+    }
+
+    @Test
+    fun failed_turn_surfaces_codex_error_instead_of_generic_turn_failed() = runBlocking {
+        val w = mutableListOf<String>()
+        val b = ready(w)
+        val ev = b.parse(
+            """{"method":"turn/completed","params":{"threadId":"thr-1","turn":{"id":"t1","status":"failed","error":{"message":"Selected model is unavailable"}}}}""",
+        )
+
+        val tr = assertIs<AgentEvent.TurnResult>(ev.single())
+        assertTrue(tr.isError)
+        assertEquals("Selected model is unavailable", tr.finalText)
     }
 
     @Test

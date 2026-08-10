@@ -48,7 +48,7 @@ class CodexModelServiceTest {
 
         assertEquals(AgentKind.CODEX, result.agent)
         assertEquals(null, result.error)
-        assertEquals(listOf("gpt-5.5", "gpt-5.6-sol", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex"), result.models)
+        assertEquals(listOf("gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"), result.models)
         val sol = result.modelCapabilities.single { it.model == "gpt-5.6-sol" }
         assertEquals(listOf("max", "ultra"), sol.reasoningEfforts)
         assertEquals("max", sol.defaultReasoningEffort)

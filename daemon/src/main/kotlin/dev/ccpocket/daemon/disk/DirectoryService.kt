@@ -25,6 +25,9 @@ class DirectoryService(
     private val projectsRoot: () -> Path = ProjectPaths::projectsRoot,
     private val codexCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.codex.CodexTranscriptScanner.cwdsByNewest() },
     private val opencodeCwds: () -> Map<String, Long> = { dev.ccpocket.daemon.opencode.OpenCodeTranscriptScanner.cwdsByNewest() },
+    private val liveCodexCwds: () -> Set<String> = LiveProcesses::codexCwds,
+    private val activeCodexSessions: (Set<String>) -> Map<String, dev.ccpocket.protocol.SessionSummary> =
+        dev.ccpocket.daemon.codex.CodexTranscriptScanner::activeSummaries,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val recents = LinkedHashSet<String>()
@@ -67,10 +70,55 @@ class DirectoryService(
     ): List<DirectoryEntry> {
         // canonical-keyed so ANY spelling mismatch (tilde, symlink, separators) between OpenSession's
         // workdir and a transcript's recorded cwd still matches
-        val liveNorm = liveByCwd.entries.groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value }).mapValues { (_, v) -> v.flatten() }
-        val claude = claudeDirectories(busyCwds, liveNorm)
         val codex = runCatching(codexCwds).getOrDefault(emptyMap())
         val opencode = if (includeOpencode) runCatching(opencodeCwds).getOrDefault(emptyMap()) else emptyMap()
+        val daemonLive = liveByCwd.entries
+            .groupBy({ ProjectPaths.canonicalKey(it.key) }, { it.value })
+            .mapValues { (_, v) -> v.flatten() }
+        // A Codex CLI launched from Terminal/Codex Desktop is outside SessionRegistry, so enrich the
+        // project list from its process cwd and the newest rollout for that cwd. Process presence means
+        // `open`; transcript freshness only decides `executing`. The daemon-owned row wins on a duplicate
+        // session id because it has exact turn state, while this external probe is necessarily heuristic.
+        val externalCodexCwds = runCatching { liveCodexCwds() }.getOrDefault(emptySet())
+            .filterTo(linkedSetOf()) { cwd ->
+                codex.keys.any { ProjectPaths.canonicalKey(it) == ProjectPaths.canonicalKey(cwd) }
+            }
+        // A daemon-owned Codex process is already authoritative proof that this session is live. Include
+        // those workdirs even when no separate Terminal/Codex Desktop process exists; otherwise the
+        // transcript probe never runs and the exact daemon row keeps its intentionally-null title.
+        val daemonCodexCwds = liveByCwd.entries
+            .filterTo(linkedSetOf()) { (_, sessions) -> sessions.any { it.agent == AgentKind.CODEX } }
+            .mapTo(linkedSetOf()) { it.key }
+        val codexTitleCwds = externalCodexCwds + daemonCodexCwds
+        val externalCodexLive = runCatching { activeCodexSessions(codexTitleCwds) }.getOrDefault(emptyMap())
+            .map { (cwd, session) ->
+                ProjectPaths.canonicalKey(cwd) to ActiveSession(
+                    sessionId = session.sessionId,
+                    title = session.title,
+                    executing = session.live,
+                    gitBranch = session.gitBranch,
+                    agent = AgentKind.CODEX,
+                )
+            }
+            .groupBy({ it.first }, { it.second })
+        val liveNorm = (daemonLive.keys + externalCodexLive.keys).associateWith { key ->
+            val external = externalCodexLive[key].orEmpty()
+            val externalById = external.associateBy { it.sessionId }
+            // Keep the daemon's exact execution/busy/origin state, but fill its deliberately-null
+            // presentation metadata from the transcript probe. A plain distinctBy kept the daemon row
+            // whole and discarded the duplicate probe row, so tapping a live Codex project opened the
+            // correct session with a null title and the phone rendered its generic "Chat" fallback.
+            val authoritative = daemonLive[key].orEmpty().map { live ->
+                val transcript = externalById[live.sessionId]
+                live.copy(
+                    title = live.title ?: transcript?.title,
+                    gitBranch = live.gitBranch ?: transcript?.gitBranch,
+                )
+            }
+            (authoritative + external.filterNot { probe -> authoritative.any { it.sessionId == probe.sessionId } })
+                .sortedByDescending { it.executing }
+        }
+        val claude = claudeDirectories(busyCwds, liveNorm)
         // issue #188: the App's agent filter needs PROJECT-level provenance, not just the backend of any
         // currently-live session. Keep it additive on DirectoryEntry so each client can apply its own
         // persisted filter without turning that preference into daemon-global state.

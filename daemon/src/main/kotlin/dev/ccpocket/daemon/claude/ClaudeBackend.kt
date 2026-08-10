@@ -243,6 +243,9 @@ class ClaudeBackend(
     override fun resumeModel(workdir: String, sessionId: String): String? =
         TranscriptScanner.lastModel(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))
 
+    override fun resumeTitle(workdir: String, sessionId: String): String? =
+        TranscriptScanner.summarize(ProjectPaths.dirFor(workdir).resolve("$sessionId.jsonl"))?.title
+
     // issue #96: read the configured default (settings.json `model` / $ANTHROPIC_MODEL) so a brand-new
     // session's header shows the real model before the first turn. configDir = the daemon's isolated
     // CLAUDE_CONFIG_DIR when credential isolation is on (settings.json is symlinked back to the real one).

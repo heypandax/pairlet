@@ -56,7 +56,12 @@ object SlashCommandScanner {
         agent: AgentKind = AgentKind.CLAUDE,
     ): List<SlashCommand> {
         val byName = LinkedHashMap<String, SlashCommand>()
-        builtins.forEach { byName[skillKey(it.name)] = it }
+        val supportedBuiltins = if (agent == AgentKind.CODEX) {
+            // App-server control plane / daemon equivalents plus actions that are valid Codex prompts.
+            // Claude-only CLI skills (/init, /run, /deep-research, …) must not be advertised as Codex commands.
+            builtins.filter { it.name in CODEX_BUILTINS }
+        } else builtins
+        supportedBuiltins.forEach { byName[skillKey(it.name)] = it }
         // Claude custom commands are not a Codex/OpenCode capability. Preserve the legacy OpenCode
         // listing until that backend has its own command discovery contract.
         if (agent != AgentKind.CODEX) {
@@ -118,6 +123,8 @@ object SlashCommandScanner {
     }
 
     private data class Frontmatter(val description: String?, val argumentHint: String?)
+
+    private val CODEX_BUILTINS = setOf("model", "effort", "compact", "clear", "review", "simplify")
 
     /** Minimal YAML frontmatter read: top-level `description:` and `argument-hint:` scalars only. */
     private fun frontmatter(file: Path): Frontmatter {
