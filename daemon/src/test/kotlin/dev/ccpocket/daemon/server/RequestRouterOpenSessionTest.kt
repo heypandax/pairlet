@@ -47,6 +47,13 @@ import kotlin.test.assertTrue
  * and keep a GUEST clamped to its shared root (`share_out_of_scope`) even at this second gate —
  * GuestGuard vets first, but the router's re-check is the belt-and-suspenders the #115 scope relies
  * on. The lazy open (#61) spawns no process, so a stub backend drives the whole path.
+ *
+ * ANNOUNCE ECHO (issue #219): the SessionLive answering an open must carry the opener's workdir
+ * string VERBATIM, not the daemon's canonicalized form. The phone's identity guard recognizes a
+ * brand-new session (no sessionId yet) by exact string match against the workdir it sent, and only
+ * the daemon knows the remote home/symlink layout — so any canonicalization here ("~" → home,
+ * /var → /private/var) makes the phone drop its own answer and time out. Expansion still happens
+ * internally (validateOrCreateWorkdir); it just must not leak into the announce.
  */
 class RequestRouterOpenSessionTest {
 
@@ -109,19 +116,25 @@ class RequestRouterOpenSessionTest {
         router(CoroutineScope(Dispatchers.Default)).handle(OpenSession(fresh.toString()), { emitted += it })
 
         val live = awaitLive(emitted)
-        assertEquals(fresh.toRealPath().toString(), live.workdir, "the announced cwd is the canonicalized picked dir")
+        // NOT toRealPath(): on macOS the temp dir is /var/… while its real path is /private/var/… —
+        // exactly the canonicalization drift the #219 echo contract exists to keep out of the announce
+        assertEquals(fresh.toString(), live.workdir, "the announce echoes the opener's workdir verbatim (#219)")
         assertTrue(emitted.none { it is PocketError }, "a readable no-history dir must not be refused: $emitted")
     }
 
     @Test
-    fun the_pickers_raw_tilde_workdir_expands_to_the_daemon_home() = runBlocking {
+    fun the_pickers_raw_tilde_workdir_opens_and_is_echoed_verbatim() = runBlocking {
         // the phone's folder browser (issue #152) ships "~"-anchored workdirs raw — only the daemon
-        // knows the remote machine's home (same contract the ListSessions tilde test pins)
+        // knows the remote machine's home (same contract the ListSessions tilde test pins). The open
+        // must succeed (proof the daemon expanded it internally), but the ANNOUNCE must echo "~"
+        // untouched: the phone's #219 guard matches the exact string it sent, and a home-expanded
+        // announce is the "new session from the ~ anchor times out" bug this pins against.
         val emitted = Collections.synchronizedList(mutableListOf<Frame>())
         router(CoroutineScope(Dispatchers.Default)).handle(OpenSession("~"), { emitted += it })
 
         val live = awaitLive(emitted)
-        assertEquals(Path.of(System.getProperty("user.home")).toRealPath().toString(), live.workdir)
+        assertEquals("~", live.workdir, "the raw ~ form must survive into the announce (#219)")
+        assertTrue(emitted.none { it is PocketError }, "the daemon must still expand ~ internally and open it: $emitted")
     }
 
     @Test
@@ -158,6 +171,6 @@ class RequestRouterOpenSessionTest {
             .handle(OpenSession(sub.toString()), { emitted += it }, origin = "share:alex", guestScope = guestScope(root))
 
         val live = awaitLive(emitted)
-        assertEquals(sub.toRealPath().toString(), live.workdir, "in-scope fresh dirs stay openable for a guest")
+        assertEquals(sub.toString(), live.workdir, "in-scope fresh dirs stay openable for a guest, echoed verbatim (#219)")
     }
 }
