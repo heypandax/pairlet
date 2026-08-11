@@ -1,12 +1,17 @@
 package dev.ccpocket.app.ui
 
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import androidx.compose.ui.test.runDesktopComposeUiTest
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import dev.ccpocket.app.assertPresent
 import dev.ccpocket.app.data.PocketRepository
 import dev.ccpocket.app.pairing.PairedDaemon
@@ -30,10 +35,16 @@ import dev.ccpocket.app.resources.schedule_tasks_title
 import dev.ccpocket.app.resources.security_section
 import dev.ccpocket.app.resources.settings_bridges
 import dev.ccpocket.app.resources.settings_cat_agent
+import dev.ccpocket.app.resources.settings_cat_agent_sub
 import dev.ccpocket.app.resources.settings_cat_connections
+import dev.ccpocket.app.resources.settings_cat_connections_sub
 import dev.ccpocket.app.resources.settings_cat_general
+import dev.ccpocket.app.resources.settings_cat_general_sub
 import dev.ccpocket.app.resources.settings_cat_security
+import dev.ccpocket.app.resources.settings_cat_security_sub
 import dev.ccpocket.app.resources.settings_cat_support
+import dev.ccpocket.app.resources.settings_cat_support_sub
+import dev.ccpocket.app.resources.settings_categories
 import dev.ccpocket.app.resources.settings_connected_to
 import dev.ccpocket.app.resources.settings_manual_title
 import dev.ccpocket.app.resources.settings_paired_computers
@@ -123,6 +134,7 @@ class SettingsIaTest {
         assertPresent(str(Res.string.settings_connected_to, "alex-macbook"))
         assertPresent(str(Res.string.settings_usage))
         assertPresent(str(Res.string.schedule_tasks_title))
+        assertPresent(str(Res.string.settings_categories).uppercase())
         listOf(
             Res.string.settings_cat_general, Res.string.settings_cat_agent, Res.string.settings_cat_connections,
             Res.string.settings_cat_security, Res.string.settings_cat_support,
@@ -130,6 +142,67 @@ class SettingsIaTest {
         // no control has leaked onto it
         assertFalse(present(str(Res.string.appearance_section)), "controls live on their category page")
         assertFalse(present(str(Res.string.exit)), "…including the way out")
+    }
+
+    /**
+     * UI 2.1: the two utilities and the five categories are two VISIBLY different groups.
+     *
+     * The A3 correction is structural, so it is asserted structurally: the utilities stay bare on the page
+     * gutter, a written label separates them, and the five categories are inset — which is what being
+     * inside one container looks like from the outside. Heights are floors, not fixed sizes, so a longer
+     * localisation or bigger type grows a row rather than cropping its second line.
+     */
+    @Test
+    fun theLandingSeparatesBareUtilitiesFromOneCategoryContainer() = runDesktopComposeUiTest(402, 874) {
+        setContent {
+            val repo = PocketRepository(rememberCoroutineScope(), account())
+            PocketTheme { SettingsScreen(repo, onBack = {}) }
+        }
+        waitForIdle()
+
+        fun text(s: String) = onAllNodes(hasText(s), useUnmergedTree = true).onFirst().getUnclippedBoundsInRoot()
+        fun row(s: String) = onAllNodes(hasText(s)).onFirst().getUnclippedBoundsInRoot()
+
+        val usage = text(str(Res.string.settings_usage))
+        val schedules = text(str(Res.string.schedule_tasks_title))
+        val label = text(str(Res.string.settings_categories).uppercase())
+        val categories = SettingsCategory.entries.map { text(str(settingsCategoryTitleRes(it))) }
+
+        // order: the two destinations, then the label, then the five categories
+        assertTrue(schedules.top > usage.top, "Scheduled tasks follows Token usage")
+        assertTrue(label.top > schedules.top, "the section label comes after both utilities")
+        categories.forEach { assertTrue(it.top > label.top, "every category sits under the label") }
+        categories.zipWithNext { a, b -> assertTrue(b.top > a.top, "the five categories keep their order") }
+
+        // the categories are inset from the page gutter the utilities sit on — one container holds them
+        assertEquals(usage.left, schedules.left, "both utilities sit on the page gutter")
+        categories.forEach {
+            assertTrue(it.left > usage.left, "a category row is inset inside its container")
+        }
+
+        // floors, so 200% type grows a row instead of cropping it
+        listOf(str(Res.string.settings_usage), str(Res.string.schedule_tasks_title)).forEach {
+            assertTrue(row(it).height >= 56.dp, "\"$it\" keeps the 56 dp utility floor")
+        }
+        SettingsCategory.entries.forEach {
+            val title = str(settingsCategoryTitleRes(it))
+            assertTrue(row(title).height >= 64.dp, "\"$title\" keeps the 64 dp category floor")
+        }
+    }
+
+    @Test
+    fun everyCategorySubtitleExplainsWhatLivesInside() = runComposeUiTest {
+        setContent {
+            val scope = rememberCoroutineScope()
+            val repo = remember { PocketRepository(scope, account()) }
+            PocketTheme { SettingsScreen(repo, onBack = {}) }
+        }
+        waitForIdle()
+        listOf(
+            Res.string.settings_cat_general_sub, Res.string.settings_cat_agent_sub,
+            Res.string.settings_cat_connections_sub,
+            Res.string.settings_cat_security_sub, Res.string.settings_cat_support_sub,
+        ).forEach { assertPresent(str(it)) }
     }
 
     /** Each category page renders the controls its map claims. Walked one page at a time, by opening it. */

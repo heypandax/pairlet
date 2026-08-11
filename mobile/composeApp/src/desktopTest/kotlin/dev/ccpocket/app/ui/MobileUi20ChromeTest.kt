@@ -212,7 +212,8 @@ class MobileUi20ChromeTest {
         val connLabels = listOf(Res.string.ses_conn_online, Res.string.ses_conn_connecting, Res.string.ses_conn_offline).map { str(it) }
         assertEquals(1, connLabels.count { present(it, substring = true) }, "the link states exactly one state")
         assertFalse(present(str(Res.string.ses_conn_online), substring = true), "…and never claims online while it is not")
-        assertTrue(present("cc-pocket", substring = true), "the project folder is its own line")
+        // the folder is named ONCE, at the path's tail — never as a duplicate row stacked above the path
+        assertFalse(present("cc-pocket"), "no standalone folder row")
         assertTrue(present("~/code/cc-pocket", substring = true), "the FULL workdir is on screen, not a tail fragment")
         // both halves of the list, each under its own heading, each row writing its state
         assertTrue(present(str(Res.string.ses_active).uppercase()), "running work gets the Active section")
@@ -244,6 +245,30 @@ class MobileUi20ChromeTest {
             present("${str(Res.string.st_complete)} · Claude · ${str(Res.string.ses_messages, 8)}"),
             "a row omits the facts it lacks instead of padding them",
         )
+    }
+
+    @Test
+    fun anUntitledSessionDoesNotPrintItsPromptTwice() = baseline(
+        seed = {
+            receiveForTest(
+                Sessions(
+                    dir,
+                    listOf(
+                        summary("s1", title = "Redesign the sessions screen", prompt = "Redesign the sessions screen"),
+                        summary("s2", title = "Auth refactor", prompt = "refactor the auth module end to end"),
+                    ),
+                ),
+            )
+        },
+        content = { SessionsScreen(it) },
+    ) {
+        // a scanner-fallback title IS the first prompt — the row prints those words once, never as a preview too
+        assertEquals(
+            1, onAllNodes(hasText("Redesign the sessions screen")).fetchSemanticsNodes().size,
+            "title and preview must not stack the same sentence",
+        )
+        // a REAL title keeps its preview: the prompt under it adds information
+        assertTrue(present("refactor the auth module end to end"), "a distinct prompt still previews")
     }
 
     @Test
@@ -461,6 +486,7 @@ class MobileUi20ChromeTest {
                         HistoryMessage(ChatRole.USER, "add a unit test for the stream parser"),
                         HistoryMessage(ChatRole.ASSISTANT, "The parser now emits exactly one event per frame."),
                         HistoryMessage(ChatRole.TOOL, "./gradlew :protocol:test", tool = "Bash", ok = true),
+                        HistoryMessage(ChatRole.TOOL, "cat build/reports/summary.txt", tool = "Bash", ok = true),
                     ),
                 ),
             )
@@ -470,8 +496,15 @@ class MobileUi20ChromeTest {
         assertTrue(present(str(Res.string.chat_you).uppercase()), "the user turn names its source")
         assertTrue(present("CLAUDE"), "the agent turn names the REAL backend, not a generic \"assistant\"")
         assertTrue(present(str(Res.string.chat_src_tool).uppercase()), "and a tool call says so")
+        // …but a RUN of tool calls says so once: each band's own tool chip already names its call, so the
+        // label repeating between consecutive bands was pure air
+        assertEquals(
+            1, onAllNodes(hasText(str(Res.string.chat_src_tool).uppercase())).fetchSemanticsNodes().size,
+            "consecutive tool turns share one source label",
+        )
         assertTrue(present("Bash"), "the tool token is the daemon's own")
         assertTrue(present("./gradlew :protocol:test"), "the payload is the literal command, never a summary")
+        assertTrue(present("cat build/reports/summary.txt"), "…for every band in the run")
         assertTrue(present(str(Res.string.done)), "a real ok = true reads as Done")
     }
 
@@ -503,7 +536,7 @@ class MobileUi20ChromeTest {
     }
 
     @Test
-    fun theChatHeaderStateBlockAndComposerAllSurviveTwoHundredPercentType() = baseline(
+    fun theChatHeaderAndComposerSurviveTwoHundredPercentTypeAndRunningIsWrittenOnce() = baseline(
         fontScale = 2f,
         seed = {
             receiveForTest(sessionLive(executing = true))
@@ -511,10 +544,12 @@ class MobileUi20ChromeTest {
         },
         content = { ChatScreen(it) },
     ) {
-        // the pinned state and the composer both stay reachable in the same frame at double type
-        onAllNodes(hasText(str(Res.string.st_running), substring = true)).onFirst().assertIsDisplayed()
+        // the queue note — the ONE place a bare running turn is written — stays reachable at double type
         onAllNodes(hasText(str(Res.string.message_queued_hint), substring = true)).onFirst().assertIsDisplayed()
-        assertWithinViewport(str(Res.string.st_running))
+        assertWithinViewport(str(Res.string.message_queued_hint))
+        // streaming alone pins no "Running" band above the stream: the note + Stop already say it, and a
+        // second full-width band said the same thing twice while costing the transcript a row
+        assertFalse(present(str(Res.string.st_running)), "a bare running turn must not pin a state band too")
     }
 
     private companion object {

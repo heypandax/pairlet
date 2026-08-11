@@ -1822,18 +1822,23 @@ internal fun SessionsScreen(repo: PocketRepository, onOpenInbox: () -> Unit = {}
                 }
                 // ── Recent: the organisation half. Groups keep their headers here, including empty ones,
                 // so a freshly created group stays visible and manageable (issue #119).
+                // The "+ New group" affordance rides the section header's trailing edge — shown whenever the
+                // daemon is group-aware (groupsSupported), including zero groups yet so the FIRST group stays
+                // creatable, but hidden on an older daemon / guest connection that omits groups entirely
+                // (sessionSections then returns one flat section). Inline rather than a full-width row of its
+                // own: a bootstrap affordance must stay discoverable without owning a whole list line.
                 if (split.recent.isNotEmpty() || repo.groupsSupported.value) {
                     item(key = "hdr:recent") {
-                        SessionSectionLabel(
-                            stringResource(Res.string.ses_recent),
-                            Modifier.padding(top = if (split.active.isEmpty()) 0.dp else 22.dp, bottom = 10.dp),
-                        )
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = if (split.active.isEmpty()) 0.dp else 14.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SessionSectionLabel(stringResource(Res.string.ses_recent))
+                            Spacer(Modifier.weight(1f))
+                            if (repo.groupsSupported.value) NewGroupRow { showNewGroup = true }
+                        }
                     }
                 }
-                // The "+ New group" affordance shows whenever the daemon is group-aware (groupsSupported) —
-                // including zero groups yet, so the FIRST group is creatable — but hides on an older daemon /
-                // guest connection that omits groups entirely (sessionSections then returns one flat section).
-                if (repo.groupsSupported.value) item { NewGroupRow { showNewGroup = true } }
                 for (section in sessionSections(split.recent.map { it.session }, repo.sessionGroups)) {
                     val g = section.group
                     val key = g?.id ?: UNGROUPED_KEY
@@ -2234,8 +2239,9 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                 }
             }
             // ── the one pinned state, chosen by the shared ladder from real facts only ────────────────
-            // Approval/Answer lead; a streaming turn under them is demoted to a qualifying line. The block
-            // is actionless by design — Secure Approval (modal) and QuestionCard own their decisions.
+            // Approval/Answer lead; a streaming turn under them is demoted to a qualifying line, and
+            // streaming ALONE pins nothing — the composer note + Stop write it once, where the user acts.
+            // The block is actionless by design — Secure Approval (modal) and QuestionCard own their decisions.
             chatStateUi(repo.pendingAsk.value, repo.sessionDegraded.value, repo.streaming.value)
                 ?.let { ChatStateBlock(it) }
             // Role ribbon (design Frames 6/7): terracotta only when THIS device is the acting recipient;
@@ -2322,6 +2328,10 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 m,
                                 workflowRun = (m as? ChatItem.Tool)?.let(repo::workflowFor),
                                 agent = repo.sessionAgent.value,
+                                // short-circuit keeps non-tool rows from reading the list in their own
+                                // recompose scope — a whole-list read here re-runs every visible row on
+                                // every streaming delta
+                                toolSourceLabeled = m !is ChatItem.Tool || repo.messages.getOrNull(mi - 1) !is ChatItem.Tool,
                                 onOpenWorkflow = repo::openWorkflow,
                                 onOpenImages = { imgs, i -> viewer = imgs to i },
                                 onOpenVideo = { videoViewer = it },
@@ -2883,6 +2893,9 @@ private fun MessageItem(
     workflowRun: dev.ccpocket.protocol.WorkflowRun? = null,
     // which backend is speaking — the Agent turn is labeled with its real name, never a generic "Assistant"
     agent: AgentKind? = null,
+    // false inside a run of consecutive tool calls: the run shares ONE "Tool" source label, because each
+    // band's own tool chip already names its call and repeating the label between bands only cost air
+    toolSourceLabeled: Boolean = true,
     onOpenWorkflow: (String) -> Unit = {},
     onOpenImages: (List<ByteArray>, Int) -> Unit = { _, _ -> },
     onOpenVideo: (dev.ccpocket.app.data.SentFile) -> Unit = {},
@@ -2942,7 +2955,7 @@ private fun MessageItem(
             val opener = LocalPathOpener.current
             val openablePath = m.tool in TOOL_FILE_PATH_TOOLS && opener != null && looksLikePath(m.preview)
             Column {
-                TurnSourceLabel(stringResource(Res.string.chat_src_tool), Modifier.padding(bottom = 7.dp))
+                if (toolSourceLabeled) TurnSourceLabel(stringResource(Res.string.chat_src_tool), Modifier.padding(bottom = 7.dp))
                 ToolTurnBand(
                     // the real tool token, verbatim — "Plan" is the one rename, because that is what
                     // ExitPlanMode's payload actually is

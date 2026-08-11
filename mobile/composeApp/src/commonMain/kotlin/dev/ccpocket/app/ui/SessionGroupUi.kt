@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -106,17 +107,18 @@ internal fun GroupHeader(name: String, count: Int, collapsed: Boolean, onToggle:
     }
 }
 
-/** The "+ New group" affordance at the top of the list — the bootstrap path for the very first group. */
+/** The "+ New group" affordance riding the Recent section header — the bootstrap path for the very first
+ *  group. Hugs its content (it shares the header line with the section label), never a full-width row. */
 @Composable
 internal fun NewGroupRow(onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 10.dp),
+        Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(9.dp)).clickable(onClick = onClick)
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Rounded.Add, null, tint = Tok.tx2, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Icon(Icons.Rounded.Add, null, tint = Tok.tx2, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(stringResource(Res.string.group_new), color = Tok.tx2, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }
 

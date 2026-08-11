@@ -36,9 +36,13 @@ data class ChatStateUi(
 /**
  * Select the ONE state Chat pins under its header, from current facts only.
  *
- * Returns null when nothing is happening: reading back history is not a state, so no "Complete"/"New result"
- * block is invented to fill the slot. `Failure` is the daemon-backed [sessionDegraded] flag; `Running` is a
- * real streaming turn — nothing here is derived from transcript content or elapsed time.
+ * Returns null when nothing needs a pinned block: reading back history is not a state, so no
+ * "Complete"/"New result" block is invented to fill the slot — and a streaming turn ALONE pins nothing
+ * either. The composer already writes execution where the user acts (the "sends will queue" note plus the
+ * Stop control), so a second full-width "Running" band above the stream said the same thing twice while
+ * costing the transcript a row. Running survives in the vocabulary as the demoted [ChatStateUi.alsoRunning]
+ * qualifier under an intervention, and on the Sessions rows. `Failure` is the daemon-backed
+ * [sessionDegraded] flag — nothing here is derived from transcript content or elapsed time.
  */
 fun chatStateUi(
     pendingAsk: PermissionAsk?,
@@ -50,6 +54,5 @@ fun chatStateUi(
     pendingAsk != null ->
         ChatStateUi(SurfaceState.ANSWER, pendingAsk.title.takeIf { it.isNotBlank() }, alsoRunning = streaming)
     sessionDegraded -> ChatStateUi(SurfaceState.FAILURE, detail = null, alsoRunning = false)
-    streaming -> ChatStateUi(SurfaceState.RUNNING, detail = null, alsoRunning = false)
     else -> null
 }

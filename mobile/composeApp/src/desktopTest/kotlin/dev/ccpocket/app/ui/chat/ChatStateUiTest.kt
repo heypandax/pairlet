@@ -66,10 +66,11 @@ class ChatStateUiTest {
     }
 
     @Test
-    fun streaming_alone_is_running() {
-        val ui = assertNotNullUi(chatStateUi(null, sessionDegraded = false, streaming = true))
-        assertEquals(SurfaceState.RUNNING, ui.state)
-        assertEquals(StateMark.DOT, ui.mark)
+    fun streaming_alone_pins_nothing() {
+        assertNull(
+            chatStateUi(null, sessionDegraded = false, streaming = true),
+            "the composer note + Stop already write a running turn once; a pinned Running band said it twice",
+        )
     }
 
     @Test

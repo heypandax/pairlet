@@ -228,9 +228,11 @@ private fun ContextChevronDown(modifier: Modifier = Modifier) {
  * The pinned state block.
  *
  * Approval/Answer lead; a genuinely streaming turn under them is demoted to a qualifying line, never the
- * headline. Deliberately actionless: an open approval already OWNS the screen as a modal Secure Approval
- * sheet and a question already docks its QuestionCard above the composer, so a second "Review"/"Answer"
- * control here would be a second path into a decision that must have exactly one.
+ * headline — and streaming ALONE never reaches this block at all ([chatStateUi] pins nothing for it; the
+ * composer note and Stop control own that fact). Deliberately actionless: an open approval already OWNS
+ * the screen as a modal Secure Approval sheet and a question already docks its QuestionCard above the
+ * composer, so a second "Review"/"Answer" control here would be a second path into a decision that must
+ * have exactly one.
  */
 @Composable
 fun ChatStateBlock(ui: ChatStateUi, modifier: Modifier = Modifier) {

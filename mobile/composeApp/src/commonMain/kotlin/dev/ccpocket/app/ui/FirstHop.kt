@@ -21,10 +21,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.ccpocket.app.data.PocketRepository
+import dev.ccpocket.app.pairing.displayName
 import dev.ccpocket.app.resources.Res
 import dev.ccpocket.app.resources.action_back
+import dev.ccpocket.app.resources.settings_connected_to
 import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
@@ -82,6 +86,11 @@ fun FirstHopHeader(
     }
 }
 
+/** The one factual line the Settings family of surfaces may claim: which computer it is talking to. */
+@Composable
+fun connectedToSummary(repo: PocketRepository): String? =
+    repo.paired.value?.displayName()?.let { stringResource(Res.string.settings_connected_to, it) }
+
 /** An uppercase section label. It orders the page; it never shouts. */
 @Composable
 fun FirstHopSectionLabel(text: String, modifier: Modifier = Modifier) {
@@ -94,21 +103,25 @@ fun FirstHopSectionLabel(text: String, modifier: Modifier = Modifier) {
 /**
  * A navigation row of a first-hop landing: title, optional factual subtitle, an optional [trailing] mark, ›.
  *
- * A 56 dp FLOOR rather than a height — at 200% type the row grows and both lines stay whole rather than
- * being cropped to fit.
+ * A [minHeight] FLOOR rather than a height — at 200% type the row grows and both lines stay whole rather
+ * than being cropped to fit. [horizontalPadding] insets the CONTENT of a row that sits inside a container
+ * (UI 2.1 Settings categories) while the tap target still spans the container's full width; a bare row on
+ * the base surface keeps the page gutter and passes 0.
  */
 @Composable
 fun FirstHopRow(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    minHeight: Dp = 56.dp,
+    horizontalPadding: Dp = 0.dp,
     onClick: () -> Unit,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     Row(
-        modifier.fillMaxWidth().heightIn(min = 56.dp)
+        modifier.fillMaxWidth().heightIn(min = minHeight)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = Metric.gap),
+            .padding(horizontal = horizontalPadding, vertical = Metric.gap),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
     ) {

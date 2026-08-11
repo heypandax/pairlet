@@ -49,10 +49,10 @@ import dev.ccpocket.app.theme.Metric
 import dev.ccpocket.app.theme.Tok
 import dev.ccpocket.app.theme.TypeRole
 import dev.ccpocket.app.ui.agentName
-import dev.ccpocket.app.ui.folderName
 import dev.ccpocket.app.ui.relativeTime
 import dev.ccpocket.app.ui.tilde
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.SessionSummary
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -71,6 +71,8 @@ enum class ConnBadge { ONLINE, CONNECTING, OFFLINE }
  *
  * Every line is real or absent: [machine] null drops the name and leaves the link state alone, and the path
  * row renders the FULL workdir with its own 48 dp copy target rather than an ellipsis with no way out.
+ * The project folder is NOT its own row — the path's tail already names it (the same "folder once" proof
+ * Chat's expanded context passed), and printing it twice stacked identical words above each other.
  */
 @Composable
 fun SessionsContextHeader(
@@ -105,10 +107,6 @@ fun SessionsContextHeader(
                 maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            folderName(workdir), color = Tok.tx2, style = TypeRole.metaMono,
-            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Metric.gapXs),
-        )
         PathWithCopy(workdir, Modifier.padding(top = 2.dp))
     }
 }
@@ -161,6 +159,12 @@ fun SessionSectionLabel(text: String, modifier: Modifier = Modifier) {
  * highest-priority state renders an action, and that action merely OPENS the session — Secure Approval and
  * QuestionCard stay the only places a request can actually be answered.
  */
+/** The preview earns its lines only when it says MORE than the title: an untitled session's title IS its
+ *  first prompt (scanner fallback), and printing the same words twice stacks identical lines. One owner
+ *  for the rule — every list that pairs a title with a firstPrompt preview goes through here. */
+fun SessionSummary.distinctPreview(): String? =
+    firstPrompt.takeIf { it.isNotBlank() && it.trim() != title.trim() }
+
 @Composable
 fun SessionListRow(
     row: SessionRowUi,
@@ -174,7 +178,7 @@ fun SessionListRow(
     Column(
         modifier.fillMaxWidth()
             .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
-            .padding(vertical = Metric.gapL),
+            .padding(vertical = Metric.gap),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             // top padding aligns the 8dp mark with the cap height of the first title line, at any font scale
@@ -184,10 +188,12 @@ fun SessionListRow(
                     s.title, color = Tok.tx, style = TypeRole.rowTitle,
                     maxLines = 3, overflow = TextOverflow.Ellipsis,
                 )
-                if (s.firstPrompt.isNotBlank()) Text(
-                    s.firstPrompt, color = Tok.tx2, style = TypeRole.preview,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp),
-                )
+                s.distinctPreview()?.let {
+                    Text(
+                        it, color = Tok.tx2, style = TypeRole.preview,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 5.dp),
+                    )
+                }
                 val meta = sessionMetaLine(row)
                 if (meta.isNotBlank()) Text(
                     meta, color = Tok.tx2, style = TypeRole.metaMono,

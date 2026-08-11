@@ -171,10 +171,7 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
             title = stringResource(page?.let(::settingsCategoryTitleRes) ?: Res.string.settings_title),
             // one factual line, and only on the landing: which computer these settings are talking to.
             // Nothing derived, nothing secret — the paired binding's own display name or nothing at all.
-            summary = if (page != null) null else {
-                repo.paired.value?.displayName()?.takeIf { it.isNotBlank() }
-                    ?.let { stringResource(Res.string.settings_connected_to, it) }
-            },
+            summary = if (page != null) null else connectedToSummary(repo),
             onBack = { if (page != null) category = null else onBack() },
         )
         Column(
@@ -216,7 +213,14 @@ fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     }
 }
 
-/** The landing: the two utility destinations, then the five categories. Nothing here is itself a control. */
+/**
+ * The landing: the two utility destinations, then the five categories. Nothing here is itself a control.
+ *
+ * UI 2.1 (A3) splits the two groups the eye kept merging. The utilities stay BARE on the paper base —
+ * they are places to go, not settings — while the five categories move into one low container under a
+ * written label. One container, not five cards: the grouping is the point, and a stack of cards would
+ * re-flatten it into the same undifferentiated list this replaces.
+ */
 @Composable
 private fun SettingsLanding(
     repo: PocketRepository,
@@ -229,19 +233,24 @@ private fun SettingsLanding(
     Hairline()
     FirstHopRow(stringResource(Res.string.schedule_tasks_title), onClick = onSchedules)
     Hairline()
-    Spacer(Modifier.height(20.dp))
-    SettingsCategory.entries.forEachIndexed { index, c ->
-        if (index > 0) Hairline()
-        FirstHopRow(
-            title = stringResource(settingsCategoryTitleRes(c)),
-            subtitle = stringResource(settingsCategorySubRes(c)),
-            onClick = { onCategory(c) },
-        ) {
-            // "a colleague is waiting on you" must not be two taps deep
-            if (c == SettingsCategory.CONNECTIONS && repo.reviewPendingCount > 0) PendingCountMark(repo.reviewPendingCount)
+    FirstHopSectionLabel(stringResource(Res.string.settings_categories))
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tok.surface)) {
+        SettingsCategory.entries.forEachIndexed { index, c ->
+            if (index > 0) Hairline(Modifier.padding(horizontal = 14.dp))
+            FirstHopRow(
+                title = stringResource(settingsCategoryTitleRes(c)),
+                subtitle = stringResource(settingsCategorySubRes(c)),
+                // 64 dp floor: a two-line row inside a container needs the extra air, and at 200% type it
+                // grows past this rather than compressing the second line away
+                minHeight = 64.dp,
+                horizontalPadding = 14.dp,
+                onClick = { onCategory(c) },
+            ) {
+                // "a colleague is waiting on you" must not be two taps deep
+                if (c == SettingsCategory.CONNECTIONS && repo.reviewPendingCount > 0) PendingCountMark(repo.reviewPendingCount)
+            }
         }
     }
-    Hairline()
 }
 
 /** A count that says what it counts: a bare accent "2" is not something a screen reader can convey. */

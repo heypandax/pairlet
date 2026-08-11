@@ -736,6 +736,7 @@
     <string name="bridge_edit_appid_ph">FEISHU_APP_ID (cli_…, blank = unchanged)</string>
     <string name="bridge_edit_secret_ph">FEISHU_APP_SECRET (blank = unchanged)</string>
     <string name="bridge_edit_save">Save &amp; restart</string>
+    <string name="bridge_expand_toggle">Expand or collapse</string>
     <string name="bridge_merge_lost">The daemon is too old for partial edits — it CLEARED these values instead of keeping them: %1$s. Update the daemon, then edit again and re-enter them.</string>
 
     <!-- guest: accept preview -->
@@ -1627,6 +1628,8 @@
     <string name="settings_cat_support">Support &amp; about</string>
     <string name="settings_cat_support_sub">Help, manual, troubleshooting, versions, about</string>
     <string name="settings_connected_to">Connected to %1$s</string>
+    <!-- UI 2.1: the written label over the five-category container -->
+    <string name="settings_categories">Categories</string>
     <string name="about_direct_lan">direct LAN</string>
     <string name="rv_invite_qr_a11y">Review invite QR code</string>
 
