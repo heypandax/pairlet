@@ -1,15 +1,16 @@
-What's new in 1.7.5
+What's new in 1.7.6
+
+New
+• Codex sessions now accept image attachments — send error screenshots or design mocks to Codex just like Claude
 
 Redesigned
-• Mobile UI 2.0 rebuilds Computers, Projects, Sessions, Chat, Approvals, Reviews, and Settings around clearer hierarchy and truthful status
-• Chat now uses full-width conversation entries, grouped context, persistent running/queue/upload notes, and 48 pt interaction targets
-• Quick Actions groups session settings, tools, and context; Handoff is an ordinary peer action without promotional treatment
+• Settings groups its five categories into one clear container, separated from the utility destinations
+• Bridge cards split identity, facts, and actions into zones; action buttons wrap as whole controls instead of squeezing, so labels never break vertically on narrow screens or at 200% text
 
 Improved
-• Long session titles, paths, and tool commands wrap without horizontal clipping, while critical controls remain reachable at 200% text
-• Desktop session running indicators stay fresh as background work starts and stops
+• Consecutive tool calls in Chat share one source label instead of repeating it between every card
+• A streaming turn no longer pins a redundant Running banner — the composer note and Stop control already say it
+• Session lists stop printing an untitled session's first prompt twice; the Bridges screen names the computer it controls
 
 Fixed
-• Kimi ACP conversations preserve replay, tool cards, mid-turn queued messages, approvals, and prompt settlement more reliably
-• Session info and the composer remain pinned instead of making the entire Chat screen scroll
-• Tool payloads keep their compact two-line preview and expand in full on tap
+• Feishu group sessions failed to start on Windows daemons — clean-room launch arguments now survive the Windows shell
