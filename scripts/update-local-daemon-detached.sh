@@ -34,7 +34,7 @@ if [ "$driven" = "0" ]; then
   exec bash scripts/update-local-daemon.sh
 fi
 
-echo "── 本会话由 daemon 驱动 → ${DELAY}s 后脱离式更新（日志 $LOG）──"
+echo "── 本会话由 daemon 驱动 → ${DELAY}s 后脱离式更新（日志 ${LOG}）──"
 echo "   会话将断开（预期）；daemon 重启后手机自动重连，重新进入会话即可。"
 python3 - "$DELAY" "$LOG" "$PWD" <<'PY'
 import os, subprocess, sys, time
