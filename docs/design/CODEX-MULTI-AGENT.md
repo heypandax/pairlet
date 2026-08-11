@@ -100,7 +100,7 @@ initialize(req) → result → initialized(notif)        # 每连接一次，先
 | 授权标识 | tool 的 `request_id` | JSON-RPC request 的 `id` | 都能抽象成「一个待答复的 askId」，PermissionBridge 模型可复用 |
 | token 用量 | 在 `result` 里随回合返回 | **独立 `thread/tokenUsage/updated`** | 累计到下一个 TurnDone |
 | 流式 + 终稿 | 增量块 + 终块 | 增量 delta + `item/completed` 终稿 | 二者都发：流式 delta 当 chunk，终稿用于 TurnDone.finalText，**不重复 emit** |
-| 图片输入 | base64 内联 | 仅 `image{url}` / `localImage{path}`，**无 base64 变体** | Tier A Codex 先不支持贴图；后续用 data: URL 或落临时文件走 localImage |
+| 图片输入 | base64 内联 | `image{url}` / `localImage{path}`，其中 `url` 支持 base64 data URL | 后端把共享协议的 base64 图片包装成 data URL，无需临时文件 |
 | 磁盘落点 | `~/.claude/projects/<key>/*.jsonl` | `~/.codex/sessions/rollout-<ts>-<threadId>.jsonl`（`RolloutLine` schema，首行 `SessionMeta`）| 扫描 / 回放要各做一份 |
 
 ---
@@ -237,7 +237,7 @@ Claude 把审批 + 沙箱揉进一个 `PermissionMode`；Codex 拆成 `approvalP
 
 1. **app-server `[experimental]`**：方法名 / 字段在演进（近期 delta 事件刚改名）。对策：parse 容错未知 method/type；`experimentalApi=false` 只吃稳定 schema；pin Codex 版本，升级时回归。
 2. **首轮缓冲时序**：thread/start 异步，首个 prompt 要等就绪——`CodexBackend.sendPrompt` 内部排队，避免死锁（参考 `Conversation.open` 现有「先报 live 再回填」思路）。
-3. **图片**：Codex 无 base64 内联，Tier A 先文本；Tier C 决定 data URL vs 临时文件 localImage。
+3. **图片**：已选择 data URL——直接包装手机传来的 base64，避免临时文件生命周期与本机路径暴露。
 4. **ToolMeta**：Codex 审批预览来自 `command` / diff，不走 Claude 工具名表——`CodexBackend` 自建 preview/title/danger（可复用 `ToolMetadata` 的危险正则于 `command` 字符串）。
 5. **两个二进制都可能缺失**：未装 `codex` 时选 Codex 要给清晰报错（指向安装方式），而非启动失败。
 
@@ -263,9 +263,8 @@ Claude 把审批 + 沙箱揉进一个 `PermissionMode`；Codex 拆成 `approvalP
 
 **纠正研究的一处**：codex 0.124 的 rollout 落盘是 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl`（**按日期分子目录**，研究说的是扁平），扫描已改递归。
 
-## 十二、已知限制（留待 Tier C）
+## 十二、当前剩余限制
 
-- **Codex 不支持贴图**：`turn/start` 只收 `image{url}`/`localImage{path}`，无 base64 内联；当前 Codex 会话发图被静默忽略（仅发文本）。后续用临时文件走 localImage。
 - **slash 命令仍扫 `~/.claude/commands`**：Codex 会话会看到 Claude 的自定义命令（`/model`、`/effort`、`/clear` 守护拦截仍正常）。应做成 backend 感知。
 - **model 选项写死 Claude 别名**：Codex 会话里选 opus/sonnet/haiku 会被丢弃、退回 codex 默认模型（不报错）。应按 agent 给不同 model 列表。
 - **项目列表发现**：仅 Codex（无 Claude 历史、未进 recents）的目录不会出现在项目列表；首次开会话后即进 recents。可后续把 Codex cwd 并入 `DirectoryService`。

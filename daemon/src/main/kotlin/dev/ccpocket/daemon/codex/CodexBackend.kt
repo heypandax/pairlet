@@ -328,7 +328,14 @@ class CodexBackend(
             put("threadId", tid)
             putJsonArray("input") {
                 addJsonObject { put("type", "text"); put("text", text) }
-                // images: Codex takes image{url}/localImage{path}, not base64 inline — deferred (Tier C)
+                // app-server's ImageUserInput takes a URL. A data URL keeps the phone's already-downscaled
+                // image in-memory end to end, with no temporary file lifecycle or daemon-local path exposure.
+                images.forEach { image ->
+                    addJsonObject {
+                        put("type", "image")
+                        put("url", "data:${image.mediaType};base64,${image.base64}")
+                    }
+                }
             }
             put("cwd", workdir)
             put("approvalPolicy", approvalPolicy())
