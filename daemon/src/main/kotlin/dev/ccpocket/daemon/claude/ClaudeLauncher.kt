@@ -73,14 +73,21 @@ object ClaudeLauncher {
             // rules / hooks would let the CLI AUTO-APPROVE tools WITHOUT routing them through the daemon's
             // --permission-prompt-tool — silently bypassing the path guard + tier clamp (issue #115 crypto
             // review H2). The daemon stays the sole permission authority via --permission-prompt-tool +
-            // --permission-mode; credentials are not a setting source, so the daemon's login (billing) is intact.
+            // --permission-mode; the CLI's separate login store remains available for account auth.
             // Written attached rather than as a separate empty argument for the transport reason above: a
             // standalone "" is the other shape a cmd.exe re-parse can drop, and dropping it silently restores
             // EVERY settings source — the H2 bypass, re-opened by a quoting accident. Equivalent on 2.1.218
             // (both forms cut the session's slash commands from 109 to 46, i.e. the user source is gone).
+            // It also drops the user settings' `env` block — including the API route a gateway user keeps
+            // there — so processBuilder re-imports that one allow-listed slice; see [CleanRoomEnv].
             add("--setting-sources=")
             // keep the owner's auto-memory paths, env vars, git status out of the guest's system prompt
             add("--exclude-dynamic-system-prompt-sections")
+            // CLI 2.1.218's credential-scrub hardening (applied in processBuilder below) deliberately forces
+            // its native permission mode to `default`. A restricted PLAN session must not thereby regain a
+            // shell or mutation tool, so pin its AVAILABLE tools to a closed read/coordination set. This is a
+            // capability wall, not a prompt convention: future/renamed tools stay absent until reviewed.
+            if (spec.mode == PermissionMode.PLAN) add(CLEAN_ROOM_PLAN_TOOLS)
         }
         spec.resumeId?.let {
             add("--resume"); add(it)
@@ -90,7 +97,14 @@ object ClaudeLauncher {
         }
         spec.model?.let { add("--model"); add(it) }
         spec.effort?.let { add("--effort"); add(it) }
-        spec.appendSystemPrompt?.let { add("--append-system-prompt"); add(it) }
+        val appendPrompt = if (spec.cleanRoom && spec.mode == PermissionMode.PLAN) {
+            listOfNotNull(CLEAN_ROOM_PLAN_PROMPT, spec.appendSystemPrompt).joinToString("\n\n")
+        } else {
+            // Preserve the ordinary launch exactly, including the (unusual but previously supported) empty
+            // string, rather than making the clean-room compensation change owner-session argv semantics.
+            spec.appendSystemPrompt
+        }
+        appendPrompt?.let { add("--append-system-prompt"); add(it) }
     }
 
     fun processBuilder(exe: Path, spec: AgentSpec, configDir: Path? = null, presetEnv: Map<String, String>? = null): ProcessBuilder {
@@ -115,6 +129,11 @@ object ClaudeLauncher {
             // API preset (issue #113): the active preset's endpoint/token/model routing for THIS launch —
             // read per launch, so a switch applies to new sessions while running ones keep their env
             presetEnv?.let { applyPresetEnv(environment(), it) }
+            // GUEST/BRIDGE clean room: --setting-sources= also drops the user settings' `env` API route, so a
+            // gateway machine's restricted launch had no usable credential and every turn came back as the
+            // CLI's <synthetic> API failure. Re-import that ONE allow-listed transport slice (and only it),
+            // then stop it spreading to Bash/hooks/MCP. Runs AFTER the preset so an active preset still wins.
+            if (spec.cleanRoom) CleanRoomEnv.applyTo(environment(), presetActive = presetEnv != null, userConfigDir = configDir)
         }
     }
 
@@ -128,6 +147,11 @@ object ClaudeLauncher {
         PresetEnv.SCRUBBED.forEach(env::remove)
         env.putAll(preset)
     }
+
+    /** Attached, quote-free tokens so the restrictions survive a Windows `.cmd` re-parse. */
+    internal const val CLEAN_ROOM_PLAN_TOOLS = "--tools=Read,Glob,Grep,AskUserQuestion,TodoWrite"
+    internal const val CLEAN_ROOM_PLAN_PROMPT =
+        "Operate in read-only plan mode. Analyze and propose a plan only; do not modify files or execute commands."
 }
 
 /** The CLI flag value for a permission mode (single source of truth = the @SerialName). */

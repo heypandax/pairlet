@@ -33,7 +33,9 @@ data class AgentSpec(
     //     .claude/settings.json, whose allow-rules would auto-approve tools past the daemon (review H2),
     //   • --exclude-dynamic-system-prompt-sections   → drop auto-memory paths, env info, git status from the
     //     system prompt (vectors #2/#5 — the owner's private memory + shell env don't bleed into replies).
-    // Credentials/auth are NOT a setting source, so the guest still bills the owner's account (billing intact).
+    // The CLI's separate login store remains available. On a GATEWAY machine, however, the route/token often
+    // live in the user settings' `env` and go down with the settings sources; `CleanRoomEnv` re-imports that
+    // allow-listed transport slice at launch and blocks it from reaching Bash/hooks/MCP subprocesses.
     val cleanRoom: Boolean = false,
     // OpenCode only: the initial prompt text, passed as a CLI positional arg to `opencode run`.
     // KNOWN LIMITATION (review P1, issue #164): argv is readable in the local process table (`ps`)
