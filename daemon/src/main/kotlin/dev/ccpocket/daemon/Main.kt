@@ -655,6 +655,10 @@ private class ShareCmd : CliktCommand(name = "share") {
 
 private class UpdateCmd : CliktCommand(name = "update") {
     private val check by option("--check", help = "only report whether a newer release exists").flag()
+    private val pairPort by option(
+        "--pair-port",
+        help = "loopback port of the running daemon (used for the Windows update handoff)",
+    ).int().default(8799)
 
     override fun run() {
         val current = dev.ccpocket.daemon.update.UpdateService.currentVersion()
@@ -673,7 +677,7 @@ private class UpdateCmd : CliktCommand(name = "update") {
         val newLauncher = dev.ccpocket.daemon.update.UpdateService.apply(latest, install)
         echo("installed ${latest.version} → ${install.versionsDir.resolve(latest.version)}")
         echo("restarting the background service onto it…")
-        dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher)
+        dev.ccpocket.daemon.update.UpdateService.restartService(newLauncher, pairPort)
         echo("✅ updated to ${latest.version}")
     }
 }

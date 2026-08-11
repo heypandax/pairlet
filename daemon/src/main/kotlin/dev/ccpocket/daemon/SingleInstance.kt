@@ -23,8 +23,7 @@ object SingleInstance {
         if (!portInUse(pairPort)) return
         if (takeover) {
             echo("another cc-pocket daemon already holds 127.0.0.1:$pairPort — stopping it and taking over")
-            killHolders(pairPort)
-            repeat(50) { if (!portInUse(pairPort)) return; Thread.sleep(100) } // wait up to ~5s for release
+            if (stopRunning(pairPort)) return
             echo("could not free 127.0.0.1:$pairPort — the running daemon didn't exit; aborting")
             exitProcess(69) // EX_UNAVAILABLE
         }
@@ -35,10 +34,32 @@ object SingleInstance {
     }
 
     /** True iff something accepts a loopback TCP connection on [port] — i.e. a daemon is already listening. */
-    private fun portInUse(port: Int): Boolean = runCatching {
+    internal fun portInUse(port: Int): Boolean = runCatching {
         Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 400) }
         true
     }.getOrDefault(false)
+
+    /** Stop the current daemon and wait for its singleton port to be released. Used by both `--takeover`
+     *  and the Windows updater: the Windows Scheduled Task launches through a detached WScript, so ending
+     *  the task itself does not end the daemon process that WScript already spawned. */
+    internal fun stopRunning(port: Int, attempts: Int = 50, waitMs: Long = 100): Boolean {
+        if (!portInUse(port)) return true
+        killHolders(port)
+        repeat(attempts) {
+            if (!portInUse(port)) return true
+            if (waitMs > 0) Thread.sleep(waitMs)
+        }
+        return !portInUse(port)
+    }
+
+    /** Wait for a newly started daemon to claim its loopback singleton port. */
+    internal fun waitUntilRunning(port: Int, attempts: Int = 200, waitMs: Long = 100): Boolean {
+        repeat(attempts) {
+            if (portInUse(port)) return true
+            if (waitMs > 0) Thread.sleep(waitMs)
+        }
+        return portInUse(port)
+    }
 
     /** Best-effort stop of whatever holds [port] (the other daemon): lsof on macOS/Linux, netstat+taskkill on Windows. */
     private fun killHolders(port: Int) {
@@ -47,15 +68,26 @@ object SingleInstance {
             val pids = if (win) {
                 val out = ProcessBuilder("cmd", "/c", "netstat -ano -p tcp | findstr :$port")
                     .start().inputStream.bufferedReader().readText()
-                Regex("""LISTENING\s+(\d+)""").findAll(out).map { it.groupValues[1] }.toSet()
+                windowsListeningPids(out, port)
             } else {
                 ProcessBuilder("lsof", "-ti", "tcp:$port")
                     .start().inputStream.bufferedReader().readText().trim().split("\n").filter { it.isNotBlank() }.toSet()
             }
             pids.forEach { pid ->
-                if (win) ProcessBuilder("taskkill", "/PID", pid, "/F").start().waitFor()
+                if (win) ProcessBuilder("taskkill", "/PID", pid, "/T", "/F").start().waitFor()
                 else ProcessBuilder("kill", pid).start().waitFor()
             }
         }.onFailure { log.warn("takeover: couldn't enumerate/stop the port holder: ${it.message}") }
     }
+
+    /** Parse only LISTENING rows whose LOCAL endpoint is exactly [port]. `findstr :8799` can also return
+     *  a connection whose remote endpoint happens to use that port; killing that row's PID would stop an
+     *  unrelated process during an update. Handles both IPv4 (`127.0.0.1:8799`) and IPv6 (`[::1]:8799`). */
+    internal fun windowsListeningPids(netstat: String, port: Int): Set<String> = netstat.lineSequence()
+        .map { it.trim().split(Regex("\\s+")) }
+        .filter { it.size >= 5 && it[0].equals("TCP", ignoreCase = true) }
+        .filter { it[3].equals("LISTENING", ignoreCase = true) }
+        .filter { it[1].substringAfterLast(':').toIntOrNull() == port }
+        .mapNotNull { it[4].takeIf { pid -> pid.all(Char::isDigit) } }
+        .toSet()
 }

@@ -4,6 +4,7 @@ import dev.ccpocket.daemon.update.UpdateService.InstallKind
 import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -85,5 +86,44 @@ class UpdateServiceTest {
         assertEquals("56e51fe0f9674df9d8b246fabf8188c1dd669d7c106930ed4077e3c94e3b60ef", sums["cc-pocket-daemon-1.2.0-windows-x86_64.zip"])
         assertEquals("8ee8fea9b9b8326acd5bfc04e3340b923eaf0d3b22e91d4eea1b67b429842c60", sums["cc-pocket-daemon-1.2.0-macos-x86_64.tar.gz"])
         assertNull(sums["garbage.bin"])
+    }
+
+    @Test
+    fun windows_restart_registers_then_stops_then_starts_once_and_waits() {
+        val events = mutableListOf<String>()
+        val launcher = Path.of("C:\\Users\\x\\AppData\\Local\\cc-pocket\\versions\\1.2.1\\cc-pocket-daemon\\cc-pocket-daemon.exe")
+
+        UpdateService.restartWindowsService(
+            newLauncher = launcher,
+            pairPort = 8799,
+            register = { actual, port ->
+                assertEquals(launcher, actual)
+                assertEquals(8799, port)
+                events += "register"
+            },
+            stopOld = { events += "stop:$it"; true },
+            startNew = { events += "start" },
+            awaitNew = { events += "await:$it"; true },
+        )
+
+        assertEquals(listOf("register", "stop:8799", "start", "await:8799"), events)
+    }
+
+    @Test
+    fun windows_restart_never_starts_new_daemon_until_old_one_is_gone() {
+        val events = mutableListOf<String>()
+
+        assertFailsWith<IllegalStateException> {
+            UpdateService.restartWindowsService(
+                newLauncher = Path.of("C:\\cc-pocket-daemon.exe"),
+                pairPort = 9001,
+                register = { _, _ -> events += "register" },
+                stopOld = { events += "stop"; false },
+                startNew = { events += "start" },
+                awaitNew = { events += "await"; true },
+            )
+        }
+
+        assertEquals(listOf("register", "stop"), events)
     }
 }
