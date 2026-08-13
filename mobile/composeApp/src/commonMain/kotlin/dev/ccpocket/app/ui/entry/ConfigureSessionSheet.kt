@@ -129,14 +129,16 @@ fun ConfigureSessionSheet(
     agent: AgentKind = AgentKind.CLAUDE,
     computer: String? = null,
     autoAvailable: Boolean = false,
+    availableAgents: List<AgentKind> = AgentKind.entries,
     modelsFor: (AgentKind) -> List<ModelChoice> = { emptyList() },
     defaultModelFor: (AgentKind) -> String? = { null },
     onAgentPicked: (AgentKind) -> Unit = {},
     onPick: (PermissionMode, AgentKind, String?, String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val openedAgent = remember { agent }
-    var chosenAgent by remember { mutableStateOf(agent) }
+    val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
+    val openedAgent = remember { agent.takeIf { it in selectableAgents } ?: selectableAgents.first() }
+    var chosenAgent by remember { mutableStateOf(openedAgent) }
     // null = "follow the default" (Settings / the CLI's own). Reset per agent: a Claude alias is not a model
     // Codex can run, and compatibleModelForAgent would drop it silently anyway.
     var chosenModel by remember(chosenAgent) { mutableStateOf<String?>(null) }
@@ -185,7 +187,7 @@ fun ConfigureSessionSheet(
                     horizontalArrangement = Arrangement.spacedBy(Metric.gapS),
                     verticalArrangement = Arrangement.spacedBy(Metric.gapS),
                 ) {
-                    AgentKind.entries.forEach { a ->
+                    selectableAgents.forEach { a ->
                         AgentChip(a, selected = a == chosenAgent) { chosenAgent = a }
                     }
                 }
@@ -495,5 +497,6 @@ private fun modeFootnote(agent: AgentKind): String? = when (agent) {
     AgentKind.CLAUDE -> stringResource(Res.string.cfg_claude_note)
     AgentKind.CODEX -> stringResource(Res.string.cfg_codex_note)
     AgentKind.KIMI -> stringResource(Res.string.cfg_kimi_note)
+    AgentKind.ZCODE -> null
     AgentKind.OPENCODE -> null
 }

@@ -9,10 +9,15 @@ import dev.ccpocket.protocol.HandoffFinding
 import dev.ccpocket.protocol.HandoffResult
 import dev.ccpocket.protocol.HandoffStatus
 import dev.ccpocket.protocol.SessionHandoff
+import dev.ccpocket.protocol.AgentKind
 import org.jetbrains.compose.resources.stringResource
 
 // Wire → display mapping. UNKNOWN maps to null: a state this build can't read renders nothing
 // rather than guessing (the daemon still refuses input on its side — App display never authorizes).
+
+/** Whether the current backend may expose the owner-side Session Handoff entry. ZCode's
+ * collaborator grant is deliberately fail-closed until its approval boundary is proven. */
+fun AgentKind.canInitiateSessionHandoff(): Boolean = this != AgentKind.ZCODE
 
 fun HandoffStatus.toUi(): HandoffUiStatus? = when (this) {
     HandoffStatus.WAITING -> HandoffUiStatus.WAITING

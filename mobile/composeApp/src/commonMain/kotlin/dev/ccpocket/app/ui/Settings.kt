@@ -78,6 +78,7 @@ import dev.ccpocket.protocol.DEFAULT_CONTEXT_WINDOW
 import dev.ccpocket.protocol.LARGE_CONTEXT_WINDOW
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
+import dev.ccpocket.protocol.PermissionMode
 import org.jetbrains.compose.resources.stringResource
 
 // new-session default model: the shared Claude aliases + a leading null = "CLI default". Claude-only —
@@ -118,7 +119,7 @@ private val FONT_SCALE_STEPS: List<Float> = listOf(0.85f, 1.0f, 1.15f, 1.3f, 1.4
 fun SettingsScreen(repo: PocketRepository, onBack: () -> Unit) {
     // Capability rows come from the installed CLI/model cache. A recomposition after the reply replaces
     // the loading/empty state; no global max/ultra list is guessed in the client.
-    LaunchedEffect(repo.defaultAgent.value) { repo.fetchModels(repo.defaultAgent.value) }
+    LaunchedEffect(repo.sessionDefaultAgent) { repo.fetchModels(repo.sessionDefaultAgent) }
     // Approvals (issue #201). Daemon truth: the Security page shows the preference only once an
     // ApprovalPrefs reply proves this daemon can honor it. Asked HERE rather than on that page, so the
     // answer has already arrived by the time it is opened.
@@ -366,7 +367,7 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
     SectionLabel(stringResource(Res.string.default_mode_section))
     Column(Modifier.fillMaxWidth()) {
         val modeOptions = MODES + if (
-            repo.defaultAgent.value == AgentKind.CLAUDE &&
+            repo.sessionDefaultAgent == AgentKind.CLAUDE &&
             repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
         ) listOf(AUTO_MODE) else emptyList()
         modeOptions.forEach { m ->
@@ -401,7 +402,7 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
 
     SectionLabel(stringResource(Res.string.default_effort_section))
     val effortDefaultLabel = stringResource(Res.string.value_default)
-    val defaultAgent = repo.defaultAgent.value
+    val defaultAgent = repo.sessionDefaultAgent
     val effortOptions = (listOf<String?>(null) + repo.effortOptions(defaultAgent, repo.defaultModelFor(defaultAgent)))
         .let { opts -> if (repo.defaultEffort.value != null && repo.defaultEffort.value !in opts) opts + repo.defaultEffort.value else opts }
         .distinct()
@@ -444,7 +445,9 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
             Triple("claude", stringResource(Res.string.af_claude_only), Tok.accent),
             Triple("codex", stringResource(Res.string.af_codex_only), Tok.codex),
             Triple("opencode", stringResource(Res.string.af_opencode_only), Tok.opencode),
-        )
+        ) + if (repo.supportsAgent(AgentKind.ZCODE)) {
+            listOf(Triple("zcode", stringResource(Res.string.af_zcode_only), Tok.zcode))
+        } else emptyList()
         afOpts.forEach { (key, label, dot) ->
             val sel = repo.agentFilter.value == key
             // same thumb as SegmentedRow: selected fills Tok.accent (was a near-invisible Tok.raised).

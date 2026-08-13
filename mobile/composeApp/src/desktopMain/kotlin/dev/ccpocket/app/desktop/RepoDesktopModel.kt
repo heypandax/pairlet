@@ -1039,8 +1039,10 @@ class RepoDesktopModel(
         }
     }
     override var defaultAgent: AgentKind
-        get() = repo.defaultAgent.value
+        get() = repo.sessionDefaultAgent
         set(v) { repo.setDefaultAgent(v) }
+    override val availableAgents: List<AgentKind>
+        get() = DESKTOP_AGENT_CHOICES.filter(repo::supportsAgent)
     override var defaultMode: PermissionMode
         get() = repo.defaultMode.value
         set(v) { repo.setDefaultMode(v) }

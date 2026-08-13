@@ -205,6 +205,8 @@ import dev.ccpocket.protocol.FetchAuthStatus
 import dev.ccpocket.protocol.FetchModels
 import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
+import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
+import dev.ccpocket.protocol.DAEMON_SUPPORTED_AGENT_WIRES
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.FetchPresets
 import dev.ccpocket.protocol.ModelsList
@@ -561,6 +563,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     private val defaultCodexModel = mutableStateOf(SecureStore.getString(K_DEFAULT_CODEX_MODEL)?.takeIf { it.isNotEmpty() })
     private val defaultOpenCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_OPENCODE_MODEL)?.takeIf { it.isNotEmpty() })
     private val defaultKimiModel = mutableStateOf(SecureStore.getString(K_DEFAULT_KIMI_MODEL)?.takeIf { it.isNotEmpty() })
+    private val defaultZCodeModel = mutableStateOf(SecureStore.getString(K_DEFAULT_ZCODE_MODEL)?.takeIf { it.isNotEmpty() })
 
     fun defaultModelFor(agent: AgentKind): String? = when (agent) {
         // legacy persisted bare "opus" follows the Opus row to Opus 5. Official endpoint only: on a
@@ -569,6 +572,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         AgentKind.CODEX -> defaultCodexModel.value
         AgentKind.OPENCODE -> defaultOpenCodeModel.value
         AgentKind.KIMI -> defaultKimiModel.value
+        AgentKind.ZCODE -> defaultZCodeModel.value
     }
 
     /** Persisted context-window override (tokens) used as the usage statusline's denominator, or null to follow
@@ -1437,7 +1441,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingOpen = null
         if (convoId.value != null && currentSessionId == t.sessionId) return // already in this session — don't churn it
         sessionsDir.value = null // drop any half-open session list so the chat is what shows
-        openSession(t.workdir, t.sessionId, title = t.title, agent = t.agent ?: defaultAgent.value)
+        openSession(t.workdir, t.sessionId, title = t.title, agent = t.agent ?: sessionDefaultAgent)
     }
 
     /** Relay control-plane events (not E2E daemon traffic) drive the honest connection phase. */
@@ -1642,6 +1646,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             AgentKind.CODEX -> defaultCodexModel
             AgentKind.OPENCODE -> defaultOpenCodeModel
             AgentKind.KIMI -> defaultKimiModel
+            AgentKind.ZCODE -> defaultZCodeModel
         }
         if (v == state.value) return
         state.value = v
@@ -1661,6 +1666,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 AgentKind.CODEX -> K_DEFAULT_CODEX_MODEL
                 AgentKind.OPENCODE -> K_DEFAULT_OPENCODE_MODEL
                 AgentKind.KIMI -> K_DEFAULT_KIMI_MODEL
+                AgentKind.ZCODE -> K_DEFAULT_ZCODE_MODEL
             },
             v ?: "",
         )
@@ -1862,7 +1868,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // offers addressed to THIS device. Sending the ordinary volley here would be three refusals.
                 send(ListHandoffs())
             } else {
-                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI), supportsApprovalV2 = true))
+                send(ClientCaps(supportsAgents = listOf(AGENT_WIRE_OPENCODE, AGENT_WIRE_KIMI, AGENT_WIRE_ZCODE), supportsApprovalV2 = true))
                 send(ListDirectories())
                 send(ListPendingApprovals)
             }
@@ -2036,6 +2042,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         presetsState.value = null; presetsStateRev.value = 0
         gatewayBaseUrl.value = null // per-daemon truth (issue #139): the next machine re-announces via DaemonInfo
         bridgeControl.value = null  // per-daemon truth too — the next daemon re-advertises via DaemonInfo (issue #91)
+        daemonSupportedAgents.value = emptySet() // reverse agent capability: no stale ZCode across machines
         versionStatus.value = VersionStatus(APP_VERSION) // ditto (issue #200): the next machine reports its own
         // per-daemon truth too: the next machine's skills/plugins are a fresh fetch (issue #132)
         skillCatalogDeadline?.cancel()
@@ -2133,6 +2140,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         defaultCodexModel.value = from.defaultCodexModel.value
         defaultOpenCodeModel.value = from.defaultOpenCodeModel.value
         defaultKimiModel.value = from.defaultKimiModel.value
+        defaultZCodeModel.value = from.defaultZCodeModel.value
         contextWindowOverride.value = from.contextWindowOverride.value
         contextWindowOverrides.clear(); contextWindowOverrides.putAll(from.contextWindowOverrides) // #169: per-model table travels with the rest of Settings
         defaultAgent.value = from.defaultAgent.value
@@ -2235,6 +2243,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
 
     /** All outbound frames funnel here; a throw means the link is dead — trigger the reconnect path. */
     private suspend fun send(frame: Frame) {
+        // Reverse capability guard: an old daemon can coerce the unknown `zcode` enum to OpenSession's
+        // Claude default. Keep this at the final egress seam as defense in depth for reconnect/takeover
+        // paths that do not originate in the new-session picker.
+        if (frame is OpenSession && !supportsAgent(frame.agent)) return
         onSendForTest?.invoke(frame)
         if (demoMode.value) { demoRespond(frame); return } // no network: synthesize the daemon's reply locally
         try {
@@ -2266,6 +2278,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Enter the demo: seed the project list + slash commands, then render like a connected session. */
     fun enterDemo() {
         demoMode.value = true
+        // Demo has no handshake, so explicitly emulate a current daemon rather than inheriting the
+        // disconnected socket's deny-by-default capability state.
+        daemonSupportedAgents.value = DAEMON_SUPPORTED_AGENT_WIRES.toSet()
         demoAsked = false
         sessionActive.value = true
         replace(slashCommands, DemoData.commands())
@@ -2591,6 +2606,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // endpoint (or an old daemon omitting the field) must clear a previous gateway's value
                 gatewayBaseUrl.value = f.gatewayBaseUrl
                 bridgeControl.value = f.bridgeControl // capability advertisement (issue #91): false = daemon too old
+                daemonSupportedAgents.value = f.supportedAgents.toSet()
                 // version visibility (issue #200): unconditional, incl. nulls from a daemon that predates
                 // the fields — "unknown" must not be shown as the previous machine's numbers
                 versionStatus.value = VersionStatus(
@@ -3328,6 +3344,21 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      *  null until the first one lands, false from a daemon too old to carry the field. The Bridges screen
      *  shows "update the daemon" up front on false, instead of waiting for a bridge fetch to time out. */
     val bridgeControl = mutableStateOf<Boolean?>(null)
+
+    /** Agent wire names accepted by the connected daemon, learned from [DaemonInfo]. Empty is both the
+     * safe pre-handshake state and the decoded value from an older daemon. Only post-advertisement agents
+     * use it as a hard gate; see [agentAvailableFromDaemon]. */
+    val daemonSupportedAgents = mutableStateOf<Set<String>>(emptySet())
+
+    fun supportsAgent(agent: AgentKind): Boolean = agentAvailableFromDaemon(agent, daemonSupportedAgents.value)
+
+    /** Persisted ZCode remains the user's preference across machine switches, but an older daemon gets a
+     * temporary Claude fallback so its UI never displays or launches an agent it did not advertise. */
+    val sessionDefaultAgent: AgentKind
+        get() = defaultAgent.value.takeIf(::supportsAgent) ?: AgentKind.CLAUDE
+
+    val availableAgents: List<AgentKind>
+        get() = availableAgentsFromDaemon(daemonSupportedAgents.value)
 
     /** App / daemon / newest-release versions (issue #200), refreshed from every [DaemonInfo]. Starts as
      *  "only our own version known"; a daemon too old to report leaves the other fields null, which reads
@@ -4344,13 +4375,18 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         resumeId: String? = null,
         startMode: PermissionMode = defaultMode.value,
         title: String? = null,
-        agent: AgentKind = defaultAgent.value,
+        agent: AgentKind = sessionDefaultAgent,
         startPermissionMode: String? = defaultPermissionMode.value,
         // issue #199: a model picked in the new-session step, for THIS session only. Null = the usual
         // ladder (the session's remembered model, else the per-agent Settings default). Deliberately not
         // persisted anywhere: the pick is part of creating one session, not a new default.
         startModel: String? = null,
     ): Boolean {
+        // A resumed session keeps its recorded backend, so gate that effective agent rather than only the
+        // caller's seed. This is synchronous like the idempotence refusals below: unsupported ZCode never
+        // clears the current chat, flips opening state or reaches the wire.
+        val targetAgent = resumeId?.let { sessionParams[it]?.agent } ?: agent
+        if (!supportsAgent(targetAgent)) return false
         val attempt = OpenAttempt(wd, resumeId, startMode, title, agent, startPermissionMode, startModel)
         // #235: the two refusals, both decided SYNCHRONOUSLY — the defect they fix is two clicks landing in
         // the same frame, so any check that only ran inside the coroutine below was already too late.
@@ -4437,7 +4473,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             ?: compatibleModelForAgent(openAgent, defaultModelFor(openAgent))
         val knownCapabilities = modelCapabilities(openAgent, openModel)
         val openEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->
-            candidate == null || knownCapabilities == null || candidate in knownCapabilities.reasoningEfforts
+            candidate == null ||
+                candidate in knownCapabilities?.reasoningEfforts.orEmpty() ||
+                (openAgent != AgentKind.ZCODE && knownCapabilities == null)
         }
         val openServiceTier = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { candidate ->
             openAgent == AgentKind.CODEX &&
@@ -5464,7 +5502,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the authoritative id right after (a fork or lock-heal can hand back a different one), so a
         // wrong guess self-corrects instead of sticking in the MRU.
         rememberOpenedSession(item.dirKey, item.sessionId, item.title, item.agent)
-        openSession(item.dirKey, item.sessionId, title = item.title, agent = item.agent ?: defaultAgent.value)
+        openSession(item.dirKey, item.sessionId, title = item.title, agent = item.agent ?: sessionDefaultAgent)
     }
 
     /** Leaving the chat or losing the connection invalidates any in-flight capture. */
@@ -5488,6 +5526,13 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // still restore per-session, same as openSession.
             val saved = sessionParams[sid]
             val agent = saved?.agent ?: sessionAgent.value ?: AgentKind.CLAUDE
+            val takeOverModel = compatibleModelForAgent(agent, saved?.model)
+            val takeOverCapabilities = modelCapabilities(agent, takeOverModel)
+            val takeOverEffort = (saved?.effort ?: defaultEffort.value).takeIf { candidate ->
+                candidate == null ||
+                    candidate in takeOverCapabilities?.reasoningEfforts.orEmpty() ||
+                    (agent != AgentKind.ZCODE && takeOverCapabilities == null)
+            }
             mode.value = defaultMode.value
             permissionMode.value = defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
             serviceTier.value = (saved?.serviceTier ?: defaultServiceTier.value).takeIf { agent == AgentKind.CODEX }
@@ -5495,9 +5540,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 OpenSession(
                     wd,
                     sid,
-                    model = compatibleModelForAgent(agent, saved?.model),
+                    model = takeOverModel,
                     mode = defaultMode.value,
-                    effort = saved?.effort ?: defaultEffort.value,
+                    effort = takeOverEffort,
+                    agent = agent,
                     takeOver = true,
                     lastEventSeq = lastEventSeqFor(sid),
                     permissionMode = permissionMode.value,
@@ -5622,6 +5668,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         const val K_DEFAULT_CODEX_MODEL = "default_session_model_codex" // SecureStore: Codex model id for new sessions
         const val K_DEFAULT_OPENCODE_MODEL = "default_session_model_opencode" // SecureStore: OpenCode provider/model id for new sessions
         const val K_DEFAULT_KIMI_MODEL = "default_session_model_kimi" // SecureStore: Kimi model alias for new sessions (issue #206)
+        const val K_DEFAULT_ZCODE_MODEL = "default_session_model_zcode" // SecureStore: ZCode model id for new sessions (issue #228)
         private val LEGACY_EFFORT_OPTIONS = listOf("low", "medium", "high", "xhigh", "max")
         const val K_CONTEXT_WINDOW_OVERRIDE = "context_window_override" // SecureStore: LEGACY global statusline denominator in tokens ("" = follow derived window); now the fallback tier under K_CONTEXT_WINDOW_OVERRIDES
         const val K_CONTEXT_WINDOW_OVERRIDES = "context_window_overrides" // SecureStore: TSV modelId\ttokens per line — per-model denominators (issue #169)

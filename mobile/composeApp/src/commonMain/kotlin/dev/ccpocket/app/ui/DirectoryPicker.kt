@@ -325,8 +325,8 @@ internal fun DirectoryPickerSheet(
                     Box(Modifier.weight(1f)) {
                         EntryPrimaryButton(
                             stringResource(Res.string.dir_picker_use_here),
-                            caption = agentName(repo.defaultAgent.value) + " · " +
-                                stringResource(sessionDefaultsLabel(repo.defaultAgent.value, repo.defaultMode.value)),
+                            caption = agentName(repo.sessionDefaultAgent) + " · " +
+                                stringResource(sessionDefaultsLabel(repo.sessionDefaultAgent, repo.defaultMode.value)),
                             enabled = !started,
                         ) { if (!started) { started = true; onStart(workdir) } }
                     }

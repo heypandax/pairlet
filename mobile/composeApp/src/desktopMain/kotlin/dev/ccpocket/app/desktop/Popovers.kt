@@ -113,6 +113,7 @@ import dev.ccpocket.app.ui.agentColor
 import dev.ccpocket.app.ui.agentName
 import dev.ccpocket.app.ui.agentTintBorder
 import dev.ccpocket.app.ui.agentTintFill
+import dev.ccpocket.app.ui.handoff.canInitiateSessionHandoff
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.PermissionMode
@@ -135,6 +136,24 @@ internal val CLAUDE_MODES = listOf(
 internal val CLAUDE_AUTO_MODE =
     DkMode(Res.string.mode_auto_short, CLAUDE_PERMISSION_MODE_AUTO, PermissionMode.DEFAULT, Tok.accent, nativeMode = CLAUDE_PERMISSION_MODE_AUTO)
 
+/** Agents exposed by both desktop entry points: New session and Settings > Default agent. */
+internal val DESKTOP_AGENT_CHOICES = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.ZCODE)
+
+/** Desktop's rendering model for the shared permission contract. */
+internal fun desktopModeChoices(agent: AgentKind, autoAvailable: Boolean = false): List<DkMode> = when (agent) {
+    AgentKind.CLAUDE -> CLAUDE_MODES + if (autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
+    AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI, AgentKind.ZCODE -> CLAUDE_MODES
+}
+
+internal fun desktopDefaultModeIndex(
+    agent: AgentKind,
+    defaultMode: PermissionMode,
+    defaultPermissionMode: String?,
+    autoAvailable: Boolean = false,
+): Int = desktopModeChoices(agent, autoAvailable)
+    .indexOfFirst { it.mode == defaultMode && it.nativeMode == defaultPermissionMode }
+    .coerceAtLeast(0)
+
 /**
  * Agent + model + mode picker with an EDITABLE path field seeded by whoever opened it (the current project
  * from ⌘N / the Sessions-pane row, "~/" from the Projects-group row, a RECENT header's ＋). A path whose
@@ -149,6 +168,7 @@ internal val CLAUDE_AUTO_MODE =
 fun NewSessionPopover(
     initialPath: String,
     defaultAgent: AgentKind = AgentKind.CLAUDE,
+    availableAgents: List<AgentKind> = DESKTOP_AGENT_CHOICES,
     defaultMode: PermissionMode = PermissionMode.DEFAULT,
     defaultPermissionMode: String? = null,
     autoAvailable: Boolean = false,
@@ -157,12 +177,11 @@ fun NewSessionPopover(
     onAgentPicked: (AgentKind) -> Unit = {},
     onStart: (String, AgentKind, PermissionMode, String?, String?) -> Unit,
 ) {
-    var agent by remember { mutableStateOf(defaultAgent) }
-    val availableModes = CLAUDE_MODES + if (agent == AgentKind.CLAUDE && autoAvailable) listOf(CLAUDE_AUTO_MODE) else emptyList()
+    val selectableAgents = availableAgents.ifEmpty { listOf(AgentKind.CLAUDE) }
+    var agent by remember { mutableStateOf(defaultAgent.takeIf { it in selectableAgents } ?: selectableAgents.first()) }
+    val availableModes = desktopModeChoices(agent, autoAvailable)
     var modeIdx by remember {
-        mutableStateOf(
-            availableModes.indexOfFirst { it.mode == defaultMode && it.nativeMode == defaultPermissionMode }.coerceAtLeast(0),
-        )
+        mutableStateOf(desktopDefaultModeIndex(agent, defaultMode, defaultPermissionMode, autoAvailable))
     }
     // null = follow the per-agent default. Reset per agent: a Claude alias isn't a model Codex can run.
     var chosenModel by remember(agent) { mutableStateOf<String?>(null) }
@@ -210,10 +229,15 @@ fun NewSessionPopover(
                 )
             }
             PopoverLabel(stringResource(Res.string.label_agent))
-            Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                AgentCard(AgentKind.CLAUDE, agent == AgentKind.CLAUDE, Modifier.weight(1f)) { agent = AgentKind.CLAUDE }
-                AgentCard(AgentKind.CODEX, agent == AgentKind.CODEX, Modifier.weight(1f)) { agent = AgentKind.CODEX }
-                AgentCard(AgentKind.OPENCODE, agent == AgentKind.OPENCODE, Modifier.weight(1f)) { agent = AgentKind.OPENCODE }
+            Column(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                selectableAgents.chunked(3).forEach { rowAgents ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        rowAgents.forEach { candidate ->
+                            AgentCard(candidate, agent == candidate, Modifier.weight(1f)) { agent = candidate }
+                        }
+                        repeat(3 - rowAgents.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
             }
             NewSessionModelRow(modelsFor(agent), chosenModel, defaultModelFor(agent)) { chosenModel = it }
             PopoverLabel(stringResource(Res.string.label_mode))
@@ -341,10 +365,10 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                         onDismiss()
                     }
                 }
-                val modeChoices = CLAUDE_MODES + if (
-                    model.chatAgent == AgentKind.CLAUDE &&
-                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO)
-                ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                val modeChoices = desktopModeChoices(
+                    model.chatAgent,
+                    model.chatAgent == AgentKind.CLAUDE && model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO),
+                )
                 val activeMode = modeChoices.firstOrNull {
                     it.mode == model.chatMode && it.nativeMode == model.chatPermissionMode
                 } ?: modeChoices.first()
@@ -359,7 +383,7 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
                 // "Hand off to a colleague": an ordinary peer row (no NEW badge — available is not
                 // recommended, design chat-quick-actions-ui-2.0), only while the session is handoff-free —
                 // one non-terminal handoff per session, and the daemon refuses a second anyway
-                if (!model.observing && model.activeHandoff == null) {
+                if (!model.observing && model.activeHandoff == null && model.chatAgent.canInitiateSessionHandoff()) {
                     QaRow(stringResource(Res.string.ho_menu_row)) { onDismiss(); model.showHandoff = true }
                 }
                 QaRow(stringResource(Res.string.qa_compact)) { model.compactConversation(); onDismiss() }
@@ -377,10 +401,10 @@ fun QuickActionsPopover(model: DesktopModel, onDismiss: () -> Unit) {
             }
             QaPage.MODE -> {
                 QaBack(stringResource(Res.string.label_mode)) { page = QaPage.MAIN }
-                val choices = CLAUDE_MODES + if (
-                    model.chatAgent == AgentKind.CLAUDE &&
-                    model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO)
-                ) listOf(CLAUDE_AUTO_MODE) else emptyList()
+                val choices = desktopModeChoices(
+                    model.chatAgent,
+                    model.chatAgent == AgentKind.CLAUDE && model.permissionModeAvailable(CLAUDE_PERMISSION_MODE_AUTO),
+                )
                 choices.forEach { m ->
                     QaOption(
                         stringResource(m.label),
@@ -423,6 +447,8 @@ fun ModelPopover(model: DesktopModel, onDismiss: () -> Unit) {
             AgentKind.OPENCODE -> model.modelsForAgent(AgentKind.OPENCODE).map { it to it }
             // KIMI (issue #206): daemon-reported aliases only (from `kimi provider list --json`)
             AgentKind.KIMI -> model.modelsForAgent(AgentKind.KIMI).map { it to it }
+            // ZCode (issue #228): daemon-reported ids only, the same contract as Kimi.
+            AgentKind.ZCODE -> model.modelsForAgent(AgentKind.ZCODE).map { it to it }
             // Claude keeps its static alias rows (labels + the 1M/200K semantics live in the shared
             // table) — the daemon's list for Claude is config-default + the same aliases anyway.
             // claudeRowPick: on a gateway the Opus row degrades to the bare alias (#167/#168).

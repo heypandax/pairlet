@@ -36,6 +36,7 @@ import dev.ccpocket.protocol.RevokeGrant
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.AGENT_WIRE_KIMI
 import dev.ccpocket.protocol.AGENT_WIRE_OPENCODE
+import dev.ccpocket.protocol.AGENT_WIRE_ZCODE
 import dev.ccpocket.protocol.ScheduleState
 import dev.ccpocket.protocol.ClientCaps
 import dev.ccpocket.protocol.AudioCancel
@@ -158,6 +159,7 @@ class RequestRouter(
     private val scheduler: SchedulerService,
     private val openCodeModels: OpenCodeModelService = OpenCodeModelService(),
     private val kimiModels: dev.ccpocket.daemon.kimi.KimiModelService = dev.ccpocket.daemon.kimi.KimiModelService(),
+    private val zcodeModels: dev.ccpocket.daemon.zcode.ZCodeModelService = dev.ccpocket.daemon.zcode.ZCodeModelService(),
     private val codexModels: CodexModelService = CodexModelService(),
     private val claudeModels: ClaudeModelService = ClaudeModelService(),
     // the daemon-wide pending-approval ledger (approval design M1): the single verdict routing point;
@@ -192,6 +194,9 @@ class RequestRouter(
          *  after the baseline vocabulary, so its rows must not reach a peer that never declared it. */
         @Volatile var supportsKimi: Boolean = false
 
+        /** issue #228: the client decodes AgentKind.ZCODE. */
+        @Volatile var supportsZcode: Boolean = false
+
         /** §18.2 P2-3: the client decodes the approval-V2 frame types. The INGRESS sinks consult this to
          *  drop [AuthorizedActionRecorded]/[PermissionRiskUpdated] for undeclared peers — old clients
          *  would drop the unknown types anyway, but gating keeps the wire quiet and the contract real. */
@@ -202,6 +207,7 @@ class RequestRouter(
         fun allows(agent: AgentKind): Boolean = when (agent) {
             AgentKind.OPENCODE -> supportsOpencode
             AgentKind.KIMI -> supportsKimi
+            AgentKind.ZCODE -> supportsZcode
             AgentKind.CLAUDE, AgentKind.CODEX -> true
         }
     }
@@ -226,12 +232,24 @@ class RequestRouter(
             frame is dev.ccpocket.protocol.AuthorizedActionRecorded || frame is dev.ccpocket.protocol.PermissionRiskUpdated
 
         /** Per-connection/device gate: one modern client must never opt a sibling legacy client in. */
-        fun allowedForCaps(frame: Frame, caps: ClientCapsHolder): Boolean =
-            !approvalV2Only(frame) || caps.supportsApprovalV2
+        fun allowedForCaps(frame: Frame, caps: ClientCapsHolder?): Boolean = when {
+            approvalV2Only(frame) -> caps?.supportsApprovalV2 == true
+            // issue #228: fan-out is daemon-wide, but AgentKind vocabulary is per connection. A
+            // modern ZCode phone must never opt a legacy sibling into a HandoffUpdated it cannot
+            // decode. Null is a legacy/no-declaration ingress and therefore fails closed too.
+            frame is HandoffUpdated -> capsAllow(caps, frame.handoff.agent)
+            else -> true
+        }
+
+        /** Strip handoff rows carrying an undeclared post-baseline [AgentKind]. Unlike
+         * [allowedForCaps], a listing can keep its compatible rows instead of dropping the frame. */
+        internal fun filterHandoffs(items: List<dev.ccpocket.protocol.SessionHandoff>, caps: ClientCapsHolder?) =
+            items.filter { capsAllow(caps, it.agent) }
 
         /**
-         * [DirectoryEntry] rows themselves are agent-free; only their [DirectoryEntry.activeSessions]
-         * enrichment carries [AgentKind] — strip the opencode entries, keep the row.
+         * [DirectoryEntry] carries agent vocabulary in BOTH [DirectoryEntry.activeSessions] and
+         * [DirectoryEntry.sessionAgents]. Strip undeclared values from both before the frame reaches an
+         * older peer, while keeping the project row itself.
          *
          * Row-level symmetry (issue #184 mechanism ②) lives UPSTREAM: this filter can't tell what backed a
          * row, so [DirectoryService.listDirectories]'s `includeOpencode=false` (fed from the SAME caps bit)
@@ -253,11 +271,13 @@ class RequestRouter(
          */
         internal fun filterDirs(entries: List<DirectoryEntry>, caps: ClientCapsHolder?): List<DirectoryEntry> =
             entries.map { e ->
-                if (e.activeSessions.all { capsAllow(caps, it.agent) }) return@map e
                 val kept = e.activeSessions.filter { capsAllow(caps, it.agent) }
+                val keptAgents = e.sessionAgents.filter { capsAllow(caps, it) }
+                if (kept.size == e.activeSessions.size && keptAgents.size == e.sessionAgents.size) return@map e
                 val first = kept.firstOrNull()
                 e.copy(
                     activeSessions = kept,
+                    sessionAgents = keptAgents,
                     // derive from what SURVIVED — never from the stripped-out session
                     open = first != null,
                     executing = kept.any { it.executing },
@@ -305,12 +325,13 @@ class RequestRouter(
             is ClientCaps -> {
                 caps?.supportsOpencode = AGENT_WIRE_OPENCODE in frame.supportsAgents
                 caps?.supportsKimi = AGENT_WIRE_KIMI in frame.supportsAgents // issue #206: gates KIMI rows
+                caps?.supportsZcode = AGENT_WIRE_ZCODE in frame.supportsAgents // issue #228: gates ZCODE rows
                 caps?.supportsApprovalV2 = frame.supportsApprovalV2 // P2-3: gates the V2 approval frames
             }
 
             is ListDirectories ->
                 if (guestScope != null) sink.emit(Directories(filterDirs(scopedDirectories(guestScope, caps), caps)))
-                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true), caps)))
+                else sink.emit(Directories(filterDirs(dirs.listDirectories(frame.root, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true), caps)))
 
             // Owner control-plane pull: push is alert-only, so every foreground client can reconstruct the
             // complete queue even if APNs/FCM was delayed or lost. Restricted credentials must never learn
@@ -450,7 +471,7 @@ class RequestRouter(
                     // blocked on device-code auth), so a restricted credential must not open one yet. P2
                     // re-evaluates once the ACP approval face is proven end-to-end.
                     (guestScope != null || origin != null) &&
-                        (frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI) ->
+                        (frame.agent == AgentKind.OPENCODE || frame.agent == AgentKind.KIMI || frame.agent == AgentKind.ZCODE) ->
                         sink.emit(PocketError("share_forbidden", "${frame.agent} sessions are not available over shared/bridge access yet"))
                     guestScope != null && !PathScope.contains(guestScope.roots, wd.toString()) ->
                         sink.emit(PocketError("share_out_of_scope", "that folder is outside your shared folder"))
@@ -470,6 +491,7 @@ class RequestRouter(
                             // null caps (legacy ingress / bridges) = undeclared, same as everywhere else here
                             peerSupportsOpencode = caps?.supportsOpencode == true,
                             peerSupportsKimi = caps?.supportsKimi == true,
+                            peerSupportsZcode = caps?.supportsZcode == true,
                             bridgeAllowedCommands = bridgeAllowedCommands,
                             announcedWorkdir = frame.workdir, // #219: announce the RAW workdir the phone opened (may be "~/x")
                             ownerBypass = ownerBypass, // trusted in-process open flag ⇒ owner's own session
@@ -654,6 +676,7 @@ class RequestRouter(
                 sink.emit(when (frame.agent) {
                     AgentKind.OPENCODE -> openCodeModels.fetch()
                     AgentKind.KIMI -> kimiModels.fetch()
+                    AgentKind.ZCODE -> zcodeModels.fetch()
                     AgentKind.CODEX -> codexModels.fetch()
                     AgentKind.CLAUDE -> claudeModels.fetch(frame.workdir)
                 })
@@ -671,6 +694,16 @@ class RequestRouter(
                     svc == null -> sink.emit(HandoffCreated(ok = false, error = "handoffs are not available on this daemon"))
                     origin != null || guestScope != null || collabScope != null ->
                         sink.emit(PocketError("handoff_forbidden", "not permitted for a restricted credential"))
+                    // CollaboratorGuard cannot open a ZCode grant yet. Refuse before the registry
+                    // persists WAITING, otherwise the owner can create an offer that only fails after
+                    // the recipient accepts and tries to enter the session.
+                    frame.agent == AgentKind.ZCODE -> sink.emit(
+                        HandoffCreated(
+                            ok = false,
+                            error = "ZCode sessions can't be handed off over a collaborator link yet",
+                            code = "handoff_agent_unsupported",
+                        ),
+                    )
                     else -> {
                         // §4.1 preconditions live on the registry (it owns the live conversation state)
                         val blocker = registry.handoffBlocker(frame.sessionId)
@@ -735,7 +768,7 @@ class RequestRouter(
                         // a COLLABORATOR credential sees ONLY handoffs addressed to its own device (§4.1:
                         // offers + their history — never the owner's other handoffs); owners see everything
                         if (collabScope != null) items = items.filter { it.recipientDeviceId == collabScope.deviceId }
-                        sink.emit(HandoffListing(items))
+                        sink.emit(HandoffListing(filterHandoffs(items, caps)))
                     }
                 }
             }
@@ -1139,7 +1172,7 @@ class RequestRouter(
      * rows exactly like the owner path (issue #184 mechanism ②).
      */
     private suspend fun scopedDirectories(scope: GuestScope, caps: ClientCapsHolder?): List<DirectoryEntry> {
-        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true)
+        val all = dirs.listDirectories(null, registry.busyCwds(), registry.liveByCwd(), includeOpencode = caps?.supportsOpencode == true, includeKimi = caps?.supportsKimi == true, includeZcode = caps?.supportsZcode == true)
         val underScope = all
             .filter { e -> PathScope.contains(scope.roots, e.path) }
             .map { it.stampShare(scope) }
