@@ -274,11 +274,6 @@ class Conversation(
     private data class SubagentRun(val tool: String, val background: Boolean)
     private val subagentRuns = LinkedHashMap<String, SubagentRun>()
 
-    // a user turn is in flight (prompt written, TurnDone not yet seen) — SessionLive carries it so
-    // a (re)attaching phone can reset its ■/streaming state instead of trusting a stale local value
-    @Volatile
-    private var executing = false
-
     // UNPROMPTED-CONTINUATION grace (issue #105 residual). Two probed CLI behaviors (2.1.206) start a
     // new turn with no sendPrompt to arm `executing`: plan mode keeps working after its premature
     // `result` (the research → AskUserQuestion flow of issue #55, reproduced organically: a fresh
@@ -290,8 +285,21 @@ class Conversation(
     // thinking_tokens system lines only flow once the API responds). This stamp keeps [isBusy] true
     // for a bounded grace after those triggers; the continuation's own stream then re-arms
     // `executing`. Gated on a LIVE process, so a dead conversation can never ride the grace.
+    // `executing` and the grace belong to ONE state value. A directory poll is concurrent with the stdout
+    // pump; publishing them as two unrelated volatile fields allowed the WORKING -> grace hand-off to be
+    // observed between writes as a false SETTLED edge. All transitions replace this immutable snapshot.
+    private data class TurnWorkState(
+        val executing: Boolean = false,
+        val continuationGraceUntil: Long = 0L,
+        // Mirrors the two other producer-owned work sources into this SAME atomic snapshot. The detailed
+        // registries still own payload/replay data; these booleans exist so project-list completion inference
+        // never tears across `executing`, a queued prompt, and a background-job transition.
+        val backgroundWork: Boolean = false,
+        val pendingPromptWork: Boolean = false,
+    )
+    private val turnWorkLock = Any()
     @Volatile
-    private var continuationGraceUntil: Long = 0L
+    private var turnWork = TurnWorkState()
 
     @Volatile
     private var intentionalStop = false
@@ -378,6 +386,10 @@ class Conversation(
         val images: List<ImageData>,
         var generation: Long,
         var redeliveries: Int = 0,
+        // True only when this prompt was accepted BEHIND work already in flight. A TurnResult may settle
+        // the current ledger entry even without UserReplay, but it must never settle one of these queued
+        // successors before its own consumption/start evidence arrives.
+        var queuedWork: Boolean = false,
     )
 
     // the turn-starting prompt handed to a fresh (re)launch, so launchProcess can LEDGER it before it
@@ -432,12 +444,31 @@ class Conversation(
     // ---- unconsumed-prompt ledger (issue #122) ----
 
     /** Record a prompt handed to backend.sendPrompt — unproven until its UserReplay settles it. */
-    private fun recordPromptWritten(promptId: String?, text: String, images: List<ImageData>) {
-        synchronized(promptLedger) {
-            promptLedger.addLast(
-                PendingPrompt(promptId ?: "local-${localPromptSeq.getAndIncrement()}", text, images, processGeneration),
-            )
-            while (promptLedger.size > LEDGER_MAX) promptLedger.removeFirst()
+    private fun recordPromptWritten(
+        promptId: String?,
+        text: String,
+        images: List<ImageData>,
+        queuedWork: Boolean = false,
+        inferQueuedWork: Boolean = false,
+    ) {
+        synchronized(turnWorkLock) {
+            synchronized(promptLedger) {
+                val state = turnWork
+                val countsAsQueued = queuedWork || inferQueuedWork && (
+                    state.executing || state.backgroundWork || state.pendingPromptWork || continuationExpected(state)
+                )
+                promptLedger.addLast(
+                    PendingPrompt(
+                        promptId ?: "local-${localPromptSeq.getAndIncrement()}",
+                        text,
+                        images,
+                        processGeneration,
+                        queuedWork = countsAsQueued,
+                    ),
+                )
+                while (promptLedger.size > LEDGER_MAX) promptLedger.removeFirst()
+                turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+            }
         }
     }
 
@@ -445,9 +476,17 @@ class Conversation(
      *  Injected plumbing turns (task-notifications, compact summaries) never match a recorded prompt. */
     private fun settlePromptReplay(text: String?) {
         text ?: return
-        synchronized(promptLedger) {
-            val iter = promptLedger.iterator()
-            while (iter.hasNext()) if (iter.next().text == text) { iter.remove(); return }
+        synchronized(turnWorkLock) {
+            synchronized(promptLedger) {
+                val iter = promptLedger.iterator()
+                while (iter.hasNext()) {
+                    if (iter.next().text == text) {
+                        iter.remove()
+                        turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+                        return
+                    }
+                }
+            }
         }
     }
 
@@ -459,15 +498,18 @@ class Conversation(
     private var initialArgSettledGen = -1L
 
     /** One-shot argv prompts have no stdin replay; the process accepting the turn settles the launch prompt. */
-    private fun settleInitialArgPrompt() = synchronized(promptLedger) {
-        if (initialArgSettledGen == processGeneration) return@synchronized
-        initialArgSettledGen = processGeneration
-        val iter = promptLedger.iterator()
-        while (iter.hasNext()) {
-            val entry = iter.next()
-            if (entry.generation == processGeneration) {
-                iter.remove()
-                return@synchronized
+    private fun settleInitialArgPrompt() = synchronized(turnWorkLock) outer@{
+        synchronized(promptLedger) {
+            if (initialArgSettledGen == processGeneration) return@outer
+            initialArgSettledGen = processGeneration
+            val iter = promptLedger.iterator()
+            while (iter.hasNext()) {
+                val entry = iter.next()
+                if (entry.generation == processGeneration) {
+                    iter.remove()
+                    turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+                    return@outer
+                }
             }
         }
     }
@@ -477,19 +519,37 @@ class Conversation(
     /** One-shot queue drain: the oldest queued prompt leaves the ledger to become the next spawn's
      *  argv message — launchProcess re-records it (initialSend) under the fresh generation, so the
      *  usual SessionInit settle applies. Pop-then-re-record keeps exactly one live copy. */
-    private fun popQueuedPrompt(): PendingPrompt? = synchronized(promptLedger) { promptLedger.removeFirstOrNull() }
+    private fun popQueuedPrompt(): PendingPrompt? = synchronized(turnWorkLock) {
+        synchronized(promptLedger) {
+            // Transfer, not settlement: keep pendingPromptWork true until launchProcess re-records the
+            // same prompt under the next generation (or its failure path clears the whole work snapshot).
+            promptLedger.removeFirstOrNull()
+        }
+    }
 
     /** /clear + switchDirectory: the old session's undelivered prompts must not leak into a fresh one. */
-    private fun clearPromptLedger() = synchronized(promptLedger) { promptLedger.clear() }
+    private fun clearPromptLedger() = synchronized(turnWorkLock) {
+        synchronized(promptLedger) {
+            promptLedger.clear()
+            turnWork = turnWork.copy(pendingPromptWork = false)
+        }
+    }
 
     /** Ledger entries a fresh process (generation [gen]) must be re-handed, oldest first. Stamps them
      *  onto the new generation and counts the redelivery; an entry redelivered [MAX_REDELIVERIES] times
      *  without ever seeing its replay is dropped — a safety valve against replay-parse drift turning
      *  every relaunch into a duplicate turn. */
-    private fun promptsForRedelivery(gen: Long): List<PendingPrompt> = synchronized(promptLedger) {
-        promptLedger.removeAll { it.redeliveries >= MAX_REDELIVERIES }
-        promptLedger.forEach { it.generation = gen; it.redeliveries++ }
-        promptLedger.toList()
+    private fun promptsForRedelivery(gen: Long): List<PendingPrompt> = synchronized(turnWorkLock) {
+        synchronized(promptLedger) {
+            promptLedger.removeAll { it.redeliveries >= MAX_REDELIVERIES }
+            promptLedger.forEachIndexed { index, entry ->
+                entry.generation = gen
+                entry.redeliveries++
+                entry.queuedWork = index > 0
+            }
+            turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+            promptLedger.toList()
+        }
     }
 
     /** Issue #122 ④: true when [promptId]'s earlier write is provably LOST — it never produced a user
@@ -497,11 +557,14 @@ class Conversation(
      *  the caller re-runs the prompt through the normal path instead of hollow-re-acking it. An entry
      *  still owned by the LIVE process is merely queued mid-turn — that one stays a re-ack (a duplicate
      *  turn is worse than a duplicate receipt). */
-    private fun releaseLostPrompt(promptId: String): Boolean = synchronized(promptLedger) {
-        val entry = promptLedger.firstOrNull { it.key == promptId } ?: return false
-        val lost = proc == null || entry.generation != processGeneration
-        if (lost) promptLedger.remove(entry)
-        lost
+    private fun releaseLostPrompt(promptId: String): Boolean = synchronized(turnWorkLock) outer@{
+        synchronized(promptLedger) {
+            val entry = promptLedger.firstOrNull { it.key == promptId } ?: return@outer false
+            val lost = proc == null || entry.generation != processGeneration
+            if (lost) promptLedger.remove(entry)
+            turnWork = turnWork.copy(pendingPromptWork = promptLedger.any { it.queuedWork })
+            lost
+        }
     }
 
     /** The model the phone should SEE: the requested/confirmed one, else the transcript backfill. */
@@ -518,7 +581,7 @@ class Conversation(
     /** The announce frame, stamped with everything mutable the phone reconciles from (mode, executing, model, effort, agent). */
     private fun live(sid: String?) =
         SessionLive(
-            convoId, announcedWorkdir ?: workdir.toString(), sid, mode = mode, executing = executing, model = displayModel(), effort = effort,
+            convoId, announcedWorkdir ?: workdir.toString(), sid, mode = mode, executing = isExecuting(), model = displayModel(), effort = effort,
             // stamp the 1M/200k window from the model so the phone's usage % has an authoritative denominator
             // (issue #20) instead of sniffing the id itself. Phones that predate the field simply ignore it.
             contextWindow = claudeWindow(),
@@ -734,7 +797,7 @@ class Conversation(
     }
 
     /** True while any background job is still RUNNING — the daemon's idle reaper must not reap such a session. */
-    fun hasBackgroundWork(): Boolean = jobs.hasRunning()
+    fun hasBackgroundWork(): Boolean = turnWork.backgroundWork
 
     /** Labels of the still-RUNNING background jobs — names the work an auth-switch blocker row shows. */
     fun runningJobLabels(): List<String> =
@@ -760,23 +823,70 @@ class Conversation(
 
     /** True while a turn is streaming — the LAN disconnect grace-close re-arms instead of killing it
      *  (in-flight work must survive its owner app quitting; see SessionRegistry.scheduleClose). */
-    fun isExecuting(): Boolean = executing
+    fun isExecuting(): Boolean = turnWork.executing
 
-    private fun armContinuationGrace() {
-        continuationGraceUntil = System.currentTimeMillis() + continuationGraceMs
+    /** A prompt or continuation has produced stream evidence. Set `executing` before dropping the grace
+     *  in the same immutable snapshot, so concurrent directory readers can observe only WORKING states. */
+    private fun markExecuting() = synchronized(turnWorkLock) {
+        turnWork = turnWork.copy(executing = true, continuationGraceUntil = 0L)
     }
 
-    /** True while an unprompted continuation turn may still be coming (see [continuationGraceUntil]):
-     *  the grace is armed and the agent process is alive to deliver it. */
-    private fun continuationExpected(): Boolean =
-        System.currentTimeMillis() < continuationGraceUntil && proc?.isAlive() == true
+    /** The process cannot deliver this turn or a continuation (death, failed spawn, explicit stop). */
+    private fun clearTurnWork() = synchronized(turnWorkLock) {
+        turnWork = TurnWorkState()
+    }
+
+    /** A clean one-shot process ended but its next queued prompt is about to be relaunched. The old
+     *  process's turn/jobs/grace are over; only the transferred prompt remains authoritative work. */
+    private fun carryPendingPromptTransfer() = synchronized(turnWorkLock) {
+        turnWork = TurnWorkState(pendingPromptWork = true)
+    }
+
+    /** Atomically hand a completed result either to its bounded continuation grace or to SETTLED.
+     *  An already-armed background-task grace survives the enclosing turn result. */
+    private fun settleTurnWork(expectContinuation: Boolean) = synchronized(turnWorkLock) {
+        val until = if (expectContinuation) {
+            maxOf(turnWork.continuationGraceUntil, System.currentTimeMillis() + continuationGraceMs)
+        } else {
+            turnWork.continuationGraceUntil
+        }
+        turnWork = turnWork.copy(executing = false, continuationGraceUntil = until)
+    }
+
+    /** Refresh the background-work bit only after the detailed registry mutation. Its previous true value
+     *  remains in [turnWork] until this single replacement installs either the remaining jobs or the grace,
+     *  so a concurrent directory snapshot cannot fall between `job DONE` and `continuation expected`. */
+    private fun syncBackgroundWork(expectContinuation: Boolean = false) = synchronized(turnWorkLock) {
+        val running = jobs.hasRunning()
+        val until = if (expectContinuation) {
+            maxOf(turnWork.continuationGraceUntil, System.currentTimeMillis() + continuationGraceMs)
+        } else {
+            turnWork.continuationGraceUntil
+        }
+        turnWork = turnWork.copy(backgroundWork = running, continuationGraceUntil = until)
+    }
+
+    /** True while an unprompted continuation turn may still be coming: the grace is armed and the
+     *  agent process is alive to deliver it. [state] lets callers make one coherent work-state read. */
+    private fun continuationExpected(state: TurnWorkState = turnWork): Boolean =
+        System.currentTimeMillis() < state.continuationGraceUntil && proc?.isAlive() == true
+
+    /** The agent emitted a nominal result but is still allowed to continue without another user prompt. */
+    fun expectsContinuation(): Boolean = continuationExpected()
+
+    /** One atomic producer view for project-list work state. This is deliberately broader than
+     *  [isExecuting]: continuation grace is unfinished work, but SessionLive still reports the real turn. */
+    fun hasAuthoritativeTurnWork(): Boolean {
+        val state = turnWork
+        return state.executing || state.backgroundWork || state.pendingPromptWork || continuationExpected(state)
+    }
 
     /** True while the conversation is doing or awaiting anything that must outlive its owner leaving: a
      *  streaming turn, running background jobs, an unanswered permission/question card, or the bounded
      *  window in which the CLI is expected to start an unprompted continuation turn (plan mode's
      *  premature result / a just-completed background task — issue #105 residual). The shared
      *  keep-alive predicate for SessionRegistry.close/scheduleClose/reapIdle. */
-    fun isBusy(): Boolean = isExecuting() || hasBackgroundWork() || hasPendingAsk() || continuationExpected()
+    fun isBusy(): Boolean = hasAuthoritativeTurnWork() || hasPendingAsk()
 
     /** Pre-first-turn (issue #61 lazy start): with no agent process yet, a mode/model/effort switch only
      *  records the field and re-announces — relaunching would spawn the very process the lazy open avoided,
@@ -801,10 +911,13 @@ class Conversation(
      * report (agent killed outside the daemon / event lost to a crash), so gate it on exactly that.
      */
     suspend fun reapStaleJobs(staleMs: Long): Boolean {
-        if (!jobs.hasRunning()) return false // idle conversation: nothing RUNNING to settle, skip the clock+scan
+        if (!jobs.hasRunning()) return false // detailed ledger survives process death until this cleanup
         if (proc?.isAlive() == true) return false // live agent: trust its eventual task_* completion, never the clock
         val changed = jobs.reapStale(System.currentTimeMillis(), staleMs)
-        if (changed) sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+        if (changed) {
+            syncBackgroundWork()
+            sink.emit(BackgroundJobs(convoId, jobs.snapshot()))
+        }
         return changed
     }
 
@@ -1106,8 +1219,11 @@ class Conversation(
         } else {
             emptyList()
         }
+        // Arm before any ledger replacement/write: the pump has not started yet, so an instant-death clear
+        // cannot race this write, and a one-shot queued transfer never drops its pending shield before the
+        // fresh process becomes executing.
+        if (redeliver.isNotEmpty() || armExecuting) markExecuting()
         if (redeliver.isNotEmpty()) {
-            executing = true // the re-injected prompts start a turn; TurnResult clears it as usual
             log.info("$convoId re-injecting ${redeliver.size} unconsumed prompt(s) into the fresh agent")
             redeliver.forEach { backend.sendPrompt(it.text, it.images) }
         }
@@ -1117,12 +1233,9 @@ class Conversation(
         // the pump, so the CLI's near-instant user-message echo settles the entry instead of orphaning it
         // (issue #122 record-vs-replay race — a spurious re-injection on the next relaunch). NOT re-sent
         // here: it is not in `redeliver` (recorded after that snapshot) — the caller owns its single write.
-        initialSend?.let { recordPromptWritten(it.promptId, it.text, it.images) }
-        // Arm `executing` for a turn-starting (re)launch BEFORE the pump can run (sendPrompt's lazy start /
-        // settings relaunch): the pump's death-branch `executing = false` is then guaranteed to happen-after
-        // this write, so an instant startup death always wins and can't be resurrected by a late arm on the
-        // caller thread (the reap-flake / stranded-■ race). Ordered last so it also covers re-injection.
-        if (armExecuting) executing = true
+        initialSend?.let {
+            recordPromptWritten(it.promptId, it.text, it.images, queuedWork = redeliver.isNotEmpty())
+        }
         // OpenCode startup watchdog: if the process hangs on launch (bad model, resume failure, etc.)
         // with zero stdout for OPENCODE_STARTUP_TIMEOUT_MS, kill it and surface an error — the pump
         // would otherwise block on `for (line in p.stdout)` forever (issue: opencode run with an
@@ -1143,7 +1256,7 @@ class Conversation(
                     // Null proc + clear state so the next sendPrompt triggers a fresh relaunch
                     // (without this, subsequent prompts would write into the dead stdin and be lost)
                     proc = null
-                    executing = false
+                    clearTurnWork()
                     bridge?.cancelAll()
                     bridge = null
                     // Surface the last stderr (often the real cause) + a clear message
@@ -1205,6 +1318,10 @@ class Conversation(
             for (ev in backend.parse(line)) {
                 when (ev) {
                     is AgentEvent.SessionInit -> {
+                        // Claude's unprompted continuation announces a fresh init before its first assistant
+                        // token. Convert the grace to a real executing turn now so a long first-token delay is
+                        // still visible, while ordinary init leaves the caller-armed state untouched.
+                        if (expectsContinuation()) markExecuting()
                         if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
                         val firstTime = sessionId == null
                         val prevSid = sessionId
@@ -1247,15 +1364,15 @@ class Conversation(
                     // speaking — its activity reaches the phone as parent-tagged tool events the client
                     // folds into the Task card instead (issue #77)
                     is AgentEvent.AssistantText -> {
-                        executing = true
+                        markExecuting()
                         if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(ev.text)))
                     }
                     is AgentEvent.AssistantThinking -> {
-                        executing = true
+                        markExecuting()
                         if (ev.parentId == null) sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Thinking(ev.text)))
                     }
                     is AgentEvent.AssistantToolUse -> {
-                        executing = true
+                        markExecuting()
                         val subagent = ev.parentId == null && isSubagentTool(ev.name)
                         // ExitPlanMode's input IS the proposed plan (input["plan"]) — surface it in full via the
                         // shared ToolMetadata extractor so the plan is readable in the phone's chat, not truncated
@@ -1287,16 +1404,25 @@ class Conversation(
                                 toolUseId = ev.id, parentToolUseId = ev.parentId,
                             ),
                         )
-                        if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) emitJobs()
+                        if (jobs.onToolUse(ev.id, ev.name, ev.input, System.currentTimeMillis())) {
+                            syncBackgroundWork()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.ToolResult -> {
                         if (ev.parentId == null) finishSubagentFromResult(ev)
-                        if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) emitJobs()
+                        if (jobs.onToolResult(ev.toolUseId, ev.content, ev.isError, System.currentTimeMillis())) {
+                            syncBackgroundWork()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.BackgroundTaskStarted -> {
                         val now = System.currentTimeMillis()
                         if (ev.taskType == "local_workflow" && workflows.onTaskStarted(ev.taskId, ev.toolUseId, ev.workflowName, now)) emitWorkflow(ev.taskId)
-                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, now)) emitJobs()
+                        if (jobs.onTaskStarted(ev.taskId, ev.toolUseId, ev.description, ev.taskType, now)) {
+                            syncBackgroundWork()
+                            emitJobs()
+                        }
                     }
                     is AgentEvent.BackgroundTaskUpdated -> {
                         finishSubagentFromTask(ev)
@@ -1309,8 +1435,9 @@ class Conversation(
                         if (jobs.onTaskUpdated(ev.taskId, ev.status, now)) {
                             // a settled background task triggers the CLI's unprompted follow-up turn
                             // (probed on 2.1.206) — hold the conversation until that continuation's
-                            // own stream re-arms `executing`
-                            armContinuationGrace()
+                            // own stream re-arms `executing`. The prior backgroundWork=true stays in the
+                            // atomic snapshot until this replacement installs grace + the new job state.
+                            syncBackgroundWork(expectContinuation = true)
                             emitJobs()
                         }
                     }
@@ -1329,7 +1456,7 @@ class Conversation(
                     // the CLI's API-failure placeholder — never a real reply. Suppress the chunk (the
                     // TurnDone error row replaces it) but still arm `executing`: a turn did run (issue #65).
                     is AgentEvent.SyntheticReply -> {
-                        executing = true
+                        markExecuting()
                         sawSyntheticThisTurn = true
                         lastSyntheticText = ev.text // issue #208: retain for error attribution
                     }
@@ -1339,7 +1466,11 @@ class Conversation(
                         // Revoke before processing any later stdout event; the next request starts locked.
                         bridgeGrant.set(BridgeGrant.NONE)
                         if (backend.promptDelivery == AgentPromptDelivery.INITIAL_ARG_ONE_SHOT) settleInitialArgPrompt()
-                        executing = false
+                        val interrupted = interruptRequested
+                        interruptRequested = false
+                        // Publish the WORKING -> grace/SETTLED hand-off as ONE state replacement before
+                        // any suspend below. A concurrent project poll can never observe both flags false.
+                        settleTurnWork(mode == PermissionMode.PLAN && !interrupted)
                         // relaunch continuation grace anchor (issue #122 ⑤): this result may be a phantom
                         // (fable early result/fallback) — for RELAUNCH_GRACE ms after it, sendPrompt must
                         // not treat `!executing` as license to kill this process. NOTE: the ledger is NOT
@@ -1354,13 +1485,8 @@ class Conversation(
                         sawSyntheticThisTurn = false
                         val syntheticText = lastSyntheticText
                         lastSyntheticText = null
-                        val interrupted = interruptRequested
-                        interruptRequested = false
-                        // plan mode's `result` is routinely PREMATURE (issue #55): the CLI continues
-                        // unprompted toward its AskUserQuestion/ExitPlanMode (a fresh init follows the
-                        // result within 0.1s — probed on 2.1.206). Hold the conversation for that
-                        // continuation; a user-interrupted turn genuinely ends, so no grace then.
-                        if (mode == PermissionMode.PLAN && !interrupted) armContinuationGrace()
+                        // Plan mode's `result` is routinely premature (issue #55); its grace was installed
+                        // atomically with the executing clear above. A user interrupt instead settled it.
                         // A result WITHOUT usage (interrupted turn, some error exits) surfaces as usage=null,
                         // never zeros — a zero snaps the phone's statusline to 0% and poisons the resume seed.
                         // Context fields prefer the turn's LAST API call: the result event SUMS input/cache
@@ -1426,7 +1552,12 @@ class Conversation(
                     // the CLI's consumption receipt (issue #122): a top-level user replay proves the
                     // matching prompt reached the model — settle its ledger entry. A parent-tagged
                     // replay is a sub-agent's inner user line, never one of ours.
-                    is AgentEvent.UserReplay -> if (ev.parentId == null) settlePromptReplay(ev.text)
+                    is AgentEvent.UserReplay -> if (ev.parentId == null) {
+                        // Consumption is first-class start evidence for a queued turn. Install executing
+                        // before removing its pending-prompt shield so no directory reader can see a gap.
+                        markExecuting()
+                        settlePromptReplay(ev.text)
+                    }
                     is AgentEvent.Ignored -> {}
                     is AgentEvent.Unparseable -> {}
                 }
@@ -1439,7 +1570,6 @@ class Conversation(
             if (proc !== p) return
             // unexpected death: stdout EOF precedes the last transcript flush, so wait for the
             // real process exit before touching the file (intentional stops settle in stopProcess)
-            executing = false // a dead process never delivers TurnResult
             bridgeGrant.set(BridgeGrant.NONE) // nor may its one-off grant survive into the respawned process
             p.awaitExit()
             if (backend.processMode == AgentProcessMode.ONE_SHOT_TURN && p.exitCode() == 0 && turnCompleted) {
@@ -1460,6 +1590,7 @@ class Conversation(
                 proc = null // dead handle dropped FIRST — a failed drain-launch below must not leave prompts writing into it
                 val next = popQueuedPrompt()
                 if (next != null) {
+                    carryPendingPromptTransfer()
                     log.info("$convoId one-shot queue: relaunching with queued prompt ${next.key.take(8)}…")
                     runCatching {
                         launchProcess(
@@ -1471,15 +1602,19 @@ class Conversation(
                             initialSend = InitialSend(next.key, next.text, next.images),
                         )
                     }.onFailure { e ->
-                        executing = false // the spawn never started a turn
+                        clearTurnWork() // the spawn never started a turn
                         // the popped entry is gone from the ledger — forget its id too, so the client's
                         // resend runs it fresh instead of being hollow-re-acked as "already delivered"
                         synchronized(seenPromptIds) { seenPromptIds.remove(next.key) }
                         sink.emit(PocketError("agent_unavailable", "agent failed to start for a queued message (${e.message})", convoId))
                     }
-                }
+                } else clearTurnWork()
                 return
             }
+            // Not the clean one-shot queue-transfer path: no live process can consume a turn, grace, job,
+            // or pending prompt now. Clear only after awaitExit classified the path, so a queued one-shot
+            // prompt never loses its work shield between the old process and its next spawn.
+            clearTurnWork()
             // workflows died with the process — settle them so no card pulses forever (#106)
             for (taskId in workflows.killRunning(System.currentTimeMillis())) emitWorkflow(taskId)
             backend.onProcessEnded(sessionId)
@@ -1597,7 +1732,7 @@ class Conversation(
     /** Ask the owner to approve this exact bridge request before the prompt reaches the agent. */
     suspend fun awaitBridgeRequestApproval(preview: String): Boolean {
         if (
-            origin == null || pathScope != null || ownerBypass || executing ||
+            origin == null || pathScope != null || ownerBypass || isExecuting() ||
             bridgeGrant.get().authorizes || bridgeRequestPermit.get()
         ) return false
         lastActivityMs = System.currentTimeMillis()
@@ -1652,11 +1787,11 @@ class Conversation(
      *  can never both believe they hold the grant. A hand-off that starts no turn (a daemon-intercepted slash
      *  command) or throws revokes it immediately. */
     private suspend fun handOff(text: String, promptId: String?, grant: BridgeGrant): Boolean {
-        if (executing) return false
+        if (isExecuting()) return false
         if (!bridgeGrant.compareAndSet(BridgeGrant.NONE, grant)) return false
         return runCatching {
             sendPrompt(text, promptId = promptId)
-            if (!executing) bridgeGrant.set(BridgeGrant.NONE)
+            if (!isExecuting()) bridgeGrant.set(BridgeGrant.NONE)
             true
         }.getOrElse {
             bridgeGrant.set(BridgeGrant.NONE)
@@ -1712,7 +1847,9 @@ class Conversation(
         // (issue #104) snapshot the process state BEFORE the (re)launch below: a prompt acked during a fresh
         // spawn or a settings relaunch is exactly the window a client "delivered but no turn" (turnStalled) targets.
         val firstSpawn = proc == null
-        val relaunching = proc != null && !executing && pendingRelaunch && relaunchGraceElapsed() && !continuationExpected()
+        val workAtSend = turnWork
+        val relaunching = proc != null && !workAtSend.executing && pendingRelaunch &&
+            relaunchGraceElapsed() && !continuationExpected(workAtSend)
         // `executing` must be armed with a happens-before edge to the new pump: a process that dies
         // instantly at startup runs its death-branch `executing = false` on the pump thread, and that
         // clear MUST win. Arming AFTER the launch (as before) lost the race under load — the late `true`
@@ -1727,7 +1864,7 @@ class Conversation(
             reemitLive = true // the post-relaunch init re-announces SessionLive with the fresh sessionId + model
             val relaunched = runCatching { relaunch(sessionId ?: openedResumeId, armExecuting = true, initialSend = initialSend) }
             if (relaunched.isFailure) {
-                executing = false // the relaunch never started a turn
+                clearTurnWork() // the relaunch never started a turn
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to relaunch for the new settings (${relaunched.exceptionOrNull()?.message})", convoId))
                 return
@@ -1759,7 +1896,7 @@ class Conversation(
                 )
             }
             if (launched.isFailure) {
-                executing = false // the spawn never started a turn
+                clearTurnWork() // the spawn never started a turn
                 // no ack: the prompt did NOT reach an agent — forget the id so the client's retry can run
                 promptId?.let { synchronized(seenPromptIds) { seenPromptIds.remove(it) } }
                 sink.emit(PocketError("agent_unavailable", "agent failed to start (${launched.exceptionOrNull()?.message})", convoId))
@@ -1772,14 +1909,14 @@ class Conversation(
             // into the next spawn (one prompt per process). recordPromptWritten stamps the CURRENT
             // generation, so a client resend while this turn runs is a plain re-ack (#122 ④: an entry
             // owned by the live process is queued, not lost).
-            recordPromptWritten(promptId, text, images)
+            recordPromptWritten(promptId, text, images, queuedWork = true)
         } else {
             // queued send onto the already-live process (mid-turn queue, or a steady-state next turn):
-            // no new pump is starting, so there is no death-branch to race — arm executing directly, and
-            // ledger BEFORE the write (issue #122 ③): even a write that dies inside the backend leaves the
-            // prompt recorded, and only the CLI's consumption replay settles it (ack ≠ consumed).
-            executing = true // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
-            recordPromptWritten(promptId, text, images)
+            // no new pump is starting, so there is no death-branch to race. Ledger FIRST, then arm the turn:
+            // if the old turn's result races this enqueue, either executing or pendingPromptWork remains true.
+            // The write comes only after both, and only the CLI's consumption replay settles the ledger.
+            recordPromptWritten(promptId, text, images, inferQueuedWork = true)
+            markExecuting() // cleared by TurnResult (also covers cancelTurn — the agent still emits a result)
         }
         lastActivityMs = System.currentTimeMillis()
         lockForkRetried = false // each user prompt re-arms one heal
@@ -1816,7 +1953,7 @@ class Conversation(
             reply("Current model: ${displayModel() ?: "default"}.\nUsage: /model <name> — e.g. /model opus, /model sonnet, /model haiku (or a full model id).")
             return
         }
-        val wasExecuting = executing // switchModel doesn't touch it, but read before any await to be safe
+        val wasExecuting = isExecuting() // switchModel doesn't touch it, but read before any await to be safe
         switchModel(arg)
         // issue #84: don't splice a confirmation + TurnDone into a running turn's stream (it would prematurely
         // clear the phone's ■ and inject the notice mid-reply). Mid-turn the optimistic SessionLive badge is the
@@ -1836,7 +1973,7 @@ class Conversation(
             reply("Unsupported effort \"$arg\" for ${displayModel() ?: backend.kind.name.lowercase()}. Choose one of: ${supported.joinToString(", ")}.")
             return
         }
-        val wasExecuting = executing
+        val wasExecuting = isExecuting()
         switchEffort(arg.takeUnless { it == "default" })
         // issue #84: as in handleModelCommand — no mid-stream confirmation; the badge is the feedback when a
         // turn is in flight, and the switch still takes effect on the next turn.
@@ -1888,7 +2025,7 @@ class Conversation(
      * a clean user cancel.
      */
     private suspend fun requestInterrupt() {
-        if (!executing) return
+        if (!isExecuting()) return
         interruptRequested = true // the coming result's is_error is the user's stop, not a failure to paint red
         backend.interrupt()
     }
@@ -1923,6 +2060,7 @@ class Conversation(
      */
     suspend fun stopBackgroundJob(jobId: String) {
         if (!jobs.markKilled(jobId, System.currentTimeMillis())) return
+        syncBackgroundWork()
         requestInterrupt()
         emitJobs() // reflect KILLED in the panel now (also stamps lastActivityMs)
     }
@@ -1950,7 +2088,7 @@ class Conversation(
 
     private suspend fun stopProcess() {
         intentionalStop = true
-        executing = false // any in-flight turn dies with the process
+        clearTurnWork() // any in-flight turn and continuation grace die with the process
         bridgeGrant.set(BridgeGrant.NONE)
         bridgeRequestPermit.set(false)
         bridge?.cancelAll()

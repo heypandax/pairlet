@@ -35,22 +35,32 @@ class ClientCapsFilterTest {
         path = "/w/proj", name = "proj", isDir = true, hasSessions = true,
         open = live.isNotEmpty(),
         executing = live.any { it.executing },
+        busy = live.any { it.busy },
         activeSessionId = live.firstOrNull()?.sessionId,
         activeSessionTitle = live.firstOrNull()?.title,
         gitBranch = live.firstOrNull()?.gitBranch,
         activeSessions = live.toList(),
     )
 
-    private fun oc(id: String, executing: Boolean = false) =
-        ActiveSession(sessionId = id, title = "oc", agent = AgentKind.OPENCODE, executing = executing, gitBranch = "main")
+    private fun oc(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "oc", agent = AgentKind.OPENCODE, executing = executing,
+            busy = busy, gitBranch = "main", executingAuthoritative = true,
+        )
 
-    private fun claude(id: String, executing: Boolean = false) =
-        ActiveSession(sessionId = id, title = "cl", agent = AgentKind.CLAUDE, executing = executing, gitBranch = "dev")
+    private fun claude(id: String, executing: Boolean = false, busy: Boolean = false) =
+        ActiveSession(
+            sessionId = id, title = "cl", agent = AgentKind.CLAUDE, executing = executing,
+            busy = busy, gitBranch = "dev", executingAuthoritative = true,
+        )
 
     /** THE P0 regression: an opencode-only project must reach an undeclared client with NO tap target. */
     @Test
     fun `an opencode-only project leaves no live session for an undeclared client`() {
-        val out = RequestRouter.filterDirs(listOf(entry(oc("oc-sid-1", executing = true))), undeclared())
+        val out = RequestRouter.filterDirs(
+            listOf(entry(oc("oc-sid-1", executing = true, busy = true))),
+            undeclared(),
+        )
         val e = out.single()
         assertTrue(e.activeSessions.isEmpty(), "opencode row must be stripped")
         assertNull(e.activeSessionId, "a stripped session must not stay reachable through the scalar")
@@ -58,6 +68,7 @@ class ClientCapsFilterTest {
         assertNull(e.gitBranch)
         assertFalse(e.open, "the row must not claim to be open — that is the tap target")
         assertFalse(e.executing, "executing came from the session that was stripped")
+        assertFalse(e.busy, "background work from the stripped session must not keep the row Running")
         assertEquals("/w/proj", e.path, "the project row itself stays visible")
     }
 
@@ -65,7 +76,10 @@ class ClientCapsFilterTest {
      *  opencode session that happened to sort first. */
     @Test
     fun `a mixed project keeps the surviving session and describes it in the scalars`() {
-        val out = RequestRouter.filterDirs(listOf(entry(oc("oc-sid", executing = true), claude("cl-sid"))), undeclared())
+        val out = RequestRouter.filterDirs(
+            listOf(entry(oc("oc-sid", executing = true, busy = true), claude("cl-sid"))),
+            undeclared(),
+        )
         val e = out.single()
         assertEquals(listOf("cl-sid"), e.activeSessions.map { it.sessionId })
         assertEquals("cl-sid", e.activeSessionId, "scalar must follow the survivor, not the stripped row")
@@ -73,6 +87,8 @@ class ClientCapsFilterTest {
         assertEquals("dev", e.gitBranch)
         assertTrue(e.open)
         assertFalse(e.executing, "only the stripped opencode session was executing")
+        assertFalse(e.busy, "only the stripped opencode session had background work")
+        assertTrue(e.activeSessions.single().executingAuthoritative, "filtering preserves the survivor's work source")
     }
 
     /** A declared client is untouched — the gate must cost nothing once support is announced. */

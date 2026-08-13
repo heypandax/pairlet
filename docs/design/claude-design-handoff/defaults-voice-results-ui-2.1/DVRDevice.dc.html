@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  @keyframes dvrpulse { 0%, 100% { opacity: 1 } 50% { opacity: .4 } }
+  @keyframes dvrspin { to { transform: rotate(360deg) } }
+</style>
+</helmet>
+
+<div style="{{ vars }}">
+<div style="width:{{ w }};height:{{ h }};border-radius:18px;overflow:hidden;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;box-shadow:0 24px 48px -24px rgba(20,18,16,.42)">
+
+  <div style="height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;flex:none">
+    <span style="font-family:'JetBrains Mono',monospace;font-weight:600;font-size:13px;line-height:1">9:41</span>
+    <span style="display:flex;gap:5px;align-items:center"><span style="width:14px;height:8px;border:1.2px solid var(--ink);border-radius:2px;opacity:.6"></span><span style="width:20px;height:9px;border:1.2px solid var(--ink);border-radius:3px;opacity:.6"></span></span>
+  </div>
+
+  <!-- ══════════ SETTINGS ══════════ -->
+  <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="Agent defaults" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="flex:none;padding:0 var(--gut)">
+      <div style="min-height:var(--tgt);display:flex;align-items:center;margin-left:-12px">
+        <span role="button" tabIndex="0" aria-label="{{ t.back }}" style="width:var(--tgt);height:var(--tgt);display:flex;align-items:center;justify-content:center;font-weight:300;font-size:24px;line-height:1;color:var(--acc);flex:none">‹</span>
+      </div>
+      <h1 style="margin:2px 0 0;font-weight:600;font-size:var(--t-title);line-height:1.14;letter-spacing:-.02em;text-wrap:pretty">{{ t.agentDefaults }}</h1>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:auto;padding:14px var(--gut) 0">
+
+      <!-- S3 · unlabeled summary of existing label/value pairs -->
+      <sc-if value="{{ sumBlock }}" hint-placeholder-val="{{ false }}">
+      <div style="background:var(--surf);border-radius:14px;padding:13px 14px;display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ summary }}" as="s" hint-placeholder-count="5">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+            <span style="min-width:118px;font-size:var(--t-cap);line-height:1.4;color:var(--ink4);flex:none;text-wrap:pretty">{{ s.k }}</span>
+            <sc-if value="{{ s.mono }}" hint-placeholder-val="{{ true }}"><span style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.45;color:var(--ink);letter-spacing:-.01em;word-break:break-all">{{ s.v }}</span></sc-if>
+            <sc-if value="{{ s.plain }}" hint-placeholder-val="{{ false }}"><span style="flex:1;min-width:0;font-weight:500;font-size:var(--t-body);line-height:1.35;color:var(--ink);text-wrap:pretty">{{ s.v }}</span></sc-if>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+        <div style="margin-top:{{ g.gap }}">
+          <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;min-height:22px">
+            <span style="font-weight:500;font-size:var(--t-lbl);line-height:1.3;letter-spacing:.13em;text-transform:uppercase;color:var(--ink4)">{{ g.label }}</span>
+            <sc-if value="{{ g.hasScope }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-cap);line-height:1.3;color:var(--ink5);text-wrap:pretty">{{ g.scope }}</span></sc-if>
+          </div>
+
+          <sc-if value="{{ g.collapsed }}" hint-placeholder-val="{{ false }}">
+          <div role="button" tabIndex="0" style="margin-top:10px;min-height:var(--tgt);display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:9px 0">
+            <span style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.45;color:var(--ink);letter-spacing:-.01em;word-break:break-all">{{ g.current }}</span>
+            <span style="font-weight:300;font-size:15px;line-height:1;color:var(--ink4);flex:none">▾</span>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ g.open }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ g.wrapStyle }}">
+            <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="4">
+              <sc-if value="{{ r.isRadio }}" hint-placeholder-val="{{ true }}">
+              <div role="radio" tabIndex="0" aria-checked="{{ r.checked }}" style="min-height:var(--tgt);display:flex;align-items:flex-start;gap:11px;padding:10px 0;border-bottom:1px solid var(--line)">
+                <sc-if value="{{ r.on }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);border-radius:50%;border:2px solid var(--acc);background:var(--acc);flex:none;margin-top:5px"></span></sc-if>
+                <sc-if value="{{ r.off }}" hint-placeholder-val="{{ true }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);border-radius:50%;border:1.5px solid var(--ink5);flex:none;margin-top:5px"></span></sc-if>
+                <div style="flex:1;min-width:0">
+                  <sc-if value="{{ r.mono }}" hint-placeholder-val="{{ false }}"><div style="font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.5;color:var(--ink2);letter-spacing:-.01em;word-break:break-all">{{ r.label }}</div></sc-if>
+                  <sc-if value="{{ r.plain }}" hint-placeholder-val="{{ true }}"><div style="font-weight:500;font-size:var(--t-body);line-height:1.35;color:var(--ink2);text-wrap:pretty">{{ r.label }}</div></sc-if>
+                </div>
+              </div>
+              </sc-if>
+              <sc-if value="{{ r.isValue }}" hint-placeholder-val="{{ false }}">
+              <div role="button" tabIndex="0" style="min-height:var(--tgt);display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
+                <span style="flex:1;min-width:0;font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.5;color:var(--ink2);letter-spacing:-.01em;word-break:break-all">{{ r.label }}</span>
+                <span style="font-weight:500;font-size:var(--t-cap);line-height:1.3;color:var(--ink4);flex:none">{{ r.value }}</span>
+                <span aria-hidden="true" style="font-weight:300;font-size:17px;line-height:1;color:var(--ink5);flex:none">›</span>
+              </div>
+              </sc-if>
+              <sc-if value="{{ r.isToggle }}" hint-placeholder-val="{{ false }}">
+              <div role="switch" tabIndex="0" aria-checked="{{ r.checked }}" style="min-height:var(--tgt);display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--line)">
+                <div style="flex:1;min-width:0"><div style="font-weight:500;font-size:var(--t-body);line-height:1.35;color:var(--ink2);text-wrap:pretty">{{ r.label }}</div></div>
+                <sc-if value="{{ r.on }}" hint-placeholder-val="{{ true }}"><span aria-hidden="true" style="width:48px;height:30px;border-radius:15px;border:1px solid var(--acc);background:var(--accBg);display:flex;align-items:center;justify-content:flex-end;padding:0 3px;flex:none"><span style="width:24px;height:24px;border-radius:50%;background:var(--acc)"></span></span></sc-if>
+                <sc-if value="{{ r.off }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:48px;height:30px;border-radius:15px;border:1px solid var(--line2);background:var(--bg);display:flex;align-items:center;padding:0 3px;flex:none"><span style="width:24px;height:24px;border-radius:50%;background:var(--ink5)"></span></span></sc-if>
+              </div>
+              </sc-if>
+            </sc-for>
+          </div>
+          </sc-if>
+        </div>
+      </sc-for>
+      <div style="height:18px"></div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ COMPOSER ══════════ -->
+  <sc-if value="{{ isComposer }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Composer" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="flex:1;min-height:0;overflow:hidden"></div>
+
+    <div style="flex:none;border-top:1px solid var(--line);background:var(--surf);padding:10px var(--gut) 0">
+
+      <!-- state ribbon / failure chip -->
+      <sc-if value="{{ ribbon }}" hint-placeholder-val="{{ false }}">
+      <div role="status" style="display:flex;align-items:flex-start;gap:8px;padding-bottom:9px">
+        <sc-if value="{{ ribbonBad }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:8px;height:8px;background:var(--bad);flex:none;margin-top:5px"></span></sc-if>
+        <sc-if value="{{ ribbonQuiet }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:var(--ink5);flex:none;margin-top:5px"></span></sc-if>
+        <span style="flex:1;min-width:0;font-size:var(--t-cap);line-height:1.45;color:{{ ribbonInk }};text-wrap:pretty">{{ ribbonText }}</span>
+      </div>
+      </sc-if>
+
+      <!-- ordinary composer · absent entirely during capture -->
+      <sc-if value="{{ showOrdinary }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="display:flex;align-items:flex-end;gap:8px">
+          <div role="textbox" tabIndex="0" aria-label="{{ t.field }}" style="flex:1;min-width:0;min-height:var(--field);border-radius:12px;border:1px solid var(--line2);background:var(--bg);padding:11px 12px;display:flex;align-items:center">
+            <sc-if value="{{ hasDraft }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-body);line-height:1.45;color:var(--ink);text-wrap:pretty">{{ draft }}</span></sc-if>
+            <sc-if value="{{ noDraft }}" hint-placeholder-val="{{ true }}"><span style="font-size:var(--t-body);line-height:1.45;color:var(--ink5)">{{ t.ph }}</span></sc-if>
+          </div>
+          <sc-if value="{{ trailMic }}" hint-placeholder-val="{{ true }}">
+            <span role="button" tabIndex="0" aria-label="{{ t.voice }}" style="width:var(--tgt);height:var(--tgt);display:flex;align-items:center;justify-content:center;flex:none"><span aria-hidden="true" style="width:12px;height:19px;border-radius:6px;border:1.6px solid var(--ink3);display:block"></span></span>
+          </sc-if>
+          <sc-if value="{{ trailRetry }}" hint-placeholder-val="{{ false }}">
+            <span role="button" tabIndex="0" aria-label="{{ t.retryVoice }}" style="min-width:var(--tgt);height:var(--tgt);padding:0 10px;border-radius:12px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;gap:7px;flex:none">
+              <span aria-hidden="true" style="width:11px;height:17px;border-radius:6px;border:1.6px solid var(--acc);display:block"></span>
+              <span aria-hidden="true" style="font-weight:600;font-size:var(--t-chip);line-height:1;color:var(--acc)">↻</span>
+            </span>
+          </sc-if>
+        </div>
+
+        <div style="{{ laneStyle }}">
+          <div style="{{ leftStyle }}">
+            <span role="button" tabIndex="0" aria-label="{{ t.attach }}" style="width:var(--tgt);height:var(--tgt);margin-left:-8px;display:flex;align-items:center;justify-content:center;flex:none;font-weight:300;font-size:var(--t-plus);line-height:1;color:var(--ink3)">+</span>
+            <span role="button" tabIndex="0" aria-label="{{ modelAria }}" style="min-height:var(--tgt);padding:0 10px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;font-family:'JetBrains Mono',monospace;font-size:var(--t-chip);line-height:1.2;color:var(--ink3);flex:none;word-break:break-all">{{ model }}</span>
+            <sc-if value="{{ hasSwitcher }}" hint-placeholder-val="{{ false }}">
+              <span role="button" tabIndex="0" aria-label="{{ switcherAria }}" style="min-height:var(--tgt);min-width:var(--tgt);padding:0 12px;border-radius:9px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;gap:6px;font-size:var(--t-chip);line-height:1.2;color:var(--ink3);flex:none">
+                <span aria-hidden="true" style="font-family:'JetBrains Mono',monospace">⌥</span>{{ switcherLabel }}
+              </span>
+            </sc-if>
+            <span aria-label="{{ ctxAria }}" style="min-height:var(--tgt);display:flex;align-items:center;gap:6px;flex:none">
+              <span aria-hidden="true" style="width:26px;height:4px;border-radius:2px;background:var(--line2);position:relative;overflow:hidden;display:block"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ ctxPct }};background:var(--ink4)"></span></span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:var(--t-chip);line-height:1;color:var(--ink5)">{{ ctxLabel }}</span>
+            </span>
+          </div>
+
+          <sc-if value="{{ hasActions }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ actionsStyle }}">
+            <sc-if value="{{ actStop }}" hint-placeholder-val="{{ false }}">
+              <span role="button" tabIndex="0" aria-label="{{ t.stop }}" style="min-width:var(--actMin);height:var(--tgt);padding:0 14px;border-radius:12px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--ink2);flex:{{ actFlex }}">{{ t.stop }}</span>
+            </sc-if>
+            <sc-if value="{{ actUploading }}" hint-placeholder-val="{{ false }}">
+              <span role="status" aria-label="{{ t.uploading }}" style="min-width:var(--actMin);height:var(--tgt);padding:0 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);display:flex;align-items:center;justify-content:center;flex:{{ actFlex }}">
+                <span aria-hidden="true" style="width:100%;max-width:56px;height:4px;border-radius:2px;background:var(--line2);position:relative;overflow:hidden;display:block"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ upPct }};background:var(--ink4)"></span></span>
+              </span>
+            </sc-if>
+            <sc-if value="{{ actSend }}" hint-placeholder-val="{{ false }}">
+              <span role="button" tabIndex="0" aria-label="{{ sendAria }}" style="min-width:var(--actMin);height:var(--tgt);padding:0 16px;border-radius:12px;background:var(--acc);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--onAcc);flex:{{ actFlex }}">{{ t.send }}</span>
+            </sc-if>
+          </div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- capture · replaces the ordinary composer entirely -->
+      <sc-if value="{{ showCapture }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div role="status" style="min-height:var(--field);border-radius:12px;border:1px solid var(--voiceLine);background:var(--bg);padding:7px 8px 7px 4px;display:flex;align-items:center;gap:10px">
+          <span role="button" tabIndex="0" aria-label="{{ t.cancelRec }}" style="width:var(--tgt);height:var(--tgt);display:flex;align-items:center;justify-content:center;flex:none;font-weight:400;font-size:17px;line-height:1;color:var(--ink4)">✕</span>
+          <sc-if value="{{ isRecording }}" hint-placeholder-val="{{ true }}">
+            <span aria-hidden="true" style="flex:1;min-width:0;display:flex;align-items:center;gap:3px;height:22px;overflow:hidden">
+              <sc-for list="{{ waveBars }}" as="b" hint-placeholder-count="14">
+                <span style="width:3px;height:{{ b.h }};border-radius:2px;background:var(--acc);opacity:.75;flex:none"></span>
+              </sc-for>
+            </span>
+          </sc-if>
+          <sc-if value="{{ isTranscribing }}" hint-placeholder-val="{{ false }}">
+            <span style="flex:1;min-width:0;display:flex;align-items:center;gap:9px">
+              <span aria-hidden="true" style="width:15px;height:15px;border-radius:50%;border:2px solid var(--line2);border-top-color:var(--acc);flex:none;animation:dvrspin .9s linear infinite"></span>
+              <span style="font-size:var(--t-cap);line-height:1.35;color:var(--ink3);text-wrap:pretty">{{ t.transcribing }}</span>
+            </span>
+          </sc-if>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1;color:var(--ink4);flex:none">{{ voiceTime }}</span>
+          <span role="button" tabIndex="0" aria-label="{{ t.done }}" style="min-width:var(--tgt);height:var(--tgt);padding:0 14px;border-radius:11px;background:var(--acc);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--onAcc);flex:none">{{ t.done }}</span>
+        </div>
+        <sc-if value="{{ captureStop }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;padding-top:9px">
+          <span role="button" tabIndex="0" aria-label="{{ t.stop }}" style="flex:1;min-width:var(--actMin);height:var(--tgt);padding:0 14px;border-radius:12px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--t-cap);line-height:1;color:var(--ink2)">{{ t.stop }}</span>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ legacyNote }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:9px 0 0;display:flex;align-items:flex-start;gap:8px">
+        <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:var(--ink5);flex:none;margin-top:5px"></span>
+        <span style="flex:1;font-size:var(--t-cap);line-height:1.45;color:var(--ink4);text-wrap:pretty">{{ ribbonText }}</span>
+      </div>
+      </sc-if>
+
+      <div style="height:var(--homepad)"></div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ══════════ SESSIONS ══════════ -->
+  <sc-if value="{{ isSessions }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Sessions" style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="flex:none;padding:0 var(--gut)">
+      <h1 style="margin:4px 0 0;font-weight:600;font-size:var(--t-title);line-height:1.14;letter-spacing:-.025em">{{ t.sessions }}</h1>
+    </div>
+    <div style="flex:1;min-height:0;overflow:auto;padding:16px var(--gut) 0">
+      <sc-for list="{{ sessionGroups }}" as="grp" hint-placeholder-count="2">
+        <div style="margin-top:{{ grp.gap }}">
+          <div style="font-weight:500;font-size:var(--t-lbl);line-height:1;letter-spacing:.13em;text-transform:uppercase;color:var(--ink4)">{{ grp.label }}</div>
+          <div style="margin-top:11px;border-top:1px solid var(--line)">
+            <sc-for list="{{ grp.rows }}" as="r" hint-placeholder-count="3">
+              <div role="button" tabIndex="0" aria-label="{{ r.aria }}" style="border-bottom:1px solid var(--line);min-height:var(--tgt);display:flex;align-items:flex-start;gap:11px;padding:12px 0">
+                <sc-if value="{{ r.mFilled }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);border-radius:50%;background:{{ r.tone }};flex:none;margin-top:5px"></span></sc-if>
+                <sc-if value="{{ r.mHalf }}" hint-placeholder-val="{{ true }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);border-radius:50%;border:2px solid {{ r.tone }};background:linear-gradient(90deg,{{ r.tone }} 50%,transparent 50%);flex:none;margin-top:5px"></span></sc-if>
+                <sc-if value="{{ r.mRing }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);border-radius:50%;border:2px solid {{ r.tone }};flex:none;margin-top:5px"></span></sc-if>
+                <sc-if value="{{ r.mDiamond }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);background:{{ r.tone }};transform:rotate(45deg);flex:none;margin-top:5px"></span></sc-if>
+                <sc-if value="{{ r.mDiamondOpen }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);border:2px solid {{ r.tone }};transform:rotate(45deg);flex:none;margin-top:5px"></span></sc-if>
+                <sc-if value="{{ r.mSquare }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="width:var(--mark);height:var(--mark);background:{{ r.tone }};flex:none;margin-top:5px"></span></sc-if>
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600;font-size:var(--t-row);line-height:1.3;letter-spacing:-.01em;color:var(--ink);text-wrap:pretty">{{ r.title }}</div>
+                  <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-top:6px">
+                    <span style="font-weight:600;font-size:var(--t-stat);line-height:1.35;color:{{ r.tone }};text-wrap:pretty">{{ r.state }}</span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:var(--t-mono);line-height:1.4;color:var(--ink4);letter-spacing:-.01em;word-break:break-all">{{ r.meta }}</span>
+                  </div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div style="height:16px"></div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:402,&quot;height&quot;:874},&quot;surface&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;settings&quot;,&quot;options&quot;:[&quot;settings&quot;,&quot;composer&quot;,&quot;sessions&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;c&quot;,&quot;options&quot;:[&quot;a&quot;,&quot;b&quot;,&quot;c&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;idle&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;staged&quot;,&quot;streamingEmpty&quot;,&quot;streamingStaged&quot;,&quot;upload&quot;,&quot;recStreaming&quot;,&quot;transStreaming&quot;,&quot;failure&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;region&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;top&quot;,&quot;options&quot;:[&quot;top&quot;,&quot;model&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;fixture&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;mixed&quot;,&quot;options&quot;:[&quot;mixed&quot;,&quot;precedence&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dark&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;locale&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;en&quot;,&quot;options&quot;:[&quot;en&quot;,&quot;zh&quot;],&quot;tsType&quot;:&quot;string&quot;},&quot;big&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;longId&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;switcher&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;w&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;402px&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;h&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;874px&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  THEMES = {
+    dark: { '--bg': '#0B0B0C', '--surf': '#141417', '--ink': '#F3F3F4', '--ink2': '#E6E6E9', '--ink3': '#B4B5BC', '--ink4': '#8C8D95', '--ink5': '#6E6E76', '--line': 'rgba(255,255,255,.14)', '--line2': 'rgba(255,255,255,.26)', '--acc': '#E2795A', '--accBg': 'rgba(226,121,90,.14)', '--onAcc': '#1A0E09', '--ok': '#5CB582', '--warn': '#E9B45C', '--bad': '#E97462', '--badInk': '#F0A08F', '--voiceLine': 'rgba(226,121,90,.5)' },
+    light: { '--bg': '#FCFBFA', '--surf': '#F4F2EF', '--ink': '#17161A', '--ink2': '#17161A', '--ink3': '#4B4A50', '--ink4': '#6B6970', '--ink5': '#8E8C92', '--line': 'rgba(20,18,16,.16)', '--line2': 'rgba(20,18,16,.26)', '--acc': '#A9482A', '--accBg': 'rgba(169,72,42,.10)', '--onAcc': '#FFFFFF', '--ok': '#1F7A4D', '--warn': '#8A5A08', '--bad': '#A3311F', '--badInk': '#A3311F', '--voiceLine': 'rgba(163,49,31,.45)' }
+  };
+  SCALE = {
+    normal: { '--t-title': '28px', '--t-row': '16px', '--t-body': '15px', '--t-cap': '13px', '--t-stat': '13px', '--t-mono': '12.5px', '--t-lbl': '10.5px', '--t-chip': '11.5px', '--t-plus': '26px', '--tgt': '48px', '--field': '46px', '--mark': '10px', '--homepad': '20px', '--actMin': '84px' },
+    big: { '--t-title': '38px', '--t-row': '23px', '--t-body': '22px', '--t-cap': '18.5px', '--t-stat': '19px', '--t-mono': '17px', '--t-lbl': '15px', '--t-chip': '16px', '--t-plus': '34px', '--tgt': '58px', '--field': '66px', '--mark': '14px', '--homepad': '20px', '--actMin': '124px' }
+  };
+  STR = {
+    en: {
+      back: 'Back', agentDefaults: 'Agent & session defaults', sessions: 'Sessions',
+      agent: 'Default agent', mode: 'New-session permission mode', model: 'Default model', effort: 'Default reasoning effort', fast: 'Fast',
+      ctxWindow: 'Context window', perModel: 'Per-model context windows', filter: 'Agent filter', custom: 'Custom…',
+      scopeCodex: 'for Codex', dflt: 'Default', on: 'On', off: 'Off',
+      mDefault: 'Default', mAccept: 'Accept edits', mPlan: 'Plan', mFull: 'Full access',
+      ph: 'Message Claude…', field: 'Message field', voice: 'Record voice message', attach: 'Add attachment',
+      send: 'Send', stop: 'Stop',
+      working: 'Working… — sends will queue',
+      uploading: 'uploading 1 of 1 — send waits',
+      cantTranscribe: "Couldn't transcribe — try again",
+      retryVoice: 'Retry voice input', transcribing: 'Transcribing…', done: 'Done', cancelRec: 'Cancel recording',
+      sendQ: 'Send', switcher: 'Cross-session switcher, ', ctx: 'Context used, ', modelA: 'Model, ',
+      active: 'Active', recent: 'Recent',
+      running: 'Running', newResult: 'New result', complete: 'Complete', approval: 'Approval waiting', answer: 'Answer needed', failure: 'Failed'
+    },
+    zh: {
+      back: '返回', agentDefaults: 'Agent 与会话默认项', sessions: '会话',
+      agent: '默认智能体', mode: '新会话默认模式', model: '默认模型', effort: '默认推理强度', fast: '快速模式',
+      ctxWindow: '上下文窗口', perModel: '按模型的上下文窗口', filter: '智能体筛选', custom: '自定义…',
+      scopeCodex: '适用于 Codex', dflt: '默认', on: '开', off: '关',
+      mDefault: '默认', mAccept: '接受编辑', mPlan: '计划', mFull: '完全访问',
+      ph: '给 Claude 发消息…', field: '消息输入框', voice: '录制语音', attach: '添加附件',
+      send: '发送', stop: '停止',
+      working: '正在运行 — 发送将排队',
+      uploading: '正在上传 1/1——完成后发送',
+      cantTranscribe: '转写失败，请重试',
+      retryVoice: '重试语音转写', transcribing: '转写中…', done: '完成', cancelRec: '取消录音',
+      sendQ: '发送', switcher: '跨会话切换，', ctx: '已用上下文，', modelA: '模型，',
+      active: '进行中', recent: '最近',
+      running: '运行中', newResult: '有新结果', complete: '已完成', approval: '等待批准', answer: '需要回答', failure: '失败'
+    }
+  };
+  CODEX_MODELS = ['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.6-codex-specialized-with-long-context'];
+  EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+
+  renderVals() {
+    const p = this.props;
+    const loc = p.locale === 'zh' ? 'zh' : 'en';
+    const t = this.STR[loc];
+    const big = !!p.big;
+    const surface = p.surface || 'settings';
+    const variant = p.variant || 'c';
+    const v = p.state || 'idle';
+    const longId = !!p.longId;
+    const selModel = longId ? 'gpt-5.6-codex-specialized-with-long-context' : 'gpt-5.6-sol';
+
+    const vars = Object.assign({}, this.THEMES[p.theme === 'light' ? 'light' : 'dark'], this.SCALE[big ? 'big' : 'normal']);
+    vars['--gut'] = '20px';
+
+    // ── settings ──
+    const radio = (label, on, mono) => ({ isRadio: true, isToggle: false, label: label, on: on, off: !on, checked: on ? 'true' : 'false', mono: !!mono, plain: !mono });
+    const toggle = (label, on) => ({ isRadio: false, isToggle: true, label: label, on: on, off: !on, checked: on ? 'true' : 'false', mono: false, plain: true });
+    const container = variant === 'a'
+      ? 'margin-top:10px;background:var(--surf);border-radius:14px;padding:2px 14px'
+      : 'margin-top:10px;border-top:1px solid var(--line)';
+
+    const region = p.region || 'top';
+    let groups = [];
+    if (surface === 'settings') {
+      const agentRows = ['Claude', 'Codex', 'OpenCode', 'Kimi'].map(a => radio(a, a === 'Codex'));
+      const modeRows = [radio(t.mDefault, true), radio(t.mAccept, false), radio(t.mPlan, false), radio(t.mFull, false)];
+      const modelRows = [radio(t.dflt, false)].concat(this.CODEX_MODELS.map(m => radio(m, m === selModel, true)));
+      const effortRows = [radio(t.dflt, false)].concat(this.EFFORTS.map(e => radio(e, e === 'ultra', true)));
+      const fastRows = [toggle(t.fast, true)];
+
+      if (region === 'later') {
+        groups = [
+          { label: t.ctxWindow, scope: t.scopeCodex, hasScope: true, gap: '0px', rows: [radio(t.dflt, true), radio(t.custom, false)] },
+          { label: t.perModel, scope: t.scopeCodex, hasScope: true, gap: '24px', rows: this.CODEX_MODELS.map(m => ({ isRadio: false, isToggle: false, isValue: true, label: m, value: t.dflt })) },
+          { label: t.filter, gap: '24px', hasScope: false, rows: ['Claude', 'Codex', 'OpenCode', 'Kimi'].map(a => toggle(a, a === 'Codex' || a === 'Claude')) }
+        ];
+      } else if (region === 'model') {
+        groups = [
+          { label: t.model, scope: t.scopeCodex, hasScope: true, gap: '0px', rows: modelRows },
+          { label: t.effort, scope: t.scopeCodex, hasScope: true, gap: '24px', rows: effortRows },
+          { label: t.fast, scope: t.scopeCodex, hasScope: true, gap: '24px', rows: fastRows }
+        ];
+      } else {
+        groups = [
+          { label: t.agent, gap: variant === 'c' ? '22px' : '4px', rows: agentRows, hasScope: false },
+          { label: t.mode, gap: '24px', rows: modeRows, hasScope: false },
+          { label: t.model, scope: t.scopeCodex, hasScope: true, gap: '24px', rows: modelRows }
+        ];
+      }
+      groups = groups.map(g => Object.assign(g, {
+        wrapStyle: container,
+        collapsed: variant === 'b',
+        open: variant !== 'b',
+        current: (g.rows.filter(r => r.on)[0] || {}).label || t.dflt
+      }));
+    }
+
+    // ── composer ──
+    const streaming = v === 'streamingEmpty' || v === 'streamingStaged' || v === 'recStreaming' || v === 'transStreaming';
+    const capture = v === 'recStreaming' || v === 'transStreaming';
+    const staged = v === 'staged' || v === 'streamingStaged' || v === 'upload' || v === 'failure';
+    const draftText = loc === 'zh'
+      ? '把发布脚本改成先跑测试，再打标签，然后把变更日志发到频道里'
+      : 'Change the release script so it runs the tests first, then tags, then posts the changelog to the channel';
+
+    let ribbonText = '';
+    if (streaming && !capture) ribbonText = t.working;
+    if (v === 'upload') ribbonText = t.uploading;
+    if (v === 'failure') ribbonText = t.cantTranscribe;
+
+    const actStop = streaming && !capture;
+    const actSend = v === 'staged' || v === 'streamingStaged' || v === 'failure';
+    const actUploading = v === 'upload';
+    const actionCount = (actStop ? 1 : 0) + (actSend ? 1 : 0) + (actUploading ? 1 : 0);
+    const hasSwitcher = p.switcher !== false && !capture;
+
+    const wNum = parseInt(String(p.w || '402px'), 10) || 402;
+    // left group needs attach 40 + model ~92 + switcher ~74 + context ~64 with gaps
+    const leftNeed = 196 + (hasSwitcher ? 82 : 0);
+    const laneFits = !big && actionCount > 0 && (wNum - 40) >= (leftNeed + actionCount * 92);
+    const laneStyle = 'display:flex;align-items:center;gap:8px;padding-top:9px;flex-wrap:wrap';
+    const leftStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;'
+      + (laneFits ? 'flex:1 1 ' + leftNeed + 'px;min-width:0' : 'flex:1 1 100%;min-width:0');
+    const actionsStyle = 'display:flex;align-items:center;gap:8px;flex-wrap:nowrap;'
+      + (laneFits ? 'flex:0 0 auto;margin-left:auto' : 'flex:1 1 100%;margin-left:0');
+
+    // ── sessions ──
+    const tone = { run: 'var(--ok)', nr: 'var(--acc)', done: 'var(--ink4)', app: 'var(--warn)', ans: 'var(--warn)', fail: 'var(--bad)' };
+    const mk = (title, state, meta, toneVar, marks) => Object.assign({
+      title: title, state: state, meta: meta, tone: toneVar,
+      aria: title + ', ' + state + ', ' + meta,
+      mFilled: false, mHalf: false, mRing: false, mDiamond: false, mDiamondOpen: false, mSquare: false
+    }, marks);
+    const nrMark = variant === 'a' ? { mRing: true } : (variant === 'b' ? { mFilled: true } : { mHalf: true });
+
+    const fixture = p.fixture || 'mixed';
+    let sessionGroups = [];
+    if (surface === 'sessions') {
+      const active = [];
+      if (fixture === 'precedence') {
+        active.push(mk('cc-pocket', t.approval, '2m · Bash', tone.app, { mDiamond: true }));
+        active.push(mk('relay-server', t.answer, '5m', tone.ans, { mDiamondOpen: true }));
+        active.push(mk('notes-cli', t.failure, '9m', tone.fail, { mSquare: true }));
+        active.push(mk('dotfiles', t.running, '12m', tone.run, { mFilled: true }));
+        active.push(mk('cc-pocket-site', t.newResult, '· 4m', tone.nr, nrMark));
+      } else {
+        active.push(mk('cc-pocket-site', t.newResult, '· 4m', tone.nr, nrMark));
+        active.push(mk('notes-cli', t.newResult, '· 11m', tone.nr, nrMark));
+        active.push(mk('cc-pocket', t.running, '· 2m', tone.run, { mFilled: true }));
+      }
+      sessionGroups = [
+        { label: t.active, gap: '0px', rows: active },
+        { label: t.recent, gap: '24px', rows: [mk('relay-server', t.complete, '· 1h', tone.done, { mRing: true })] }
+      ];
+    }
+
+    const summary = [
+      { k: t.agent, v: 'Codex', plain: true, mono: false },
+      { k: t.mode, v: t.mDefault, plain: true, mono: false },
+      { k: t.model, v: selModel, mono: true, plain: false },
+      { k: t.effort, v: 'ultra', mono: true, plain: false },
+      { k: t.fast, v: t.on, plain: true, mono: false }
+    ];
+
+    return {
+      vars: vars, t: t,
+      w: p.w || '402px', h: p.h || '874px',
+      isSettings: surface === 'settings', isComposer: surface === 'composer', isSessions: surface === 'sessions',
+
+      sumBlock: surface === 'settings' && variant === 'c' && region === 'top',
+      summary: summary,
+      groups: groups,
+
+      showOrdinary: !capture, showCapture: capture,
+      isRecording: v === 'recStreaming', isTranscribing: v === 'transStreaming',
+      captureStop: v === 'recStreaming' || v === 'transStreaming',
+      voiceTime: v === 'transStreaming' ? '0:12' : '0:07',
+      waveBars: [9, 15, 20, 12, 22, 16, 8, 18, 21, 11, 17, 13, 19, 10].map(h => ({ h: h + 'px' })),
+      hasDraft: staged, noDraft: !staged, draft: draftText,
+      trailMic: !capture && v !== 'failure' && v !== 'streamingEmpty',
+      trailRetry: v === 'failure',
+      ribbon: variant !== 'a' && !!ribbonText, legacyNote: variant === 'a' && !!ribbonText,
+      ribbonText: ribbonText,
+      ribbonBad: variant === 'c' && v === 'failure',
+      ribbonQuiet: variant === 'c' && v !== 'failure',
+      ribbonInk: v === 'failure' ? 'var(--badInk)' : 'var(--ink4)',
+      hasActions: actionCount > 0,
+      actStop: actStop, actSend: actSend, actUploading: actUploading,
+      actFlex: laneFits ? '0 0 auto' : '1 1 0',
+      sendAria: t.sendQ, upPct: '62%',
+      model: 'gpt-5.6-sol', modelAria: t.modelA + 'gpt-5.6-sol',
+      hasSwitcher: hasSwitcher, switcherLabel: '2', switcherAria: t.switcher + '2',
+      ctxLabel: '34%', ctxPct: '34%', ctxAria: t.ctx + '34%',
+      laneStyle: laneStyle, leftStyle: leftStyle, actionsStyle: actionsStyle,
+
+      sessionGroups: sessionGroups
+    };
+  }
+}
+</script>
+</body>
+</html>

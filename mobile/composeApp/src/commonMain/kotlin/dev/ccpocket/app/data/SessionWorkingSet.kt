@@ -6,7 +6,8 @@ import dev.ccpocket.protocol.DirectoryEntry
 /**
  * The cross-project session WORKING SET (issue #165): the handful of sessions a user is actually moving
  * between right now, assembled purely client-side from data the phone already has — the daemon's project
- * list (which sessions are alive) plus a local most-recently-opened memory. No wire change, no daemon work.
+ * list (which sessions are alive) plus a local most-recently-opened memory. Completion visibility additionally
+ * consumes the daemon's additive `executingAuthoritative` bit so a terminal mtime window cannot fake a result.
  *
  * Everything here is pure so the switcher's whole behavior — MRU order, the cap, running/recent dedupe,
  * the finished-while-away signal — is unit-testable without a link, a repo, or a composition. The
@@ -39,6 +40,8 @@ data class RunningSession(
     val agent: AgentKind?,
     /** mid-turn right now (vs merely holding background work) — lets a row say "running" vs "active". */
     val executing: Boolean,
+    /** Whether an executing/busy transition is safe to use as a completion edge (#239). */
+    val workStateAuthoritative: Boolean,
 )
 
 /** One switcher row. [current] marks the session on screen; [running] and [unseen] drive its badges. */
@@ -101,6 +104,9 @@ fun runningSessions(dirs: List<DirectoryEntry>): List<RunningSession> =
                     dirKey = e.path, sessionId = s.sessionId,
                     title = s.title?.takeIf { it.isNotBlank() } ?: project,
                     project = project, agent = s.agent, executing = s.executing || s.busy,
+                    // busy is always daemon-owned; executing needs the explicit source bit because a
+                    // terminal Claude row may only mean "its transcript changed in the last 30 seconds".
+                    workStateAuthoritative = s.busy || s.executingAuthoritative,
                 )
             }
         } else {
@@ -112,25 +118,35 @@ fun runningSessions(dirs: List<DirectoryEntry>): List<RunningSession> =
                         dirKey = e.path, sessionId = sid,
                         title = e.activeSessionTitle?.takeIf { it.isNotBlank() } ?: project,
                         project = project, agent = null, executing = e.executing || e.busy,
+                        // Older scalar-only daemons cannot attribute either project-level flag to this
+                        // session. Keep the row switchable, but fail closed for completion inference.
+                        workStateAuthoritative = false,
                     )
                 },
             )
         }
     }.distinctBy { it.sessionId }
 
+/** Sessions doing real work now. Keep this separate from [runningSessions]: that broader list also contains
+ * live-but-idle conversations for quick switching, while completion visibility needs an actual work edge. */
+fun workingSessions(dirs: List<DirectoryEntry>): List<RunningSession> =
+    runningSessions(dirs).filter { it.executing && it.workStateAuthoritative }
+
 /**
- * Fold one project-list refresh into the finished-while-away set: a session that WAS working and no longer
- * is (finished, or its process went away entirely) becomes "unseen" until it's opened. The session on
- * screen is never marked — you watched it finish. Deliberately client-side and best-effort: it needs no
- * protocol support, and a missed edge just means one missing dot, never a wrong one.
+ * Fold one project-list refresh into the finished-while-away set. A result is created only for the
+ * intersection of the previously-authoritative WORKING baseline and sessions that are authoritatively
+ * SETTLED now. An absent row or an executing row whose source is unknown is UNKNOWN, not finished: both
+ * disarm the old baseline without inventing a result, so an old daemon's busy -> transcript-mtime sequence
+ * cannot flash a false completion. The session on screen is never marked — you watched it finish.
+ * Deliberately client-side and best-effort: a missed edge means one missing mark, never an invented one.
  */
 fun markFinishedAway(
     prevWorking: Set<String>,
-    nowWorking: Set<String>,
+    nowAuthoritativelySettled: Set<String>,
     currentSessionId: String?,
     unseen: Set<String>,
 ): Set<String> {
-    val finished = prevWorking - nowWorking - setOfNotNull(currentSessionId)
+    val finished = prevWorking.intersect(nowAuthoritativelySettled) - setOfNotNull(currentSessionId)
     return if (finished.isEmpty()) unseen else unseen + finished
 }
 

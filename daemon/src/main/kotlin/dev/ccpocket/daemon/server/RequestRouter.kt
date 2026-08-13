@@ -261,6 +261,7 @@ class RequestRouter(
                     // derive from what SURVIVED — never from the stripped-out session
                     open = first != null,
                     executing = kept.any { it.executing },
+                    busy = kept.any { it.busy },
                     activeSessionId = first?.sessionId,
                     activeSessionTitle = first?.title,
                     gitBranch = first?.gitBranch,

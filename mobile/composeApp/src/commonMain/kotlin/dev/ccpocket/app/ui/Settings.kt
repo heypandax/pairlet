@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -54,6 +55,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import dev.ccpocket.app.APP_STORE_URL
 import dev.ccpocket.app.AppUpdateRoute
@@ -80,9 +82,24 @@ import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import org.jetbrains.compose.resources.stringResource
 
-// new-session default model: the shared Claude aliases + a leading null = "CLI default". Claude-only —
-// a Codex launch never inherits it (see PocketRepository.openSession), so Codex needs no row here.
-private val MODEL_DEFAULT_OPTS: List<String?> = listOf(null) + CLAUDE_MODEL_OPTIONS.map { it.second }
+/**
+ * Default-model options for the selected backend. Claude deliberately keeps its existing alias table;
+ * Codex uses the connected daemon's catalog (with the same static fallback as the session picker), while
+ * OpenCode/Kimi only offer ids their daemon actually reported. A selected stale/custom id leads so a
+ * refresh can never make the current preference disappear from Settings.
+ */
+internal fun settingsDefaultModelOptions(
+    agent: AgentKind,
+    selected: String?,
+    discovered: List<String>,
+): List<String?> {
+    val available = when (agent) {
+        AgentKind.CLAUDE -> CLAUDE_MODEL_OPTIONS.map { it.second }
+        AgentKind.CODEX -> discovered.ifEmpty { CODEX_MODEL_OPTIONS }
+        AgentKind.OPENCODE, AgentKind.KIMI -> discovered
+    }
+    return (listOf<String?>(null) + listOfNotNull(selected) + available.filter { it.isNotBlank() }).distinct()
+}
 
 // #220: Full Control expiry presets (ms). 0 = never expires (the default); the rest re-arm the old
 // safety net at a chosen duration. Kept as raw ms so the wire value is language-neutral.
@@ -363,15 +380,32 @@ private fun GeneralPage(repo: PocketRepository) {
 /** What a NEW session starts with, plus the two windows that decide how its usage is measured. */
 @Composable
 private fun AgentDefaultsPage(repo: PocketRepository) {
+    val defaultAgent = repo.defaultAgent.value
+    // Claude Auto is a native Claude-only mode. Keep the stored value when the user merely inspects
+    // another backend, but render that backend's real launch mode (the shared PermissionMode fallback).
+    val effectivePermissionMode = repo.defaultPermissionMode.value.takeIf { defaultAgent == AgentKind.CLAUDE }
+    AgentDefaultsSummary(repo, defaultAgent)
+    SectionLabel(stringResource(Res.string.settings_default_agent))
+    SettingsChoiceRows(
+        options = listOf(AgentKind.CLAUDE, AgentKind.CODEX, AgentKind.OPENCODE, AgentKind.KIMI),
+        selected = defaultAgent,
+        label = ::agentName,
+    ) { repo.setDefaultAgent(it) }
+    Text(
+        stringResource(Res.string.settings_default_agent_sub),
+        color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp,
+        modifier = Modifier.padding(top = 10.dp, start = 2.dp),
+    )
+
     SectionLabel(stringResource(Res.string.default_mode_section))
     Column(Modifier.fillMaxWidth()) {
         val modeOptions = MODES + if (
-            repo.defaultAgent.value == AgentKind.CLAUDE &&
+            defaultAgent == AgentKind.CLAUDE &&
             repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)
         ) listOf(AUTO_MODE) else emptyList()
         modeOptions.forEach { m ->
             Hairline()
-            val sel = repo.defaultMode.value == m.key && repo.defaultPermissionMode.value == m.nativeMode
+            val sel = repo.defaultMode.value == m.key && effectivePermissionMode == m.nativeMode
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp)
                     .semantics { selected = sel }
@@ -392,21 +426,52 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
         Hairline()
     }
 
-    SectionLabel(stringResource(Res.string.default_model_section))
+    SectionLabel("${stringResource(Res.string.default_model_section)} · ${agentName(defaultAgent)}")
     val modelDefaultLabel = stringResource(Res.string.value_default)
-    // selected via defaultModelFor so a legacy stored "opus" still highlights the (migrated) Opus
-    // segment; labels collapse the full Opus 5 id to its short alias so the segments stay compact
-    SegmentedRow(MODEL_DEFAULT_OPTS, repo.defaultModelFor(AgentKind.CLAUDE), label = { it?.let(::modelAlias) ?: modelDefaultLabel }) { repo.setDefaultModel(it) }
-    Text(stringResource(Res.string.default_model_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
+    val defaultModel = repo.defaultModelFor(defaultAgent)
+    val modelOptions = settingsDefaultModelOptions(
+        defaultAgent,
+        defaultModel,
+        repo.agentModels[defaultAgent]?.models.orEmpty(),
+    )
+    SettingsChoiceRows(
+        modelOptions,
+        defaultModel,
+        label = { id ->
+            when {
+                id == null -> modelDefaultLabel
+                defaultAgent == AgentKind.CLAUDE -> modelAlias(id)
+                // A settings row has room for the daemon's exact id. Do not chip-truncate it: unlike the
+                // compact composer chip this is where users audit which backend model will really launch.
+                else -> id
+            }
+        },
+        monospace = { it != null },
+    ) { repo.setDefaultModelFor(defaultAgent, it) }
+    Text(
+        stringResource(Res.string.settings_default_model_sub, agentName(defaultAgent)),
+        color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp,
+        modifier = Modifier.padding(top = 10.dp, start = 2.dp),
+    )
 
-    SectionLabel(stringResource(Res.string.default_effort_section))
+    SectionLabel("${stringResource(Res.string.default_effort_section)} · ${agentName(defaultAgent)}")
     val effortDefaultLabel = stringResource(Res.string.value_default)
-    val defaultAgent = repo.defaultAgent.value
+    val defaultEffort = repo.defaultEffortFor(defaultAgent)
     val effortOptions = (listOf<String?>(null) + repo.effortOptions(defaultAgent, repo.defaultModelFor(defaultAgent)))
-        .let { opts -> if (repo.defaultEffort.value != null && repo.defaultEffort.value !in opts) opts + repo.defaultEffort.value else opts }
+        .let { opts -> if (defaultEffort != null && defaultEffort !in opts) opts + defaultEffort else opts }
         .distinct()
-    SegmentedRow(effortOptions, repo.defaultEffort.value, label = { it ?: effortDefaultLabel }) { repo.setDefaultEffort(it) }
-    if (defaultAgent == AgentKind.CODEX && repo.serviceTierOptions(defaultAgent, repo.defaultModelFor(defaultAgent)).any { it.id == "priority" }) {
+    // Capability catalogs are daemon-owned and can exceed the handful of values that fit in a segmented
+    // control. Use the same full-width radio rows as models so every option keeps a >=44 dp target on a
+    // narrow phone and long/custom effort ids remain readable rather than collapsing into tiny columns.
+    SettingsChoiceRows(
+        effortOptions,
+        defaultEffort,
+        label = { it ?: effortDefaultLabel },
+        monospace = { it != null },
+    ) {
+        repo.setDefaultEffortFor(defaultAgent, it)
+    }
+    if (fastModeAvailable(repo, defaultAgent)) {
         Spacer(Modifier.height(10.dp))
         ToggleRow(
             label = stringResource(Res.string.fast_mode),
@@ -474,6 +539,117 @@ private fun AgentDefaultsPage(repo: PocketRepository) {
     }
     Text(stringResource(Res.string.af_hint), color = Tok.muted, fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.padding(top = 10.dp, start = 2.dp))
 }
+
+/**
+ * The ONE owner of "does the selected agent's default model advertise the `priority` tier Fast rides on".
+ *
+ * Read by the Fast switch and by the summary above it. Two copies of this predicate is how a summary
+ * starts claiming a control the page is not actually showing.
+ */
+private fun fastModeAvailable(repo: PocketRepository, agent: AgentKind): Boolean =
+    agent == AgentKind.CODEX &&
+        repo.serviceTierOptions(agent, repo.defaultModelFor(agent)).any { it.id == "priority" }
+
+/**
+ * What a new session would launch with, printed once above the controls that own it (#237 · S3).
+ *
+ * Read-only and unlabeled by design: every value is the same live state the group below binds to, so this
+ * container holds no state, no callback and no string of its own — no heading, no framing sentence, no
+ * derived text. The rows below stay the editable source of truth; this only answers "what runs next"
+ * without scrolling a capability-driven page to find out.
+ *
+ * Fast appears under exactly [fastModeAvailable], the switch's own gate. Printing it unconditionally would
+ * name a control the page is not showing; omitting it under a priority model would let a summary that
+ * looks complete hide one of the stored defaults.
+ */
+@Composable
+private fun AgentDefaultsSummary(repo: PocketRepository, agent: AgentKind) {
+    val modelDefault = stringResource(Res.string.value_default)
+    val storedModel = repo.defaultModelFor(agent)
+    val effectivePermissionMode = repo.defaultPermissionMode.value.takeIf { agent == AgentKind.CLAUDE }
+    // the mode group's own option list AND its own selection rule, unchanged: Auto only where it is
+    // advertised, and key + native mode must BOTH match — so a stored `auto` is never reported for a
+    // backend whose rows cannot offer it, and no row reads selected while the summary claims another
+    val mode = (MODES + if (agent == AgentKind.CLAUDE && repo.supportsPermissionMode(CLAUDE_PERMISSION_MODE_AUTO)) {
+        listOf(AUTO_MODE)
+    } else {
+        emptyList()
+    }).firstOrNull { repo.defaultMode.value == it.key && effectivePermissionMode == it.nativeMode }
+    val pairs = buildList {
+        add(SummaryPair(stringResource(Res.string.settings_default_agent), agentName(agent), mono = false))
+        mode?.let { add(SummaryPair(stringResource(Res.string.default_mode_section), stringResource(it.label), mono = false)) }
+        add(
+            SummaryPair(
+                stringResource(Res.string.default_model_section),
+                when {
+                    storedModel == null -> modelDefault
+                    // the rows' own labelling rule: Claude keeps its alias table, every other backend
+                    // keeps the daemon's exact id so what launches stays auditable
+                    agent == AgentKind.CLAUDE -> modelAlias(storedModel)
+                    else -> storedModel
+                },
+                mono = storedModel != null,
+            ),
+        )
+        val storedEffort = repo.defaultEffortFor(agent)
+        add(SummaryPair(stringResource(Res.string.default_effort_section), storedEffort ?: modelDefault, mono = storedEffort != null))
+        if (fastModeAvailable(repo, agent)) {
+            add(
+                SummaryPair(
+                    stringResource(Res.string.fast_mode),
+                    stringResource(if (repo.defaultServiceTier.value == "priority") Res.string.value_on else Res.string.value_off),
+                    mono = false,
+                ),
+            )
+        }
+    }
+    // stacking, not truncating: below this width (or once type doubles) a 118 dp label column would leave
+    // a long custom model id a sliver to wrap inside, so the value takes the whole line instead. Nothing
+    // here may ellipsize, shrink or scroll sideways — the ids are what a user audits.
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        val stacked = maxWidth < 260.dp || LocalDensity.current.fontScale >= 1.3f
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Tok.surface)
+                .border(1.dp, Tok.hair, RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            pairs.forEach { pair ->
+                // merged, so each pair is announced as one "label, value" instead of two loose strings.
+                // No role and no click: this is a readout, not a control, and must not enter the tab order
+                // or claim a target budget.
+                val cell = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
+                if (stacked) {
+                    Column(cell, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        SummaryLabel(pair.label, Modifier)
+                        SummaryValue(pair, Modifier)
+                    }
+                } else {
+                    Row(cell, verticalAlignment = Alignment.Top) {
+                        SummaryLabel(pair.label, Modifier.width(118.dp).padding(end = 10.dp))
+                        SummaryValue(pair, Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One label/value fact in [AgentDefaultsSummary]. [mono] marks the technical values — ids, effort keys. */
+private data class SummaryPair(val label: String, val value: String, val mono: Boolean)
+
+@Composable
+private fun SummaryLabel(text: String, modifier: Modifier) = Text(
+    text, color = Tok.muted, fontSize = 11.sp, lineHeight = 15.sp,
+    fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp, modifier = modifier,
+)
+
+/** No `maxLines`, no overflow: a long custom id wraps to as many lines as it needs and stays complete. */
+@Composable
+private fun SummaryValue(pair: SummaryPair, modifier: Modifier) = Text(
+    pair.value, color = Tok.tx, fontSize = if (pair.mono) 12.sp else 13.sp, lineHeight = 18.sp,
+    fontFamily = if (pair.mono) FontFamily.Monospace else null, modifier = modifier,
+)
 
 // ══ Connections & collaboration ════════════════════════════════════════════════════════════════════
 
@@ -976,7 +1152,7 @@ private fun PerModelRow(id: String, tokens: Long, live: Boolean, onDelete: () ->
 
 /**
  * Horizontal segmented control: a surface track with equal-width segments; the selected one fills with accent
- * (thumb), the rest stay flush with the track. Shared by the model/effort/window/expiry pickers.
+ * (thumb), the rest stay flush with the track. Shared by the bounded window/expiry pickers.
  *
  * A 44 dp FLOOR and no `maxLines`: at 200% type a segment grows taller and its label wraps whole rather than
  * being cut mid-glyph. A picker you cannot read is a picker you cannot use.
@@ -1004,6 +1180,47 @@ private fun <T> SegmentedRow(options: List<T>, selected: T, label: (T) -> String
                     fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
                     textAlign = TextAlign.Center,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * A variable-length settings choice. The page already owns vertical scrolling, so daemon-discovered catalogs
+ * stay readable as one full-width row per id instead of being crushed into an equal-width segmented control.
+ * Merged semantics make the whole 48 dp row — not just its glyphs — the radio target in UI tests and a11y.
+ * Prose choices stay in the system face; only technical ids use monospace.
+ */
+@Composable
+private fun <T> SettingsChoiceRows(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    monospace: (T) -> Boolean = { false },
+    onPick: (T) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Tok.surface)
+            .border(1.dp, Tok.hair, RoundedCornerShape(10.dp)),
+    ) {
+        options.forEachIndexed { index, opt ->
+            if (index > 0) Hairline(Modifier.padding(horizontal = 12.dp))
+            val sel = selected == opt
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                    .semantics(mergeDescendants = true) { this.selected = sel }
+                    .clickable(role = Role.RadioButton, onClick = { onPick(opt) })
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    label(opt), color = if (sel) Tok.accent else Tok.tx,
+                    fontFamily = if (monospace(opt)) FontFamily.Monospace else null,
+                    fontSize = if (monospace(opt)) 12.sp else 13.sp, lineHeight = 18.sp,
+                    fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f),
+                )
+                if (sel) Text("✓", color = Tok.accent, fontSize = 13.5.sp, modifier = Modifier.padding(start = 10.dp))
             }
         }
     }

@@ -142,6 +142,7 @@
     <string name="add_message_hint">补充说明…</string>
     <string name="send">发送</string>
     <string name="dictate">语音输入</string>
+    <string name="retry_voice_input">重试语音转写</string>
     <string name="attach_image">添加图片</string>
     <string name="attach_menu">添加附件</string>
     <string name="attach_sheet_photo">照片</string>

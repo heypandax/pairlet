@@ -1050,8 +1050,8 @@ class RepoDesktopModel(
         else repo.setDefaultMode(mode)
     }
     override var defaultEffort: String?
-        get() = repo.defaultEffort.value
-        set(v) { repo.setDefaultEffort(v) }
+        get() = repo.defaultEffortFor(defaultAgent)
+        set(v) { repo.setDefaultEffortFor(defaultAgent, v) }
     override var defaultServiceTier: String?
         get() = repo.defaultServiceTier.value
         set(v) { repo.setDefaultServiceTier(v) }

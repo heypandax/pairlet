@@ -201,6 +201,16 @@ open class SeedDesktopModel : DesktopModel {
     override val relayUrl = "wss://pocket.ark-nexus.cc"
     override var defaultAgent by mutableStateOf(AgentKind.CLAUDE)
     override var defaultMode by mutableStateOf(PermissionMode.DEFAULT)
+    private val defaultEfforts = mutableStateMapOf<AgentKind, String>()
+    override var defaultEffort: String?
+        get() = defaultEfforts[defaultAgent]
+        set(value) {
+            if (value == null) defaultEfforts.remove(defaultAgent) else defaultEfforts[defaultAgent] = value
+        }
+    /** Empty by default so existing seed screenshots do not gain a capability the scene did not declare.
+     *  Desktop Settings tests opt in when exercising the effort picker. */
+    var settingsEffortOptions: List<String> by mutableStateOf(emptyList())
+    override fun effortOptionsFor(agent: AgentKind, model: String?): List<String> = settingsEffortOptions
     private val defaultModels = mutableStateMapOf<AgentKind, String>()
     override fun defaultModelFor(agent: AgentKind): String? = defaultModels[agent]
     override fun setDefaultModelFor(agent: AgentKind, model: String?) {

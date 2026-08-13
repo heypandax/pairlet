@@ -251,7 +251,7 @@ data class PathEntry(val name: String, val isDir: Boolean)
 
 /** One live session in a project dir — [DirectoryEntry.activeSessions]. The daemon knows its own
  *  conversations' turn state exactly; [executing] for a terminal-launched claude falls back to the
- *  wrote-recently heuristic. */
+ *  wrote-recently heuristic and therefore must not be used to infer a completion edge. */
 @Serializable
 data class ActiveSession(
     val sessionId: String,
@@ -266,6 +266,10 @@ data class ActiveSession(
     /** the external bridge credential that opened it (issue #91), e.g. "feishu-bot" — clients show
      *  "via feishu-bot" on the live row. Null = interactive/local session or an older daemon. */
     val origin: String? = null,
+    /** True only when [executing] came from a daemon-owned conversation's real turn lifecycle. False for
+     *  terminal transcript-mtime heuristics and old daemons; clients may under-report completions in that
+     *  case, but must never invent one when a recency window expires (#239). */
+    val executingAuthoritative: Boolean = false,
 )
 
 /**

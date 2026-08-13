@@ -829,6 +829,25 @@ class DesktopUiTest {
     }
 
     @Test
+    fun desktopSettingsScopesDefaultEffortToTheSelectedAgent() = runComposeUiTest {
+        val m = SeedDesktopModel().apply {
+            defaultAgent = AgentKind.CLAUDE
+            defaultEffort = "high"
+            defaultAgent = AgentKind.CODEX
+            settingsEffortOptions = listOf("low", "ultra")
+        }
+        setContent { PocketTheme { SettingsModal(m) {} } }
+        waitForIdle()
+
+        onAllNodes(hasText("ultra")).onFirst().performScrollTo().performClick()
+        waitForIdle()
+
+        assertEquals("ultra", m.defaultEffort)
+        m.defaultAgent = AgentKind.CLAUDE
+        assertEquals("high", m.defaultEffort, "choosing a Codex effort must not rewrite Claude")
+    }
+
+    @Test
     fun seedDataInvariants() {
         val m = SeedDesktopModel()
         assertTrue(m.sessions.isNotEmpty())

@@ -17,14 +17,16 @@ import dev.ccpocket.protocol.SessionSummary
  * The one state a session may claim. Declaration order IS the priority order
  * (Proofs · "Approval required › Answer required › Failure › Running › New result › Complete").
  *
- * [FAILURE] and [NEW_RESULT] have no authoritative source in `SessionSummary` yet. They are named, shaped
- * and toned anyway so the day a real field arrives it becomes one argument to [sessionState] instead of a
- * rewrite of every row's chrome. Until then nothing may select them — absence is not evidence.
+ * [FAILURE] has no authoritative source in `SessionSummary` yet. [NEW_RESULT] is narrower: it is selected
+ * only when this client observed a known-running session become settled while the user was elsewhere. It
+ * is never guessed from timestamps, prompt text, model or transcript content.
  */
 enum class SurfaceState { APPROVAL, ANSWER, FAILURE, RUNNING, NEW_RESULT, COMPLETE }
 
-/** The non-color half of a state (foundations · "Status marks"): the shape carries it in greyscale too. */
-enum class StateMark { DIAMOND, SQUARE, DOT, RING }
+/** The non-color half of a state (foundations · "Status marks"): the shape carries it in greyscale too.
+ *  Fill IS the ladder among the round marks: filled [DOT] still running, [HALF_DOT] settled but unseen,
+ *  hollow [RING] settled and seen. */
+enum class StateMark { DIAMOND, SQUARE, DOT, HALF_DOT, RING }
 
 /** The color ROLE. Resolved to a live `Tok` slot at the call site, so both palettes stay reactive. */
 enum class StateTone { ATTENTION, DANGER, RUNNING, NEUTRAL }
@@ -37,7 +39,11 @@ val SurfaceState.mark: StateMark
         SurfaceState.APPROVAL, SurfaceState.ANSWER -> StateMark.DIAMOND
         SurfaceState.FAILURE -> StateMark.SQUARE
         SurfaceState.RUNNING -> StateMark.DOT
-        SurfaceState.NEW_RESULT, SurfaceState.COMPLETE -> StateMark.RING
+        // #239: a result you have not opened yet is half-filled, not a second hollow ring. Sharing
+        // Complete's ring left the two settled states separable by colour alone, which is exactly the
+        // signalling the vocabulary forbids — the written label was carrying it unaided in greyscale.
+        SurfaceState.NEW_RESULT -> StateMark.HALF_DOT
+        SurfaceState.COMPLETE -> StateMark.RING
     }
 
 val SurfaceState.tone: StateTone
@@ -57,8 +63,8 @@ val SurfaceState.action: StateAction?
         else -> null
     }
 
-/** Which half of the list owns this state. Anything that is not finished is work in progress, so a future
- *  [SurfaceState.FAILURE] / [SurfaceState.NEW_RESULT] lands in Active without another partition rule. */
+/** Which half of the list owns this state. Anything that still needs the user's attention stays in Active;
+ *  that includes a newly completed result until the session is successfully opened. */
 val SurfaceState.pinsToActive: Boolean get() = this != SurfaceState.COMPLETE
 
 /**
@@ -100,28 +106,46 @@ fun attentionFor(summary: SessionSummary, attention: List<SessionAttention>): Se
 /**
  * Select the ONE state [summary] may claim.
  *
- * [failed] and [newResult] are the degradation seam: `SessionSummary` carries no authoritative failure or
- * new-result field, so every caller leaves them null and neither state is reachable today. They are NOT
- * inferred from `lastModified`, prompt text, model or transcript content — a stale row is a row we know
- * nothing new about, not a failure, and "the daemon touched this file" is not a result the user asked for.
+ * [failed] remains a degradation seam because `SessionSummary` carries no authoritative failure field.
+ * [newResult] may be true only when the repository's working-set tracker observed a running-to-settled
+ * transition while this session was not open. Neither state is inferred from `lastModified`, prompt text,
+ * model or transcript content — a stale row is a row we know nothing new about, not a failure or result.
  */
 fun sessionState(
     summary: SessionSummary,
     attention: SessionAttention?,
     failed: Boolean? = null,
     newResult: Boolean? = null,
+    /** null = no directory truth available, so fall back to SessionSummary's compatibility flags. */
+    currentlyWorking: Boolean? = null,
 ): SurfaceState = when {
     attention != null && !attention.isQuestion -> SurfaceState.APPROVAL
     attention != null -> SurfaceState.ANSWER
     failed == true -> SurfaceState.FAILURE
-    summary.live || summary.busy -> SurfaceState.RUNNING
+    currentlyWorking == true -> SurfaceState.RUNNING
     newResult == true -> SurfaceState.NEW_RESULT
+    currentlyWorking == false -> SurfaceState.COMPLETE
+    summary.live || summary.busy -> SurfaceState.RUNNING
     else -> SurfaceState.COMPLETE
 }
 
 /** Classify a whole list, preserving the daemon's order. */
-fun sessionRows(sessions: List<SessionSummary>, attention: List<SessionAttention>): List<SessionRowUi> =
-    sessions.map { SessionRowUi(it, sessionState(it, attentionFor(it, attention))) }
+fun sessionRows(
+    sessions: List<SessionSummary>,
+    attention: List<SessionAttention>,
+    newResults: Set<String> = emptySet(),
+    currentlyWorking: Set<String>? = null,
+): List<SessionRowUi> = sessions.map {
+    SessionRowUi(
+        it,
+        sessionState(
+            it,
+            attentionFor(it, attention),
+            newResult = it.sessionId in newResults,
+            currentlyWorking = currentlyWorking?.let { work -> it.sessionId in work },
+        ),
+    )
+}
 
 /** Split classified rows into the Active and Recent halves, each keeping its incoming order. */
 fun splitSessions(rows: List<SessionRowUi>): SessionSplit =

@@ -55,6 +55,7 @@ import dev.ccpocket.app.resources.st_act_review
 import dev.ccpocket.app.resources.st_also_running
 import dev.ccpocket.app.resources.st_answer
 import dev.ccpocket.app.resources.st_complete
+import dev.ccpocket.app.resources.st_new_result
 import dev.ccpocket.app.resources.st_running
 import dev.ccpocket.app.resources.switcher_open
 import dev.ccpocket.app.resources.time_just_now
@@ -70,9 +71,12 @@ import dev.ccpocket.app.ui.session.SessionListRow
 import dev.ccpocket.app.ui.session.SessionRowUi
 import dev.ccpocket.app.ui.session.SurfaceState
 import dev.ccpocket.protocol.AgentKind
+import dev.ccpocket.protocol.ActiveSession
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ConvoHistory
+import dev.ccpocket.protocol.Directories
+import dev.ccpocket.protocol.DirectoryEntry
 import dev.ccpocket.protocol.HistoryMessage
 import dev.ccpocket.protocol.PendingApproval
 import dev.ccpocket.protocol.PendingApprovals
@@ -230,6 +234,96 @@ class MobileUi20ChromeTest {
         )
         assertWithinViewport(str(Res.string.new_session_cta))
         assertWithinViewport("~/code/cc-pocket")
+    }
+
+    @Test
+    fun aClientObservedCompletionStaysVisibleAsANewResult() = baseline(
+        seed = {
+            receiveForTest(
+                Sessions(
+                    dir,
+                    listOf(summary("s-fresh", "Just finished", live = true), summary("s-old", "Older result")),
+                ),
+            )
+            val active = DirectoryEntry(
+                path = dir, name = "cc-pocket", isDir = true, open = true, executing = true,
+                activeSessionId = "s-fresh", activeSessionTitle = "Just finished",
+                activeSessions = listOf(
+                    ActiveSession("s-fresh", "Just finished", executing = true, executingAuthoritative = true),
+                ),
+            )
+            receiveForTest(Directories(listOf(active)))
+            receiveForTest(
+                Directories(
+                    listOf(
+                        active.copy(
+                            executing = false,
+                            activeSessions = listOf(
+                                ActiveSession("s-fresh", "Just finished", executingAuthoritative = true),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        },
+        content = { SessionsScreen(it) },
+    ) {
+        assertTrue(present(str(Res.string.ses_active).uppercase()))
+        assertTrue(present("Just finished"))
+        assertTrue(present(str(Res.string.st_new_result), substring = true))
+        assertTrue(present(str(Res.string.ses_recent).uppercase()))
+        assertTrue(present("Older result"))
+        assertTrue(present(str(Res.string.st_complete), substring = true))
+    }
+
+    /**
+     * #239: two sessions that finished while the user was elsewhere are two independent rows, not one
+     * grouped notice — each keeps its own title, its own written state and its own place in the daemon's
+     * order, above a session that is still running. The one that was never running is ordinary history.
+     */
+    @Test
+    fun twoIndependentNewResultsStayActiveAboveRunningWithCompleteInRecent() = baseline(
+        seed = {
+            receiveForTest(
+                Sessions(
+                    dir,
+                    listOf(
+                        summary("s-a", "Refine composer states", live = true),
+                        summary("s-b", "Audit state precedence", live = true),
+                        summary("s-run", "Run the mobile suite", live = true),
+                        summary("s-done", "Document the release"),
+                    ),
+                ),
+            )
+            fun entry(executing: Set<String>) = DirectoryEntry(
+                path = dir, name = "cc-pocket", isDir = true, open = true, executing = executing.isNotEmpty(),
+                activeSessionId = executing.firstOrNull() ?: "s-a", activeSessionTitle = "Refine composer states",
+                activeSessions = listOf("s-a", "s-b", "s-run")
+                    .map { ActiveSession(it, it, executing = it in executing, executingAuthoritative = true) },
+            )
+            receiveForTest(Directories(listOf(entry(setOf("s-a", "s-b", "s-run")))))
+            // a and b settle while another surface is open; the third turn keeps running
+            receiveForTest(Directories(listOf(entry(setOf("s-run")))))
+        },
+        content = { SessionsScreen(it) },
+    ) {
+        val newResult = str(Res.string.st_new_result)
+        assertEquals(
+            2, onAllNodes(hasText(newResult, substring = true)).fetchSemanticsNodes().size,
+            "each observed completion keeps its OWN row rather than collapsing into one notice",
+        )
+        val a = onAllNodes(hasText("Refine composer states")).onFirst().getUnclippedBoundsInRoot()
+        val b = onAllNodes(hasText("Audit state precedence")).onFirst().getUnclippedBoundsInRoot()
+        val running = onAllNodes(hasText("Run the mobile suite")).onFirst().getUnclippedBoundsInRoot()
+        val recentLabel = onAllNodes(hasText(str(Res.string.ses_recent).uppercase())).onFirst().getUnclippedBoundsInRoot()
+        assertTrue(a.top < b.top && b.top < running.top, "the daemon's order survives inside Active")
+        assertTrue(running.bottom <= recentLabel.top, "all three stay in Active, above the Recent heading")
+        assertTrue(
+            onAllNodes(hasText("Document the release")).onFirst().getUnclippedBoundsInRoot().top > recentLabel.top,
+            "a session that never ran while away is ordinary history",
+        )
+        assertTrue(present(str(Res.string.st_running), substring = true), "the running row still reads Running")
+        assertTrue(present(str(Res.string.st_complete), substring = true))
     }
 
     @Test

@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -175,14 +176,18 @@ fun SessionListRow(
     val s = row.session
     val tint = stateColor(row.tone)
     val action = row.action
+    val markSize = sessionStateMarkSize(LocalDensity.current.fontScale)
     Column(
         modifier.fillMaxWidth()
             .combinedClickable(onClick = onOpen, onLongClick = onLongPress)
             .padding(vertical = Metric.gap),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(11.dp)) {
-            // top padding aligns the 8dp mark with the cap height of the first title line, at any font scale
-            Box(Modifier.padding(top = 7.dp)) { StateMarkGlyph(row.mark, tint) }
+            // The Sessions master makes the whole state vocabulary 10dp, rising to 14dp with large type.
+            // Written state remains authoritative; the larger decorative mark preserves the fill ladder.
+            Box(Modifier.padding(top = 7.dp)) {
+                StateMarkGlyph(row.mark, tint, size = markSize, strokeWidth = SessionStateMarkStroke)
+            }
             Column(Modifier.weight(1f)) {
                 Text(
                     s.title, color = Tok.tx, style = TypeRole.rowTitle,
