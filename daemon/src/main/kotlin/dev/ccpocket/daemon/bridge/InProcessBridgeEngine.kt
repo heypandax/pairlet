@@ -30,15 +30,18 @@ interface InProcessBridgeEngine {
     fun start(): String?
 
     /** Drop the IM link so the engine can be re-[start]ed (this is how restart works). Does NOT end
-     *  in-flight Claude convos — a restart preserves continuity; [closeOwnedConvos] is the revoke path. */
+     *  in-flight Claude convos — a restart preserves continuity; [revokeAndShutdown] is the revoke path. */
     fun stop()
 
-    /** Permanent teardown: [stop] plus release of the engine's own resources (coroutine scope, …). */
-    fun shutdown()
-
-    /** Force-close the Claude convos this engine opened. Called on REVOKE/detach only, so a bridge's
-     *  running turns END with its credential instead of outliving it until idle-reap (issue #91 A1). */
-    suspend fun closeOwnedConvos()
+    /**
+     * Irreversible authority teardown for REVOKE/detach/reconfigure. Implementations must perform this as
+     * one ordered operation: reject new ingress, cancel AND await every already-admitted handler, force-close
+     * all conversations bearing this bridge's origin, then release resources. The await-before-close rule is
+     * security-critical: otherwise a handler admitted just before quiesce can open a new FULL_AUTO or
+     * owner-bypass conversation after the close sweep. Any close failure must escape to the caller, which
+     * then keeps the old runner entry and refuses to build a replacement.
+     */
+    suspend fun revokeAndShutdown()
 }
 
 /** Builds an [InProcessBridgeEngine] for one managed bridge. Registered per IM kind via

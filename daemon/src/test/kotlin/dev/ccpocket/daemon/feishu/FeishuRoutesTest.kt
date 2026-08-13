@@ -34,6 +34,14 @@ class FeishuRoutesTest {
         assertNull(FeishuRoutes.resolveProject("dup", listOf("/a/DUP", "/b/Dup")))
     }
 
+    @Test
+    fun exact_duplicate_project_basenames_fail_closed_instead_of_picking_by_list_order() {
+        val duplicateFoos = listOf("/projects/one/foo", "/projects/two/foo")
+
+        assertNull(FeishuRoutes.resolveProject("foo", duplicateFoos))
+        assertNull(FeishuRoutes.resolveProject("  foo  ", duplicateFoos))
+    }
+
     // ── the routes table ──
 
     @Test
@@ -166,7 +174,11 @@ class FeishuRoutesTest {
     @Test
     fun help_answers_with_usage() {
         val (_, c) = commands()
-        assertTrue("用法" in assertIs<ChatAction.Reply>(c.handle("/help", "oc_1", "ou_x")).text)
+        val out = assertIs<ChatAction.Reply>(c.handle("/help", "oc_1", "ou_x")).text
+        assertTrue("用法" in out)
+        assertTrue("/full-auto confirm" in out && "显式开启" in out, out)
+        assertTrue("Bash" in out && "MCP" in out && "网络" in out && "子代理" in out, out)
+        assertTrue("项目外/外传" in out && "/untrust" in out, out)
     }
 
     @Test
@@ -213,21 +225,23 @@ class FeishuRoutesTest {
             r, workdirs, adminOpenId = "ou_admin", chatOwnerOf = { "ou_groupowner" },
             noApprovalEnabled = true,
         )
-        for (cmd in listOf("/trust", "/review", "/review 只做评审")) {
+        for (cmd in listOf("/trust", "/review", "/review 只做评审", "/full-auto", "/full-auto confirm")) {
             assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_groupowner")).text)
             assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_stranger")).text)
         }
         assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin"))
         assertIs<ChatAction.SetTrust>(c.handle("/review", "oc_1", "ou_admin"))
+        assertIs<ChatAction.SetTrust>(c.handle("/full-auto confirm", "oc_1", "ou_admin"))
     }
 
     @Test
-    fun trust_and_review_refuse_until_the_owner_enabled_it_on_the_machine() {
+    fun trust_modes_refuse_until_the_owner_enabled_them_on_the_machine() {
         val (r, c, _) = trustCommands(masterOn = false)
         r.bind("oc_1", "/p/alpha")
-        for (cmd in listOf("/trust", "/review 只做评审")) {
+        for (cmd in listOf("/trust", "/review 只做评审", "/full-auto confirm 只跑测试")) {
             val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_admin")).text
             assertTrue("桌面端" in out, out) // points at the master switch instead of silently doing nothing
+            if (cmd.startsWith("/full-auto")) assertTrue("/full-auto confirm 只跑测试" in out, out)
         }
     }
 
@@ -235,10 +249,53 @@ class FeishuRoutesTest {
     fun trust_needs_an_admin_and_echoes_the_callers_open_id_to_bootstrap_one() {
         val (r, c, _) = trustCommands(admin = null)
         r.bind("oc_1", "/p/alpha")
-        for (cmd in listOf("/trust", "/review")) {
+        for (cmd in listOf("/trust", "/review", "/full-auto", "/full-auto confirm")) {
             val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_me")).text
             assertTrue("ou_me" in out, out)
         }
+    }
+
+    @Test
+    fun full_auto_without_exact_confirm_only_warns_and_cannot_reach_persistence() {
+        val (r, c, records) = trustCommands()
+        r.bind("oc_1", "/p/alpha")
+        for (cmd in listOf("/full-auto", "/full-auto confirmed", "/full-auto confirm-now")) {
+            val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_admin"), cmd).text
+            assertTrue("高风险" in out && "尚未开启任何状态" in out, out)
+            assertTrue("@机器人 /full-auto confirm" in out, "warning must carry the exact confirmation command: $out")
+            assertTrue(records.isEmpty(), "a warning-only command must not change any trust record")
+        }
+    }
+
+    @Test
+    fun full_auto_confirm_is_owner_only_and_carries_an_optional_contract() {
+        val (r, c, records) = trustCommands()
+        r.bind("oc_1", "/p/alpha")
+
+        assertTrue(
+            "只有机主" in assertIs<ChatAction.Reply>(c.handle("/full-auto confirm 只跑测试", "oc_1", "ou_member")).text,
+        )
+        assertTrue(records.isEmpty(), "a non-owner refusal cannot mutate trust")
+
+        assertIs<ChatAction.SetTrust>(c.handle("/full-auto confirm 只跑测试", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.FULL_AUTO, it.mode)
+            assertEquals("只跑测试", it.purpose)
+        }
+        assertIs<ChatAction.SetTrust>(c.handle("/full-auto confirm", "oc_1", "ou_admin")).let {
+            assertEquals(FeishuTrustMode.FULL_AUTO, it.mode)
+            assertNull(it.purpose)
+        }
+    }
+
+    @Test
+    fun full_auto_success_receipt_states_broad_authority_limited_holds_and_revocation() {
+        val out = fullAutoEnabledReply("alpha", "只跑测试")
+        assertTrue("显式开启" in out && "Guardian" in out && "full-auto" in out, out)
+        assertTrue("任意未被拦截" in out && "Bash" in out && "MCP" in out && "网络" in out && "子代理" in out, out)
+        assertTrue("项目外" in out && "向外发送" in out, out)
+        assertTrue("人类决策" in out && "结构化持久化" in out && "Shell、MCP 和未知工具不受" in out, out)
+        assertTrue("只跑测试" in out && "/untrust" in out, out)
+        assertFalse("/p/alpha" in out)
     }
 
     @Test
@@ -305,6 +362,14 @@ class FeishuRoutesTest {
         val out = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
         assertTrue("智能审核" in out && "只做评审" in out && "3" in out, out)
         assertFalse("/p/alpha" in out, "chat-facing text must not leak machine paths: $out")
+        // explicit full-auto: status must make the broad, non-sandbox authority and revocation visible
+        records["oc_1"] = FeishuTrustRecord("/p/alpha", FeishuTrustMode.FULL_AUTO, "只跑测试", contractVersion = 4)
+        val full = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
+        assertTrue("Guardian 全自动" in full && "高风险" in full, full)
+        assertTrue("Bash" in full && "MCP" in full && "网络" in full && "子代理" in full, full)
+        assertTrue("项目外" in full && "向外发送" in full && "/untrust" in full, full)
+        assertTrue("持久化" in full && "Shell/MCP/未知工具不受" in full, full)
+        assertFalse("/p/alpha" in full, "chat-facing text must not leak machine paths: $full")
         // a stale record for another project reads as not in effect
         records["oc_1"] = record(FeishuTrustMode.TRUSTED, workdir = "/p/gamma")
         val stale = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text

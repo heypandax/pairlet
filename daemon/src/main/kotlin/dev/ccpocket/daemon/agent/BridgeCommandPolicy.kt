@@ -4,11 +4,12 @@ package dev.ccpocket.daemon.agent
  * A defense-in-depth Bash gate for BRIDGE-origin sessions (issue #91), driven by anyone in a Feishu group.
  *
  * Three verdicts, and the trust model behind each:
- *  - `ALLOW`  → runs with ZERO owner interaction (no PermissionAsk is emitted; a bridge can't receive one
- *    anyway). So ALLOW is a HARD SECURITY BOUNDARY: a command reaches it only if it is provably free of
- *    side effects AND cannot exfiltrate arbitrary file contents. This list is intentionally tiny.
- *  - `DENY`   → hard-refused, un-tappable (closes the "手滑点同意" mis-tap hole).
- *  - `ASK`    → routes to the owner's phone. **This is the default for everything not proven safe.**
+ *  - `ALLOW`  → safe enough for ordinary and legacy-confined bridge turns to run with zero owner
+ *    interaction. A command reaches it only if it is provably free of side effects and cannot exfiltrate
+ *    arbitrary file contents. This list is intentionally tiny.
+ *  - `DENY`   → refused before every grant. This is useful defense-in-depth, not a complete shell parser.
+ *  - `ASK`    → routes to the owner's phone by default. An explicitly authorized #233 full-auto turn may
+ *    accept it without another per-command card; that mode is broad delegation, not classifier proof.
  *
  * Why ALLOW is so much smaller than intuition suggests (security review, issue #91): a command NAME is not
  * a proxy for "read-only". `find` has `-delete`/`-exec`, `awk`/`sed` have `system()`/`e`/`w`, `command`
@@ -20,15 +21,17 @@ package dev.ccpocket.daemon.agent
  * (which are path-scoped for bridges), not through Bash.
  *
  * The `DENY` blacklist is explicitly best-effort: byte-level obfuscation (`r""m`, `r\m`) can't be closed
- * at the regex level. That's tolerable because a bypassed DENY only falls through to ASK (the owner still
- * decides) — it never falls through to ALLOW. The real guarantee is the tiny ALLOW list + ASK-by-default.
+ * at the regex level. In ordinary and legacy-confined bridge turns, a bypassed DENY falls through to ASK;
+ * this tiny ALLOW list + ASK-by-default is the actual boundary. Issue #233's separately and explicitly
+ * confirmed FULL_AUTO grant may consume an ASK without another card, so that mode must be presented as
+ * broad owner-delegated shell authority, never as a sandbox or a complete destructive-command barrier.
  */
 object BridgeCommandPolicy {
     enum class Verdict { DENY, ALLOW, ASK }
 
     private val I = setOf(RegexOption.IGNORE_CASE)
 
-    /** Absolute red lines — refused before any ask, under every mode. Best-effort (see class doc). */
+    /** Known destructive shapes — refused before any ask, under every mode. Best-effort (see class doc). */
     private val DANGEROUS = listOf(
         Regex("""\brm\b\s+(-\w*r\w*|--recursive)""", I),          // any recursive rm (target-agnostic): -r -rf -R -fr --recursive
         Regex("""\brm\b\s+(-\w+\s+)*(/|~|\*)(\s|$)""", I),        // rm of / ~ * even without a recursive flag

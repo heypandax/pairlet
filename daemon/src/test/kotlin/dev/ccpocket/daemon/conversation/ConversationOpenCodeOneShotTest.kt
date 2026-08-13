@@ -202,6 +202,41 @@ class ConversationOpenCodeOneShotTest {
         }
     }
 
+    @Test
+    fun startup_watchdog_revokes_the_bridge_grant_lease() = runBlocking {
+        if (win()) return@runBlocking
+        System.setProperty(Conversation.OPENCODE_WATCHDOG_PROP, "300")
+        try {
+            val frames = CopyOnWriteArrayList<Frame>()
+            val scope = CoroutineScope(Dispatchers.Default)
+            val backend = OneShotBackend(listOf(okTurn("ses_open_1"), okTurn("ses_open_2"))) { idx, f ->
+                if (idx == 0) "sleep 30" else "cat '${f.absolutePathString()}'"
+            }
+            val convo = Conversation(
+                "cOpenBridge",
+                Files.createTempDirectory("ccp-open"),
+                PermissionMode.DEFAULT,
+                { frames.add(it) },
+                scope,
+                backend,
+                origin = "feishu-bot",
+            )
+            try {
+                convo.open(resumeId = null, model = null)
+                assertTrue(convo.sendReviewedFullAutoBridgePrompt("first", reviewId = "review-1"))
+                await { frames.any { it is PocketError && it.code == "opencode_startup_timeout" } }
+                // The failed process's pending lease must not permanently block or later authorize a retry.
+                assertTrue(convo.sendReviewedFullAutoBridgePrompt("second", reviewId = "review-2"))
+                await { frames.any { it is TurnDone } }
+            } finally {
+                convo.close()
+                scope.cancel()
+            }
+        } finally {
+            System.clearProperty(Conversation.OPENCODE_WATCHDOG_PROP)
+        }
+    }
+
     /** Cold-resume regression (review P0): tapping a DISK session (openedResumeId set, no live sessionId)
      *  must resume that opencode session — not silently fork a fresh one. */
     @Test

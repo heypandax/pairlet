@@ -258,8 +258,9 @@ class SessionRegistry(
         peerSupportsOpencode: Boolean = true,
         peerSupportsKimi: Boolean = true,
         bridgeAllowedCommands: List<String> = emptyList(),
-        // issue #91 OWNER BYPASS: this session is the bridge owner's OWN dedicated session → its whole
-        // PermissionBridge auto-allows. Passed ONLY by trusted in-process code (the built-in engine).
+        // issue #91 OWNER BYPASS: this is the bridge owner's OWN dedicated session. It may mint one-turn
+        // OWNER_BYPASS grants through the in-process entry point; the flag alone does not auto-allow tools.
+        // Passed ONLY by trusted in-process code (the built-in engine).
         ownerBypass: Boolean = false,
         // SESSION-HANDOFF §8.3: non-null exactly for a COLLABORATOR's vetted open — the Handoff Grant's
         // operation ceiling. It rides into the Conversation's PermissionBridge (REVIEW hard-refuses
@@ -723,7 +724,8 @@ class SessionRegistry(
 
     /**
      * Execute one request from a chat the owner PRE-TRUSTED (issue #198) — no approval card was shown, so the
-     * turn runs under the narrower AUTO_TRUSTED grant (danger/workdir walls still enforced).
+     * turn runs under the one-turn AUTO_TRUSTED grant and its legacy closed tool ceiling. #233 deliberately
+     * does not widen an existing durable trust record into arbitrary Bash/MCP/network authority.
      *
      * In-process callers only, exactly like [approveBridgeRequest]: the trust decision is keyed on the
      * attested chat id, which only the built-in engine sees. No frame reaches this — the router has no branch
@@ -736,7 +738,7 @@ class SessionRegistry(
 
     /**
      * Execute one Guardian-passed request from a REVIEWED chat (reviewed-trust design) under the one-turn
-     * REVIEWER_APPROVED grant — same closed ceiling as trusted, distinct for audit.
+     * REVIEWER_APPROVED grant — same legacy closed ceiling as trusted, distinct for audit.
      *
      * In-process callers only, exactly like [sendTrustedBridgePrompt]: the review decision is made and
      * re-validated inside the built-in engine, and no router branch calls this — a bridge cannot claim its
@@ -745,6 +747,23 @@ class SessionRegistry(
     suspend fun sendReviewedBridgePrompt(p: SendPrompt, reviewId: String): Boolean {
         val convo = get(p.convoId) ?: return false
         return convo.sendReviewedBridgePrompt(p.text, p.promptId, reviewId = reviewId)
+    }
+
+    /**
+     * Execute one Guardian-passed request from a chat whose owner explicitly confirmed FULL_AUTO. No wire
+     * route calls this method; only the built-in engine can exchange its validated mode/review decision for
+     * a one-turn [dev.ccpocket.daemon.bridge.BridgeGrant.REVIEWER_FULL_AUTO].
+     */
+    suspend fun sendReviewedFullAutoBridgePrompt(p: SendPrompt, reviewId: String): Boolean {
+        val convo = get(p.convoId) ?: return false
+        return convo.sendReviewedFullAutoBridgePrompt(p.text, p.promptId, reviewId = reviewId)
+    }
+
+    /** Execute one request in the configured owner's dedicated in-process bridge session. No wire route
+     *  calls this; the Feishu engine exchanges its attested owner identity for a one-turn OWNER_BYPASS grant. */
+    suspend fun sendOwnerBypassBridgePrompt(p: SendPrompt): Boolean {
+        val convo = get(p.convoId) ?: return false
+        return convo.sendOwnerBypassBridgePrompt(p.text, p.promptId)
     }
 
     suspend fun switchDir(s: SwitchDirectory) = get(s.convoId)?.switchDirectory(Path.of(s.workdir)) ?: Unit

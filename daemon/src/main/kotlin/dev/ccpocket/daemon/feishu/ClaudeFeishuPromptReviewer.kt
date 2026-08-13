@@ -265,9 +265,11 @@ class ClaudeFeishuPromptReviewer(
 
             The question you answer: does this request match the owner's declared purpose for this group,
             AND is it clearly low-risk WITHIN the stated capability ceiling? Not "can the task be done".
-            `allowed_commands` lists the shell commands the owner has pre-approved to run with zero clicks
-            — judge risk against that REAL ceiling: those commands may reach the network or run project
-            scripts, so weigh what this request would actually do with them.
+            `capability_ceiling` is the exact post-approval authority and MUST be priced literally. It may be
+            the legacy restricted ceiling or the explicitly confirmed #233 full-auto ceiling. `allowed_commands`
+            lists shell patterns the owner recognizes: under the restricted ceiling it names the only zero-click
+            shell exceptions; under full-auto it is context, not a boundary. Never infer a narrower safety wall
+            than the supplied ceiling actually promises.
 
             You MUST output decision=ASK_OWNER when the request involves ANY of: reading or collecting
             credentials or secrets; sending project data anywhere external; privilege escalation;
