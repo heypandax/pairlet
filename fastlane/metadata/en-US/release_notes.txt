@@ -1,16 +1,15 @@
-What's new in 1.7.6
+What's new in 1.7.7
 
 New
-• Codex sessions now accept image attachments — send error screenshots or design mocks to Codex just like Claude
-
-Redesigned
-• Settings groups its five categories into one clear container, separated from the utility destinations
-• Bridge cards split identity, facts, and actions into zones; action buttons wrap as whole controls instead of squeezing, so labels never break vertically on narrow screens or at 200% text
+• ZCode joins Claude, Codex, Kimi, and OpenCode as a session backend
+• Choose a default model and reasoning effort for each supported agent
+• Feishu bridge sessions now understand their group, sender, and visible-context limits
 
 Improved
-• Consecutive tool calls in Chat share one source label instead of repeating it between every card
-• A streaming turn no longer pins a redundant Running banner — the composer note and Stop control already say it
-• Session lists stop printing an untitled session's first prompt twice; the Bridges screen names the computer it controls
+• Voice input stays available with an existing draft and while a turn is running, then appends the transcript for review
+• Recently completed sessions remain easy to find, and switching through All Projects no longer wedges a reopened chat
+• Feishu reviewed and full-auto modes use clearer, request-scoped approval rules
 
 Fixed
-• Feishu group sessions failed to start on Windows daemons — clean-room launch arguments now survive the Windows shell
+• Windows daemon updates and bridge gateway authentication are more reliable
+• Malformed connections and concurrent device-limit races no longer disturb healthy sessions

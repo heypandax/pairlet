@@ -10,9 +10,11 @@ cask "cc-pocket" do
   # bit-reproducible, so even the arm64 sha changes on a rebuild).
   arch arm: "arm64", intel: "x86_64"
 
-  version "1.7.6"
-  sha256 arm:   "8d520bee9d1b5ce3b9db37385cbc644ff077ea5dda12b7380421e5d3c934f61c",
-         intel: "aa7e1ca7d5b105095bdc0dfbb39b6ece1990a5f055d34d07824c728c4104f5da"
+  version "1.7.7"
+  # During release preparation these remain the last published hashes. Replace both from the
+  # notarized v1.7.7 assets before copying this template to heypandax/homebrew-tap.
+  sha256 arm:   "cc2df4f2abac2f41190d3b1407aeb037fb5b20227618070abfc02e2c6204d9f6",
+         intel: "8d953c2625936323c4d03ccd009fa592aed330843295d6d3625dd589451cc9bf"
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
   name "CC Pocket daemon"
