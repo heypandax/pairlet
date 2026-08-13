@@ -77,6 +77,26 @@ class BackNavigationSessionGuardTest {
     }
 
     @Test
+    fun allProjectsFromInsideAChatTearsItDownAndDoesNotWedgeReopen() {
+        // Regression: backToDirectories() (the switcher sheet's "All projects") raised the #226 fence but
+        // left convoId set, so the router kept showing the chat while acceptsSessionLive rejected every
+        // reattach — the chat froze and died on reconnect. Leaving a chat here must null convoId like BACK.
+        val h = Harness()
+        h.bind()
+        assertEquals("convo-a", h.repo.convoId.value)
+
+        h.repo.backToDirectories()
+        assertNull(h.repo.convoId.value, "leaving a chat via All-projects must unbind the conversation")
+        assertNull(h.repo.sessionsDir.value, "All-projects drops all the way to the directory list")
+        assertTrue(h.repo.messages.isEmpty(), "the chat transcript is cleared on leave")
+
+        // The fence must not outlive the navigation: an explicit reopen still works (no permanent wedge).
+        assertTrue(h.repo.openSession("/w/proj", resumeId = "sid-a"))
+        h.repo.receiveForTest(SessionLive("convo-a4", "/w/proj", "sid-a", executing = false))
+        assertEquals("convo-a4", h.repo.convoId.value, "reopening after All-projects must bind normally")
+    }
+
+    @Test
     fun backingOutOfAnInflightOpenRejectsItsLateAnswer() {
         val h = Harness()
         h.bind()

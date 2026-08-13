@@ -100,10 +100,14 @@ fun ComposerField(
     trailingAction: (@Composable () -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(14.dp)
-    val trailingInset = if (trailingAction == null) 0.dp else Metric.touch + 4.dp
+    // The TEXT owns the field's inset, not the field itself. A shared outer `horizontal = 14.dp` also
+    // pushed the trailing target 14dp off the right border, so its centered plate sat 21dp from the
+    // visible edge while it sat 7dp from the top and bottom — a mark that read as nudged inward. The
+    // target is flush with the border instead, and the text stops [Metric.touch] + 4dp short of it, which
+    // leaves the same optical gap between the last glyph and the plate that it had before.
+    val textEndInset = if (trailingAction == null) 14.dp else Metric.touch + 4.dp
     Box(
-        modifier.heightIn(min = 44.dp).clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape)
-            .padding(horizontal = 14.dp),
+        modifier.heightIn(min = 44.dp).clip(shape).background(Tok.base).border(1.dp, Tok.hair, shape),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
@@ -111,24 +115,30 @@ fun ComposerField(
             textStyle = TextStyle(color = Tok.tx, fontSize = 15.sp, lineHeight = 21.sp),
             cursorBrush = SolidColor(Tok.accent),
             maxLines = 4,
-            modifier = Modifier.fillMaxWidth().padding(end = trailingInset, top = 11.dp, bottom = 11.dp)
+            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = textEndInset, top = 11.dp, bottom = 11.dp)
                 .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
         )
         if (state.text.isEmpty()) {
-            Text(placeholder, color = Tok.muted, fontSize = 15.sp, maxLines = 1, modifier = Modifier.padding(end = trailingInset))
+            Text(
+                placeholder, color = Tok.muted, fontSize = 15.sp, maxLines = 1,
+                modifier = Modifier.padding(start = 14.dp, end = textEndInset),
+            )
         }
         trailingAction?.let { action -> Box(Modifier.align(Alignment.CenterEnd)) { action() } }
     }
 }
 
 /**
- * 44dp round action button: filled terracotta (send/done) or hairline outline (mic).
+ * 44dp round action button: filled terracotta (send/done) or hairline outline (capture stop).
  *
  * The circle keeps its 44dp look; the button ITSELF is the design's [Metric.touch] minimum (Chat Master
  * v2: "44–48 pt controls, with 48 pt accessibility targets even when the visible chip is smaller"). The
  * extra ring is transparent, so nothing about the drawn control changes — only what a thumb, and the
  * semantics tree, can actually hit. [contentDescription] names it there too: the stop square carries no
  * icon of its own, so before this it reached assistive tech as an unnamed button.
+ *
+ * This is the grammar of the FREE-STANDING round actions. The composer field's Mic draws its own inset
+ * plate instead — a hairline circle nested inside the field's hairline read as a frame within a frame.
  */
 @Composable
 fun RoundActionButton(
@@ -160,10 +170,11 @@ fun RoundActionButton(
 }
 
 /**
- * A turn action in the accessory lane, deliberately distinct from [RoundActionButton]. Mic and the
- * recording bar keep their compact circular grammar; Stop and Send are the lane's labelled, rectangular
- * actions from the canonical handoff. [modifier] may carry the lane's `weight(1f)` when the action group
- * stacks, so both actions divide the available row evenly without weakening their 84 dp inline floor.
+ * A turn action in the accessory lane, deliberately distinct from [RoundActionButton]. The recording bar
+ * and the field's Mic keep their compact icon-only grammar; Stop and Send are the lane's labelled,
+ * rectangular actions from the canonical handoff. [modifier] may carry the lane's `weight(1f)` when the
+ * action group stacks, so both actions divide the available row evenly without weakening their 84 dp
+ * inline floor.
  */
 @Composable
 fun ComposerLaneActionButton(

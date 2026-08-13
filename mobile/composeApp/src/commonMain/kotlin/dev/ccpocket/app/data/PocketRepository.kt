@@ -5710,6 +5710,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     }
 
     fun backToDirectories() {
+        // "All projects" is reachable from inside a live chat (the switcher sheet, App.kt onAllProjects).
+        // Leaving a chat here must tear it down exactly like BACK does — and, load-bearing, null convoId:
+        // the #226 fence this raises makes acceptsSessionLive reject every reattach/reemit while fenced, so
+        // a chat left bound (convoId != null) freezes its live state and dies on the next reconnect until
+        // the user backs all the way out and reopens. Delegate the chat teardown, then drop to directories.
+        if (convoId.value != null) backToBrowse()
         fenceSessionNavigation()
         sessionsDir.value = null
         sessions.clear()

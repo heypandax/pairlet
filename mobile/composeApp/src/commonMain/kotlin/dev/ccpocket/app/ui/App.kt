@@ -2599,11 +2599,6 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 repo.streaming.value -> ComposerNote(stringResource(Res.string.message_queued_hint))
                             }
                             val stagedContent = input.isNotBlank() || hasReady || hasLanded
-                            // Voice is offered in exactly the states it always was — everything except a
-                            // running turn with nothing staged, where the slot is the interrupt. It simply
-                            // always lives in the field's trailing slot now, so Send/Stop never evict it
-                            // and the accessory lane below holds only the turn's own actions (#238).
-                            val micInField = stagedContent || uploadsBusy || !repo.streaming.value
                             ComposerField(
                                 composer,
                                 // the placeholder names the REAL backend of this session — a Codex/OpenCode/Kimi
@@ -2615,12 +2610,14 @@ internal fun ChatScreen( // internal: rendered offscreen by ShowcaseRender (mark
                                 },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 focusRequester = composerFocus,
-                                // #238: Send must not evict voice. Mic lives inside the full-width field
-                                // rather than competing for the accessory lane's width, so it is reachable
-                                // in every state that offers it — idle, staged, uploading, or mid-turn.
-                                trailingAction = if (micInField) {
-                                    { VoiceActionButton(failed != null) { if (failed != null) repo.retryVoice() else repo.startVoice() } }
-                                } else null,
+                                // #238: neither Send nor Stop may evict voice. Mic lives inside the
+                                // full-width field rather than competing for the accessory lane's width, so
+                                // the ordinary composer offers it in every state it is shown — idle, staged,
+                                // uploading, and mid-turn with nothing typed, which is precisely when you
+                                // want to dictate the message the ribbon above promises to queue.
+                                trailingAction = {
+                                    VoiceActionButton(failed != null) { if (failed != null) repo.retryVoice() else repo.startVoice() }
+                                },
                             )
                             // one tap to any other session you're juggling, across projects (issue #165).
                             // Came DOWN here from the header, which had no width left to give and made a
@@ -3110,14 +3107,46 @@ private fun UploadStatusSlot(label: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** One named Mic action shared by the empty accessory slot and #238's field-trailing append entry. */
+/**
+ * The one named Mic action, riding the composer field's trailing slot (#238).
+ *
+ * Deliberately NOT a [RoundActionButton]. That button draws a 44dp hairline circle, which inside the field
+ * lands a second outline a couple of points inside the field's own rounded hairline — a frame within a
+ * frame, and the heaviest thing in a composer whose whole grammar is quiet. Here the visible mark is an
+ * inset 34dp plate with no border of its own; the [Metric.touch] target and the accessible name are
+ * unchanged. The bordered circle stays the grammar of the free-standing round actions (recording Done,
+ * capture Stop), which have no field around them to collide with.
+ */
 @Composable
 private fun VoiceActionButton(failed: Boolean, onClick: () -> Unit) {
     // Failed always invokes retryVoice(): it re-transcribes a retained capture when available, or falls
     // back to a new recording. Calling that action "Dictate" concealed the retry from screen readers.
     val actionLabel = stringResource(if (failed) Res.string.retry_voice_input else Res.string.dictate)
-    RoundActionButton(onClick = onClick, filled = false, contentDescription = actionLabel) {
-        Icon(MicIcon, null, tint = if (failed) Tok.accent else Tok.tx2, modifier = Modifier.size(22.dp))
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val plate = RoundedCornerShape(11.dp)
+    // The target stays the full 48dp square, but it is transparent — so the default ripple would flood a
+    // block half again the size of the mark it belongs to. Press is drawn on the plate instead, the same
+    // interaction-source pattern the attach button and the approval FAB already use.
+    Box(
+        Modifier.size(Metric.touch)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .semantics { contentDescription = actionLabel },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.size(34.dp).clip(plate).background(
+                when {
+                    pressed -> Tok.accent.copy(alpha = 0.14f)
+                    // failure keeps the accent at rest: retrying is the one thing left to do here
+                    failed -> Tok.accent.copy(alpha = 0.10f)
+                    else -> Tok.raised
+                },
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(MicIcon, null, tint = if (failed || pressed) Tok.accent else Tok.tx2, modifier = Modifier.size(20.dp))
+        }
     }
 }
 

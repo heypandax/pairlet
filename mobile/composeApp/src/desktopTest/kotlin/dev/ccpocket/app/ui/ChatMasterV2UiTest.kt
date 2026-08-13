@@ -143,7 +143,7 @@ class ChatMasterV2UiTest {
         assertTrue(b.left.value >= -0.5f && b.right.value <= viewportWidth + 0.5f, "\"$label\" spills the viewport: ${b.left}..${b.right}")
     }
 
-    /** Canonical accessory actions are labelled rectangles, not the 48 dp circles used by Mic/capture. */
+    /** Canonical accessory actions are labelled rectangles, not the 48 dp icon slots used by Mic/capture. */
     private fun SkikoComposeUiTest.assertLaneAction(
         label: String,
         viewportWidth: Int = W,
@@ -158,10 +158,26 @@ class ChatMasterV2UiTest {
         assertTrue(b.left.value >= -0.5f && b.right.value <= viewportWidth + 0.5f, "\"$label\" spills the viewport: ${b.left}..${b.right}")
     }
 
-    private fun SkikoComposeUiTest.assertCompactRoundTarget(label: String) {
+    /** An icon-only action holds an EXACT 48pt square slot, whatever its visible mark is drawn as. */
+    private fun SkikoComposeUiTest.assertCompactIconTarget(label: String) {
         val b = control(label).onFirst().getUnclippedBoundsInRoot()
-        assertTrue(kotlin.math.abs((b.right - b.left).value - 48f) < 0.5f, "\"$label\" lost its 48pt round slot: $b")
-        assertTrue(kotlin.math.abs((b.bottom - b.top).value - 48f) < 0.5f, "\"$label\" lost its 48pt round slot: $b")
+        assertTrue(kotlin.math.abs((b.right - b.left).value - 48f) < 0.5f, "\"$label\" lost its 48pt compact slot: $b")
+        assertTrue(kotlin.math.abs((b.bottom - b.top).value - 48f) < 0.5f, "\"$label\" lost its 48pt compact slot: $b")
+    }
+
+    /**
+     * The field's trailing target ends ON the field's right edge — the composer's [FIELD_GUTTER] inset from
+     * the viewport. That flush target is the whole reason the 34pt plate centred inside it reads balanced:
+     * (48 − 34) / 2 = 7pt of clearance to the right border, matching the 7pt it already had above and below
+     * inside the 48pt field. While the field's own text inset also pushed the target in, the plate sat 21pt
+     * from the right border and 7pt from the top — measurably lopsided, which is what this pins.
+     */
+    private fun SkikoComposeUiTest.assertFieldTrailingFlush(label: String, viewportWidth: Int = W) {
+        val b = control(label).onFirst().getUnclippedBoundsInRoot()
+        assertTrue(
+            kotlin.math.abs(b.right.value - (viewportWidth - FIELD_GUTTER)) < 0.5f,
+            "\"$label\" must sit flush with the field's ${viewportWidth - FIELD_GUTTER}pt right edge: $b",
+        )
     }
 
     // ══ 1 · transcript grammar ═════════════════════════════════════════════════════════════════════
@@ -246,13 +262,26 @@ class ChatMasterV2UiTest {
         assertFalse(present(str(Res.string.message_agent_hint, "Claude")), "…and never the other backend's name")
     }
 
-    /** Streaming with nothing typed: the slot is Stop. Not Stop AND a microphone, not Stop and a Send. */
+    /**
+     * Streaming with nothing typed: the ACCESSORY slot is the interrupt, and nothing offers to send — but
+     * the field keeps its Mic. Mid-turn with an empty draft is exactly when the ribbon above promises that
+     * a send would queue, so it is exactly when dictating that next message has to be reachable; the Mic
+     * used to be the one control the running turn took away.
+     */
     @Test
-    fun streamingWithAnEmptyFieldOffersStopAlone() = baseline(seed = { receiveForTest(live(executing = true)) }) {
-        assertEquals(1, controlCount(str(Res.string.stop)), "the action slot is the interrupt")
-        assertEquals(0, controlCount(str(Res.string.dictate)), "…with no microphone beside it")
+    fun streamingWithAnEmptyFieldOffersStopAndKeepsTheFieldsMic() = baseline(
+        seed = { receiveForTest(live(executing = true)) },
+    ) {
+        assertEquals(1, controlCount(str(Res.string.stop)), "the accessory slot is the interrupt")
         assertEquals(0, controlCount(str(Res.string.send)), "…and nothing to send")
+        assertEquals(1, controlCount(str(Res.string.dictate)), "…while the field still offers to dictate the next message")
         assertTrue(present(str(Res.string.message_queued_hint)), "the note already explains what a send would do")
+        assertFullTarget(str(Res.string.dictate), minimum = 48f)
+        assertCompactIconTarget(str(Res.string.dictate))
+        assertFieldTrailingFlush(str(Res.string.dictate))
+        val mic = control(str(Res.string.dictate)).onFirst().getUnclippedBoundsInRoot()
+        val stop = control(str(Res.string.stop)).onFirst().getUnclippedBoundsInRoot()
+        assertTrue(mic.bottom <= stop.top, "the field's Mic stays clear of the lane's Stop")
     }
 
     /**
@@ -286,7 +315,8 @@ class ChatMasterV2UiTest {
                 assertEquals(1, controlCount(str(Res.string.send)), "$viewport pt keeps one Send")
                 assertFullTarget(str(Res.string.dictate), viewportWidth = viewport, minimum = 48f)
                 assertFullTarget(str(Res.string.send), viewportWidth = viewport, minimum = 48f)
-                assertCompactRoundTarget(str(Res.string.dictate))
+                assertCompactIconTarget(str(Res.string.dictate))
+                assertFieldTrailingFlush(str(Res.string.dictate), viewportWidth = viewport)
                 val mic = control(str(Res.string.dictate)).onFirst().getUnclippedBoundsInRoot()
                 val send = control(str(Res.string.send)).onFirst().getUnclippedBoundsInRoot()
                 assertTrue(mic.bottom <= send.top, "$viewport pt separates field Mic from accessory Send")
@@ -558,7 +588,7 @@ class ChatMasterV2UiTest {
                 width = 320,
             ) {
                 assertFullTarget(str(Res.string.stop), viewportWidth = 320)
-                assertCompactRoundTarget(str(Res.string.stop))
+                assertCompactIconTarget(str(Res.string.stop))
                 assertEquals(1, controlCount(str(Res.string.stop)), "$capture keeps the agent-turn interrupt")
                 // …and it is the ONLY survivor: capture replaces the ordinary composer wholesale, so the
                 // accessory lane, the field and its Mic are gone rather than stacked under the bar
@@ -689,8 +719,8 @@ class ChatMasterV2UiTest {
 
     /**
      * Every accessory control the idle composer offers is a full [TARGET] slot, though the model chip is
-     * still drawn 30pt tall and the microphone 44pt round. The gauge is the tell: at rest it draws a 30 ×
-     * 30 capsule, which is narrower than a thumb.
+     * still drawn 30pt tall and the microphone's visible plate 34pt. The gauge is the tell: at rest it
+     * draws a 30 × 30 capsule, which is narrower than a thumb.
      */
     @Test
     fun everyIdleComposerControlIsAFullTouchTarget() = baseline(
@@ -760,6 +790,9 @@ class ChatMasterV2UiTest {
 
         /** The handoff's interactive minimum, in pt. */
         const val TARGET = 48f
+
+        /** The composer field's own horizontal inset from the viewport, in pt (mobile-composer.jsx). */
+        const val FIELD_GUTTER = 16f
 
         val LONG_PROMPT =
             "here is the failing run: the relay drops the socket about forty seconds after the phone " +
