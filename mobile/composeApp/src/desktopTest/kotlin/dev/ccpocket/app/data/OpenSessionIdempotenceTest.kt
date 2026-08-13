@@ -14,9 +14,13 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -229,5 +233,122 @@ class OpenSessionIdempotenceTest {
         assertEquals("/w/proj", h.opens().single().workdir)
         assertEquals("sid-a", h.opens().single().resumeId)
         assertEquals("Refactor auth", h.repo.chatTitle.value, "the retry keeps naming the same session")
+    }
+
+    /** Disconnect is a hard ownership boundary. If the open worker has only been queued when the user
+     *  leaves the computer, it must not wake later, repopulate the cleared session state, and enqueue an
+     *  OpenSession into the reusable transport outbox for whichever computer connects next. */
+    @Test
+    fun disconnectCancelsAnOpenWhoseWorkerHasNotRunYet() {
+        val scheduler = TestCoroutineScheduler()
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
+        try {
+            val sent = mutableListOf<Frame>()
+            val repo = PocketRepository(scope).apply { onSendForTest = { sent += it } }
+
+            assertTrue(repo.openSession("/w/machine-a", resumeId = "sid-a"))
+            repo.disconnect()
+            scheduler.runCurrent() // deliberately give every pre-disconnect queued worker a chance to leak
+
+            assertTrue(sent.none { it is OpenSession }, "a disconnected open must never reach a later link: $sent")
+            assertFalse(repo.opening.value)
+            assertFalse(repo.switchingSession.value)
+            assertFalse(repo.openTimedOut.value)
+            assertNull(repo.sessionKey.value, "the abandoned target must not resurrect after disconnect")
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** Once an OpenSession is already on the wire, disconnect still wins ownership of the view. The old
+     *  link may have queued its SessionLive just before teardown; that answer cannot reopen chat on the
+     *  connect screen, and no stale opening/timeout affordance may carry into another computer. */
+    @Test
+    fun disconnectRetiresADispatchedOpenAndRejectsItsLateAnswer() {
+        val h = Harness()
+        assertTrue(h.repo.openSession("/w/machine-a"))
+        assertTrue(h.repo.opening.value)
+
+        h.repo.disconnect()
+        assertFalse(h.repo.opening.value)
+        assertFalse(h.repo.switchingSession.value)
+        assertFalse(h.repo.openTimedOut.value)
+
+        h.repo.receiveForTest(SessionLive("late-convo", "/w/machine-a", "late-sid", executing = false))
+        assertNull(h.repo.convoId.value, "the disconnected link's answer must remain background state")
+    }
+
+    /** A timed-out open is per-link feedback. Disconnecting (including a cold machine switch) must not
+     *  show the old computer's "didn't respond" banner over the next computer's connect screen. */
+    @Test
+    fun disconnectClearsOpenTimeoutFeedback() {
+        val scheduler = TestCoroutineScheduler()
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
+        try {
+            val repo = PocketRepository(scope)
+            assertTrue(repo.openSession("/w/machine-a", resumeId = "sid-a"))
+            scheduler.runCurrent()
+            scheduler.advanceTimeBy(8_000)
+            scheduler.runCurrent()
+            assertTrue(repo.openTimedOut.value)
+
+            repo.disconnect()
+
+            assertFalse(repo.openTimedOut.value)
+            assertFalse(repo.opening.value)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** Hot fleet switching has the same boundary as a cold disconnect: the outgoing primary becomes a
+     *  headless satellite, so a queued UI open must die instead of opening a ghost chat on that satellite. */
+    @Test
+    fun demotionCancelsAnOpenWhoseWorkerHasNotRunYet() {
+        val scheduler = TestCoroutineScheduler()
+        val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
+        try {
+            val sent = mutableListOf<Frame>()
+            val repo = PocketRepository(scope).apply { onSendForTest = { sent += it } }
+
+            assertTrue(repo.openSession("/w/machine-a", resumeId = "sid-a"))
+            repo.demoteToSatellite()
+            scheduler.runCurrent()
+
+            assertTrue(sent.none { it is OpenSession }, "a demoted repo must not open an unseen ghost chat: $sent")
+            assertNull(repo.sessionKey.value)
+            assertNull(repo.convoId.value)
+            assertFalse(repo.opening.value)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    /** The switcher wrapper must preserve the repo's idempotence too. A repeated tap arrives after the first
+     *  worker has nulled convoId; recomputing the hold from convoId alone used to drop switchingSession and
+     *  bounce the router back to the list while the one legitimate OpenSession was still in flight. */
+    @Test
+    fun repeatedSwitcherTapKeepsTheInflightChatRouteHeld() {
+        val h = Harness()
+        h.repo.convoId.value = "convo-a"
+        h.repo.sessionKey.value = "sid-a"
+        h.repo.workdir.value = "/w/a"
+        val target = SessionSwitcherItem(
+            dirKey = "/w/b",
+            sessionId = "sid-b",
+            title = "target",
+            project = "b",
+            running = true,
+            executing = false,
+            current = false,
+            unseen = false,
+        )
+
+        h.repo.switchToSession(target)
+        assertTrue(h.repo.switchingSession.value)
+        h.repo.switchToSession(target)
+
+        assertEquals(1, h.opens().size, "the duplicate stays wire-idempotent")
+        assertTrue(h.repo.switchingSession.value, "the duplicate must not release the first tap's route hold")
     }
 }

@@ -4,6 +4,8 @@ import dev.ccpocket.relay.auth.Codec
 import dev.ccpocket.relay.store.Device
 import dev.ccpocket.relay.store.RelayStore
 import java.security.SecureRandom
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Mints and redeems pairing tickets. Minting is only ever invoked for an already-authenticated
@@ -16,6 +18,9 @@ class PairingService(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val rng = SecureRandom()
+    // Keep the account-wide capacity check and device insert in one in-process critical section.
+    // RelayServer owns one PairingService, so concurrent REST redeems cannot both observe slot 50 free.
+    private val redeemLock = Mutex()
 
     sealed interface MintResult {
         data class Ok(val ticket: String, val ttlSec: Int) : MintResult
@@ -52,21 +57,26 @@ class PairingService(
         val devicePub = runCatching { Codec.b64uDec(devicePubKeyB64) }.getOrNull() ?: return RedeemResult.Err("bad_pubkey")
         if (devicePub.size !in 32..133) return RedeemResult.Err("bad_pubkey")
 
-        val claimed = store.claimTicket(Codec.sha256(raw), clock()) ?: return RedeemResult.Err("invalid_or_expired")
-        if (store.countDevices(claimed.accountId) >= MAX_DEVICES) return RedeemResult.Err("too_many_devices")
+        return redeemLock.withLock {
+            val claimed = store.claimTicket(Codec.sha256(raw), clock())
+                ?: return@withLock RedeemResult.Err("invalid_or_expired")
+            if (store.countDevices(claimed.accountId) >= MAX_DEVICES) {
+                return@withLock RedeemResult.Err("too_many_devices")
+            }
 
-        val deviceId = Codec.b64uEnc(ByteArray(16).also(rng::nextBytes))
-        val secretBytes = ByteArray(32).also(rng::nextBytes)
-        // authoritative: the ticket's markers only, never the client's self-declaration. The COLLABORATOR
-        // marker (§3.4) has no self-declared wire counterpart at all — it exists solely on the ticket, so a
-        // client cannot mint itself an inbox that would be push-addressable.
-        store.insertDevice(
-            Device(
-                deviceId, claimed.accountId, devicePub, Codec.sha256(secretBytes), clock(), null,
-                revoked = false, headless = claimed.headless, collaborator = claimed.collaborator,
+            val deviceId = Codec.b64uEnc(ByteArray(16).also(rng::nextBytes))
+            val secretBytes = ByteArray(32).also(rng::nextBytes)
+            // authoritative: the ticket's markers only, never the client's self-declaration. The COLLABORATOR
+            // marker (§3.4) has no self-declared wire counterpart at all — it exists solely on the ticket, so a
+            // client cannot mint itself an inbox that would be push-addressable.
+            store.insertDevice(
+                Device(
+                    deviceId, claimed.accountId, devicePub, Codec.sha256(secretBytes), clock(), null,
+                    revoked = false, headless = claimed.headless, collaborator = claimed.collaborator,
+                )
             )
-        )
-        return RedeemResult.Ok(claimed.accountId, deviceId, Codec.b64uEnc(secretBytes), devicePubKeyB64)
+            RedeemResult.Ok(claimed.accountId, deviceId, Codec.b64uEnc(secretBytes), devicePubKeyB64)
+        }
     }
 
     private companion object {

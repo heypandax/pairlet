@@ -6,7 +6,7 @@
         "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
         "android_client_info": { "package_name": "com.panda.ccpocket" }
       },
-      "api_key": [ { "current_key": "AIzaPlaceholderKeyForLocalDevBuildsOnly0000" } ],
+      "api_key": [ { "current_key": "AIza00000000000000000000000000000000000" } ],
       "oauth_client": [],
       "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
     }

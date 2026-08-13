@@ -21,8 +21,10 @@ class FeishuReviewedFlowTest {
 
     private class FakeReviewer(val answer: () -> PromptReviewResult) : FeishuPromptReviewer {
         var calls = 0
+        var lastInput: PromptReviewInput? = null
         override suspend fun review(input: PromptReviewInput): PromptReviewResult {
             calls++
+            lastInput = input
             return answer()
         }
     }
@@ -38,7 +40,7 @@ class FeishuReviewedFlowTest {
         revalidate: () -> Boolean = { true },
     ) = runBlocking {
         ReviewedPreflight(reviewer, audit, shadowOnly = shadow)
-            .evaluate(snapshot, prompt, "alpha", "ou_member", "om_msg1", revalidate)
+            .evaluate(snapshot, prompt, "alpha", "ou_member", "om_msg1", revalidate = revalidate)
     }
 
     @Test
@@ -132,6 +134,29 @@ class FeishuReviewedFlowTest {
                 .evaluate(snapshot, "帮我跑测试", "alpha", "ou_member", "om_msg1") { true }
         }
         assertEquals(listOf("npm test", "./gradlew build"), seen?.allowedCommands)
+    }
+
+    @Test
+    fun preflight_defaults_to_restricted_but_accepts_the_explicit_full_auto_ceiling() {
+        val restricted = FakeReviewer { allow() }
+        runBlocking {
+            ReviewedPreflight(restricted, audit)
+                .evaluate(snapshot, "帮我跑测试", "alpha", "ou_member", "om_restricted") { true }
+        }
+        assertEquals(PromptReviewInput.CAPABILITY_CEILING, restricted.lastInput?.capabilityCeiling)
+
+        val broad = FakeReviewer { allow() }
+        runBlocking {
+            ReviewedPreflight(broad, audit).evaluate(
+                snapshot.copy(mode = FeishuTrustMode.FULL_AUTO),
+                "帮我跑测试",
+                "alpha",
+                "ou_member",
+                "om_full_auto",
+                capabilityCeiling = PromptReviewInput.FULL_AUTO_CAPABILITY_CEILING,
+            ) { true }
+        }
+        assertEquals(PromptReviewInput.FULL_AUTO_CAPABILITY_CEILING, broad.lastInput?.capabilityCeiling)
     }
 
     @Test

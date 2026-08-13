@@ -1,27 +1,41 @@
 # 飞书群智能审核信任模式（Reviewed Trust）
 
+> **Full Auto 扩展（2026-08-12，issue #233）**：旧 `TRUSTED/REVIEWED` 记录和
+> `AUTO_TRUSTED/REVIEWER_APPROVED` 行为保持原封闭工具白名单，升级绝不静默扩权。新增的
+> `FeishuTrustMode.FULL_AUTO` 只能由机主精确执行 `/full-auto confirm [purpose]` 建立；之后每条请求仍先过
+> Guardian，只有明确低风险且符合用途的请求才获得一回合 `BridgeGrant.REVIEWER_FULL_AUTO`。
+>
+> `FULL_AUTO` 是高风险显式 opt-in，不是沙箱：Guardian 通过后，Bash（含分类器 `ASK`）、MCP、网络、
+> `Task` 和未知工具都可能不经逐步卡片运行；Bash `DENY` 只是 best-effort defense-in-depth，workdir 检查
+> 只覆盖 daemon 能识别路径字段的结构化工具。known specific-file 工具的不可解析目标与 canonical
+> `executesForTheOwner` 目标仍询问，但这个 hold 不覆盖 Bash/MCP/Task/unknown schema。
+> `ExitPlanMode`、`AskUserQuestion` 等人类决策仍询问。
+> §21～§22 是 v2 Reviewed Trust 的历史复审记录；当前四态与安全边界以正文及 §23 为准。
+>
 > 状态：**已实现，§21 复审整改已完成（处置见 §22），待真实飞书群验收**（2026-08-03，已合并到
 > `feat/session-handoff-collaborator`；直接实现阶段 B，`FEISHU_REVIEW_SHADOW` 影子配置点保留、默认关）。
 > 在 §17 + §21.8 的真机验收完成前不应发版。Reviewer CLI 契约回归见
 > `scripts/probe-feishu-reviewer.py`（升级 claude CLI 后必跑；已含 12s 生产超时门）。
+> 上述“已实现”首先指 v2 Reviewed Trust；issue #233 的 v3 扩展以本次正文和 §23 为当前实现契约，仍需通过
+> §16 的定向回归与 §17 的真实群验收，不能借旧状态行宣称已经上线验证。
 >
 > 面向实现者：本文已收敛 MVP 产品语义、权限边界、数据迁移、代码改动、测试与验收标准，可直接据此实现。
 >
-> 关联设计：审批领域与硬安全边界以 [`APPROVAL-SYSTEM.md`](./APPROVAL-SYSTEM.md) 为准；风险评估通用原则以
-> [`SMART-APPROVAL.md`](./SMART-APPROVAL.md) 为准。本文只负责飞书群在 `trust` 与 `untrust` 之间的条件信任模式。
+> 关联设计：审批领域与运行期边界以 [`APPROVAL-SYSTEM.md`](./APPROVAL-SYSTEM.md) 为准；风险评估通用原则以
+> [`SMART-APPROVAL.md`](./SMART-APPROVAL.md) 为准。本文负责飞书群的持久信任模式与逐请求 Guardian 分流。
 
 ## 0. 一句话结论
 
-在飞书群增加第三种权限模式 **智能审核（`REVIEWED`）**：机主先为群建立一个条件授权，之后每条群成员提示词
-先由独立的 Guardian Reviewer 判断是否符合该群用途且风险较低；只有明确通过的请求才获得一次性的、上限等同
-当前 `AUTO_TRUSTED` 的受限执行资格，其余请求继续走现有机主审批卡。
+飞书群有四种模式：`UNTRUSTED` 每条请求找机主；`TRUSTED` 沿用旧封闭白名单；`REVIEWED` 由 Guardian
+逐请求筛选后获得同一封闭上限；只有机主另行高风险确认的 `FULL_AUTO`，才会在 Guardian 明确通过后为该请求
+产生一回合 `REVIEWER_FULL_AUTO`，跳过普通工具的逐步卡片。
 
-Guardian 不是权限主体，不能授予 `OWNER_APPROVED`，也不能放宽 Bash、路径、网络、MCP 或 destructive
-hard wall。真正的授权决定仍由 daemon 根据机主保存的群策略和固定规则产生。
+Guardian 不是权限主体。它只判断本请求是否满足机主已经保存的用途与对应 capability ceiling；真正的 Grant
+仍由 daemon 固定映射。它不能把 `REVIEWED` 升成 full-auto，也不能自行创建或延长 `FULL_AUTO`。
 
 ## 1. 背景与问题
 
-目前飞书群只有两种主要状态：
+最初飞书群只有两种主要状态：
 
 - 未信任：群成员每次发起请求，都先等待机主批准整条提示词；
 - 已信任：机主执行 `/trust` 后，请求直接以 `AUTO_TRUSTED` 进入 Agent，低风险工具不再打断。
@@ -31,13 +45,13 @@ hard wall。真正的授权决定仍由 daemon 根据机主保存的群策略和
 
 目标不是让模型判断“这个人是不是坏人”，而是判断：
 
-> 当前提示词是否符合机主为这个群预先声明的用途，并且在 cc-pocket 已有的受限执行上限内，是否足够明确、低风险。
+> 当前提示词是否符合机主为这个群预先声明的用途，并且在该模式如实描述的执行上限内，是否足够明确、低风险。
 
 ## 2. 目标与非目标
 
 ### 2.1 目标
 
-- 在 `untrust` 与 `trust` 之间提供低打扰的条件信任模式；
+- 在 `untrust` 与 `trust` 之间提供低打扰的条件信任模式，并为确实需要无人逐步确认的群提供独立的高风险 opt-in；
 - 正常的项目阅读、分析、代码评审、修改和测试请求尽量不再触发请求级审批卡；
 - 涉及凭证、数据外发、权限提升、项目外访问、持久化、混淆意图或无法判断的请求仍找机主；
 - Reviewer 故障、超时、输出异常时 fail closed，退回现有人工审批，而不是阻塞整个飞书功能；
@@ -46,26 +60,32 @@ hard wall。真正的授权决定仍由 daemon 根据机主保存的群策略和
 
 ### 2.2 非目标
 
-- 不让 Reviewer 自动授予 `dangerous`、`OWNER_APPROVED` 或 Full Control；
-- 不让 LLM 的“安全”结论覆盖 daemon 的硬拒绝和工具策略；
+- 不让 Reviewer 自动授予 `OWNER_APPROVED`、创建持久 `FULL_AUTO` 或改变 capability ceiling；
+- 不把 LLM 的“安全”结论描述成沙箱、恶意代码检测或完整副作用证明；
 - 不在 MVP 建设企业策略后台、组织 IAM、复杂的 per-tool 策略编辑器或远端审核服务；
 - 不让 relay 看到提示词明文或参与审核；
 - 不承诺抵御已控制成员账号、恶意仓库内容或复杂 Prompt Injection 的所有攻击；
-- 不在 MVP 自动学习用户审批习惯或自动把群升级成 `TRUSTED`；
+- 不自动学习用户审批习惯，也不把 `TRUSTED/REVIEWED` 自动升级成 `FULL_AUTO`；
 - 不复用主 Agent Session 做审核，避免上下文污染、递归调用和相互阻塞。
 
 ## 3. 产品模型
 
-### 3.1 三态权限
+### 3.1 四态权限
 
 | 模式 | UI 名称 | 请求进入 Agent 前 | 工具执行上限 |
 |---|---|---|---|
 | `UNTRUSTED` | 每次审批 | 每条请求找机主 | 机主批准后走现有 `OWNER_APPROVED` |
 | `REVIEWED` | 智能审核 | Guardian 逐条判断；不确定则找机主 | 自动通过时仅获得 `REVIEWER_APPROVED` |
 | `TRUSTED` | 免审核 | 直接进入 Agent | 现有 `AUTO_TRUSTED` |
+| `FULL_AUTO` | 智能全自动（高风险） | Guardian 逐条判断；不确定则找机主 | 自动通过时仅获得一回合 `REVIEWER_FULL_AUTO` |
 
-`REVIEWER_APPROVED` 与 `AUTO_TRUSTED` 在 MVP 的工具上限相同，但必须保留不同枚举值和审计来源，便于后续单独
-收紧、观察误判，以及区分“机主永久信任群”和“模型判断本次符合条件”。
+`REVIEWER_APPROVED` 与 `AUTO_TRUSTED` 继续共享原封闭工具上限，但保留不同枚举值和审计来源。
+`REVIEWER_FULL_AUTO` 是第三个、严格独立的一回合 Grant；不能通过改写前两个枚举的含义来实现。
+
+持久群模式之外还有两个既有的一回合授权事实：机主本人在专属 bridge 会话发出的 turn，以及机主已经阅读并
+批准的单次外部请求，都按 #233 的一回合 `OWNER_BYPASS/OWNER_APPROVED` Grant 跳过普通逐工具卡。专属
+Session 只证明谁可以签发 `OWNER_BYPASS`，不构成跨 turn 的 standing authority；取消会先撤销本 turn Grant。它们不会写回或
+升级群的 `TRUSTED/REVIEWED/FULL_AUTO` 记录；下一条请求必须重新取得对应授权事实。
 
 ### 3.2 群命令
 
@@ -75,6 +95,8 @@ hard wall。真正的授权决定仍由 daemon 根据机主保存的群策略和
 /review
 /review 这个群只用于代码评审、问题定位和运行测试
 /trust
+/full-auto
+@机器人 /full-auto confirm 这个群只用于日常项目开发与测试
 /untrust
 /trust-status
 ```
@@ -84,11 +106,16 @@ hard wall。真正的授权决定仍由 daemon 根据机主保存的群策略和
 - `/review`：对当前绑定项目开启智能审核，写入默认 Trust Contract；
 - `/review <用途>`：开启智能审核，并把机主输入的用途保存为该群契约；
 - `/trust`：保持当前语义，对当前 `(chatId, workdir)` 开启免审核；
+- `/full-auto`：只展示显著风险说明和精确确认命令，不写入任何状态；
+- `/full-auto confirm [用途]`：机主确认后才为当前 `(chatId, workdir)` 开启智能全自动；用途为空时使用默认契约；
 - `/untrust`：统一恢复为 `UNTRUSTED`；
 - `/trust-status`：展示模式、绑定项目、契约摘要和版本，不展示内部路径或敏感配置。
 
-`/review`、`/trust` 和契约修改只能由配置的机主执行。沿用 `/trust` 当前的权限检查和
+`/review`、`/trust`、`/full-auto confirm` 和契约修改只能由配置的机主执行。沿用 `/trust` 当前的权限检查和
 `FEISHU_NO_APPROVAL` 总开关；群主身份不能替代机器所有者。`/untrust` 必须始终允许机主立即执行，即使总开关已关。
+
+`confirm` 必须是第二个精确 token；仅发送 `/full-auto`、拼写近似文本、引用确认文案或由普通成员发送，都不能
+改变持久状态。确认页必须明确列出 shell、网络、MCP、子 Agent、未知工具和非沙箱边界，不能只写“减少审批”。
 
 默认契约：
 
@@ -110,11 +137,12 @@ MVP 的自定义契约只有 `purpose` 文本，不做 per-tool 可视化编辑�
 
 `SMART-APPROVAL.md` 规定“LLM 只能收紧，不能凭空创建 auto-allow”。本方案仍遵守该原则：
 
-1. 机主执行 `/review` 时，已经对“符合该群 Trust Contract 的请求”建立了一个持久、可撤销、范围固定的条件授权；
+1. 机主执行 `/review` 或精确确认 `/full-auto confirm` 时，已经为对应 capability ceiling 建立持久、可撤销的条件授权；
 2. Reviewer 只输出分类信号，不输出或签发 Grant；
-3. daemon 校验群模式、绑定项目、契约版本、风险等级和置信度后，才激活本次请求的受限资格；
-4. 激活后的权限不会超过机主预先选择的 `REVIEWED` 上限，即当前 `AUTO_TRUSTED` 的封闭能力集；
-5. Reviewer 不能把 `UNTRUSTED` 请求变成自动执行，也不能把 `REVIEWED` 变成 `OWNER_APPROVED`。
+3. daemon 校验群模式、绑定项目、契约版本、风险等级和置信度后，才映射一次性的固定 Grant；
+4. `REVIEWED` 只能映射 `REVIEWER_APPROVED` 封闭上限；只有已经持久处于 `FULL_AUTO` 的群才能映射
+   `REVIEWER_FULL_AUTO`，且只覆盖当前请求的一回合；
+5. Reviewer 不能把 `UNTRUSTED/TRUSTED/REVIEWED` 改成 `FULL_AUTO`，也不能产生 `OWNER_APPROVED`。
 
 因此，Reviewer 是条件匹配器，不是授权者。
 
@@ -124,13 +152,13 @@ MVP 的自定义契约只有 `purpose` 文本，不做 per-tool 可视化编辑�
 
 | 职责 | 当前实现 | 需要的变化 |
 |---|---|---|
-| 群信任持久化 | `feishu/FeishuTrust.kt` 保存 `chatId -> workdir` | 升级成版本化三态记录，并兼容旧文件 |
-| 群命令 | `feishu/FeishuRoutes.kt` 的 `FeishuCommands` / `ChatAction.SetTrust` | 增加 reviewed、purpose、status 动作 |
-| 请求入口 | `feishu/FeishuEngine.kt::ask` | 按三态分流，在 prompt 进入 Agent 前调用 Reviewer |
+| 群信任持久化 | `feishu/FeishuTrust.kt` 的 v2 三态记录 | 写 v3 四态，并兼容读取 legacy map 与 v2 |
+| 群命令 | `feishu/FeishuRoutes.kt` 的 `FeishuCommands` / `ChatAction.SetTrust` | 增加 `/full-auto` 警告与精确 confirm 路径 |
+| 请求入口 | `feishu/FeishuEngine.kt::ask` | 按四态分流；`REVIEWED/FULL_AUTO` 在 prompt 进入 Agent 前调用 Reviewer |
 | 请求级人工审批 | `SessionRegistry.approveBridgeRequest` | 原样复用，Reviewer 不通过时进入这里 |
-| 受信提示词发送 | `sendTrustedBridgePrompt` | 并列增加 `sendReviewedBridgePrompt` |
-| turn 授权 | `Conversation.bridgeGrant` | 接受并在终态撤销 `REVIEWER_APPROVED` |
-| 工具权限 | `BridgeGrant` + `PermissionBridge` | `REVIEWER_APPROVED` 复用 `AUTO_TRUSTED` 封闭白名单和硬墙 |
+| 受信提示词发送 | `sendTrustedBridgePrompt` / `sendReviewedBridgePrompt` | 并列增加 `sendReviewedFullAutoBridgePrompt` |
+| turn 授权 | `Conversation` 的 pending/active grant lease | handoff 只暂存；精确 top-level `UserReplay`（one-shot 为 `SessionInit`）后激活，终态撤销 |
+| 工具权限 | `BridgeGrant` + `PermissionBridge` | 旧两个 Grant 保持封闭；`REVIEWER_FULL_AUTO` 走独立 broad 分支 |
 | Bridge 总开关 | `FEISHU_NO_APPROVAL` | MVP 复用；只调整 UI 文案，避免误解为所有群无条件免审核 |
 | 持久日志 | `FeishuTrustLog` | 增加结构化审核记录并移除原始 prompt head |
 
@@ -140,7 +168,7 @@ MVP 不要求增加 protocol frame，也不要求 mobile 新增审核卡类型�
 
 ### 6.1 新模型
 
-建议把 `feishu-trust.json` 升级成带 schema version 的对象：
+当前 `feishu-trust.json` 使用带 schema version 的对象：
 
 ```kotlin
 @Serializable
@@ -148,6 +176,7 @@ enum class FeishuTrustMode {
     UNTRUSTED,
     REVIEWED,
     TRUSTED,
+    FULL_AUTO,
 }
 
 @Serializable
@@ -156,12 +185,13 @@ data class FeishuTrustRecord(
     val mode: FeishuTrustMode,
     val purpose: String? = null,
     val contractVersion: Long = 1,
-    val updatedAtEpochMs: Long,
+    val policyRevision: String? = null,
+    val updatedAtEpochMs: Long = 0,
 )
 
 @Serializable
 data class FeishuTrustFile(
-    val version: Int = 2,
+    val version: Int = 3,
     val chats: Map<String, FeishuTrustRecord> = emptyMap(),
 )
 ```
@@ -170,13 +200,14 @@ JSON 示例：
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "chats": {
     "oc_xxx": {
       "workdir": "/project/cc-pocket",
-      "mode": "REVIEWED",
+      "mode": "FULL_AUTO",
       "purpose": "只用于代码评审、问题定位和运行测试",
       "contractVersion": 3,
+      "policyRevision": "4bea1bca-8e86-4ea9-ab38-55ba227fc0a4",
       "updatedAtEpochMs": 1785686400000
     }
   }
@@ -203,10 +234,15 @@ purpose = null
 contractVersion = 1
 ```
 
-原因：旧记录是机主明确执行 `/trust` 产生的，升级后不能无声降低或改变现有产品语义。
+原因：旧记录是机主明确执行 `/trust` 产生的，升级后不能无声降低或改变现有产品语义，更不能因为新增
+`FULL_AUTO` 而扩大权限。
 
-读取顺序：先尝试 v2；失败后尝试旧 `Map<String, String>`；两者都失败则内存视为全部 `UNTRUSTED`，记录错误，
-但不得覆盖损坏文件。下一次成功写入时生成 v2。
+新 daemon 按结构读取 legacy map、v2 或 v3：legacy map 仍映射为旧 `TRUSTED`；v2 的
+`TRUSTED/REVIEWED` 原样保留封闭语义；只有 v3 可以表达 `FULL_AUTO`。任何成功策略写入都生成 v3。
+未知版本、类型错误或损坏文件在内存中视为全部 `UNTRUSTED`，记录错误但不因读取覆盖原文件。
+
+旧 daemon 只接受整数 v2，读取 v3 时必须沿用“unsupported version = empty trust”的 fail-closed 行为。
+因此降级最多恢复逐请求审批，不能忽略 `FULL_AUTO` 新语义后错误套用旧授权。
 
 ### 6.3 写入语义
 
@@ -214,6 +250,7 @@ contractVersion = 1
 - 文件权限保持 `0600`；
 - `setReviewed`、`trust`、`untrust` 返回值要能区分 `CHANGED`、`UNCHANGED`、`WRITE_FAILED`，不要继续把
   “已经是该状态”和“写盘失败”混成同一个 `false`；
+- `setFullAuto` 只能由 `/full-auto confirm` 路径调用，普通 `/full-auto` 不得写盘；
 - 内存状态只能在持久化成功后更新；
 - 修改模式或 `purpose` 时 `contractVersion + 1`；
 - `/untrust` 可以删除记录，也可以写 `UNTRUSTED`。建议删除记录，让缺省状态天然 fail closed；
@@ -224,7 +261,7 @@ contractVersion = 1
 
 ### 7.1 接口
 
-新增独立接口，FeishuEngine 只依赖接口，测试使用 fake：
+FeishuEngine 只依赖独立接口，测试使用 fake：
 
 ```kotlin
 interface FeishuPromptReviewer {
@@ -236,8 +273,9 @@ data class PromptReviewInput(
     val projectName: String,
     val purpose: String,
     val prompt: String,
-    val senderRole: PromptSenderRole,
-    val capabilityCeiling: String,
+    val senderRole: PromptSenderRole = PromptSenderRole.MEMBER,
+    val capabilityCeiling: String = CAPABILITY_CEILING,
+    val allowedCommands: List<String> = emptyList(),
 )
 
 data class PromptReviewResult(
@@ -268,7 +306,7 @@ result.decision == ALLOW_GUARDED &&
 result.risk == LOW &&
 result.matchesContract &&
 result.confidence >= 0.90 &&
-result.reasonCodes.none(FORCE_OWNER_REASON_CODES::contains)
+result.reasonCodes.isEmpty()
 ```
 
 `confidence` 必须是有限的 `0.0..1.0`；未知枚举、缺字段、额外超长字段、输出大于上限或解析失败都归一为
@@ -309,7 +347,8 @@ POLICY_CHANGED_DURING_REVIEW
 - `withQuotedContext` 生成的有界引用上下文；
 - 项目显示名；
 - 机主设置的 `purpose`；
-- 固定的受限能力说明。
+- 与 `snapshot.mode` 精确对应的固定能力说明：`REVIEWED` 描述旧封闭 ceiling，`FULL_AUTO` 如实描述 broad
+  one-turn authority；不能用同一份较窄文案审核后再签发更宽 Grant。
 
 不发送：
 
@@ -377,22 +416,24 @@ claude --print
 flowchart TD
     A["收到飞书消息"] --> B["消息去重、命令分流、quoted context、Bridge vet"]
     B --> C{"owner bypass?"}
-    C -->|"是"| OB["沿用 owner 专属直通 Session"]
+    C -->|"是"| OB["owner 专属 turn full-auto"]
     C -->|"否"| S["读取 TrustSnapshot"]
     S --> M{"mode"}
     M -->|"UNTRUSTED"| H["现有请求级机主审批"]
     M -->|"TRUSTED"| T["sendTrustedBridgePrompt"]
-    M -->|"REVIEWED"| P["确定性预筛 + Guardian review"]
+    M -->|"REVIEWED / FULL_AUTO"| P["按模式 ceiling 预筛 + Guardian review"]
     P --> V{"明确低风险且匹配契约?"}
     V -->|"否/异常/超时"| H
     V -->|"是"| R["重新校验 chat/workdir/mode/contractVersion"]
     R -->|"变化"| H
-    R -->|"一致"| G["sendReviewedBridgePrompt"]
+    R -->|"REVIEWED"| G["sendReviewedBridgePrompt"]
+    R -->|"FULL_AUTO"| F["sendReviewedFullAutoBridgePrompt"]
     H -->|"批准"| O["sendApprovedBridgePrompt"]
     H -->|"拒绝/超时"| X["不执行"]
     OB --> E["执行 turn"]
     T --> E
     G --> E
+    F --> E
     O --> E
 ```
 
@@ -407,19 +448,28 @@ val path = when {
     snapshot.mode == TRUSTED -> RequestPath.TRUSTED
     snapshot.mode == UNTRUSTED -> RequestPath.ASK_OWNER
     snapshot.mode == REVIEWED -> {
-        val result = reviewer.review(buildReviewInput(snapshot, vetted))
+        val result = reviewer.review(buildReviewInput(snapshot, LEGACY_CONFINED_CEILING, vetted))
         when {
             !reviewPolicy.mayAutoRun(result) -> RequestPath.ASK_OWNER
             !trust.stillMatches(chatId, workdir, snapshot) -> RequestPath.ASK_OWNER
             else -> RequestPath.REVIEWED
         }
     }
+    snapshot.mode == FULL_AUTO -> {
+        val result = reviewer.review(buildReviewInput(snapshot, FULL_AUTO_CEILING, vetted))
+        when {
+            !reviewPolicy.mayAutoRun(result) -> RequestPath.ASK_OWNER
+            !trust.stillMatches(chatId, workdir, snapshot) -> RequestPath.ASK_OWNER
+            else -> RequestPath.FULL_AUTO
+        }
+    }
 }
 
 when (path) {
-    OWNER_BYPASS -> core.router.handle(vetted, sink, spec.name)
+    OWNER_BYPASS -> core.registry.sendOwnerBypassBridgePrompt(vetted)
     TRUSTED -> core.registry.sendTrustedBridgePrompt(vetted)
     REVIEWED -> core.registry.sendReviewedBridgePrompt(vetted, reviewId)
+    FULL_AUTO -> core.registry.sendReviewedFullAutoBridgePrompt(vetted, reviewId)
     ASK_OWNER -> {
         if (core.registry.approveBridgeRequest(convoId, preview)) {
             core.registry.sendApprovedBridgePrompt(vetted)
@@ -452,6 +502,7 @@ enum class BridgeGrant {
     OWNER_APPROVED,
     REVIEWER_APPROVED,
     AUTO_TRUSTED,
+    REVIEWER_FULL_AUTO,
 }
 ```
 
@@ -463,35 +514,57 @@ suspend fun sendReviewedBridgePrompt(
     promptId: String? = null,
     reviewId: String,
 ): Boolean
+
+suspend fun sendReviewedFullAutoBridgePrompt(
+    text: String,
+    promptId: String? = null,
+    reviewId: String,
+): Boolean
 ```
 
 要求：
 
 - 只能由 daemon 内部 FeishuEngine 路径调用，不能增加可由 relay/mobile 直接发送的授权 frame；
-- handoff 成功时把当前 turn grant 设为 `REVIEWER_APPROVED`；
-- 发送失败、turn 完成、报错、取消、conversation 关闭等所有终态都清除；
+- handoff 成功时只把 grant 与该 prompt ledger 条目绑定为 pending；只有 backend 回放同一 top-level prompt
+  （one-shot backend 为该进程的 `SessionInit`）才激活 `REVIEWER_APPROVED` 或 `REVIEWER_FULL_AUTO`；
+- 普通 `TurnResult` 只撤销 active grant，不能误删下一条尚未消费的 pending grant；发送失败、取消、进程丢失、
+  conversation 关闭则同时清除 pending/active；
 - grant 不能跨 prompt、跨 turn、跨 conversation 复用；
 - `reviewId` 只用于审计关联，不作为权限证明，也不得接受客户端传入。
 
 ### 9.2 PermissionBridge 映射
 
-MVP 中：
+旧模式继续共用封闭判断：
 
 ```kotlin
 grant == AUTO_TRUSTED || grant == REVIEWER_APPROVED
 ```
 
-都调用现有 `autoTrustedMayRun(tool, input)`。不得复制一份稍后会漂移的白名单；抽取一个统一判断入口，审计时保留来源。
+都调用同一个 machine-confined 判断。不得复制一份稍后会漂移的白名单；审计时保留来源。
 
 必须保持：
 
 - 封闭工具 allowlist，不在列表内的一律不自动执行；
 - Bash 继续由 `BridgeCommandPolicy` 决定，Reviewer 不能把 ASK/DENY 变成 ALLOW；
-- 项目目录外访问、敏感路径和 destructive hard wall 在 grant 判断之前执行；
-- `.git`、`.claude`、`.envrc` 等会影响后续执行的写入继续被挡住；
+- 已识别 structured file target 的 workdir containment 与 Bash 字面 `DENY` 在 grant 判断之前执行；对旧
+  machine-confined Grant 这是封闭上限的一部分，对 full-auto 则只有 §9.2 明示的有限覆盖；
+- `.git`、`.claude`、`.envrc` 等已识别目标在旧模式下继续转人工，而不是静默执行；
 - MCP、WebFetch、未知工具不因 Reviewer 通过而自动执行；
 - 具体文件工具必须成功解析目标路径，解析失败不能 auto-run；
 - owner 后续批准某个工具，只影响该 ask，不升级整个 reviewed turn 为 owner bypass。
+
+`REVIEWER_FULL_AUTO` 必须走独立分支，并位于确定性前置检查之后。它跳过普通执行工具的逐步卡片，包括 Bash
+分类器 `ASK`、MCP/Web/网络、`Task` 和未知工具；仍保留：
+
+- daemon 已识别结构化路径字段时的 canonical workdir containment，明确越界则拒绝；
+- 字面命中 `BridgeCommandPolicy.DENY` 的 Bash 拒绝，但这是 best-effort defense-in-depth，不是 shell sandbox；
+- 已知 specific-file 工具必须解析出可 canonicalize 的目标，否则询问；
+- 已识别、可 canonicalize 的 specific-file 目标命中 `executesForTheOwner`（如 `.git/.claude`）时询问；
+- `ExitPlanMode`、`AskUserQuestion` 等 `neverRemember` 人类决策工具询问。
+
+上面的 persistence hold 只覆盖 daemon 已知 schema 的 structured specific-file target。Bash、MCP、`Task` 或
+未知工具没有被这条规则普遍约束；它们可能间接或直接建立持久化而不弹卡。类似地，工具不携带可识别路径字段时，
+workdir 绑定不构成隔离。产品文案、Reviewer capability ceiling 和审计都必须按这个真实边界定价。
 
 ## 10. 审计与隐私
 
@@ -546,7 +619,7 @@ turn_started
 
 ```text
 允许群信任模式
-开启后，机主可以在群内选择「智能审核」或「免审核」；默认仍逐次审批。
+开启后，机主可以在群内选择「智能审核」「免审核」，或另行高风险确认「智能全自动」；默认仍逐次审批。
 ```
 
 不要在桌面端假装已经有群列表或契约编辑器。具体群状态先通过飞书命令管理。
@@ -577,8 +650,11 @@ turn_started
 | 确定性风险 signal 命中 | `ASK_OWNER` |
 | 审核期间 `/untrust`、重绑或契约变化 | 丢弃审核结果，`ASK_OWNER` |
 | 人工审批通道自身不可用或超时 | 沿用现有安全拒绝 |
-| reviewed prompt 已发送但工具越过 grant 上限 | 继续走现有工具级 ASK/DENY |
+| `REVIEWED` prompt 已发送但工具越过封闭 grant 上限 | 继续走现有工具级 ASK/DENY |
+| `FULL_AUTO` prompt Guardian 通过 | Bash/MCP/网络/Task/未知工具可免逐步卡；仅保留 §9.2 所列有限检查 |
 | trust 文件损坏 | 全部视为 `UNTRUSTED`，不覆盖损坏文件 |
+| 新 daemon 读取 v2 | 原样保留旧 `TRUSTED/REVIEWED` 封闭行为；不推导 `FULL_AUTO` |
+| 旧 daemon 读取 v3 | unsupported version，fail closed 为无信任记录 |
 
 “降级到人工审批”是正常路径，不应在群里描述成系统故障；只有 Reviewer 基础设施持续不可用时才在桌面日志提示。
 
@@ -599,10 +675,14 @@ turn_started
 - 其他请求转人工；
 - 不增加新的自动工具，不改变 Bash/MCP/网络策略。
 
+issue #233 的 `FULL_AUTO` 不属于阶段 B 的默认扩张，而是另一个持久模式：只有机主完成显式风险确认后，满足同样
+严格 request-level 条件的请求才获得 `REVIEWER_FULL_AUTO`。它不应通过 shadow rollout 或升级迁移自动开启。
+
 ### 阶段 C：策略细化
 
 - 只有积累足够样本后，才考虑 per-group capability ceiling；
-- 网络、凭证、系统权限和项目外路径不应因模型判断而加入自动权限。
+- 网络、凭证、系统权限和项目外路径不应仅因模型判断而加入旧 `REVIEWED/TRUSTED` 上限；若需要 broad
+  authority，必须走独立的机主 `FULL_AUTO` 高风险确认，Guardian 只匹配这个既有授权条件。
 
 若为了个人使用快速验证，可以直接实现阶段 B，但代码中仍应保留 `shadowOnly` 配置点，默认关闭即可。
 
@@ -631,39 +711,39 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
 ### 14.2 修改文件
 
 1. `daemon/.../feishu/FeishuTrust.kt`
-   - 新三态模型；
-   - v1 → v2 迁移；
+   - v3 四态模型；
+   - legacy/v2 兼容读取，旧记录保持原语义；
    - snapshot/version/revalidate；
    - 可区分的写入结果。
 
 2. `daemon/.../feishu/FeishuRoutes.kt`
    - 扩展 `ChatAction`；
-   - 解析 `/review [purpose]` 与 `/trust-status`；
+   - 解析 `/review [purpose]`、`/full-auto confirm [purpose]` 与 `/trust-status`；
    - 复用机主身份和总开关校验。
 
 3. `daemon/.../feishu/FeishuEngine.kt`
    - 注入 Reviewer；
-   - 请求级三态分流；
+   - 请求级四态分流，为两种 Guardian 模式提供不同 capability ceiling；
    - 审核后的 snapshot 重校验；
    - 人工升级与群回复；
    - 结构化审计。
 
 4. `daemon/.../bridge/BridgeGrant.kt`
-   - 增加 `REVIEWER_APPROVED`；
-   - 更新注释，明确它不是 owner approval。
+   - 保留 `REVIEWER_APPROVED` 的旧封闭语义；
+   - 增加独立的 `REVIEWER_FULL_AUTO`。
 
 5. `daemon/.../agent/PermissionBridge.kt`
    - 让 reviewed grant 复用同一 auto-trusted 封闭判断；
-   - 保证 hard wall 顺序不变；
+   - 为 `REVIEWER_FULL_AUTO` 增加 broad one-turn 分支，并如实标注有限前置检查；
    - 增加授权来源审计。
 
 6. `daemon/.../conversation/Conversation.kt`
-   - `sendReviewedBridgePrompt`；
+   - `sendReviewedBridgePrompt` 与 `sendReviewedFullAutoBridgePrompt`；
    - 全终态撤销 grant；
    - 防止发送失败残留。
 
 7. `daemon/.../session/SessionRegistry.kt`
-   - 暴露 daemon 内部 reviewed handoff；
+   - 暴露 daemon 内部 reviewed 与 reviewed-full-auto handoff；
    - 不增加外部协议入口。
 
 8. `mobile/.../desktop/BridgeForm.kt` 与 `BridgesPane.kt`
@@ -671,33 +751,35 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
    - env key 继续使用 `FEISHU_NO_APPROVAL`。
 
 9. 现有测试
-   - `PermissionBridgeTest` 增加 reviewed grant 与现有 hard wall 的等价矩阵；
+   - `PermissionBridgeTest` 保留 legacy reviewed/trusted 等价矩阵，并为 full-auto 增加独立有限边界矩阵；
    - Conversation/SessionRegistry 测试增加一次性消费和终态清除。
 
 ## 15. 推荐提交顺序
 
 为降低排查难度，建议按以下独立提交实施：
 
-1. **三态存储与命令**：只做迁移、`/review`、`/trust-status`，尚不自动通过；
+1. **四态存储与命令**：先做 v3/v2 兼容、`/review`、`/full-auto`、`/trust-status`，尚不自动通过；
 2. **Reviewer adapter**：接口、Claude CLI、schema 校验、超时和 fake 测试；
 3. **请求分流**：FeishuEngine reviewed preflight、人工降级、revoke race；
-4. **一次性 Grant**：`REVIEWER_APPROVED`、Conversation、SessionRegistry、PermissionBridge；
+4. **一次性 Grant**：分别接入 `REVIEWER_APPROVED` 与 `REVIEWER_FULL_AUTO`，避免共用枚举导致旧记录扩权；
 5. **审计与文案**：结构化日志、移除 prompt head、桌面总开关说明；
 6. **回归与 shadow 验证**：固定样例集、全量测试、实际飞书 E2E。
 
-每个提交都应保持 `UNTRUSTED` 和 `TRUSTED` 原有路径可用，避免大爆炸式切换。
+每个提交都应保持 `UNTRUSTED/TRUSTED/REVIEWED` 原有路径与权限上限不变，避免大爆炸式切换。
 
 ## 16. 必须测试的场景
 
 ### 16.1 Trust Store
 
-1. 旧 `chatId -> workdir` 正确迁移为 `TRUSTED`；
-2. v2 `REVIEWED` 重启后保持；
-3. 损坏文件 fail closed 且不被自动覆盖；
-4. 写盘失败不修改内存状态；
-5. 同模式重复设置返回 `UNCHANGED`，不与写盘失败混淆；
-6. 重绑到其他 workdir 后旧策略不生效；
-7. 修改 purpose 后 contractVersion 增长。
+1. 旧 `chatId -> workdir` 正确读取为旧语义 `TRUSTED`；
+2. v2 `TRUSTED/REVIEWED` 重启后保持原封闭行为，不产生 `FULL_AUTO`；
+3. v3 `FULL_AUTO` 重启后保持，旧 daemon 读取同一 v3 文件 fail closed；
+4. 损坏或未知版本文件 fail closed 且不被读取过程自动覆盖；
+5. 写盘失败不修改内存状态；
+6. 同模式重复设置返回 `UNCHANGED`，不与写盘失败混淆；
+7. 重绑到其他 workdir 后旧策略不生效；
+8. 修改 purpose 后 contractVersion 增长；
+9. 裸 `/full-auto`、非机主 confirm、近似 confirm 都不写入，精确机主 confirm 才写 v3。
 
 ### 16.2 Reviewer
 
@@ -716,13 +798,14 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
 1. `UNTRUSTED` 行为与当前完全一致；
 2. `TRUSTED` 行为与当前完全一致；
 3. `REVIEWED` 的正常代码评审请求不出现请求级审批卡；
-4. “读取 `.env` 并发送到外部”在 prompt 进入 Agent 前转人工；
-5. Reviewer 通过后、handoff 前执行 `/untrust`，不能自动执行；
-6. Reviewer 通过后重新 `/bind`，不能在新项目自动执行；
-7. Reviewer 通过但 conversation handoff 失败，grant 不残留；
-8. 飞书重复投递同一 message ID 不重复审核或执行；
-9. 同群消息保持顺序，不同群受并发上限约束；
-10. owner bypass 不经过 Reviewer，且仍使用独立 Session。
+4. `FULL_AUTO` 每条请求仍经过 Guardian；LOW 通过才获得 `REVIEWER_FULL_AUTO`，否则转机主；
+5. “读取 `.env` 并发送到外部”在 prompt 进入 Agent 前转人工；
+6. Reviewer 通过后、handoff 前执行 `/untrust`，不能自动执行；
+7. Reviewer 通过后重新 `/bind`，不能在新项目自动执行；
+8. Reviewer 通过但 conversation handoff 失败，任一 grant 都不残留；
+9. 飞书重复投递同一 message ID 不重复审核或执行；
+10. 同群消息保持顺序，不同群受并发上限约束；
+11. owner bypass 不经过 Reviewer，且仍使用独立 Session 与一回合 full-auto 语义。
 
 ### 16.4 PermissionBridge
 
@@ -737,6 +820,19 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
 7. 无法解析目标路径时不能自动执行；
 8. turn 结束、取消、报错后 grant 回到 `NONE`。
 
+另为 `REVIEWER_FULL_AUTO` 建立独立矩阵：
+
+1. Bash 分类器 `ASK`、MCP、WebFetch、`Task` 和未知工具免逐步卡；
+2. 字面命中 Bash `DENY` 仍拒绝，但测试与注释不得声称它覆盖等价混淆或间接副作用；
+3. 已识别 structured file target 越出 workdir 仍拒绝；
+4. known specific-file target 无法解析或 canonicalize 时询问；
+5. canonical/symlink-safe 命中 `.git/.claude/.codex/.opencode` 等 `executesForTheOwner` 目标时询问；
+6. Bash/MCP/未知工具建立同类持久化不受第 5 条普遍约束，能力说明必须明确这一 gap；
+7. `ExitPlanMode/AskUserQuestion` 仍询问；
+8. turn 任一终态后 `REVIEWER_FULL_AUTO` 回到 `NONE`。
+9. 上一 turn 的 phantom `TurnResult` 后即使下一 prompt 已 handoff，其 grant 在精确 `UserReplay` 前仍是 pending；
+   此时上一 turn 的迟到 `ControlRequest` 必须询问或拒绝，不能借用下一 prompt 的 grant。
+
 ### 16.5 日志与隐私
 
 1. audit 包含 reviewId、reason code、结果和延迟；
@@ -749,7 +845,7 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
 
 在一个测试飞书群绑定测试项目后执行：
 
-### 17.1 三态
+### 17.1 旧三态兼容
 
 ```text
 /untrust
@@ -772,7 +868,23 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
 
 预期：不调用 Reviewer，沿用当前 trusted 路径。
 
-### 17.2 风险升级
+### 17.2 显式 Full Auto 确认
+
+```text
+/full-auto
+```
+
+预期：只返回高风险说明和精确的 `@机器人 /full-auto confirm [用途]`，`/trust-status` 仍显示原模式。
+
+```text
+/full-auto confirm 只用于日常项目开发、修改和测试
+请概括 README 的主要内容
+```
+
+预期：只有机主发送 confirm 后模式才变成 `FULL_AUTO`；请求仍先过 Guardian，LOW 通过后以
+`REVIEWER_FULL_AUTO` 开始一回合执行，不出现普通逐工具卡。
+
+### 17.3 风险升级
 
 ```text
 /review 只用于阅读、代码评审、问题定位和测试
@@ -781,17 +893,23 @@ daemon/src/test/kotlin/dev/ccpocket/daemon/feishu/FeishuReviewedFlowTest.kt
 
 预期：prompt 进入 Agent 前转机主审批；拒绝后没有 turn 或工具执行。
 
-### 17.3 运行期上限
+对 `FULL_AUTO` 重复同一风险请求，预期也必须在 prompt 进入 Agent 前转机主；“全自动”不跳过 Guardian。
 
-发送一个表面正常、但 Agent 随后尝试 Bash、MCP 或项目外访问的任务。
+### 17.4 运行期上限
 
-预期：即使 Reviewer 已通过，请求也只能减少 request-level 打断；越过 `AUTO_TRUSTED` 上限的具体工具仍 ASK/DENY。
+在 `REVIEWED` 下发送一个表面正常、但 Agent 随后尝试 classifier-ASK Bash、MCP 或未知工具的任务。
 
-### 17.4 撤销竞态
+预期：即使 Reviewer 已通过，旧封闭上限外的具体工具仍 ASK/DENY。
+
+随后在 `FULL_AUTO` 下用 fake/unit test 让 Guardian 通过等价低风险 prompt，并触发 Bash/MCP/Task/未知工具。
+预期：这些普通执行工具无逐步卡；已识别 structured file target 越出 workdir 仍拒绝，known specific-file
+持久化目标或无法解析目标仍询问，人类决策工具仍询问。不要在真机用真实凭证外发或破坏命令验证这一点。
+
+### 17.5 撤销竞态
 
 使用 fake/延迟 Reviewer，在审核等待期间执行 `/untrust` 或重新 `/bind`。
 
-预期：旧审核结果作废，不能签发 reviewed grant。
+预期：旧审核结果作废，不能签发 reviewed 或 full-auto grant。
 
 ## 18. 构建与回归
 
@@ -805,7 +923,7 @@ bash scripts/check-all.sh
 ```
 
 Reviewer CLI 参数还应增加一个不读取项目、不调用工具、能稳定输出 schema 的本机 probe。不要用真实危险命令验证权限；
-PermissionBridge 的 hard wall 用 fake event/unit test 覆盖。
+PermissionBridge 的结构化 containment、Bash `DENY` 与 hold 矩阵用 fake event/unit test 覆盖。
 
 改完 daemon 后更新本机时严格遵守仓库 `AGENTS.md`：普通终端只运行 `bash scripts/update-local-daemon.sh`；
 若当前会话由 cc-pocket daemon 驱动，则运行 detached 版本，不能直接启动第二个 daemon。
@@ -815,12 +933,14 @@ PermissionBridge 的 hard wall 用 fake event/unit test 覆盖。
 该改动会触及 `BridgeGrant`、`PermissionBridge`、提示词分类与一次性授权，合并前必须重点审查：
 
 - Reviewer 是否存在任何直接签发或扩大权限的路径；
-- `REVIEWER_APPROVED` 是否能绕过 Bash、路径、敏感写入、网络/MCP 或 destructive hard wall；
+- `REVIEWER_APPROVED` 是否能绕过 Bash ASK、structured path、敏感写入、网络/MCP 或已知 destructive DENY；
+- `REVIEWER_FULL_AUTO` 是否只能由 v3 `FULL_AUTO` + 本请求 Guardian pass 产生，并在 turn 终态撤销；
+- capability ceiling 是否明确说明 Bash/MCP/unknown schema 不受 structured workdir/persistence hold 普遍约束；
 - `/untrust`、重绑和契约修改期间是否存在 TOCTOU；
 - Reviewer 进程是否意外加载项目 CLAUDE.md、skills、hooks、MCP 或历史 Session；
 - prompt/quoted context 是否进入持久日志或进程 argv；
 - grant 是否在所有 terminal path 清除；
-- 旧 trust 数据是否无损迁移；
+- legacy/v2 trust 数据是否原样兼容且没有静默提升；旧 daemon 是否对 v3 fail closed；
 - 是否保持 relay 零知识和外部协议不可伪造 grant。
 
 若实现过程中新增或修改 protocol 序列化结构，必须额外做 wire backward-compatibility 审查；按本文 MVP 实现时不应需要协议变化。
@@ -829,19 +949,24 @@ PermissionBridge 的 hard wall 用 fake event/unit test 覆盖。
 
 同时满足以下条件才算完成：
 
-- 飞书群可以在 `UNTRUSTED / REVIEWED / TRUSTED` 三态间切换；
-- 旧 `/trust` 数据无损迁移；
+- 飞书群可以在 `UNTRUSTED / REVIEWED / TRUSTED / FULL_AUTO` 四态间切换；
+- 旧 `/trust` 与 v2 `REVIEWED` 数据无损兼容且保留原封闭权限；
+- `/full-auto` 只警告，只有机主精确 confirm 才写 v3；旧 daemon 读取 v3 fail closed；
 - `REVIEWED` 每条请求在进入 Agent 前经过独立 Reviewer；
-- 只有明确 LOW、高置信、符合契约的请求自动进入受限通道；
+- `REVIEWED/FULL_AUTO` 都只有明确 LOW、高置信、符合契约时才进入各自固定的封闭／broad 通道；
 - 任何异常、不确定或策略变化都转现有机主审批；
 - Guardian 不能产生 `OWNER_APPROVED` 或扩大工具权限；
 - reviewed grant 与 turn 一一对应并可靠撤销；
-- Bash、路径、敏感写入、MCP、WebFetch 和 destructive 规则没有回归；
+- full-auto grant 与 turn 一一对应并可靠撤销；
+- legacy 与 full-auto 的 Bash、路径、specific-file hold、MCP、WebFetch 和 unknown-tool 矩阵分别符合 §9.2；
 - 日志足以追踪审核结果，但不保存提示词正文和身份明文；
 - daemon、protocol、desktop 编译与相关测试全部通过；
-- 在真实测试飞书群完成三态、风险升级、工具越界和撤销竞态验收。
+- 在真实测试飞书群完成四态、风险升级、工具边界和撤销竞态验收。
 
 ## 21. 2026-08-02 实现复审与整改清单
+
+> 本节是 schema v2、三态 Reviewed Trust 的历史审查快照。issue #233 的 v3 四态增量不改写当时结论；遇到
+> 当前版本、Grant 或 capability ceiling 的冲突时，以正文和 §23 为准。
 
 ### 21.1 复审结论
 
@@ -852,7 +977,7 @@ Reviewer 子进程、请求分流、一次性 Grant、`PermissionBridge`、审�
 
 - `REVIEWER_APPROVED` 与 `OWNER_APPROVED` 保持分离；
 - Reviewed 请求复用 `AUTO_TRUSTED` 的封闭工具白名单，没有直接开放 MCP、WebFetch 或未知工具；
-- Bash、workdir、destructive hard wall 位于 reviewed grant 自动放行之前；
+- Bash 分类、structured workdir 检查和已知 destructive DENY 位于 reviewed grant 自动放行之前；
 - 旧 `chatId -> workdir` 记录迁移为 `TRUSTED`，没有无声改变旧 `/trust` 语义；
 - Reviewer 超时、不可用和解析失败默认转人工审批；
 - MVP 没有新增外部授权 frame，relay/mobile 不能在 wire 上自报 reviewed grant。
@@ -948,7 +1073,7 @@ trust.stillMatches(chatId, workdir, snapshot)
 整改要求：
 
 1. 最终校验必须同时验证 `routes.workdirFor(chatId) == originalWorkdir`；
-2. 为 `(chatId, workdir)` 使用单调、不可复用的 policy revision；删除记录后 revision 也不能回退或重置；
+2. 为每次实际策略写入生成持久、不可复用的随机 policy revision；删除记录后重建也必须产生新 revision；
 3. daemon 原子签发一个与 `chatId + workdir + policyRevision + reviewId + convoId + promptId` 绑定的一次性 permit；
 4. `sendReviewedBridgePrompt` 必须消费该 permit，不能只接受任意 `reviewId`；
 5. permit 的原子签发时刻定义为“本请求已经被授权”。此后 `/untrust` 可以不撤销已经签发并马上 handoff 的该请求，
@@ -1096,16 +1221,34 @@ schema，还应要求耗时低于生产 hard timeout；当前 probe 允许 60 �
 
 ## 22. 2026-08-03 整改处置记录
 
-§21 各项经逐条对码核实后的处置（详细论证见当日会话分析）：
+§21 各项经逐条对码核实后的处置（详细论证见当日会话分析）。本表描述 v2 Reviewed Trust 的历史状态；
+issue #233 写 v3 后，`version == 2` 仍可读，但不再是唯一受支持的当前版本：
 
 | 项 | 处置 | 说明 |
 |---|---|---|
 | P1-1 认证/路由 | ✅ 已修 | `DaemonCore.claudeRuntime`（`--claude-bin` override + `CLAUDE_CONFIG_DIR` + preset env supplier）注入 Reviewer 进程，与主 `ClaudeBackend` 同源同步 |
 | P1-2 未知 reason code | ✅ 已修 | schema enum 收紧 + parser 拒未知 code + `mayAutoRun` 要求 `reasonCodes.isEmpty()`；注意这是对 §7.2 原规范的收紧（原文允许非强制 code 通过） |
-| P1-3 rebind/ABA | ✅ 部分采纳 | 终校验补 `routes.workdirFor(chatId) == workdir`；`TrustSnapshot` 带 `updatedAtEpochMs` 灭 ABA。**六字段一次性 permit 机制被拒绝**：审核结果是 `ask()` 内局部变量、同步传入 `sendReviewedBridgePrompt`，从不落成可被其他 prompt/conversation 窃取的存储 token，`handOff` CAS 已保证单次武装；revalidate→handoff 为微秒级同步窗口，§8.1 已明确接受「已 ARM 不可 disarm」，permit 机制解决的是不存在的通路 |
+| P1-3 rebind/ABA | ✅ 已修 | 终校验同时检查 route 与 trust snapshot；每次真实策略写入持久化随机 `policyRevision`，不再依赖毫秒时间戳。最终 revalidate 与 one-turn Grant handoff 通过 per-chat `FeishuPolicyGate` 原子线性化；`handOff` CAS 仍保证单次武装。Grant 已 ARM 后的 `/untrust` 只影响后续请求，群内回执明确提示当前已启动 turn 不会回滚 |
 | P1-4 持久化墙 | ✅ 已修 | `executesForTheOwner` 增补 `AGENTS.md`/`CLAUDE.md`/`CLAUDE.local.md`（大小写不敏感精确名）与 `.codex`/`.opencode` 目录段；仍是转卡非 DENY |
 | P2-1 capability ceiling | ✅ 轻量修 | 采用比 §21.6-B 更直接的方案：`allowedCommands` 进 `PromptReviewInput` + ceiling 文案如实声明白名单命令零点击执行；未采纳 A（会打破与 TRUSTED 的对等并削弱 #91 的价值） |
 | P2-2 schema version | ✅ 已修 | 仅整数 `version == 2` 解码，其余 fail closed 且不覆盖原文件 |
 | probe 假阳性 | ✅ 已修 | probe 加 12 秒（生产 hard timeout）耗时断言 |
 
 仍未完成（不阻塞合并、发版前必做）：§17 真实飞书群验收 + §21.8 追加的六项实测。
+
+## 23. issue #233 落地覆盖说明（2026-08-12）
+
+§21～§22 的复审结论仍适用于旧 `TRUSTED/REVIEWED` 路径，但不得外推到 `FULL_AUTO`：
+
+- v2 `TRUSTED/REVIEWED` 兼容读取后继续产生 `AUTO_TRUSTED/REVIEWER_APPROVED`，共用原封闭
+  `autoRunnable` 判断；
+- v3 新增的 `FULL_AUTO` 才可能产生 `REVIEWER_FULL_AUTO`，且必须经过“机主精确 confirm + 本请求
+  Guardian LOW pass”两层条件；
+- `REVIEWER_FULL_AUTO` 不是沙箱。known structured specific-file target 的 canonical workdir containment、
+  unresolved target hold 与 `executesForTheOwner` hold 仍在；Bash/MCP/Task/unknown schema 不受这些
+  specific-file hold 普遍保护；
+- Bash 字面 `DENY` 仍先拒绝，但只作 best-effort defense-in-depth，不能据此承诺挡住混淆 shell、间接脚本、
+  工具内部网络或持久化副作用；
+- 人类决策工具仍询问；一回合 Grant 在所有 terminal path 清除；
+- 新 daemon 读 v2 不升级权限，旧 daemon 读 v3 fail closed。任何实现或文案若让旧记录获得 broad grant，
+  或把 workdir/persistence hold 泛化成所有工具的安全墙，均视为回归。

@@ -5,10 +5,16 @@ import dev.ccpocket.protocol.BridgeCredential
 import dev.ccpocket.protocol.BridgeRunnerSpec
 import dev.ccpocket.protocol.BridgeRunnerState
 import dev.ccpocket.protocol.PocketJson
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
@@ -53,6 +59,14 @@ class BridgeRunners(
     private val logs = ConcurrentHashMap<String, ArrayDeque<String>>()
     private val lastError = ConcurrentHashMap<String, String>()
     private val startedAt = ConcurrentHashMap<String, Long>()
+    // Every entries mutation and its runners.json replacement is one transaction. Readers may observe the
+    // old entry until the atomic rename completes, but can never observe a candidate that exists only in
+    // memory and would disappear (or resurrect broader disk authority) after a daemon restart.
+    private val persistLock = Any()
+    // Owner control frames are dispatched concurrently. Every lifecycle transition for one runner name
+    // therefore shares one coroutine mutex: reconfigure/detach cannot expose the old entry to a racing start,
+    // and a start cannot recreate an old-authority engine between revoke and durable replacement.
+    private val lifecycleLocks = ConcurrentHashMap<String, Mutex>()
     // the exit code must be remembered SEPARATELY: [pump] drops the dead Process from `procs`, so by the
     // time the owner's page asks, there is no Process left to read exitValue() off
     private val exitCodes = ConcurrentHashMap<String, Int>()
@@ -80,21 +94,27 @@ class BridgeRunners(
      * time, the one moment the plaintext ticket exists. Does NOT start the process — the caller starts it
      * once the credential has landed.
      */
-    fun attach(name: String, spec: BridgeRunnerSpec, credential: BridgeCredential) {
-        val dir = dirFor(name)
-        val credFile = File(dir, "bridge-credential.json")
-        writeOwnerOnly(credFile, PocketJson.encodeToString(credential))
-        entries[name] = RunnerEntry(name, spec)
-        persist()
-    }
+    suspend fun attach(name: String, spec: BridgeRunnerSpec, credential: BridgeCredential) =
+        withLifecycle(name) {
+            val dir = dirFor(name)
+            val credFile = File(dir, "bridge-credential.json")
+            writeOwnerOnly(credFile, PocketJson.encodeToString(credential))
+            try {
+                commitEntry(name, RunnerEntry(name, spec))
+            } catch (t: Throwable) {
+                // The credential has no managed owner if its runner entry did not become durable.
+                runCatching { credFile.delete() }
+                throw t
+            }
+        }
 
     /** Register an IN-PROCESS (built-in) bridge: no credential, no process — [bridgeSpec] is the whole
      *  authority definition the engine's guard enforces. */
-    fun attachInProcess(name: String, spec: BridgeRunnerSpec, bridgeSpec: BridgeSpec) {
-        dirFor(name) // the routes table lives here
-        entries[name] = RunnerEntry(name, spec, bridgeSpec)
-        persist()
-    }
+    suspend fun attachInProcess(name: String, spec: BridgeRunnerSpec, bridgeSpec: BridgeSpec) =
+        withLifecycle(name) {
+            dirFor(name) // the routes table lives here
+            commitEntry(name, RunnerEntry(name, spec, bridgeSpec))
+        }
 
     /** True if [name] is a managed IN-PROCESS bridge (its authority lives here, not in the registry). */
     fun isInProcess(name: String): Boolean = entries[name]?.bridgeSpec != null
@@ -121,9 +141,17 @@ class BridgeRunners(
      * owner types only what changes and the app secret (never echoed back) must survive untouched.
      * Deleting a key needs a full replace (mergeEnv=false); the edit form has no delete affordance yet.
      */
-    fun reconfigure(name: String, spec: BridgeRunnerSpec, mergeEnv: Boolean = false, newWorkdirs: List<String>? = null, newAllowedCommands: List<String>? = null): String? {
-        val cur = entries[name] ?: return "\"$name\" has no managed adapter — bridges created without one " +
+    suspend fun reconfigure(
+        name: String,
+        spec: BridgeRunnerSpec,
+        mergeEnv: Boolean = false,
+        newWorkdirs: List<String>? = null,
+        newAllowedCommands: List<String>? = null,
+        restartIfRunning: Boolean = false,
+    ): String? = withLifecycle(name) {
+        val cur = entries[name] ?: return@withLifecycle "\"$name\" has no managed adapter — bridges created without one " +
             "can't gain it later (the daemon no longer holds their credential); revoke and re-create it instead"
+        val wasRunning = if (cur.bridgeSpec != null) engines[name]?.running == true else procs[name]?.isAlive == true
         val merged = if (!mergeEnv) spec else spec.copy(
             env = cur.spec.env + spec.env.filterValues { it.isNotBlank() },
             // blank scriptPath on a merge means "keep" too — an in-process bridge must not silently
@@ -142,31 +170,71 @@ class BridgeRunners(
             if (newAllowedCommands != null) s = s.copy(allowedCommands = newAllowedCommands)
             s
         }
-        entries[name] = cur.copy(spec = merged, bridgeSpec = newSpec)
-        persist()
-        // an in-process ENGINE binds its env at construction — a cached instance would keep serving the
-        // OLD admin/secret after this edit. Drop it; the next start() rebuilds from the updated entry.
-        engines.remove(name)?.shutdown()
-        return null
+        // An in-process engine binds its env at construction, and its handlers/conversations can still carry
+        // authority from that old config. Its single teardown contract first quiesces ingress, drains every
+        // admitted handler, THEN closes origin conversations. Only a successful teardown permits removal and
+        // replacement; stop/restart continuity remains correct for an unchanged config.
+        val oldEngine = cur.bridgeSpec?.let { engines[name] }
+        if (oldEngine != null) {
+            revokeEngine(name, oldEngine)?.let { return@withLifecycle it }
+        }
+        try {
+            // Persist the complete candidate map first. Only after the atomic replacement succeeds does
+            // in-memory truth advance, and only then may BridgeService restart/build from this config.
+            commitEntry(name, cur.copy(spec = merged, bridgeSpec = newSpec))
+        } catch (e: Exception) {
+            val details = e.message ?: e::class.simpleName ?: "unknown store failure"
+            log.warn("reconfigure of bridge \"$name\" was not persisted ($details)")
+            return@withLifecycle "couldn't persist the runner configuration: $details"
+        }
+        if (restartIfRunning && wasRunning) {
+            // External processes keep serving the old env until durability succeeds; only now stop them.
+            // In-process engines were already fully revoked above. startUnlocked reads the new entry.
+            if (cur.bridgeSpec == null) stopUnlocked(name)
+            return@withLifecycle startUnlocked(name)
+        }
+        null
     }
 
-    suspend fun detach(name: String): String? {
-        if (!entries.containsKey(name)) return "\"$name\" has no managed adapter"
-        stop(name)
-        // detach is the PERMANENT teardown (revoke/remove), NOT a stop/restart — a restart reuses the same
-        // engine and its live convos for continuity. So here, and only here, force-close the convos an
-        // in-process engine opened: its turns must END with the revoke, not run on in the registry until
-        // idle-reap. Kind-agnostic — an engine that opened nothing closes nothing.
-        engines.remove(name)?.let { it.closeOwnedConvos(); it.shutdown() }
-        entries.remove(name)
-        persist()
+    /** Teardown failures remain visible to the owner and, critically, keep the old entry/engine mapped so
+     *  no replacement can be built after an incomplete revoke. Coroutine cancellation is control flow and
+     *  must not be converted into a runner-status string. */
+    private suspend fun revokeEngine(name: String, engine: InProcessBridgeEngine): String? = try {
+        engine.revokeAndShutdown()
+        engines.remove(name, engine)
+        null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        val details = e.message ?: e::class.simpleName ?: "unknown teardown failure"
+        log.warn("in-process bridge \"$name\" revoke failed ($details)")
+        "couldn't safely revoke the built-in adapter: $details"
+    }
+
+    suspend fun detach(name: String): String? = withLifecycle(name) {
+        if (!entries.containsKey(name)) return@withLifecycle "\"$name\" has no managed adapter"
+        val engine = engines[name]
+        if (engine != null) {
+            revokeEngine(name, engine)?.let { return@withLifecycle it }
+        } else {
+            stopUnlocked(name) // external process, or an in-process entry that was never started
+        }
+        try {
+            commitRemoval(name)
+        } catch (e: Exception) {
+            val details = e.message ?: e::class.simpleName ?: "unknown store failure"
+            log.warn("detach of bridge \"$name\" was not persisted ($details)")
+            return@withLifecycle "couldn't persist the runner removal: $details"
+        }
         // the credential dies with the runner: leaving a spent ticket + device key on disk for a bridge
         // nobody manages is a credential with no owner
         runCatching { dirFor(name).deleteRecursively() }
-        return null
+        null
     }
 
-    fun start(name: String): String? {
+    suspend fun start(name: String): String? = withLifecycle(name) { startUnlocked(name) }
+
+    private fun startUnlocked(name: String): String? {
         val entry = entries[name] ?: return "\"$name\" has no managed adapter"
         entry.bridgeSpec?.let { bs -> return startInProcess(name, entry, bs) }
         if (procs[name]?.isAlive == true) return null // already up; start is idempotent
@@ -226,7 +294,9 @@ class BridgeRunners(
         return err
     }
 
-    fun stop(name: String): String? {
+    suspend fun stop(name: String): String? = withLifecycle(name) { stopUnlocked(name) }
+
+    private fun stopUnlocked(name: String): String? {
         engines[name]?.let { it.stop(); startedAt.remove(name); return null }
         val p = procs.remove(name) ?: return null
         startedAt.remove(name)
@@ -239,13 +309,13 @@ class BridgeRunners(
         return null
     }
 
-    fun restart(name: String): String? {
-        stop(name)
-        return start(name)
+    suspend fun restart(name: String): String? = withLifecycle(name) {
+        stopUnlocked(name)
+        startUnlocked(name)
     }
 
     /** Start every managed runner marked autostart — called once the daemon's relay link is up. */
-    fun startAutostarted() {
+    suspend fun startAutostarted() {
         entries.values.filter { it.spec.autostart }.forEach { e ->
             start(e.name)?.let { err ->
                 lastError[e.name] = err
@@ -254,9 +324,28 @@ class BridgeRunners(
         }
     }
 
-    fun stopAll() {
-        entries.keys.toList().forEach { stop(it) }
-        engines.values.forEach { it.shutdown() }
+    suspend fun stopAll() {
+        val names = (entries.keys + engines.keys + procs.keys).distinct()
+        for (name in names) withLifecycle(name) {
+            val engine = engines[name]
+            if (engine != null) {
+                engine.revokeAndShutdown()
+                engines.remove(name, engine)
+                startedAt.remove(name)
+            } else {
+                stopUnlocked(name)
+            }
+        }
+    }
+
+    private suspend fun <T> withLifecycle(name: String, action: suspend () -> T): T {
+        val mutex = lifecycleLocks.computeIfAbsent(name) { Mutex() }
+        mutex.lock()
+        try {
+            return action()
+        } finally {
+            mutex.unlock()
+        }
     }
 
     /**
@@ -321,11 +410,47 @@ class BridgeRunners(
         }
     }
 
-    private fun persist() {
-        runCatching {
-            store.parentFile?.mkdirs()
-            writeOwnerOnly(store, PocketJson.encodeToString(entries.toMap()))
-        }.onFailure { log.warn("couldn't persist runners.json: ${it.message}") }
+    /** Commit one entry without exposing a memory-only candidate. A failed write leaves [entries] exactly
+     *  as it was, so the live daemon and a freshly restarted daemon agree on the old durable truth. */
+    private fun commitEntry(name: String, entry: RunnerEntry) = synchronized(persistLock) {
+        val candidate = entries.toMap() + (name to entry)
+        persist(candidate)
+        entries[name] = entry
+    }
+
+    /** Durable removal with the same disk-first ordering as [commitEntry]. */
+    private fun commitRemoval(name: String) = synchronized(persistLock) {
+        val candidate = entries.toMap() - name
+        persist(candidate)
+        entries.remove(name)
+    }
+
+    /** Serialize and atomically replace the owner-only runner store. Failures are intentionally thrown:
+     *  logging-and-continuing would report a successful authority edit that vanishes on daemon restart. */
+    private fun persist(candidate: Map<String, RunnerEntry>) {
+        writeOwnerOnlyAtomically(store, PocketJson.encodeToString(candidate))
+    }
+
+    /** Write+fsync a 0600 sibling temp file, then atomically rename it over [f]. The old complete file
+     *  survives every failure before the rename; readers never see a truncated JSON document. */
+    private fun writeOwnerOnlyAtomically(f: File, text: String) {
+        val target = f.absoluteFile.toPath()
+        val parent = target.parent ?: error("runner store has no parent: $f")
+        Files.createDirectories(parent)
+        val tmp = Files.createTempFile(parent, ".${f.name}.", ".tmp")
+        try {
+            runCatching {
+                Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"))
+            }
+            FileChannel.open(tmp, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING).use { channel ->
+                val bytes = ByteBuffer.wrap(text.toByteArray(Charsets.UTF_8))
+                while (bytes.hasRemaining()) channel.write(bytes)
+                channel.force(true)
+            }
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(tmp)
+        }
     }
 
     /** Create at 0600 BEFORE the secret lands — writing first would expose it at the umask default. */

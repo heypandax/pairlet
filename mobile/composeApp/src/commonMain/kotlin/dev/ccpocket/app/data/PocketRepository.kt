@@ -286,6 +286,7 @@ import dev.ccpocket.app.media.PickedFile
 import dev.ccpocket.app.media.compressImage
 import kotlin.random.Random
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1116,6 +1117,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     val openTimedOut = mutableStateOf(false)                 // the daemon never answered an OpenSession within 8s — slim banner, auto-dismissed (issue #41)
     private var openGen = 0                                  // generation counter matching each openSession call to its own safety-net timer
     private var openDispatchedGen = 0                        // current generation has reached its OpenSession send (#235 identity handoff)
+    private var openJob: Job? = null                         // owns both the state-switch worker and its 8s deadline
     /**
      * Explicit navigation fence (issue #226). [sessionKey] intentionally survives [backToBrowse] so a
      * draft keeps its durable key, but it therefore cannot also prove that the user still wants a chat
@@ -2075,6 +2077,11 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** Drop the live connection and return to the Connect screen (pairing is kept). */
     fun disconnect() {
         sessionActive.value = false
+        // An OpenSession worker belongs to the link/computer that accepted the click. It may still be
+        // queued (or suspended on a full reconnect outbox), so invalidating only the claim is insufficient:
+        // the worker could wake after drainPending() and enqueue the old machine's open into the next link.
+        openGen++
+        openJob?.cancel(); openJob = null
         retryJob?.cancel(); connectJob?.cancel(); inboundJob?.cancel(); controlJob?.cancel(); deafJob?.cancel(); graceJob?.cancel(); listWaitJob?.cancel(); connectWatchdog?.cancel(); reconnectGraceJob?.cancel(); linkStableJob?.cancel(); presenceProbeJob?.cancel()
         retryJob = null; connectJob = null; inboundJob = null; controlJob = null; deafJob = null; graceJob = null; listWaitJob = null; connectWatchdog = null; reconnectGraceJob = null; linkStableJob = null; presenceProbeJob = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // pending bubbles leave with messages below
@@ -2088,7 +2095,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         pendingOpen = null // a queued push-tap target is moot once the user drops the connection
         // #235: so is the open claim — carrying it across a reconnect would make the same row's next click
         // a permanent no-op, and its retry target names a machine we may never come back to
-        openInFlight = null; lastOpenAttempt = null
+        openInFlight = null; lastOpenAttempt = null; pendingNewOpenWd = null
+        opening.value = false; switchingSession.value = false; openTimedOut.value = false
+        sessionNavigationFenced = true
         attachedThisSession = false; daemonOffline = false; pairingInvalid = false
         hadReadyThisSession = false; relayDeadlinePassed = false; reconnectGracePassed = false; listWaitRetried = false; directoriesLoaded.value = false
         handoffsLoaded.value = false // inbox mode's readiness proof dies with the link, same as the list
@@ -2243,6 +2252,12 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
      * link would open a ghost session nobody is watching.
      */
     internal fun demoteToSatellite() {
+        // The UI open worker is not a transport job and therefore survives the fleet swap unless it is
+        // explicitly retired. A headless satellite must never execute a click queued by the old primary.
+        openGen++
+        openJob?.cancel(); openJob = null
+        pendingNewOpenWd = null
+        sessionNavigationFenced = true
         convoId.value?.let { c -> if (observing.value || !streaming.value) scope.launch { send(CloseSession(c)) } }
         pendingOpen = null
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false
@@ -2673,6 +2688,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
             // conversation's AssistantChunk/ToolEvent frames then passed the guards and spliced another
             // session's live turn into the open transcript. Not our view's session → no state touched.
             is SessionLive -> if (acceptsSessionLive(f)) {
+                openJob?.cancel(); openJob = null // the answer owns the view; retire its dormant 8s deadline
                 pendingNewOpenWd = null // the in-flight open (if any) is answered by this announce
                 openInFlight = null // …and so is its #235 claim — the next click on this row is a real request again
                 migrateDraft(f.sessionId) // before re-keying: composerKey() still reads the old chain
@@ -2923,8 +2939,14 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
                 // asked) — the common case (renaming a terminal-held session) has no chat open, and an
                 // open chat is an UNRELATED session whose transcript must not absorb the error line.
                 renameError.value = renameTarget?.let { RenameRefusal(it, f.message) }
+            } else if (f.convoId != null && (openInFlight != null || f.convoId != convoId.value)) {
+                // Conversation-scoped errors fan out from background sessions just like SessionLive and
+                // stream frames. They must not splice a system row into this transcript or terminate a
+                // different in-flight open. OpenSession failures have no conversation yet and therefore
+                // arrive with convoId == null; the current view's own errors still pass below.
             } else {
                 // …and a failed switch must release the router, or the chat would hold an empty screen
+                openJob?.cancel(); openJob = null
                 opening.value = false; switchingSession.value = false // a failed open re-enables the one-tap entries right away
                 pendingNewOpenWd = null // #219: the failed open's marker must not admit a later background announce
                 openInFlight = null // #235: release the claim on the same edge — a refused open must stay retryable
@@ -4466,7 +4488,10 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         opening.value = true // held until the daemon answers (SessionLive/PocketError) — 8s net below
         openTimedOut.value = false
         val gen = ++openGen // ties the 8s safety net below to THIS open — a quick second open isn't cleared by the first one's timer
-        scope.launch { runOpen(attempt, gen) }
+        openJob?.cancel() // a different target supersedes even a worker suspended before dispatch
+        val job = scope.launch(start = CoroutineStart.LAZY) { runOpen(attempt, gen) }
+        openJob = job
+        job.start()
         return true
     }
 
@@ -4480,6 +4505,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
     /** The state switch + send of one accepted [openSession]. Split out only so the claim above stays
      *  synchronous; everything here runs on [scope] exactly as it always did. */
     private suspend fun runOpen(attempt: OpenAttempt, gen: Int) {
+        if (gen != openGen) return // disconnect/demote/back may win before this queued worker gets CPU
         val (wd, resumeId, startMode, title, agent, startPermissionMode, startModel) = attempt
         promptPending = false // the pending marker belongs to the previous conversation's transcript
         promptWatchdog?.cancel(); promptWatchdog = null; sendStalled.value = false // and so does its receipt deadline
@@ -4491,6 +4517,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         // the previous session's in-flight work on every switch. Switching back later resumes by
         // sessionId and reattaches the still-live conversation (registry live-match), no fork.
         convoId.value?.let { if (observing.value || !streaming.value) send(CloseSession(it)) }
+        if (gen != openGen) return // the close send can suspend while a newer navigation decision wins
         messages.clear(); convoId.value = null; replayEcho = false
         resetHistoryPaging() // #147: a fresh open replays in full — a stale cursor must not ask for a delta
         sessionKey.value = resumeId // durable draft key known immediately on resume; null for a brand-new session
@@ -4562,7 +4589,8 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         Telemetry.track(TelEvent.SessionOpened, mapOf(TelKey.Resume to if (resumeId != null) 1 else 0))
         // lastEventSeq = 0 (never null, via lastEventSeqFor after the reset above): full replay, but it
         // declares this client delta-capable so an observe view tails with deltas (issue #147)
-        if (gen == openGen) openDispatchedGen = gen // the matching SessionLive may own the view from here
+        if (gen != openGen) return
+        openDispatchedGen = gen // the matching SessionLive may own the view from here
         send(
             OpenSession(
                 wd,
@@ -4578,6 +4606,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         )
         delay(8000) // safety: clear if the daemon never answers (matches `switching`)
         if (gen == openGen && opening.value) {
+            openJob = null
             opening.value = false
             // …and release the router too (issue #165): a switch that never landed must fall back to the
             // session list rather than strand the user on a chat that will never fill
@@ -5564,7 +5593,9 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         if (item.current) return // the row is on screen already; a tap that reopens it would just flash
         // hold the chat on screen across the round trip — see [switchingSession]. Only when we're actually
         // IN a chat: switching from the project list should keep showing the list, as it always has.
-        switchingSession.value = convoId.value != null
+        // Preserve an existing hold on a duplicate tap: after the first open worker runs, convoId is null,
+        // but the original in-flight transition still owns the chat route until it lands/fails/times out.
+        switchingSession.value = switchingSession.value || convoId.value != null
         sessionsDir.value = item.dirKey
         listSessions(item.dirKey) // freshen that project's list so the back trip doesn't show the old one's
         // Optimistic touch so the sheet re-orders under the tap. The daemon's SessionLive re-touches with
@@ -5649,6 +5680,7 @@ class PocketRepository(private val scope: CoroutineScope, private val pinnedTo: 
         sessionNavigationFenced = true
         if (openInFlight != null || opening.value || switchingSession.value) {
             openGen++ // invalidates the abandoned request's 8s safety-net coroutine
+            openJob?.cancel(); openJob = null
             openInFlight = null
             lastOpenAttempt = null
             pendingNewOpenWd = null

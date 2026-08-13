@@ -243,12 +243,16 @@ class BridgeService(
         // editing the Bash command allow-list (issue #91): null = unchanged; a list REPLACES it. Normalized
         // (trim/dedupe/cap) the same way create does; still gated per-command by BridgeCommandPolicy at run time.
         val newAllowedCommands = req.allowedCommands?.let { BridgeSpec.normalizeAllowedCommands(it) }
-        val wasRunning = rs.state(req.name)?.running == true
-        rs.reconfigure(req.name, req.spec, req.mergeEnv, canonicalWorkdirs, newAllowedCommands)?.let { return BridgeRunnerStatus(req.name, ok = false, error = it) }
-        // a config change that isn't applied to the RUNNING adapter would be a lie on the page. Note the
-        // running check happens BEFORE reconfigure: an in-process engine is torn down by the edit itself,
-        // so probing afterwards would always read "stopped" and skip the restart.
-        val err = if (wasRunning) rs.restart(req.name) else null
+        // Persistence, old-authority teardown and the replacement start are one per-name lifecycle
+        // transaction. Concurrent owner control frames cannot rebuild the old config in the middle.
+        val err = rs.reconfigure(
+            req.name,
+            req.spec,
+            req.mergeEnv,
+            canonicalWorkdirs,
+            newAllowedCommands,
+            restartIfRunning = true,
+        )
         return BridgeRunnerStatus(req.name, ok = err == null, error = err, state = rs.state(req.name))
     }
 

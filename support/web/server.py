@@ -386,7 +386,6 @@ class SupportServer(ThreadingHTTPServer):
         turnstile_site_key: str | None = None,
         turnstile_secret_key: str | None = None,
     ) -> None:
-        super().__init__(address, SupportHandler)
         self.session_secret = derive_secret(master_secret, "session-key")
         self.pass_secret = derive_secret(master_secret, "anonymous-pass")
         self.turnstile_site_key = (
@@ -399,25 +398,41 @@ class SupportServer(ThreadingHTTPServer):
             raise RuntimeError("Turnstile site and secret keys must be configured together")
         self.turnstile_enabled = bool(self.turnstile_site_key and self.turnstile_secret_key)
         self._owns_abuse_store = abuse_store is None
-        self.abuse_store = abuse_store or AbuseStore(
-            ABUSE_DB_PATH,
-            derive_secret(master_secret, "abuse-store"),
-            minute_limit=MINUTE_LIMIT,
-            day_limit=DAY_LIMIT,
-            pass_minute_limit=PASS_MINUTE_LIMIT,
-            pass_lifetime_limit=PASS_LIFETIME_LIMIT,
-            challenge_minute_limit=CHALLENGE_MINUTE_LIMIT,
-            challenge_global_minute_limit=CHALLENGE_GLOBAL_MINUTE_LIMIT,
-            global_minute_limit=GLOBAL_MINUTE_LIMIT,
-            global_day_limit=GLOBAL_DAY_LIMIT,
-            daily_token_budget=DAILY_TOKEN_BUDGET,
-            token_reserve=TOKEN_RESERVE,
-        )
-        self.capacity = threading.BoundedSemaphore(MAX_CONCURRENT)
-        self.turnstile_capacity = threading.BoundedSemaphore(MAX_TURNSTILE_CONCURRENT)
-        self.connection_capacity = threading.BoundedSemaphore(MAX_CONNECTIONS)
-        self._session_locks: dict[str, threading.Lock] = {}
-        self._session_locks_guard = threading.Lock()
+        self._abuse_store_closed = False
+        if abuse_store is None:
+            self.abuse_store = AbuseStore(
+                ABUSE_DB_PATH,
+                derive_secret(master_secret, "abuse-store"),
+                minute_limit=MINUTE_LIMIT,
+                day_limit=DAY_LIMIT,
+                pass_minute_limit=PASS_MINUTE_LIMIT,
+                pass_lifetime_limit=PASS_LIFETIME_LIMIT,
+                challenge_minute_limit=CHALLENGE_MINUTE_LIMIT,
+                challenge_global_minute_limit=CHALLENGE_GLOBAL_MINUTE_LIMIT,
+                global_minute_limit=GLOBAL_MINUTE_LIMIT,
+                global_day_limit=GLOBAL_DAY_LIMIT,
+                daily_token_budget=DAILY_TOKEN_BUDGET,
+                token_reserve=TOKEN_RESERVE,
+            )
+        else:
+            self.abuse_store = abuse_store
+
+        try:
+            self.capacity = threading.BoundedSemaphore(MAX_CONCURRENT)
+            self.turnstile_capacity = threading.BoundedSemaphore(MAX_TURNSTILE_CONCURRENT)
+            self.connection_capacity = threading.BoundedSemaphore(MAX_CONNECTIONS)
+            self._session_locks: dict[str, threading.Lock] = {}
+            self._session_locks_guard = threading.Lock()
+
+            # TCPServer creates its socket outside the bind/activate cleanup block, and
+            # that block calls our public server_close(), whose cleanup could mask the
+            # original error.  Own the whole construction boundary here instead.
+            super().__init__(address, SupportHandler, bind_and_activate=False)
+            self.server_bind()
+            self.server_activate()
+        except BaseException:
+            self._cleanup_failed_construction()
+            raise
 
     def session_lock(self, key: str) -> threading.Lock:
         with self._session_locks_guard:
@@ -441,12 +456,31 @@ class SupportServer(ThreadingHTTPServer):
         finally:
             self.connection_capacity.release()
 
+    def _close_owned_abuse_store(self, *, suppress_errors: bool = False) -> None:
+        if not self._owns_abuse_store or self._abuse_store_closed:
+            return
+        self._abuse_store_closed = True
+        try:
+            self.abuse_store.close()
+        except BaseException:
+            if not suppress_errors:
+                raise
+
+    def _cleanup_failed_construction(self) -> None:
+        if hasattr(self, "socket"):
+            try:
+                super().server_close()
+            except BaseException:
+                pass
+        self._close_owned_abuse_store(suppress_errors=True)
+
     def server_close(self) -> None:
         try:
             super().server_close()
-        finally:
-            if self._owns_abuse_store:
-                self.abuse_store.close()
+        except BaseException:
+            self._close_owned_abuse_store(suppress_errors=True)
+            raise
+        self._close_owned_abuse_store()
 
 
 class SupportHandler(BaseHTTPRequestHandler):

@@ -7,6 +7,7 @@ import dev.ccpocket.daemon.agent.AgentIo
 import dev.ccpocket.daemon.agent.AgentSpec
 import dev.ccpocket.daemon.claude.StreamParser
 import dev.ccpocket.daemon.conversation.OutboundSink
+import dev.ccpocket.daemon.conversation.KeyedSink
 import dev.ccpocket.protocol.AgentKind
 import dev.ccpocket.protocol.CLAUDE_PERMISSION_MODE_AUTO
 import dev.ccpocket.protocol.Frame
@@ -20,15 +21,21 @@ import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.ToolEvent
 import dev.ccpocket.protocol.TurnDone
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.coroutines.CoroutineContext
 import kotlin.io.path.absolutePathString
 import kotlin.io.path.writeText
 import kotlin.test.Test
@@ -47,6 +54,13 @@ import kotlin.test.assertTrue
  * grants + autonomy the running task is executing under) — same idle-only spirit as the reaper.
  */
 class SessionRegistryReattachModeTest {
+
+    /** Runs dispatched work inline. This makes a non-lazy launch beat the caller's following statement,
+     *  deterministically exercising registration-before-start ordering rather than relying on timing. */
+    private object ImmediateDispatcher : CoroutineDispatcher() {
+        override fun isDispatchNeeded(context: CoroutineContext): Boolean = false
+        override fun dispatch(context: CoroutineContext, block: Runnable) = block.run()
+    }
 
     /** Replays [script] on stdout through the REAL Conversation pump; `sleep` keeps the process alive. */
     private class ScriptedBackend(private val script: Path) : AgentBackend {
@@ -268,6 +282,211 @@ class SessionRegistryReattachModeTest {
             // the first open's announce is async, so frame ORDER is racy — wait for the reattach's
             // announce by content instead (times out = the native mode was dropped)
             awaitFrame(frames) { it is SessionLive && it.permissionMode == CLAUDE_PERMISSION_MODE_AUTO }
+        }
+    }
+
+    @Test
+    fun zero_grace_close_is_registered_before_its_timer_can_run() = runBlocking {
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(init + "\n") }
+        val dir = Files.createTempDirectory("ccp-remode")
+        val scope = CoroutineScope(SupervisorJob() + ImmediateDispatcher)
+        val registry = SessionRegistry(
+            scope,
+            backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ScriptedBackend(script) }),
+        )
+        try {
+            val sink = OutboundSink { }
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                sink,
+            )
+
+            registry.scheduleClose(convoId, sink, graceMs = 0)
+
+            assertEquals(
+                null,
+                registry.modeOf(convoId),
+                "a zero-delay timer must see its registered ownership and close the idle conversation",
+            )
+        } finally {
+            registry.closeAll()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun lan_reconnect_does_not_leave_the_disconnected_sink_attached_forever() {
+        // A LAN disconnect schedules a grace-close for that exact connection's sink. Re-opening from a
+        // new socket must preserve the warm Conversation, but the old sink still needs to be detached
+        // when its grace expires. Otherwise leaving from the replacement socket sees the zombie sink as
+        // another live viewer and refuses to close; while any unrelated LAN socket remains online, the
+        // idle reaper also mistakes that zombie view for an occupant and can pin the session forever.
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(init + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
+            val first = OutboundSink { }
+            val replacement = OutboundSink { }
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                first,
+            )
+            registry.scheduleClose(convoId, first, graceMs = 40)
+
+            val again = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                replacement,
+            )
+            assertEquals(convoId, again, "the reconnect must reuse the warm conversation")
+            delay(120)
+
+            assertTrue(
+                registry.close(convoId, requester = replacement),
+                "after the old socket's grace, the replacement must be the only attached client",
+            )
+        }
+    }
+
+    @Test
+    fun overlapping_lan_disconnect_graces_are_tracked_per_connection() {
+        // Two LAN clients can view the same conversation. Their disconnect timers are independent:
+        // scheduling the second must not cancel the first, or the first dead sink survives after both
+        // sockets are gone and keeps the warm session registered indefinitely.
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(init + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
+            val first = OutboundSink { }
+            val second = OutboundSink { }
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                first,
+            )
+            assertEquals(
+                convoId,
+                registry.open(OpenSession(workdir = dir.toString(), resumeId = "s-remode"), second),
+            )
+
+            registry.scheduleClose(convoId, first, graceMs = 40)
+            registry.scheduleClose(convoId, second, graceMs = 40)
+            delay(120)
+
+            assertFalse(
+                registry.sendPrompt(SendPrompt(convoId, "must be gone")),
+                "after both connection graces expire, no dead sink may keep the conversation registered",
+            )
+        }
+    }
+
+    @Test
+    fun same_key_reconnect_replaces_the_sink_and_cancels_its_stale_cleanup() {
+        // Relay/device-style keyed sinks deliberately represent a logical client across reconnects.
+        // The per-sink timer change must retain the existing behaviour: a replacement with the same
+        // key cancels the stale connection's cleanup instead of detaching the new delegate at expiry.
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(init + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
+            val old = KeyedSink("dev:stable", OutboundSink { })
+            val replacement = KeyedSink("dev:stable", OutboundSink { })
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                old,
+            )
+            registry.scheduleClose(convoId, old, graceMs = 40)
+            assertEquals(
+                convoId,
+                registry.open(OpenSession(workdir = dir.toString(), resumeId = "s-remode"), replacement),
+            )
+            delay(120)
+
+            assertTrue(
+                registry.sendPrompt(SendPrompt(convoId, "still live")),
+                "the cancelled old timer must not detach the replacement sharing its logical key",
+            )
+        }
+    }
+
+    @Test
+    fun superseded_timer_that_already_woke_must_not_run_cleanup() {
+        // Cancellation alone is not sufficient once the old job has crossed its delay. Hold it at the
+        // claim seam, replace it with a long timer for the same (convo, sink) identity, then release it:
+        // the old job must notice it no longer owns the map slot and return before detach.
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(init + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
+            val sink = OutboundSink { }
+            val convoId = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                sink,
+            )
+            val oldAwake = CompletableDeferred<Unit>()
+            val letOldClaim = CompletableDeferred<Unit>()
+            var first = true
+            registry.beforePendingCloseClaim = {
+                if (first) {
+                    first = false
+                    oldAwake.complete(Unit)
+                    letOldClaim.await()
+                }
+            }
+
+            registry.scheduleClose(convoId, sink, graceMs = 1)
+            withTimeout(5_000) { oldAwake.await() }
+            registry.scheduleClose(convoId, sink, graceMs = 5_000) // supersedes the already-awake job
+            letOldClaim.complete(Unit)
+            delay(80)
+
+            assertTrue(
+                registry.sendPrompt(SendPrompt(convoId, "old timer must be inert")),
+                "a superseded, already-awake timer must return before detaching its sink",
+            )
+            registry.beforePendingCloseClaim = null
+        }
+    }
+
+    @Test
+    fun expiry_winning_before_the_atomic_reattach_claim_forces_a_cold_replacement() {
+        val script = Files.createTempDirectory("ccp-remode-fx").resolve("stream.jsonl")
+            .apply { writeText(init + "\n") }
+        withRegistry(ScriptedBackend(script)) { registry, dir, _ ->
+            val oldSink = KeyedSink("dev:stable", OutboundSink { })
+            val replacement = KeyedSink("dev:stable", OutboundSink { })
+            val oldConvoId = registry.open(
+                OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                oldSink,
+            )
+            val expiryAwake = CompletableDeferred<Unit>()
+            val letExpiryClaim = CompletableDeferred<Unit>()
+            registry.beforePendingCloseClaim = {
+                expiryAwake.complete(Unit)
+                letExpiryClaim.await()
+            }
+            registry.scheduleClose(oldConvoId, oldSink, graceMs = 1)
+            withTimeout(5_000) { expiryAwake.await() }
+
+            val reattachAtClaim = CompletableDeferred<Unit>()
+            val letReattachClaim = CompletableDeferred<Unit>()
+            registry.beforeLiveReattachClaim = {
+                reattachAtClaim.complete(Unit)
+                letReattachClaim.await()
+            }
+            coroutineScope {
+                val reopened = async {
+                    registry.open(
+                        OpenSession(workdir = dir.toString(), resumeId = "s-remode"),
+                        replacement,
+                    )
+                }
+                withTimeout(5_000) { reattachAtClaim.await() }
+
+                letExpiryClaim.complete(Unit)
+                withTimeout(5_000) { while (registry.modeOf(oldConvoId) != null) delay(1) }
+                letReattachClaim.complete(Unit)
+                val newConvoId = withTimeout(5_000) { reopened.await() }
+
+                assertTrue(newConvoId.isNotEmpty())
+                assertTrue(newConvoId != oldConvoId, "an expired candidate must never be returned as live")
+                assertEquals(PermissionMode.DEFAULT, registry.modeOf(newConvoId), "the cold replacement must be registered")
+            }
         }
     }
 }

@@ -21,6 +21,7 @@ import java.util.Base64
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -121,6 +122,32 @@ class DeviceSessionsOverlapTest {
         h.sessions.onDisconnect() // the daemon's relay leg blipped — device sessions must NOT die with it (#145)
 
         roundTrip(h, "devB", session, "ghost-2")
+    }
+
+    @Test
+    fun malformed_rehandshake_is_dropped_without_breaking_the_live_device_session() = runBlocking {
+        val h = Harness(dir)
+        val keys = pairedDevice(h, "devMalformed", "ticket-malformed")
+        val live = handshake(h, "devMalformed", keys, "ticket-malformed")
+        roundTrip(h, "devMalformed", live, "before-malformed")
+
+        // The relay-authenticated device id is not proof that the inner ephemeral is a valid P-256
+        // point: the device controls these bytes. An exception escaping onFrame tears down the daemon's
+        // whole relay receive loop, so each malformed re-handshake must be a local drop only. It must
+        // also leave the already-established DeviceLink untouched.
+        val malformedEphemerals = listOf(
+            ByteArray(0),
+            byteArrayOf(0x04),
+            ByteArray(65),
+            ByteArray(65) { if (it == 0) 0x04 else 0x7f },
+        )
+        malformedEphemerals.forEachIndexed { index, ephemeral ->
+            val failure = runCatching {
+                h.sessions.onFrame("devMalformed", Wire.payload(Wire.HANDSHAKE, ephemeral))
+            }.exceptionOrNull()
+            assertNull(failure, "malformed handshake #$index must not escape the per-device boundary")
+            roundTrip(h, "devMalformed", live, "after-malformed-$index")
+        }
     }
 
     @Test
