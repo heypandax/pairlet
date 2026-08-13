@@ -169,7 +169,7 @@ security find-identity -v -p codesigning
 `release.yml` 现在带 `macos-desktop` 和 `windows-desktop` 两个 job。一条命令：
 
 ```bash
-gh workflow run release.yml -f version=<X>
+gh workflow run release.yml --ref v<X> -f version=<X>
 ```
 
 就会：构建 + 签名 + 公证出 DMG、构建出 MSI，并把两者都上传到 `v<X>` 这个 release —— 和 daemon、Android APK 挂在一起。（**前提**：`v<X>` 这个 GitHub Release 必须已存在，和 daemon 的 job 一样。）

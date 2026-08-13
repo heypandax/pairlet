@@ -81,5 +81,5 @@ def ensure_build_group_access(
             sleep(retry_delay_seconds)
 
     raise BuildGroupAccessError(
-        f"attaching the build failed after {attempts} attempt(s): " + "; ".join(last_failures)
+        f"attaching the build failed on attempt {attempt}: " + "; ".join(last_failures)
     )
