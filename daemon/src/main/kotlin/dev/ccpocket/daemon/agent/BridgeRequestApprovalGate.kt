@@ -30,6 +30,13 @@ class BridgeRequestApprovalGate(
 ) {
     /** Ask the owner to approve this exact request. No response is a denial and never starts execution. */
     suspend fun awaitApproval(preview: String): Boolean {
+        // SECURITY: an OWNER_APPROVED verdict grants full-turn authority to the ENTIRE request, so the
+        // owner must have seen the entire request. If the preview would be truncated, the tail the owner
+        // never read would still run with full authority — an untrusted member can hide a malicious
+        // instruction past the cut inside a long quoted message. Fail closed: refuse rather than show a
+        // partial request under full grant. MAX_PREVIEW_CHARS is sized above BridgeGuard.MAX_PROMPT_CHARS
+        // (the vet ceiling) plus header headroom, so no legitimately vetted request is ever refused here.
+        if (preview.length > MAX_PREVIEW_CHARS) return false
         val askId = "br-" + UUID.randomUUID()
         val result = CompletableDeferred<Boolean>()
         val ask = PermissionAsk(
@@ -68,8 +75,10 @@ class BridgeRequestApprovalGate(
 
     suspend fun cancelAll() = coordinator.withdrawAllFor(this)
 
-    private companion object {
+    internal companion object {
         const val TOOL = "FeishuRequest"
-        const val MAX_PREVIEW_CHARS = 12_000
+        // Above BridgeGuard.MAX_PROMPT_CHARS (32 KiB, the vet ceiling) + header headroom, so a vetted
+        // request is always shown to the owner in full. The awaitApproval guard fails closed above this.
+        const val MAX_PREVIEW_CHARS = 32 * 1024 + 2_048
     }
 }
