@@ -11,10 +11,8 @@ cask "cc-pocket" do
   arch arm: "arm64", intel: "x86_64"
 
   version "1.7.7"
-  # During release preparation these remain the last published hashes. Replace both from the
-  # notarized v1.7.7 assets before copying this template to heypandax/homebrew-tap.
-  sha256 arm:   "cc2df4f2abac2f41190d3b1407aeb037fb5b20227618070abfc02e2c6204d9f6",
-         intel: "8d953c2625936323c4d03ccd009fa592aed330843295d6d3625dd589451cc9bf"
+  sha256 arm:   "ab6665a8a9055e29160ff1fe63424880ba0dcb40c5647364d7e9beff202787a5",
+         intel: "7bb244af1c03350ecc6a823d905a0e29f4768af66d493136dd1b46f2698c2db7"
 
   url "https://github.com/heypandax/cc-pocket/releases/download/v#{version}/cc-pocket-daemon-#{version}-macos-#{arch}.tar.gz"
   name "CC Pocket daemon"
