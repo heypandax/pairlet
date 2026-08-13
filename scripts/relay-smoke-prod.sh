@@ -13,7 +13,14 @@ D=daemon/build/install/cc-pocket-daemon/bin/cc-pocket-daemon
 WORK=$(mktemp -d)
 ID_FILE="$WORK/identity.json"   # throwaway identity so we don't collide with anyone
 PAIRPORT=8897
-cleanup() { kill "${DAEMON_PID:-}" 2>/dev/null || true; rm -rf "$WORK"; }
+cleanup() {
+  [ -z "${CLIENT_PID:-}" ] || kill "$CLIENT_PID" 2>/dev/null || true
+  [ -z "${DAEMON_PID:-}" ] || kill "$DAEMON_PID" 2>/dev/null || true
+  [ -z "${CLIENT_PID:-}" ] || wait "$CLIENT_PID" 2>/dev/null || true
+  [ -z "${DAEMON_PID:-}" ] || wait "$DAEMON_PID" 2>/dev/null || true
+  exec 3>&- 2>/dev/null || true
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
 
 echo "── public health ──"; curl -fsS --max-time 15 "${RELAY/wss:/https:}/healthz" && echo " ok"
@@ -32,11 +39,32 @@ TICKET=$(echo "$PAIR" | sed -E 's/.*"ticket":"([^"]+)".*/\1/')
 DPUB=$(echo "$PAIR" | sed -E 's/.*"daemonPub":"([^"]+)".*/\1/')
 [ -n "$TICKET" ] && [ "$TICKET" != "$PAIR" ] || { echo "FAIL: mint: $PAIR"; exit 1; }
 
-# A freshly restarted relay may need a few seconds for the daemon's replay and the device's E2E
-# channel to settle before the first command response; six seconds made this smoke test flaky.
-( printf 'dirs\n'; sleep 15; printf 'quit\n' ) \
-  | CC_POCKET_IDENTITY="$WORK/dev.json" "$D" test-client --relay "$RELAY" --daemon-pub "$DPUB" --ticket "$TICKET" >"$WORK/tc.log" 2>&1 || true
+# Keep stdin open through a FIFO while the asynchronous response arrives. The test client can wait
+# indefinitely for the WebSocket close handshake after `quit`, so the smoke test owns its lifetime:
+# observe the two required proofs, then terminate the throwaway client with a hard 30-second bound.
+mkfifo "$WORK/tc.in"
+exec 3<>"$WORK/tc.in"
+CC_POCKET_IDENTITY="$WORK/dev.json" \
+  "$D" test-client --relay "$RELAY" --daemon-pub "$DPUB" --ticket "$TICKET" \
+  <"$WORK/tc.in" >"$WORK/tc.log" 2>&1 &
+CLIENT_PID=$!
+printf 'dirs\n' >&3
 
+PROVED=0
+for _ in $(seq 1 60); do
+  if grep -q "E2E channel up" "$WORK/tc.log" 2>/dev/null && grep -q "\[dirs\]" "$WORK/tc.log" 2>/dev/null; then
+    PROVED=1
+    break
+  fi
+  kill -0 "$CLIENT_PID" 2>/dev/null || break
+  sleep 0.5
+done
+kill "$CLIENT_PID" 2>/dev/null || true
+wait "$CLIENT_PID" 2>/dev/null || true
+CLIENT_PID=
+exec 3>&-
+
+[ "$PROVED" = 1 ] || { echo "FAIL: timed out waiting for encrypted round trip"; cat "$WORK/tc.log"; exit 1; }
 grep -q "E2E channel up" "$WORK/tc.log" || { echo "FAIL: E2E handshake"; cat "$WORK/tc.log"; echo "--- daemon ---"; tail "$WORK/daemon.log"; exit 1; }
 grep -q "\[dirs\]"      "$WORK/tc.log" || { echo "FAIL: no encrypted round trip"; cat "$WORK/tc.log"; exit 1; }
 echo "  E2E handshake ✓   encrypted round trip ✓"
