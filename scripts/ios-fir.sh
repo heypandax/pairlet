@@ -49,7 +49,7 @@ xcodebuild -project iosApp/iosApp.xcodeproj -scheme iosApp -configuration Releas
   -destination 'generic/platform=iOS' -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates archive
 
-echo "▸ exporting IPA ($METHOD) via $OPTS…"
+echo "▸ exporting IPA ($METHOD) via ${OPTS}…"
 rm -rf "$EXPORT_DIR"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$EXPORT_DIR" \
   -exportOptionsPlist "$OPTS" -allowProvisioningUpdates
