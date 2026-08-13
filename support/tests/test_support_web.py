@@ -55,6 +55,75 @@ class FakeResponse:
 
 
 class SupportWebTest(unittest.TestCase):
+    def test_bind_failure_preserves_the_socket_error(self):
+        store = make_store()
+        fake_socket = mock.Mock()
+        try:
+            with (
+                mock.patch("socketserver.socket.socket", return_value=fake_socket),
+                mock.patch(
+                    "socketserver.TCPServer.server_bind",
+                    side_effect=OSError("synthetic bind failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "synthetic bind failure"):
+                    support_web.SupportServer(
+                        ("127.0.0.1", 0),
+                        b"s" * 32,
+                        abuse_store=store,
+                        turnstile_site_key="",
+                        turnstile_secret_key="",
+                    )
+
+            # A failed server construction must not close a caller-owned store.
+            fake_socket.close.assert_called_once_with()
+            visitor = store.visitor_hash("192.0.2.10")
+            self.assertTrue(store.reserve(visitor).allowed)
+        finally:
+            store.close()
+
+    def test_construction_failure_closes_owned_store_without_masking_cause(self):
+        for failure_point in ("socket", "bind", "activate"):
+            with self.subTest(failure_point=failure_point):
+                original = OSError(f"synthetic {failure_point} failure")
+                owned_store = mock.Mock()
+                owned_store.close.side_effect = RuntimeError("store cleanup failed")
+                fake_socket = mock.Mock()
+                fake_socket.close.side_effect = RuntimeError("socket cleanup failed")
+
+                with (
+                    mock.patch.object(
+                        support_web, "AbuseStore", return_value=owned_store
+                    ),
+                    mock.patch("socketserver.socket.socket") as socket_factory,
+                    mock.patch("socketserver.TCPServer.server_bind") as server_bind,
+                    mock.patch(
+                        "socketserver.TCPServer.server_activate"
+                    ) as server_activate,
+                ):
+                    socket_factory.return_value = fake_socket
+                    if failure_point == "socket":
+                        socket_factory.side_effect = original
+                    elif failure_point == "bind":
+                        server_bind.side_effect = original
+                    else:
+                        server_activate.side_effect = original
+
+                    with self.assertRaises(OSError) as raised:
+                        support_web.SupportServer(
+                            ("127.0.0.1", 0),
+                            b"s" * 32,
+                            turnstile_site_key="",
+                            turnstile_secret_key="",
+                        )
+
+                self.assertIs(original, raised.exception)
+                owned_store.close.assert_called_once_with()
+                if failure_point == "socket":
+                    fake_socket.close.assert_not_called()
+                else:
+                    fake_socket.close.assert_called_once_with()
+
     def test_persistent_store_hides_ip_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             path = str(pathlib.Path(directory) / "abuse.sqlite3")
