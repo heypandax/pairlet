@@ -5,6 +5,7 @@ import dev.ccpocket.protocol.AssistantChunk
 import dev.ccpocket.protocol.ChatRole
 import dev.ccpocket.protocol.ConvoHistory
 import dev.ccpocket.protocol.HistoryMessage
+import dev.ccpocket.protocol.PocketError
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.StreamPiece
 import dev.ccpocket.protocol.ToolEvent
@@ -105,6 +106,27 @@ class CrossSessionStreamGuardTest {
 
         r.receiveForTest(SessionLive("convo-b", "/w/proj", "sid-b", executing = false))
         assertEquals("convo-b", r.convoId.value, "the open's real answer (matched by sessionId) must land")
+    }
+
+    /** PocketError is also conversation-scoped and fanned out. An old/background conversation failing
+     *  while the user switches to B must not cancel B's open claim or inject A's error into B's blank
+     *  transition; otherwise a repeated tap can restart B before its legitimate SessionLive arrives. */
+    @Test
+    fun backgroundErrorCannotAbortADifferentInflightOpen() {
+        val r = repo()
+        r.bindView(convo = "convo-a", sid = "sid-a")
+
+        assertTrue(r.openSession("/w/proj", resumeId = "sid-b"))
+        assertTrue(r.opening.value)
+        r.receiveForTest(PocketError("process_exited", "A exited", convoId = "convo-a"))
+
+        assertTrue(r.opening.value, "A's error must not terminate B's open transition")
+        assertTrue(r.messages.isEmpty(), "A's error must not render in B's transcript")
+        assertFalse(r.openSession("/w/proj", resumeId = "sid-b"), "B's original claim must remain idempotent")
+
+        r.receiveForTest(SessionLive("convo-b", "/w/proj", "sid-b", executing = false))
+        assertEquals("convo-b", r.convoId.value)
+        assertFalse(r.opening.value)
     }
 
     @Test
