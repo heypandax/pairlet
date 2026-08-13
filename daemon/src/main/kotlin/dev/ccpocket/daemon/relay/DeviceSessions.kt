@@ -35,6 +35,7 @@ import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.ShareEnded
 import dev.ccpocket.protocol.e2e.E2ESession
 import dev.ccpocket.protocol.e2e.Wire
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -290,7 +291,22 @@ class DeviceSessions(
         // failing closed.
         val twinned = psk.isNotEmpty() && mutex.withLock { devicePubs.containsKey(deviceId) }
         val candidates = if (twinned) listOf(psk, ByteArray(0)) else listOf(psk)
-        val (derived, responderEph) = E2ESession.responder(identity.e2ePrivRaw, identity.e2ePubRaw, devicePub, candidates, deviceEphPub)
+        // The relay authenticates the routing deviceId, but the device still controls its inner
+        // ephemeral bytes. A short, wrong-format, or off-curve P-256 point makes the crypto provider
+        // throw. Never let that untrusted input escape [onFrame]: RelayClient deliberately processes
+        // device frames in its single receive loop, so one bad re-handshake would otherwise tear down
+        // the account-wide relay link and could repeat forever. Derive before mutating [sessions], then
+        // drop only this handshake on any ordinary crypto/format failure; transport/network failures
+        // after a valid derivation still propagate and trigger the intended reconnect path.
+        val response = try {
+            E2ESession.responder(identity.e2ePrivRaw, identity.e2ePubRaw, devicePub, candidates, deviceEphPub)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("malformed handshake from ${deviceId.take(8)}… (${e::class.simpleName}) — dropped")
+            return
+        }
+        val (derived, responderEph) = response
         val session = derived.first()
         mutex.withLock {
             val link = sessions[deviceId]
