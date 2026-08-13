@@ -106,6 +106,11 @@ class Conversation(
      *  command auto-runs on this session with no phone prompt (via BridgeCommandPolicy); empty for owner/guest
      *  and for a bridge whose owner configured none. Only consulted when [bridgeSession] is true. */
     private val bridgeAllowedCommands: List<String> = emptyList(),
+    /** BRIDGE only (issue #242): the session-stable "where am I / what can't I see" preamble the bridge
+     *  computed at open time (chat, project, capability boundary). Appended to the agent's SYSTEM prompt at
+     *  every launch, so a relaunch or resume carries it without any per-turn prompt injection. Null for
+     *  owner/guest conversations and for a bridge that supplies none — nothing else changes. */
+    private val bridgeContextPreamble: String? = null,
     /** COLLABORATOR handoff (SESSION-HANDOFF.md §8.3): the Handoff Grant's operation ceiling this
      *  conversation runs under. Non-null → the PermissionBridge HARD-REFUSES write tools
      *  (Write/Edit/…) before any ask exists unless the access explicitly grants scoped writes —
@@ -1204,7 +1209,9 @@ class Conversation(
         val bridgePrompt = if (origin != null && pathScope == null) BRIDGE_SENSITIVE_OUTPUT_PROMPT else null
         val securedSpec = if (bridgePrompt != null) {
             rawSpec.copy(
-                appendSystemPrompt = listOfNotNull(rawSpec.appendSystemPrompt, bridgePrompt)
+                // #242: the bridge's session context (if any) reads BEFORE the security boundary — identity
+                // first, then the rule. Same branch as bridgePrompt, so a non-bridge launch is untouched.
+                appendSystemPrompt = listOfNotNull(rawSpec.appendSystemPrompt, bridgeContextPreamble, bridgePrompt)
                     .joinToString("\n\n"),
             )
         } else {

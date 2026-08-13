@@ -316,7 +316,10 @@ class RequestRouter(
     // frame was already vetted by CollaboratorGuard at the ingress: it restricts the handoff plane to the
     // device's OWN offers (accept/decline/return + a filtered listing), denies every owner-side handoff
     // op, and carries the vetted OpenSession's path scope into the conversation's PermissionBridge.
-    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, onOpened: suspend (String) -> Unit = {}) {
+    // [bridgeContextPreamble] (issue #242) is a BUILT-IN bridge's session-stable context (which chat, which
+    // project, what the session cannot see), appended to the agent's SYSTEM prompt for the conversation this
+    // OpenSession creates. Carries no authority and is set only by trusted in-process code; null everywhere else.
+    suspend fun handle(frame: Frame, sink: OutboundSink, origin: String? = null, guestScope: GuestScope? = null, caps: ClientCapsHolder? = null, bridgeAllowedCommands: List<String> = emptyList(), bridgeContextPreamble: String? = null, ownerBypass: Boolean = false, deviceId: String? = null, collabScope: CollaboratorScope? = null, onOpened: suspend (String) -> Unit = {}) {
         val dev = deviceId ?: LOCAL_DEVICE_ID
         when (frame) {
             // capability declaration (wire-compat gate for AgentKind additions) — no reply; the very
@@ -494,6 +497,8 @@ class RequestRouter(
                             peerSupportsKimi = caps?.supportsKimi == true,
                             peerSupportsZcode = caps?.supportsZcode == true,
                             bridgeAllowedCommands = bridgeAllowedCommands,
+                            bridgeContextPreamble = bridgeContextPreamble, // #242, bridge opens only
+
                             announcedWorkdir = frame.workdir, // #219: announce the RAW workdir the phone opened (may be "~/x")
                             ownerBypass = ownerBypass, // trusted in-process open flag ⇒ owner's own session
                         )

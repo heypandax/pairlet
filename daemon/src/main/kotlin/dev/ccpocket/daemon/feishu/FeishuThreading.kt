@@ -34,5 +34,7 @@ internal object FeishuThreading {
         return if (ownerTurn) "$base\u0000owner" else base
     }
 
-    private fun isGroup(chatType: String?): Boolean = chatType.equals("group", ignoreCase = true)
+    /** Group vs. direct chat — also read by the engine, which fetches a chat NAME and says 「飞书群」 in the
+     *  injected session header only for groups (#242). One definition, so the two can never disagree. */
+    fun isGroup(chatType: String?): Boolean = chatType.equals("group", ignoreCase = true)
 }

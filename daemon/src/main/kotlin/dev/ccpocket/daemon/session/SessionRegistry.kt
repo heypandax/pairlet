@@ -273,6 +273,9 @@ class SessionRegistry(
         peerSupportsKimi: Boolean = true,
         peerSupportsZcode: Boolean = true,
         bridgeAllowedCommands: List<String> = emptyList(),
+        // issue #242: a BRIDGE's session-stable context preamble (chat/project/capability boundary), appended
+        // to the agent's system prompt on every launch of this conversation. Null for owner/guest opens.
+        bridgeContextPreamble: String? = null,
         // issue #91 OWNER BYPASS: this is the bridge owner's OWN dedicated session. It may mint one-turn
         // OWNER_BYPASS grants through the in-process entry point; the flag alone does not auto-allow tools.
         // Passed ONLY by trusted in-process code (the built-in engine).
@@ -447,7 +450,8 @@ class SessionRegistry(
         val c = Conversation(
             convoId, Path.of(open.workdir), open.mode, sink, scope, factory.create(),
             pushHookProvider = { pushHook }, origin = origin, askPushHookProvider = { askPushHook },
-            pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands, ownerBypass = ownerBypass,
+            pathScope = pathScope, bridgeAllowedCommands = bridgeAllowedCommands,
+            bridgeContextPreamble = bridgeContextPreamble, ownerBypass = ownerBypass,
             handoffAccess = handoffAccess, headless = headless,
             announcedWorkdir = announcedWorkdir,
             approvals = approvals, grants = grants, riskEngine = riskEngine,

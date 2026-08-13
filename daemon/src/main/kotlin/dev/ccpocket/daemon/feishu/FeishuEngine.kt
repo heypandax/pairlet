@@ -24,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -205,6 +206,13 @@ class FeishuEngine(
     // an ownership transfer keeps the OLD owner as bind authority until the engine restarts — bounded, since
     // binding only selects an already-allow-listed workdir and every action still hits owner approval.
     private val chatOwners = java.util.concurrent.ConcurrentHashMap<String, String>()
+    // Feishu GROUP NAME per chat (#242), for the session-stable context preamble. Holds the in-flight FETCH,
+    // not the value: the preamble is baked into the agent's system prompt at open time, so the opener needs a
+    // way to WAIT briefly for a first fetch rather than freeze "nameless" into the whole session. Started on
+    // the lark dispatcher thread (onMessage), awaited from a scope coroutine — hence ConcurrentHashMap +
+    // Deferred, never a polling loop. A completed miss is evicted (see [chatNameOrNull]) so a failed read
+    // retries later; no TTL, so a rename lands after the next fetch or engine restart — nothing depends on it.
+    private val chatNames = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<String?>>()
     @Volatile override var running: Boolean = false
         private set
     @Volatile override var lastError: String? = null
@@ -343,6 +351,29 @@ class FeishuEngine(
         }
     }
 
+    /** Start (or join) the display-name fetch for [chatId] — the group half of the context preamble (#242).
+     *  Deliberately independent of [fetchChatOwner]: the name is wanted in EVERY group, the owner only when
+     *  no admin open_id is configured. Warmed from onMessage so the wait below is usually already over. */
+    private fun fetchChatName(chatId: String): kotlinx.coroutines.Deferred<String?> =
+        chatNames.computeIfAbsent(chatId) { id ->
+            // Never throws: the preamble degrades to a nameless group rather than failing an open.
+            scope.async { runCatching { api?.chatName(id) }.getOrNull()?.takeIf { it.isNotBlank() } }
+        }
+
+    /** The group's name for a preamble that is about to be baked into a launching session, or null. Bounded:
+     *  the name is nice-to-have context, so a slow or broken Feishu read costs at most [CHAT_NAME_WAIT_MS]
+     *  and then degrades to 「飞书群」 — it must never delay or fail opening the session. The wait is on the
+     *  Deferred, NOT around the API call itself: [FeishuApiClient] is blocking IO that a cancellation cannot
+     *  interrupt, so the fetch keeps running on its own and warms the cache for the next open. */
+    private suspend fun chatNameOrNull(chatId: String): String? {
+        val pending = fetchChatName(chatId)
+        val name = withTimeoutOrNull(CHAT_NAME_WAIT_MS) { pending.await() }
+        // A finished fetch that produced nothing (API error, empty name) is dropped so a later open retries;
+        // one still in flight stays cached — it is exactly what the next open wants to join.
+        if (name == null && pending.isCompleted) chatNames.remove(chatId, pending)
+        return name
+    }
+
     /** First time we've seen [messageId]? Records it and returns true; a redelivered duplicate returns
      *  false. Bounded LRU ([seenMessages]); thread-safe for the lark dispatcher threads onMessage runs on. */
     private fun firstSeen(messageId: String): Boolean =
@@ -424,6 +455,7 @@ class FeishuEngine(
         if (!firstSeen(replyMessageId)) return
 
         val replyTo = FeishuThreading.replyTarget(replyMessageId, msg.chatType)
+        val isGroup = FeishuThreading.isGroup(msg.chatType)
         // #234: acknowledge a valid group request immediately, independently of the work it starts. A
         // missing reaction scope or a transient Feishu error is cosmetic and must never block the command.
         if (replyTo.inThread) scope.launch {
@@ -432,6 +464,9 @@ class FeishuEngine(
         }
         // warm the group-owner cache for the /bind fallback — only when no admin is set (else it's unused)
         if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
+        // warm the group-name fetch for the context preamble (#242) — groups only; a direct chat has no name
+        // to state. Independent of the owner fetch above: different trigger, different consumer.
+        if (isGroup) fetchChatName(chatId)
 
         // OWNER BYPASS (issue #91): the CONFIGURED owner's OWN messages run in a SEPARATE, dedicated session
         // (keyed apart from the topic's) that auto-allows — race-free, because a session never mixes senders.
@@ -474,19 +509,29 @@ class FeishuEngine(
                 // requirement 2: a natural-language reply carries the QUOTED message (+ thread root) into the
                 // prompt. Skipped for slash pass-throughs ("/clear" etc.) — those act on the user's own line,
                 // not the quoted one. Network fetch here, safely inside the coroutine (never the lark thread).
-                val prompt = if (!text.startsWith("/")) withQuotedContext(action.prompt, parentId, rootId) else action.prompt
+                val slashPassThrough = text.startsWith("/")
+                val quoted = if (!slashPassThrough) withQuotedContext(action.prompt, parentId, rootId) else action.prompt
+                // "did the quote actually resolve?" is decided HERE, on the quoted value alone. The sender
+                // line below always changes the string, so a comparison made after prepending it would
+                // report every unreadable quote as resolved.
+                val quotedResolved = quoted != action.prompt
                 // a quote-only request whose quote couldn't be read has NO instruction left in it — running
                 // the turn would burn a session on the placeholder note alone. Say so instead of pretending.
-                if (quoteOnly && prompt == action.prompt) {
+                if (quoteOnly && !quotedResolved) {
                     return@launch reply(replyTo, "⚠️ 读不到你引用的那条消息，请把要处理的内容直接 @我 发出来。")
                 }
+                // #242: WHO asked is the only per-turn context — a topic's session outlives the message that
+                // opened it, so a later turn can come from someone else. Where the session is and what it
+                // cannot see are session-stable and ride the system prompt instead (see openOrReuse), keeping
+                // the transcript and the owner's approval card clean. Slash pass-throughs stay verbatim.
+                val prompt = if (slashPassThrough) quoted else senderLine(sender, ownerTurn) + "\n\n" + quoted
                 // ONE conversation per group topic (or per direct chat), one turn at a time per conversation
                 // (see chatLocks) — a second message queues instead of clobbering the first's waiter.
                 // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
                 // survives an out-of-band owner tap; we only surface a hard failure to open/drive the turn.
                 val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
                 lock.withLock {
-                    runCatching { ask(convoKey, chatId, action.workdir, prompt, replyTo, sender, ownerTurn) }
+                    runCatching { ask(convoKey, chatId, isGroup, action.workdir, prompt, replyTo, sender, ownerTurn) }
                         .onFailure { e ->
                             log.warn("feishu turn failed: ${e.message}")
                             reply(replyTo, "⚠️ 出错了：${e.message}")
@@ -588,13 +633,14 @@ class FeishuEngine(
     private suspend fun ask(
         key: String,
         chatId: String,
+        isGroup: Boolean,
         workdir: String,
         prompt: String,
         replyTo: FeishuReplyTarget,
         senderOpenId: String,
         ownerBypass: Boolean = false,
     ) {
-        val convoId = when (val opened = openOrReuse(key, workdir, ownerBypass)) {
+        val convoId = when (val opened = openOrReuse(key, chatId, isGroup, workdir, ownerBypass)) {
             is OpenResult.Opened -> opened.convoId
             is OpenResult.Denied -> {
                 reply(replyTo, openDeniedMessage(opened.code))
@@ -796,7 +842,13 @@ class FeishuEngine(
     private fun turnText(t: TurnDone): String =
         t.error?.let { "⚠️ $it" } ?: t.finalText?.takeIf { it.isNotBlank() } ?: "(无回复)"
 
-    private suspend fun openOrReuse(key: String, workdir: String, ownerBypass: Boolean = false): OpenResult {
+    private suspend fun openOrReuse(
+        key: String,
+        chatId: String,
+        isGroup: Boolean,
+        workdir: String,
+        ownerBypass: Boolean = false,
+    ): OpenResult {
         // Only a convo opened against THIS SAME workdir may be reused or resumed. After a /bind moves the
         // chat to another project, the key still points at the old project's convo; reusing (or resuming
         // its session) would land prompts in the old workdir — the rebind-doesn't-take-effect bug. A
@@ -818,6 +870,14 @@ class FeishuEngine(
         val openVerdict = vet(OpenSession(workdir = workdir, resumeId = resume, mode = AccessTier.ceiling(spec.tier)))
         val open = (openVerdict as? BridgeVerdict.Allow)?.frame as? OpenSession
             ?: return OpenResult.Denied((openVerdict as BridgeVerdict.Deny).code)
+        // #242: the session-stable context, computed HERE (past every reuse/resume early-return, so a warm
+        // conversation pays nothing) and baked into the launching agent's system prompt. A group name that
+        // isn't cached yet gets a bounded wait; anything slower degrades to a nameless group.
+        val preamble = bridgeContextPreamble(
+            chatName = if (isGroup) chatNameOrNull(chatId) else null,
+            isGroup = isGroup,
+            projectName = FeishuRoutes.projectName(workdir),
+        )
         val opened = CompletableDeferred<String>()
         val openKey = "open-${System.nanoTime()}"
         mutex.withLock { openWaiters[openKey] = opened }
@@ -828,7 +888,12 @@ class FeishuEngine(
             // ownerBypass (issue #91): the owner's DEDICATED session opens with a trusted in-process identity
             // flag. FeishuEngine later exchanges it for one-turn OWNER_BYPASS grants; the flag itself no longer
             // auto-allows tools, so cancel can revoke the current turn. Never set for shared/group sessions or wire.
-            core.router.handle(open, sink, spec.name, bridgeAllowedCommands = spec.allowedCommands, ownerBypass = ownerBypass) { convoId ->
+            core.router.handle(
+                open, sink, spec.name,
+                bridgeAllowedCommands = spec.allowedCommands,
+                bridgeContextPreamble = preamble,
+                ownerBypass = ownerBypass,
+            ) { convoId ->
                 guard.noteOpened(convoId)
                 openWaiters[openKey]?.complete(convoId)
             }
@@ -933,6 +998,7 @@ class FeishuEngine(
         const val NUDGE_MS = 25_000L        // no reply yet after this + an approval pending → nudge the group
         const val TURN_TIMEOUT_MS = 300_000L
         const val OPEN_TIMEOUT_MS = 30_000L
+        const val CHAT_NAME_WAIT_MS = 1_500L // bounded wait for a first group-name fetch (see chatNameOrNull)
         const val RELEASE_RETRY_MS = 1_000L
         const val MAX_REPLY_CHARS = 20_000 // feishu text-message ceiling with headroom
         // stands in as the "[用户本次的指令]" line when the user only @'d the bot on a quoted message. Worded as

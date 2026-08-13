@@ -378,6 +378,49 @@ class SessionRegistryBridgeApprovalRouteTest {
         }
     }
 
+    /** issue #242: a bridge's session context rides the SYSTEM prompt (so relaunch/resume keep it and the
+     *  transcript stays clean), ahead of the sensitive-output boundary. It is a bridge-only seam: an owner
+     *  conversation must launch exactly as before even if a caller supplies one. */
+    @Test
+    fun a_bridge_launch_carries_its_context_preamble_ahead_of_the_security_boundary() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val preamble = "[会话背景]\n来源：飞书群「研发群」（cc-pocket 桥接，项目：demo）\n能力边界：无法读取群历史。"
+        val bridgeBackend = LazyBackend()
+        val bridgeRegistry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { bridgeBackend }))
+        val ownerBackend = LazyBackend()
+        val ownerRegistry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { ownerBackend }))
+        val workdir = Files.createTempDirectory("ccp-bridge-preamble").toString()
+        try {
+            val bridgeConvo = bridgeRegistry.open(
+                OpenSession(workdir), { }, origin = "feishu-bot", bridgeContextPreamble = preamble,
+            )
+            assertTrue(bridgeRegistry.sendTrustedBridgePrompt(SendPrompt(bridgeConvo, "run tests")))
+            val bridgeLaunch = withTimeout(5_000) {
+                while (bridgeBackend.launchedSpec == null) delay(10)
+                assertNotNull(bridgeBackend.launchedSpec).appendSystemPrompt.orEmpty()
+            }
+            assertTrue(bridgeLaunch.contains(preamble), bridgeLaunch)
+            assertTrue(
+                bridgeLaunch.indexOf(preamble) <
+                    bridgeLaunch.indexOf("approval never authorizes disclosing sensitive data"),
+                "the session context reads before the security boundary: $bridgeLaunch",
+            )
+
+            // an OWNER conversation (origin == null) never takes the bridge branch
+            val ownerConvo = ownerRegistry.open(OpenSession(workdir), { }, bridgeContextPreamble = preamble)
+            ownerRegistry.sendPrompt(SendPrompt(ownerConvo, "hello"))
+            val ownerLaunch = withTimeout(5_000) {
+                while (ownerBackend.launchedSpec == null) delay(10)
+                assertNotNull(ownerBackend.launchedSpec).appendSystemPrompt
+            }
+            assertFalse(ownerLaunch.orEmpty().contains("[会话背景]"), "owner launch: $ownerLaunch")
+        } finally {
+            bridgeRegistry.closeAll()
+            ownerRegistry.closeAll()
+            scope.cancel()
+        }
+    }
+
     /** issue #198/#233 compatibility: a pre-trusted chat's request needs NO permit (nothing was tapped) but is
      *  still refused on a guest credential and emits no request-level card. PermissionBridge retains this
      *  durable mode's broad one-turn authority (see PermissionBridgeTest). */

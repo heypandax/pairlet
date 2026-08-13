@@ -108,6 +108,18 @@ internal class FeishuApiClient(
         response.data?.ownerId
     }
 
+    /** The chat's display name — the "where am I" half of the injected session header (#242). Null when
+     *  Feishu reports no name; a separate call from [chatOwnerOpenId] because the two are needed under
+     *  different conditions (the name in every group, the owner only without a configured admin). */
+    fun chatName(chatId: String): String? = tracked("chat.get") {
+        requireFeishuId(chatId, "chat id")
+        val response = client.im().v1().chat().get(
+            GetChatReq.newBuilder().chatId(chatId).userIdType("open_id").build(),
+        )
+        if (!response.success()) throw FeishuApiException("chat.get code=${response.code}")
+        response.data?.name
+    }
+
     fun message(messageId: String): FeishuFetchedMessage? = tracked("message.get") {
         requireFeishuId(messageId, "message id")
         val response = client.im().v1().message().get(
