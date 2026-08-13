@@ -31,11 +31,13 @@ import dev.ccpocket.protocol.SwitchDirectory
 import dev.ccpocket.protocol.SwitchMode
 import dev.ccpocket.protocol.SwitchServiceTier
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -74,7 +76,19 @@ class SessionRegistry(
     private val log = dev.ccpocket.daemon.util.logger("SessionRegistry")
     private val convos = mutableMapOf<String, Conversation>()
     private val observes = mutableMapOf<String, ObserveSession>()
-    private val pendingClose = mutableMapOf<String, Job>() // convoId -> delayed-close job during a LAN disconnect grace
+    /** A shared conversation can have several LAN viewers disconnect inside the same grace window. Each
+     *  dead connection owns an independent cleanup; keying only by convoId made the newest disconnect
+     *  cancel the older one's cleanup and leave its sink attached forever. */
+    private data class PendingCloseKey(val convoId: String, val ownerKey: Any)
+    private val pendingClose = mutableMapOf<PendingCloseKey, Job>()
+    private data class LiveReattachClaim(val staleClose: Job?)
+
+    /** Test-only race seam: invoked after a grace delay but before that timer claims the mutex. A
+     *  replacement can supersede the awakened timer here, pinning the cancellation boundary. */
+    internal var beforePendingCloseClaim: (suspend () -> Unit)? = null
+
+    /** Test-only race seam between the optimistic live lookup and its authoritative atomic claim. */
+    internal var beforeLiveReattachClaim: (suspend () -> Unit)? = null
 
     // live LAN sockets — the reaper must treat "a phone is attached over LAN" like relay peerOnline,
     // else a LAN session idle past the reap window is killed under the user's thumbs
@@ -308,7 +322,7 @@ class SessionRegistry(
                 // sink is excluded: it is the new conversation's initialSink already.
                 spectators = hot.attachedSinks().filterNot { sinkKey(it) == sinkKey(sink) }
                 mutex.withLock { convos.remove(hot.convoId) }
-                cancelPendingClose(hot.convoId)
+                cancelPendingCloses(hot.convoId)
                 runCatching { hot.close() }
                 noteSelfClosed(hot)
                 live = null
@@ -353,16 +367,34 @@ class SessionRegistry(
                 // untouched — merely re-entering never renews Full Control). A BUSY conversation is left
                 // alone: peeking at a running task must not yank its grants/autonomy mid-flight (the
                 // idle-only spirit of the reaper and the client's close-on-switch).
-                val sameAuthority = attach.matchesGrant(pathScope, handoffAccess) && attach.origin == origin
-                if (!attach.isBusy() && sameAuthority) {
-                    if (attach.currentMode() != open.mode) {
-                        log.info("open ${resume.take(8)}… → reattach applies caller mode ${open.mode} (was ${attach.currentMode()})")
-                    }
-                    attach.switchMode(open.mode, open.permissionMode)
-                } else if (!attach.isBusy() && !sameAuthority && attach.currentMode() != open.mode) {
-                    log.info("open ${resume.take(8)}… → reattach keeps convo mode ${attach.currentMode()}: caller's grant shape differs (mode ${open.mode} not applied)")
+                beforeLiveReattachClaim?.invoke()
+                // The first lookup above is optimistic: an awakened grace timer may remove and close that
+                // Conversation while switchMode/replay suspends. Claim it again under the SAME mutex the
+                // timer uses for cleanup. Presence recheck + same-key timer removal + replacement-sink
+                // registration are indivisible, so either reattach wins and expiry becomes stale, or expiry
+                // wins and this open falls through to a fresh cold resume instead of returning a dead id.
+                val claim = mutex.withLock {
+                    if (convos[attach.convoId] !== attach) return@withLock null
+                    val staleClose = pendingClose.remove(PendingCloseKey(attach.convoId, sinkKey(sink)))
+                    attach.registerReattach(sink)
+                    LiveReattachClaim(staleClose)
                 }
-                cancelPendingClose(attach.convoId); attach.reattach(sink, open.lastEventSeq); return attach.convoId
+                if (claim != null) {
+                    claim.staleClose?.cancel()
+                    val sameAuthority = attach.matchesGrant(pathScope, handoffAccess) && attach.origin == origin
+                    if (!attach.isBusy() && sameAuthority) {
+                        if (attach.currentMode() != open.mode) {
+                            log.info("open ${resume.take(8)}… → reattach applies caller mode ${open.mode} (was ${attach.currentMode()})")
+                        }
+                        attach.switchMode(open.mode, open.permissionMode)
+                    } else if (!attach.isBusy() && !sameAuthority && attach.currentMode() != open.mode) {
+                        log.info("open ${resume.take(8)}… → reattach keeps convo mode ${attach.currentMode()}: caller's grant shape differs (mode ${open.mode} not applied)")
+                    }
+                    attach.replayReattach(sink, open.lastEventSeq)
+                    return attach.convoId
+                }
+                log.info("open ${resume.take(8)}… → live candidate ${attach.convoId.take(8)}… expired before reattach claim; resuming cold")
+                live = null
             }
             // observe a Claude session running OUTSIDE the daemon (e.g. a terminal) — read-only, no spawn.
             // Claude-transcript specific; Codex resume falls through to a controlled thread/resume below.
@@ -694,9 +726,9 @@ class SessionRegistry(
         val removed = mutex.withLock {
             val convo = convos[convoId] ?: return@withLock null
             if (convo.isBusy()) return@withLock null
-            pendingClose.remove(convoId) to (convos.remove(convoId) ?: return@withLock null)
+            removePendingCloseJobsLocked(convoId) to (convos.remove(convoId) ?: return@withLock null)
         } ?: return false
-        removed.first?.cancel()
+        removed.first.forEach { it.cancel() }
         removed.second.close()
         noteSelfClosed(removed.second)
         log.info("closeIfIdle: released ${convoId.take(8)}… (sid=${removed.second.sessionId?.take(8) ?: "-"})")
@@ -858,15 +890,15 @@ class SessionRegistry(
                 return false
             }
         }
-        val (job, convo, obs) = mutex.withLock {
-            Triple(pendingClose.remove(convoId), convos.remove(convoId), observes.remove(convoId))
+        val (jobs, convo, obs) = mutex.withLock {
+            Triple(removePendingCloseJobsLocked(convoId), convos.remove(convoId), observes.remove(convoId))
         }
         // §18.1 P1-5: a REAL close sweeps every pending approval of this conversation across ALL sources
         // (agent asks die with the conversation anyway; shell/export pending live in daemon-global
         // services and would otherwise stay approvable from the account inbox after the session is gone).
         // BEFORE convo.close() so the withdraw frames still ride the fan-out sinks.
         if (convo != null || obs != null) approvals.withdrawAllForConvo(convoId)
-        job?.cancel(); convo?.close(); obs?.close()
+        jobs.forEach { it.cancel() }; convo?.close(); obs?.close()
         if (convo != null || obs != null) log.info("close ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
         convo?.let { noteSelfClosed(it) }
         return convo != null || obs != null
@@ -880,60 +912,100 @@ class SessionRegistry(
     }
 
     /**
-     * Close [convoId] after [graceMs] UNLESS a reconnect reattaches first (which calls [cancelPendingClose]).
+     * Detach [owner]'s view of [convoId] after [graceMs]. A reconnect under the SAME keyed sink identity
+     * cancels this cleanup; a LAN reconnect uses a fresh plain sink and deliberately leaves the old
+     * connection's cleanup armed, so only the zombie view is removed after the grace.
      * The LAN server uses this on socket drop instead of closing immediately: a flaky link / backgrounded phone
      * would otherwise instantly kill the claude process and rewrite the transcript, forcing the reconnect into a
      * cold `--resume` (issue #24's amplifier) and losing warm session state. Relay drops have their own grace
      * (reaperLoop's 90s idle window); this is the LAN equivalent. A second schedule replaces the first.
      *
      * [owner] is the scheduling connection's sink: at expiry the close only fires if the conversation is STILL
-     * attached to it. A zombie socket's late `finally` (TCP can take minutes to give up) must not kill a
-     * conversation a newer connection has since reattached — and the same check closes the reattach-vs-expiry
-     * race (a reattach re-points the sink before cancelPendingClose lands).
+     * attached to that identity. A zombie socket's late `finally` (TCP can take minutes to give up) must not kill
+     * a conversation whose keyed sink a newer connection replaced — the matching-key reconnect cancels this
+     * timer before replacing the delegate. Plain LAN sinks have per-connection identity, so their old cleanup
+     * remains armed and cannot detach the replacement.
      */
     suspend fun scheduleClose(convoId: String, owner: OutboundSink, graceMs: Long = LAN_DISCONNECT_GRACE_MS) {
-        val job = scope.launch {
-            delay(graceMs)
-            // deregister BEFORE closing: otherwise close() below would cancel this very job mid-flight
-            mutex.withLock { pendingClose.remove(convoId) }
-            // A conversation still WORKING (streaming turn / running background jobs) survives its owner's
-            // disconnect: re-arm and check again next window, close only once truly idle. Killing in-flight
-            // work because the app quit (update/relaunch/crash) is exactly what the task-complete push
-            // promises never happens — the relay path's idle reaper already spares busy convos this way.
-            val busy = mutex.withLock {
-                convos[convoId]?.takeIf { it.isAttachedTo(owner) }?.isBusy() == true
-            }
-            if (busy) {
-                log.info("grace expiry ${convoId.take(8)}… still working → re-armed ${graceMs}ms")
-                scheduleClose(convoId, owner, graceMs); return@launch
-            }
-            val (convo, obs) = mutex.withLock {
-                val c = convos[convoId]
-                val o = observes[convoId]
-                when {
-                    // fan-out: the dead socket only takes ITS view with it — close only if it was the last
-                    c != null && c.isAttachedTo(owner) ->
-                        if (c.detach(owner)) { convos.remove(convoId); c to null } else null to null
-                    o != null && o.isAttachedTo(owner) -> { observes.remove(convoId); null to o }
-                    else -> null to null // reattached elsewhere (or already gone) — not ours to kill
+        val key = PendingCloseKey(convoId, sinkKey(owner))
+        // Register before the timer can execute. In particular delay(0) does not suspend, so a normally
+        // started child on an immediate/concurrent dispatcher could otherwise inspect an empty map, return,
+        // and then be installed as an already-completed job: the sink would never be detached and the stale
+        // map entry would live until a later real close/shutdown.
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            val me = currentCoroutineContext()[Job]
+            while (true) {
+                delay(graceMs)
+                beforePendingCloseClaim?.invoke()
+                var retry = false
+                var convo: Conversation? = null
+                var obs: ObserveSession? = null
+                val ownsCurrentTimer = mutex.withLock {
+                    // Ownership check and detach/removal share one critical section with open()'s claim.
+                    // Never expose a window where this job has dropped its map identity but can still
+                    // remove the replacement sink installed by a same-key reconnect.
+                    if (pendingClose[key] !== me) return@withLock false
+                    val currentConvo = convos[convoId]
+                    val currentObs = observes[convoId]
+                    when {
+                        currentConvo != null && currentConvo.isAttachedTo(owner) && currentConvo.isBusy() -> {
+                            // Keep this same job registered/cancellable across the next grace window.
+                            retry = true
+                        }
+                        currentConvo != null && currentConvo.isAttachedTo(owner) -> {
+                            pendingClose.remove(key)
+                            if (currentConvo.detach(owner)) {
+                                convos.remove(convoId)
+                                convo = currentConvo
+                            }
+                        }
+                        currentObs != null && currentObs.isAttachedTo(owner) -> {
+                            pendingClose.remove(key)
+                            observes.remove(convoId)
+                            obs = currentObs
+                        }
+                        else -> pendingClose.remove(key) // already detached/gone — retire this timer
+                    }
+                    true
                 }
+                if (!ownsCurrentTimer) return@launch
+                if (retry) {
+                    log.info("grace expiry ${convoId.take(8)}… still working → re-armed ${graceMs}ms")
+                    continue
+                }
+                if (convo != null || obs != null) {
+                    log.info("grace expiry closed ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
+                }
+                convo?.close(); obs?.close()
+                convo?.let { noteSelfClosed(it) }
+                return@launch
             }
-            if (convo != null || obs != null) {
-                log.info("grace expiry closed ${convoId.take(8)}… (sid=${convo?.sessionId?.take(8) ?: "-"}, observe=${obs != null})")
-            }
-            convo?.close(); obs?.close()
-            convo?.let { noteSelfClosed(it) }
         }
-        mutex.withLock { pendingClose.put(convoId, job) }?.cancel()
+        mutex.withLock { pendingClose.put(key, job) }?.cancel()
+        job.start()
     }
 
-    private suspend fun cancelPendingClose(convoId: String) {
-        mutex.withLock { pendingClose.remove(convoId) }?.cancel()
+    /** Real conversation removal invalidates every connection-specific grace timer. */
+    private suspend fun cancelPendingCloses(convoId: String) {
+        mutex.withLock { removePendingCloseJobsLocked(convoId) }.forEach { it.cancel() }
+    }
+
+    /** Caller holds [mutex]. */
+    private fun removePendingCloseJobsLocked(convoId: String): List<Job> {
+        val hits = pendingClose.filterKeys { it.convoId == convoId }.values.toList()
+        pendingClose.keys.removeAll { it.convoId == convoId }
+        return hits
     }
 
     suspend fun closeAll() {
-        val all = mutex.withLock { convos.values.toList().also { convos.clear() } }
-        val obs = mutex.withLock { observes.values.toList().also { observes.clear() } }
+        val (all, obs, jobs) = mutex.withLock {
+            Triple(
+                convos.values.toList().also { convos.clear() },
+                observes.values.toList().also { observes.clear() },
+                pendingClose.values.toList().also { pendingClose.clear() },
+            )
+        }
+        jobs.forEach { it.cancel() }
         // Close in parallel. The daemon-shutdown hook (Main.kt / DaemonServer.kt) runs this, and each
         // Conversation.close can spend AgentProcess's bounded EOF->SIGTERM->SIGKILL grace on a wedged
         // child (issue #101). Serialised, N wedged sessions would sum past launchd/systemd's stop

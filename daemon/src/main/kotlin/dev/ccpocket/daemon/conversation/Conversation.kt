@@ -41,6 +41,7 @@ import dev.ccpocket.protocol.WorkflowAgentDetail
 import dev.ccpocket.protocol.WorkflowUpdate
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -176,6 +177,16 @@ class Conversation(
     // (issue #84): Claude defers its relaunch to the next sendPrompt, Codex carries it in the next turn's params
     @Volatile
     private var mode: PermissionMode = initialMode
+
+    /** Monotonic identity of the current explicit/automatic mode state. Cancellation is not enough to
+     *  retire an expiry coroutine that has already crossed its last suspension, so the timer rechecks this
+     *  generation under [modeStateLock] at the exact write boundary. */
+    private val modeStateLock = Any()
+    private var modeGeneration = 0L
+    /** Serializes the state commit with its backend/grant/notice side effects. Otherwise an expiry can
+     *  commit DEFAULT, lose to a later explicit PLAN switch, then resume and apply DEFAULT to the backend
+     *  after PLAN has already won the visible state. */
+    private val modeMutationMutex = Mutex()
 
     // mutable: a phone can switch the model mid-session via `/model <name>`
     @Volatile
@@ -884,19 +895,29 @@ class Conversation(
             sink.emit(live(sessionId))
             return
         }
-        val normalizedNative = normalizePermissionMode(nativeMode)
-        if (newMode == mode && normalizedNative == permissionMode) {
-            // no-op, but still announce: an out-of-sync phone badge corrects itself from this
-            sink.emit(live(sessionId))
-            return
+        modeMutationMutex.withLock {
+            val normalizedNative = normalizePermissionMode(nativeMode)
+            val changed = synchronized(modeStateLock) {
+                if (newMode == mode && normalizedNative == permissionMode) {
+                    false
+                } else {
+                    mode = newMode
+                    permissionMode = normalizedNative
+                    modeGeneration++
+                    armFullControlExpiryLocked()
+                    true
+                }
+            }
+            if (!changed) {
+                // no-op, but still announce: an out-of-sync phone badge corrects itself from this
+                sink.emit(live(sessionId))
+                return@withLock
+            }
+            // approval design M2: a mode switch changes the ground the user granted under — every standing
+            // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
+            grants.endSession(convoId)
+            recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
         }
-        mode = newMode
-        permissionMode = normalizedNative
-        // approval design M2: a mode switch changes the ground the user granted under — every standing
-        // task grant of this conversation dies with it (design §5.1 "mode change" expiry)
-        grants.endSession(convoId)
-        armFullControlExpiry() // #220: arms only if the owner opted into an expiry; else Full Control persists
-        recordPendingSettings(mode = newMode, model = null, effort = null, permissionModeChanged = true)
     }
 
     // ── issue #220: the owner's manually-entered Full Control is a deliberate authorization — by default it
@@ -908,24 +929,54 @@ class Conversation(
     // clock only ever governs the owner's own档位 存续. ──
     private var fullControlExpiry: Job? = null
 
-    private fun armFullControlExpiry() {
+    /** Deterministic test seam after the timer's cheap check and before its authoritative generation
+     *  check/write. Deliberately non-suspending: cancellation cannot make the race disappear in tests. */
+    @Volatile
+    internal var beforeFullControlExpiryCommit: (() -> Unit)? = null
+
+    /** Test-only handle for waiting until a timer that crossed the commit seam has fully terminated. */
+    internal fun fullControlExpiryJobForTest(): Job? = synchronized(modeStateLock) { fullControlExpiry }
+
+    private fun armFullControlExpiry() = synchronized(modeStateLock) { armFullControlExpiryLocked() }
+
+    /** Caller holds [modeStateLock]. */
+    private fun armFullControlExpiryLocked() {
         fullControlExpiry?.cancel()
+        fullControlExpiry = null
         if (mode != PermissionMode.BYPASS_PERMISSIONS) return
         val ttl = fullControlExpiryMs()
         if (ttl <= 0L) return // #220: no expiry configured — the owner's Full Control runs open-ended
-        fullControlExpiry = scope.launch {
+        val armedGeneration = modeGeneration
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             delay(ttl)
+            // Cheap exit for the ordinary case. It is NOT the authority: an explicit switch can happen
+            // immediately after this read, once cancellation has no suspension left at which to bite.
             if (mode != PermissionMode.BYPASS_PERMISSIONS) return@launch // already left it
-            log.info("$convoId Full Control expired after ${ttl / 60_000}min — back to default mode")
-            mode = PermissionMode.DEFAULT
-            permissionMode = null
-            grants.endSession(convoId) // the ground changed again — nothing standing survives
-            recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
-            // #220: make the fallback PERCEPTIBLE — a system line in the transcript, not just a badge flip,
-            // so the owner is never surprised that "the mode changed itself" (design intent of the notice)
-            sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FULL_CONTROL_EXPIRED_NOTICE)))
-            sink.emit(live(sessionId)) // every attached client's mode badge corrects itself
+            beforeFullControlExpiryCommit?.invoke()
+            modeMutationMutex.withLock {
+                val expired = synchronized(modeStateLock) {
+                    if (modeGeneration != armedGeneration || mode != PermissionMode.BYPASS_PERMISSIONS) {
+                        false
+                    } else {
+                        mode = PermissionMode.DEFAULT
+                        permissionMode = null
+                        modeGeneration++
+                        fullControlExpiry = null
+                        true
+                    }
+                }
+                if (!expired) return@withLock
+                log.info("$convoId Full Control expired after ${ttl / 60_000}min — back to default mode")
+                grants.endSession(convoId) // the ground changed again — nothing standing survives
+                recordPendingSettings(mode = PermissionMode.DEFAULT, model = null, effort = null, permissionModeChanged = true)
+                // #220: make the fallback PERCEPTIBLE — a system line in the transcript, not just a badge flip,
+                // so the owner is never surprised that "the mode changed itself" (design intent of the notice)
+                sink.emit(AssistantChunk(convoId, seq.getAndIncrement(), StreamPiece.Text(FULL_CONTROL_EXPIRED_NOTICE)))
+                sink.emit(live(sessionId)) // every attached client's mode badge corrects itself
+            }
         }
+        fullControlExpiry = job
+        job.start()
     }
 
     init {
@@ -1630,12 +1681,16 @@ class Conversation(
         return true
     }
 
-    /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
-     *  replaying the transcript so far to the newcomer only. [sinceSeq] = the newcomer's transcript
-     *  cursor (issue #147): only the delta past it is replayed when it can be honored. */
-    suspend fun reattach(newSink: OutboundSink, sinceSeq: Long? = null) {
+    /** Install/replace a re-opened device's view without suspending. SessionRegistry uses this inside its
+     *  own mutex so registry membership, stale-close cancellation and sink replacement are one atomic claim. */
+    internal fun registerReattach(newSink: OutboundSink) {
         sinks[sinkKey(newSink)] = newSink
         lastActivityMs = System.currentTimeMillis()
+    }
+
+    /** Replay the current live state to an already-[registerReattach]ed sink. Kept separate because disk
+     *  replay and transport emission suspend and must never run while SessionRegistry's mutex is held. */
+    internal suspend fun replayReattach(newSink: OutboundSink, sinceSeq: Long? = null) {
         // pre-first-turn the agent hasn't minted a sessionId yet — anchor on the resume id (same trick
         // as switchMode) so the reattach still confirms + replays instead of leaving a blank chat
         val sid = sessionId ?: resumeAnchor
@@ -1658,6 +1713,14 @@ class Conversation(
         // the phone's convoId is set before the PermissionAsk (its handler is convoId-gated).
         bridgeRequestGate.resurfacePending { newSink.emit(it) }
         bridge?.resurfacePending { newSink.emit(it) }
+    }
+
+    /** ADD a re-opened device's view (fan-out — it no longer steals the stream from the others),
+     *  replaying the transcript so far to the newcomer only. [sinceSeq] = the newcomer's transcript
+     *  cursor (issue #147): only the delta past it is replayed when it can be honored. */
+    suspend fun reattach(newSink: OutboundSink, sinceSeq: Long? = null) {
+        registerReattach(newSink)
+        replayReattach(newSink, sinceSeq)
     }
 
     /** Ask the owner to approve this exact bridge request before the prompt reaches the agent. */

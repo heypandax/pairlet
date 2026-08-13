@@ -12,6 +12,7 @@ import dev.ccpocket.protocol.ImageData
 import dev.ccpocket.protocol.PermissionMode
 import dev.ccpocket.protocol.SessionSummary
 import dev.ccpocket.protocol.StreamPiece
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -21,8 +22,11 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -80,17 +84,28 @@ class ConversationFullControlExpiryTest {
     @Test
     fun opt_in_expiry_reverts_with_a_perceptible_notice() = runBlocking {
         val frames = ArrayList<Frame>()
+        val notice = CompletableDeferred<Unit>()
         val scope = CoroutineScope(Dispatchers.Default)
         val convo = Conversation(
             convoId = "cFc", initialWorkdir = Files.createTempDirectory("ccp-fc"),
             initialMode = PermissionMode.DEFAULT,
-            initialSink = { f -> synchronized(frames) { frames.add(f) } },
+            initialSink = { f ->
+                synchronized(frames) { frames.add(f) }
+                if (f is AssistantChunk &&
+                    (f.piece as? StreamPiece.Text)?.text == Conversation.FULL_CONTROL_EXPIRED_NOTICE
+                ) {
+                    notice.complete(Unit)
+                }
+            },
             parentScope = scope, backend = InertBackend(),
             fullControlExpiryMs = { 60L }, // opt-in short clock
         )
         try {
             convo.switchMode(PermissionMode.BYPASS_PERMISSIONS)
             withTimeout(5_000) { while (convo.currentMode() != PermissionMode.DEFAULT) delay(20) }
+            // mode is written before the following notice is emitted on another dispatcher; wait for the
+            // observable contract itself instead of racing that deliberate ordering.
+            withTimeout(5_000) { notice.await() }
             assertEquals(PermissionMode.DEFAULT, convo.currentMode(), "an opt-in expiry must revert to default")
             assertTrue(noticeEmitted(synchronized(frames) { frames.toList() }), "the revert must surface a visible notice")
         } finally {
@@ -116,6 +131,43 @@ class ConversationFullControlExpiryTest {
             delay(100)
             assertEquals(PermissionMode.DEFAULT, convo.currentMode(), "restricted origin must be refused Full Control")
         } finally {
+            convo.close(); scope.cancel()
+        }
+    }
+
+    @Test
+    fun expiry_past_its_delay_cannot_overwrite_a_newer_explicit_mode_switch() = runBlocking {
+        val frames = ArrayList<Frame>()
+        val atCommit = CountDownLatch(1)
+        val releaseOldExpiry = CountDownLatch(1)
+        val scope = CoroutineScope(Dispatchers.Default)
+        val convo = Conversation(
+            convoId = "cFc-race", initialWorkdir = Files.createTempDirectory("ccp-fc"),
+            initialMode = PermissionMode.DEFAULT,
+            initialSink = { f -> synchronized(frames) { frames.add(f) } },
+            parentScope = scope, backend = InertBackend(),
+            fullControlExpiryMs = { 1L },
+        )
+        try {
+            convo.beforeFullControlExpiryCommit = {
+                atCommit.countDown()
+                releaseOldExpiry.await()
+            }
+            convo.switchMode(PermissionMode.BYPASS_PERMISSIONS)
+            assertTrue(atCommit.await(5, TimeUnit.SECONDS), "the old expiry must reach its commit seam")
+            val oldExpiry = checkNotNull(convo.fullControlExpiryJobForTest())
+
+            convo.switchMode(PermissionMode.PLAN)
+            releaseOldExpiry.countDown()
+            withTimeout(5_000) { oldExpiry.join() }
+
+            assertEquals(PermissionMode.PLAN, convo.currentMode(), "the newer explicit switch must win")
+            assertFalse(
+                noticeEmitted(synchronized(frames) { frames.toList() }),
+                "a stale expiry must not announce a fallback it did not commit",
+            )
+        } finally {
+            releaseOldExpiry.countDown()
             convo.close(); scope.cancel()
         }
     }
