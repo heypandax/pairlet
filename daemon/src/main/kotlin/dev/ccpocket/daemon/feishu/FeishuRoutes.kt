@@ -78,9 +78,9 @@ sealed interface ChatAction {
     data class Ask(val workdir: String, val prompt: String, val note: String? = null) : ChatAction
     /** Drop this chat's conversation so the next message opens a FRESH session ("/new"). [note] confirms it. */
     data class Reset(val note: String) : ChatAction
-    /** Move this chat to [mode] ("/trust", "/review [purpose]", "/full-auto confirm [purpose]", "/untrust")
+    /** Move this chat to [mode] (`/trust confirm`, `/review [purpose]`, `/untrust`)
      *  — authority already verified (machine owner only). [purpose] is the owner-typed Trust Contract for
-     *  REVIEWED/FULL_AUTO (null = the default contract). The engine persists it and replies, since only it
+     *  REVIEWED (null = the default contract). The engine persists it and replies, since only it
      *  knows whether the state actually changed — and whether the write LANDED. */
     data class SetTrust(val mode: FeishuTrustMode, val purpose: String? = null) : ChatAction
     /** Not addressed to us / nothing to do. */
@@ -179,13 +179,7 @@ class FeishuCommands(
                 val admin = adminOpenId?.takeIf { it.isNotBlank() }
                 val record = trustRecordOf(chatId)
                 val bound = routes.workdirFor(chatId)
-                // The broad mode deliberately needs a SECOND token. Merely asking about it must be read-only,
-                // and malformed near-matches ("confirmed", "confirm-now") must not count as consent.
-                val fullAutoConfirmation = if (cmd == "full-auto") {
-                    Regex("^confirm(?:\\s+(.*))?$", RegexOption.IGNORE_CASE).matchEntire(arg)
-                } else {
-                    null
-                }
+                val trustConfirmed = cmd == "trust" && arg.equals("confirm", ignoreCase = true)
                 when {
                     admin == null -> ChatAction.Reply(
                         "还没设置机主 open_id，无法调整本群的信任模式。\n你的 open_id 是：$senderOpenId\n" +
@@ -199,18 +193,23 @@ class FeishuCommands(
                     cmd == "untrust" ->
                         if (record != null) ChatAction.SetTrust(FeishuTrustMode.UNTRUSTED)
                         else ChatAction.Reply("本群本来就是逐请求审批。")
-                    // /full-auto is intentionally an information command until the owner types `confirm`.
-                    // Put this before master/binding checks: warning about the real authority never mutates
-                    // anything and remains useful while the owner is deciding whether to enable the switch.
-                    cmd == "full-auto" && fullAutoConfirmation == null -> ChatAction.Reply(FULL_AUTO_WARNING)
+                    // The historical bare /trust promised a restricted ceiling. It is now read-only so an
+                    // old habit or cached instruction cannot silently consent to broader Bash/MCP authority.
+                    cmd == "trust" && !trustConfirmed -> ChatAction.Reply(TRUST_WARNING)
+                    // FULL_AUTO is no longer a separate mode. Every old spelling is read-only: its old
+                    // confirmation included a Guardian gate and cannot silently become unconditional full.
+                    cmd == "full-auto" -> ChatAction.Reply(FULL_AUTO_COMPAT)
                     !noApprovalEnabled -> ChatAction.Reply(
                         "电脑上还没允许群信任模式：先在桌面端「桥」的配置里勾上「允许群信任模式」，再在群里发 " +
                             if (cmd == "full-auto") "/full-auto $arg。" else "/$cmd。",
                     )
                     bound == null -> ChatAction.Reply("本群还没有绑定项目，先 /bind 再设置信任模式。")
-                    cmd == "trust" ->
-                        if (record?.workdir == bound && record.mode == FeishuTrustMode.TRUSTED) {
-                            ChatAction.Reply("本群已经是免审核了。")
+                    cmd == "trust" -> // exact /trust confirm
+                        if (
+                            record?.workdir == bound && record.mode == FeishuTrustMode.TRUSTED &&
+                            record.fullAuthorityConfirmed
+                        ) {
+                            ChatAction.Reply("本群已经是完全信任了。")
                         } else {
                             ChatAction.SetTrust(FeishuTrustMode.TRUSTED)
                         }
@@ -222,15 +221,7 @@ class FeishuCommands(
                             ChatAction.SetTrust(FeishuTrustMode.REVIEWED, purpose)
                         }
                     }
-                    else -> { // /full-auto confirm [purpose]
-                        val purpose = fullAutoConfirmation!!.groupValues.getOrNull(1)
-                            ?.trim()?.take(FeishuTrust.MAX_PURPOSE_CHARS)?.takeIf { it.isNotEmpty() }
-                        if (record?.workdir == bound && record.mode == FeishuTrustMode.FULL_AUTO && record.purpose == purpose) {
-                            ChatAction.Reply("本群已经是 Guardian 全自动了。用 /trust-status 查看契约和风险边界。")
-                        } else {
-                            ChatAction.SetTrust(FeishuTrustMode.FULL_AUTO, purpose)
-                        }
-                    }
+                    else -> error("unreachable trust command: $cmd")
                 }
             }
             // read-only status — open to any member on purpose: it shows nothing but the mode, the bound
@@ -250,20 +241,25 @@ class FeishuCommands(
             return "本群还没有绑定项目，当前所有请求都不会执行。先 /bind 绑定项目。"
         }
         val effective = record?.takeIf { it.workdir == bound }
+        val legacyNeedsConfirmation = effective != null &&
+            effective.mode in setOf(FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO) &&
+            !effective.fullAuthorityConfirmed
         return buildString {
             appendLine("绑定项目：${FeishuRoutes.projectName(bound)}")
-            when (effective?.mode) {
-                FeishuTrustMode.TRUSTED -> appendLine("模式：免审核 —— 群成员的请求直接执行（仅限项目内的受限工具）。")
-                FeishuTrustMode.REVIEWED -> {
+            when {
+                legacyNeedsConfirmation -> {
+                    appendLine("模式：每次审批（旧信任待重新确认）—— 历史授权不会被静默扩大为 full 权限。")
+                    appendLine("机主如接受新版权限，请先发送 /trust 查看说明，再发送 /trust confirm；在此之前每条请求仍先发到机主手机。")
+                }
+                effective?.mode == FeishuTrustMode.TRUSTED || effective?.mode == FeishuTrustMode.FULL_AUTO -> {
+                    appendLine("模式：完全信任 —— 机主已授权本群在该项目中直接执行；每条请求获得整轮 full 权限，不经 Guardian，也不逐工具询问。")
+                    appendLine("能力：可运行未被确定性规则拦截的 Bash、MCP、网络工具和子代理，可能访问项目外数据或向外发送数据。")
+                    appendLine("仍会询问：需要人类作答或确认的交互工具。已开始的一轮不会因 /untrust 被中途撤销。")
+                    appendLine("机主可随时发 /untrust，撤销后从下一条请求生效。")
+                }
+                effective?.mode == FeishuTrustMode.REVIEWED -> {
                     appendLine("模式：智能审核 —— 每条请求先经 Guardian，明确低风险且符合群用途的才在项目内受限执行，其余转机主审批。")
                     appendLine("契约（版本 ${effective.contractVersion}）：${effective.purpose ?: FeishuTrust.DEFAULT_CONTRACT}")
-                }
-                FeishuTrustMode.FULL_AUTO -> {
-                    appendLine("模式：Guardian 全自动（高风险） —— 每条请求仍先审核；高风险转机主，低风险获取整轮 full-auto。")
-                    appendLine("能力：可运行任意未被拦截的 Bash、MCP、网络和子代理；可能访问项目外数据或向外发送数据。")
-                    appendLine("仍会询问：人类决策工具，以及守护进程能识别的持久化文件写入；Shell/MCP/未知工具不受后一条保证。")
-                    appendLine("契约（版本 ${effective.contractVersion}）：${effective.purpose ?: FeishuTrust.DEFAULT_CONTRACT}")
-                    appendLine("机主可随时发 /untrust 撤销。")
                 }
                 else -> appendLine("模式：每次审批 —— 每条请求都先发到机主手机。")
             }
@@ -291,24 +287,29 @@ class FeishuCommands(
               @机器人 /projects       列出可绑定的项目
               @机器人 /bind <项目>    把本群绑到某个项目（仅管理员）
               @机器人 /unbind         解绑本群（仅管理员）
-              @机器人 /trust          本群免审核直接执行（仅机主，需电脑上先允许）
+              @机器人 /trust          查看完全信任的权限说明（只读）
+              @机器人 /trust confirm  完全信任本群：每条请求整轮 full 权限直接执行（仅机主，需电脑上先允许）
               @机器人 /review [用途]  本群智能审核：AI 判定低风险才直接执行（仅机主）
-              @机器人 /full-auto      查看 Guardian 全自动的高风险警告（不会开启）
               @机器人 /full-auto confirm [用途]
-                                      显式开启全自动（仅机主）：低风险请求可运行任意未拦截 Bash、MCP、网络和子代理，可访问项目外/外传
+                                      旧命令迁移提示（只读）；请先读 /trust，再明确发送 /trust confirm
               @机器人 /untrust        恢复逐请求审批（仅机主）
               @机器人 /trust-status   查看本群的信任模式与契约
         """.trimIndent()
 
-        val FULL_AUTO_WARNING = """
-            ⚠️ Guardian 全自动是高风险模式，不是沙箱。此命令尚未开启任何状态。
-            每条请求仍先经 Guardian；高风险会转机主审批，但判定低风险后会获得整轮 full-auto：可运行任意未被拦截的 Bash、MCP、网络工具和子代理，不再逐步询问。
-            Shell 和未知工具不受结构化项目目录墙限制，可能访问项目外数据或向外发送数据；已知高风险命令拦截仅是尽力防御。人类决策工具仍会询问。
-            已识别的结构化持久化文件写入也仍会询问；Shell、MCP 和未知工具不受这条保证。
+        val TRUST_WARNING = """
+            ⚠️ 完全信任不是沙箱。此命令尚未开启任何状态。
+            开启后，本群对当前项目的每条请求都不经 Guardian，并获得整轮 full 权限：可运行未被确定性规则拦截的 Bash、MCP、网络工具和子代理，不再逐工具询问。
+            Shell、MCP、网络工具和子代理可能访问项目外数据或向外发送数据；未来未识别工具及需要人类作答或确认的交互工具仍会询问。
 
-            确认开启请发：@机器人 /full-auto confirm
-            可选附上用途：@机器人 /full-auto confirm <用途>
-            开启后可随时发 /untrust 撤销。
+            机主确认接受以上权限请精确发送：@机器人 /trust confirm
+            开启后可随时发 /untrust 撤销，撤销从下一条请求生效。
+        """.trimIndent()
+
+        val FULL_AUTO_COMPAT = """
+            ℹ️ full-auto 已合并到完全信任模式，不再单独经过 Guardian。
+            请先发送 @机器人 /trust 查看新版 full 权限说明，再精确发送 @机器人 /trust confirm 完成授权。
+            旧命令 @机器人 /full-auto confirm 原本包含 Guardian 条件，因此现在只显示本提示，不会静默扩大授权。
+            可随时发 /untrust 撤销，撤销从下一条请求生效。
         """.trimIndent()
     }
 }

@@ -763,9 +763,8 @@ class SessionRegistry(
     }
 
     /**
-     * Execute one request from a chat the owner PRE-TRUSTED (issue #198) — no approval card was shown, so the
-     * turn runs under the one-turn AUTO_TRUSTED grant and its legacy closed tool ceiling. #233 deliberately
-     * does not widen an existing durable trust record into arbitrary Bash/MCP/network authority.
+     * Execute one request from a chat/project the owner PRE-TRUSTED (issues #198/#233). No approval card is
+     * shown; a broad AUTO_TRUSTED grant is armed only for this prompt and revoked at turn end.
      *
      * In-process callers only, exactly like [approveBridgeRequest]: the trust decision is keyed on the
      * attested chat id, which only the built-in engine sees. No frame reaches this — the router has no branch
@@ -778,7 +777,7 @@ class SessionRegistry(
 
     /**
      * Execute one Guardian-passed request from a REVIEWED chat (reviewed-trust design) under the one-turn
-     * REVIEWER_APPROVED grant — same legacy closed ceiling as trusted, distinct for audit.
+     * REVIEWER_APPROVED grant — the Guardian path's closed ceiling, distinct from trusted full authority.
      *
      * In-process callers only, exactly like [sendTrustedBridgePrompt]: the review decision is made and
      * re-validated inside the built-in engine, and no router branch calls this — a bridge cannot claim its
@@ -787,16 +786,6 @@ class SessionRegistry(
     suspend fun sendReviewedBridgePrompt(p: SendPrompt, reviewId: String): Boolean {
         val convo = get(p.convoId) ?: return false
         return convo.sendReviewedBridgePrompt(p.text, p.promptId, reviewId = reviewId)
-    }
-
-    /**
-     * Execute one Guardian-passed request from a chat whose owner explicitly confirmed FULL_AUTO. No wire
-     * route calls this method; only the built-in engine can exchange its validated mode/review decision for
-     * a one-turn [dev.ccpocket.daemon.bridge.BridgeGrant.REVIEWER_FULL_AUTO].
-     */
-    suspend fun sendReviewedFullAutoBridgePrompt(p: SendPrompt, reviewId: String): Boolean {
-        val convo = get(p.convoId) ?: return false
-        return convo.sendReviewedFullAutoBridgePrompt(p.text, p.promptId, reviewId = reviewId)
     }
 
     /** Execute one request in the configured owner's dedicated in-process bridge session. No wire route

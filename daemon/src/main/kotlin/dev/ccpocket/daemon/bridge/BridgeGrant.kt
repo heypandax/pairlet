@@ -5,10 +5,9 @@ package dev.ccpocket.daemon.bridge
  * at hand-off and revoked at TurnResult / process end — never a standing rule (issue #91's whole point:
  * an approval must not become a blank cheque for later, attacker-supplied prompts).
  *
- * Existing trust records keep their original confined ceiling. Issue #233 adds full-auto authority only to
- * decisions that are explicit under the new contract: the owner's own bridge turn, a request the owner read
- * and approved, or a Guardian pass made while the chat is in the separately confirmed FULL_AUTO mode.
- * This avoids silently upgrading a durable TRUSTED/REVIEWED record created under the older, narrower promise.
+ * Full authority comes only from a machine-owner decision: the owner's own bridge turn, a request the owner
+ * read and approved, or the owner's durable TRUSTED grant for an exact chat/project. REVIEWED remains the
+ * independent Guardian path and keeps a restricted ceiling because no human approved that individual turn.
  *
  *  - [NONE] — the default. Every tool ask routes to the owner's phone (Bash first passing
  *    BridgeCommandPolicy's deny/allow walls). This is what an unapproved request gets.
@@ -16,14 +15,12 @@ package dev.ccpocket.daemon.bridge
  *    session. It is armed for the prompt rather than inferred from the standing session flag, so cancelling
  *    that turn revokes it before any buffered tool request can be answered.
  *  - [OWNER_APPROVED] (issue #190 / #233 rule ②) — the owner READ this exact request and accepted a
- *    full-auto turn. Ordinary tool asks, including classifier-ASK Bash, are skipped for this turn. This is
+ *    full turn. Ordinary tool asks, including classifier-ASK Bash, are skipped for this turn. This is
  *    deliberately broad authority; the shell deny list remains defense-in-depth, not a complete sandbox.
- *  - [REVIEWER_APPROVED] and [AUTO_TRUSTED] — the legacy machine-confined grants. They retain one closed
- *    [autoRunnable] ceiling: unknown/MCP/network/Task and classifier-ASK Bash still ask the owner.
- *  - [REVIEWER_FULL_AUTO] (issue #233 rule ③) — the owner explicitly confirmed FULL_AUTO for this exact
- *    chat/project, then Guardian judged this request clearly low-risk and on-contract using the real broad
- *    capability description. The resulting one turn may run arbitrary non-blocked tools without more taps.
- *    The mode is intentionally opt-in because this is not a confinement boundary.
+ *  - [AUTO_TRUSTED] (issue #233 rule ③) — the owner durably trusted this exact chat/project. Every request
+ *    receives a fresh one-turn broad grant, with no Guardian or per-tool cards; it never becomes session-wide.
+ *  - [REVIEWER_APPROVED] — a Guardian-passed REVIEWED request. It retains the closed [autoRunnable] ceiling:
+ *    unknown/MCP/network/Task and classifier-ASK Bash still ask the owner.
  */
 enum class BridgeGrant {
     NONE,
@@ -31,19 +28,18 @@ enum class BridgeGrant {
     OWNER_APPROVED,
     REVIEWER_APPROVED,
     AUTO_TRUSTED,
-    REVIEWER_FULL_AUTO,
     ;
 
-    /** Existing trust modes share the original closed-ceiling judgement. */
-    val machineConfined: Boolean get() = this == AUTO_TRUSTED || this == REVIEWER_APPROVED
+    /** Only Guardian-reviewed turns use the closed-ceiling judgement. */
+    val machineConfined: Boolean get() = this == REVIEWER_APPROVED
 
     /** True when the grant authorizes ordinary execution tools without a per-tool ask. */
     val authorizes: Boolean get() = this != NONE
 
     companion object {
         /**
-         * The tools legacy [AUTO_TRUSTED]/[REVIEWER_APPROVED] grants may run without an owner card. This
-         * remains CLOSED so upgrading to a build that contains #233 never widens an existing trust record.
+         * The tools a [REVIEWER_APPROVED] grant may run without an owner card. This stays CLOSED because the
+         * Guardian is a classifier, not the machine owner.
          */
         fun autoRunnable(toolName: String): Boolean = toolName in AUTO_RUNNABLE_TOOLS
 

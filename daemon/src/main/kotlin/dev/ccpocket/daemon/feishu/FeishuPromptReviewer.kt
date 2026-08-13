@@ -1,15 +1,14 @@
 package dev.ccpocket.daemon.feishu
 
 /**
- * The Guardian Reviewer seam for a REVIEWED or FULL_AUTO chat: an INDEPENDENT classifier that answers
+ * The Guardian Reviewer seam for a REVIEWED chat: an INDEPENDENT classifier that answers
  * one question about one prompt — "does this match the owner's Trust Contract for the group, and is it
  * clearly low-risk within the fixed capability ceiling?" — before that prompt reaches the agent.
  *
  * The reviewer is a CONDITION MATCHER, never an authorizer (design §4): it emits a classification signal
  * only. The daemon decides what that signal is worth ([PromptReviewPolicy.mayAutoRun]), re-validates the
- * chat's policy afterwards (revoke race), and the engine chooses the fixed ceiling that corresponds to the
- * owner's durable mode. No output field can name tools, grants or permission modes — the model can classify
- * one prompt, never widen either ceiling.
+ * chat's policy afterwards (revoke race), and the engine applies the fixed REVIEWED ceiling. No output field
+ * can name tools, grants or permission modes — the model can classify one prompt, never widen that ceiling.
  */
 interface FeishuPromptReviewer {
     suspend fun review(input: PromptReviewInput): PromptReviewResult
@@ -27,8 +26,8 @@ data class PromptReviewInput(
     /** The fixed description of what an auto-passed request may at most do — so "low-risk" is judged
      *  against the real ceiling, not the model's imagination of it. */
     val capabilityCeiling: String = CAPABILITY_CEILING,
-    /** The owner's configured Bash allowlist (command patterns, not secrets). Its authority depends on the
-     *  selected ceiling: it is the only shell exception under REVIEWED, but merely contextual under FULL_AUTO. */
+    /** The owner's configured Bash allowlist (command patterns, not secrets). It is the only shell exception
+     *  under REVIEWED. */
     val allowedCommands: List<String> = emptyList(),
 ) {
     companion object {
@@ -41,20 +40,6 @@ data class PromptReviewInput(
                 "Everything else — any other shell command, MCP tools, network access, writes to " +
                 ".git/.claude/.envrc, anything outside the project — still requires the machine owner's approval."
 
-        // The explicit #233 FULL_AUTO ceiling. Under-pricing any of these capabilities is an authorization
-        // bug: the reviewer would classify a prompt as low-risk while assuming a human or sandbox that is absent.
-        const val FULL_AUTO_CAPABILITY_CEILING =
-            "An auto-approved request receives a one-turn full-auto grant. The coding agent may run arbitrary " +
-                "non-blocked Bash commands, use MCP and network tools, spawn sub-agents, and edit project files " +
-                "without another owner confirmation. Shell and unknown tools are not confined by the structured " +
-                "file workdir wall: they may access data outside the project or send data externally. Structured " +
-                "file targets outside the bound project are denied. A persistence hold applies only when the " +
-                "daemon recognizes a structured file target that executes for the owner; it does not confine " +
-                "shell or unknown tools. Unresolved named-file targets and human-decision tools still ask. Known " +
-                "destructive/high-risk Bash DENY patterns are best-effort defense-in-depth, not a complete or " +
-                "unbypassable safety boundary. Therefore any credential/secret, external-path, exfiltration, " +
-                "persistence, privilege, destructive, approval-bypass, or ambiguous intent is NOT low-risk and " +
-                "must ask the owner."
     }
 }
 
@@ -147,7 +132,7 @@ object PromptReviewPolicy {
 }
 
 /**
- * The Guardian request preflight for REVIEWED/FULL_AUTO — the one place the pieces compose, kept free of
+ * The Guardian request preflight for REVIEWED — the one place the pieces compose, kept free of
  * Feishu/engine types so the whole flow (prescreen → review → policy → revalidation → audit) is unit-testable with fakes:
  *
  *  1. deterministic [PromptThreatSignals] prescreen (force-to-owner only, never auto-pass);
@@ -177,7 +162,6 @@ class ReviewedPreflight(
         projectName: String,
         senderOpenId: String,
         messageId: String,
-        capabilityCeiling: String = PromptReviewInput.CAPABILITY_CEILING,
         revalidate: () -> Boolean,
     ): Outcome {
         val reviewId = java.util.UUID.randomUUID().toString()
@@ -196,7 +180,6 @@ class ReviewedPreflight(
                             projectName = projectName,
                             purpose = purpose,
                             prompt = prompt,
-                            capabilityCeiling = capabilityCeiling,
                             allowedCommands = allowedCommands,
                         ),
                     )

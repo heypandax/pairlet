@@ -37,7 +37,7 @@ interface InProcessBridgeEngine {
      * Irreversible authority teardown for REVOKE/detach/reconfigure. Implementations must perform this as
      * one ordered operation: reject new ingress, cancel AND await every already-admitted handler, force-close
      * all conversations bearing this bridge's origin, then release resources. The await-before-close rule is
-     * security-critical: otherwise a handler admitted just before quiesce can open a new FULL_AUTO or
+     * security-critical: otherwise a handler admitted just before quiesce can open a new TRUSTED or
      * owner-bypass conversation after the close sweep. Any close failure must escape to the caller, which
      * then keeps the old runner entry and refuses to build a replacement.
      */

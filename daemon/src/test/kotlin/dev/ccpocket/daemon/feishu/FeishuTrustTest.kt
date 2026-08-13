@@ -8,7 +8,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -26,12 +25,14 @@ class FeishuTrustTest {
     // ── migration ──
 
     @Test
-    fun legacy_chatId_to_workdir_map_migrates_to_TRUSTED_records() {
-        // the old rows were the owner's explicit /trust — the upgrade must not silently change their meaning
+    fun legacy_chatId_to_workdir_map_is_retained_but_requires_new_full_confirmation() {
+        // the old /trust promised a restricted ceiling; keep the row visible but execute fail-closed
         f.writeText("""{"oc_1":"/p/alpha","oc_2":"/p/Beta"}""")
         val t = FeishuTrust(f)
-        assertTrue(t.isTrusted("oc_1", "/p/alpha"))
-        assertEquals(FeishuTrustMode.TRUSTED, t.modeFor("oc_2", "/p/Beta"))
+        assertFalse(t.isTrusted("oc_1", "/p/alpha"))
+        assertEquals(FeishuTrustMode.UNTRUSTED, t.modeFor("oc_2", "/p/Beta"))
+        assertEquals(FeishuTrustMode.TRUSTED, t.recordFor("oc_1")?.mode)
+        assertFalse(t.recordFor("oc_1")?.fullAuthorityConfirmed ?: true)
         assertEquals(1, t.recordFor("oc_1")?.contractVersion)
         assertNull(t.recordFor("oc_1")?.purpose)
         // migration is lazy: the file is not rewritten by the read itself…
@@ -39,18 +40,20 @@ class FeishuTrustTest {
         // …but the next successful explicit write regenerates it as v3 WITH the migrated rows intact
         assertEquals(TrustWrite.CHANGED, t.setReviewed("oc_3", "/p/gamma", null))
         val reloaded = FeishuTrust(f)
-        assertTrue(reloaded.isTrusted("oc_1", "/p/alpha"))
+        assertFalse(reloaded.isTrusted("oc_1", "/p/alpha"))
         assertEquals(FeishuTrustMode.REVIEWED, reloaded.modeFor("oc_3", "/p/gamma"))
         assertTrue("\"version\":3" in f.readText())
     }
 
     @Test
-    fun old_v2_rows_keep_their_restricted_modes_instead_of_upgrading_to_full_auto() {
+    fun old_v2_trusted_requires_new_full_confirmation_while_reviewed_keeps_its_mode() {
         f.writeText(
-            """{"version":2,"chats":{"oc_trusted":{"workdir":"/p/alpha","mode":"TRUSTED","contractVersion":4},"oc_reviewed":{"workdir":"/p/beta","mode":"REVIEWED","purpose":"只做评审","contractVersion":7}}}""",
+            """{"version":2,"chats":{"oc_trusted":{"workdir":"/p/alpha","mode":"TRUSTED","fullAuthorityConfirmed":true,"contractVersion":4},"oc_reviewed":{"workdir":"/p/beta","mode":"REVIEWED","purpose":"只做评审","contractVersion":7}}}""",
         )
         val t = FeishuTrust(f)
-        assertEquals(FeishuTrustMode.TRUSTED, t.modeFor("oc_trusted", "/p/alpha"))
+        assertEquals(FeishuTrustMode.UNTRUSTED, t.modeFor("oc_trusted", "/p/alpha"))
+        assertEquals(FeishuTrustMode.TRUSTED, t.recordFor("oc_trusted")?.mode)
+        assertFalse(t.recordFor("oc_trusted")?.fullAuthorityConfirmed ?: true)
         assertEquals(FeishuTrustMode.REVIEWED, t.modeFor("oc_reviewed", "/p/beta"))
         assertEquals("只做评审", t.recordFor("oc_reviewed")?.purpose)
         assertFalse(t.recordFor("oc_trusted")?.mode == FeishuTrustMode.FULL_AUTO)
@@ -59,17 +62,17 @@ class FeishuTrustTest {
     }
 
     @Test
-    fun v3_full_auto_round_trips_with_its_contract() {
-        val t = FeishuTrust(f)
-        assertEquals(TrustWrite.CHANGED, t.setFullAuto("oc_1", "/p/alpha", "只用于代码评审"))
-        assertTrue("\"version\":3" in f.readText())
-        val writtenRevision = assertNotNull(t.recordFor("oc_1")?.policyRevision)
-        assertTrue(runCatching { java.util.UUID.fromString(writtenRevision) }.isSuccess)
+    fun v3_legacy_full_auto_normalizes_to_trusted_without_rewriting_the_file() {
+        val body =
+            """{"version":3,"chats":{"oc_1":{"workdir":"/p/alpha","mode":"FULL_AUTO","purpose":"只用于代码评审","contractVersion":4,"policyRevision":"11111111-1111-4111-8111-111111111111"}}}"""
+        f.writeText(body)
         val r = FeishuTrust(f).recordFor("oc_1")!!
-        assertEquals(FeishuTrustMode.FULL_AUTO, r.mode)
-        assertEquals("只用于代码评审", r.purpose)
-        assertEquals(writtenRevision, r.policyRevision, "the policy identity must survive daemon restart")
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(f.toPath())))
+        assertEquals(FeishuTrustMode.TRUSTED, r.mode)
+        assertFalse(r.fullAuthorityConfirmed)
+        assertNull(r.purpose, "TRUSTED has no Guardian contract")
+        assertEquals(4, r.contractVersion)
+        assertEquals("11111111-1111-4111-8111-111111111111", r.policyRevision)
+        assertEquals(body, f.readText(), "compatibility reads must not rewrite owner state")
     }
 
     @Test
@@ -111,11 +114,11 @@ class FeishuTrustTest {
     fun repeat_of_the_same_state_is_UNCHANGED_not_a_failure() {
         val t = FeishuTrust(f)
         assertEquals(TrustWrite.CHANGED, t.trust("oc_1", "/p/alpha"))
+        assertTrue(t.recordFor("oc_1")?.fullAuthorityConfirmed == true)
+        assertTrue(FeishuTrust(f).isTrusted("oc_1", "/p/alpha"), "current v3 confirmation must survive restart")
         assertEquals(TrustWrite.UNCHANGED, t.trust("oc_1", "/p/alpha"))
         assertEquals(TrustWrite.CHANGED, t.setReviewed("oc_1", "/p/alpha", "评审"))
         assertEquals(TrustWrite.UNCHANGED, t.setReviewed("oc_1", "/p/alpha", "评审"))
-        assertEquals(TrustWrite.CHANGED, t.setFullAuto("oc_1", "/p/alpha", "评审"))
-        assertEquals(TrustWrite.UNCHANGED, t.setFullAuto("oc_1", "/p/alpha", "评审"))
         assertEquals(TrustWrite.CHANGED, t.untrust("oc_1"))
         assertEquals(TrustWrite.UNCHANGED, t.untrust("oc_1"))
     }

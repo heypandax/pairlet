@@ -137,7 +137,7 @@ class FeishuReviewedFlowTest {
     }
 
     @Test
-    fun preflight_defaults_to_restricted_but_accepts_the_explicit_full_auto_ceiling() {
+    fun preflight_always_uses_the_restricted_reviewed_ceiling() {
         val restricted = FakeReviewer { allow() }
         runBlocking {
             ReviewedPreflight(restricted, audit)
@@ -145,18 +145,6 @@ class FeishuReviewedFlowTest {
         }
         assertEquals(PromptReviewInput.CAPABILITY_CEILING, restricted.lastInput?.capabilityCeiling)
 
-        val broad = FakeReviewer { allow() }
-        runBlocking {
-            ReviewedPreflight(broad, audit).evaluate(
-                snapshot.copy(mode = FeishuTrustMode.FULL_AUTO),
-                "帮我跑测试",
-                "alpha",
-                "ou_member",
-                "om_full_auto",
-                capabilityCeiling = PromptReviewInput.FULL_AUTO_CAPABILITY_CEILING,
-            ) { true }
-        }
-        assertEquals(PromptReviewInput.FULL_AUTO_CAPABILITY_CEILING, broad.lastInput?.capabilityCeiling)
     }
 
     @Test

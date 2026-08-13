@@ -223,10 +223,10 @@ class ConversationOpenCodeOneShotTest {
             )
             try {
                 convo.open(resumeId = null, model = null)
-                assertTrue(convo.sendReviewedFullAutoBridgePrompt("first", reviewId = "review-1"))
+                assertTrue(convo.sendTrustedBridgePrompt("first"))
                 await { frames.any { it is PocketError && it.code == "opencode_startup_timeout" } }
                 // The failed process's pending lease must not permanently block or later authorize a retry.
-                assertTrue(convo.sendReviewedFullAutoBridgePrompt("second", reviewId = "review-2"))
+                assertTrue(convo.sendTrustedBridgePrompt("second"))
                 await { frames.any { it is TurnDone } }
             } finally {
                 convo.close()

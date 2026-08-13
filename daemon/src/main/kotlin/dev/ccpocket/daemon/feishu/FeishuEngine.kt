@@ -33,14 +33,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
-/** Pure chat-facing receipt kept outside the engine so the high-risk promise has direct regression tests. */
-internal fun fullAutoEnabledReply(projectName: String, purpose: String?): String =
-    "✅ 已为「$projectName」显式开启 Guardian 全自动（高风险）。每条请求仍先经 Guardian；" +
-        "高风险转机主审批，低风险将获取整轮 full-auto。\n" +
-        "通过后可运行任意未被拦截的 Bash、MCP、网络工具和子代理，可能访问项目外数据或向外发送数据，常规步骤不再逐个询问。\n" +
-        "人类决策工具及已识别的结构化持久化文件写入仍会询问；Shell、MCP 和未知工具不受后一条保证。\n" +
-        "契约：${purpose ?: FeishuTrust.DEFAULT_CONTRACT}\n" +
-        "换绑到别的项目会自动失效；随时 /untrust 撤销。"
+/** Pure chat-facing receipt kept outside the engine so the broad TRUSTED promise has regression tests. */
+internal fun trustedEnabledReply(projectName: String): String =
+    "✅ 已完全信任「$projectName」：群成员的每条请求会获得整轮 full 权限，不经 Guardian，也不再逐工具等待机主批准。\n" +
+        "本轮可运行未被确定性规则拦截的 Bash、MCP、网络工具和子代理，可能访问项目外数据或向外发送数据。\n" +
+        "需要人类作答或确认的交互工具仍会询问；授权在每轮结束时撤销，由下一条受信请求重新取得。\n" +
+        "换绑到别的项目会自动失效；随时 /untrust 撤销，撤销从下一条请求生效。"
 
 /**
  * The irreversible in-process bridge teardown sequence, isolated so its late-handler boundary can be
@@ -501,25 +499,33 @@ class FeishuEngine(
 
     /** Resolve-and-persist half of a trust command. Called only inside [policyGate], in the SAME critical
      *  section as [FeishuCommands.handle], so `/untrust` cannot be resolved and then overtaken by a stale
-     *  reviewed/full-auto claim before its disk state changes. Replies/audit IO happen after the gate. */
+     *  reviewed/trusted claim before its disk state changes. Replies/audit IO happen after the gate. */
     private fun applyTrustMutation(action: ChatAction.SetTrust, chatId: String): PolicyDispatch {
         val wd = routes.workdirFor(chatId)
         if (action.mode != FeishuTrustMode.UNTRUSTED && wd == null) {
             return PolicyDispatch(ChatAction.Ignore, trustReply = "本群还没有绑定项目，先 /bind 再设置信任模式。")
         }
+        if (action.mode == FeishuTrustMode.FULL_AUTO) {
+            // Legacy enum spelling is readable from old data, but it is not current consent. Even a stale
+            // in-process action must fail closed instead of silently exchanging the old Guardian promise
+            // for unconditional TRUSTED authority.
+            return PolicyDispatch(
+                ChatAction.Ignore,
+                trustReply = "ℹ️ 旧 full-auto 授权不会自动升级。请先发送 /trust 阅读新版权限说明，再发送 /trust confirm。",
+            )
+        }
         val result = when (action.mode) {
             FeishuTrustMode.TRUSTED -> trust.trust(chatId, wd!!)
             FeishuTrustMode.REVIEWED -> trust.setReviewed(chatId, wd!!, action.purpose)
-            FeishuTrustMode.FULL_AUTO -> trust.setFullAuto(chatId, wd!!, action.purpose)
+            FeishuTrustMode.FULL_AUTO -> error("handled above")
             FeishuTrustMode.UNTRUSTED -> trust.untrust(chatId)
         }
         return when (result) {
             TrustWrite.UNCHANGED -> PolicyDispatch(
                 ChatAction.Ignore,
                 trustReply = when (action.mode) {
-                    FeishuTrustMode.TRUSTED -> "本群已经是免审核了。"
+                    FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO -> "本群已经是完全信任了。"
                     FeishuTrustMode.REVIEWED -> "本群已经是智能审核了。用 /trust-status 查看契约。"
-                    FeishuTrustMode.FULL_AUTO -> "本群已经是 Guardian 全自动了。用 /trust-status 查看契约和风险边界。"
                     FeishuTrustMode.UNTRUSTED -> "本群本来就是逐请求审批。"
                 },
             )
@@ -531,24 +537,20 @@ class FeishuEngine(
             )
             TrustWrite.CHANGED -> {
                 val what = when (action.mode) {
-                    FeishuTrustMode.TRUSTED -> "机主开启了免审核：$chatId → ${FeishuRoutes.projectName(wd!!)}（本群成员的请求将直接执行）"
+                    FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO ->
+                        "机主开启了完全信任：$chatId → ${FeishuRoutes.projectName(wd!!)}（每条请求获得整轮 full 权限）"
                     FeishuTrustMode.REVIEWED -> "机主开启了智能审核：$chatId → ${FeishuRoutes.projectName(wd!!)}" +
-                        (if (action.purpose != null) "（自定义契约）" else "（默认契约）")
-                    FeishuTrustMode.FULL_AUTO -> "机主显式开启了 Guardian 全自动：$chatId → ${FeishuRoutes.projectName(wd!!)}" +
                         (if (action.purpose != null) "（自定义契约）" else "（默认契约）")
                     FeishuTrustMode.UNTRUSTED -> "机主关闭了信任模式：$chatId（恢复逐请求审批）"
                 }
                 val confirmation = when (action.mode) {
-                    FeishuTrustMode.TRUSTED ->
-                        "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」免审核：群成员的请求会直接执行，不再逐条等机主批准。\n" +
-                            "仍然拦着的：shell 命令照旧（危险命令直接拒绝，拿不准的仍会弹机主手机），项目目录外的文件读写直接拒绝。\n" +
-                            "换绑到别的项目会自动失效；随时 /untrust 收回。"
+                    FeishuTrustMode.TRUSTED, FeishuTrustMode.FULL_AUTO ->
+                        trustedEnabledReply(FeishuRoutes.projectName(wd!!))
                     FeishuTrustMode.REVIEWED ->
                         "✅ 本群已对「${FeishuRoutes.projectName(wd!!)}」开启智能审核：每条请求先由 AI 判断是否符合群用途且低风险，" +
                             "通过的直接执行（仅限项目内的受限工具），其余仍会发机主审批。\n" +
                             "契约：${action.purpose ?: FeishuTrust.DEFAULT_CONTRACT}\n" +
                             "换绑到别的项目会自动失效；/trust-status 查看，/untrust 收回。"
-                    FeishuTrustMode.FULL_AUTO -> fullAutoEnabledReply(FeishuRoutes.projectName(wd!!), action.purpose)
                     FeishuTrustMode.UNTRUSTED ->
                         "✅ 已恢复逐请求审批：从下一次请求起，本群每次请求都会先发到机主手机。" +
                             "已经交给代理执行的当前一轮不会被中途撤销；如需停止，请在 cc-pocket 会话中点停止。"
@@ -627,20 +629,14 @@ class FeishuEngine(
             // no bind/unbind hook to keep in sync).
             val snapshot = trust.snapshot(chatId, workdir)
             val trusted = !ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.TRUSTED
-            // REVIEWED/FULL_AUTO: the Guardian classifies the vetted prompt BEFORE it reaches the agent.
+            // REVIEWED: the Guardian classifies the vetted prompt BEFORE it reaches the agent.
             // The preflight audits itself; a non-pass (risk, low confidence, prescreen hit, timeout, CLI
             // missing, shadow mode, policy changed mid-review) simply falls through to the owner's card —
             // degraded, not broken. The revalidation closure re-reads the store AFTER the async review, so a
             // /untrust, rebind or contract edit that landed while the model was thinking voids the pass.
-            val guardianMode = snapshot.mode == FeishuTrustMode.REVIEWED || snapshot.mode == FeishuTrustMode.FULL_AUTO
-            val review = if (!ownerBypass && noApprovalEnabled && guardianMode) {
+            val review = if (!ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED) {
                 reviewPreflight.evaluate(
                     snapshot, vetted.text, FeishuRoutes.projectName(workdir), senderOpenId, replyTo.messageId,
-                    capabilityCeiling = if (snapshot.mode == FeishuTrustMode.FULL_AUTO) {
-                        PromptReviewInput.FULL_AUTO_CAPABILITY_CEILING
-                    } else {
-                        PromptReviewInput.CAPABILITY_CEILING
-                    },
                 ) {
                     // §21.4: the trust record alone can't see a mid-review /bind — the routes table is the
                     // half a rebind actually mutates, so the final check reads BOTH: the policy must be
@@ -656,7 +652,6 @@ class FeishuEngine(
                 null
             }
             val reviewedAuto = review?.autoRun == true
-            val fullAutoReviewed = reviewedAuto && snapshot.mode == FeishuTrustMode.FULL_AUTO
 
             // issue #190: approval belongs to THIS request, before requester-controlled text reaches the agent.
             // The configured owner's bypass session keeps its existing direct path; every other request waits on
@@ -704,14 +699,10 @@ class FeishuEngine(
 
             val sent = when {
                 ownerBypass -> core.registry.sendOwnerBypassBridgePrompt(vetted)
-                // Existing TRUSTED records keep the legacy restricted AUTO_TRUSTED ceiling.
-                trusted -> claimStillValid(FeishuTrustMode.TRUSTED) {
+                // TRUSTED is durable broad authority for this exact chat/project; AUTO_TRUSTED remains
+                // prompt-bound and is revoked at the end of this one turn.
+                trusted -> claimStillValid(snapshot.mode) {
                     core.registry.sendTrustedBridgePrompt(vetted)
-                }
-                // Explicit FULL_AUTO plus a low-risk Guardian pass gets the separate broad grant. Existing
-                // REVIEWED records keep the legacy restricted REVIEWER_APPROVED ceiling.
-                fullAutoReviewed -> claimStillValid(FeishuTrustMode.FULL_AUTO) {
-                    core.registry.sendReviewedFullAutoBridgePrompt(vetted, review!!.reviewId)
                 }
                 reviewedAuto -> claimStillValid(FeishuTrustMode.REVIEWED) {
                     core.registry.sendReviewedBridgePrompt(vetted, review!!.reviewId)
@@ -720,8 +711,8 @@ class FeishuEngine(
             }
             if (trusted && sent) {
                 // Ring gets a short excerpt for live debugging; the DURABLE line carries no prompt text.
-                logLine("[trust] 免审核执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)} ← ${prompt.replace('\n', ' ').take(80)}")
-                trustLog.record("${java.time.Instant.now()} ran chat=$chatId 免审核执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)}")
+                logLine("[trust] 完全信任执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)} ← ${prompt.replace('\n', ' ').take(80)}")
+                trustLog.record("${java.time.Instant.now()} ran chat=$chatId 完全信任执行：发起人 ${senderOpenId.ifBlank { "?" }} · ${FeishuRoutes.projectName(workdir)}")
             }
             if (reviewedAuto) {
                 val event = when {
@@ -774,7 +765,7 @@ class FeishuEngine(
         }
     }
 
-    /** A turn-level audit event for a REVIEWED/FULL_AUTO request, correlated by review id (design §10). */
+    /** A turn-level audit event for a REVIEWED request, correlated by review id (design §10). */
     private fun reviewTurnEvent(
         outcome: String,
         review: ReviewedPreflight.Outcome,

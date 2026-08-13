@@ -176,9 +176,9 @@ class FeishuRoutesTest {
         val (_, c) = commands()
         val out = assertIs<ChatAction.Reply>(c.handle("/help", "oc_1", "ou_x")).text
         assertTrue("用法" in out)
-        assertTrue("/full-auto confirm" in out && "显式开启" in out, out)
-        assertTrue("Bash" in out && "MCP" in out && "网络" in out && "子代理" in out, out)
-        assertTrue("项目外/外传" in out && "/untrust" in out, out)
+        assertTrue("/trust confirm" in out && "完全信任" in out && "full 权限" in out, out)
+        assertTrue("/full-auto confirm" in out && "旧命令迁移" in out, out)
+        assertTrue("/untrust" in out, out)
     }
 
     @Test
@@ -212,8 +212,18 @@ class FeishuRoutesTest {
         records,
     )
 
-    private fun record(mode: FeishuTrustMode, workdir: String = "/p/alpha", purpose: String? = null) =
-        FeishuTrustRecord(workdir = workdir, mode = mode, purpose = purpose, contractVersion = 1)
+    private fun record(
+        mode: FeishuTrustMode,
+        workdir: String = "/p/alpha",
+        purpose: String? = null,
+        fullAuthorityConfirmed: Boolean = mode == FeishuTrustMode.TRUSTED,
+    ) = FeishuTrustRecord(
+        workdir = workdir,
+        mode = mode,
+        purpose = purpose,
+        fullAuthorityConfirmed = fullAuthorityConfirmed,
+        contractVersion = 1,
+    )
 
     @Test
     fun trust_is_the_machine_owners_alone_never_the_group_owners() {
@@ -225,50 +235,51 @@ class FeishuRoutesTest {
             r, workdirs, adminOpenId = "ou_admin", chatOwnerOf = { "ou_groupowner" },
             noApprovalEnabled = true,
         )
-        for (cmd in listOf("/trust", "/review", "/review 只做评审", "/full-auto", "/full-auto confirm")) {
+        for (cmd in listOf("/trust", "/trust confirm", "/review", "/review 只做评审", "/full-auto", "/full-auto confirm")) {
             assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_groupowner")).text)
             assertTrue("只有机主" in assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_stranger")).text)
         }
-        assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin"))
+        assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin"))
+        assertIs<ChatAction.SetTrust>(c.handle("/trust confirm", "oc_1", "ou_admin"))
         assertIs<ChatAction.SetTrust>(c.handle("/review", "oc_1", "ou_admin"))
-        assertIs<ChatAction.SetTrust>(c.handle("/full-auto confirm", "oc_1", "ou_admin"))
+        assertIs<ChatAction.Reply>(c.handle("/full-auto confirm", "oc_1", "ou_admin"))
     }
 
     @Test
     fun trust_modes_refuse_until_the_owner_enabled_them_on_the_machine() {
         val (r, c, _) = trustCommands(masterOn = false)
         r.bind("oc_1", "/p/alpha")
-        for (cmd in listOf("/trust", "/review 只做评审", "/full-auto confirm 只跑测试")) {
+        for (cmd in listOf("/trust confirm", "/review 只做评审")) {
             val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_admin")).text
             assertTrue("桌面端" in out, out) // points at the master switch instead of silently doing nothing
-            if (cmd.startsWith("/full-auto")) assertTrue("/full-auto confirm 只跑测试" in out, out)
         }
+        assertTrue("已合并" in assertIs<ChatAction.Reply>(c.handle("/full-auto confirm", "oc_1", "ou_admin")).text)
     }
 
     @Test
     fun trust_needs_an_admin_and_echoes_the_callers_open_id_to_bootstrap_one() {
         val (r, c, _) = trustCommands(admin = null)
         r.bind("oc_1", "/p/alpha")
-        for (cmd in listOf("/trust", "/review", "/full-auto", "/full-auto confirm")) {
+        for (cmd in listOf("/trust", "/trust confirm", "/review", "/full-auto", "/full-auto confirm")) {
             val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_me")).text
             assertTrue("ou_me" in out, out)
         }
     }
 
     @Test
-    fun full_auto_without_exact_confirm_only_warns_and_cannot_reach_persistence() {
+    fun legacy_full_auto_without_exact_confirm_only_explains_migration_and_cannot_reach_persistence() {
         val (r, c, records) = trustCommands()
         r.bind("oc_1", "/p/alpha")
         for (cmd in listOf("/full-auto", "/full-auto confirmed", "/full-auto confirm-now")) {
             val out = assertIs<ChatAction.Reply>(c.handle(cmd, "oc_1", "ou_admin"), cmd).text
-            assertTrue("高风险" in out && "尚未开启任何状态" in out, out)
-            assertTrue("@机器人 /full-auto confirm" in out, "warning must carry the exact confirmation command: $out")
-            assertTrue(records.isEmpty(), "a warning-only command must not change any trust record")
+            assertTrue("已合并" in out && "/trust confirm" in out, out)
+            assertTrue("@机器人 /full-auto confirm" in out, "compatibility help must carry the exact old command: $out")
+            assertTrue(records.isEmpty(), "an information-only command must not change any trust record")
         }
     }
 
     @Test
-    fun full_auto_confirm_is_owner_only_and_carries_an_optional_contract() {
+    fun legacy_full_auto_confirm_is_owner_only_and_read_only() {
         val (r, c, records) = trustCommands()
         r.bind("oc_1", "/p/alpha")
 
@@ -277,37 +288,35 @@ class FeishuRoutesTest {
         )
         assertTrue(records.isEmpty(), "a non-owner refusal cannot mutate trust")
 
-        assertIs<ChatAction.SetTrust>(c.handle("/full-auto confirm 只跑测试", "oc_1", "ou_admin")).let {
-            assertEquals(FeishuTrustMode.FULL_AUTO, it.mode)
-            assertEquals("只跑测试", it.purpose)
-        }
-        assertIs<ChatAction.SetTrust>(c.handle("/full-auto confirm", "oc_1", "ou_admin")).let {
-            assertEquals(FeishuTrustMode.FULL_AUTO, it.mode)
-            assertNull(it.purpose)
-        }
+        assertTrue("不会静默扩大授权" in assertIs<ChatAction.Reply>(
+            c.handle("/full-auto confirm 只跑测试", "oc_1", "ou_admin"),
+        ).text)
+        assertIs<ChatAction.Reply>(c.handle("/full-auto confirm", "oc_1", "ou_admin"))
+        assertTrue(records.isEmpty())
     }
 
     @Test
-    fun full_auto_success_receipt_states_broad_authority_limited_holds_and_revocation() {
-        val out = fullAutoEnabledReply("alpha", "只跑测试")
-        assertTrue("显式开启" in out && "Guardian" in out && "full-auto" in out, out)
-        assertTrue("任意未被拦截" in out && "Bash" in out && "MCP" in out && "网络" in out && "子代理" in out, out)
+    fun trusted_success_receipt_states_broad_turn_authority_and_revocation() {
+        val out = trustedEnabledReply("alpha")
+        assertTrue("完全信任" in out && "full 权限" in out && "不经 Guardian" in out, out)
+        assertTrue("未被确定性规则拦截" in out && "Bash" in out && "MCP" in out && "网络" in out && "子代理" in out, out)
         assertTrue("项目外" in out && "向外发送" in out, out)
-        assertTrue("人类决策" in out && "结构化持久化" in out && "Shell、MCP 和未知工具不受" in out, out)
-        assertTrue("只跑测试" in out && "/untrust" in out, out)
+        assertTrue("人类作答或确认" in out && "每轮结束时撤销" in out, out)
+        assertTrue("/untrust" in out, out)
         assertFalse("/p/alpha" in out)
     }
 
     @Test
     fun trust_requires_a_bound_project_and_reports_a_no_op_instead_of_re_trusting() {
         val (r, c, records) = trustCommands()
-        assertTrue("绑定" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
+        assertTrue("尚未开启" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
+        assertTrue("绑定" in assertIs<ChatAction.Reply>(c.handle("/trust confirm", "oc_1", "ou_admin")).text)
         r.bind("oc_1", "/p/alpha")
-        assertIs<ChatAction.SetTrust>(c.handle("/trust", "oc_1", "ou_admin")).let {
+        assertIs<ChatAction.SetTrust>(c.handle("/trust confirm", "oc_1", "ou_admin")).let {
             assertEquals(FeishuTrustMode.TRUSTED, it.mode)
         }
         records["oc_1"] = record(FeishuTrustMode.TRUSTED)
-        assertTrue("已经是免审核" in assertIs<ChatAction.Reply>(c.handle("/trust", "oc_1", "ou_admin")).text)
+        assertTrue("已经是完全信任" in assertIs<ChatAction.Reply>(c.handle("/trust confirm", "oc_1", "ou_admin")).text)
         // …but a TRUSTED chat may still be MOVED to reviewed (and back) — a mode change is not a no-op
         assertIs<ChatAction.SetTrust>(c.handle("/review", "oc_1", "ou_admin")).let {
             assertEquals(FeishuTrustMode.REVIEWED, it.mode)
@@ -362,14 +371,20 @@ class FeishuRoutesTest {
         val out = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
         assertTrue("智能审核" in out && "只做评审" in out && "3" in out, out)
         assertFalse("/p/alpha" in out, "chat-facing text must not leak machine paths: $out")
-        // explicit full-auto: status must make the broad, non-sandbox authority and revocation visible
-        records["oc_1"] = FeishuTrustRecord("/p/alpha", FeishuTrustMode.FULL_AUTO, "只跑测试", contractVersion = 4)
+        // trusted: status must make the broad authority and revocation visible
+        records["oc_1"] = FeishuTrustRecord(
+            "/p/alpha", FeishuTrustMode.TRUSTED, fullAuthorityConfirmed = true, contractVersion = 4,
+        )
         val full = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
-        assertTrue("Guardian 全自动" in full && "高风险" in full, full)
+        assertTrue("完全信任" in full && "不经 Guardian" in full && "full 权限" in full, full)
         assertTrue("Bash" in full && "MCP" in full && "网络" in full && "子代理" in full, full)
         assertTrue("项目外" in full && "向外发送" in full && "/untrust" in full, full)
-        assertTrue("持久化" in full && "Shell/MCP/未知工具不受" in full, full)
+        assertTrue("人类作答或确认" in full && "下一条请求" in full, full)
         assertFalse("/p/alpha" in full, "chat-facing text must not leak machine paths: $full")
+        // a historical TRUSTED row has not consented to the new broad contract and remains fail-closed
+        records["oc_1"] = record(FeishuTrustMode.TRUSTED, fullAuthorityConfirmed = false)
+        val legacy = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text
+        assertTrue("旧信任待重新确认" in legacy && "/trust" in legacy && "每条请求" in legacy, legacy)
         // a stale record for another project reads as not in effect
         records["oc_1"] = record(FeishuTrustMode.TRUSTED, workdir = "/p/gamma")
         val stale = assertIs<ChatAction.Reply>(c.handle("/trust-status", "oc_1", "ou_stranger")).text

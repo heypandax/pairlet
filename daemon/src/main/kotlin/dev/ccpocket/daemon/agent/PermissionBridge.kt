@@ -144,10 +144,9 @@ class PermissionBridge(
             return
         }
         // ASK is the classifier's fallback verdict for Bash syntax it cannot prove safe. Under the owner's
-        // three-rule model (issue #233) it gates UNAUTHORIZED and legacy-confined turns. A turn the owner
-        // confirmed (their own dedicated session; a request they read and approved), or a Guardian-passed
-        // request from the separately confirmed FULL_AUTO mode, runs its shell without a per-command card.
-        // Existing TRUSTED/REVIEWED records retain ASK here, so upgrading cannot silently widen them.
+        // three-rule model (issue #233) it gates UNAUTHORIZED and Guardian-reviewed turns. A turn the owner
+        // confirmed — their own dedicated session, a request they read and approved, or a request from a
+        // chat/project they durably TRUSTED — runs its shell without a per-command card.
         val bridgeBashNeedsAsk = bridgeBash == BridgeCommandPolicy.Verdict.ASK
         // M3: feed the sequence ledger on every ATTEMPT that got past the pre-grant checks (intent matters
         // for the radar) and keep the assessment for the ask below. Deterministic + advisory: no
@@ -159,36 +158,36 @@ class PermissionBridge(
         )
         val grant = if (bridgeSession) bridgeGrant() else BridgeGrant.NONE
         // OWNER BYPASS (issue #91 / #233 rule ①): the configured owner's dedicated bridge session runs
-        // full-auto — the owner asked in the chat, that IS the confirmation, on their own machine. Authority
+        // full — the owner asked in the chat, that IS the confirmation, on their own machine. Authority
         // is nevertheless turn-scoped: cancel revokes OWNER_BYPASS under the same lock as this allow response,
         // so a buffered classifier-ASK tool arriving afterwards falls back to the phone instead of executing.
-        if (bridgeSession && ownerBypassSession && grant == BridgeGrant.OWNER_BYPASS && !meta.neverRemember) {
+        if (
+            bridgeSession && ownerBypassSession && grant == BridgeGrant.OWNER_BYPASS &&
+            !meta.neverRemember && ToolMetadata.broadGrantEligible(ev.toolName)
+        ) {
             if (useBridgeGrant(grant) {
                     coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-bypass-session")
                     respond(ev.requestId, true, false, ev.input, null, null)
                 }) return
         }
-        // FULL REQUEST AUTHORIZATION (issue #190 / #233 rule ②): the owner read and approved this exact
-        // externally submitted request before it reached the agent, so the turn runs full-auto — including
-        // the Bash the classifier could not prove safe: the owner's reading of the prompt IS the wall.
+        // FULL REQUEST AUTHORIZATION (issue #190 / #233 rules ②+③): either the owner read and approved this
+        // exact externally submitted request, or durably TRUSTED its exact chat/project. The turn runs full —
+        // including Bash the classifier could not prove safe: the machine owner's authorization IS the wall.
         // What it does not skip (P1-8): the structured-file workdir check and any literal Bash DENY above.
         // Human-decision tools remain interactive because their decision/answer rides the verdict. The
         // supplier is trusted in-process state, revoked when the turn ends.
-        if (grant == BridgeGrant.OWNER_APPROVED && !meta.neverRemember) {
+        if (
+            (grant == BridgeGrant.OWNER_APPROVED || grant == BridgeGrant.AUTO_TRUSTED) &&
+            !meta.neverRemember && ToolMetadata.broadGrantEligible(ev.toolName)
+        ) {
             if (useBridgeGrant(grant) {
-                    coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "owner-approved-request")
-                    respond(ev.requestId, true, false, ev.input, null, null)
-                }) return
-        }
-        // EXPLICIT FULL_AUTO (issue #233 rule ③): this grant can only be minted after the owner confirms
-        // FULL_AUTO for the exact chat/project and Guardian passes this exact request. It intentionally skips
-        // ordinary per-tool cards for Bash, MCP/network, Task and unknown tools. This is broad authority, not
-        // confinement: only the pre-grant checks above, recognized structured persistence targets and
-        // human-decision tools remain. Bash/MCP/unknown schemas cannot claim that persistence hold. Existing
-        // durable TRUSTED/REVIEWED modes never reach this branch.
-        if (grant == BridgeGrant.REVIEWER_FULL_AUTO && !meta.neverRemember && fullAutoMayRun(ev.toolName, ev.input)) {
-            if (useBridgeGrant(grant) {
-                    coordinator.recordAuto(ApprovalSource.AGENT, convoId, ev.toolName, meta.rule, "reviewer-full-auto-request")
+                    coordinator.recordAuto(
+                        ApprovalSource.AGENT,
+                        convoId,
+                        ev.toolName,
+                        meta.rule,
+                        if (grant == BridgeGrant.AUTO_TRUSTED) "trusted-chat-full-turn" else "owner-approved-request",
+                    )
                     respond(ev.requestId, true, false, ev.input, null, null)
                 }) return
         }
@@ -199,16 +198,14 @@ class PermissionBridge(
             respond(ev.requestId, true, false, ev.input, null, null)
             return
         }
-        // LEGACY MACHINE-CONFINED GRANTS (issue #198 AUTO_TRUSTED + reviewed-trust REVIEWER_APPROVED):
-        // preserve their original closed allow-list across the #233 upgrade. Nobody opted these durable
-        // records into arbitrary shell/MCP/network access, so classifier-ASK Bash and unknown tools still
-        // reach the owner. The shared helper also requires a resolvable in-workdir target and holds writes
-        // that would persist into the owner's later execution. One judgement for both modes avoids drift.
+        // GUARDIAN-REVIEWED GRANT: the Reviewer did not become the machine owner. Keep its closed allow-list;
+        // classifier-ASK Bash and unknown tools still reach the owner. The helper also requires a resolvable
+        // in-workdir target and holds writes that would persist into the owner's later execution.
         if (grant.machineConfined && !meta.neverRemember && !bridgeBashNeedsAsk && machineConfinedMayRun(ev.toolName, ev.input)) {
             if (useBridgeGrant(grant) {
                     coordinator.recordAuto(
                         ApprovalSource.AGENT, convoId, ev.toolName, meta.rule,
-                        if (grant == BridgeGrant.AUTO_TRUSTED) "auto-trusted-chat" else "reviewer-approved-request",
+                        "reviewer-approved-request",
                     )
                     respond(ev.requestId, true, false, ev.input, null, null)
                 }) return
@@ -438,23 +435,6 @@ class PermissionBridge(
             PathScope.canonical(absolute) ?: return false
         }
         return canonicalTargets.none { BridgeGrant.executesForTheOwner(it) }
-    }
-
-    /**
-     * The sole extra hold inside explicit FULL_AUTO: when a tool carries a structured filesystem-path key
-     * the daemon recognizes and the canonical target would execute for the owner later, ask before creating
-     * persistence. Key-shape, not the current exact tool name, prevents a renamed future writer from silently
-     * bypassing the promise. Bash and tools whose schemas carry no recognized path key cannot be confined by
-     * this helper and remain part of the explicitly accepted broad authority; the warning says so.
-     */
-    private fun fullAutoMayRun(tool: String, input: JsonObject?): Boolean {
-        val targets = ToolMetadata.pathTargets(tool, input)
-        if (targets.isEmpty()) return tool !in BridgeGrant.SPECIFIC_FILE_TOOLS
-        return targets.none { target ->
-            val absolute = if (File(target).isAbsolute || workdir == null) target else File(workdir, target).path
-            val canonical = PathScope.canonical(absolute) ?: return false
-            BridgeGrant.executesForTheOwner(canonical)
-        }
     }
 
     /** Is [tool] a write tool this conversation's Handoff Grant refuses outright (§8.3)? Fail-closed

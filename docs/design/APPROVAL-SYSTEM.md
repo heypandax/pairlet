@@ -1,17 +1,17 @@
 # cc-pocket 统一审批系统设计
 
-> **桥接全自动补充（2026-08-12，issue #233）**：机主自己的 bridge turn，以及机主已经阅读并批准的单次
-> 请求，按既有授权语义获得一回合 full-auto。飞书群另增必须由机主精确执行
-> `/full-auto confirm [purpose]` 才能建立的 `FeishuTrustMode.FULL_AUTO`；该模式仍逐请求先过 Guardian，只有
-> 明确低风险且符合用途的请求才获得一回合 `BridgeGrant.REVIEWER_FULL_AUTO`。旧 `TRUSTED`／`REVIEWED`
-> 记录及其 `AUTO_TRUSTED`／`REVIEWER_APPROVED` 封闭工具白名单原样保留，升级绝不静默扩权。
+> **桥接权限最终语义（2026-08-12，issue #233）**：机主自己的 bridge turn、机主已经阅读并批准的单次
+> 请求，以及机主对精确 `(chatId, workdir)` 设置的 `TRUSTED`，都获得一回合 full 权限，不再逐工具询问。
+> `TRUSTED` 是机主的长期授权，但执行 Grant 仍按 prompt/turn 临时签发并在终态撤销。`REVIEWED` 只由
+> Guardian 逐请求分类，通过后仍使用 `REVIEWER_APPROVED` 的项目内封闭工具上限；Guardian 不能签发 full。
+> 产品只有 `UNTRUSTED / REVIEWED / TRUSTED` 三档。
 >
-> 这里的 full-auto 是高风险、显式 opt-in，不是沙箱或“只在项目内”的安全保证：Bash（包括分类器 `ASK`）、
-> MCP、网络、`Task` 和未知工具可不经逐工具卡片运行。已知 Bash `DENY` 只是一层 best-effort
-> defense-in-depth；workdir 检查只覆盖 daemon 能识别路径字段的结构化工具，不能约束 shell、MCP 或未知工具的
-> 实际副作用。对 `REVIEWER_FULL_AUTO`，已知 specific-file 工具的不可解析目标与 canonical
-> `executesForTheOwner` 目标仍询问；这个 hold 不覆盖 Bash、MCP、`Task` 或未知 schema。
-> `ExitPlanMode`、`AskUserQuestion` 等人类决策工具仍必须询问。完整边界见【§19】。
+> 这里的 full 权限不是沙箱或“只在项目内”的安全保证：Bash（包括分类器 `ASK`）、
+> MCP、网络、`Task` 和显式列入 broad 工具集的工具可不经逐工具卡片运行；未来未识别工具仍回到 ASK。已知 Bash
+> `DENY` 只是一层 best-effort defense-in-depth；workdir 检查只覆盖 daemon 能识别路径字段的结构化工具，不能约束 shell、MCP 或未知 schema 的
+> 实际副作用。`ExitPlanMode`、`AskUserQuestion` 等需要人类给出决定或答案的工具仍必须询问。完整边界见【§19】。
+> 已写入 v3 的 `FULL_AUTO` 及旧 `TRUSTED` 记录不会静默获得新版 full：它们先按逐请求审批运行，直到机主
+> 阅读 `/trust` 风险说明并精确发送 `/trust confirm`。所有 `/full-auto*` 旧命令只显示迁移说明，不写授权。
 >
 > 状态：**最终方案，作为后续实现与评审的唯一依据**（2026-08-02）。
 > **M1／M2／M3／M5 已实现并随 merge `f134f44` 合入 `feat/session-handoff-collaborator`**（同日），
@@ -94,8 +94,8 @@ cc-pocket 不应继续把审批理解成“Agent 每调用一次工具，手机�
 | 非 changed-set 文件导出到手机 | `FileExportService` | owner 设备 | changed file 直接读；其他文件逐个确认；BYPASS 免审 | 只允许当前 workdir 内文件，one-off；这是独立 Pending Gate |
 | 通用 headless Bridge 的工具请求 | Bridge Session 的 `PermissionBridge` | owner；bridge 结构上不能收/回 verdict | `BridgeCommandPolicy`、bridge allowedCommands、tier | 默认安全但割裂；Bridge 看不到 ask，依赖 push 和 owner inbox |
 | 飞书请求级审批 | `BridgeRequestApprovalGate` | owner | 每个请求 one-off | owner 批准 prompt 后得到 `OWNER_APPROVED`，该 turn 不再逐工具询问 |
-| 飞书旧信任模式 | `FeishuTrust` + `AUTO_TRUSTED` / `REVIEWER_APPROVED` | owner 预先授权；`REVIEWED` 还逐请求过 Guardian | 旧记录保持封闭工具白名单，越界工具仍找 owner | 升级不能把既有 `TRUSTED/REVIEWED` 静默变成 full-auto |
-| 飞书显式全自动 | `FeishuTrustMode.FULL_AUTO` + `REVIEWER_FULL_AUTO` | owner 精确确认模式；Guardian 逐请求只放明确低风险 | 通过后仅本 turn 跳过普通工具卡 | 高风险 opt-in；不是 shell、网络或未知工具的沙箱 |
+| 飞书完全信任 | `FeishuTrust` + `AUTO_TRUSTED` | owner 为精确群/项目预先授权 | 每条请求获得 prompt-bound 的一回合 full 权限 | 不经 Guardian；不是 shell、MCP 或网络副作用的沙箱；未来未识别工具 ASK |
+| 飞书智能审核 | `FeishuTrust` + `REVIEWER_APPROVED` | owner 预设用途；Guardian 逐请求只放明确低风险 | 通过后仅项目内封闭工具免问，其余仍找 owner | Guardian 是分类器，不是 full 权限主体 |
 | 飞书 owner 专属会话 | `ownerBypassSession` 资格 + `OWNER_BYPASS` Grant | 无逐动作审批 | owner 身份消息形成一回合 full-auto | 取消先撤销 turn Grant；仍经过结构化路径检查、best-effort Bash DENY 和人类决策门 |
 | Guest Folder Share | `GuestCaps / GuestGuard / PermissionBridge` | guest 自己 | share tier 上限；guest Session allowRules | owner 只在发 Share 时给能力上限，运行时 guest 自批 |
 | Session Handoff | `CollaboratorGuard / HandoffGuard / PermissionBridge` | 当前 recipient 自批；未来高风险可转 owner | REVIEW 写工具硬拒绝；Bash 当前逐次 ASK 目标 | Controller 与 Approver 混在 lease gate；Bash neverRemember 需 daemon 强制 |
@@ -439,14 +439,15 @@ Profile 先受来源 ceiling 限制，再映射到 backend：
 |---|---|---|---|
 | Owner interactive | Full Control | 当前 owner 设备；高风险可要求生物识别 | 可创建 Saved Policy |
 | Schedule | Project Auto | owner | 创建时必须确认 Task Contract；不允许隐式 Full Control |
-| Generic Bridge / Feishu | 默认 Project Auto；仅显式 `FULL_AUTO` 可形成单 turn full-auto | owner | bridge 永远不能回 verdict；旧 `AUTO_TRUSTED/REVIEWER_APPROVED` 保持封闭上限；`FULL_AUTO` 必须机主确认且逐请求经 Guardian |
+| Generic Bridge / Feishu | 默认 Project Auto；机主逐请求批准或对精确群/项目设 `TRUSTED` 时形成单 turn full | owner | bridge 永远不能回 verdict；`REVIEWED` 的 Guardian pass 仍为封闭上限；`TRUSTED` 不经 Guardian |
 | Guest Folder Share | share tier 对应上限，永不 Full | guest；owner 可配置高风险升级 | roots、expiry 与 clean-room 固定 |
 | Handoff REVIEW | Guided/Balanced 的只读变体 | recipient；HIGH/UNKNOWN 转 owner | 结构化写硬拒绝；shell 不能 remember |
 | Handoff CONTINUE（后续） | Project Auto 以下 | recipient；外部/高风险 owner | 只在 allowedRoots 写入 |
 
 来源 ceiling 由 daemon 的 credential / Handoff Grant 得出，客户端和 Agent 都不能声明更高档位。
 
-issue #233 明确保留 Bridge 的 `OWNER_APPROVED = 本 turn full-auto`：机主已经阅读并批准了这一条外部请求，
+issue #233 明确保留 Bridge 的 `OWNER_APPROVED = 本 turn full`，并令 `AUTO_TRUSTED` 使用同一能力：机主已在
+逐请求卡片或精确群/项目策略中完成确认，
 因此普通工具不再二次逐步询问。它不是跨 turn 的 standing rule，也不由客户端或外部 bridge 自报；turn 结束、
 发送失败、取消、报错或会话关闭即撤销。daemon 仍先执行可判定的结构化路径检查和 Bash `DENY` 筛查，但必须
 诚实说明后者只是 best-effort，前者也不覆盖 shell、MCP、网络和未知工具。未来若改成结构化 Task Grant，必须作为
@@ -1265,8 +1266,8 @@ prompt 或 secret，锁屏不提供直接批准。
   `bridge_bash_ask_cannot_be_promoted_by_owner_or_mode_bypasses`＋`BridgeCommandPolicyTest`——通过。
 
   **后续语义（issue #233）**：以上是 2026-08-02 的落地快照，不再代表所有当前分支。机主专属 turn、
-  `OWNER_APPROVED` 和显式 `REVIEWER_FULL_AUTO` 现在可以越过 Bash 分类器的 `ASK`；旧
-  `AUTO_TRUSTED/REVIEWER_APPROVED` 仍不能。字面命中的 `DENY` 仍先拒绝，但正则分类器无法完整理解 shell，
+  `OWNER_APPROVED` 和机主长期确认的 `AUTO_TRUSTED` 现在可以越过 Bash 分类器的 `ASK`；
+  `REVIEWER_APPROVED` 仍不能。字面命中的 `DENY` 仍先拒绝，但正则分类器无法完整理解 shell，
   因而只是 defense-in-depth，不得再称为不可绕过的“硬墙”。当前完整矩阵以【§19】为准。
 - **P2-1** 手机 `PermissionSheet`：本地倒计时归零仅在 `grantOptions==null`（旧 daemon）才是终态，
   grant-aware 卡以 daemon 的 `AskWithdrawn(TIMED_OUT)` 为准；桌面心跳以 `LocalWindowInfo.isWindowFocused`
@@ -1292,85 +1293,70 @@ prompt 或 secret，锁屏不提供直接批准。
 遗留（下一轮）：P2-2 App 历史页；P2-4 iOS category 客户端处理；
 §18.3-7 的 `SwitchScrollLandingTest` 偶发未再复现（本轮未改动该测试）。
 
-## 19. issue #233：Bridge 一回合 Full Auto 与兼容边界（2026-08-12）
+## 19. issue #233：Bridge 一回合 Full 权限与三档信任（2026-08-12）
 
-本节记录当前实现的窄范围策略例外。它不把通用 Bridge 来源整体提升为 Full Control，也不改变 Guest、Handoff、
-Schedule 或普通 owner Session 的授权模型。
+本节是当前实现规范。它不把通用 Bridge、Guest、Handoff、Schedule 或普通 owner Session 整体提升为
+Full Control；只定义经过机器所有者确认的请求怎样获得一回合权限。
 
 ### 19.1 授权来源与一回合 Grant
 
 | 来源事实 | turn 内授权 | 是否逐请求 Guardian | 普通工具是否逐步询问 |
 |---|---|---|---|
-| 无授权的外部请求 | `BridgeGrant.NONE` | 否 | 是；Bash 先经分类器 |
-| 机主自己的专属 bridge 会话 | `BridgeGrant.OWNER_BYPASS` | 否 | 否；本条机主消息本身就是确认，仅覆盖该 turn |
+| 无授权的外部请求 | `BridgeGrant.NONE` | 否 | 是；先审批整条请求 |
+| 机主自己的专属 bridge 会话 | `BridgeGrant.OWNER_BYPASS` | 否 | 否；本条机主消息就是确认 |
 | 机主阅读并批准这一条请求 | `BridgeGrant.OWNER_APPROVED` | 否 | 否；仅覆盖该 turn |
-| 旧 `TRUSTED` 记录 | `BridgeGrant.AUTO_TRUSTED` | 否 | 只对原封闭白名单免问 |
-| 旧 `REVIEWED` 记录且 Guardian 通过 | `BridgeGrant.REVIEWER_APPROVED` | 是 | 只对与 `AUTO_TRUSTED` 相同的封闭白名单免问 |
-| 机主显式确认 `FULL_AUTO`，且本请求 Guardian 通过 | `BridgeGrant.REVIEWER_FULL_AUTO` | 是 | 通常否；known specific-file hold 和人类决策工具例外 |
+| 机主对精确群/项目设置 `TRUSTED` | `BridgeGrant.AUTO_TRUSTED` | 否 | 否；每条 prompt 重新签发一回合 full Grant |
+| `REVIEWED` 且 Guardian 通过 | `BridgeGrant.REVIEWER_APPROVED` | 是 | 仅项目内封闭工具免问；越界能力仍找机主 |
 
-所有 `BridgeGrant` 都是 daemon 进程内的一回合状态，不是 wire 能力。对应 prompt handoff 只创建与 ledger
-条目绑定的 pending lease；只有 backend 精确回放该 top-level prompt（one-shot 为 `SessionInit`）才转 active。
-`TurnResult` 只撤销 active，取消/进程丢失/发送失败/conversation 关闭同时清 pending 与 active。这样上一 turn
-的 phantom result/迟到工具请求不能借用下一 prompt 的授权；grant 也不能跨 prompt、turn 或会话复用。
+机主确认分两种：逐请求卡片确认，或 `/trust confirm` 对精确 `(chatId, workdir)` 的长期确认。两种都是机器所有者的
+授权，因此执行能力相同；区别只在确认频率。Guardian 不是权限主体，所以 `REVIEWED` 不获得 full。
 
-旧 `TRUSTED/REVIEWED` 必须继续共用 `BridgeGrant.autoRunnable` 的封闭判断。分类器 `ASK` 的 Bash、MCP、
-网络工具、`Task` 与未知工具仍转机主；具名文件工具无法解析目标、或结构化目标命中
-`executesForTheOwner` 时也仍转机主。`FULL_AUTO` 是新枚举和新 Grant，不能借复用旧值来实现，否则升级会把
-过去按较窄承诺创建的持久记录静默扩权。
+所有 `BridgeGrant` 都是 daemon 进程内的一回合状态，不是 wire 能力。prompt handoff 先创建与 ledger 条目绑定的
+pending lease；只有 backend 精确回放该 top-level prompt（one-shot 为 `SessionInit`）才转 active。
+`TurnResult` 撤销 active；取消、进程丢失、发送失败和 conversation 关闭同时清 pending/active。上一 turn 的
+phantom result 或迟到工具请求不能借下一 prompt 的授权，Grant 也不能跨 prompt、turn 或会话复用。
 
 ### 19.2 PermissionBridge 的真实检查顺序
 
-对 bridge-origin 工具请求，当前关键顺序是：
+对 bridge-origin 工具请求，关键顺序是：
 
 1. Handoff 等来源自己的确定性只读／能力上限；
 2. daemon 能从已知字段提取到的结构化文件目标做 canonical workdir containment，越界则拒绝；
-3. Bash 经过 `BridgeCommandPolicy`；字面命中已知 destructive/high-risk 模式的 `DENY` 先拒绝；
-4. `OWNER_BYPASS` 或 `OWNER_APPROVED` 自动允许非人类决策工具；两者都在取消时先原子撤销再中断 backend；
-5. `REVIEWER_FULL_AUTO` 对已知 specific-file 工具先检查目标可解析、可 canonicalize 且不命中
-   `executesForTheOwner`；命中则转人工，其余普通执行工具自动允许；
+3. Bash 经 `BridgeCommandPolicy`；字面命中已知 destructive/high-risk 模式的 `DENY` 先拒绝；
+4. `OWNER_BYPASS` 自动允许非人类决策工具；
+5. `OWNER_APPROVED` 或 `AUTO_TRUSTED` 自动允许显式 broad 集中的非人类决策工具，包括 classifier `ASK` 的
+   Bash、MCP、网络、`Task` 和项目内持久化文件；未来未识别的顶层工具回到 ASK；
 6. Bash 明确 `ALLOW` 的 fast path；
-7. 旧 `AUTO_TRUSTED/REVIEWER_APPROVED` 只匹配封闭 `autoRunnable`，并继续检查可解析目标与
+7. `REVIEWER_APPROVED` 只匹配封闭 `autoRunnable`，并检查目标可解析、canonical containment 与
    `executesForTheOwner`；
 8. 其余 mode、remembered rule、Task Grant 或人工卡按原流程处理。
 
-`ExitPlanMode`、`AskUserQuestion` 等 `neverRemember` 工具表达的是人类方案决定或答案，不是普通执行许可；
-它们在 owner bypass、`OWNER_APPROVED` 和 `REVIEWER_FULL_AUTO` 下仍到人。
+`ExitPlanMode`、`AskUserQuestion` 等 `neverRemember` 工具承载的是人类方案决定或答案，不是普通执行许可；即使在
+full turn 下也仍到人。取消会在同一同步点先撤销本 turn Grant，再中断 backend，防止迟到工具继续消费授权。
 
-必须避免把第 2、3 步合称为完整 hard wall：
+第 2、3 步不能称为完整沙箱：workdir containment 只约束 daemon 认识路径字段的结构化请求；Bash 分类器不是
+shell AST；MCP、网络、`Task` 和未来工具可能没有 daemon 认识的路径字段。因此 `/trust` 确认前文案必须说明可能访问
+项目外数据或向外发送数据。机主选择的是便利与信任，不是 OS 级隔离。
 
-- workdir containment 只约束 daemon 能识别 `file_path`、`path`、`notebook_path` 等结构化目标的工具请求；
-- Bash 命令文本不是 AST，`DENY` 模式只能挡住已识别写法，混淆、间接脚本或工具内部副作用可能不命中；
-- MCP、网络、`Task` 和未来未知工具可能不携带 daemon 认识的路径字段；在 broad full-auto turn 中它们不因
-  “绑定了 workdir”而获得隔离；
-- “具名文件目标必须可解析”与 `executesForTheOwner` hold 同时用于旧 machine-confined Grant 和
-  `REVIEWER_FULL_AUTO`，但后者只检查 daemon 已知 schema 的 specific-file 工具；Bash、MCP、`Task` 和未知
-  工具可产生同类持久化副作用而不触发这个 hold。
+### 19.3 飞书三档命令与 schema v3 兼容
 
-因此 `FULL_AUTO` 的产品文案必须直接写明：该群的低风险请求一旦获 Guardian 通过，可能在没有逐步卡片的情况下
-运行 shell、访问网络、调用 MCP、派生子 Agent 和调用尚未识别的工具；启用者承担 Guardian 误判、提示词注入和
-工具副作用无法静态约束的风险。
+产品只有三档：
 
-### 19.3 飞书显式确认与 schema v3
+- `UNTRUSTED`：每条请求先找机主；批准后该 turn 为 `OWNER_APPROVED` full；
+- `REVIEWED`：Guardian 逐请求分类；明确低风险且符合用途时走受限 `REVIEWER_APPROVED`，否则找机主；
+- `TRUSTED`：机主对当前群/项目长期确认；不经 Guardian，每条请求获得一回合 `AUTO_TRUSTED` full。
 
-`FeishuTrustMode.FULL_AUTO` 只能由配置的 machine owner 为当前 `(chatId, workdir)` 创建，并继续受 bridge
-总开关约束：
+写命令只有 `/review [purpose]`、`/trust confirm`、`/untrust`。裸 `/trust` 和所有 `/full-auto*` 返回只读风险/迁移说明。
+旧命令不能沿用旧 consent 静默升成 unconditional full。所有升权命令只接受配置的
+machine owner；群主、普通成员、Guardian、relay/mobile frame 和 Agent 都不能替机主确认。`/untrust` 即使总开关
+关闭也可执行，且从下一条请求生效；已经开始的 turn 不被异步拔掉。
 
-```text
-/full-auto
-@机器人 /full-auto confirm [purpose]
-```
+`feishu-trust.json` 继续写 schema v3，因为该版本还承载 `policyRevision` 的 ABA 防护：
 
-第一条只返回高风险说明和精确确认指令，不写状态；只有第二条精确带 `confirm` 才写入 `FULL_AUTO`，可附用途，
-未附时使用默认 Trust Contract。群主、普通成员、Guardian、relay/mobile frame 和 Agent 都不能替机主完成确认。
-`/untrust` 保持随时可降权；重绑、用途或 contract version 变化会使审核中的旧结果失效。
+- v2 `FULL_AUTO` 非法并 fail closed；
+- 已落盘的 v3 `FULL_AUTO` 归一为待确认 `TRUSTED`，旧 TRUSTED 缺少 `fullAuthorityConfirmed=true`；二者有效模式均为 UNTRUSTED；
+- 当前 `/trust confirm` 才写 `TRUSTED + fullAuthorityConfirmed=true`；成功策略写入仍输出 v3；
+- legacy `chatId -> workdir` 保留为待确认 TRUSTED；未知、损坏或类型错误版本 fail closed；
+- 读取不覆盖源文件，下一次机主真实修改才通过原子写入落成当前三档数据。
 
-`feishu-trust.json` 写出 schema v3：
-
-- 新 daemon 兼容读取 v2，并把其中 `TRUSTED/REVIEWED` 原样解释为旧封闭语义；也继续按既定规则读取更早的
-  `chatId -> workdir` map 为 legacy `TRUSTED`；
-- 新增 `FULL_AUTO` 只允许出现在 v3，任何读取兼容路径都不得推导或自动生成它；
-- 任何成功策略写入都输出 v3；未知、损坏或类型错误的版本 fail closed，且读取本身不覆盖原文件；
-- 旧 daemon 只认识 v2，看到 v3 必须按既有未知版本逻辑读成“无信任记录”，而不是忽略新字段后应用其中授权。
-
-这使独立升级保持单向安全：升级不会扩大旧记录；降级会失去便利性并回到逐请求审批，而不会误用
-`FULL_AUTO`。
+这保留了已部署数据与独立升级兼容，同时消除了“TRUSTED 仍受限、还要另开 FULL_AUTO”的重复产品概念。

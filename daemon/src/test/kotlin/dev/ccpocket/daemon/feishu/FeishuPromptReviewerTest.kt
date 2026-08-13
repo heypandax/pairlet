@@ -222,17 +222,4 @@ class FeishuPromptReviewerTest {
         assertFalse("full-auto" in c, "a legacy REVIEWED record must not silently acquire #233 authority: $c")
     }
 
-    @Test
-    fun full_auto_capability_ceiling_prices_the_real_broad_authority_and_limited_holds() {
-        val c = PromptReviewInput.FULL_AUTO_CAPABILITY_CEILING
-        assertTrue("full-auto" in c, c)
-        assertTrue("arbitrary" in c && "Bash" in c, c)
-        assertTrue("MCP" in c && "network" in c && "sub-agents" in c, c)
-        assertTrue("not confined" in c && "outside the project" in c && "send data externally" in c, c)
-        assertTrue("human-decision tools still ask" in c, c)
-        assertTrue("only when" in c && "structured file target" in c, c)
-        assertTrue("does not confine" in c && "shell or unknown tools" in c, c)
-        assertTrue("best-effort defense-in-depth" in c && "not a complete or unbypassable" in c, c)
-        assertTrue("must ask the owner" in c, c)
-    }
 }

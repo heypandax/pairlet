@@ -16,12 +16,12 @@ import java.util.UUID
  *  - [UNTRUSTED] — every request waits on the machine owner's per-request approval card (the default,
  *    and the meaning of an ABSENT record: fail closed).
  *  - [REVIEWED] — each request is first classified by an independent Guardian Reviewer against the
- *    owner's Trust Contract; only a clear low-risk match runs card-free, under the same restricted tool
- *    ceiling as [TRUSTED]. Everything else falls back to the owner's card.
- *  - [TRUSTED] — the owner waived the per-request card for this (chat, project) pair, but retained the
- *    legacy restricted tool ceiling. Existing records must never acquire broader authority on upgrade.
- *  - [FULL_AUTO] — an explicitly confirmed #233 mode. Every request still passes Guardian first; only a
- *    clear low-risk match receives the broader one-turn full-auto authority. Everything else asks owner.
+ *    owner's Trust Contract; only a clear low-risk match runs card-free under a restricted project-scoped
+ *    tool ceiling. Everything else falls back to the owner's card.
+ *  - [TRUSTED] — the owner durably authorized this exact (chat, project) pair. Each request receives broad
+ *    one-turn authority without Guardian or per-tool cards; the grant is still revoked at turn end.
+ *  - [FULL_AUTO] — legacy v3 serialized spelling, retained only so already-written files remain readable.
+ *    It is normalized to [TRUSTED] on read and is never written by current product flows.
  */
 @Serializable
 enum class FeishuTrustMode {
@@ -36,8 +36,11 @@ enum class FeishuTrustMode {
 data class FeishuTrustRecord(
     val workdir: String,
     val mode: FeishuTrustMode,
-    /** The owner's Trust Contract for a REVIEWED/FULL_AUTO chat; null = the default contract. */
+    /** The owner's Trust Contract for a REVIEWED chat; null = the default contract. */
     val purpose: String? = null,
+    /** True only after the owner invoked the current `/trust confirm`, after reading `/trust`'s disclosure.
+     *  Missing/false on legacy rows prevents a narrower historical consent from being silently widened. */
+    val fullAuthorityConfirmed: Boolean = false,
     /** Bumped on every mode/purpose change, so an async review can prove the policy it read still stands. */
     val contractVersion: Long = 1,
     /**
@@ -50,7 +53,7 @@ data class FeishuTrustRecord(
     val updatedAtEpochMs: Long = 0,
 )
 
-/** The on-disk shape, versioned so broad FULL_AUTO authority cannot be mistaken for a legacy grant. */
+/** The on-disk shape. v3 is retained for compatibility with the already-shipped policyRevision schema. */
 @Serializable
 data class FeishuTrustFile(
     val version: Int = 3,
@@ -118,13 +121,13 @@ class FeishuTrust(
         }
     }
 
-    /** True only if this chat is fully TRUSTED for the project it is bound to RIGHT NOW. */
+    /** True only if this chat has current broad TRUSTED consent for the project it is bound to RIGHT NOW. */
     @Synchronized fun isTrusted(chatId: String, workdir: String): Boolean =
         modeFor(chatId, workdir) == FeishuTrustMode.TRUSTED
 
     /** The chat's effective mode for THIS project — a record naming another workdir grants nothing. */
     @Synchronized fun modeFor(chatId: String, workdir: String): FeishuTrustMode =
-        chats[chatId]?.takeIf { it.workdir == workdir }?.mode ?: FeishuTrustMode.UNTRUSTED
+        chats[chatId]?.takeIf { it.workdir == workdir }?.let(::effectiveMode) ?: FeishuTrustMode.UNTRUSTED
 
     /** Any trust record for this chat, whatever project it names — for /untrust revocation and /trust-status. */
     @Synchronized fun recordFor(chatId: String): FeishuTrustRecord? = chats[chatId]
@@ -136,11 +139,12 @@ class FeishuTrust(
      *  absent or other-project record reads as UNTRUSTED with contractVersion 0. */
     @Synchronized fun snapshot(chatId: String, workdir: String): TrustSnapshot {
         val r = chats[chatId]?.takeIf { it.workdir == workdir }
+        val mode = r?.let(::effectiveMode) ?: FeishuTrustMode.UNTRUSTED
         return TrustSnapshot(
             chatId = chatId,
             workdir = workdir,
-            mode = r?.mode ?: FeishuTrustMode.UNTRUSTED,
-            purpose = r?.purpose,
+            mode = mode,
+            purpose = r?.purpose.takeIf { mode == FeishuTrustMode.REVIEWED },
             contractVersion = r?.contractVersion ?: 0,
             policyRevision = r?.policyRevision,
             updatedAtEpochMs = r?.updatedAtEpochMs ?: 0,
@@ -156,13 +160,16 @@ class FeishuTrust(
         snapshot(chatId, workdir) == snap
 
     @Synchronized fun trust(chatId: String, workdir: String): TrustWrite =
-        put(chatId, workdir, FeishuTrustMode.TRUSTED, purpose = null)
+        put(chatId, workdir, FeishuTrustMode.TRUSTED, purpose = null, fullAuthorityConfirmed = true)
 
     @Synchronized fun setReviewed(chatId: String, workdir: String, purpose: String?): TrustWrite =
-        put(chatId, workdir, FeishuTrustMode.REVIEWED, purpose = purpose?.trim()?.take(MAX_PURPOSE_CHARS)?.takeIf { it.isNotEmpty() })
-
-    @Synchronized fun setFullAuto(chatId: String, workdir: String, purpose: String?): TrustWrite =
-        put(chatId, workdir, FeishuTrustMode.FULL_AUTO, purpose = purpose?.trim()?.take(MAX_PURPOSE_CHARS)?.takeIf { it.isNotEmpty() })
+        put(
+            chatId,
+            workdir,
+            FeishuTrustMode.REVIEWED,
+            purpose = purpose?.trim()?.take(MAX_PURPOSE_CHARS)?.takeIf { it.isNotEmpty() },
+            fullAuthorityConfirmed = false,
+        )
 
     @Synchronized fun untrust(chatId: String): TrustWrite {
         if (chatId !in chats) return TrustWrite.UNCHANGED
@@ -177,15 +184,25 @@ class FeishuTrust(
 
     @Synchronized fun size(): Int = chats.size
 
-    private fun put(chatId: String, workdir: String, mode: FeishuTrustMode, purpose: String?): TrustWrite {
+    private fun put(
+        chatId: String,
+        workdir: String,
+        mode: FeishuTrustMode,
+        purpose: String?,
+        fullAuthorityConfirmed: Boolean,
+    ): TrustWrite {
         val existing = chats[chatId]
-        if (existing != null && existing.workdir == workdir && existing.mode == mode && existing.purpose == purpose) {
+        if (
+            existing != null && existing.workdir == workdir && existing.mode == mode &&
+            existing.purpose == purpose && existing.fullAuthorityConfirmed == fullAuthorityConfirmed
+        ) {
             return TrustWrite.UNCHANGED
         }
         val next = FeishuTrustRecord(
             workdir = workdir,
             mode = mode,
             purpose = purpose,
+            fullAuthorityConfirmed = fullAuthorityConfirmed,
             // any change to the policy (mode, purpose, or the project it names) invalidates in-flight reviews
             contractVersion = (existing?.contractVersion ?: 0) + 1,
             policyRevision = newPolicyRevision(),
@@ -194,6 +211,15 @@ class FeishuTrust(
         if (!write(chats + (chatId to next))) return TrustWrite.WRITE_FAILED
         chats[chatId] = next
         return TrustWrite.CHANGED
+    }
+
+    /** Legacy TRUSTED/FULL_AUTO rows were confirmed under narrower promises. They remain visible for status
+     *  and revocation, but execute as UNTRUSTED until the owner invokes the current `/trust confirm`. */
+    private fun effectiveMode(record: FeishuTrustRecord): FeishuTrustMode = when (record.mode) {
+        FeishuTrustMode.REVIEWED -> FeishuTrustMode.REVIEWED
+        FeishuTrustMode.TRUSTED ->
+            if (record.fullAuthorityConfirmed) FeishuTrustMode.TRUSTED else FeishuTrustMode.UNTRUSTED
+        FeishuTrustMode.FULL_AUTO, FeishuTrustMode.UNTRUSTED -> FeishuTrustMode.UNTRUSTED
     }
 
     private fun write(next: Map<String, FeishuTrustRecord>): Boolean =
@@ -211,24 +237,33 @@ class FeishuTrust(
          * Read every supported shape off disk. A versioned object is detected STRUCTURALLY (a JSON object carrying
          * "version") rather than by decode-and-hope: PocketJson ignores unknown keys, so decoding the legacy
          * `chatId -> workdir` map as [FeishuTrustFile] would "succeed" as an empty table and silently drop
-         * every grant. A legacy map migrates in-memory to TRUSTED records — those rows were the owner's
-         * explicit /trust, so the upgrade must not quietly change their meaning.
+         * every grant. A legacy map migrates in-memory to not-yet-confirmed TRUSTED records: those rows were
+         * created under the old restricted promise and must not silently gain broad authority.
          *
          * Integer versions 2 and 3 are decoded. v2 rows retain exactly their legacy TRUSTED/REVIEWED meaning;
-         * FULL_AUTO is valid only in v3, so a forged/mislabeled v2 FULL_AUTO file fails closed. The additive
-         * policyRevision field defaults to null for pre-field v2/v3 rows; that preserves their established
-         * authority while their first real policy change writes a fresh UUID, which is enough to make any
+         * FULL_AUTO was valid only in v3, so a forged/mislabeled v2 FULL_AUTO file fails closed. A legitimate
+         * v3 FULL_AUTO row is normalized to a not-yet-confirmed TRUSTED record: it remains fail-closed until
+         * the owner invokes the current `/trust confirm`, because the former mode promised a Guardian gate.
+         * Every v2 row is forced to [FeishuTrustRecord.fullAuthorityConfirmed] false even if an unknown field
+         * was injected: only the current v3 writer can record the new broad consent. The additive policyRevision
+         * field defaults to null for pre-field v2/v3 rows; their first real policy change writes a fresh UUID,
+         * which is enough to make any
          * revoke/re-grant ABA distinguishable. Any OTHER version — newer, older, or the wrong type — also
          * reads as empty trust rather than best-effort: a future schema may hang new safety conditions on
          * fields this build does not know. The read never rewrites the source. A later explicit write emits
-         * v3; older daemons only accept integer v2 and thus fail closed on the new broad-authority records
-         * instead of ignoring fields and widening access.
+         * v3; daemons from before this flag ignore it and retain their narrower TRUSTED ceiling.
          */
         internal fun parse(text: String): Map<String, FeishuTrustRecord> {
             val root = PocketJson.parseToJsonElement(text)
             if (root !is JsonObject || "version" !in root) {
                 return PocketJson.decodeFromJsonElement<Map<String, String>>(root).mapValues { (_, wd) ->
-                    FeishuTrustRecord(workdir = wd, mode = FeishuTrustMode.TRUSTED, purpose = null, contractVersion = 1)
+                    FeishuTrustRecord(
+                        workdir = wd,
+                        mode = FeishuTrustMode.TRUSTED,
+                        purpose = null,
+                        fullAuthorityConfirmed = false,
+                        contractVersion = 1,
+                    )
                 }
             }
             // an unquoted supported integer, exactly — "2" (string), null, future versions, etc. fail closed
@@ -237,7 +272,14 @@ class FeishuTrust(
             if (version !in setOf(2, 3)) return emptyMap()
             val decoded = PocketJson.decodeFromJsonElement<FeishuTrustFile>(root).chats
             if (version == 2 && decoded.values.any { it.mode == FeishuTrustMode.FULL_AUTO }) return emptyMap()
-            return decoded
+            return decoded.mapValues { (_, record) ->
+                when {
+                    version == 2 -> record.copy(fullAuthorityConfirmed = false)
+                    record.mode == FeishuTrustMode.FULL_AUTO ->
+                        record.copy(mode = FeishuTrustMode.TRUSTED, purpose = null, fullAuthorityConfirmed = false)
+                    else -> record
+                }
+            }
         }
     }
 }

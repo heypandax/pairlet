@@ -19,6 +19,7 @@ import dev.ccpocket.protocol.PermissionVerdict
 import dev.ccpocket.protocol.SendPrompt
 import dev.ccpocket.protocol.SessionLive
 import dev.ccpocket.protocol.SessionSummary
+import dev.ccpocket.protocol.SwitchMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -155,6 +156,158 @@ class SessionRegistryBridgeApprovalRouteTest {
         override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
     }
 
+    /** A reports a top-level result while one background Agent remains live, then that Agent asks for a tool. */
+    private class BackgroundGrantBoundaryBackend : AgentBackend {
+        val releaseBackgroundControl = CompletableDeferred<Unit>()
+        val responses = CopyOnWriteArrayList<Pair<String, Boolean>>()
+
+        override val kind = AgentKind.CLAUDE
+        override fun processBuilder(spec: AgentSpec): ProcessBuilder = ProcessBuilder(
+            "sh", "-c",
+            "printf '%s\\n' replay-a background-tool background-start result-a background-control; sleep 30",
+        )
+        override suspend fun attach(io: AgentIo, spec: AgentSpec) {}
+        override suspend fun parse(line: String): List<AgentEvent> = when (line) {
+            "replay-a" -> listOf(AgentEvent.UserReplay("request A"))
+            "background-tool" -> listOf(
+                AgentEvent.AssistantToolUse(
+                    id = "agent-tool-a",
+                    name = "Agent",
+                    input = buildJsonObject {},
+                    parentId = null,
+                ),
+            )
+            "background-start" -> listOf(
+                AgentEvent.BackgroundTaskStarted(
+                    taskId = "background-a",
+                    toolUseId = "agent-tool-a",
+                    description = "background A",
+                    taskType = "agent",
+                ),
+            )
+            "result-a" -> listOf(AgentEvent.TurnResult("done A", null, false))
+            "background-control" -> {
+                releaseBackgroundControl.await()
+                listOf(AgentEvent.ControlRequest("background-a-control", "mcp__remote__do", buildJsonObject {}))
+            }
+            else -> emptyList()
+        }
+        override suspend fun sendPrompt(text: String, images: List<ImageData>) {}
+        override suspend fun interrupt() {}
+        override suspend fun respondPermission(
+            askId: String,
+            allow: Boolean,
+            remember: Boolean,
+            originalInput: JsonObject?,
+            updatedInput: String?,
+            denyMessage: String?,
+        ) {
+            responses += askId to allow
+        }
+        override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = true
+        override suspend fun onProcessEnded(sessionId: String?) {}
+        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
+        override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
+        override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
+        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    }
+
+    /** Keeps generation 1's pump suspended while generation 2 activates B's trusted grant. */
+    private class ProcessGenerationGrantBoundaryBackend : AgentBackend {
+        val releaseOldControl = CompletableDeferred<Unit>()
+        val responses = CopyOnWriteArrayList<Pair<String, Boolean>>()
+        @Volatile var launches = 0
+
+        override val kind = AgentKind.CLAUDE
+        override fun processBuilder(spec: AgentSpec): ProcessBuilder {
+            launches += 1
+            return if (launches == 1) {
+                ProcessBuilder("sh", "-c", "printf '%s\\n' replay-a result-a old-control; sleep 30")
+            } else {
+                ProcessBuilder("sh", "-c", "printf '%s\\n' replay-b new-control; sleep 30")
+            }
+        }
+        override suspend fun attach(io: AgentIo, spec: AgentSpec) {}
+        override suspend fun parse(line: String): List<AgentEvent> = when (line) {
+            "replay-a" -> listOf(AgentEvent.UserReplay("request A"))
+            "result-a" -> listOf(AgentEvent.TurnResult("done A", null, false))
+            "old-control" -> {
+                releaseOldControl.await()
+                listOf(AgentEvent.ControlRequest("old-control", "mcp__remote__do", buildJsonObject {}))
+            }
+            "replay-b" -> listOf(AgentEvent.UserReplay("request B"))
+            "new-control" -> listOf(AgentEvent.ControlRequest("new-control", "mcp__remote__do", buildJsonObject {}))
+            else -> emptyList()
+        }
+        override suspend fun sendPrompt(text: String, images: List<ImageData>) {}
+        override suspend fun interrupt() {}
+        override suspend fun respondPermission(
+            askId: String,
+            allow: Boolean,
+            remember: Boolean,
+            originalInput: JsonObject?,
+            updatedInput: String?,
+            denyMessage: String?,
+        ) {
+            responses += askId to allow
+        }
+        override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = true
+        override suspend fun onProcessEnded(sessionId: String?) {}
+        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
+        override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
+        override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
+        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    }
+
+    /** B is staged while idle, then A's delayed background-start lands before B's replay activates. */
+    private class GrantActivationRaceBackend : AgentBackend {
+        val releaseBackgroundStart = CompletableDeferred<Unit>()
+        val responses = CopyOnWriteArrayList<Pair<String, Boolean>>()
+
+        override val kind = AgentKind.CLAUDE
+        override fun processBuilder(spec: AgentSpec): ProcessBuilder = ProcessBuilder(
+            "sh", "-c",
+            "printf '%s\\n' replay-a result-a delayed-background-start replay-b control-b; sleep 30",
+        )
+        override suspend fun attach(io: AgentIo, spec: AgentSpec) {}
+        override suspend fun parse(line: String): List<AgentEvent> = when (line) {
+            "replay-a" -> listOf(AgentEvent.UserReplay("request A"))
+            "result-a" -> listOf(AgentEvent.TurnResult("done A", null, false))
+            "delayed-background-start" -> {
+                releaseBackgroundStart.await()
+                listOf(
+                    AgentEvent.BackgroundTaskStarted(
+                        taskId = "late-background-a",
+                        toolUseId = "late-agent-a",
+                        description = "late background A",
+                        taskType = "agent",
+                    ),
+                )
+            }
+            "replay-b" -> listOf(AgentEvent.UserReplay("request B"))
+            "control-b" -> listOf(AgentEvent.ControlRequest("control-b", "mcp__remote__do", buildJsonObject {}))
+            else -> emptyList()
+        }
+        override suspend fun sendPrompt(text: String, images: List<ImageData>) {}
+        override suspend fun interrupt() {}
+        override suspend fun respondPermission(
+            askId: String,
+            allow: Boolean,
+            remember: Boolean,
+            originalInput: JsonObject?,
+            updatedInput: String?,
+            denyMessage: String?,
+        ) {
+            responses += askId to allow
+        }
+        override fun applySettings(mode: PermissionMode?, model: String?, effort: String?) = true
+        override suspend fun onProcessEnded(sessionId: String?) {}
+        override fun transcriptDir(workdir: String): Path = Path.of(workdir)
+        override fun listSessions(workdir: String): List<SessionSummary> = emptyList()
+        override fun replayHistory(workdir: String, sessionId: String): List<HistoryMessage> = emptyList()
+        override fun resumeContextTokens(workdir: String, sessionId: String): Long? = null
+    }
+
     @Test
     fun pre_first_turn_push_anchor_reattaches_and_resurfaces_the_exact_request() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Default)
@@ -227,7 +380,7 @@ class SessionRegistryBridgeApprovalRouteTest {
 
     /** issue #198/#233 compatibility: a pre-trusted chat's request needs NO permit (nothing was tapped) but is
      *  still refused on a guest credential and emits no request-level card. PermissionBridge retains this
-     *  durable mode's legacy closed tool ceiling (see PermissionBridgeTest). */
+     *  durable mode's broad one-turn authority (see PermissionBridgeTest). */
     @Test
     fun a_trusted_chats_request_runs_without_a_permit_but_never_on_a_guest_share() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Default)
@@ -268,46 +421,8 @@ class SessionRegistryBridgeApprovalRouteTest {
         }
     }
 
-    /** issue #233: only the in-process Feishu engine exchanges an owner-confirmed mode + Guardian pass for
-     *  this broad one-turn grant. The registry still rejects a guest/session-share credential. */
     @Test
-    fun an_explicit_full_auto_request_runs_without_a_permit_but_never_on_a_guest_share() = runBlocking {
-        val scope = CoroutineScope(Dispatchers.Default)
-        val backend = LazyBackend()
-        val registry = SessionRegistry(scope, backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }))
-        val workdir = Files.createTempDirectory("ccp-bridge-full-auto").toString()
-        try {
-            val convoId = registry.open(OpenSession(workdir), { }, origin = "feishu-bot")
-            assertTrue(
-                registry.sendReviewedFullAutoBridgePrompt(
-                    SendPrompt(convoId, "run the reviewed task"),
-                    reviewId = "review-233",
-                ),
-            )
-            withTimeout(5_000) {
-                while (backend.launchedSpec == null) delay(10)
-            }
-
-            val guestConvo = registry.open(
-                OpenSession(workdir),
-                { },
-                origin = "guest-share",
-                pathScope = listOf(workdir),
-            )
-            assertFalse(
-                registry.sendReviewedFullAutoBridgePrompt(
-                    SendPrompt(guestConvo, "must not run"),
-                    reviewId = "review-guest",
-                ),
-            )
-        } finally {
-            registry.closeAll()
-            scope.cancel()
-        }
-    }
-
-    @Test
-    fun a_staged_full_auto_grant_cannot_authorize_a_late_request_from_the_previous_turn() = runBlocking {
+    fun a_staged_trusted_grant_cannot_authorize_a_late_request_from_the_previous_turn() = runBlocking {
         val scope = CoroutineScope(Dispatchers.Default)
         val backend = GrantBoundaryBackend()
         val approvals = ApprovalCoordinator(scope)
@@ -321,27 +436,22 @@ class SessionRegistryBridgeApprovalRouteTest {
         try {
             val convoId = registry.open(OpenSession(workdir), { frames += it }, origin = "feishu-bot")
             assertTrue(
-                registry.sendReviewedFullAutoBridgePrompt(
-                    SendPrompt(convoId, "request A"),
-                    reviewId = "review-a",
-                ),
+                registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request A")),
             )
             withTimeout(5_000) {
                 while (frames.none { it is dev.ccpocket.protocol.TurnDone }) delay(10)
             }
 
-            // B's full-auto grant is now STAGED, but A's continuation wins the stdout race. The late
+            // B's trusted grant is now STAGED, but A's continuation wins the stdout race. The late
             // request must ask; it cannot borrow B's authority before B's exact UserReplay arrives.
             assertTrue(
-                registry.sendReviewedFullAutoBridgePrompt(
-                    SendPrompt(convoId, "request B"),
-                    reviewId = "review-b",
-                ),
+                registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request B")),
             )
             backend.releaseLateA.complete(Unit)
             val ask = withTimeout(5_000) {
                 while (true) {
-                    frames.filterIsInstance<PermissionAsk>().lastOrNull()?.let { return@withTimeout it }
+                    frames.filterIsInstance<PermissionAsk>().firstOrNull { it.askId == "late-a" }
+                        ?.let { return@withTimeout it }
                     delay(10)
                 }
                 error("unreachable")
@@ -353,14 +463,164 @@ class SessionRegistryBridgeApprovalRouteTest {
             )
 
             approvals.onVerdict(PermissionVerdict(convoId, ask.askId, Decision.DENY))
-            withTimeout(5_000) {
-                while (backend.responses.none { it.first == "control-b" }) delay(10)
+            val bAsk = withTimeout(5_000) {
+                while (true) {
+                    frames.filterIsInstance<PermissionAsk>().firstOrNull { it.askId == "control-b" }
+                        ?.let { return@withTimeout it }
+                    delay(10)
+                }
+                error("unreachable")
             }
+            assertTrue(backend.responses.none { it.first == "control-b" && it.second })
+            approvals.onVerdict(PermissionVerdict(convoId, bAsk.askId, Decision.DENY))
+            withTimeout(5_000) { while (backend.responses.none { it.first == "control-b" }) delay(10) }
             assertEquals(
-                mapOf("late-a" to false, "control-b" to true),
+                mapOf("late-a" to false, "control-b" to false),
                 backend.responses.toMap(),
-                "B may auto-run only after its matching replay activates the staged grant",
+                "an unresolved A ask at B's replay must fail closed and void B's staged grant",
             )
+        } finally {
+            registry.closeAll()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun a_live_background_agent_blocks_the_next_trusted_grant_after_top_level_result() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = BackgroundGrantBoundaryBackend()
+        val approvals = ApprovalCoordinator(scope)
+        val registry = SessionRegistry(
+            scope,
+            backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }),
+            approvals = approvals,
+        )
+        val workdir = Files.createTempDirectory("ccp-bridge-background-grant-boundary").toString()
+        val frames = CopyOnWriteArrayList<Frame>()
+        try {
+            val convoId = registry.open(OpenSession(workdir), { frames += it }, origin = "feishu-bot")
+            assertTrue(registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request A")))
+            withTimeout(5_000) {
+                while (frames.none { it is dev.ccpocket.protocol.TurnDone }) delay(10)
+            }
+
+            assertFalse(
+                registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request B")),
+                "a top-level result must not mint B's full grant while A still has background work",
+            )
+            backend.releaseBackgroundControl.complete(Unit)
+            val ask = withTimeout(5_000) {
+                while (true) {
+                    frames.filterIsInstance<PermissionAsk>().lastOrNull()?.let { return@withTimeout it }
+                    delay(10)
+                }
+                error("unreachable")
+            }
+            assertEquals("background-a-control", ask.askId)
+            assertTrue(
+                backend.responses.none { it.first == ask.askId && it.second },
+                "A's background request must not borrow a later prompt's full authority",
+            )
+            approvals.onVerdict(PermissionVerdict(convoId, ask.askId, Decision.DENY))
+            withTimeout(5_000) { while (backend.responses.none { it.first == ask.askId }) delay(10) }
+            assertEquals(ask.askId to false, backend.responses.last())
+        } finally {
+            registry.closeAll()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun a_superseded_process_cannot_borrow_the_replacement_process_trusted_grant() = runBlocking {
+        System.setProperty("ccpocket.relaunch.graceMs", "0")
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = ProcessGenerationGrantBoundaryBackend()
+        val approvals = ApprovalCoordinator(scope)
+        val registry = SessionRegistry(
+            scope,
+            backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }),
+            approvals = approvals,
+        )
+        val workdir = Files.createTempDirectory("ccp-bridge-process-generation").toString()
+        val frames = CopyOnWriteArrayList<Frame>()
+        try {
+            val convoId = registry.open(OpenSession(workdir), { frames += it }, origin = "feishu-bot")
+            assertTrue(registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request A")))
+            withTimeout(5_000) {
+                while (frames.none { it is dev.ccpocket.protocol.TurnDone }) delay(10)
+            }
+
+            registry.switchMode(SwitchMode(convoId, PermissionMode.ACCEPT_EDITS))
+            assertTrue(registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request B")))
+            withTimeout(5_000) {
+                while (backend.responses.none { it.first == "new-control" }) delay(10)
+            }
+            assertEquals("new-control" to true, backend.responses.last())
+            assertEquals(2, backend.launches)
+
+            backend.releaseOldControl.complete(Unit)
+            val ask = withTimeout(5_000) {
+                while (true) {
+                    frames.filterIsInstance<PermissionAsk>()
+                        .lastOrNull { it.askId == "old-control" }
+                        ?.let { return@withTimeout it }
+                    delay(10)
+                }
+                error("unreachable")
+            }
+            assertTrue(
+                backend.responses.none { it.first == ask.askId && it.second },
+                "generation 1 must not observe generation 2's active full grant",
+            )
+            approvals.onVerdict(PermissionVerdict(convoId, ask.askId, Decision.DENY))
+            withTimeout(5_000) { while (backend.responses.none { it.first == ask.askId }) delay(10) }
+            assertEquals(ask.askId to false, backend.responses.last())
+        } finally {
+            registry.closeAll()
+            scope.cancel()
+            System.clearProperty("ccpocket.relaunch.graceMs")
+        }
+    }
+
+    @Test
+    fun background_work_discovered_after_handoff_still_blocks_grant_activation() = runBlocking {
+        val scope = CoroutineScope(Dispatchers.Default)
+        val backend = GrantActivationRaceBackend()
+        val approvals = ApprovalCoordinator(scope)
+        val registry = SessionRegistry(
+            scope,
+            backends = mapOf(AgentKind.CLAUDE to AgentBackendFactory { backend }),
+            approvals = approvals,
+        )
+        val workdir = Files.createTempDirectory("ccp-bridge-grant-activation-race").toString()
+        val frames = CopyOnWriteArrayList<Frame>()
+        try {
+            val convoId = registry.open(OpenSession(workdir), { frames += it }, origin = "feishu-bot")
+            assertTrue(registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request A")))
+            withTimeout(5_000) {
+                while (frames.none { it is dev.ccpocket.protocol.TurnDone }) delay(10)
+            }
+
+            assertTrue(
+                registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request B")),
+                "B stages before the delayed background marker is observable",
+            )
+            backend.releaseBackgroundStart.complete(Unit)
+            val ask = withTimeout(5_000) {
+                while (true) {
+                    frames.filterIsInstance<PermissionAsk>().lastOrNull { it.askId == "control-b" }
+                        ?.let { return@withTimeout it }
+                    delay(10)
+                }
+                error("unreachable")
+            }
+            assertTrue(
+                backend.responses.none { it.first == ask.askId && it.second },
+                "activation must re-check residual work instead of trusting handoff's earlier snapshot",
+            )
+            approvals.onVerdict(PermissionVerdict(convoId, ask.askId, Decision.DENY))
+            withTimeout(5_000) { while (backend.responses.none { it.first == ask.askId }) delay(10) }
+            assertEquals(ask.askId to false, backend.responses.last())
         } finally {
             registry.closeAll()
             scope.cancel()
@@ -381,10 +641,10 @@ class SessionRegistryBridgeApprovalRouteTest {
         val frames = CopyOnWriteArrayList<Frame>()
         try {
             val convoId = registry.open(OpenSession(workdir), { frames += it }, origin = "feishu-bot")
-            assertTrue(registry.sendReviewedFullAutoBridgePrompt(SendPrompt(convoId, "request A"), "review-a"))
+            assertTrue(registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request A")))
             withTimeout(5_000) { while (frames.filterIsInstance<dev.ccpocket.protocol.TurnDone>().size < 1) delay(10) }
 
-            assertTrue(registry.sendReviewedFullAutoBridgePrompt(SendPrompt(convoId, "request B"), "review-b"))
+            assertTrue(registry.sendTrustedBridgePrompt(SendPrompt(convoId, "request B")))
             backend.releaseSecondResult.complete(Unit)
             withTimeout(5_000) { while (frames.filterIsInstance<dev.ccpocket.protocol.TurnDone>().size < 2) delay(10) }
 
