@@ -3,8 +3,6 @@ package dev.ccpocket.daemon.feishu
 import com.lark.oapi.event.EventDispatcher
 import com.lark.oapi.service.im.ImService
 import com.lark.oapi.service.im.v1.model.P2MessageReceiveV1
-import com.lark.oapi.service.im.v1.model.ReplyMessageReq
-import com.lark.oapi.service.im.v1.model.ReplyMessageReqBody
 import dev.ccpocket.daemon.DaemonCore
 import dev.ccpocket.daemon.bridge.BridgeDenyCode
 import dev.ccpocket.daemon.bridge.BridgeGuard
@@ -31,9 +29,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 /**
@@ -110,10 +105,12 @@ class FeishuEngine(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var ws: com.lark.oapi.ws.Client? = null
-    private var api: com.lark.oapi.Client? = null
+    // One bounded SDK HTTP client for this engine's whole lifetime. A managed stop/start retains it; bridge
+    // removal/reconfigure calls shutdown(), which cancels calls and closes its owned connection pool (#236).
+    private var api: FeishuApiClient? = null
 
-    // conversation state: ONE conversation per chat (key = chatId) — see onMessage. convo -> session
-    // survives idle-reap so a later message resumes with full context.
+    // conversation state: one conversation per direct chat, or per group TOPIC (#234) — see onMessage.
+    // convo -> session survives idle-reap so a later message in the same topic resumes with full context.
     private val mutex = Mutex()
     private val convoByKey = HashMap<String, String>()
     // the workdir each key's convo was opened against. A /bind can move a chat to another project mid-life,
@@ -132,7 +129,7 @@ class FeishuEngine(
     // a turn's reply target + a one-shot guard: the final text posts to the group EXACTLY ONCE, whether
     // ask() delivers it inline (finished within the wait) or a late TurnDone does (the owner approved a
     // permission ask on their phone minutes later — the bridge's whole reason to exist). Keyed by convoId.
-    private data class ReplySlot(val replyTo: String, var done: Boolean = false)
+    private data class ReplySlot(val target: FeishuReplyTarget, var done: Boolean = false)
     private val replySlots = HashMap<String, ReplySlot>()
 
     private sealed interface OpenResult {
@@ -143,10 +140,9 @@ class FeishuEngine(
     // convoId -> the label of a permission ask currently waiting on the owner's phone, so the "still
     // working" nudge can name it ("Run command 在等你批准") instead of a bare, scary timeout.
     private val pendingAsk = HashMap<String, String>()
-    // per-chat turn serialization: two messages in one chat share a conversation, and a second prompt
-    // arriving mid-turn would OVERWRITE the first's turn waiter — the first reply then never posts and
-    // its sender sees a phantom timeout. One lock per chat queues them in arrival order instead; other
-    // chats stay fully parallel.
+    // per-conversation turn serialization: direct messages share a chat conversation; group messages share
+    // only their topic. A second prompt in that conversation queues instead of overwriting the first waiter;
+    // unrelated topics remain parallel (#234).
     private val chatLocks = HashMap<String, Mutex>()
     // the bot's own open_id (fetched at start) — the mention filter's ground truth. Null until fetched;
     // fallback then is "any mention", the pre-fix behaviour, so a slow fetch degrades soft.
@@ -165,8 +161,6 @@ class FeishuEngine(
     // an ownership transfer keeps the OLD owner as bind authority until the engine restarts — bounded, since
     // binding only selects an already-allow-listed workdir and every action still hits owner approval.
     private val chatOwners = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private val http = java.net.http.HttpClient.newHttpClient()
-
     @Volatile override var running: Boolean = false
         private set
     @Volatile override var lastError: String? = null
@@ -186,7 +180,7 @@ class FeishuEngine(
         if (running) return null
         if (appId.isBlank() || appSecret.isBlank()) return "FEISHU_APP_ID / FEISHU_APP_SECRET are required for the built-in adapter"
         return runCatching {
-            api = com.lark.oapi.Client.newBuilder(appId, appSecret).build()
+            if (api == null) api = FeishuApiClient(appId, appSecret, name, logLine)
             val dispatcher = EventDispatcher.newBuilder("", "")
                 .onP2MessageReceiveV1(object : ImService.P2MessageReceiveV1Handler() {
                     override fun handle(event: P2MessageReceiveV1) = onMessage(event)
@@ -234,11 +228,22 @@ class FeishuEngine(
             }.onFailure { log.warn("feishu ws disconnect via reflection failed (${it.message}) — the SDK may keep a reconnect loop") }
         }
         ws = null
+        api?.snapshot()?.takeIf { it.calls > 0 }?.let { s ->
+            logLine(
+                "[http] calls=${s.calls} failed=${s.failures} timed-out=${s.timeouts} " +
+                    "peak=${s.peakActive} connections=${s.connections}/${s.idleConnections} idle",
+            )
+        }
         logLine("[engine] stopped")
         log.info("feishu engine \"$name\" stopped")
     }
 
-    override fun shutdown() { stop(); scope.cancel() }
+    override fun shutdown() {
+        stop()
+        scope.cancel()
+        api?.close()
+        api = null
+    }
 
     /** ConvoIds this engine ever opened — the caller intersects with live registry state for the
      *  "active now" pulse on the management pages, same as an external bridge's guard. */
@@ -268,24 +273,10 @@ class FeishuEngine(
      * was the reference adapter's behaviour, and it misfires whenever the app receives all group messages).
      * Best-effort async: until (or unless) it lands, the filter falls back to any-mention and says so once.
      */
-    /** A tenant_access_token for app-authenticated Feishu REST calls (bot info, chat owner), or null. */
-    private fun tenantToken(): String? = runCatching {
-        val req = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"))
-            .header("Content-Type", "application/json")
-            .POST(java.net.http.HttpRequest.BodyPublishers.ofString("""{"app_id":"$appId","app_secret":"$appSecret"}"""))
-            .build()
-        Json.parseToJsonElement(http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
-            .jsonObject["tenant_access_token"]?.jsonPrimitive?.content
-    }.getOrNull()
-
     private fun fetchBotIdentity() {
         scope.launch {
             runCatching {
-                val token = tenantToken() ?: error("no tenant_access_token in reply")
-                val infoReq = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/bot/v3/info"))
-                    .header("Authorization", "Bearer $token").GET().build()
-                val openId = Json.parseToJsonElement(http.send(infoReq, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
-                    .jsonObject["bot"]?.jsonObject?.get("open_id")?.jsonPrimitive?.content ?: error("no bot.open_id in reply")
+                val openId = api?.botOpenId() ?: error("Feishu API client unavailable")
                 botOpenId = openId
                 log.info("feishu bot identity: ${openId.take(12)}…")
             }.onFailure {
@@ -300,14 +291,10 @@ class FeishuEngine(
     private fun fetchChatOwner(chatId: String) {
         scope.launch {
             runCatching {
-                val token = tenantToken() ?: return@launch
-                val req = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/im/v1/chats/$chatId?user_id_type=open_id"))
-                    .header("Authorization", "Bearer $token").GET().build()
-                val owner = Json.parseToJsonElement(http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
-                    .jsonObject["data"]?.jsonObject?.get("owner_id")?.jsonPrimitive?.content
+                val owner = api?.chatOwnerOpenId(chatId) ?: return@launch
                 // only a USER open_id (ou_…) may become a bind authority — a bot-owned group (cli_…) or any
                 // other shape fails closed (never cached ⇒ /bind stays "confirming, retry"), never authorizes
-                if (owner != null && owner.startsWith("ou_")) chatOwners[chatId] = owner
+                if (owner.startsWith("ou_")) chatOwners[chatId] = owner
             }
         }
     }
@@ -341,22 +328,14 @@ class FeishuEngine(
         }
     }
 
-    /** Fetch one message's plain text by id (GET /im/v1/messages/:id → data.items[0]) — the quoted-context
-     *  reader. Null on any failure (no token, HTTP error, empty items, parse miss) so the caller degrades to
-     *  "no quote". Reuses the engine's tenant-token + raw-HTTP path; runs on Dispatchers.IO via the caller. */
+    /** Fetch one message's plain text by id — the quoted-context reader. Null on any failure so the caller
+     *  degrades to "no quote". The SDK owns tenant-token caching and the bounded HTTP path (#236). */
     private suspend fun fetchMessageText(messageId: String): String? = runCatching {
         // defense-in-depth: the id comes from Feishu's own event (om_…-shaped, not user-typed), but validate
         // its charset before it lands in the URL path so a malformed/crafted id can never alter the request.
         if (!messageId.matches(Regex("^[A-Za-z0-9_-]+$"))) return null
-        val token = tenantToken() ?: return null
-        val req = java.net.http.HttpRequest.newBuilder(java.net.URI("https://open.feishu.cn/open-apis/im/v1/messages/$messageId"))
-            .header("Authorization", "Bearer $token").GET().build()
-        val item = Json.parseToJsonElement(http.send(req, java.net.http.HttpResponse.BodyHandlers.ofString()).body())
-            .jsonObject["data"]?.jsonObject?.get("items")?.let { it as? kotlinx.serialization.json.JsonArray }
-            ?.firstOrNull()?.jsonObject ?: return null
-        val msgType = item["msg_type"]?.jsonPrimitive?.content
-        val content = item["body"]?.jsonObject?.get("content")?.jsonPrimitive?.content
-        FeishuMessageText.plainText(msgType, content).takeIf { it.isNotBlank() }
+        val item = api?.message(messageId) ?: return null
+        FeishuMessageText.plainText(item.type, item.content).takeIf { it.isNotBlank() }
     }.getOrNull()
 
     private fun onMessage(event: P2MessageReceiveV1) {
@@ -391,19 +370,27 @@ class FeishuEngine(
             logLine("[drop] $chatId: 只 @ 了机器人，既没写内容也没引用消息")
             return
         }
-        // warm the group-owner cache for the /bind fallback — only when no admin is set (else it's unused)
-        if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
         val sender = data.sender?.senderId?.openId.orEmpty()
-        val replyTo = msg.messageId ?: return
+        val replyMessageId = msg.messageId ?: return
         // Feishu delivers events at-least-once — the SAME message can arrive again on a retry / reconnect,
         // and without dedup that re-runs the prompt (issue #91). Drop a message id we've already handled.
-        if (!firstSeen(replyTo)) return
+        if (!firstSeen(replyMessageId)) return
+
+        val replyTo = FeishuThreading.replyTarget(replyMessageId, msg.chatType)
+        // #234: acknowledge a valid group request immediately, independently of the work it starts. A
+        // missing reaction scope or a transient Feishu error is cosmetic and must never block the command.
+        if (replyTo.inThread) scope.launch {
+            runCatching { api?.reactTyping(replyMessageId) }
+                .onFailure { logLine("[chat] typing receipt failed") }
+        }
+        // warm the group-owner cache for the /bind fallback — only when no admin is set (else it's unused)
+        if (adminOpenId.isNullOrBlank() && !chatOwners.containsKey(chatId)) fetchChatOwner(chatId)
 
         // OWNER BYPASS (issue #91): the CONFIGURED owner's OWN messages run in a SEPARATE, dedicated session
-        // (keyed apart from the group's) that auto-allows — race-free, because a session never mixes senders.
-        // Everyone else drives the shared, approval-gated session. Gated on the toggle + a set admin id.
+        // (keyed apart from the topic's) that auto-allows — race-free, because a session never mixes senders.
+        // Everyone else drives the approval-gated topic session. Gated on the toggle + a set admin id.
         val ownerTurn = ownerBypassEnabled && !adminOpenId.isNullOrBlank() && sender == adminOpenId
-        val convoKey = if (ownerTurn) "$chatId\u0000owner" else chatId
+        val convoKey = FeishuThreading.conversationKey(chatId, msg.chatType, replyMessageId, rootId, ownerTurn)
 
         when (val action = commands.handle(text, chatId, sender)) {
             is ChatAction.Ignore -> {}
@@ -498,8 +485,8 @@ class FeishuEngine(
                 if (quoteOnly && prompt == action.prompt) {
                     return@launch reply(replyTo, "⚠️ 读不到你引用的那条消息，请把要处理的内容直接 @我 发出来。")
                 }
-                // ONE conversation per chat (context carries across messages), one turn at a time per
-                // chat (see chatLocks) — a second message queues instead of clobbering the first's waiter.
+                // ONE conversation per group topic (or per direct chat), one turn at a time per conversation
+                // (see chatLocks) — a second message queues instead of clobbering the first's waiter.
                 // ask() posts its OWN reply (inline, or late via onFrame after an approval) so the result
                 // survives an out-of-band owner tap; we only surface a hard failure to open/drive the turn.
                 val lock = mutex.withLock { chatLocks.getOrPut(convoKey) { Mutex() } }
@@ -514,7 +501,7 @@ class FeishuEngine(
         }
     }
 
-    private fun reply(messageId: String, text: String) {
+    private fun reply(target: FeishuReplyTarget, text: String) {
         // last-ditch outbound scrub: a read of a secret file is auto-allowed (read-only, no phone prompt),
         // so its contents can ride the reply into the group — redact obvious credentials here. Applied at
         // the single reply choke point, so it also catches an error string that echoed file content.
@@ -524,11 +511,7 @@ class FeishuEngine(
             put("text", kotlinx.serialization.json.JsonPrimitive(out.take(MAX_REPLY_CHARS)))
         }.toString()
         runCatching {
-            api?.im()?.v1()?.message()?.reply(
-                ReplyMessageReq.newBuilder().messageId(messageId)
-                    .replyMessageReqBody(ReplyMessageReqBody.newBuilder().content(body).msgType("text").build())
-                    .build(),
-            )
+            api?.reply(target.messageId, body, inThread = target.inThread)
         }.onFailure { logLine("[chat] reply failed: ${it.message}") }
     }
 
@@ -548,7 +531,7 @@ class FeishuEngine(
         chatId: String,
         workdir: String,
         prompt: String,
-        replyTo: String,
+        replyTo: FeishuReplyTarget,
         senderOpenId: String,
         ownerBypass: Boolean = false,
     ) {
@@ -601,7 +584,7 @@ class FeishuEngine(
             // /untrust, rebind or contract edit that landed while the model was thinking voids the pass.
             val review = if (!ownerBypass && noApprovalEnabled && snapshot.mode == FeishuTrustMode.REVIEWED) {
                 reviewPreflight.evaluate(
-                    snapshot, vetted.text, FeishuRoutes.projectName(workdir), senderOpenId, replyTo,
+                    snapshot, vetted.text, FeishuRoutes.projectName(workdir), senderOpenId, replyTo.messageId,
                 ) {
                     // §21.4: the trust record alone can't see a mid-review /bind — the routes table is the
                     // half a rebind actually mutates, so the final check reads BOTH: the policy must be
@@ -633,7 +616,7 @@ class FeishuEngine(
                 mutex.withLock { pendingAsk.remove(convoId) }
                 // a REVIEWED chat's escalation closes its audit trail with the owner's verdict
                 review?.let {
-                    reviewLog.record(reviewTurnEvent(if (approved) "escalated_owner_allowed" else "escalated_owner_denied", it, snapshot, senderOpenId, replyTo, workdir))
+                    reviewLog.record(reviewTurnEvent(if (approved) "escalated_owner_allowed" else "escalated_owner_denied", it, snapshot, senderOpenId, replyTo.messageId, workdir))
                 }
                 if (!approved) {
                     reply(replyTo, "⛔ 这次请求未获批准，未执行任何操作。")
@@ -658,7 +641,7 @@ class FeishuEngine(
                 else -> core.registry.sendApprovedBridgePrompt(vetted)
             }
             if (reviewedAuto) {
-                reviewLog.record(reviewTurnEvent(if (sent) "turn_started" else "handoff_failed", review!!, snapshot, senderOpenId, replyTo, workdir))
+                reviewLog.record(reviewTurnEvent(if (sent) "turn_started" else "handoff_failed", review!!, snapshot, senderOpenId, replyTo.messageId, workdir))
             }
             if (!sent) {
                 // the grant was minted but the hand-off lost a race (the conversation went busy) — the request
@@ -721,7 +704,7 @@ class FeishuEngine(
      *  both try, and the loser no-ops, so an out-of-band approval never double-posts nor drops the reply. */
     private suspend fun postTurn(convoId: String, text: String) {
         val slot = mutex.withLock { replySlots[convoId]?.takeIf { !it.done }?.also { it.done = true } } ?: return
-        reply(slot.replyTo, text)
+        reply(slot.target, text)
     }
 
     private fun turnText(t: TurnDone): String =
